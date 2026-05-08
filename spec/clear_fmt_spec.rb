@@ -826,7 +826,8 @@ RSpec.describe Formatter do
       toks = tokenize("FN foo -> END\n")
       arrow_idx = toks.index { |t| t.type == :OP && t.raw == '->' }
       out  = []
-      em.send(:emit_fn_signature_metadata_wrapped, out, toks, 0, arrow_idx, nil, nil)
+      sig = Formatter::Emitter::FnSig.new(toks: toks, start: 0, arrow_idx: arrow_idx, po: nil, pc: nil)
+      em.send(:emit_fn_signature_metadata_wrapped, out, sig)
       expect(out.first.raw).to eq("FN")
       expect(out.map(&:raw).join("")).to include("FN")
       expect(out.map(&:raw).join("")).to include("foo")

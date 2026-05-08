@@ -14,24 +14,24 @@ require_relative "../src/ast/type"
 RSpec.describe "Type promotion/cleanup analysis" do
   let(:schemas) do
     {
-      Point: { "x" => :Float64, "y" => :Float64 },
-      User: { "name" => :String, "age" => :Int64 },
-      ListHolder: { "items" => Type.new(:"Int64[]"), "label" => :String },
-      MapHolder: { "data" => Type.new(:"HashMap<Int64>"), "label" => :String },
-      PureSliceHolder: { "items" => Type.new(:"Int64[]"), "count" => :Int64 },
-      JsonValue: { kind: :union, variants: {
+      Point: Schemas::StructSchema.new(fields: { "x" => :Float64, "y" => :Float64 }),
+      User: Schemas::StructSchema.new(fields: { "name" => :String, "age" => :Int64 }),
+      ListHolder: Schemas::StructSchema.new(fields: { "items" => Type.new(:"Int64[]"), "label" => :String }),
+      MapHolder: Schemas::StructSchema.new(fields: { "data" => Type.new(:"HashMap<Int64>"), "label" => :String }),
+      PureSliceHolder: Schemas::StructSchema.new(fields: { "items" => Type.new(:"Int64[]"), "count" => :Int64 }),
+      JsonValue: Schemas::UnionSchema.new(variants: {
         "Null" => nil,
         "JBool" => Type.new(:Bool),
         "JNum" => Type.new(:Float64),
         "JStr" => Type.new(:String),
         "JArray" => Type.new(:"JsonValue[]"),
         "JObj" => Type.new(:"HashMap<JsonValue>"),
-      }},
-      Direction: { kind: :enum, variants: Set["North", "South"] },
-      SimpleUnion: { kind: :union, variants: {
+      }),
+      Direction: Schemas::EnumSchema.new(variants: Set["North", "South"]),
+      SimpleUnion: Schemas::UnionSchema.new(variants: {
         "A" => Type.new(:Float64),
         "B" => Type.new(:Int64),
-      }},
+      }),
     }
   end
 

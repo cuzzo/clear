@@ -1384,8 +1384,7 @@ RSpec.describe MIRLowering do
       body = make_lit(:NUMBER, 42, full_type: :Int64)
       body.coerced_type = :Int64
       node = AST::LambdaLit.new(tok, [], nil, body, nil, nil)
-      sig_hash = { params: [], return: { type: :Int64 }, lambda: true }
-      node.full_type = sig_hash
+      node.full_type = FunctionSignature.new(params: [], return_type: :Int64)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::LambdaExpr)
       zig = emit(result)

@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 # Phase 3 compile-time correctness checks for concurrent CLEAR programs.
@@ -55,12 +56,10 @@ module ConcurrencyChecks
           offender_token = node.token
           reason = "NEXT"
         when AST::FuncCall
-          if node.respond_to?(:name)
-            callee = fn_nodes[node.name.to_s]
-            if callee&.effects&.include?(EffectTracker::YIELD)
-              offender_token = node.token
-              reason = "call to '#{node.name}' which yields"
-            end
+          callee = fn_nodes[node.name.to_s]
+          if callee&.effects&.include?(EffectTracker::YIELD)
+            offender_token = node.token
+            reason = "call to '#{node.name}' which yields"
           end
         end
 

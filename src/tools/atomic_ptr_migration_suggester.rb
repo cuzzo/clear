@@ -54,16 +54,16 @@ module AtomicPtrMigrationSuggester
   # for the :versioned case.
   def candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-    return nil unless node.respond_to?(:name) && node.name.is_a?(String)
+    return nil unless node.name.is_a?(String)
 
     val = node.value
     val = val.value if val.is_a?(AST::CapabilityWrap)
     return nil unless val.is_a?(AST::StructLit)
 
-    ti = node.respond_to?(:type_info) ? node.type_info : nil
+    ti = node.type_info
     return nil unless ti
     ti = Type.new(ti) unless ti.is_a?(Type)
-    syn = ti.respond_to?(:sync) ? ti.sync : nil
+    syn = ti.sync
     # Three sync families are atomic-ptr-fit candidates:
     #   - @locked / @writeLocked (replace-the-lock with rcu-publish)
     #   - @versioned (M3.16: upgrade-from-MVCC when the cell only does
@@ -72,7 +72,7 @@ module AtomicPtrMigrationSuggester
     return nil unless syn == :locked || syn == :write_locked || syn == :versioned
     return nil unless ti.respond_to?(:struct?) && ti.struct?
 
-    line = node.respond_to?(:token) && node.token ? node.token.line : nil
+    line = node.token&.line
     {
       name: node.name.to_s,
       decl_node: node,
@@ -150,7 +150,7 @@ module AtomicPtrMigrationSuggester
       # `let-style` bind on the alias root would shadow; on a field,
       # it's a read. Only reads are eligible here; assignment-bind is
       # caught by the general references_alias? check below.
-      target = stmt.respond_to?(:target) ? stmt.target : stmt.name
+      target = stmt.name
       return false if target.is_a?(AST::GetField) &&
                       target.target.is_a?(AST::Identifier) &&
                       target.target.name == alias_name

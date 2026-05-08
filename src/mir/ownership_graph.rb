@@ -270,8 +270,8 @@ class OwnershipGraph
     node.move_action = action
     return unless at_token
 
-    node.move_line = at_token.respond_to?(:line)   ? at_token.line   : nil
-    node.move_col  = at_token.respond_to?(:column) ? at_token.column : nil
+    node.move_line = at_token.line
+    node.move_col  = at_token.column
   end
 
   def collect_descendants(path, result)

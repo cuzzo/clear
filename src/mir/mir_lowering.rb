@@ -339,11 +339,11 @@ class MIRLowering
     when AST::ProfileStmt      then lower_profile(node)
 
     else
-      raise "MIRLowering: unhandled node type #{node.class} at #{node.respond_to?(:token) && node.token ? "line #{node.token.line}" : 'unknown'}"
+      raise "MIRLowering: unhandled node type #{node.class} at #{node.token ? "line #{node.token.line}" : 'unknown'}"
     end.tap { |mir|
       # Apply type coercion (int->float, float->int, etc.) when AST node has coerced_type
       if mir && node.respond_to?(:coerced_type) && node.coerced_type &&
-         node.respond_to?(:full_type) && node.full_type &&
+         node.full_type &&
          node.coerced_type != node.full_type
         # Skip coercion for stack-allocated fixed-size arrays (SROA)
         skip = node.is_a?(AST::ListLit) && node.storage == :stack &&
@@ -376,7 +376,7 @@ class MIRLowering
       result.concat(pending)
       # Inject source map comment for this user-visible statement.
       # Placed after pending (hoisted synthetic temps have no user source line).
-      line = s.respond_to?(:token) && s.token ? s.token.line : nil
+      line = s.token&.line
       result << MIR::Comment.new("CLR:#{line}") if line
       # lower_var_decl may return [AllocMark, Let, Cleanup] when the binding needs cleanup.
       if mir.is_a?(Array)
@@ -436,7 +436,7 @@ class MIRLowering
     node.statements.each do |stmt|
       lowered = lower(stmt)
       next unless lowered
-      line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+      line = stmt.token&.line
       # Some lowerings (e.g. union with helpers) return arrays of nodes
       nodes = lowered.is_a?(::Array) ? lowered : [lowered]
       nodes.each_with_index do |n, i|
@@ -463,7 +463,7 @@ class MIRLowering
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        line = stmt.token&.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
           fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
@@ -473,7 +473,7 @@ class MIRLowering
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        line = stmt.token&.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
           type_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
@@ -486,7 +486,7 @@ class MIRLowering
       when AST::ExternFnDecl, AST::ExternStructDecl
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        line = stmt.token&.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
           fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
@@ -567,18 +567,15 @@ class MIRLowering
       # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
-        (obj.respond_to?(:storage) && obj.storage == :heap) ||
-          (obj.respond_to?(:symbol) && obj.symbol&.reg.respond_to?(:storage) && obj.symbol.reg.storage == :heap)
-      elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        obj.storage == :heap || obj.symbol&.reg&.storage == :heap
+      elsif node.mutates_receiver
         first = node.args&.first
-        (first&.respond_to?(:storage) && first.storage == :heap) ||
-          (first.respond_to?(:symbol) && first&.symbol&.reg.respond_to?(:storage) && first.symbol.reg.storage == :heap)
+        first&.storage == :heap || first&.symbol&.reg&.storage == :heap
       end
-      needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
+      needs_heap ||= (node.storage == :heap)
       needs_heap ? :heap : :frame
     when :node_storage
-      storage = node.respond_to?(:storage) ? node.storage : nil
-      storage == :heap ? :heap : :frame
+      node.storage == :heap ? :heap : :frame
     else :heap
     end
   end
@@ -587,7 +584,7 @@ class MIRLowering
   def extract_root_var_name(node)
     case node
     when AST::Identifier
-      decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+      decl = node.symbol&.reg
       (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || node.name.to_s
     when AST::GetField   then extract_root_var_name(node.target)
     when AST::GetIndex   then extract_root_var_name(node.target)
@@ -680,7 +677,7 @@ class MIRLowering
 
     zig_type = case entry[:kind]
     when :heap_slice
-      is_bare = source_node.respond_to?(:value) && source_node.value.is_a?(AST::CopyNode) && !ti&.list_collection?
+      is_bare = source_node.value.is_a?(AST::CopyNode) && !ti&.list_collection?
       if is_bare
         elem = ti&.element_type ? Type.new(ti.element_type).zig_type : "UNKNOWN"
         "[]#{elem}"
@@ -715,9 +712,9 @@ class MIRLowering
   # Resolve the stdlib alloc: symbol for an AllocMark from the FuncCall node's
   # matched_stdlib_def. Returns nil when not available (falls back to entry alloc).
   def resolve_decl_stdlib_alloc(node)
-    val = node.respond_to?(:value) ? node.value : nil
+    val = node.value
     return nil unless val
-    mdef = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
+    mdef = val.matched_stdlib_def
     return nil unless mdef.is_a?(Hash)
     case mdef[:alloc]
     when :heap, :frame then mdef[:alloc]
@@ -762,7 +759,7 @@ class MIRLowering
   end
 
   def lower_struct_def(node)
-    @struct_schemas[node.name.to_sym] = node.fields
+    @struct_schemas[node.name.to_sym] = Schemas::StructSchema.new(fields: node.fields)
 
     if node.type_params&.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
@@ -786,7 +783,7 @@ class MIRLowering
   end
 
   def lower_union_def(node)
-    @union_schemas[node.name.to_sym] = node.variants
+    @union_schemas[node.name.to_sym] = Schemas::UnionSchema.new(variants: node.variants)
 
     # Track @indirect fields
     node.variants.each do |var_name, var_data|
@@ -1520,7 +1517,7 @@ class MIRLowering
       # arg on success (param[:takes] || GIVE). That is the SINGLE source of
       # truth for "callee takes" — the lowering must not re-derive it from
       # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
-      takes = a.respond_to?(:was_moved) && a.was_moved
+      takes = a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       # Array/List args: convert to slice via .items (skip strings - already []const u8).
       #
@@ -1535,7 +1532,7 @@ class MIRLowering
       ti = a.type_info
       callee_param = nil
       if callee_sig
-        params_list = callee_sig.respond_to?(:params) ? callee_sig.params : (callee_sig[:params] || [])
+        params_list = callee_sig.params || []
         callee_param = params_list[idx]
       end
       callee_wants_mutable_list =
@@ -1632,7 +1629,7 @@ class MIRLowering
     args_mir = node.args.map { |a|
       # Single source of truth: was_moved (set by annotator when callee TAKES).
       # See note in lower_call_inner.
-      takes = a.respond_to?(:was_moved) && a.was_moved
+      takes = a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.type_info
       if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
@@ -1831,7 +1828,7 @@ class MIRLowering
     # get the correct disambiguated Zig name.
     if node.is_a?(AST::MethodCall) && node.object.respond_to?(:name)
       iz.target_var = extract_root_var_name(node.object)
-    elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver && node.args&.first&.respond_to?(:name)
+    elsif node.mutates_receiver && node.args&.first&.respond_to?(:name)
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
@@ -1854,7 +1851,7 @@ class MIRLowering
       alloc_call = alloc_kind == :heap \
         ? MIR::MethodCall.new(rt, "heapAlloc",  [], false) \
         : MIR::MethodCall.new(rt, "frameAlloc", [], false)
-      n_comptime = node.args.count { |a| a.respond_to?(:full_type) && a.full_type == :Type }
+      n_comptime = node.args.count { |a| a.full_type == :Type }
       args = args[0, n_comptime] + [alloc_call] + args[n_comptime..]
     end
     mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
@@ -1891,7 +1888,7 @@ class MIRLowering
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields (Zig type is `type`, comptime-only).
     # They are baked directly into the call_zig string.
-    comptime_args, runtime_ast_args = node.args.partition { |a| a.respond_to?(:full_type) && a.full_type == :Type }
+    comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type == :Type }
     comptime_codes = comptime_args.map { |a| emit_expr(lower_extern_arg(a)) }
 
     args = runtime_ast_args.map { |a| lower_extern_arg(a) }
@@ -2034,17 +2031,18 @@ class MIRLowering
 
   def lower_lambda(node)
     sig = node.full_type
+    sig = sig.raw if sig.is_a?(Type)
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"
 
-    params_list = sig.respond_to?(:params) ? sig.params : sig[:params] || []
+    params_list = sig.params || []
     params_mir = [MIR::Param.new("_rt", "*Runtime")] + params_list.map { |p|
       p_type = p[:type]
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
       MIR::Param.new(p[:name], type_str)
     }
 
-    ret = sig.respond_to?(:return_type) ? (sig.return_type || :Void) : (sig[:return]&.fetch(:type, nil) || :Void)
+    ret = sig.return_type || :Void
     ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
     ret_str = if ret_zig.start_with?("!") || ret_zig.include?("anyerror!") || ret_zig.include?("error{")
                 ret_zig
@@ -2154,23 +2152,21 @@ class MIRLowering
     alloc_str = "#{rt_name}.heapAlloc()"
 
     # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap
-    is_arc = ti.respond_to?(:shared?) && ti.shared?
-    is_rc = ti.respond_to?(:multiowned?) && ti.multiowned?
+    is_arc = ti.shared?
+    is_rc = ti.multiowned?
     if is_arc || is_rc
       # Sharded maps have their sync mode built into the Zig type
       # (e.g. MutexShardedStringMap), so they need the legacy direct-
       # composition path that preserves shard_count + sync on bare_ft.
       # Plain (non-sharded) maps go through compose_capability_wrap for
       # the unified Group 1 / Group 2 separation.
-      is_striped = ti.respond_to?(:striped?) && ti.striped?
-      if is_striped
+      if ti.striped?
         bare_ft = Type.new(ti.resolved.to_s)
-        bare_ft.shard_count = ti.shard_count if ti.respond_to?(:shard_count) && ti.shard_count
-        bare_ft.sync = ti.sync if ti.respond_to?(:sync) && ti.shard_count && ti.sync
+        bare_ft.shard_count = ti.shard_count if ti.shard_count
+        bare_ft.sync = ti.sync if ti.shard_count && ti.sync
         zig_t = bare_ft.zig_type
 
-        needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
-                      (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
+        needs_alloc = bare_ft.map_init_needs_alloc?
         inner = if needs_alloc
           MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
         else
@@ -2276,7 +2272,7 @@ class MIRLowering
        (live = @current_fiber_capture_symbols&.dig(var_node.name))
       return [live.sync, live.storage]
     end
-    sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
+    sym = var_node.symbol
     [sym&.sync, sym&.storage]
   end
 
@@ -2408,6 +2404,9 @@ class MIRLowering
         # Include the WITH node's object_id in the guard name so nested
         # WITHs on the same variable (permitted via POSSIBLE_DEADLOCK)
         # don't produce colliding Zig identifiers.
+        # Use source position (line_col) — stable across process invocations
+        # and across refactors that shift Ruby object IDs. Two WITHs at the
+        # same source position can't exist (they'd be the same WITH).
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
         is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
         # For function parameters, the caller's wrapper is unknown at
@@ -2430,6 +2429,9 @@ class MIRLowering
         end
       when :write_locked_read
         next if needs_sort
+        # Use source position (line_col) — stable across process invocations
+        # and across refactors that shift Ruby object IDs. Two WITHs at the
+        # same source position can't exist (they'd be the same WITH).
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
         is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
         lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
@@ -2448,8 +2450,7 @@ class MIRLowering
         # @multiowned all bind uniformly to a `*T`-shaped value.
         is_param = with_cap_is_param?(cap[:var_node])
         if is_param && (var_sync.nil? || var_sync == :local) &&
-           cap[:var_node].respond_to?(:symbol) && cap[:var_node].symbol &&
-           !cap[:var_node].symbol.mutable
+           cap[:var_node].symbol && !cap[:var_node].symbol.mutable
           aliased_value = with_match_unwrap_value(source_zig)
           bindings << "const #{zig_safe_name(alias_name)} = #{aliased_value};\n_ = &#{zig_safe_name(alias_name)};"
         else
@@ -3062,7 +3063,7 @@ class MIRLowering
       expr   = entry[:expr]
       source = entry[:source]
       cond = lower(expr)
-      line = expr.respond_to?(:token) && expr.token ? expr.token.line.to_s : "0"
+      line = expr.token ? expr.token.line.to_s : "0"
 
       msg_text = if source && !source.empty?
         "PRE failed: #{source}"
@@ -3161,9 +3162,8 @@ class MIRLowering
       # picks the right Zig error name (AtomicConflict vs
       # UpdateRetriesExhausted) and the conflict_action emits the
       # right ErrorName for the setError call.
-      sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
-      is_atomic_ptr = sym && sym.sync == :atomic &&
-                      sym.respond_to?(:layout) && sym.layout == :indirect
+      sym = var_node.symbol
+      is_atomic_ptr = sym && sym.sync == :atomic && sym.layout == :indirect
       conflict_error = is_atomic_ptr ? :AtomicConflict : :MvccConflict
       conflict_action = emit_conflict_action_zig(
         node.lock_error_clause, with_label, node, conflict_error,
@@ -3191,45 +3191,6 @@ class MIRLowering
         cells_tuple, @rt_name, alloc_zig, alias_decls,
         body_mir, conflict_action, retries, with_label,
       )
-    end
-  end
-
-  # Wrap a `Versioned.update[Multi]` call expression with the user's
-  # ON MvccConflict handler (and the RETRY(N) THEN outer-retry shape when
-  # `retries` is set). When retries==nil, emits a plain catch-switch.
-  # When retries==N, emits a counted while-loop that retries up to N
-  # times before running the THEN action.
-  def wrap_with_conflict_handler(core_call, conflict_action, retries, node)
-    if retries
-      retry_label = "__snap_retry_#{node.object_id.abs}"
-      # The conflict_action ALWAYS terminates control flow:
-      #   RAISE / EXIT -> return error.CheatError
-      #   PASS         -> break :__with_<id>
-      #   -> { stmts } -> body + break :__with_<id>
-      # So the action itself exits the retry loop -- no trailing break needed.
-      <<~ZIG.rstrip
-        {
-            var __retry: usize = 0;
-            #{retry_label}: while (true) : (__retry += 1) {
-                if (#{core_call}) |_| {
-                    break :#{retry_label};
-                } else |__err| switch (__err) {
-                    error.UpdateRetriesExhausted => {
-                        if (__retry + 1 < #{retries}) continue;
-                        #{conflict_action}
-                    },
-                    else => return __err,
-                }
-            }
-        }
-      ZIG
-    else
-      <<~ZIG.rstrip
-        #{core_call} catch |__err| switch (__err) {
-            error.UpdateRetriesExhausted => { #{conflict_action} },
-            else => return __err,
-        };
-      ZIG
     end
   end
 
@@ -3299,11 +3260,11 @@ class MIRLowering
       alias_name = cap[:alias] || var_name
       resolved   = cap[:resolved_type]
       zig_var    = @do_capture_map&.dig(var_name) || var_name
-      var_storage = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.storage : nil
+      var_storage = cap[:var_node].symbol&.storage
       is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
       lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
       addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
-      var_sync   = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.sync : nil
+      var_sync   = cap[:var_node].symbol&.sync
       panic_method, err_method = case cap[:capability]
                                  when :EXCLUSIVE
                                    var_sync == :write_locked ? %w[write writeOrErr] : %w[acquire acquireOrErr]
@@ -3700,7 +3661,7 @@ class MIRLowering
           elsif code.strip.end_with?(";") || code.strip.end_with?("}")
             code
           else
-            expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
+            expr_type = step[:expr].full_type || :Void
             is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
             is_void_step ? "#{code};" : "_ = #{code};"
           end
@@ -4055,7 +4016,7 @@ class MIRLowering
   end
 
   def lower_next_expr(node, alloc_sym = :frame)
-    promise_type = node.expr.respond_to?(:full_type) ? Type.new(node.expr.full_type || :Void) : nil
+    promise_type = Type.new(node.expr.full_type || :Void)
 
     if promise_type&.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
@@ -4264,7 +4225,8 @@ class MIRLowering
     end
     if mod.union_schemas
       @union_schemas.merge!(mod.union_schemas)
-      mod.union_schemas.each do |uname, variants|
+      mod.union_schemas.each do |uname, schema|
+        variants = schema.is_a?(Schemas::UnionSchema) ? schema.variants : schema
         variants.each do |var_name, var_data|
           next unless var_data.is_a?(Hash) && var_data[:indirect_fields]
           var_data[:indirect_fields].each do |fname|
@@ -4491,7 +4453,7 @@ class MIRLowering
     # used outside its pipeline context (after the pipeline expression ended,
     # or in a pipeline that doesn't have a matching AS declaration).
     if node.name.match?(/\A\$[a-z]/)
-      line = node.token&.respond_to?(:line) ? node.token.line : "?"
+      line = node.token&.line || "?"
       raise "line #{line}: Undefined pipeline binding '#{node.name}'. " \
             "Pipeline bindings must be declared with 'AS #{node.name}' " \
             "in the same pipeline expression where they are used."
@@ -4514,7 +4476,7 @@ class MIRLowering
 
     # Use disambiguated Zig name if the declaration was renamed to avoid
     # same-name collision in the MIR checker (see lower_var_decl).
-    decl_node = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    decl_node = node.symbol&.reg
     zig_name = (@decl_zig_name_map && decl_node && @decl_zig_name_map[decl_node.object_id]) ||
                zig_safe_name(node.name)
     ident = MIR::Ident.new(zig_name)
@@ -4533,10 +4495,8 @@ class MIRLowering
     # caller passes the cell ref so the callee body can dispatch via
     # @hasDecl probes per family. The callee's anytype param accepts
     # whichever shape lands.
-    if node.respond_to?(:symbol) && node.symbol&.sync == :atomic && !@atomic_emit_raw
-      if node.respond_to?(:atomic_borrow) && node.atomic_borrow
-        return ident
-      end
+    if node.symbol&.sync == :atomic && !@atomic_emit_raw
+      return ident if node.atomic_borrow
       # AtomicPtr M3.5: @indirect:atomic uses the WITH SNAPSHOT
       # surface (read returns a Guard via cell.read(rt), MUTABLE
       # body wraps in cell.update(rt, ..., closure)). The bare
@@ -4557,16 +4517,6 @@ class MIRLowering
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
-  end
-
-  # Helper for the atomic auto-rewrite path: lower an Identifier without
-  # the `c.load()` wrap, so we can build `c.fetchAdd(...)` etc.
-  # Atomics M2.2: with the Arc dropped, the cell IS the binding.
-  def lower_atomic_cell_ref(name_node)
-    @atomic_emit_raw = true
-    ident_mir = lower(name_node)
-    @atomic_emit_raw = false
-    ident_mir
   end
 
   def lower_unary_op(node)
@@ -4747,9 +4697,9 @@ class MIRLowering
     return nil unless node.target.is_a?(AST::Identifier)
     type_name = node.target.name.to_sym
     schema = @union_schemas&.dig(type_name)
-    return nil unless schema
-    var_data = schema[node.field]
-    return nil unless schema.key?(node.field)
+    return nil unless schema.is_a?(Schemas::UnionSchema)
+    var_data = schema.variants[node.field]
+    return nil unless schema.variants.key?(node.field)
     # Unit variants have nil / Symbol / Type variant data. Inline-struct
     # variants are Hashes with :kind => :inline_struct; payload variants
     # like `Idle: Int64` are Symbols/Types -- both could appear at this
@@ -4819,7 +4769,7 @@ class MIRLowering
     # COLLECT only needs to call .next() to read the final value.
     if rhs.is_a?(AST::CollectOp)
       left = lower(node.left)
-      ft = if node.left.respond_to?(:full_type) && node.left.full_type
+      ft = if node.left.full_type
         node.left.full_type.is_a?(Type) ? node.left.full_type : Type.new(node.left.full_type)
       else
         nil
@@ -4879,7 +4829,7 @@ class MIRLowering
     # Capture snapshot for CATCH blocks: store LHS before the failable call
     snapshot_stmts = nil
     if @current_fn_has_catch
-      lhs_type = node.left.respond_to?(:full_type) ? node.left.full_type : nil
+      lhs_type = node.left.full_type
       if lhs_type
         t = Type.new(lhs_type)
         unless t.void? || t.error_union?
@@ -4902,18 +4852,16 @@ class MIRLowering
       # x |> f -> f(x)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
       synthetic.full_type = node.full_type
-      synthetic.storage = node.storage if node.respond_to?(:storage)
-      synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
+      synthetic.storage = node.storage
+      synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       lower_func_call(synthetic)
     elsif rhs.is_a?(AST::FuncCall)
       # x |> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
       synthetic.full_type = node.full_type || rhs.full_type
-      synthetic.storage = node.storage if node.respond_to?(:storage)
-      synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
-      if rhs.respond_to?(:coerced_type) && rhs.coerced_type
-        synthetic.coerced_type = rhs.coerced_type
-      end
+      synthetic.storage = node.storage
+      synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
+      synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
       lower_func_call(synthetic)
     else
       raise "MIRLowering: unhandled SMOOTH RHS #{rhs.class}"
@@ -4932,7 +4880,7 @@ class MIRLowering
   # ================================================================
 
   def lower_or_rescue(node)
-    t_left = node.left.respond_to?(:full_type) && node.left.full_type ? Type.new(node.left.full_type) : nil
+    t_left = node.left.full_type ? Type.new(node.left.full_type) : nil
     # CLEAR's auto-propagate strips `!T` from a fallible call's
     # full_type (so `x = call()` is x: T at the binding level). The
     # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
@@ -4963,7 +4911,7 @@ class MIRLowering
       if is_error
         rt_name = @rt_name
         ex = node.right
-        line = node.respond_to?(:token) && node.token ? node.token.line : 0
+        line = node.token&.line || 0
         stmts = []
 
         if ex.kind
@@ -5033,8 +4981,8 @@ class MIRLowering
     # Union unit-variant constructor: Type{ .Variant = {} }
     if node.target.is_a?(AST::Identifier)
       schema = @union_schemas&.dig(node.target.name.to_sym)
-      if schema
-        var_data = schema[node.field]
+      if schema.is_a?(Schemas::UnionSchema)
+        var_data = schema.variants[node.field]
         unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
           return MIR::StructInit.new(node.target.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
         end
@@ -5046,7 +4994,7 @@ class MIRLowering
     if node.target.is_a?(AST::OptionalUnwrap)
       inner_ti = node.target.type_info  # T (unwrapped)
       inner_mir = lower(node.target.target)
-      inner_sync = node.target.target.respond_to?(:symbol) ? node.target.target.symbol&.sync : nil
+      inner_sync = node.target.target.symbol&.sync
       field_expr = if inner_ti&.multiowned? || inner_ti&.shared? ||
                        inner_sync == :locked || inner_sync == :write_locked
         "_r.ctrl.data.#{node.field}"
@@ -5073,7 +5021,7 @@ class MIRLowering
     is_rc_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
     is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
 
-    target_sync = node.target.respond_to?(:symbol) ? node.target.symbol&.sync : nil
+    target_sync = node.target.symbol&.sync
     if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")
@@ -5099,10 +5047,11 @@ class MIRLowering
     # matching (vs. plain struct-field access).
     target_type_sym = ti&.resolved&.to_s&.to_sym
     union_schema = target_type_sym && @union_schemas&.dig(target_type_sym)
+    union_variants = union_schema.is_a?(Schemas::UnionSchema) ? union_schema.variants : nil
     field_str = node.field.to_s
-    if union_schema && (union_schema.key?(node.field) ||
-                        union_schema.key?(field_str) ||
-                        union_schema.key?(field_str.to_sym))
+    if union_variants && (union_variants.key?(node.field) ||
+                          union_variants.key?(field_str) ||
+                          union_variants.key?(field_str.to_sym))
       return MIR::UnionVariantGet.new(target, field_str, ti.zig_type)
     end
 
@@ -5188,7 +5137,7 @@ class MIRLowering
       MIR::IndexGet.new(items, cast_idx)
     elsif ti && direct_indexable_collection_type?(ti)
       direct_index_get(target, index, node.target, ti) || begin
-        builtin = INDEX_OPS.dig(ti&.dispatch_key, :get, :builtin) || :getAt
+        builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
         emit_builtin(builtin, [target, index])
       end
     else
@@ -5216,7 +5165,9 @@ class MIRLowering
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
                     !(v.respond_to?(:target_is_list_field) && v.target_is_list_field)
       # BORROWED fields: source may be ArrayList but field expects slice
-      field_def = @struct_schemas&.dig(node.name.to_sym, k)
+      schema_for_name = @struct_schemas&.dig(node.name.to_sym)
+      schema_fields = schema_for_name.is_a?(Schemas::StructSchema) ? schema_for_name.fields : schema_for_name
+      field_def = schema_fields&.[](k)
       if field_def.is_a?(Hash) && field_def[:borrowed] && vt&.array? && !needs_items
         val = MIR::ItemsAccess.new(val, true)
       elsif needs_items
@@ -5224,7 +5175,7 @@ class MIRLowering
       end
       # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
-      if v.respond_to?(:needs_heap_create) && v.needs_heap_create
+      if v.needs_heap_create
         zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
@@ -5272,7 +5223,7 @@ class MIRLowering
 
   def lower_union_variant_lit(node)
     schema = @union_schemas&.dig(node.union_name.to_sym)
-    var_data = schema&.dig(node.variant_name)
+    var_data = schema.is_a?(Schemas::UnionSchema) ? schema.variants[node.variant_name] : schema&.dig(node.variant_name)
     indirect = (var_data.is_a?(Hash) && var_data[:indirect_fields]) || Set.new
 
     # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
@@ -5402,7 +5353,7 @@ class MIRLowering
     # follows the assertion's condition. Normalize to "assertion failed"
     # so the user-visible message isn't the literal string "Any".
     raw = node.message
-    msg_str = if raw.nil? || raw == :Any || (raw.respond_to?(:empty?) && raw.empty?)
+    msg_str = if raw.nil? || raw == :Any || raw.empty?
       "assertion failed"
     else
       raw.to_s
@@ -5790,10 +5741,7 @@ class MIRLowering
     # flip it to `const`. Without this, &binding produces *const T,
     # which doesn't unify with the body's `*T` parameter and the
     # mutation never reaches the caller.
-    if node.respond_to?(:symbol) && node.symbol&.respond_to?(:poly_borrow_target) &&
-       node.symbol.poly_borrow_target
-      is_mutable = true
-    end
+    is_mutable = true if node.symbol&.poly_borrow_target
 
     # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
     # For same-name vars in different scopes, alloc is overridden per-declaration
@@ -5803,18 +5751,16 @@ class MIRLowering
     has_mir_drop = binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    has_mutable_cleanup = has_mir_drop || ft&.collection? || ft&.dynamic_stream? || ft&.bounded_stream? || ft&.shared_promise? ||
-                          ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
-                          ft&.heap_provenance? || ft&.resource? || node.resource_close_zig
+    has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
+                          ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
+                          ft.heap_provenance? || ft.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
     # True-Sync-Polymorphism Gate 3: a binding whose address is taken
     # at a universal-poly call site MUST emit Zig `var` so &binding is
     # *T (not *const T). The local-mutation analyzer would otherwise
     # downgrade this to `const` when the binding is only "field-mutated"
     # via the polymorphic body -- which is invisible to var_mutated.
-    poly_borrow = node.respond_to?(:symbol) && node.symbol &&
-                  node.symbol.respond_to?(:poly_borrow_target) &&
-                  node.symbol.poly_borrow_target == true
+    poly_borrow = node.symbol&.poly_borrow_target == true
     keyword_mutable = if !is_mutable
       false
     elsif actually_mutated || forced_var || poly_borrow
@@ -6152,7 +6098,7 @@ class MIRLowering
     rt_name = @rt_name
 
     # Resolve INDEX_OPS :set entry via dispatch_key
-    kind = ti&.dispatch_key
+    kind = ti.dispatch_key
     op = kind && INDEX_OPS.dig(kind, :set)
 
     target = lower(target_node)
@@ -6902,7 +6848,7 @@ class MIRLowering
       ]
       MIR::ScopeBlock.new(stmts)
     elsif needs_string_dupe && value
-      ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
+      ret_type = node.value.full_type ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
         MIR::ScopeBlock.new([
           MIR::AllocMark.new("__ret_dupe", :heap, nil),
@@ -6969,12 +6915,12 @@ class MIRLowering
     pname = (param[:name] || param["name"]).to_s
     fams = callee_sig.requires[pname]
     # Universal poly: REQUIRES key present AND the family-set is empty.
-    return false unless fams && fams.respond_to?(:empty?) && fams.empty?
+    return false unless fams && fams.empty?
     # The arg must be a plain (no-sync, no-Arc, no-pointer) struct
     # binding so & flips it into *T territory. Identifier lookup gives
     # us the SymbolEntry; bail if anything's missing.
     return false unless arg_node.is_a?(AST::Identifier)
-    sym = arg_node.respond_to?(:symbol) ? arg_node.symbol : nil
+    sym = arg_node.symbol
     return false unless sym
     # Skip if the binding is already pointer-shaped or sync-wrapped --
     # the helper handles those via comptime dispatch.

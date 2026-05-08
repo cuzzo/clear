@@ -23,11 +23,13 @@
 !/docs/
 !/examples/
 !/manifesto/
+!/sorbet/
 !/spec/
 !/src/
 !/stdlib/
 !/syntaxes/
 !/testdata/
+!/tools/
 !/transpile-tests/
 !/zig/
 

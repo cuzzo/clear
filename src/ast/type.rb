@@ -1,3 +1,5 @@
+require_relative "../annotator-helpers/function_signature"
+
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
@@ -257,11 +259,6 @@ class Type
     @is_auto = true if auto
   end
 
-  # Delegate [] to the raw value for Hash-typed raws (function signatures).
-  def [](key)
-    @raw[key] if @raw.is_a?(Hash)
-  end
-
   # -----------------------------------------------
   # COMPATIBILITY LAYER (The "Don't Break Tests" part)
   # -----------------------------------------------
@@ -287,7 +284,7 @@ class Type
     # Logic moved from Locatable#resolved_type
     return @resolved_cache if @resolved_cache
 
-    ft = if @raw.is_a?(Hash); @raw[:return][:type]
+    ft = if @raw.is_a?(FunctionSignature); @raw.return_type
          elsif @raw.is_a?(Array); @raw[2]
          else; @raw; end
 
@@ -414,7 +411,7 @@ class Type
   attr_accessor :auto_token
 
   def fn_type?
-    @raw.is_a?(Hash) && @raw[:fn_type] == true
+    @raw.is_a?(FunctionSignature)
   end
 
   def array?
@@ -1256,12 +1253,10 @@ class Type
     return true if string? || list_collection? || (map? && !numeric_map?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash)
-        if schema[:kind] == :union
-          return schema_union_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
-        elsif !schema[:kind]
-          return schema_struct_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
-        end
+      if schema.is_a?(Schemas::UnionSchema) || (schema.is_a?(Hash) && schema[:kind] == :union)
+        return schema_union_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
+      elsif schema.is_a?(Schemas::StructSchema) || (schema.is_a?(Hash) && !schema[:kind])
+        return schema_struct_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
       end
     end
     false
@@ -1278,12 +1273,10 @@ class Type
                    (array? && !string?) || any_sync?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash)
-        if schema[:kind] == :union
-          return schema_union_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
-        elsif !schema[:kind]
-          return schema_struct_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
-        end
+      if schema.is_a?(Schemas::UnionSchema) || (schema.is_a?(Hash) && schema[:kind] == :union)
+        return schema_union_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
+      elsif schema.is_a?(Schemas::StructSchema) || (schema.is_a?(Hash) && !schema[:kind])
+        return schema_struct_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
       end
     end
     false
@@ -1479,7 +1472,8 @@ class Type
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
   def schema_struct_any?(schema)
-    schema.any? { |k, v|
+    fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
+    fields.any? { |k, v|
       next false if k.is_a?(Symbol)
       ft = v.is_a?(Hash) ? v[:type] : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
@@ -1492,7 +1486,8 @@ class Type
   # Skips nil and Hash variants (inline_struct/indirect); caller handles those via
   # Type.variant_has_heap? when needed.
   def schema_union_any?(schema)
-    (schema[:variants] || {}).any? { |_, vt|
+    variants = schema.is_a?(Schemas::UnionSchema) ? schema.variants : (schema[:variants] || {})
+    variants.any? { |_, vt|
       next false unless vt
       next false if vt.is_a?(Hash)
       t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
@@ -1504,17 +1499,15 @@ class Type
   # Structural match for function/lambda types. Called by accepts? when self.fn_type?.
   def accepts_fn_type?(other_type)
     return true if other_type.is_a?(Type) && other_type.any?
-    other_raw = other_type.is_a?(Type) ? other_type.raw : nil
-    is_fn_or_lambda = other_type.is_a?(Type) &&
-                      (other_type.fn_type? || (other_raw.is_a?(Hash) && other_raw[:lambda]))
-    return false unless is_fn_or_lambda
+    return false unless other_type.is_a?(Type) && other_type.fn_type?
+    other_raw = other_type.raw
 
-    self_params  = @raw[:params] || []
-    other_params = (other_raw || {})[:params] || []
+    self_params  = @raw.params || []
+    other_params = other_raw.params || []
     return false unless self_params.length == other_params.length
 
-    self_ret  = @raw.dig(:return, :type)
-    other_ret = (other_raw || {}).dig(:return, :type)
+    self_ret  = @raw.return_type
+    other_ret = other_raw.return_type
     self_ret_t  = self_ret.is_a?(Type)  ? self_ret  : Type.new(self_ret  || :Any)
     other_ret_t = other_ret.is_a?(Type) ? other_ret : Type.new(other_ret || :Any)
     return false unless self_ret_t.accepts?(other_ret_t)
@@ -1527,9 +1520,7 @@ class Type
 
     # Reentrant constraint: a @reentrant function cannot be passed to a parameter
     # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
-    self_allows_reentrant = @raw[:reentrant] == true
-    other_is_reentrant    = other_raw.is_a?(Hash) && other_raw[:reentrant] == true
-    return false if other_is_reentrant && !self_allows_reentrant
+    return false if other_raw.reentrant && !@raw.reentrant
 
     true
   end
@@ -1576,9 +1567,9 @@ class Type
   end
 
   def parse_raw_input
-    # Hash and Array raws are function signatures — no string parsing applies.
+    # FunctionSignature and Array raws are function signatures — no string parsing applies.
     # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
-    if @raw.is_a?(Hash) || @raw.is_a?(Array)
+    if @raw.is_a?(FunctionSignature) || @raw.is_a?(Array)
       @ownership  = :affine
       @sync       = nil
       @collection = nil
@@ -1857,11 +1848,11 @@ class Type
 
     # 2c. Function type: FN(T, ...) -> R  =>  *const fn(*Runtime, T, ...) anyerror!R
     if fn_type?
-      param_types_zig = @raw[:params].map do |p|
+      param_types_zig = @raw.params.map do |p|
         t = p[:type]
         t.is_a?(Type) ? t.zig_type(is_param: true) : Type.new(t).zig_type(is_param: true)
       end
-      ret = @raw[:return][:type]
+      ret = @raw.return_type
       ret_zig = ret.is_a?(Type) ? ret.zig_type : Type.new(ret).zig_type
       all_params = ["*Runtime"] + param_types_zig
       ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"

@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # Auto inference — Pass B (constraint collection).
 #
 # Given a parsed program and the @fn_nodes registry produced by
@@ -346,7 +348,7 @@ class AutoUnifier
     resolved   = {}
     ambiguous  = {}
 
-    progress = true
+    progress = T.let(true, T::Boolean)
     while progress
       progress = false
       @slots.each do |id, slot|
@@ -542,9 +544,8 @@ class ShapeEvidenceCollector
     return if node.nil?
     case node
     when AST::BindExpr, AST::VarDecl
-      yield node if node.respond_to?(:name) && node.respond_to?(:type) &&
-                    node.type.is_a?(Type) && node.type.auto?
-      walk_for_shape_decls(node.value, &block) if node.respond_to?(:value)
+      yield node if node.type.is_a?(Type) && node.type.auto?
+      walk_for_shape_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
     when Array
@@ -565,7 +566,7 @@ class ShapeEvidenceCollector
     when AST::MethodCall
       record_method_call(node, name_map)
       walk(node.object, name_map)
-      (node.args || []).each { |a| walk(a, name_map) }
+      node.args.each { |a| walk(a, name_map) }
     when AST::Assignment
       record_index_assign(node, name_map)
       walk(node.value, name_map)
@@ -694,7 +695,7 @@ class OperatorEvidenceCollector
     case node
     when AST::BindExpr, AST::VarDecl
       yield node if auto?(node.type)
-      walk_for_local_decls(node.value, &block) if node.respond_to?(:value)
+      walk_for_local_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
     when Array

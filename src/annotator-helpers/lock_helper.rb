@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 require "set"
 
 # All lock-safety analysis lives here. Two layers in one module so they
@@ -35,6 +37,7 @@ module LockHelper
 
   # Called once from SemanticAnnotator#initialize.
   def init_lock_analysis!
+    T.bind(self, SemanticAnnotator) rescue nil
     @lock_direct_edges    ||= Hash.new { |h, k| h[k] = [] }
     @lock_direct_acquires ||= Hash.new { |h, k| h[k] = Set.new }
     @lock_held_calls      ||= Hash.new { |h, k| h[k] = [] }
@@ -49,6 +52,7 @@ module LockHelper
 
   # First declaration of T with a rank wins; subsequent mismatches error.
   def record_lock_type_rank!(type_sym, rank, node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless type_sym && rank
     existing = @lock_type_ranks[type_sym]
     if existing.nil?
@@ -61,12 +65,14 @@ module LockHelper
   # For the Phase 3 ordering check: return the rank of a WITH capability's
   # lock type, or nil if the type has no rank declared anywhere.
   def rank_of_cap(cap)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = lock_identity_of(cap)
     return nil unless t
     @lock_type_ranks[t]
   end
 
   def record_lock_clause_site!(node, expanded_capabilities)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
     fallible = expanded_capabilities.select { |c|
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
@@ -83,6 +89,7 @@ module LockHelper
   # 2 handles cross-function type-level cycles). Opt-outs downgrade to a
   # [Note].
   def check_nested_lock_reacquire!(node, expanded_capabilities)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless @held_locks
     expanded_capabilities.each do |cap|
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
@@ -109,6 +116,7 @@ module LockHelper
   # on the inner WITH downgrades the error to a [Note] so the risk is
   # visible but not blocking.
   def check_lock_rank_ordering!(node, expanded_capabilities)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless @held_lock_types && !@held_lock_types.empty?
     return unless @lock_type_ranks && !@lock_type_ranks.empty?
     escape = node.deadlock_escape
@@ -140,6 +148,7 @@ module LockHelper
   # inner type's base symbol (:Counter for Locked(Counter) or
   # @shared:locked Counter), or nil if we can't determine it.
   def lock_identity_of(cap)
+    T.bind(self, SemanticAnnotator) rescue nil
     ti = cap[:resolved_type]
     return nil unless ti
     return nil unless ti.respond_to?(:base_type)
@@ -153,10 +162,11 @@ module LockHelper
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
   def record_with_acquire!(fn_name, cap, held_stack, escape)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = lock_identity_of(cap)
     return unless t
     @lock_direct_acquires[fn_name] << t
-    site_tok = cap[:var_node].respond_to?(:token) ? cap[:var_node].token : nil
+    site_tok = cap[:var_node].token
     acquirer_opt = !escape.nil?
     held_stack.each do |held|
       @lock_direct_edges[fn_name] << LockEdge.new(
@@ -168,6 +178,7 @@ module LockHelper
   end
 
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
+    T.bind(self, SemanticAnnotator) rescue nil
     held_stack.each do |held|
       @lock_held_calls[fn_name] << {
         held: held[:type], callee: callee_name, site_token: site_token,
@@ -181,12 +192,13 @@ module LockHelper
   # transitive callee takes. Mirrors compute_needs_rt! / compute_can_fail!
   # structure.
   def propagate_lock_acquires!
+    T.bind(self, SemanticAnnotator) rescue nil
     transitive = {}
     @lock_direct_acquires.each { |fn, set| transitive[fn] = set.dup }
     @call_graph.each_key { |fn| transitive[fn] ||= Set.new }
 
     loop do
-      changed = false
+      changed = T.let(false, T::Boolean)
       @call_graph.each do |fn, callees|
         callees.each do |callee|
           next unless transitive[callee]
@@ -204,6 +216,7 @@ module LockHelper
   end
 
   def resolve_held_calls!
+    T.bind(self, SemanticAnnotator) rescue nil
     @lock_held_calls.each do |fn, sites|
       sites.each do |site|
         (@lock_transitive_acquires[site[:callee]] || Set.new).each do |t|
@@ -223,6 +236,7 @@ module LockHelper
   # reachability analysis (opt-out edges are paths that CAN fire at
   # runtime, so ON :LockCycle handlers reaching them are live).
   def build_lock_graph(include_opted_out: false)
+    T.bind(self, SemanticAnnotator) rescue nil
     adj = Hash.new { |h, k| h[k] = Set.new }
     nodes = Set.new
     live = []
@@ -240,6 +254,7 @@ module LockHelper
 
   # Iterative Tarjan SCC. Returns array of SCCs (each an array of nodes).
   def tarjan_scc(nodes, adj)
+    T.bind(self, SemanticAnnotator) rescue nil
     index = {}
     lowlink = {}
     on_stack = {}
@@ -290,6 +305,7 @@ module LockHelper
 
   # Called as a post-pass once @call_graph is complete.
   def check_lock_cycles!
+    T.bind(self, SemanticAnnotator) rescue nil
     propagate_lock_acquires!
     resolve_held_calls!
 
@@ -307,6 +323,7 @@ module LockHelper
   end
 
   def check_lock_handler_reachability!
+    T.bind(self, SemanticAnnotator) rescue nil
     return if @lock_clause_sites.nil? || @lock_clause_sites.empty?
 
     full = build_lock_graph(include_opted_out: true)
@@ -336,6 +353,7 @@ module LockHelper
   # Each selector in the clause must expand to at least one type in this
   # set. A selector that expands to the empty set here is dead code.
   def verify_handler_reachability!(site, types_in_cycle, types_with_self)
+    T.bind(self, SemanticAnnotator) rescue nil
     node    = site[:node]
     clause  = node.lock_error_clause
     return unless clause
@@ -381,12 +399,14 @@ module LockHelper
   end
 
   def scc_is_cyclic?(scc, adj)
+    T.bind(self, SemanticAnnotator) rescue nil
     return true if scc.length > 1
     node = scc.first
     adj[node].include?(node)
   end
 
   def report_lock_cycle!(scc, edges)
+    T.bind(self, SemanticAnnotator) rescue nil
     scc_set = scc.to_set
     participating = edges.select { |e| scc_set.include?(e.held) && scc_set.include?(e.acquired) }
     sample = participating.first

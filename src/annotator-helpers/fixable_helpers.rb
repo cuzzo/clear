@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # FixableHelper — emission helpers for FixableError findings.
 #
 # Each helper converts a specific compiler diagnostic into a
@@ -19,10 +21,11 @@ module FixableHelper
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
   def emit_mutable_unused_finding!(reg, name)
-    return unless reg && reg.respond_to?(:token) && reg.token
+    T.bind(self, SemanticAnnotator) rescue nil
+    return unless reg && reg.token
     tok = reg.token
     fixes = []
-    if tok.respond_to?(:value) && tok.value == 'MUTABLE'
+    if tok.value == 'MUTABLE'
       fixes << Fix.new(
         description: "Remove MUTABLE keyword (binding is never reassigned).",
         confidence: :auto,
@@ -50,7 +53,8 @@ module FixableHelper
   # over `candidates`, provided it's within `max_distance`. Returns nil
   # when no candidate is close enough (don't suggest wild guesses).
   def closest_name(input, candidates, max_distance: 3)
-    best = nil
+    T.bind(self, SemanticAnnotator) rescue nil
+    best = T.let(nil, T.untyped)
     best_d = max_distance + 1
     candidates.each do |cand|
       d = levenshtein(input.to_s, cand.to_s)
@@ -63,6 +67,7 @@ module FixableHelper
   end
 
   def levenshtein(a, b)
+    T.bind(self, SemanticAnnotator) rescue nil
     return b.length if a.empty?
     return a.length if b.empty?
     prev = (0..b.length).to_a
@@ -88,6 +93,7 @@ module FixableHelper
   #   fix_label   — short description of what the replacement represents
   #                 (e.g. "closest known kind", "closest registered type")
   def emit_registry_mismatch!(token, name, candidates, message, fix_label)
+    T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
     fixes = []
     if best
@@ -125,6 +131,7 @@ module FixableHelper
   #                 the enclosing visitor can cleanly bail out.
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
+    T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
     fixes = []
     if best
@@ -158,14 +165,16 @@ module FixableHelper
   end
 
   def anchor_at(line, col)
+    T.bind(self, SemanticAnnotator) rescue nil
     AnchorToken.new(line, col)
   end
 
   # Given a Type.Variant style GetField, compute the token line/col of
   # the variant name (right after `target.` — length of target + 1).
   def variant_anchor_from_getfield(getfield_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     tgt = getfield_node.target
-    return nil unless tgt.respond_to?(:token) && tgt.token
+    return nil unless tgt.token
     anchor_at(tgt.token.line, tgt.token.column + tgt.name.to_s.length + 1)
   end
 
@@ -173,7 +182,8 @@ module FixableHelper
   # opening `{` — the variant name ends right before it, so the name's
   # start column is `token.column - variant_name.length`.
   def variant_anchor_from_unionlit(node, variant_name)
-    return nil unless node.respond_to?(:token) && node.token
+    T.bind(self, SemanticAnnotator) rescue nil
+    return nil unless node.token
     anchor_at(node.token.line, node.token.column - variant_name.to_s.length)
   end
 
@@ -182,6 +192,7 @@ module FixableHelper
   # from a synthesized anchor.
   def emit_variant_typo!(anchor, name, candidates, message, fix_label,
                          cascade: false)
+    T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
     fixes = []
     if best
@@ -217,6 +228,7 @@ module FixableHelper
   # captures), fall through to the plain `error!` so the legacy
   # diagnostic still surfaces.
   def emit_use_of_moved_error!(use_node, og_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     name = use_node.name.to_s
     unless og_node && og_node.move_line && og_node.move_col
       msg = "USE AFTER MOVE: You can't use `#{name}`."
@@ -239,7 +251,7 @@ module FixableHelper
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     src = @source_code
-    if decl && decl.respond_to?(:token) && decl.token && src
+    if decl && decl.token && src
       dline = decl.token.line
       line_text = src.lines[dline - 1] || ''
       # Find the `;` that terminates the declaration (skip trailing
@@ -372,6 +384,7 @@ module FixableHelper
   UNSIGNED_ORDER  = [:Byte,  :UInt16, :UInt32, :UInt64].freeze
 
   def smallest_fitting_int_type(val)
+    T.bind(self, SemanticAnnotator) rescue nil
     order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
     order.find do |t|
       max = Type::INT_TYPE_MAX[t]
@@ -381,9 +394,10 @@ module FixableHelper
   end
 
   def emit_int_overflow_error!(node, val, target_type, min, max)
+    T.bind(self, SemanticAnnotator) rescue nil
     overflow_kw = { val: val, type: target_type, min: min, max: max }
     msg = "Integer literal (#{val}) overflows #{target_type} (range #{min}..#{max})"
-    tok = node.respond_to?(:token) ? node.token : nil
+    tok = node.token
     return error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw) unless tok && @source_code
 
     best = smallest_fitting_int_type(val)
@@ -431,6 +445,7 @@ module FixableHelper
   end
 
   def emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = Fix.new(
       description: "Widen suffix `_#{old_suffix}` to `_#{new_suffix}` (smallest type that fits #{val}).",
       confidence: :auto,
@@ -453,6 +468,7 @@ module FixableHelper
   # (plus one adjacent space). Falls back to a plain stderr note when
   # source isn't available or the text isn't found on the line.
   def emit_local_never_shared_finding!(info)
+    T.bind(self, SemanticAnnotator) rescue nil
     name = info[:var]
     line = info[:line]
     msg = "Variable '#{name}' is @local but never shared across fibers. " \
@@ -496,6 +512,7 @@ module FixableHelper
   # locates the original declaration and inserts `MUTABLE ` at its
   # column.
   def emit_immutable_assignment_error!(node, scope)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(node.name, scope)
     return error!(node, :IMMUTABLE_ASSIGNMENT, name: node.name) unless fix
     fixable!(node,
@@ -509,6 +526,7 @@ module FixableHelper
   # immutable variable 'x'`. Same fix shape as the assignment case —
   # declare the passed variable MUTABLE at its binding site.
   def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(arg_node.name, scope)
     kw = { index: arg_idx, param: param_name, actual: arg_node.name }
     return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
@@ -557,9 +575,9 @@ module FixableHelper
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
   # the human-readable migration text appended to the error template.
   def emit_reentrant_error!(fn_node, code, hint:)
-    arrow = fn_node.respond_to?(:arrow_token) ? fn_node.arrow_token : nil
+    arrow = fn_node.arrow_token
     fix = nil
-    if arrow && arrow.respond_to?(:line) && arrow.respond_to?(:column)
+    if arrow
       fix = Fix.new(
         description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
         confidence: :auto,
@@ -595,9 +613,9 @@ module FixableHelper
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
   def emit_ambiguous_return_error!(fn_node, found_returns)
-    arrow = fn_node.respond_to?(:arrow_token) ? fn_node.arrow_token : nil
+    arrow = fn_node.arrow_token
     fix = nil
-    if arrow && arrow.respond_to?(:line) && arrow.respond_to?(:column)
+    if arrow
       fix = Fix.new(
         description: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
         confidence: :auto,
@@ -620,9 +638,9 @@ module FixableHelper
   # confidence because PARTIAL MATCH is strictly a superset (allows
   # DEFAULT, allows guards, doesn't require exhaustiveness).
   def emit_match_partial_fix!(match_node, code, **kwargs)
-    tok = match_node.respond_to?(:token) ? match_node.token : nil
+    tok = match_node.token
     fix = nil
-    if tok && tok.respond_to?(:line)
+    if tok
       fix = Fix.new(
         description: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
         confidence: :auto,
@@ -646,7 +664,7 @@ module FixableHelper
   # decline and add a lifetime annotation instead.
   def emit_return_borrowed_no_copy_error!(node)
     fix = nil
-    if node.respond_to?(:token) && node.token
+    if node.token
       tok = node.token
       fix = Fix.new(
         description: "Wrap the returned value with `COPY ` so it doesn't borrow from the parameter.",
@@ -671,7 +689,7 @@ module FixableHelper
   # same shape as emit_immutable_assignment_error!.
   def emit_with_restrict_immutable_error!(node, var_node)
     name = var_node.name
-    scope = (var_node.respond_to?(:symbol) && var_node.symbol&.scope) || current_scope
+    scope = (var_node.symbol&.scope) || current_scope
     fix = build_declare_mutable_fix(name, scope)
     return error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: name) unless fix
     fixable!(node,
@@ -687,9 +705,9 @@ module FixableHelper
   # (e.g. synthesized fns).
   def emit_style_mutable_param_needs_bang!(fn_node)
     name = fn_node.name
-    name_tok = fn_node.respond_to?(:name_token) ? fn_node.name_token : nil
+    name_tok = fn_node.name_token
     fix = nil
-    if name_tok && name_tok.respond_to?(:line) && name_tok.respond_to?(:column)
+    if name_tok
       end_col = name_tok.column + name.length
       fix = Fix.new(
         description: "Append `!` to '#{name}' (signals that it takes a MUTABLE parameter).",
@@ -714,7 +732,7 @@ module FixableHelper
   def emit_can_smash_unsupported_error!(node)
     fix = nil
     tok = node.respond_to?(:can_smash_token) ? node.can_smash_token : nil
-    if tok && tok.respond_to?(:line)
+    if tok
       fix = Fix.new(
         description: "Replace `@canSmash` with `@service` (OS-thread spawn — supported today).",
         confidence: :auto,
@@ -740,7 +758,7 @@ module FixableHelper
   # length is known from the parsed token's value).
   def emit_type_mismatch_assign_error!(node, target_type, value_type)
     kw = { got: value_type, expected: target_type }
-    value = node.respond_to?(:value) ? node.value : nil
+    value = node.value
     fix = build_cast_wrap_fix(value, target_type)
     return error!(node, :TYPE_MISMATCH_ASSIGN, **kw) unless fix
     fixable!(node,
@@ -757,7 +775,7 @@ module FixableHelper
   # function call) gets nil so the caller falls back to plain error!.
   def build_cast_wrap_fix(value, target_type)
     return nil unless value
-    return nil unless value.respond_to?(:token) && value.token
+    return nil unless value.token
     tok = value.token
     target_name = target_type.respond_to?(:resolved) ? target_type.resolved : target_type
     text_length = case value
@@ -785,6 +803,7 @@ module FixableHelper
   # declaration of `name` in `scope`. Returns nil when the declaration
   # isn't locatable or already carries `MUTABLE`.
   def build_declare_mutable_fix(name, scope)
+    T.bind(self, SemanticAnnotator) rescue nil
     info = scope.locals[name]
     return nil unless info
     # Locals carry a reg whose token is the binding's first source position.
@@ -793,13 +812,13 @@ module FixableHelper
     # point a MUTABLE insertion at the signature.
     tok = nil
     decl = info.reg
-    if decl && decl.respond_to?(:token) && decl.token
+    if decl && decl.token
       tok = decl.token
     elsif info.is_param && info.param_decl_token
       tok = info.param_decl_token
     end
     return nil unless tok
-    return nil if tok.respond_to?(:value) && tok.value == 'MUTABLE'
+    return nil if tok.value == 'MUTABLE'
 
     Fix.new(
       description: "Declare '#{name}' as MUTABLE at its binding site (line #{tok.line}).",
@@ -822,10 +841,11 @@ module FixableHelper
   # atomic or the decl line text isn't locatable; the caller then
   # falls back to the plain `error!` path.
   def build_atomic_escape_migration_fix(source_sym, source_name)
+    T.bind(self, SemanticAnnotator) rescue nil
     return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.sync == :atomic
     return nil unless @source_code
     reg = source_sym.respond_to?(:reg) ? source_sym.reg : nil
-    return nil unless reg && reg.respond_to?(:token) && reg.token
+    return nil unless reg && reg.token
     line_num = reg.token.line
     return nil unless line_num
     src_line = @source_code.lines[line_num - 1] || ''
@@ -888,6 +908,7 @@ module FixableHelper
   #   2. Sum of per-op rank (default = 0, first alt = 1, ...) ascending.
   # Notes carried through from any op that has a note for that type.
   def auto_rank_candidates(ops)
+    T.bind(self, SemanticAnnotator) rescue nil
     return [] if ops.nil? || ops.empty?
 
     # Per-type aggregation across ops.
@@ -921,6 +942,7 @@ module FixableHelper
   # Auto under --gradual; for those the diagnostic still surfaces the
   # candidates as text but no auto-applicable fix).
   def build_auto_candidate_fix(slot, type_sym, note, position)
+    T.bind(self, SemanticAnnotator) rescue nil
     auto_tok = auto_token_for(slot)
     return nil unless auto_tok
     type_str = type_sym.to_s
@@ -940,6 +962,7 @@ module FixableHelper
   # candidates. Used by both the unresolved and ambiguity finding
   # builders when op_evidence is present.
   def build_auto_op_evidence_block(ops, candidates)
+    T.bind(self, SemanticAnnotator) rescue nil
     return "" if candidates.empty?
     op_list = ops.to_a.sort.join(", ")
     msg = +"\n  In the body, the binding is used in operator(s): #{op_list}.\n"
@@ -971,6 +994,7 @@ module FixableHelper
   # whole container type). The caller emits one binding-level
   # finding per shape-tracked decl via `emit_auto_shape_resolved_finding!`.
   def emit_auto_resolved_finding!(resolution)
+    T.bind(self, SemanticAnnotator) rescue nil
     slot = resolution.slot
     return if slot.respond_to?(:shape) && slot.shape
 
@@ -996,6 +1020,7 @@ module FixableHelper
   # finding here — the unresolved sub-slot's finding tells the
   # user what's missing.
   def emit_auto_shape_resolved_finding!(decl, slot)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless decl && decl.type.is_a?(Type)
     return if decl.type.auto?  # not yet wrapped — skip
     type_str = auto_type_source_form(decl.type)
@@ -1014,6 +1039,7 @@ module FixableHelper
   # array if `auto_tok` is nil (implicit-Auto under `--gradual` —
   # there's no token span to edit).
   def build_auto_replace_fixes(auto_tok, type_str)
+    T.bind(self, SemanticAnnotator) rescue nil
     return [] unless auto_tok
     [Fix.new(
       description: "Replace `Auto` with the inferred type `#{type_str}`.",
@@ -1036,6 +1062,7 @@ module FixableHelper
   # binding in operator expressions, those operators' default types
   # are offered as :interactive Fixes.
   def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
+    T.bind(self, SemanticAnnotator) rescue nil
     slot = ambiguity.slot
     label = auto_slot_label(slot)
     observed = ambiguity.observed_types
@@ -1067,6 +1094,7 @@ module FixableHelper
   # operator expressions, ranked candidate types per the
   # AUTO_OP_CANDIDATES table are offered as :interactive Fixes.
   def emit_auto_unresolved_finding!(slot, op_evidence: {})
+    T.bind(self, SemanticAnnotator) rescue nil
     label = auto_slot_label(slot)
     base_msg = "Cannot infer type for #{label} — no observed uses to drive inference."
 
@@ -1096,6 +1124,7 @@ module FixableHelper
   # Reverse-lookup helper: given a Slot struct, return its hash key
   # in the slots map (matches the IDs AutoConstraintCollector uses).
   def slot_id_for(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
     case slot.kind
     when :param  then [:param, slot.fn_name, slot.index]
     when :return then [:return, slot.fn_name]
@@ -1108,6 +1137,7 @@ module FixableHelper
   # ---------------------------------------------------------------
 
   def auto_type_source_form(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     # Prefer the resolved symbol's name; falls back to to_s for
     # parameterized types (`Int64[]`, `HashMap<String, Int64>`).
     if type.respond_to?(:resolved)
@@ -1119,6 +1149,7 @@ module FixableHelper
   end
 
   def auto_slot_label(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
     # M2.2: shape-tagged slots (forward-flow inference for empty
     # `[]` / `{}`) get a more specific label so the diagnostic
     # tells the user which sub-type is being inferred.
@@ -1151,6 +1182,7 @@ module FixableHelper
   end
 
   def auto_token_for(slot)
+    T.bind(self, SemanticAnnotator) rescue nil
     # The cached `slot.auto_token` (captured at registration) is
     # the authoritative source of the original Auto keyword span.
     # `stamp_slot!` / `stamp_map_pairs!` may overwrite
@@ -1163,6 +1195,7 @@ module FixableHelper
   end
 
   def build_auto_ambiguity_message(label, observed_strs, slot)
+    T.bind(self, SemanticAnnotator) rescue nil
     types_list = observed_strs.join(', ')
     msg = +"Ambiguous Auto for #{label}: observed as #{types_list}.\n"
 

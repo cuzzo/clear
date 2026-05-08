@@ -2608,14 +2608,13 @@ class Parser
       consume(:VAR_ID)
       allows_reentrant = true
     end
-    Type.new({
+    Type.new(FunctionSignature.new(
       params: param_types.each_with_index.map { |t, i|
         { name: "arg#{i}", type: t, required: true, mutable: false, takes: false }
       },
-      return: { type: return_type },
-      fn_type: true,
+      return_type: return_type,
       reentrant: allows_reentrant
-    })
+    ))
   end
 
   def parse_type_annotation

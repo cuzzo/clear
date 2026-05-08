@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # P2.4 / P2.5 / P2.6: validation of REQUIRES + WITH MATCH at the function
 # level + call-site family check.
 #
@@ -112,7 +114,7 @@ module WithMatchCheck
         # migration is visible. The shim will be removed in a future release.
         if warn_handler
           warn_handler.call(node,
-            "WITH at line #{node.token&.line} uses parameter '#{pname}' " \
+            "WITH at line #{node.token.line} uses parameter '#{pname}' " \
             "without a REQUIRES clause. Auto-inferring " \
             "'REQUIRES #{pname}: LOCKED' for this release. " \
             "Add the clause explicitly to silence this warning; the shim " \
@@ -124,7 +126,7 @@ module WithMatchCheck
           fn.requires[pname] = Set[:LOCKED]
         else
           error_handler.call(node,
-            "WITH at line #{node.token&.line} uses parameter '#{pname}', " \
+            "WITH at line #{node.token.line} uses parameter '#{pname}', " \
             "but '#{pname}' is not constrained by REQUIRES. " \
             "Add a REQUIRES clause naming the families this function supports:\n" \
             "    REQUIRES #{pname}: LOCKED\n" \
@@ -146,7 +148,7 @@ module WithMatchCheck
 
       missing.each do |fam|
         error_handler.call(node,
-          "WITH MATCH at line #{node.token&.line} is missing a WHEN arm for " \
+          "WITH MATCH at line #{node.token.line} is missing a WHEN arm for " \
           "#{fam} (declared in REQUIRES). Add an arm:\n" \
           "    WHEN #{fam}\n" \
           "        -> { <body for #{fam} strategy> }")
@@ -154,7 +156,7 @@ module WithMatchCheck
 
       extra.each do |fam|
         error_handler.call(node,
-          "WITH MATCH at line #{node.token&.line} has a WHEN arm for #{fam}, " \
+          "WITH MATCH at line #{node.token.line} has a WHEN arm for #{fam}, " \
           "but #{fam} is not in REQUIRES. Either remove the arm or add #{fam} " \
           "to REQUIRES.")
       end
@@ -251,10 +253,10 @@ module WithMatchCheck
       sig.params.each_with_index do |param, idx|
         pname = (param[:name] || param["name"]).to_s
         fams = sig.requires[pname]
-        next unless fams && fams.respond_to?(:empty?) && fams.empty?
+        next unless fams && fams.empty?
         arg = (call_node.args || [])[idx]
         next unless arg.is_a?(AST::Identifier)
-        sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+        sym = arg.symbol
         next unless sym
         next if sym.sync || sym.storage == :shared || sym.storage == :multiowned ||
                 sym.storage == :local || sym.storage == :heap
@@ -306,7 +308,7 @@ module WithMatchCheck
   ATOMIC_SYNCS    = %i[atomic].to_set.freeze
 
   def self.family_of_arg(arg)
-    sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+    sym = arg.symbol
     return nil unless sym
     return :LOCKED    if LOCKED_SYNCS.include?(sym.sync)
     return :VERSIONED if VERSIONED_SYNCS.include?(sym.sync)
@@ -350,7 +352,7 @@ module WithMatchCheck
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
   def self.family_of_arg_set(arg)
-    sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+    sym = arg.symbol
     return Set.new unless sym
     if sym.sync_families && sym.sync_families.size > 1
       return expand_snapshotted(sym.sync_families)
@@ -450,7 +452,7 @@ module WithMatchCheck
     until stack.empty?
       node = stack.pop
       next unless node.is_a?(AST::Locatable)
-      out << node if node.is_a?(AST::FuncCall) && node.respond_to?(:name)
+      out << node if node.is_a?(AST::FuncCall)
       next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
       node.class.members.each do |m|
         v = node[m]

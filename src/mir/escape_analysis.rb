@@ -126,13 +126,13 @@ module EscapeAnalysis
       root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
       if root.is_a?(AST::Identifier) && root.symbol
         decl     = root.symbol.reg
-        decl_val = decl.respond_to?(:value) ? decl.value : nil
+        decl_val = decl&.value
         callee2  = case decl_val
                    when AST::FuncCall   then decl_val.name
                    when AST::MethodCall then decl_val.name
                    end
         if callee2 && heap_fns.include?(callee2)
-          ret_type = val.respond_to?(:full_type) ? (Type.new(val.full_type) rescue nil) : nil
+          ret_type = (Type.new(val.full_type) rescue nil)
           return !!(ret_type&.string? || ret_type&.collection? || ret_type&.map?)
         end
       end
@@ -202,7 +202,7 @@ module EscapeAnalysis
           sym_ti = ident.symbol&.type
           sym_ti = sym_ti.is_a?(Type) ? sym_ti : (Type.new(sym_ti) rescue nil)
           if sym_ti&.requires_move?
-            node.storage = :heap if node.respond_to?(:storage=)
+            node.storage = :heap
             ident.symbol.storage = :heap if ident.symbol
           end
         end
@@ -268,7 +268,7 @@ module EscapeAnalysis
       obj = node.object
       # Receiver must be a collection (Type#collection? covers HashMap /
       # @pool / @list / @set uniformly — the single source of truth).
-      next unless obj.respond_to?(:symbol) && obj.symbol
+      next unless obj.symbol
       t = obj.symbol.type
       sym_ti = t.is_a?(Type) ? t : (Type.new(t) rescue nil)
       next unless sym_ti && sym_ti.collection?
@@ -297,7 +297,7 @@ module EscapeAnalysis
     # frame-allocated @list/@pool/@set GIVEn to TAKES of the same type.
     e2_walk_calls(fn.body) do |call|
       callee_name = call.name.to_s
-      callee_fn = fn_nodes[callee_name] || fn_nodes[callee_name.to_sym]
+      callee_fn = fn_nodes[callee_name]
       next unless callee_fn&.respond_to?(:params) && callee_fn.params
 
       args = call.args || []
@@ -342,8 +342,8 @@ module EscapeAnalysis
     case node
     when AST::BinaryOp
       promoted = false
-      if node.op == :ADD && node.respond_to?(:string_concat) && node.string_concat
-        node.storage = :heap if node.respond_to?(:storage=)
+      if node.op == :ADD && node.string_concat
+        node.storage = :heap
         ti = node.type_info
         ti.provenance = :heap if ti.is_a?(Type)
         promoted = true
@@ -352,7 +352,7 @@ module EscapeAnalysis
       promoted |= e2_promote_frame_concats!(node.right)
       promoted
     when AST::StringConcat
-      node.storage = :heap if node.respond_to?(:storage=)
+      node.storage = :heap
       node.parts&.each { |p| e2_promote_frame_concats!(p) }
       true
     when AST::StructLit, AST::UnionVariantLit
@@ -475,7 +475,7 @@ module EscapeAnalysis
           # Promote the loop-local declaration.
           AST.walk_body(body) do |local_decl|
             next unless (local_decl.is_a?(AST::VarDecl) || (local_decl.is_a?(AST::BindExpr) && local_decl.mode == :decl)) && local_decl.name.to_s == rhs.name
-            local_decl.storage = :heap if local_decl.respond_to?(:storage=)
+            local_decl.storage = :heap
             decl_ti = local_decl.type_info rescue nil
             decl_ti = Type.new(decl_ti) if decl_ti && !decl_ti.is_a?(Type)
             decl_ti.provenance = :heap if decl_ti.is_a?(Type)
@@ -489,13 +489,11 @@ module EscapeAnalysis
           outer_name = bind.name
           AST.walk_body(fn.body) do |outer_decl|
             next unless (outer_decl.is_a?(AST::VarDecl) || (outer_decl.is_a?(AST::BindExpr) && outer_decl.mode == :decl)) && outer_decl.name.to_s == outer_name
-            outer_decl.storage = :heap if outer_decl.respond_to?(:storage=)
+            outer_decl.storage = :heap
             outer_ti = outer_decl.type_info rescue nil
             outer_ti = Type.new(outer_ti) if outer_ti && !outer_ti.is_a?(Type)
             outer_ti.provenance = :heap if outer_ti.is_a?(Type)
-            if outer_decl.respond_to?(:symbol) && outer_decl.symbol
-              outer_decl.symbol.storage = :heap
-            end
+            outer_decl.symbol.storage = :heap if outer_decl.symbol
           end
         end
       end
@@ -603,15 +601,15 @@ module EscapeAnalysis
           node.type_info.provenance = :heap if node.type_info.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             decl = e3_find_decl(fn.body, node.name)
-            decl.type_info.provenance = :heap if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+            decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
           end
         when AST::Assignment
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          sym = node.name.respond_to?(:symbol) ? node.name.symbol : nil
+          sym = node.name.symbol
           decl = sym&.reg
-          decl.type_info.provenance = :heap if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+          decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
         end
       end
     end
@@ -699,7 +697,7 @@ module EscapeAnalysis
     until stack.empty?
       node = stack.pop
       next unless node.is_a?(AST::Locatable)
-      if node.is_a?(AST::FuncCall) && node.respond_to?(:name)
+      if node.is_a?(AST::FuncCall)
         callsites[node.name.to_s] << { args: (node.args || []) }
       end
       next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
@@ -782,7 +780,7 @@ module EscapeAnalysis
               call_ti.provenance = :heap if call_ti.is_a?(Type) && !call_ti.heap_provenance?
               bind_ti = stmt.type_info rescue nil
               bind_ti.provenance = :heap if bind_ti.is_a?(Type) && !bind_ti.heap_provenance?
-              bt2 = stmt.respond_to?(:full_type) ? stmt.full_type : nil
+              bt2 = stmt.full_type
               bt2.provenance = :heap if bt2.is_a?(Type) && !bt2.heap_provenance?
             end
           end

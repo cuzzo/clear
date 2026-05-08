@@ -168,7 +168,7 @@ module FsmTransform
         visit.call(node.body)
       when AST::ForEach
         if node.var_name && !seen[node.var_name]
-          ct_obj = node.collection&.respond_to?(:full_type) ? node.collection.full_type : nil
+          ct_obj = node.collection&.full_type
           ct = ct_obj.is_a?(Type) ? ct_obj : (ct_obj ? Type.new(ct_obj) : nil)
           # Defer to the FSM ForEach descriptor for the bound var
           # type (map's `k` is the KEY type, not element_type which
@@ -244,7 +244,7 @@ module FsmTransform
   def suspend_value?(value)
     return true if value.is_a?(AST::NextExpr)
     return false unless value.is_a?(AST::FuncCall) || value.is_a?(AST::MethodCall)
-    md = value.respond_to?(:matched_stdlib_def) ? value.matched_stdlib_def : nil
+    md = value.matched_stdlib_def
     !!(md && md[:suspends] && md[:fsm_setup])
   end
 

@@ -80,7 +80,7 @@ module PredicateRewriter
   end
 
   def push_always_finding(node, message)
-    anchor = node.respond_to?(:token) && node.token ? node.token : nil
+    anchor = node.token ? node.token : nil
     return unless anchor
     finding = FixableFinding.new(
       level: :warning,
@@ -312,9 +312,9 @@ module PredicateRewriter
     when AST::MethodCall
       leftmost_offset(node.object, source)
     when AST::FuncCall
-      offset_for(source, node.token.line, node.token.column) if node.respond_to?(:token) && node.token
+      offset_for(source, node.token.line, node.token.column) if node.token
     else
-      return nil unless node.respond_to?(:token) && node.token
+      return nil unless node.token
       offset_for(source, node.token.line, node.token.column)
     end
   end

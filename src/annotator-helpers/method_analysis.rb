@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # method_analysis.rb — Type-specific method resolution for Pool and HashMap.
 #
 # Resolves method calls on collection types using the declarative registries
@@ -8,6 +10,7 @@ module MethodAnalysis
   # Returns true if handled, false if the caller should fall through to UFCS.
   # Dispatch is driven by COLLECTION_METHOD_CONFIGS keyed on Type#dispatch_key.
   def resolve_collection_method(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     obj_type = node.object.type_info
     config = COLLECTION_METHOD_CONFIGS[obj_type&.dispatch_key]
     return false unless config
@@ -23,6 +26,7 @@ module MethodAnalysis
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
   def narrow_collection_type!(matched_def, args)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless matched_def[:narrows_collection] && args.size >= 2
 
     list_arg = args[0]
@@ -47,6 +51,7 @@ module MethodAnalysis
   private
 
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
+    T.bind(self, SemanticAnnotator) rescue nil
     defn = registry[node.name]
     unless defn
       available = registry.keys.join(", ")
@@ -148,6 +153,7 @@ module MethodAnalysis
   # Returns the :get or :set sub-entry, or nil.
   # Dispatch is driven by Type#dispatch_key — add new indexable types there.
   def resolve_index_op(type_info, op)
+    T.bind(self, SemanticAnnotator) rescue nil
     return nil if type_info&.promise_list?
     INDEX_OPS.dig(type_info&.dispatch_key, op)
   end

@@ -132,7 +132,7 @@ module FsmTransform
           body.concat(d.setup_stmts || [])
         end
         body.compact!
-        body.reject! { |s| s.respond_to?(:strip) && s.strip.empty? }
+        body.reject! { |s| s.is_a?(String) && s.strip.empty? }
 
         rt_suppress = spec[:rt_suppress] || ""
 
@@ -497,7 +497,7 @@ module FsmTransform
               lowered, all_promoted.uniq, "__ctx_#{id}",
             )
           end
-          [lowered, *raw_stmts].reject { |s| s.respond_to?(:strip) && s.strip.empty? }
+          [lowered, *raw_stmts].reject { |s| s.is_a?(String) && s.strip.empty? }
         end
       end
 

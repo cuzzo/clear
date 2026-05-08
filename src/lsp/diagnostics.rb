@@ -63,7 +63,7 @@ module LSP
     # tokens may have an empty value — we floor at 1 so the squiggle
     # is at least one character wide.
     def token_length(tok)
-      val = tok.respond_to?(:value) ? tok.value : nil
+      val = tok.value
       len = val.is_a?(String) ? val.bytesize : 1
       len <= 0 ? 1 : len
     end

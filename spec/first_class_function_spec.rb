@@ -118,7 +118,7 @@ RSpec.describe SemanticAnnotator do
         # Parse only — don't run the annotator (Void lambdas need separate handling)
         tokens = Lexer.new("FN() -> Void").tokenize
         # Parse just the type annotation directly via the parser
-        t = Type.new({ params: [], return: { type: Type.new(:Void) }, fn_type: true })
+        t = Type.new(FunctionSignature.new(params: [], return_type: Type.new(:Void)))
         expect(t.zig_type).to eq("*const fn(*Runtime) anyerror!void")
       end
     end
@@ -167,11 +167,10 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------------
     describe "Type#accepts? full signature matching (Phase 2)" do
       def fn_type(params, ret)
-        Type.new({
+        Type.new(FunctionSignature.new(
           params: params.map.with_index { |t, i| { name: "arg#{i}", type: Type.new(t), required: true, mutable: false, takes: false } },
-          return: { type: Type.new(ret) },
-          fn_type: true
-        })
+          return_type: Type.new(ret)
+        ))
       end
 
       it "accepts identical signatures" do
@@ -540,7 +539,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(code)
         fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
         cb_param = fn.params.find { |p| p[:name] == "cb" }
-        expect(cb_param[:type].raw[:reentrant]).to be true
+        expect(cb_param[:type].raw.reentrant).to be true
       end
 
       it "leaves reentrant false on a plain fn-type param annotation" do
@@ -552,7 +551,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(code)
         fn = tree.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "apply" }
         cb_param = fn.params.find { |p| p[:name] == "cb" }
-        expect(cb_param[:type].raw[:reentrant]).to be_falsy
+        expect(cb_param[:type].raw.reentrant).to be_falsy
       end
     end
 
@@ -574,7 +573,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(code)
         call = tree.statements.last.value
         fib_arg = call.args.find { |a| a.is_a?(AST::Identifier) && a.name == "fib" }
-        expect(fib_arg.full_type.raw[:reentrant]).to be true
+        expect(fib_arg.full_type.raw.reentrant).to be true
       end
 
       it "does not mark the fn_ref type as reentrant for a non-@reentrant function" do
@@ -590,7 +589,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(code)
         call = tree.statements.last.value
         double_arg = call.args.find { |a| a.is_a?(AST::Identifier) && a.name == "double" }
-        expect(double_arg.full_type.raw[:reentrant]).to be_falsy
+        expect(double_arg.full_type.raw.reentrant).to be_falsy
       end
     end
 

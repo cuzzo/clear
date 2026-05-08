@@ -41,7 +41,7 @@ class StringConcatRewriter
     when AST::VarDecl, AST::BindExpr
       node.value = rewrite_in_node!(node.value) if node.value
     when AST::Assignment
-      node.value = rewrite_in_node!(node.value) if node.respond_to?(:value) && node.value
+      node.value = rewrite_in_node!(node.value) if node.value
     when AST::ReturnNode
       node.value = rewrite_in_node!(node.value) if node.value
     when AST::IfStatement
@@ -49,7 +49,7 @@ class StringConcatRewriter
       node.else_branch&.map! { |s| rewrite_in_node!(s) }
     when AST::MatchStatement
       (node.cases || []).each { |c| c[:body]&.map! { |s| rewrite_in_node!(s) } }
-      node.default_case&.map! { |s| rewrite_in_node!(s) } if node.default_case
+      node.default_case.map! { |s| rewrite_in_node!(s) } if node.default_case
     when AST::WhileLoop
       b = node.do_branch
       b.map! { |s| rewrite_in_node!(s) } if b.is_a?(Array)

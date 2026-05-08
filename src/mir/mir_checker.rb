@@ -252,7 +252,7 @@ class MIRChecker
   end
 
   def self.format_fsm_error(invariant, message, source)
-    loc = source && source.respond_to?(:line) && source.line ? " at line #{source.line}" : ""
+    loc = source&.line ? " at line #{source.line}" : ""
     "[FSM checker]#{loc} #{invariant}: #{message}"
   end
 

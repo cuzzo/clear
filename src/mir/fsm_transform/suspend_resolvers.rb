@@ -78,7 +78,7 @@ module FsmTransform
       result_zig_type = nil
       if finish_value_mir && result_var && result_var != "_"
         bind_stmts << MIR::Let.new(result_var, finish_value_mir, false, nil, nil)
-        ft = io_tail.call_node.respond_to?(:full_type) ? io_tail.call_node.full_type : nil
+        ft = io_tail.call_node.full_type
         result_zig_type = ft ? Type.new(ft).zig_type : nil
       elsif finish_value_mir
         bind_stmts << MIR::ExprStmt.new(finish_value_mir, true)
@@ -170,8 +170,7 @@ module FsmTransform
       ZIG
       bind_stmts = [MIR::RawZig.new(bind_zig, "fsm_next_bind", nil, nil)]
 
-      promise_ft = next_tail.promise_ast.respond_to?(:full_type) ?
-                     next_tail.promise_ast.full_type : nil
+      promise_ft = next_tail.promise_ast.full_type
       sp_zig = promise_ft ? Type.new(promise_ft).zig_type : "anyopaque"
       inner_zig =
         if promise_ft && (pt = Type.new(promise_ft)).respond_to?(:tense_type) && pt.tense_type

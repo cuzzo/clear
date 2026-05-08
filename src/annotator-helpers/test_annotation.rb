@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 require 'set'
 
 # TestAnnotation — annotator-side handling of CLEAR's test grammar:
@@ -22,6 +24,7 @@ module TestAnnotation
                    socketRead socketWrite socketClose].to_set.freeze
 
   def visit_TestBlock(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     with_new_scope do
       node.setup.each { |s| visit(s) }
       visit_test_lets(node)
@@ -32,6 +35,7 @@ module TestAnnotation
   end
 
   def visit_WhenBlock(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     node.setup.each { |s| visit(s) }
     visit_test_lets(node)
     visit_test_hook_bodies(node)
@@ -60,6 +64,7 @@ module TestAnnotation
   # body inside the enclosing block. Lowering injects the actual
   # variable declarations at the top of each test body.
   def visit_test_lets(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:lets)
     (node.lets || []).each do |let_node|
       visit(let_node.expr)
@@ -79,6 +84,7 @@ module TestAnnotation
   # annotated against the enclosing scope so type errors surface at
   # compile time.
   def visit_test_hook_bodies(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:before_each)
     (node.before_each || []).each { |body| body.each { |s| visit(s) } }
     (node.after_each  || []).each { |body| body.each { |s| visit(s) } }
@@ -87,33 +93,41 @@ module TestAnnotation
   end
 
   def visit_TestThat(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     visit_stmts(node.body)
     node.full_type = :Void
   end
 
   def visit_AssertRaises(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
   def visit_BenchmarkStmt(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
   def visit_SmashStmt(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
   def visit_ProfileStmt(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
   def visit_StubDecl(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     # Visit the value for type checking if it's an expression.
-    visit(node.value) if node.value.respond_to?(:full_type)
+    # node.value is either an AST expression or a Symbol like :CAPTURES.
+    # Only descend into AST expressions; Symbols are leaf metadata.
+    visit(node.value) if node.value.is_a?(AST::Locatable)
     # CAPTURES stubs declare a variable in the current scope.
     if node.kind == :captures
       cap_name = node.value  # the variable name string
@@ -130,6 +144,7 @@ module TestAnnotation
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
   def validate_strict_io!(test_that, stubbed_fns)
+    T.bind(self, SemanticAnnotator) rescue nil
     calls = scan_for_calls(test_that.body).first
     visited = Set.new
     queue = calls.to_a.dup

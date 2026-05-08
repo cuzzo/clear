@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 require_relative "../ast/ast"
 
 # ==========================================
@@ -25,6 +27,7 @@ module GenericAnalysis
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
   def validate_type_param_list!(node, type_params, kind)
+    T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
     type_params.each do |param|
       param_sym = param.to_sym
@@ -62,6 +65,7 @@ module GenericAnalysis
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
   def validate_type_annotation!(node, type_obj, is_param: false)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless type_obj.is_a?(Type)
     # FN types are structurally typed; their nested param/return types are validated
     # when they are parsed. No named-type schema lookup is needed here.
@@ -193,7 +197,7 @@ module GenericAnalysis
       schema = lookup_type_schema(base_name)
 
       if schema.nil?
-        tok = node.respond_to?(:token) ? node.token : nil
+        tok = node.token
         if tok
           emit_typo_suggestion!(
             tok, base_name.to_s, all_known_type_names,
@@ -254,6 +258,7 @@ module GenericAnalysis
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
+    T.bind(self, SemanticAnnotator) rescue nil
     subst = {}
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
@@ -276,6 +281,7 @@ module GenericAnalysis
   end
 
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
+    T.bind(self, SemanticAnnotator) rescue nil
     shared_args = []
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
@@ -309,6 +315,7 @@ module GenericAnalysis
   # Recursively match param_type against actual_type to bind type params.
   # Handles both direct uses (T) and nested generic uses (Cache<T>).
   def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
+    T.bind(self, SemanticAnnotator) rescue nil
     p_res = param_type.resolved
     a_res = actual_type.resolved
     if type_params.include?(p_res)
@@ -338,6 +345,7 @@ module GenericAnalysis
   # e.g. apply_type_subst(Type(:T), { T: :Number }) → Type(:Number)
   #      apply_type_subst(Type(:"Cache<T>"), { T: :Number }) → Type(:"Cache<Number>")
   def apply_type_subst(type_obj, subst)
+    T.bind(self, SemanticAnnotator) rescue nil
     return Type.new(:Any) if type_obj.nil?
     t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     resolved = t.resolved
@@ -383,15 +391,18 @@ module GenericAnalysis
   end
 
   def generic_binding_value(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     generic_type_has_capabilities?(t) ? Type.new(t) : t.resolved
   end
 
   def generic_shared_family_param?(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
   end
 
   def generic_shared_payload_binding(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
     t.ownership = :affine
     t.provenance = nil if t.respond_to?(:provenance=)
@@ -400,6 +411,7 @@ module GenericAnalysis
   end
 
   def same_generic_binding?(left, right)
+    T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
     r = right.is_a?(Type) ? right : Type.new(right)
     l.resolved == r.resolved &&
@@ -411,6 +423,7 @@ module GenericAnalysis
   end
 
   def same_shared_call_capability?(left, right)
+    T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
     r = right.is_a?(Type) ? right : Type.new(right)
     l.sync == r.sync &&
@@ -420,6 +433,7 @@ module GenericAnalysis
   end
 
   def generic_type_has_capabilities?(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     type.ownership != :affine ||
       !type.sync.nil? ||
       !type.layout.nil? ||
@@ -428,6 +442,7 @@ module GenericAnalysis
   end
 
   def generic_binding_source(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
@@ -454,23 +469,25 @@ module GenericAnalysis
   end
 
   def shared_call_capability_display(type)
+    T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     caps = ["@shared"]
     caps << "indirect" if t.layout == :indirect
-    caps << case t.sync
+    caps << T.must(case t.sync
             when :locked then "locked"
             when :write_locked then "writeLocked"
             when :versioned then "versioned"
             when :atomic then "atomic"
             when :local then "local"
             when :always_mutable then "alwaysMutable"
-            end
+            end)
     caps.compact.join(":")
   end
 
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
   def substitute_type_params(signature, subst)
+    T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(
       params: signature.params.map { |p| p.merge(type: apply_type_subst(p[:type], subst)) },
       return_type: apply_type_subst(signature.return_type, subst),
@@ -485,6 +502,7 @@ module GenericAnalysis
 
   # Validate stream type annotations on variable declarations.
   def validate_stream_type!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type.is_a?(Type) && node.type.future?
     if node.type.multiowned?
       error!(node, :RC_PROMISE_NEEDS_SHARED)
@@ -498,6 +516,7 @@ module GenericAnalysis
   # into the value node so the transpiler sees the correct runtime type.
   # Handles: BgStreamBlock ~T[INF] retyping, shard_count, @shared promise ownership.
   def propagate_declared_type_to_value!(node, final_type)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type.is_a?(Type)
 
     # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
@@ -526,6 +545,7 @@ module GenericAnalysis
   # type annotation (or inferred value type) into node.type_info and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
   def propagate_collection_metadata!(node, final_type)
+    T.bind(self, SemanticAnnotator) rescue nil
     coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
       decl_t
     elsif node.value.type_info&.collection
@@ -571,6 +591,7 @@ module GenericAnalysis
   # call — `x = failableFunc() OR default` should still propagate
   # heap_promoted from failableFunc's returns_promoted flag.
   def propagate_call_flags!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     if has_heap_promoted_call?(node.value)
       node.type_info.provenance = :heap if node.type_info.is_a?(Type)
     end
@@ -580,6 +601,7 @@ module GenericAnalysis
   # Register container borrow in the OG when a binding receives a value
   # from container access (HashMap/Pool/List indexing, through OR).
   def register_container_borrow!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
@@ -591,6 +613,7 @@ module GenericAnalysis
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   def find_container_source(expr)
+    T.bind(self, SemanticAnnotator) rescue nil
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
@@ -631,6 +654,7 @@ module GenericAnalysis
   # Both OR (orelse) and OR_RESCUE (catch) propagate because the transpiler
   # ensures fallback struct values also have their string fields duped to heap.
   def has_heap_promoted_call?(expr)
+    T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
     ti = expr.type_info rescue nil
     ti = ti.is_a?(Type) ? ti : nil
@@ -645,6 +669,7 @@ module GenericAnalysis
   # frame-allocated and thus needs heap-duping before the fiber exits.
   # Mirrors bg_exit_needs_string_dupe? in MIRPass but runs at annotation time.
   def bg_exit_frame_string?(expr)
+    T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
     ti = expr.type_info rescue nil
     t = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)

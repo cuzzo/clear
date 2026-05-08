@@ -169,9 +169,9 @@ class ModuleImporter
     union_schemas = {}
     ast.statements.each do |stmt|
       case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.fields)
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
+      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(variants: stmt.variants)
       end
     end
 

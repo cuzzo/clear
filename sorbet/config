@@ -1,0 +1,13 @@
+--dir
+.
+--ignore=vendor/
+--ignore=zig/
+--ignore=zig-old/
+--ignore=zig-out/
+--ignore=spec/
+--ignore=transpile-tests/
+--ignore=examples/
+--ignore=benchmarks/
+--ignore=tmp/
+--ignore=docs/
+--ignore=tools/

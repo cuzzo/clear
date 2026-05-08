@@ -291,6 +291,7 @@ RSpec.describe StackVerifier do
       main = report[:functions].find { |f| f[:name] == "main" }
       expect(main[:line]).to be_nil
     end
+
   end
 
   describe "#has_errors?" do

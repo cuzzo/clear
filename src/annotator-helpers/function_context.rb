@@ -1,3 +1,4 @@
+require "sorbet-runtime"
 # Per-function state scoped to the function context stack.
 # Replaces loose instance variables (@frame_usage_count, @heap_usage_count, etc.)
 # that were manually reset in visit_FunctionDef and could leak across functions.

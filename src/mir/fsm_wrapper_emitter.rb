@@ -97,8 +97,7 @@ module FsmWrapperEmitter
   def render_run_body(step, mir_emitter)
     rendered = (step.body_stmts || []).filter_map do |stmt|
       out = mir_emitter.emit(stmt)
-      next nil if out.nil?
-      next nil if out.respond_to?(:strip) && out.strip.empty?
+      next nil if out.nil? || out.strip.empty?
       out
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
@@ -194,8 +193,7 @@ module FsmWrapperEmitter
   def render_step(step, mir_emitter)
     rendered = (step.body_stmts || []).filter_map do |stmt|
       out = mir_emitter.emit(stmt)
-      next nil if out.nil?
-      next nil if out.respond_to?(:strip) && out.strip.empty?
+      next nil if out.nil? || out.strip.empty?
       out
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
@@ -222,7 +220,7 @@ module FsmWrapperEmitter
     emitter = MIREmitter.new
     cleanups.filter_map { |stmt|
       out = emitter.emit(stmt)
-      next nil if out.nil? || (out.respond_to?(:strip) && out.strip.empty?)
+      next nil if out.nil? || out.strip.empty?
       out
     }.join("\n")
   end
@@ -352,7 +350,7 @@ module FsmWrapperEmitter
       body_lines.concat(err_action)
     end
     body_lines << render_tail(arm.tail, ctx_id)
-    body = body_lines.compact.reject { |l| l.respond_to?(:empty?) && l.empty? }.join("\n")
+    body = body_lines.compact.reject(&:empty?).join("\n")
 
     [
       "    #{arm.index} => {",
@@ -471,8 +469,7 @@ module FsmWrapperEmitter
   def render_member_fn(fn, mir_emitter)
     rendered = (fn.body_stmts || []).filter_map do |stmt|
       out = mir_emitter.emit(stmt)
-      next nil if out.nil?
-      next nil if out.respond_to?(:strip) && out.strip.empty?
+      next nil if out.nil? || out.strip.empty?
       out
     end
     body = rendered.map { |l| indent_block(l, 12) }.join("\n")
@@ -531,7 +528,7 @@ module FsmWrapperEmitter
   # ----- helpers ------------------------------------------------------------
 
   def empty?(s)
-    s.nil? || (s.respond_to?(:empty?) && s.empty?) || (s.respond_to?(:strip) && s.strip.empty?)
+    s.nil? || s.strip.empty?
   end
 
   # Re-indent every line of `text` by `n` spaces. Preserves blank

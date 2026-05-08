@@ -2338,7 +2338,8 @@ RSpec.describe SemanticAnnotator do
       raise "No FunctionDef found in AST" unless func_node
 
       signature = func_node.full_type
-      signature[:return_strategy]
+      signature = signature.raw if signature.is_a?(Type)
+      signature.return_strategy
     end
 
     let(:preamble) { "STRUCT Config { id: Float64 }" }
@@ -2522,7 +2523,7 @@ RSpec.describe SemanticAnnotator do
       it "stores :pub visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
         sig = annotator.scope_stack.first.locals["foo"].type
-        expect(sig[:visibility]).to eq(:pub)
+        expect(sig.visibility).to eq(:pub)
       end
     end
 
@@ -2536,7 +2537,7 @@ RSpec.describe SemanticAnnotator do
       it "stores :private visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
         sig = annotator.scope_stack.first.locals["foo"].type
-        expect(sig[:visibility]).to eq(:private)
+        expect(sig.visibility).to eq(:private)
       end
     end
 
@@ -2550,7 +2551,7 @@ RSpec.describe SemanticAnnotator do
       it "stores :package visibility in the scope signature" do
         _, annotator = run_with_annotator(code)
         sig = annotator.scope_stack.first.locals["foo"].type
-        expect(sig[:visibility]).to eq(:package)
+        expect(sig.visibility).to eq(:package)
       end
     end
 

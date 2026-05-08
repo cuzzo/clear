@@ -54,7 +54,7 @@ class PipelineRewriter
     when AST::VarDecl, AST::BindExpr
       node.value = rewrite!(node.value) if node.value
     when AST::Assignment
-      node.value = rewrite!(node.value) if node.respond_to?(:value) && node.value
+      node.value = rewrite!(node.value) if node.value
     when AST::ReturnNode
       node.value = rewrite!(node.value) if node.value
     when AST::IfStatement
@@ -64,7 +64,7 @@ class PipelineRewriter
     when AST::MatchStatement
       node.expr = rewrite!(node.expr)
       (node.cases || []).each { |c| c[:body]&.map! { |s| rewrite!(s) } }
-      node.default_case&.map! { |s| rewrite!(s) } if node.default_case
+      node.default_case.map! { |s| rewrite!(s) } if node.default_case
     when AST::WhileLoop
       node.condition = rewrite!(node.condition)
       node.do_branch&.map! { |s| rewrite!(s) } if node.do_branch.is_a?(Array)
@@ -203,7 +203,7 @@ class PipelineRewriter
     # the callee's declared return type.
     result_is_error = node.full_type && Type.new(node.full_type).error_union?
     result_is_error ||= callee_returns_error?(rhs)
-    needs_try = source.respond_to?(:full_type) && source.full_type && Type.new(source.full_type).error_union?
+    needs_try = source.full_type && Type.new(source.full_type).error_union?
 
     if rhs.is_a?(AST::FuncCall) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
@@ -304,7 +304,7 @@ class PipelineRewriter
 
     # 2. Build loop body
     current_it = AST::Identifier.new(token, it_var)
-    if source.respond_to?(:full_type) && source.full_type
+    if source.full_type
       src_t = Type.new(source.full_type)
       elem_t = if src_t.open_stream?
         src_t.open_stream_element_type
@@ -724,8 +724,8 @@ class PipelineRewriter
     ti = rhs.respond_to?(:type_info) ? rhs.type_info : nil
     return false unless ti
     raw = ti.raw
-    return false unless raw.is_a?(Hash) && raw[:return].is_a?(Hash)
-    ret_type = raw[:return][:type]
+    return false unless raw.is_a?(FunctionSignature)
+    ret_type = raw.return_type
     ret_type&.error_union? || false
   end
 

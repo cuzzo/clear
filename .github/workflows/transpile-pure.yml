@@ -1,0 +1,131 @@
+name: Transpile Pure
+
+# Verifies that this branch produces byte-identical .zig output for every
+# .cht file in `transpile-tests/` compared to the merge base. Triggered
+# by including `#TRANSPILE_PURE` in the PR description.
+#
+# Use this when you've made a refactor that should NOT change the
+# transpiler's output — e.g., the schema-extraction refactors in #2 or
+# the FnSig/PipelineSite extractions in #4/#3. Editing the PR body to
+# add or remove the marker re-triggers the check.
+#
+# Scope: `transpile-tests/` only. The 408 standalone .cht files there
+# are designed to round-trip through the transpiler without external
+# package paths or runtime args. `examples/` is intentionally excluded
+# — many examples in that tree are driven by bc_emitter or need
+# specific --pkg flags that emit-zig can't infer.
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+
+concurrency:
+  group: transpile-pure-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUBY_VERSION: "3.2"
+
+jobs:
+  diff-zig:
+    name: Byte-diff generated .zig vs merge base
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.body, '#TRANSPILE_PURE')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the full history so we can find and check out the merge
+          # base. Default `fetch-depth: 1` would fail on `git checkout`.
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: Compute merge base
+        id: base
+        run: |
+          BASE_SHA=$(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }})
+          echo "sha=$BASE_SHA" >> $GITHUB_OUTPUT
+          echo "Comparing branch HEAD ($(git rev-parse HEAD)) against merge base $BASE_SHA"
+
+      - name: Emit .zig from branch HEAD
+        run: |
+          mkdir -p /tmp/zig-branch
+          ./clear emit-zig transpile-tests -o /tmp/zig-branch || true
+
+      - name: Stage branch tooling for merge-base run
+        # The `clear emit-zig` subcommand may have been introduced or
+        # patched on this branch. Stash the branch's `clear` script and
+        # `tools/` so we use the SAME emitter against both checkouts —
+        # any diff is then purely a src/ change, not an emitter change.
+        run: |
+          cp clear /tmp/clear-branch
+          cp -r tools /tmp/tools-branch
+
+      - name: Check out merge base
+        run: |
+          git checkout ${{ steps.base.outputs.sha }}
+
+      - name: Restore branch tooling
+        run: |
+          cp /tmp/clear-branch ./clear
+          chmod +x ./clear
+          rm -rf tools && cp -r /tmp/tools-branch tools
+
+      - name: Reinstall gems for merge base
+        run: bundle install
+
+      - name: Emit .zig from merge base
+        run: |
+          mkdir -p /tmp/zig-base
+          ./clear emit-zig transpile-tests -o /tmp/zig-base || true
+
+      - name: Normalize auto-generated counter identifiers
+        # The transpiler uses node.object_id.abs to disambiguate nested-WITH
+        # guard variables, MATCH binding aliases, etc. — the IDs shift
+        # whenever Ruby allocation order changes (refactors that add/remove
+        # objects), even though the generated Zig is functionally identical.
+        # tools/normalize_zig.rb maps each unique counter to a stable
+        # first-occurrence index per file (`__c_guard_3220` -> `__c_guard_N1`)
+        # so the diff surfaces real semantic changes, not allocation drift.
+        # See the script's docs for collision-safety reasoning.
+        run: |
+          ruby tools/normalize_zig.rb /tmp/zig-base /tmp/zig-branch
+
+      - name: Diff trees
+        run: |
+          # `diff -r` exits 0 (no diff) / 1 (diffs) / 2 (error). We want
+          # to fail the job only on 1, so allow-fail and inspect.
+          set +e
+          diff -r --brief /tmp/zig-base /tmp/zig-branch > /tmp/diff.txt
+          status=$?
+          set -e
+
+          if [ "$status" = "0" ]; then
+            echo "::notice::Output is byte-identical between merge base and branch HEAD."
+            exit 0
+          fi
+
+          echo "::error::Generated .zig differs between merge base and branch HEAD."
+          echo ""
+          echo "=== Summary of changed files ==="
+          cat /tmp/diff.txt
+          echo ""
+          echo "=== Full unified diffs (first 500 lines per file) ==="
+          # Iterate over differing files and print a bounded unified diff.
+          while IFS= read -r line; do
+            # Lines look like: "Files /tmp/zig-base/X and /tmp/zig-branch/X differ"
+            #                 or: "Only in /tmp/zig-...: <file>"
+            if [[ "$line" == Files* ]]; then
+              base_file=$(echo "$line" | awk '{print $2}')
+              branch_file=$(echo "$line" | awk '{print $4}')
+              echo "----- $base_file vs $branch_file -----"
+              diff -u "$base_file" "$branch_file" | head -500
+              echo ""
+            else
+              echo "$line"
+            fi
+          done < /tmp/diff.txt
+          exit 1

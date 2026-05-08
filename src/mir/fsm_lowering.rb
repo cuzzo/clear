@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative 'fsm_ops'
 require_relative 'fsm_wrapper_emitter'
@@ -37,11 +39,13 @@ module FsmLowering
   # explicit values in the struct-literal, so extract just the capture
   # portion (everything after the alloc init).
   def capture_inits_fsm(capture_inits)
+    T.bind(self, MIRLowering) rescue nil
     # Drop leading ".inner = X.inner, .alloc = Y, " portion.
     parts = capture_inits.split(", ").drop(2)
     parts.empty? ? "" : parts.join(", ") + ","
   end
   def promote_fsm_decls_to_fields(code, promoted_names, ctx_var)
+    T.bind(self, MIRLowering) rescue nil
     return code if promoted_names.empty?
     out = code.dup
     promoted_names.each do |name|
@@ -76,6 +80,7 @@ module FsmLowering
   # below renders the same MIR to Zig text via MIREmitter. The
   # recursive emit path uses emit_step_stmts.
   def lower_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
+    T.bind(self, MIRLowering) rescue nil
     flat_steps = []
     stmts.each do |stmt|
       if stmt.is_a?(AST::ThenChain)
@@ -107,7 +112,7 @@ module FsmLowering
         result_mir.concat(last_pending)
 
         last_is_assign = last_step[:expr].is_a?(AST::Assignment)
-        expr_type = last_step[:expr].respond_to?(:full_type) ? last_step[:expr].full_type : :Void
+        expr_type = last_step[:expr].full_type || :Void
         is_step_void = expr_type.nil? || expr_type == :Void ||
           (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
 
@@ -153,6 +158,7 @@ module FsmLowering
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
   def lower_one_step_to_mir(step)
+    T.bind(self, MIRLowering) rescue nil
     mir = lower(step[:expr])
     return nil if mir.nil?
     pending = flush_pending
@@ -177,12 +183,13 @@ module FsmLowering
   # (MIR::Let, MIR::Set, MIR::IfStmt, MIR::BgBlock, ...) pass
   # through unchanged.
   def wrap_step_as_stmt(step, mir)
+    T.bind(self, MIRLowering) rescue nil
     return nil if mir.nil?
     if step[:binding]
       return MIR::Let.new(step[:binding], mir, false, nil, nil)
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
-    expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
+    expr_type = step[:expr].full_type || :Void
     is_void_step = expr_type.nil? || expr_type == :Void ||
       (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
     MIR::ExprStmt.new(mir, !is_void_step)
@@ -194,6 +201,7 @@ module FsmLowering
   # `result` is the trailing `__ctx.inner.result = <expr>;`
   # assignment ready for splicing into the dispatch).
   def emit_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
+    T.bind(self, MIRLowering) rescue nil
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id, exit_promote: exit_promote)
     if no_result
       render_mir_list(result)
@@ -202,6 +210,7 @@ module FsmLowering
     end
   end
   def render_mir_list(mir_list)
+    T.bind(self, MIRLowering) rescue nil
     return "" if mir_list.nil? || mir_list.empty?
     @_emitter ||= begin
       require_relative "mir_emitter"
@@ -215,8 +224,7 @@ module FsmLowering
     # Flatten one level so each emit sees a single MIR node.
     mir_list.flatten(1).filter_map { |n|
       out = @_emitter.emit(n)
-      next nil if out.nil?
-      next nil if out.respond_to?(:strip) && out.strip.empty?
+      next nil if out.nil? || out.strip.empty?
       out
     }.join("\n            ")
   end
@@ -227,6 +235,7 @@ module FsmLowering
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
+    T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||
                       cap[:capability] == :write_locked_read
 
@@ -237,8 +246,8 @@ module FsmLowering
     return nil unless captured.key?(lock_var_name)
 
     resolved = cap[:resolved_type]
-    any_rc       = resolved&.respond_to?(:any_rc?)       && resolved.any_rc?
-    write_locked = resolved&.respond_to?(:write_locked?) && resolved.write_locked?
+    any_rc       = resolved&.any_rc?
+    write_locked = resolved&.write_locked?
     # A polymorphic LOCKED param (REQUIRES c: LOCKED on a `c: T`
     # signature) carries sync=:locked but ownership=:affine — its
     # runtime type may still be Arc(Locked(T)) or Rc(Locked(T)),
@@ -246,9 +255,9 @@ module FsmLowering
     # `c.tryLockForFsm()` against the Arc, which has no such method.
     # Probe via comptime @hasField so the same FSM body works for
     # bare and Arc/Rc-wrapped callers.
-    is_param = var_node.respond_to?(:symbol) && var_node.symbol&.is_param
-    polymorphic_locked = is_param && !any_rc && resolved&.respond_to?(:sync) &&
-                         (resolved.sync == :locked || resolved.sync == :write_locked)
+    is_param = var_node.symbol&.is_param
+    polymorphic_locked = is_param && !any_rc &&
+                         (resolved&.sync == :locked || resolved&.sync == :write_locked)
     lock_kind = if cap[:capability] == :write_locked_read
                   :rwlock_read
                 elsif write_locked
@@ -301,6 +310,7 @@ module FsmLowering
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
                                     capture_map:, pointer_captures:, bg_rt:,
                                     rt_name:)
+    T.bind(self, MIRLowering) rescue nil
     line = with_node.token&.line.to_s
     case clause[:action]
     when :raise
@@ -341,6 +351,7 @@ module FsmLowering
   # Default error arm body when no clause is present: surface as a
   # generic LockError (body sets inner.result; exit_kind = :done).
   def default_fsm_lock_error_arm_split(id)
+    T.bind(self, MIRLowering) rescue nil
     {
       body_zig: "__ctx_#{id}.inner.result = error.LockError;",
       exit_kind: :done,

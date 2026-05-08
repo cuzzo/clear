@@ -9,6 +9,10 @@ require_relative "promotion_plan"
 require_relative "escape_analysis"
 
 class MIRPass
+  # Read-only context threaded through transform_body / recurse_branches!.
+  # Reek flagged the (bindings, promo) carry-down across many call sites.
+  WalkCtx = Data.define(:bindings, :promo)
+
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
   attr_reader :cleanup_bindings
@@ -146,16 +150,17 @@ class MIRPass
 
     @fn_has_catch = has_catch
     @current_transform_fn = fn
-    fn.body = transform_body(fn.body, bindings, promo)
+    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings, promo: promo))
     @current_transform_fn = nil
 
     # Transform catch clause bodies so string returns are annotated for heap-dupe.
     if has_catch
+      empty_ctx = WalkCtx.new(bindings: nil, promo: nil)
       fn.catch_clauses.each do |clause|
-        clause[:body] = transform_body(clause[:body], nil, nil) if clause[:body]
+        clause[:body] = transform_body(clause[:body], empty_ctx) if clause[:body]
       end
       if fn.default_catch.is_a?(Array)
-        fn.default_catch = transform_body(fn.default_catch, nil, nil)
+        fn.default_catch = transform_body(fn.default_catch, empty_ctx)
       end
     end
     @fn_has_catch = false
@@ -211,12 +216,14 @@ class MIRPass
 
   # Recursively transform a statement list, inserting MIR nodes.
   # Returns a new array (does not mutate the input).
-  def transform_body(stmts, bindings, promo)
+  def transform_body(stmts, ctx)
     return stmts unless stmts.is_a?(Array)
     result = []
+    bindings = ctx.bindings
+    promo = ctx.promo
     stmts.each do |stmt|
       # Recurse into nested control flow first.
-      recurse_branches!(stmt, bindings, promo)
+      recurse_branches!(stmt, ctx)
 
       # Insert Return (escape markers) + Promote before ReturnNode.
       if stmt.is_a?(AST::ReturnNode)
@@ -280,33 +287,33 @@ class MIRPass
   end
 
   # Recurse into control flow branches to transform nested bodies.
-  def recurse_branches!(stmt, bindings, promo)
+  def recurse_branches!(stmt, ctx)
     case stmt
     when AST::IfStatement
-      stmt.then_branch = transform_body(stmt.then_branch, bindings, promo) if stmt.then_branch
-      stmt.else_branch = transform_body(stmt.else_branch, bindings, promo) if stmt.else_branch
+      stmt.then_branch = transform_body(stmt.then_branch, ctx) if stmt.then_branch
+      stmt.else_branch = transform_body(stmt.else_branch, ctx) if stmt.else_branch
     when AST::WhileLoop
-      stmt.do_branch = transform_body(stmt.do_branch, bindings, promo) if stmt.do_branch
+      stmt.do_branch = transform_body(stmt.do_branch, ctx) if stmt.do_branch
     when AST::WhileBindLoop
-      stmt.do_branch = transform_body(stmt.do_branch, bindings, promo) if stmt.do_branch
+      stmt.do_branch = transform_body(stmt.do_branch, ctx) if stmt.do_branch
     when AST::IfBind
-      stmt.then_branch = transform_body(stmt.then_branch, bindings, promo) if stmt.then_branch
-      stmt.else_branch = transform_body(stmt.else_branch, bindings, promo) if stmt.else_branch && !stmt.else_branch.empty?
+      stmt.then_branch = transform_body(stmt.then_branch, ctx) if stmt.then_branch
+      stmt.else_branch = transform_body(stmt.else_branch, ctx) if stmt.else_branch && !stmt.else_branch.empty?
     when AST::ForRange, AST::ForEach
-      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::MatchStatement
-      stmt.cases&.each { |c| c[:body] = transform_body(c[:body], bindings, promo) if c[:body] }
+      stmt.cases&.each { |c| c[:body] = transform_body(c[:body], ctx) if c[:body] }
       if stmt.default_case
-        stmt.default_case = transform_body(stmt.default_case, bindings, promo)
+        stmt.default_case = transform_body(stmt.default_case, ctx)
       end
     when AST::WithBlock
-      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::DoBlock
       stmt.branches&.each do |b|
-        b[:body] = transform_body(b[:body], bindings, promo) if b[:body]
+        b[:body] = transform_body(b[:body], ctx) if b[:body]
       end
     when AST::BgBlock, AST::BgStreamBlock
-      stmt.body = transform_body(stmt.body, bg_inner_bindings(stmt, bindings), promo) if stmt.body
+      stmt.body = transform_body(stmt.body, ctx.with(bindings: bg_inner_bindings(stmt, ctx.bindings))) if stmt.body
     end
     # Process BgBlock bodies found in expression positions (MethodCall/FuncCall
     # args, VarDecl/BindExpr values). AST.walk_body misses these since it doesn't
@@ -314,14 +321,14 @@ class MIRPass
     # BgStreamBlock (generator fiber has special YIELD handling).
     case stmt
     when AST::VarDecl, AST::BindExpr, AST::Assignment
-      val = stmt.respond_to?(:value) ? stmt.value : nil
+      val = stmt.value
       if val.is_a?(AST::BgBlock) && val.body
-        val.body = transform_body(val.body, bg_inner_bindings(val, bindings), promo)
+        val.body = transform_body(val.body, ctx.with(bindings: bg_inner_bindings(val, ctx.bindings)))
       end
     when AST::MethodCall, AST::FuncCall
       stmt.args&.each do |a|
         if a.is_a?(AST::BgBlock) && a.body
-          a.body = transform_body(a.body, bg_inner_bindings(a, bindings), promo)
+          a.body = transform_body(a.body, ctx.with(bindings: bg_inner_bindings(a, ctx.bindings)))
         end
       end
     end
@@ -472,7 +479,7 @@ class MIRPass
     return unless last_expr
     return if last_expr.is_a?(AST::Assignment)
 
-    ft = last_expr.respond_to?(:full_type) ? last_expr.full_type : nil
+    ft = last_expr.full_type
     return unless ft
     t = ft.is_a?(Type) ? ft : Type.new(ft)
     return if t.void?
@@ -490,11 +497,8 @@ class MIRPass
     return false if t.heap? || t.rodata?
     return true  if t.frame?
     # No explicit provenance: check the stdlib def for frame allocation.
-    if expr.respond_to?(:matched_stdlib_def)
-      msd = expr.matched_stdlib_def
-      return true if msd.is_a?(Hash) && msd[:return_alloc] == :frame
-    end
-    false
+    msd = expr.matched_stdlib_def
+    msd.is_a?(Hash) && msd[:return_alloc] == :frame
   end
 
   # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.
@@ -507,7 +511,7 @@ class MIRPass
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       if stmt.is_a?(AST::YieldExpr)
-        ft = stmt.expr.respond_to?(:full_type) ? stmt.expr.full_type : nil
+        ft = stmt.expr.full_type
         t = ft.is_a?(Type) ? ft : (ft ? Type.new(ft) : nil)
         stmt.yield_dupe = true if t && bg_exit_needs_string_dupe?(stmt.expr, t)
       else
@@ -555,7 +559,7 @@ class MIRPass
   # MIR::Promote(:catch_string_dupe) pending-flag mechanism.
   def insert_catch_string_dupe!(result, ret_node)
     return unless ret_node.value
-    ft = ret_node.value.respond_to?(:full_type) ? ret_node.value.full_type : nil
+    ft = ret_node.value.full_type
     return unless ft
     t = Type.new(ft)
     return unless t.string?
@@ -691,7 +695,7 @@ class MIRPass
       node.args.each do |a|
         if a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier)
           add_if_consumed(a.value, names, bindings, true)
-        elsif a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
+        elsif a.is_a?(AST::Identifier) && a.was_moved
           add_if_consumed(a, names, bindings, true)
         elsif a.is_a?(AST::StructLit) || a.is_a?(AST::CapabilityWrap)
           walk_consumed(a, names, bindings)
@@ -710,8 +714,7 @@ class MIRPass
     ti = ident.type_info
     return if ti&.string?
 
-    is_atomic_ptr = ti && ti.respond_to?(:sync) && ti.sync == :atomic &&
-                    ti.respond_to?(:layout) && ti.layout == :indirect
+    is_atomic_ptr = ti && ti.sync == :atomic && ti.layout == :indirect
     # RC types: only consume on explicit GIVE. AtomicPtr is represented
     # as shared for escape/lifetime purposes, but its runtime value is a
     # unique heap cell pointer, not an Arc handle.
@@ -917,8 +920,7 @@ class MIRPass
     when AST::MoveNode   then collect_escaping_ids(node.value)
     when AST::StructLit  then node.fields.values.flat_map { |v| collect_escaping_ids(v) }
     when AST::FuncCall, AST::MethodCall
-      node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
-               .flat_map { |a| collect_escaping_ids(a) }
+      node.args.select(&:was_moved).flat_map { |a| collect_escaping_ids(a) }
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []
     else []
     end

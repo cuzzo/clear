@@ -86,8 +86,8 @@ module PromotionClassifier
           end
           if needs_promote
             ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
-            if ret_schema.is_a?(Hash) && ret_schema[:kind] == :union
-              has_heap = (ret_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+            if (us = Schemas.as_union_schema(ret_schema))
+              has_heap = (us.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
               if has_heap
                 struct_promote ||= zig_type_for(ret_type)
                 promote_return_ids << ret_node.object_id
@@ -117,7 +117,7 @@ module PromotionClassifier
     end
 
     schema = schema_lookup.call(ret_type.resolved) rescue nil
-    is_union = schema.is_a?(Hash) && schema[:kind] == :union
+    is_union = (schema = Schemas.as_union_schema(schema))
     unhandled_fields = nil
     if struct_promote.nil?
       if var_promotes.any? || handled_fields.any?
@@ -184,9 +184,8 @@ module PromotionClassifier
     return false unless schema_lookup && ti
     resolved = ti.resolved
     schema = schema_lookup.call(resolved) rescue nil
-    return false unless schema.is_a?(Hash) && !schema[:kind]  # structs only (no :kind key)
-    schema.any? do |k, v|
-      next false if k.is_a?(Symbol)
+    return false unless (schema = Schemas.as_struct_schema(schema))
+    schema.fields.any? do |_, v|
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
@@ -203,11 +202,10 @@ module PromotionClassifier
   private_class_method def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
     resolved = ret_type.resolved
     schema = schema_lookup.call(resolved) rescue nil
-    return [nil, nil] unless schema.is_a?(Hash) && !schema[:kind]
+    return [nil, nil] unless (schema = Schemas.as_struct_schema(schema))
 
     unhandled = []
-    schema.each do |fname, fdef|
-      next if fname.is_a?(Symbol)
+    schema.fields.each do |fname, fdef|
       next if handled_fields.include?(fname.to_s)
       ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(Hash) ? (fdef[:type] || :Any) : (fdef || :Any))
       unhandled << fname.to_s if ft.needs_escape_promotion?
@@ -419,7 +417,7 @@ module CleanupClassifier
     result = []
     case stmt
     when AST::VarDecl, AST::BindExpr, AST::Assignment
-      val = stmt.respond_to?(:value) ? stmt.value : nil
+      val = stmt.value
       result << val.body if val.is_a?(AST::BgBlock) && val.body
     when AST::MethodCall
       stmt.args&.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
@@ -470,11 +468,11 @@ module CleanupClassifier
     schema = schema_lookup.call(ti.resolved) rescue nil
 
     # Schema-driven kinds: resource (close_zig) and union (heap variants).
-    if schema.is_a?(Hash) && schema[:kind] == :resource
-      return entry(:resource, resource_close_zig: schema[:close_zig])
+    if (rs = Schemas.as_resource_schema(schema))
+      return entry(:resource, resource_close_zig: rs.close_zig)
     end
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    if (us = Schemas.as_union_schema(schema))
+      has_heap = (us.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       return has_heap ? entry(:takes_union) : nil
     end
 
@@ -503,7 +501,7 @@ module CleanupClassifier
       source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
       union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
       schema = schema_lookup.call(union_lookup) rescue nil
-      next unless schema.is_a?(Hash) && schema[:kind] == :union
+      next unless (schema = Schemas.as_union_schema(schema))
 
       (node.cases || []).each do |c|
         next unless c[:binding]
@@ -514,7 +512,7 @@ module CleanupClassifier
                        end
         next unless variant_name
 
-        variant_type = (schema[:variants] || {})[variant_name]
+        variant_type = (schema.variants || {})[variant_name]
         next unless variant_type
 
         if variant_type.is_a?(Hash) && variant_type[:kind] == :inline_struct
@@ -610,7 +608,7 @@ module CleanupClassifier
 
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
-    return nil if node.respond_to?(:container_borrow) && node.container_borrow
+    return nil if node.container_borrow
     return nil if ti.borrow_provenance?  # borrow return -- caller owns data
 
     sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
@@ -712,7 +710,7 @@ module CleanupClassifier
   end
 
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
-    val = node.respond_to?(:value) ? node.value : nil
+    val = node.value
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
@@ -746,7 +744,7 @@ module CleanupClassifier
       e = entry(:rc, rc_variant: :standard, rc_alloc: rc_alloc)
       if ti.any_rc? && !ti.sync
         schema = schema_lookup.call(ti.resolved) rescue nil
-        if schema.is_a?(Hash) && !schema[:kind]
+        if (schema = Schemas.as_struct_schema(schema))
           e[:needs_release_fields] = true
           e[:base_zig] = base_zig
         end
@@ -772,13 +770,12 @@ module CleanupClassifier
     return entry(:heap_slice) if ti.array? && !ti.collection?
 
     schema = schema_lookup.call(ti.resolved) rescue nil
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    if (us = Schemas.as_union_schema(schema))
+      has_heap = (us.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       return entry(:heap_union) if has_heap
     end
-    if schema.is_a?(Hash) && !schema[:kind]
-      has_escapable = schema.any? do |k, v|
-        next false if k.is_a?(Symbol)
+    if (ss = Schemas.as_struct_schema(schema))
+      has_escapable = ss.fields.any? do |_, v|
         ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
         ft.needs_escape_promotion?
       end
@@ -809,13 +806,12 @@ module CleanupClassifier
 
     # Consult schema to pick the correct cleanup kind.
     schema = schema_lookup.call(ti.resolved) rescue nil
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    if (us = Schemas.as_union_schema(schema))
+      has_heap = (us.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       return entry(:heap_union) if has_heap
     end
-    if schema.is_a?(Hash) && !schema[:kind]
-      has_escapable = schema.any? do |k, v|
-        next false if k.is_a?(Symbol)
+    if (ss = Schemas.as_struct_schema(schema))
+      has_escapable = ss.fields.any? do |_, v|
         ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
         ft.needs_escape_promotion?
       end
@@ -827,11 +823,10 @@ module CleanupClassifier
 
   private_class_method def self.classify_struct_cleanup_fields(ti, node, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
-    return nil unless schema.is_a?(Hash) && !schema[:kind]
+    return nil unless (schema = Schemas.as_struct_schema(schema))
 
-    struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
-    has_cleanup = schema.any? do |k, v|
-      next false if k.is_a?(Symbol)
+    struct_lit = node.value.is_a?(AST::StructLit) ? node.value : nil
+    has_cleanup = schema.fields.any? do |k, v|
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       next true if t.link? || t.any_rc?
@@ -852,10 +847,10 @@ module CleanupClassifier
 
   private_class_method def self.classify_non_copy_union(ti, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
-    return nil unless schema.is_a?(Hash) && schema[:kind] == :union
+    return nil unless (schema = Schemas.as_union_schema(schema))
     is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
     return nil if is_copy
-    has_heap_variants = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    has_heap_variants = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
     alloc = has_heap_variants ? :heap : (ti.provenance_alloc || :frame)
     entry(:non_copy_union, alloc: alloc)
   end
@@ -870,20 +865,18 @@ module CleanupClassifier
     # Deeper check for union/struct elements: strings in union payloads are
     # always heap-duped even without explicit heap_provenance? on the type.
     elem_schema = schema_lookup.call(et.resolved) rescue nil
-    return false unless elem_schema.is_a?(Hash)
-    if elem_schema[:kind] == :union
-      (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-    elsif !elem_schema[:kind]  # struct
-      elem_has_string_fields?(elem_schema)
+    if (us = Schemas.as_union_schema(elem_schema))
+      (us.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    elsif (ss = Schemas.as_struct_schema(elem_schema))
+      elem_has_string_fields?(ss)
     else
       false
     end
   end
 
   private_class_method def self.elem_has_string_fields?(schema)
-    return false unless schema.is_a?(Hash) && !schema[:kind]
-    schema.any? do |k, v|
-      next false if k.is_a?(Symbol)
+    return false unless (schema = Schemas.as_struct_schema(schema))
+    schema.fields.any? do |_, v|
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       t.string?

@@ -1,6 +1,7 @@
 #! /usr/bin/env ruby
 
 require 'bundler/setup' # so `bundle exec` not needed
+require "sorbet-runtime"
 require "optparse"
 require "logger"
 require "set"

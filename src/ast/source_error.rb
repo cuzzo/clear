@@ -24,6 +24,9 @@ module ErrorHelper
   # that haven't been migrated to named form yet.
   def error!(node_or_token, code_or_message, *args, **kwargs)
     # 1. Extract the Token (works for AST Node or raw Token)
+    # node_or_token is either an AST::Locatable node (has .token method)
+    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
+    # respond_to?(:token) distinguishes them — both token shapes lack it.
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
 
     # 2. Determine Message
@@ -66,12 +69,18 @@ module ErrorHelper
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
   def note!(node_or_token, message)
+    # node_or_token is either an AST::Locatable node (has .token method)
+    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
+    # respond_to?(:token) distinguishes them — both token shapes lack it.
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
   def warning!(node_or_token, message)
+    # node_or_token is either an AST::Locatable node (has .token method)
+    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
+    # respond_to?(:token) distinguishes them — both token shapes lack it.
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
@@ -96,6 +105,9 @@ module ErrorHelper
   # captured; the annotator then raises so the collector gets a clean
   # snapshot of what was diagnosed before the cascade would start.
   def fixable!(node_or_token, message:, category:, level: :warning, fixes:, raise_in_collector: false)
+    # node_or_token is either an AST::Locatable node (has .token method)
+    # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
+    # respond_to?(:token) distinguishes them — both token shapes lack it.
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
     finding = FixableFinding.new(
       level: level, message: message, token: token,

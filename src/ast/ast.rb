@@ -1,4 +1,5 @@
 require_relative "type"
+require_relative "schemas"
 
 # ==========================================
 # AST
@@ -10,35 +11,10 @@ module AST
   # Adding a new control flow node type requires updating only this method.
   def self.walk_body(body, &visitor)
     return unless body
-    nodes = body.is_a?(Array) ? body : [body]
-    nodes.each do |node|
+    Array(body).each do |node|
       yield node
-      case node
-      when IfStatement
-        walk_body(node.then_branch, &visitor)
-        walk_body(node.else_branch, &visitor)
-      when MatchStatement
-        (node.cases || []).each { |c| walk_body(c[:body], &visitor) }
-        walk_body(node.default_case, &visitor) if node.default_case
-      when WhileLoop, WhileBindLoop
-        walk_body(node.do_branch, &visitor)
-      when ForRange, ForEach
-        walk_body(node.body, &visitor)
-      when BgBlock, BgStreamBlock
-        walk_body(node.body, &visitor)
-      when WithBlock
-        walk_body(node.body, &visitor)
-      when DoBlock
-        (node.branches || []).each { |b| walk_body(b[:body], &visitor) }
-      when FunctionDef
-        walk_body(node.body, &visitor)
-      when TestBlock
-        walk_body(node.setup, &visitor)
-        node.whens&.each do |w|
-          walk_body(w.setup, &visitor)
-          w.tests&.each { |t| walk_body(t.body, &visitor) }
-        end
-      end
+      next unless node.is_a?(HasBodies)
+      node.child_bodies.each { |b| walk_body(b, &visitor) }
     end
   end
 
@@ -55,35 +31,19 @@ module AST
   end
 
   def self._bg_visit_recursive(node, &block)
-    case node
-    when BgBlock, BgStreamBlock
+    if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
-      each_bg_block(node.body, &block)
-    when IfStatement
-      each_bg_block(node.then_branch, &block)
-      each_bg_block(node.else_branch, &block)
-    when MatchStatement
-      (node.cases || []).each { |c| each_bg_block(c[:body], &block) }
-      each_bg_block(node.default_case, &block) if node.default_case
-    when WhileLoop, WhileBindLoop
-      each_bg_block(node.do_branch, &block)
-    when ForRange, ForEach
-      each_bg_block(node.body, &block)
-    when WithBlock
-      each_bg_block(node.body, &block)
-    when DoBlock
-      (node.branches || []).each { |b| each_bg_block(b[:body], &block) }
-    when FunctionDef
-      each_bg_block(node.body, &block)
-    when VarDecl, BindExpr, Assignment
-      _expr_each_bg_block_recursive(node.value, &block) if node.respond_to?(:value)
+    end
+    case node
+    when HasBodies
+      node.child_bodies.each { |b| each_bg_block(b, &block) }
+    when VarDecl, BindExpr, Assignment, ReturnNode
+      _expr_each_bg_block_recursive(node.value, &block)
     when FuncCall
       node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
     when MethodCall
       _expr_each_bg_block_recursive(node.object, &block)
       node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
-    when ReturnNode
-      _expr_each_bg_block_recursive(node.value, &block) if node.respond_to?(:value)
     end
   end
 
@@ -182,6 +142,20 @@ module AST
     end
   end
 
+  # Declarative metadata for AST nodes that own one or more statement
+  # lists (control flow, blocks, function bodies). Generic walkers like
+  # `walk_body` iterate via `child_bodies` instead of hand-coded
+  # case chains. Adding a new such node type means including this and
+  # defining child_bodies — no walker edit required.
+  module HasBodies
+    # Override in including classes. Returns Array of stmt lists (each
+    # itself an Array of statements). Nil/empty entries are filtered by
+    # the walker via `Array(...)`/`.compact`.
+    def child_bodies
+      []
+    end
+  end
+
   module Locatable
     def line; token.line; end
     def column; token.column; end
@@ -277,7 +251,7 @@ module AST
       @slot_size = type_obj.slot_size(&schema_lookup)
 
       # Determine storage from value's type if this node has a value
-      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+      if respond_to?(:value) && value.type_object
         value_type = value.type_object
         storage = value_type.finalize_storage(@slot_size, value.storage)
         # Declared type overrides: pointer types (%Type annotation) or sync types
@@ -291,9 +265,9 @@ module AST
 
       # Determine if value has a sync capability
       value_sync = nil
-      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+      if respond_to?(:value) && value.type_object
         vt = value.type_object
-        value_sync = vt.sync if vt.respond_to?(:sync)
+        value_sync = vt.sync
       end
 
       # Build a Type that carries the resolved base type plus storage-derived capabilities.
@@ -369,15 +343,15 @@ module AST
       end
 
       # Propagate additional capability fields from the value's type_object
-      if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
+      if respond_to?(:value) && value.type_object
         vt = value.type_object
-        t.ownership = vt.ownership if vt.respond_to?(:ownership) && vt.ownership && vt.ownership != :affine
-        t.sync      = vt.sync      if vt.respond_to?(:sync) && vt.sync
+        t.ownership = vt.ownership if vt.ownership && vt.ownership != :affine
+        t.sync      = vt.sync      if vt.sync
         # AtomicPtr M3.5: carry the :layout axis (e.g. :indirect from
         # @indirect:atomic on the VALUE) into the binding's full_type
         # so visit_VarDecl's `node.type_info&.layout` -> SymbolEntry
         # propagation lands. Mirrors the sync line above.
-        t.layout    = vt.layout    if vt.respond_to?(:layout) && vt.layout
+        t.layout    = vt.layout    if vt.layout
       end
 
       self.full_type = t
@@ -448,6 +422,8 @@ module AST
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     # Post-#335: the user EXPLICITLY wrote a `RETURNS T` clause (vs
     # implicit-Void / annotator-inferred return). Stamped at parse
@@ -653,6 +629,8 @@ module AST
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
     include Locatable
+    include HasBodies
+    def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
@@ -666,11 +644,15 @@ module AST
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     include Locatable
+    include HasBodies
+    def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
     include Locatable
+    include HasBodies
+    def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
   end
@@ -747,6 +729,8 @@ module AST
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
     #   { kind: :deadlock | :lock_cycle, token: Token }
@@ -969,7 +953,11 @@ module AST
   # branches: Array of { body: Array<ASTNode>, pinned: Boolean, stack_size: :standard | :micro | :large | :xl | nil }
   # pinned=true      → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
   # stack_size nil   → defaults to :standard (16 KB total: 12 KB stack + 4 KB arena)
-  DoBlock           = Struct.new(:token, :branches) { include Locatable }
+  DoBlock           = Struct.new(:token, :branches) do
+    include Locatable
+    include HasBodies
+    def child_bodies = (branches || []).filter_map { |b| b[:body] }
+  end
 
   # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).
   # body: Array of expression nodes. The last expression's type determines T.
@@ -977,6 +965,8 @@ module AST
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode, :can_smash) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :return_provenance # :heap when BG body calls a returns_promoted function
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
@@ -1008,6 +998,8 @@ module AST
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
     attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
@@ -1038,6 +1030,12 @@ module AST
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
     include Locatable
+    include HasBodies
+    def child_bodies
+      bodies = (cases || []).filter_map { |c| c[:body] }
+      bodies << default_case if default_case
+      bodies
+    end
     attr_accessor :string_match       # set by annotator: true when expr is string type (use strEql)
     attr_accessor :expr_mode          # true when used as an expression (x = MATCH ...)
     attr_accessor :case_result_types  # Array of Types (parallel to cases), for expression-MATCH
@@ -1048,12 +1046,16 @@ module AST
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :tight
   end
 
   # ForEach: FOR var IN collection DO body END
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops, :is_mutable) do
     include Locatable
+    include HasBodies
+    def child_bodies = [body].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
   end
@@ -1063,6 +1065,20 @@ module AST
   # TEST name DO setup... WHEN... END
   TestBlock = Struct.new(:token, :name, :setup, :whens) do
     include Locatable
+    include HasBodies
+    def child_bodies
+      bodies = []
+      bodies << setup if setup
+      (before_each || []).each { |b| bodies << b }
+      (after_each  || []).each { |b| bodies << b }
+      (before_all  || []).each { |b| bodies << b }
+      (after_all   || []).each { |b| bodies << b }
+      (whens || []).each do |w|
+        bodies << w.setup if w.setup
+        (w.tests || []).each { |t| bodies << t.body if t.body }
+      end
+      bodies
+    end
     # Hook bodies. Each is an Array of statement Arrays (multiple
     # `BEFORE EACH DO ... END` blocks at the same level run in
     # declaration order). TestLowering composes outer (TEST-level)

@@ -257,7 +257,7 @@ module ScopeHelper
       scope
     else
       fn_scope = lookup_scope_for(name)
-      fn_scope && fn_scope.resolve_type(name).is_a?(Hash) ? fn_scope : nil
+      fn_scope && fn_scope.resolve_type(name).is_a?(FunctionSignature) ? fn_scope : nil
     end
   end
 

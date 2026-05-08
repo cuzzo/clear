@@ -82,13 +82,13 @@ class CompilerFrontend
           return_type: stmt.return_type || :Any,
           return_lifetime: stmt.return_lifetime,
           visibility: stmt.visibility,
-          type_params: stmt.respond_to?(:type_params) ? stmt.type_params : nil,
-          reentrant: stmt.respond_to?(:reentrant) && stmt.reentrant == :reentrant
+          type_params: stmt.type_params,
+          reentrant: stmt.reentrant == :reentrant
         )
         fs.needs_rt = stmt.needs_rt
         fs.can_fail = stmt.can_fail
         fs.effects = stmt.effects
-        fs.requires = stmt.requires if stmt.respond_to?(:requires)
+        fs.requires = stmt.requires
         fn_sigs[stmt.name] = fs
       end
     end

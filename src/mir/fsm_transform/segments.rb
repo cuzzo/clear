@@ -291,7 +291,6 @@ module FsmTransform
     # :fsm_setup metadata -- the FSM template tells us how to set
     # up the suspend.
     def io_suspending_call?(call_node)
-      return false unless call_node.respond_to?(:matched_stdlib_def)
       md = call_node.matched_stdlib_def
       !!(md && md[:suspends] && md[:fsm_setup])
     end
@@ -328,17 +327,15 @@ module FsmTransform
           synth_name = "__pipe_v_#{pipe_counter}"
           pipe_counter += 1
 
-          tok = stmt.left.respond_to?(:token) ? stmt.left.token : nil
+          tok = stmt.left.token
           bind = AST::BindExpr.new(tok, synth_name, nil, stmt.left)
           bind.mode = :decl
-          bind.full_type = stmt.left.full_type if stmt.left.respond_to?(:full_type)
-          out << bind
+          bind.full_type = stmt.left.full_type          out << bind
 
           ident = AST::Identifier.new(tok, synth_name)
-          ident.full_type = stmt.left.full_type if stmt.left.respond_to?(:full_type)
-
+          ident.full_type = stmt.left.full_type
           rewritten = AST::BinaryOp.new(stmt.token, ident, stmt.op, stmt.right)
-          rewritten.full_type = stmt.full_type if stmt.respond_to?(:full_type)
+          rewritten.full_type = stmt.full_type
           out << rewritten
         else
           out << stmt

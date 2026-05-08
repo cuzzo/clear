@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # TestLowering — MIR-side handling of CLEAR's test grammar.
 #
 # Mixed into MIRLowering. Covers:
@@ -39,6 +41,7 @@ module TestLowering
   ZIG
 
   def lower_test_block(node)
+    T.bind(self, MIRLowering) rescue nil
     ctx = TestBlockCtx.new(node, self)
     tests = []
     ctx.emit_all_hooks(node.before_all, "__before_all", "", tests)
@@ -56,6 +59,7 @@ module TestLowering
   # AFTER ALL hooks). Mutates @active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
   def lower_when_block(when_block, ctx, tests)
+    T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
 
     prev_stubs = (@active_stubs || {}).dup
@@ -117,6 +121,7 @@ module TestLowering
   # around the body, and prepends only the LET decls actually
   # referenced by the body or the active hook bodies (lazy).
   def lower_test_that(test_that, env)
+    T.bind(self, MIRLowering) rescue nil
     full_name = "#{env.ctx.test_name}: #{env.when_desc}: #{test_that.description}#{env.tag_suffix}"
 
     if test_that.pending
@@ -168,6 +173,7 @@ module TestLowering
   # Scope @current_bindings to the cleanup-classifier's synthetic FN
   # wrapper for the duration of the block. Restored unconditionally.
   def with_test_that_bindings(test_that)
+    T.bind(self, MIRLowering) rescue nil
     prev = @current_bindings
     synth_fn = test_that.respond_to?(:synthetic_fn) ? test_that.synthetic_fn : nil
     @current_bindings = (synth_fn&.cleanup_bindings) || {}
@@ -235,6 +241,7 @@ module TestLowering
   # built-in substring filter — no custom test runner required.
   # Returns an empty string when there are no tags.
   def format_tag_suffix(tags)
+    T.bind(self, MIRLowering) rescue nil
     return "" unless tags && !tags.empty?
     " " + tags.map { |t| "##{t}" }.join(" ")
   end
@@ -246,6 +253,7 @@ module TestLowering
   # entries: outer LETs occupy their original indices unless replaced
   # by an inner LET, which then takes the outer's slot.
   def build_let_ast_map(lets, base: {})
+    T.bind(self, MIRLowering) rescue nil
     out = base.dup
     (lets || []).each { |let_node| out[let_node.name] = let_node }
     out
@@ -258,6 +266,7 @@ module TestLowering
   # order so the emitted Zig declarations resolve cleanly
   # (later LETs may reference earlier ones).
   def compute_used_let_names(let_ast_map, ast_subtrees)
+    T.bind(self, MIRLowering) rescue nil
     return [] if let_ast_map.empty?
 
     # Direct references in test body + hook bodies
@@ -266,7 +275,7 @@ module TestLowering
 
     # Transitive: each referenced LET's RHS may name other LETs.
     # Loop until fixed point.
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       referenced.to_a.each do |name|
@@ -286,6 +295,7 @@ module TestLowering
   # Walk an AST subtree gathering names from AST::Identifier nodes
   # whose name appears in `name_set`. Adds to the `out` set.
   def collect_identifier_refs(node, name_set, out)
+    T.bind(self, MIRLowering) rescue nil
     return if node.nil? || node.is_a?(Symbol) || node.is_a?(String) ||
               node.is_a?(Integer) || node.is_a?(Float) ||
               node.is_a?(TrueClass) || node.is_a?(FalseClass)
@@ -300,6 +310,7 @@ module TestLowering
   end
 
   def lower_assert_raises(node)
+    T.bind(self, MIRLowering) rescue nil
     rt_name = @rt_name
     kind = node.kind
     # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
@@ -328,6 +339,7 @@ module TestLowering
   # on. Locals that would otherwise become "unused" after stub
   # replacement get an explicit MIR::Suppress (`_ = &name;`).
   def stub_intercept_for(fn_name, receiver, args)
+    T.bind(self, MIRLowering) rescue nil
     stub_info = (@active_stubs || {})[fn_name]
     return nil unless stub_info
 
@@ -381,10 +393,11 @@ module TestLowering
   # match the actual Zig var (cleanup-classification may suffix-rename
   # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
   def stub_local_idents(node)
+    T.bind(self, MIRLowering) rescue nil
     return [] unless node.is_a?(AST::Identifier)
     name = node.name
     return [] unless name.is_a?(String)
-    decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    decl = node.symbol&.reg
     renamed = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) ||
               (@fn_name_rename_map && @fn_name_rename_map[name]) ||
               name
@@ -392,6 +405,7 @@ module TestLowering
   end
 
   def lower_stub_decl(node)
+    T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name
     stub_var = "__stub_#{fn_name}"
     @active_stubs ||= {}
@@ -435,14 +449,17 @@ module TestLowering
   end
 
   def lower_benchmark(node)
+    T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("benchmark lowering placeholder")
   end
 
   def lower_smash(node)
+    T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("smash test placeholder")
   end
 
   def lower_profile(node)
+    T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("profile placeholder")
   end
 end

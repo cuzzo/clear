@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # Reentrance bridge — Thunk Phase 1.3
 #
 # Unifies the two declaration sources for function reentrance into a single
@@ -38,6 +40,7 @@ module ReentranceBridge
   # in @fn_nodes. Idempotent. Validates REQUIRES clauses against the
   # parameter list of each function.
   def bridge_reentrance!(program_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     program_node.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_node = stmt
@@ -107,6 +110,7 @@ module ReentranceBridge
   #   type and need user judgment about gas budgets, so we don't
   #   force them via auto-fix).
   def offer_plain_reentrant_variant_fix!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
@@ -147,6 +151,7 @@ module ReentranceBridge
   #   :NOT_LOGICAL  -> System UnexpectedRecursion (StackGuard)
   #   :MAX_DEPTH(N) -> System MaxDepthExceeded    (depth counter)
   def validate_not_logical_return!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless [:reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)
     rt = fn_node.return_type
     is_err_union = rt.is_a?(Type) && rt.error_union?
@@ -174,6 +179,7 @@ module ReentranceBridge
   # :reentrant_thunk for downstream effect-propagation rules (Phase
   # 5 will use this to keep :THUNK out of @service).
   def route_thunk_to_tail_call_compat!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant_thunk
     return unless thunk_all_self_calls_in_tail_position?(fn_node)
     fn_node.tail_call = true
@@ -204,6 +210,7 @@ module ReentranceBridge
   # bounded depth). Runs after `check_indirect_reentrancy!` so the
   # call-graph is settled and transitive cycles are visible.
   def validate_not_logical_recursion!
+    T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
@@ -234,6 +241,7 @@ module ReentranceBridge
   # Direct self-recursion is fine -- the depth counter handles it
   # exactly. Only the cross-fn cycle case demotes.
   def validate_max_depth_mutual_cycle!
+    T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
       # Direct-only is fine; counter handles it.
@@ -271,7 +279,7 @@ module ReentranceBridge
 
       if fixes.empty?
         fixable!(fn_node, message: msg, category: :reentrance, level: :warning,
-                 raise_in_collector: false)
+                 raise_in_collector: false, fixes:)
       else
         fixable!(fn_node, message: msg, category: :reentrance, level: :warning,
                  fixes: fixes, raise_in_collector: false)
@@ -280,6 +288,7 @@ module ReentranceBridge
   end
 
   def validate_thunk_recursion!
+    T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
@@ -319,6 +328,7 @@ module ReentranceBridge
   # return true. Otherwise return false (the caller emits the
   # precise error).
   def try_stamp_mutual_thunk_plan!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
     # Phase 4f.1 scope: every cycle member must be defined locally
@@ -374,6 +384,7 @@ module ReentranceBridge
   # runtime that the cycle is logically impossible; raises System
   # UnexpectedRecursion if violated.
   def emit_mutual_thunk_unsupported!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
     cycle_thunk_fns = cycle_names.filter_map { |n| @fn_nodes[n] }
@@ -482,6 +493,7 @@ module ReentranceBridge
   # lines (multi-line edits aren't expressible with the current Span
   # shape and the user's source layout would need manual editing anyway).
   def effects_clause_edits(fn_node, replacement)
+    T.bind(self, SemanticAnnotator) rescue nil
     span = fn_node.effects_span
     return [] unless span && span[:start_tok] && span[:end_tok]
     s = span[:start_tok]
@@ -499,6 +511,7 @@ module ReentranceBridge
   # `start` itself when start is on a cycle). Used by Phase 4f.1
   # to enumerate cycle members for tagged-union frame codegen.
   def thunk_cycle_members(start)
+    T.bind(self, SemanticAnnotator) rescue nil
     start_s = start.to_s
     forward = compute_reachable(@call_graph, start_s)
     reverse_graph = {}
@@ -512,6 +525,7 @@ module ReentranceBridge
   end
 
   def compute_reachable(graph, start)
+    T.bind(self, SemanticAnnotator) rescue nil
     seen = Set.new
     queue = (graph[start] || Set.new).to_a
     until queue.empty?
@@ -528,6 +542,7 @@ module ReentranceBridge
   # transitively calls back to itself but doesn't have a direct
   # self-call edge.)
   def reachable_from_self?(start)
+    T.bind(self, SemanticAnnotator) rescue nil
     visited = Set.new
     queue   = (@call_graph[start] || Set.new).to_a
     until queue.empty?
@@ -548,6 +563,7 @@ module ReentranceBridge
   # Returns true iff the function is self-recursive AND every
   # recursive self-call is the direct value of a RETURN node.
   def thunk_all_self_calls_in_tail_position?(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     all = collect_self_calls(fn_node.body, fn_node.name)
     return false if all.empty?
     blessed = collect_returns(fn_node.body).filter_map { |r|
@@ -563,6 +579,7 @@ module ReentranceBridge
   # was set. Public so specs and downstream passes can use the same
   # mapping if they ever need to recompute.
   def canonical_reentrance_kind(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return fn_node.effects_decl if fn_node.effects_decl
     if fn_node.reentrant == :reentrant
       return fn_node.tail_call ? :reentrant_tail_call : :reentrant
@@ -583,6 +600,7 @@ module ReentranceBridge
   # When FixCollector is disabled (i.e. `clear build` / normal compile)
   # `fixable!` is a no-op; this method does nothing user-visible.
   def offer_legacy_reentrant_migration!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrant_token
     tok = fn_node.reentrant_token
     if fn_node.tail_call
@@ -639,6 +657,7 @@ module ReentranceBridge
   #     :THUNK, or :TAIL_CALL) -- the user has already taken a stance
   #     on reentrance and constraining the param is not their choice
   def offer_unconstrained_fn_param_fix!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return if [:reentrant, :reentrant_thunk, :reentrant_tail_call, :reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)
     return unless fn_node.arrow_token
 
@@ -649,7 +668,7 @@ module ReentranceBridge
       type = p[:type]
       next nil unless type.respond_to?(:fn_type?) && type.fn_type?
       raw = type.respond_to?(:raw) ? type.raw : nil
-      next nil if raw.is_a?(Hash) && raw[:reentrant] == true
+      next nil if raw.is_a?(FunctionSignature) && raw.reentrant == true
       name
     end
     return if candidates.empty?
@@ -684,6 +703,7 @@ module ReentranceBridge
   end
 
   def validate_requires_clauses!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?
     # Params come from the parser as hashes ({ name:, type:, default:, ... }).
     # See pre_register_function in annotator.rb.

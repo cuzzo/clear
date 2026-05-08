@@ -16,5 +16,15 @@ group :development do
   gem 'simplecov', require: false
   # Cobertura XML output for Codecov / coveralls / GitLab integration
   gem 'simplecov-cobertura', require: false
+
+  # Gradual typing — staged adoption per the self-host prep tracker
+  # (TODO.md "Self-host preparation" P1 / tasks #10 + #20). `sorbet`
+  # provides the static type checker (`srb tc`); `sorbet-runtime` is
+  # the inline `T::Sig` API (no runtime cost when not invoked because
+  # files start at `# typed: false`); `tapioca` generates RBI files
+  # for our gems so Sorbet sees their public APIs.
+  gem 'sorbet', require: false
+  gem 'sorbet-runtime'
+  gem 'tapioca', require: false
 end
 

@@ -260,6 +260,10 @@ class Formatter::Emitter
   OUTDENT_LEADING = Formatter::OUTDENT_LEADING
   BLANK_BEFORE    = Formatter::BLANK_BEFORE
 
+  # State for emitting one FN signature. Reek flagged the
+  # (toks, start, arrow_idx, po, pc) clump across 5 methods.
+  FnSig = Data.define(:toks, :start, :arrow_idx, :po, :pc)
+
   def initialize(tokens)
     @tokens = tokens
   end
@@ -705,14 +709,15 @@ class Formatter::Emitter
     end
 
     po, pc = find_fn_parens(toks, start, arrow_idx)
+    sig = FnSig.new(toks: toks, start: start, arrow_idx: arrow_idx, po: po, pc: pc)
     # A function signature with REQUIRES or EFFECTS uses the metadata-wrap
     # layout: each clause keyword (RETURNS, REQUIRES, EFFECTS) on its own
     # line at 1-space indent (HALF_INDENT), then `->` at FN level. Mirrors
     # the visual scope of Ruby's public/private outdent.
-    if has_fn_signature_metadata?(toks, pc, arrow_idx)
-      emit_fn_signature_metadata_wrapped(out, toks, start, arrow_idx, po, pc)
-    elsif should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
-      emit_fn_signature_wrapped(out, toks, start, arrow_idx, po, pc)
+    if has_fn_signature_metadata?(sig)
+      emit_fn_signature_metadata_wrapped(out, sig)
+    elsif should_wrap_fn_sig?(sig)
+      emit_fn_signature_wrapped(out, sig)
     else
       (start..arrow_idx).each { |j| out << toks[j] }
     end
@@ -826,10 +831,10 @@ class Formatter::Emitter
   # Wrap triggers (§3.1):
   #   (a) source already has NL between `(` and `)` (preserve wrap).
   #   (b) projected single-line length > 120 chars.
-  def should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
-    return false unless po && pc
-    return true if (po + 1 ... pc).any? { |j| toks[j].type == :NL }
-    inline = toks[start..arrow_idx].reject { |t| t.type == :NL }
+  def should_wrap_fn_sig?(sig)
+    return false unless sig.po && sig.pc
+    return true if (sig.po + 1 ... sig.pc).any? { |j| sig.toks[j].type == :NL }
+    inline = sig.toks[sig.start..sig.arrow_idx].reject { |t| t.type == :NL }
     format_line_body(inline).length > 120
   end
 
@@ -839,17 +844,18 @@ class Formatter::Emitter
   #     p2: T
   #   )
   #   RETURNS T ->
-  def emit_fn_signature_wrapped(out, toks, start, arrow_idx, po, pc)
+  def emit_fn_signature_wrapped(out, sig)
+    toks = sig.toks
     # Tokens from FN through and including `(`.
-    (start..po).each { |j| out << toks[j] }
+    (sig.start..sig.po).each { |j| out << toks[j] }
 
     insert_nl(out)
     out << phantom(:INDENT_OPEN)
 
     depth = 0
-    j = po + 1
+    j = sig.po + 1
     j = skip_nls(toks, j)
-    while j < pc
+    while j < sig.pc
       t = toks[j]
       if t.type == :SYM
         case t.raw
@@ -874,13 +880,13 @@ class Formatter::Emitter
 
     out << phantom(:INDENT_CLOSE)
     insert_nl(out)
-    out << toks[pc]  # `)`
+    out << toks[sig.pc]  # `)`
     insert_nl(out)
 
     # Emit RETURNS ... -> on its own line.
-    j = pc + 1
+    j = sig.pc + 1
     j = skip_nls(toks, j)
-    while j <= arrow_idx
+    while j <= sig.arrow_idx
       t = toks[j]
       if t.type == :NL
         j += 1
@@ -899,10 +905,10 @@ class Formatter::Emitter
 
   # True when the signature between `)` (pc) and `->` (arrow_idx) contains
   # at least one trigger keyword (REQUIRES or EFFECTS today).
-  def has_fn_signature_metadata?(toks, pc, arrow_idx)
-    return false unless pc && arrow_idx
-    (pc + 1...arrow_idx).any? do |j|
-      toks[j].type == :KEYWORD && FN_METADATA_TRIGGERS.include?(toks[j].raw)
+  def has_fn_signature_metadata?(sig)
+    return false unless sig.pc && sig.arrow_idx
+    (sig.pc + 1...sig.arrow_idx).any? do |j|
+      sig.toks[j].type == :KEYWORD && FN_METADATA_TRIGGERS.include?(sig.toks[j].raw)
     end
   end
 
@@ -915,22 +921,23 @@ class Formatter::Emitter
   #
   # The `->` lands at FN-level (column 0) on its own line. Body indent
   # then opens at +1 from FN-level via OPEN_TERMINAL on `->`.
-  def emit_fn_signature_metadata_wrapped(out, toks, start, arrow_idx, po, pc)
+  def emit_fn_signature_metadata_wrapped(out, sig)
+    toks = sig.toks
     # 1. Emit `FN name(...)`. Reuse existing param-wrapping rules so a
     # long param list still expands correctly.
-    if po && pc && should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
-      emit_fn_params_only_wrapped(out, toks, start, po, pc)
-    elsif pc
-      (start..pc).each { |j| out << toks[j] }
+    if sig.po && sig.pc && should_wrap_fn_sig?(sig)
+      emit_fn_params_only_wrapped(out, sig)
+    elsif sig.pc
+      (sig.start..sig.pc).each { |j| out << toks[j] }
     else
-      (start..arrow_idx - 1).each { |j| out << toks[j] }
+      (sig.start..sig.arrow_idx - 1).each { |j| out << toks[j] }
     end
     insert_nl(out)
 
     # 2. One line per metadata clause. Each clause runs from its keyword
     # to (but not including) the next clause keyword or `->`.
-    if pc
-      collect_fn_metadata_clauses(toks, pc + 1, arrow_idx).each do |clause_toks|
+    if sig.pc
+      collect_fn_metadata_clauses(toks, sig.pc + 1, sig.arrow_idx).each do |clause_toks|
         out << phantom(:HALF_INDENT)
         clause_toks.each { |t| out << t unless t.type == :NL }
         insert_nl(out)
@@ -938,21 +945,22 @@ class Formatter::Emitter
     end
 
     # 3. `->` on its own line at FN level.
-    out << toks[arrow_idx]
+    out << toks[sig.arrow_idx]
   end
 
   # Emit the FN keyword through to `)` only, wrapping params if the
   # existing rules say to. Mirrors emit_fn_signature_wrapped but stops at
   # `)` instead of running through `->`.
-  def emit_fn_params_only_wrapped(out, toks, start, po, pc)
-    (start..po).each { |j| out << toks[j] }
+  def emit_fn_params_only_wrapped(out, sig)
+    toks = sig.toks
+    (sig.start..sig.po).each { |j| out << toks[j] }
     insert_nl(out)
     out << phantom(:INDENT_OPEN)
 
     depth = 0
-    j = po + 1
+    j = sig.po + 1
     j = skip_nls(toks, j)
-    while j < pc
+    while j < sig.pc
       t = toks[j]
       if t.type == :SYM
         case t.raw
@@ -977,7 +985,7 @@ class Formatter::Emitter
 
     out << phantom(:INDENT_CLOSE)
     insert_nl(out)
-    out << toks[pc]
+    out << toks[sig.pc]
   end
 
   # Split tokens between `)` and `->` into per-clause groups. Each clause

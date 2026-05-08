@@ -69,7 +69,7 @@ module LSP
     end
 
     def synthetic_finding_from(err)
-      tok = err.respond_to?(:token) && err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
+      tok = err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
       SyntheticFinding.new(
         level: :error,
         message: err.original_message || err.message,

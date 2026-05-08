@@ -59,7 +59,7 @@ module AtomicMigrationSuggester
   # to a single Atomic primitive).
   def candidate_decl_info(node, annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-    return nil unless node.respond_to?(:name) && node.name.is_a?(String)
+    return nil unless node.name.is_a?(String)
     val = node.value
     # The parser wraps `Counter{...} @shared:locked` as a CapabilityWrap
     # around the StructLit; the StructLit lives on `.value`. Bare
@@ -68,24 +68,22 @@ module AtomicMigrationSuggester
     val = val.value if val.is_a?(AST::CapabilityWrap)
     return nil unless val.is_a?(AST::StructLit)
 
-    ti = node.respond_to?(:type_info) ? node.type_info : nil
+    ti = node.type_info
     ti = Type.new(ti) unless ti.is_a?(Type)
-    return nil unless ti.respond_to?(:sync) && ti.sync == :locked
+    return nil unless ti.sync == :locked
 
     schema = annotator.respond_to?(:lookup_type_schema) ?
              annotator.lookup_type_schema(ti.resolved) : nil
-    return nil unless schema.is_a?(Hash) && !schema[:methods]
-    # Schemas mix String field names with Symbol meta-keys (:methods,
-    # :visibility, :kind, ...). Keep only String keys -- those are the
-    # actual fields.
-    fields = schema.select { |k, _| k.is_a?(String) }
+    schema = Schemas.as_struct_schema(schema)
+    return nil unless schema && schema.methods.empty?
+    fields = schema.fields
     return nil unless fields.size == 1
 
     field_name, field_type = fields.first
     field_resolved = field_type.is_a?(Type) ? field_type.resolved : field_type
     return nil unless ATOMIC_ELIGIBLE_FIELD_TYPES.include?(field_resolved)
 
-    line = node.respond_to?(:token) && node.token ? node.token.line : nil
+    line = node.token&.line
     {
       name: node.name.to_s,
       decl_node: node,
@@ -132,7 +130,7 @@ module AtomicMigrationSuggester
     when AST::Assignment, AST::BindExpr
       # `alias.field = expr` — Assignment's target / BindExpr's name
       # is the GetField path; the RHS lives on `.value`.
-      target = stmt.respond_to?(:target) ? stmt.target : stmt.name
+      target = stmt.name
       return false unless target.is_a?(AST::GetField)
       return false unless target.target.is_a?(AST::Identifier) && target.target.name == alias_name
       return false unless target.field.to_s == field_name

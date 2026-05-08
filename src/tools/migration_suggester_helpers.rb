@@ -79,7 +79,7 @@ module MigrationSuggesterHelpers
       yield node
       case node
       when AST::VarDecl, AST::BindExpr, AST::Assignment
-        v = node.respond_to?(:value) ? node.value : nil
+        v = node.value
         if v.is_a?(AST::BgBlock) || v.is_a?(AST::BgStreamBlock)
           walk_recursive(v.body, &visitor)
         end

@@ -1,3 +1,5 @@
+# typed: true
+require "sorbet-runtime"
 # union.rb — Union type validation helpers for CLEAR.
 #
 # Provides validation for union method requirements (UNION ... REQUIRES)
@@ -7,6 +9,7 @@ module UnionAnalysis
   # compatible signatures. Synthesizes default functions for stubs with
   # default bodies that have no concrete override.
   def validate_union_methods!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     union_name = node.name
 
     # Detect duplicate method stub declarations.
@@ -44,7 +47,7 @@ module UnionAnalysis
       end
 
       sig = local.type
-      unless sig.is_a?(Hash) && sig.key?(:params)
+      unless sig.is_a?(FunctionSignature)
         error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
       end
 
@@ -85,6 +88,7 @@ module UnionAnalysis
   # Resolve enum or union variant access on a GetField node (TypeName.Variant).
   # Returns true if handled, false if the target is not an enum/union.
   def resolve_variant_access(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     return false unless node.target.is_a?(AST::Identifier)
 
     type_name = node.target.name.to_sym
@@ -130,6 +134,7 @@ module UnionAnalysis
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
   def validate_union_schema!(node, schema)
+    T.bind(self, SemanticAnnotator) rescue nil
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
@@ -161,6 +166,7 @@ module UnionAnalysis
   # Validate fields of an inline struct union variant: check for unknown fields,
   # missing required fields, and type-check each field value.
   def validate_union_fields!(node, expected_fields)
+    T.bind(self, SemanticAnnotator) rescue nil
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
         error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)

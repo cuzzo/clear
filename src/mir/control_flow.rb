@@ -1,3 +1,4 @@
+# typed: true
 # control_flow.rb - CFG construction, ownership dataflow, MIR node insertion
 #
 # Three components:
@@ -74,7 +75,7 @@ class FunctionCFG
     cfg.instance_variable_set(:@can_fail_fns, can_fail_fns)
     last_block = build_body(fn_node.body || [], cfg.entry, cfg.exit_block, cfg)
     # Connect fall-through to exit (implicit return at end of function).
-    last_block&.add_successor(cfg.exit_block) if last_block
+    last_block.add_successor(cfg.exit_block) if last_block
     cfg
   end
 
@@ -94,11 +95,11 @@ class FunctionCFG
         current_block.add_successor(else_block || join_block)
 
         then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg)
-        then_exit&.add_successor(join_block) if then_exit
+        then_exit.add_successor(join_block) if then_exit
 
         if stmt.else_branch
           else_exit = build_body(stmt.else_branch, else_block, exit_target, cfg)
-          else_exit&.add_successor(join_block) if else_exit
+          else_exit.add_successor(join_block) if else_exit
         end
 
         current_block = join_block
@@ -139,13 +140,13 @@ class FunctionCFG
           case_block = cfg.new_block
           current_block.add_successor(case_block)
           case_exit = build_body(c[:body] || [], case_block, exit_target, cfg)
-          case_exit&.add_successor(join_block) if case_exit
+          case_exit.add_successor(join_block) if case_exit
         end
         if stmt.default_case
           default_block = cfg.new_block
           current_block.add_successor(default_block)
           default_exit = build_body(stmt.default_case, default_block, exit_target, cfg)
-          default_exit&.add_successor(join_block) if default_exit
+          default_exit.add_successor(join_block) if default_exit
         end
 
         current_block = join_block
@@ -157,7 +158,7 @@ class FunctionCFG
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)  # WITH can fail to acquire
         body_exit = build_body(stmt.body || [], body_block, exit_target, cfg)
-        body_exit&.add_successor(after_block) if body_exit
+        body_exit.add_successor(after_block) if body_exit
         current_block = after_block
 
       when AST::DoBlock
@@ -167,7 +168,7 @@ class FunctionCFG
           branch_block = cfg.new_block
           current_block.add_successor(branch_block)
           branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg)
-          branch_exit&.add_successor(join_block) if branch_exit
+          branch_exit.add_successor(join_block) if branch_exit
         end
         current_block.add_successor(join_block)  # fallthrough if no branches
         current_block = join_block
@@ -281,6 +282,12 @@ class OwnershipDataflow
   OWNED       = :owned
   MOVED       = :moved
   MAYBE_MOVED = :maybe_moved
+
+  # Per-walk state for collect_ownership_transfers and friends. Reek
+  # flagged the (state, consumed) carry-down across 5+ methods.
+  # `state` (Hash) and `consumed` (Set) are both mutable; the Data
+  # wrapper is frozen but the inner collections are not.
+  DataflowStep = Data.define(:state, :consumed)
 
   # Enriched ownership entry: carries allocator and cleanup info alongside state.
   # Equality is based on :state only (for fixpoint convergence -- allocator and
@@ -431,7 +438,7 @@ class OwnershipDataflow
 
   # Returns true if the given variable is the subject of a MATCH TAKES statement.
   def match_takes_var?(fn_node, var_name)
-    found = false
+    found = T.let(false, T::Boolean)
     AST.walk_body(fn_node.body) do |stmt|
       if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
          stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
@@ -562,10 +569,10 @@ class OwnershipDataflow
       lhs = stmt.name
       lhs_is_map = lhs.is_a?(AST::GetIndex) && (Type.from_node(lhs.target)&.map? rescue false)
       skip_rhs_move = if lhs_is_map
-        val_ti_raw = stmt.value.respond_to?(:type_info) ? (stmt.value.type_info rescue nil) : nil
+        val_ti_raw = stmt.value.type_info rescue nil
         val_resolved = val_ti_raw && (val_ti_raw.is_a?(Type) ? val_ti_raw.resolved : val_ti_raw)
         schema = val_resolved && @schema_lookup&.call(val_resolved)
-        schema.is_a?(Hash) && schema[:kind] == :union
+        !!Schemas.as_union_schema(schema)
       else
         false
       end
@@ -638,110 +645,110 @@ class OwnershipDataflow
   # All other positions: only was_moved (set by annotator for TAKES/GIVE).
   def collect_binding_moves(node, state)
     return [] unless node
-    consumed = Set.new
-    collect_ownership_transfers(node, state, consumed)
-    consumed.to_a
+    step = DataflowStep.new(state: state, consumed: Set.new)
+    collect_ownership_transfers(node, step)
+    step.consumed.to_a
   end
 
   # Recursively find ownership-transferring identifiers.
-  def collect_ownership_transfers(node, state, consumed)
+  def collect_ownership_transfers(node, step)
     return unless node
 
     case node
     when AST::Identifier
       name = node.name.to_s
-      return unless state[name]
+      return unless step.state[name]
       return if copy_type?(node) # Copy types are never consumed
-      consumed << name
+      step.consumed << name
 
     when AST::StructLit
-      node.fields&.each_value { |v| collect_ownership_transfers(v, state, consumed) }
+      node.fields&.each_value { |v| collect_ownership_transfers(v, step) }
 
     when AST::MethodCall
       # Union constructors: U.Variant(payload) - payload transfers ownership.
       # Regular method calls in binding RHS: only was_moved args.
       # Distinguish by token type: TYPE_ID = union constructor, VAR_ID = method call.
       if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
-        node.args&.each { |a| collect_ownership_transfers(a, state, consumed) }
+        node.args.each { |a| collect_ownership_transfers(a, step) }
       else
-        collect_explicit_in(node, state, consumed)
+        collect_explicit_in(node, step)
       end
 
     when AST::FuncCall
-      collect_explicit_in(node, state, consumed)
+      collect_explicit_in(node, step)
 
     when AST::ListLit
-      node.items&.each { |i| collect_ownership_transfers(i, state, consumed) }
+      node.items.each { |i| collect_ownership_transfers(i, step) }
 
     when AST::MoveNode
       inner = node.value
       if inner.is_a?(AST::Identifier)
         name = inner.name.to_s
-        consumed << name if state[name]
+        step.consumed << name if step.state[name]
       end
 
     when AST::ShareNode
-      collect_share_transfer(node, state, consumed)
+      collect_share_transfer(node, step)
 
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       # COPY / FREEZE do NOT move the source.
 
     when AST::CapabilityWrap
       # Unwrap: S{ field: x } @shared still consumes x.
-      collect_ownership_transfers(node.value, state, consumed)
+      collect_ownership_transfers(node.value, step)
 
     when AST::BgBlock, AST::BgStreamBlock
       # Resources captured by BG fibers transfer ownership.
       node.capture_analysis&.resource_captures&.each do |name|
-        consumed << name if state[name]
+        step.consumed << name if step.state[name]
       end
       # GIVE x inside the BG body moves the outer x into the fiber.
       collect_bg_body_gives(node).each do |name|
-        consumed << name if state[name]
+        step.consumed << name if step.state[name]
       end
 
     else
-      collect_explicit_in(node, state, consumed)
+      collect_explicit_in(node, step)
     end
   end
 
   # Collect only was_moved identifiers from an expression subtree.
   # Skips CopyNode children: COPY wraps a was_moved identifier but the
   # source is NOT consumed (the copy is what transfers ownership).
-  def collect_explicit_in(node, state, consumed)
+  def collect_explicit_in(node, step)
     walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
-      next unless state[name]
+      next unless step.state[name]
       next if copy_type?(n)
-      consumed << name
+      step.consumed << name
     end
-    collect_share_transfers_in(node, state, consumed)
+    collect_share_transfers_in(node, step)
   end
 
   # Collect only explicitly moved identifiers (was_moved set by annotator).
   # Used for function calls where non-TAKES args are borrowed, not moved.
   def collect_explicit_moves(node, state)
     return [] unless node
-    consumed = Set.new
+    step = DataflowStep.new(state: state, consumed: Set.new)
     walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
-      next unless state[name]
+      next unless step.state[name]
       next if copy_type?(n)
-      consumed << name
+      step.consumed << name
     end
-    collect_share_transfers_in(node, state, consumed)
-    consumed.to_a
+    collect_share_transfers_in(node, step)
+    step.consumed.to_a
   end
 
-  def collect_share_transfers_in(node, state, consumed)
+  def collect_share_transfers_in(node, step)
     walk_expr(node) do |n|
-      collect_share_transfer(n, state, consumed) if n.is_a?(AST::ShareNode)
+      collect_share_transfer(n, step) if n.is_a?(AST::ShareNode)
     end
   end
 
-  def collect_share_transfer(node, state, consumed)
+  def collect_share_transfer(node, step)
     source = node.value
     return if source.is_a?(AST::CopyNode)
 
@@ -749,11 +756,11 @@ class OwnershipDataflow
       ti = Type.from_node(source)
       return if ti&.shared?
       name = source.name.to_s
-      consumed << name if state[name]
+      step.consumed << name if step.state[name]
       return
     end
 
-    collect_ownership_transfers(source, state, consumed)
+    collect_ownership_transfers(source, step)
   end
 
   # Collect resource captures from BG blocks nested in function/method call args.
@@ -779,10 +786,10 @@ class OwnershipDataflow
         consumed << name if state[name]
       end
     when AST::FuncCall
-      expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
+      expr.args.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
     when AST::MethodCall
       _walk_bg_captures_in_expr(expr.object, state, consumed)
-      expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
+      expr.args.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
     end
   end
 
@@ -824,8 +831,7 @@ class OwnershipDataflow
         return false
       end
     end
-    is_atomic_ptr = ti.respond_to?(:sync) && ti.sync == :atomic &&
-                    ti.respond_to?(:layout) && ti.layout == :indirect
+    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
@@ -839,10 +845,10 @@ class OwnershipDataflow
     when AST::UnaryOp
       walk_expr(node.right, &block)
     when AST::FuncCall
-      node.args&.each { |a| walk_expr(a, &block) }
+      node.args.each { |a| walk_expr(a, &block) }
     when AST::MethodCall
       walk_expr(node.object, &block)
-      node.args&.each { |a| walk_expr(a, &block) }
+      node.args.each { |a| walk_expr(a, &block) }
     when AST::GetField
       walk_expr(node.target, &block)
     when AST::GetIndex
@@ -851,9 +857,9 @@ class OwnershipDataflow
     when AST::StructLit
       node.fields&.each_value { |v| walk_expr(v, &block) }
     when AST::ListLit
-      node.items&.each { |i| walk_expr(i, &block) }
+      node.items.each { |i| walk_expr(i, &block) }
     when AST::HashLit
-      node.pairs&.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
+      node.pairs.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       walk_expr(node.value, &block)
     when AST::ShareNode
@@ -887,10 +893,10 @@ class OwnershipDataflow
     when AST::UnaryOp
       walk_expr_skip_copy(node.right, &block)
     when AST::FuncCall
-      node.args&.each { |a| walk_expr_skip_copy(a, &block) }
+      node.args.each { |a| walk_expr_skip_copy(a, &block) }
     when AST::MethodCall
       walk_expr_skip_copy(node.object, &block)
-      node.args&.each { |a| walk_expr_skip_copy(a, &block) }
+      node.args.each { |a| walk_expr_skip_copy(a, &block) }
     when AST::GetField
       walk_expr_skip_copy(node.target, &block)
     when AST::GetIndex
@@ -899,9 +905,9 @@ class OwnershipDataflow
     when AST::StructLit
       node.fields&.each_value { |v| walk_expr_skip_copy(v, &block) }
     when AST::ListLit
-      node.items&.each { |i| walk_expr_skip_copy(i, &block) }
+      node.items.each { |i| walk_expr_skip_copy(i, &block) }
     when AST::HashLit
-      node.pairs&.each { |_k, v| walk_expr_skip_copy(v.is_a?(Array) ? v[1] : v, &block) }
+      node.pairs.each { |_k, v| walk_expr_skip_copy(v.is_a?(Array) ? v[1] : v, &block) }
     when AST::MoveNode
       walk_expr_skip_copy(node.value, &block)
     when AST::CapabilityWrap
@@ -1105,10 +1111,10 @@ class UseAfterMoveChecker
       node.fields&.each_value { |v| check_reads_in_expr(v, state) }
 
     when AST::ListLit
-      node.items&.each { |i| check_reads_in_expr(i, state) }
+      node.items.each { |i| check_reads_in_expr(i, state) }
 
     when AST::HashLit
-      node.pairs&.each { |_k, v|
+      node.pairs.each { |_k, v|
         val = v.is_a?(Array) ? v[1] : v
         check_reads_in_expr(val, state)
       }
@@ -1213,12 +1219,12 @@ module LoopFrameAnalysis
       walk_stmts!(stmt.then_branch)
       walk_stmts!(stmt.else_branch)
     when AST::MatchStatement
-      stmt.cases&.each { |c| walk_stmts!(c[:body]) }
+      stmt.cases.each { |c| walk_stmts!(c[:body]) }
       walk_stmts!(stmt.default_case)
     when AST::WithBlock
       walk_stmts!(stmt.body)
     when AST::DoBlock
-      stmt.branches&.each { |b| walk_stmts!(b[:body]) }
+      stmt.branches.each { |b| walk_stmts!(b[:body]) }
     end
   end
 
@@ -1301,18 +1307,18 @@ module LoopFrameAnalysis
   # Does var_name appear as a value arg to a mutates_receiver call on an outer
   # container anywhere in the loop body (including nested loops)?
   def self.escapes_to_outer?(var_name, body, local_names)
-    found = false
+    found = T.let(false, T::Boolean)
     AST.walk_body(body) do |node|
-      next unless node.respond_to?(:mutates_receiver) && node.mutates_receiver
+      next unless node.mutates_receiver
       case node
       when AST::MethodCall
         receiver = node.object
         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args&.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+        found = true if node.args.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
       when AST::FuncCall
-        receiver = node.args&.first
+        receiver = node.args.first
         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args&.drop(1)&.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+        found = true if node.args.drop(1).any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
       end
     end
     found
@@ -1342,10 +1348,10 @@ module LoopFrameAnalysis
 
     AST.walk_body(body) do |n|
       next if n.is_a?(AST::FunctionDef)
-      next unless n.respond_to?(:mutates_receiver) && n.mutates_receiver
+      next unless n.mutates_receiver
       receiver = case n
                  when AST::MethodCall then n.object
-                 when AST::FuncCall   then n.args&.first
+                 when AST::FuncCall   then n.args.first
                  end
       next unless receiver.is_a?(AST::Identifier)
       decl = receiver.symbol&.reg
@@ -1378,12 +1384,12 @@ module LoopFrameAnalysis
     when AST::BinaryOp
       return rhs_references_any?(expr.left, names) || rhs_references_any?(expr.right, names)
     when AST::UnaryOp
-      return rhs_references_any?(expr.operand, names)
+      return rhs_references_any?(expr.right, names)
     when AST::FuncCall
-      return expr.args&.any? { |a| rhs_references_any?(a, names) } || false
+      return expr.args.any? { |a| rhs_references_any?(a, names) } || false
     when AST::MethodCall
       return rhs_references_any?(expr.object, names) ||
-             (expr.args&.any? { |a| rhs_references_any?(a, names) } || false)
+             (expr.args.any? { |a| rhs_references_any?(a, names) } || false)
     when AST::GetField
       return rhs_references_any?(expr.target, names)
     when AST::GetIndex
@@ -1470,8 +1476,8 @@ module LoopFrameAnalysis
     return unless decl_ti.is_a?(Type)
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
     decl_ti.provenance = :heap
-    decl_node.storage = :heap if decl_node.respond_to?(:storage=)
-    if decl_node.respond_to?(:value) && decl_node.value.respond_to?(:storage=)
+    decl_node.storage = :heap
+    if decl_node.value.respond_to?(:storage=)
       decl_node.value.storage = :heap
     end
   end
@@ -1489,12 +1495,12 @@ module LoopFrameAnalysis
         scan_direct(s.then_branch, &block)
         scan_direct(s.else_branch, &block)
       when AST::MatchStatement
-        s.cases&.each { |c| scan_direct(c[:body], &block) }
+        s.cases.each { |c| scan_direct(c[:body], &block) }
         scan_direct(s.default_case, &block)
       when AST::WithBlock
         scan_direct(s.body, &block)
       when AST::DoBlock
-        s.branches&.each { |b| scan_direct(b[:body], &block) }
+        s.branches.each { |b| scan_direct(b[:body], &block) }
       end
     end
   end
@@ -1663,11 +1669,11 @@ class BorrowChecker
       check_stmts(stmt.body)
 
     when AST::MatchStatement
-      stmt.cases&.each { |c| check_stmts(c[:body]) }
+      stmt.cases.each { |c| check_stmts(c[:body]) }
       check_stmts(stmt.default_case)
 
     when AST::DoBlock
-      stmt.branches&.each { |b| check_stmts(b[:body]) }
+      stmt.branches.each { |b| check_stmts(b[:body]) }
 
     when AST::BgBlock, AST::BgStreamBlock
       # BG resource captures are ownership transfers
@@ -1690,7 +1696,7 @@ class BorrowChecker
       next unless capability == :RESTRICT || capability == :BORROWED
 
       kind = (capability == :RESTRICT) ? :mutable : :immutable
-      token = (cap[:var_node].respond_to?(:token) ? cap[:var_node].token : nil) || stmt.token
+      token = cap[:var_node].token || stmt.token
 
       # ALIAS_VIOLATION: conflicting borrows
       existing = @active_borrows[source]
@@ -1764,14 +1770,14 @@ class BorrowChecker
       # Union constructors (TYPE_ID): payload transfers ownership.
       # Regular method calls: only was_moved args.
       if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
-        node.args&.each { |a| _collect_moves(a, names) }
+        node.args.each { |a| _collect_moves(a, names) }
       else
         _collect_was_moved(node, names)
       end
     when AST::FuncCall
       _collect_was_moved(node, names)
     when AST::ListLit
-      node.items&.each { |i| _collect_moves(i, names) }
+      node.items.each { |i| _collect_moves(i, names) }
     when AST::MoveNode
       inner = node.value
       names << inner.name.to_s if inner.is_a?(AST::Identifier)
@@ -1823,10 +1829,10 @@ class BorrowChecker
     when AST::UnaryOp
       walk_for_was_moved(node.right, &block)
     when AST::FuncCall
-      node.args&.each { |a| walk_for_was_moved(a, &block) }
+      node.args.each { |a| walk_for_was_moved(a, &block) }
     when AST::MethodCall
       walk_for_was_moved(node.object, &block)
-      node.args&.each { |a| walk_for_was_moved(a, &block) }
+      node.args.each { |a| walk_for_was_moved(a, &block) }
     when AST::GetField
       walk_for_was_moved(node.target, &block)
     when AST::GetIndex
@@ -1835,7 +1841,7 @@ class BorrowChecker
     when AST::StructLit
       node.fields&.each_value { |v| walk_for_was_moved(v, &block) }
     when AST::ListLit
-      node.items&.each { |i| walk_for_was_moved(i, &block) }
+      node.items.each { |i| walk_for_was_moved(i, &block) }
     when AST::MoveNode
       walk_for_was_moved(node.value, &block)
     when AST::ShareNode
@@ -1849,8 +1855,7 @@ class BorrowChecker
     ti = ident.type_info rescue nil
     return true unless ti
     ti = Type.new(ti) if !ti.is_a?(Type)
-    is_atomic_ptr = ti.respond_to?(:sync) && ti.sync == :atomic &&
-                    ti.respond_to?(:layout) && ti.layout == :indirect
+    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end
 end

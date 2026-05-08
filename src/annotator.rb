@@ -562,7 +562,7 @@ private
     # Import function signatures that are visible from this call site.
     mod.global_scope.locals.each do |name, entry|
       sig = entry.type
-      next unless sig.is_a?(FunctionSignature) || (sig.is_a?(Hash) && sig.key?(:params))
+      next unless sig.is_a?(FunctionSignature)
 
       # For package imports: skip functions that were themselves imported from
       # another module (they have a pre-existing module_alias). Those functions
@@ -579,7 +579,8 @@ private
       next unless importable
 
       # Tag the signature with the namespace so the transpiler can qualify calls.
-      imported_sig = sig.merge(module_alias: node.namespace)
+      imported_sig = sig.dup
+      imported_sig.module_alias = node.namespace
       current_scope.declare(name, nil, imported_sig, false, false, nil, :static)
     end
 
@@ -837,7 +838,7 @@ private
     node.uses_rt    = ctx.needs_rt
     node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: direct failure sources.
-    ret_type_obj = signature.respond_to?(:return_type) ? signature.return_type : (signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil)
+    ret_type_obj = signature.return_type
     heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
     @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || node.uses_alloc || heap_ret ||
       (@fn_has_fnptr[node.name] == true) ||
@@ -1404,7 +1405,7 @@ private
           # makes the new binding a borrow into locked data; it must not
           # escape the enclosing WITH scope either.
           src_root = ifbind_source_root(b[:expr])
-          if src_root && src_root.respond_to?(:symbol) && src_root.symbol&.non_escaping
+          if src_root && src_root.symbol&.non_escaping
             entry.non_escaping = true
           end
           classify_ownership!(entry)
@@ -2426,12 +2427,12 @@ private
       if type_schema.is_a?(Hash) && type_schema[:methods]&.key?(node.name)
         method_sig = type_schema[:methods][node.name]
         node.extern_call = true
-        node.extern_effects = method_sig[:extern_effects] if method_sig[:extern_effects]
+        node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
         node.instance_variable_set(:@extern_method, true)
-        node.full_type = method_sig.respond_to?(:return_type) ? (method_sig.return_type || :Void) : (method_sig[:return]&.dig(:type) || :Void)
+        node.full_type = method_sig.return_type || :Void
         record_effect(EffectTracker::EXTERN)
         # Track allocator usage for EFFECTS :alloc methods.
-        alloc_kind = method_sig[:extern_effects]&.dig(:alloc)
+        alloc_kind = method_sig.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
             current_fn_ctx.heap_count += 1
@@ -2583,7 +2584,7 @@ private
   # instead of an inline fold.
   def promote_pipe_to_observable_dest!(node)
     return unless node.respond_to?(:type) && node.type
-    return unless node.respond_to?(:value) && node.value
+    return unless node.value
     target = node.type.is_a?(Type) ? node.type : Type.new(node.type)
     return unless target.future? && target.observable?
     pipe = node.value
@@ -2618,7 +2619,7 @@ private
       # OBSERVABLE_WRAPPERS can find it. Without this, the binding's
       # emitted Zig wrapper would default-or-raise. Same mismatch
       # check as above.
-      if node.respond_to?(:full_type) && node.full_type.is_a?(Type) && node.full_type.observable?
+      if node.full_type.is_a?(Type) && node.full_type.observable?
         if node.full_type.observable_terminal && node.full_type.observable_terminal != pipe_terminal
           raise CompilerError.new(
             "Observable terminal mismatch on full_type: stamped " \
@@ -2684,11 +2685,11 @@ private
         # too context-specific to template.
         fixes = []
         obs_tok = node.type.observable_token if node.type.respond_to?(:observable_token)
-        if obs_tok && obs_tok.respond_to?(:line) && obs_tok.respond_to?(:column)
+        if obs_tok
           # Token value is `@observable` (first cap) or `:observable`
           # (chained after another cap). Match length to the actual
           # token text so the edit deletes exactly the right span.
-          tok_text = obs_tok.respond_to?(:value) ? obs_tok.value.to_s : "@observable"
+          tok_text = obs_tok.value.to_s
           fixes << Fix.new(
             description: "Drop `#{tok_text}` from the binding's type annotation. The remaining type behaves as a regular binding (no producer fiber, no WITH VIEW); use this if you didn't actually want streaming-aggregate semantics.",
             confidence: :interactive,
@@ -2798,8 +2799,7 @@ private
     if node.type_info&.versioned? && node.type_info&.ownership == :affine
       cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
       fixes = []
-      if cap_tok && cap_tok.respond_to?(:line) && cap_tok.respond_to?(:column) &&
-         cap_tok.respond_to?(:value) && cap_tok.value.to_s == "@versioned"
+      if cap_tok && cap_tok.value.to_s == "@versioned"
         fixes << Fix.new(
           description: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",
           confidence: :auto,
@@ -2933,11 +2933,10 @@ private
 
     # 2. Resolve Type
     raw_type = scope.resolve_full_type(node.name)
-    if raw_type.raw.is_a?(Hash) && raw_type.raw[:params] && !raw_type.fn_type?
-      # Named function used as a value — build a proper fn_type Type.
-      # Propagate :reentrant so the type-checker can enforce param constraints.
-      sig = raw_type.raw
-      node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true, reentrant: sig[:reentrant] == true })
+    if raw_type.raw.is_a?(FunctionSignature)
+      # Named function used as a value — re-wrap the signature in a Type
+      # tagged as a fn_ref so the transpiler emits `&fn_name`.
+      node.full_type = Type.new(raw_type.raw)
       node.fn_ref = true
     elsif raw_type.is_a?(Type) && raw_type.atomic? && raw_type.layout != :indirect
       # Atomics M1.5: a read of an `@shared:atomic` binding produces
@@ -2978,7 +2977,7 @@ private
   def classify_ownership!(entry)
     return unless entry
     t = entry.type
-    return if t.is_a?(Hash) # function signature, not a variable
+    return if t.is_a?(FunctionSignature) # function signature, not a variable
     type_obj = t.is_a?(Type) ? t : Type.new(t || :Any)
     entry.ownership_kind = if entry.resource
       :resource
@@ -3011,7 +3010,7 @@ private
   # Aliased variables share backing data with the source - skip cleanup to avoid double-free.
   def track_union_alias(var_name, value_node)
     return unless value_node.is_a?(AST::FuncCall) || value_node.is_a?(AST::MethodCall)
-    ret_type = value_node.respond_to?(:full_type) ? value_node.full_type : nil
+    ret_type = value_node.full_type
     return unless ret_type
     ret_type_obj = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type)
 
@@ -3339,13 +3338,14 @@ private
       return
     end
 
-    schema = lookup_type_schema(type)
-    if schema.is_a?(Hash) && schema[:kind] == :enum
+    raw_schema = lookup_type_schema(type)
+    struct_schema = Schemas.as_struct_schema(raw_schema)
+    if raw_schema.is_a?(Hash) && raw_schema[:kind] == :enum
       error!(node, :ENUM_FIELD_ACCESS, enum: type)
-    elsif schema.is_a?(Hash) && schema[:kind] == :union
+    elsif raw_schema.is_a?(Schemas::UnionSchema) || (raw_schema.is_a?(Hash) && raw_schema[:kind] == :union)
       error!(node, :UNION_FIELD_ACCESS, union: type)
-    elsif schema && schema[node.field]
-      field_type = schema[node.field]
+    elsif struct_schema && struct_schema.fields[node.field]
+      field_type = struct_schema.fields[node.field]
       # SOA tracking: record field access on pipeline variable `_`
       if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         @pipeline_accessed_fields << node.field
@@ -3354,20 +3354,20 @@ private
       # Handles compound types like T[], ?T, !T via apply_type_subst.
       # BORROWED fields are stored as plain types in the schema (borrowed_fields tracks which).
       type_obj = Type.new(type)
-      if type_obj.generic_instance? && schema[:type_params]
+      if type_obj.generic_instance? && struct_schema.type_params
         subst = {}
-        schema[:type_params].zip(type_obj.generic_args).each do |param, arg|
+        struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
           subst[param] = arg.resolved
         end
         field_type = apply_type_subst(field_type, subst) if subst.any?
       end
       node.full_type = field_type
-    elsif schema.is_a?(Hash) && node.token
+    elsif struct_schema && node.token
       # Struct schema resolved but the requested field doesn't exist —
       # emit a typo suggestion when one of the schema's fields is close
       # to what the user typed. The bare error code stays as the
       # fallback when no candidate is within Levenshtein threshold.
-      valid_fields = schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+      valid_fields = struct_schema.fields.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
       emit_typo_suggestion!(
         node.token, node.field, valid_fields,
         "Struct '#{type}' has no field '#{node.field}'",
@@ -3459,7 +3459,7 @@ private
   def visit_StructLit(node)
     schema = lookup_type_schema(node.name.to_sym)
     if schema.nil?
-      tok = node.respond_to?(:token) ? node.token : nil
+      tok = node.token
       if tok
         emit_typo_suggestion!(
           tok, node.name, all_known_type_names,
@@ -4659,9 +4659,9 @@ private
       if node.polymorphic && (node.capabilities || []).length == 1
         bound_var = node.capabilities.first[:var_node]
         bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
-        bound_sym  = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+        bound_sym  = bound_var.symbol
         is_param   = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
-        fn_node    = @fn_nodes[current_fn_ctx&.name]
+        fn_node    = @fn_nodes[current_fn_ctx.name]
         has_req    = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
                      fn_node.requires.key?(bound_name)
         if is_param && !has_req
@@ -4752,7 +4752,7 @@ private
 
     bound_var = node.capabilities.first[:var_node]
     bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
-    bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+    bound_sym = bound_var.symbol
     is_param = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
     fn_node = @fn_nodes[current_fn_ctx&.name]
     has_req = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
@@ -4889,7 +4889,7 @@ private
     root = field_node
     root = root.target while root.respond_to?(:target) && !root.is_a?(AST::Identifier)
     return unless root.is_a?(AST::Identifier)
-    sym = root.respond_to?(:symbol) ? root.symbol : nil
+    sym = root.symbol
     return unless sym
     return unless sym.sync == :atomic
     return unless sym.respond_to?(:layout) && sym.layout == :indirect
@@ -5402,7 +5402,7 @@ private
     if node.expr.is_a?(AST::Identifier)
       sym = node.expr.symbol
       decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
-      bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
+      bg_value = decl_node&.value
       needs_heap =
         (bg_value.is_a?(AST::BgBlock) && bg_value.return_provenance == :heap) ||
         (bg_value.is_a?(AST::BgStreamBlock) && bg_value.yields_frame_strings)
@@ -5541,7 +5541,7 @@ private
   # Returns the AST node of the argument the return value borrows from, or nil.
   def resolve_borrow_source(call_node)
     # Path 1: stdlib functions with lifetime: "self"
-    matched_def = call_node.respond_to?(:matched_stdlib_def) ? call_node.matched_stdlib_def : nil
+    matched_def = call_node.matched_stdlib_def
     if matched_def.is_a?(Hash) && matched_def[:lifetime]
       lifetime = matched_def[:lifetime]
       if lifetime == "self" && call_node.is_a?(AST::MethodCall)
@@ -5557,13 +5557,13 @@ private
       return nil
     end
 
-    # Path 2: user-defined functions with return: { lifetime: [...] }
+    # Path 2: user-defined functions with return_lifetime: [...]
     func_name = call_node.name
     scope = lookup_scope_for(func_name)
     return nil unless scope
 
     func_type = scope.resolve_type(func_name)
-    return nil unless func_type.is_a?(Hash)
+    return nil unless func_type.is_a?(FunctionSignature)
 
     # Atomics M2.4 / M2.5: multi-binding lifetime returns the FIRST
     # source. The borrow tracking still records under one root; if a
@@ -5574,7 +5574,7 @@ private
     # conservative side here (track only the first source) to avoid
     # spurious errors before the audit lands. Wildcard returns nil
     # (no specific source to track).
-    lifetime = func_type.dig(:return, :lifetime)
+    lifetime = func_type.return_lifetime
     return nil if lifetime.nil?
     lifetime = [lifetime] unless lifetime.is_a?(Array)
     return nil if lifetime.empty? || lifetime == [:wildcard]
@@ -5582,7 +5582,7 @@ private
     return nil if primary == :wildcard
     primary_root = primary.to_s.split(".").first
 
-    param_index = func_type[:params]&.find_index { |p| p[:name] == primary_root }
+    param_index = func_type.params&.find_index { |p| p[:name] == primary_root }
     return nil unless param_index
 
     args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
@@ -5834,7 +5834,7 @@ private
   def verify_tied_assignment!(assign_node)
     val = assign_node.value
     return unless val.is_a?(AST::Identifier)
-    sym = val.respond_to?(:symbol) ? val.symbol : nil
+    sym = val.symbol
     return unless sym
     sources = sym.lifetime_sources
     return if sources.empty?
@@ -5878,7 +5878,7 @@ private
   def verify_tied_return!(return_node)
     val = return_node.value
     return unless val.is_a?(AST::Identifier)
-    sym = val.respond_to?(:symbol) ? val.symbol : nil
+    sym = val.symbol
     return unless sym
     sources = sym.lifetime_sources
     return if sources.empty?
@@ -6001,7 +6001,7 @@ private
   # For a free local in current scope, depth = current scope.
   def dest_scope_depth_for_target(target_node)
     if target_node.is_a?(AST::Identifier)
-      sym = target_node.respond_to?(:symbol) ? target_node.symbol : nil
+      sym = target_node.symbol
       sym ||= lookup_scope_for(target_node.name)&.locals&.[](target_node.name)
       return sym&.scope_depth
     end
@@ -6186,7 +6186,7 @@ private
       node.each { |n| collect_returns(n, out) }
     when AST::ReturnNode
       out << node
-      collect_returns(node.value, out) if node.respond_to?(:value)
+      collect_returns(node.value, out) if node.value
     else
       node.each_pair { |_, v| collect_returns(v, out) } if node.respond_to?(:each_pair)
     end
@@ -6397,9 +6397,9 @@ private
     return unless ti
 
     # Check if value comes from a stdlib function with explicit metadata
-    val = node.respond_to?(:value) ? node.value : nil
+    val = node.value
     if val && (val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall))
-      matched_def = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
+      matched_def = val.matched_stdlib_def
       if matched_def.is_a?(Hash)
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
         if matched_def[:lifetime]

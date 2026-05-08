@@ -17,6 +17,12 @@ class PipelineHost
   include PipelineGenerator
   include ZigTypeMapper
 
+  # Per-stage state for sequential pipeline lowering. `list` is the source
+  # list AST, `options` is the smooth-node carrying alloc/error policy/etc.
+  # Reek flagged the (list_node, smooth_node) clump across 13+ lower_*
+  # methods. Bundled so the dispatcher builds once and threads through.
+  PipelineSite = Data.define(:list, :options)
+
   attr_accessor :fn_sigs
 
   def initialize(lowering:, emitter:)
@@ -212,8 +218,8 @@ class PipelineHost
       if new_args != node.args
         new_call = AST::FuncCall.new(node.token, node.name, new_args)
         copy_type_info(node, new_call)
-        new_call.zig_pattern = node.zig_pattern if node.respond_to?(:zig_pattern)
-        new_call.matched_stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
+        new_call.zig_pattern = node.zig_pattern
+        new_call.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
         return new_call
       end
     when AST::MethodCall
@@ -222,8 +228,8 @@ class PipelineHost
       if new_target != node.object || new_args != node.args
         new_mc = AST::MethodCall.new(node.token, new_target, node.name, new_args)
         copy_type_info(node, new_mc)
-        new_mc.zig_pattern = node.zig_pattern if node.respond_to?(:zig_pattern) && node.zig_pattern
-        new_mc.matched_stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
+        new_mc.zig_pattern = node.zig_pattern if node.zig_pattern
+        new_mc.matched_stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
         return new_mc
       end
     when AST::BinaryOp
@@ -332,7 +338,7 @@ class PipelineHost
   end
 
   def copy_type_info(src, dst)
-    dst.full_type = src.full_type if src.respond_to?(:full_type) && src.full_type && dst.respond_to?(:full_type=)
+    dst.full_type = src.full_type if src.full_type && dst.respond_to?(:full_type=)
     dst.type_info = src.type_info if src.respond_to?(:type_info) && src.type_info && dst.respond_to?(:type_info=)
     dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
     dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)
@@ -379,39 +385,40 @@ class PipelineHost
       return lower_binding_chain(bchain, node)
     end
 
+    site = PipelineSite.new(list: lhs, options: node)
     case rhs
-    when AST::CountOp   then lower_count(lhs, rhs, node)
-    when AST::SumOp     then lower_sum(lhs, rhs, node)
-    when AST::AverageOp then lower_average(lhs, rhs, node)
-    when AST::MinOp     then lower_min(lhs, rhs, node)
-    when AST::MaxOp     then lower_max(lhs, rhs, node)
-    when AST::AnyOp     then lower_any(lhs, rhs, node)
-    when AST::AllOp     then lower_all(lhs, rhs, node)
-    when AST::FindOp    then lower_find(lhs, rhs, node)
-    when AST::WhereOp   then lower_where(lhs, rhs.expression, node)
-    when AST::SelectOp  then lower_select(lhs, rhs.expression, node)
-    when AST::LimitOp   then lower_limit(lhs, rhs, node)
-    when AST::TakeWhileOp then lower_take_while(lhs, rhs.expression, node)
-    when AST::SkipOp    then lower_skip(lhs, rhs, node)
-    when AST::DistinctOp then lower_distinct(lhs, rhs, node)
-    when AST::UnnestOp  then lower_unnest(lhs, rhs, node)
-    when AST::ReduceOp  then lower_reduce(lhs, rhs, node)
-    when AST::WindowOp       then lower_window(lhs, rhs, node)
+    when AST::CountOp   then lower_count(site, rhs)
+    when AST::SumOp     then lower_sum(site, rhs)
+    when AST::AverageOp then lower_average(site, rhs)
+    when AST::MinOp     then lower_min(site, rhs)
+    when AST::MaxOp     then lower_max(site, rhs)
+    when AST::AnyOp     then lower_any(site, rhs)
+    when AST::AllOp     then lower_all(site, rhs)
+    when AST::FindOp    then lower_find(site, rhs)
+    when AST::WhereOp   then lower_where(site, rhs.expression)
+    when AST::SelectOp  then lower_select(site, rhs.expression)
+    when AST::LimitOp   then lower_limit(site, rhs)
+    when AST::TakeWhileOp then lower_take_while(site, rhs.expression)
+    when AST::SkipOp    then lower_skip(site, rhs)
+    when AST::DistinctOp then lower_distinct(site, rhs)
+    when AST::UnnestOp  then lower_unnest(site, rhs)
+    when AST::ReduceOp  then lower_reduce(site, rhs)
+    when AST::WindowOp       then lower_window(site, rhs)
     when AST::BatchWindowOp
       # Zig keeps the legacy template (battle-tested, has time-based
       # semantics via CheatLib.BatchWindow). BC has no equivalent runtime
       # type, so route to a structural slice-based lowering on BC only.
       if @lowering.instance_variable_get(:@target) == :bc
-        lower_batch_window(lhs, rhs, node)
+        lower_batch_window(site, rhs)
       else
         nil
       end
-    when AST::OrderByOp      then lower_order_by(lhs, rhs, node)
-    when AST::IndexOp   then lower_index(lhs, rhs.expression, node)
-    when AST::JoinOp    then lower_join(lhs, rhs, node)
-    when AST::TapOp     then lower_tap(lhs, rhs, node)
-    when AST::EachOp    then lower_each(lhs, rhs, node)
-    when AST::ConcurrentOp then lower_concurrent(lhs, rhs, node)
+    when AST::OrderByOp      then lower_order_by(site, rhs)
+    when AST::IndexOp   then lower_index(site, rhs.expression)
+    when AST::JoinOp    then lower_join(site, rhs)
+    when AST::TapOp     then lower_tap(site, rhs)
+    when AST::EachOp    then lower_each(site, rhs)
+    when AST::ConcurrentOp then lower_concurrent(site, rhs)
     else nil
     end
   end
@@ -646,7 +653,8 @@ class PipelineHost
 
   # --- Scalar accumulator lowerings (Phase 1) ---
 
-  def lower_count(list_node, count_node, _smooth_node)
+  def lower_count(site, count_node)
+    list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -662,7 +670,8 @@ class PipelineHost
     end
   end
 
-  def lower_sum(list_node, sum_node, _smooth_node)
+  def lower_sum(site, sum_node)
+    list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -676,7 +685,8 @@ class PipelineHost
     end
   end
 
-  def lower_average(list_node, avg_node, _smooth_node)
+  def lower_average(site, avg_node)
+    list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -696,7 +706,8 @@ class PipelineHost
     end
   end
 
-  def lower_min(list_node, min_node, _smooth_node)
+  def lower_min(site, min_node)
+    list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -720,7 +731,8 @@ class PipelineHost
     end
   end
 
-  def lower_max(list_node, max_node, _smooth_node)
+  def lower_max(site, max_node)
+    list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -744,7 +756,8 @@ class PipelineHost
     end
   end
 
-  def lower_any(list_node, any_node, _smooth_node)
+  def lower_any(site, any_node)
+    list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, any_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -760,7 +773,8 @@ class PipelineHost
     end
   end
 
-  def lower_all(list_node, all_node, _smooth_node)
+  def lower_all(site, all_node)
+    list_node = site.list
     pred_mir = visit_pipeline_expr_mir(list_node, all_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
@@ -776,7 +790,8 @@ class PipelineHost
     end
   end
 
-  def lower_find(list_node, find_node, _smooth_node)
+  def lower_find(site, find_node)
+    list_node = site.list
     elem_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
     pred_mir = visit_pipeline_expr_mir(list_node, find_node.expression)
     lower_pipeline_block(list_node) do |items, label|
@@ -807,7 +822,9 @@ class PipelineHost
     smooth_node.respond_to?(:storage) && smooth_node.storage == :heap ? :heap : :frame
   end
 
-  def lower_where(list_node, expr_node, smooth_node)
+  def lower_where(site, expr_node)
+    list_node = site.list
+    smooth_node = site.options
     elem_type = list_node.full_type.element_type.resolved.to_s
     elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
@@ -829,7 +846,9 @@ class PipelineHost
     end
   end
 
-  def lower_select(list_node, expr_node, smooth_node)
+  def lower_select(site, expr_node)
+    list_node = site.list
+    smooth_node = site.options
     res_type = expr_node.full_type
     res_zig = transpile_type(res_type)
     alloc = pipeline_alloc(smooth_node)
@@ -849,7 +868,9 @@ class PipelineHost
     end
   end
 
-  def lower_limit(list_node, limit_node, smooth_node)
+  def lower_limit(site, limit_node)
+    list_node = site.list
+    smooth_node = site.options
     elem_type = list_node.full_type.element_type.resolved.to_s
     elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
@@ -901,7 +922,9 @@ class PipelineHost
     end
   end
 
-  def lower_take_while(list_node, expr_node, smooth_node)
+  def lower_take_while(site, expr_node)
+    list_node = site.list
+    smooth_node = site.options
     elem_type = list_node.full_type.element_type.resolved.to_s
     elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
@@ -923,7 +946,8 @@ class PipelineHost
     end
   end
 
-  def lower_skip(list_node, skip_node, _smooth_node)
+  def lower_skip(site, skip_node)
+    list_node = site.list
     label = next_pipe_label
     source_mir = visit_mir(list_node)
     @current_pipe_label = label
@@ -945,7 +969,9 @@ class PipelineHost
     ])
   end
 
-  def lower_distinct(list_node, distinct_node, smooth_node)
+  def lower_distinct(site, distinct_node)
+    list_node = site.list
+    smooth_node = site.options
     # Observable variant: `~T[]@set:observable` -- producer-fiber-spawn
     # backed by `*ObservableStreamSet(T)` (= ObservableTerminal(StreamSet(T))).
     # Per-item: `_ = acc.inner.submit(item) catch unreachable`.
@@ -1033,7 +1059,9 @@ class PipelineHost
 
   # --- Complex operator lowerings (Phase 3) ---
 
-  def lower_unnest(list_node, unnest_node, smooth_node)
+  def lower_unnest(site, unnest_node)
+    list_node = site.list
+    smooth_node = site.options
     inner_elem_type = unnest_node.full_type.element_type.resolved.to_s
     inner_zig = transpile_type(inner_elem_type)
     alloc = pipeline_alloc(smooth_node)
@@ -1057,7 +1085,8 @@ class PipelineHost
     end
   end
 
-  def lower_reduce(list_node, reduce_node, _smooth_node)
+  def lower_reduce(site, reduce_node)
+    list_node = site.list
     acc_zig = transpile_type(reduce_node.full_type)
     init_mir = visit_mir(reduce_node.initial_value)
     expr_mir = with_pipeline_context(placeholder: "it", acc: "acc") {
@@ -1074,7 +1103,9 @@ class PipelineHost
     end
   end
 
-  def lower_window(list_node, window_node, smooth_node)
+  def lower_window(site, window_node)
+    list_node = site.list
+    smooth_node = site.options
     expr_type_str = (window_node.expression.full_type || window_node.expression.resolved_type).to_s
     res_zig = transpile_type(expr_type_str)
     alloc = pipeline_alloc(smooth_node)
@@ -1132,7 +1163,9 @@ class PipelineHost
   # there is no time-based mid-stream flush; the final flush captures
   # any accumulated tail. Tests using time-only windows (e.g. test 7
   # of 243_batch_window) rely on the final flush for a single batch.
-  def lower_batch_window(list_node, bw_node, smooth_node)
+  def lower_batch_window(site, bw_node)
+    list_node = site.list
+    smooth_node = site.options
     expr_type_str = (bw_node.expression.full_type || bw_node.expression.resolved_type).to_s
     res_zig = transpile_type(expr_type_str)
 
@@ -1281,7 +1314,9 @@ class PipelineHost
     end
   end
 
-  def lower_order_by(list_node, order_node, smooth_node)
+  def lower_order_by(site, order_node)
+    list_node = site.list
+    smooth_node = site.options
     elem_zig = transpile_type(list_node.full_type.element_type.resolved.to_s)
     alloc = pipeline_alloc(smooth_node)
     key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
@@ -1300,7 +1335,9 @@ class PipelineHost
     end
   end
 
-  def lower_index(list_node, expr_node, smooth_node)
+  def lower_index(site, expr_node)
+    list_node = site.list
+    smooth_node = site.options
     lhs_ti = list_node.type_info
     alloc = pipeline_alloc(smooth_node)
 
@@ -1419,7 +1456,9 @@ class PipelineHost
     ])
   end
 
-  def lower_join(list_node, join_node, smooth_node)
+  def lower_join(site, join_node)
+    list_node = site.list
+    smooth_node = site.options
     left_zig  = transpile_type(list_node.full_type.element_type.resolved.to_s)
     right_src_mir = visit_mir(join_node.right_source)
     right_type_info = join_node.right_source.type_info
@@ -1478,7 +1517,9 @@ class PipelineHost
     ])
   end
 
-  def lower_tap(list_node, tap_op, smooth_node)
+  def lower_tap(site, tap_op)
+    list_node = site.list
+    smooth_node = site.options
     label = next_pipe_label
     source_mir = visit_mir(list_node)
     @current_pipe_label = label
@@ -1496,7 +1537,9 @@ class PipelineHost
 
   # --- Side-effect operator lowerings (Phase 4) ---
 
-  def lower_each(list_node, each_op, smooth_node)
+  def lower_each(site, each_op)
+    list_node = site.list
+    smooth_node = site.options
     lhs_type = list_node.type_info
 
     # Sharded pools/lists need fibers on the Zig backend (one per shard) --
@@ -2001,7 +2044,7 @@ class PipelineHost
   # string embedding.
   def numeric_fold_expr_typed(expr_ast, item_var, acc_zig)
     expr_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(expr_ast) }
-    expr_type = expr_ast.respond_to?(:full_type) ? expr_ast.full_type : nil
+    expr_type = expr_ast.full_type
     expr_is_int = expr_type && Type.new(expr_type).integer?
     acc_is_float = acc_zig == "f64" || acc_zig == "f32"
     if expr_is_int && acc_is_float
@@ -2025,7 +2068,7 @@ class PipelineHost
     elsif source_ti&.inf_stream?
       source_ti.inf_stream_element_type
     else
-      start_ft = source_node.respond_to?(:start) && source_node.start.respond_to?(:full_type) ? source_node.start.full_type : nil
+      start_ft = source_node.respond_to?(:start) && source_node.start.full_type
       Type.new(start_ft || :Int64)
     end
     elem_zig = elem_t.zig_type
@@ -2856,7 +2899,9 @@ class PipelineHost
   # CONCURRENT pipeline: worker dispatch stays as RawZig string (struct defs,
   # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
   # checker knows the allocation effects.
-  def lower_concurrent(_lhs, conc_op, smooth_node)
+  def lower_concurrent(site, conc_op)
+    _lhs = site.list
+    smooth_node = site.options
     # SHARD + CONCURRENT EACH: structural lowering for both backends.
     # This is a fused single-fiber loop (no real concurrency); produce a
     # ScopeBlock + ForStmt that both backends consume directly. The
@@ -2992,29 +3037,30 @@ class PipelineHost
       real_lhs = lhs.left
     end
 
+    real_site = PipelineSite.new(list: real_lhs, options: smooth_node)
     work = lambda do
       case inner
       when AST::SelectOp
         policy, inner_expr = extract_concurrent_error_policy_for_bc(inner.expression)
         next lower_bc_concurrent_select_prune(real_lhs, inner_expr, smooth_node) if policy == :prune
-        lower_select(real_lhs, inner_expr, smooth_node)
+        lower_select(real_site, inner_expr)
 
       when AST::WhereOp
         policy, inner_expr = extract_concurrent_error_policy_for_bc(inner.expression)
         next lower_bc_concurrent_where_prune(real_lhs, inner_expr, smooth_node) if policy == :prune
-        lower_where(real_lhs, inner_expr, smooth_node)
+        lower_where(real_site, inner_expr)
 
       when AST::EachOp
-        lower_each(real_lhs, inner, smooth_node)
+        lower_each(real_site, inner)
 
-      when AST::SumOp     then lower_sum(real_lhs, inner, smooth_node)
-      when AST::CountOp   then lower_count(real_lhs, inner, smooth_node)
-      when AST::MinOp     then lower_min(real_lhs, inner, smooth_node)
-      when AST::MaxOp     then lower_max(real_lhs, inner, smooth_node)
-      when AST::AverageOp then lower_average(real_lhs, inner, smooth_node)
-      when AST::AnyOp     then lower_any(real_lhs, inner, smooth_node)
-      when AST::AllOp     then lower_all(real_lhs, inner, smooth_node)
-      when AST::FindOp    then lower_find(real_lhs, inner, smooth_node)
+      when AST::SumOp     then lower_sum(real_site, inner)
+      when AST::CountOp   then lower_count(real_site, inner)
+      when AST::MinOp     then lower_min(real_site, inner)
+      when AST::MaxOp     then lower_max(real_site, inner)
+      when AST::AverageOp then lower_average(real_site, inner)
+      when AST::AnyOp     then lower_any(real_site, inner)
+      when AST::AllOp     then lower_all(real_site, inner)
+      when AST::FindOp    then lower_find(real_site, inner)
       else
         raise "lower_concurrent_bc: unsupported inner op #{inner.class}"
       end
@@ -4038,60 +4084,36 @@ class PipelineHost
     rhs = node.right
 
     # Dispatch by operator type
-    if rhs.is_a?(AST::SelectOp)
-      return transpile_select_projection(lhs, rhs.expression)
-    elsif rhs.is_a?(AST::WhereOp)
-      return transpile_where_filter(lhs, rhs.expression)
-    elsif rhs.is_a?(AST::IndexOp)
-      return transpile_index_grouping(lhs, rhs.expression, node)
-    elsif rhs.is_a?(AST::ReduceOp)
-      return transpile_reduce(lhs, rhs)
-    elsif rhs.is_a?(AST::OrderByOp)
-      return transpile_order_by(lhs, rhs, node)
-    elsif rhs.is_a?(AST::LimitOp)
-      return transpile_limit(lhs, rhs, node)
-    elsif rhs.is_a?(AST::UnnestOp)
-      return transpile_unnest(lhs, rhs, node)
-    elsif rhs.is_a?(AST::DistinctOp)
-      return transpile_distinct(lhs, rhs, node)
-    elsif rhs.is_a?(AST::EachOp)
-      return transpile_each(node)
-    elsif rhs.is_a?(AST::FindOp)
-      return transpile_find(lhs, rhs, node)
-    elsif rhs.is_a?(AST::AnyOp)
-      return transpile_any(lhs, rhs, node)
-    elsif rhs.is_a?(AST::AllOp)
-      return transpile_all(lhs, rhs, node)
-    elsif rhs.is_a?(AST::CountOp)
-      return transpile_count(lhs, rhs, node)
-    elsif rhs.is_a?(AST::SumOp)
-      return transpile_sum(lhs, rhs, node)
-    elsif rhs.is_a?(AST::AverageOp)
-      return transpile_average(lhs, rhs, node)
-    elsif rhs.is_a?(AST::MinOp)
-      return transpile_min(lhs, rhs, node)
-    elsif rhs.is_a?(AST::MaxOp)
-      return transpile_max(lhs, rhs, node)
-    elsif rhs.is_a?(AST::TakeWhileOp)
-      return transpile_take_while(lhs, rhs.expression, node)
-    elsif rhs.is_a?(AST::WindowOp)
-      return transpile_window(lhs, rhs, node)
-    elsif rhs.is_a?(AST::BatchWindowOp)
-      return transpile_batch_window(lhs, rhs, node)
-    elsif rhs.is_a?(AST::JoinOp)
-      return transpile_join(lhs, rhs, node)
-    elsif rhs.is_a?(AST::RecoverOp)
+    case rhs
+    when AST::SelectOp      then return transpile_select_projection(lhs, rhs.expression)
+    when AST::WhereOp       then return transpile_where_filter(lhs, rhs.expression)
+    when AST::IndexOp       then return transpile_index_grouping(lhs, rhs.expression, node)
+    when AST::ReduceOp      then return transpile_reduce(lhs, rhs)
+    when AST::OrderByOp     then return transpile_order_by(lhs, rhs, node)
+    when AST::LimitOp       then return transpile_limit(lhs, rhs, node)
+    when AST::UnnestOp      then return transpile_unnest(lhs, rhs, node)
+    when AST::DistinctOp    then return transpile_distinct(lhs, rhs, node)
+    when AST::EachOp        then return transpile_each(node)
+    when AST::FindOp        then return transpile_find(lhs, rhs, node)
+    when AST::AnyOp         then return transpile_any(lhs, rhs, node)
+    when AST::AllOp         then return transpile_all(lhs, rhs, node)
+    when AST::CountOp       then return transpile_count(lhs, rhs, node)
+    when AST::SumOp         then return transpile_sum(lhs, rhs, node)
+    when AST::AverageOp     then return transpile_average(lhs, rhs, node)
+    when AST::MinOp         then return transpile_min(lhs, rhs, node)
+    when AST::MaxOp         then return transpile_max(lhs, rhs, node)
+    when AST::TakeWhileOp   then return transpile_take_while(lhs, rhs.expression, node)
+    when AST::WindowOp      then return transpile_window(lhs, rhs, node)
+    when AST::BatchWindowOp then return transpile_batch_window(lhs, rhs, node)
+    when AST::JoinOp        then return transpile_join(lhs, rhs, node)
+    when AST::RecoverOp
       default_code = visit(rhs.default_expr)
       left_code = visit(lhs).sub(/^try /, '')
       return "(#{left_code} catch #{default_code})"
-    elsif rhs.is_a?(AST::TapOp)
-      return transpile_tap(node)
-    elsif rhs.is_a?(AST::SkipOp)
-      return transpile_skip(lhs, rhs, node)
-    elsif rhs.is_a?(AST::ShardOp)
-      raise "SHARD must be followed by |> CONCURRENT EACH"
-    elsif rhs.is_a?(AST::ConcurrentOp)
-      return transpile_concurrent(node)
+    when AST::TapOp         then return transpile_tap(node)
+    when AST::SkipOp        then return transpile_skip(lhs, rhs, node)
+    when AST::ShardOp       then raise "SHARD must be followed by |> CONCURRENT EACH"
+    when AST::ConcurrentOp  then return transpile_concurrent(node)
     end
 
     # Simple function pipe: x |> f -> f(x)
@@ -4103,15 +4125,9 @@ class PipelineHost
       raise "PipelineHost Error: Invalid Pipe Destination #{rhs.class}"
     end
 
-    if rhs.respond_to?(:zig_pattern)
-      synthetic_call.zig_pattern = rhs.zig_pattern
-    end
-    if rhs.respond_to?(:full_type)
-      synthetic_call.full_type = rhs.full_type
-    end
-    if rhs.respond_to?(:coerced_type)
-      synthetic_call.coerced_type = rhs.coerced_type
-    end
+    synthetic_call.zig_pattern = rhs.zig_pattern
+    synthetic_call.full_type = rhs.full_type
+    synthetic_call.coerced_type = rhs.coerced_type
 
     visit(synthetic_call)
   end
