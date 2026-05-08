@@ -19,9 +19,13 @@
 # `${...}` interpolation), and `#` line comments. When in doubt, we
 # skip the scan rather than emit a false-positive finding.
 
+require "sorbet-runtime"
+
 require_relative "fixable_error"
 
 module SyntaxTypoScanner
+    extend T::Sig
+
   # One rule = (pattern, replacement, human-readable label for the fix).
   # Patterns are literal string matches, not regexes — intentional; a
   # regex would risk matching sub-strings of larger identifiers (e.g.
@@ -31,6 +35,7 @@ module SyntaxTypoScanner
     { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
   ].freeze
 
+  sig { params(source: T.untyped).returns(T.untyped) }
   def self.scan!(source)
     return unless FixCollector.enabled?
     return unless source && !source.empty?
@@ -106,6 +111,7 @@ module SyntaxTypoScanner
     end
   end
 
+  sig { params(source: T.untyped, i: T.untyped, line: T.untyped, col: T.untyped).returns(Array) }
   def self.advance(source, i, line, col)
     if source[i] == "\n"
       [i + 1, line + 1, 1]
@@ -114,6 +120,7 @@ module SyntaxTypoScanner
     end
   end
 
+  sig { params(line: T.untyped, col: T.untyped, rule: T.untyped).returns(Array) }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: "Replace `#{rule[:match]}` with `#{rule[:replace]}` — #{rule[:label]}.",

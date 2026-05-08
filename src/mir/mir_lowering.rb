@@ -10,6 +10,8 @@
 # This pass subsumes the transpiler's visit_node dispatch. All type
 # introspection and allocator resolution happens HERE, not in the emitter.
 
+require "sorbet-runtime"
+
 require_relative "mir"
 require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
@@ -23,6 +25,8 @@ require_relative "thunk_transform"
 require_relative "test_lowering"
 
 class MIRLowering
+    extend T::Sig
+
   include ZigTypeMapper
   include FsmLowering
   include TestLowering
@@ -61,6 +65,7 @@ class MIRLowering
   # Flush and return all pending hoisted Let statements accumulated since the
   # last flush. Called by lower_body before appending the main statement so
   # hoisted Lets precede the statement that uses them.
+  sig { returns(Array) }
   def flush_pending
     stmts = @pending_stmts
     @pending_stmts = []
@@ -90,6 +95,7 @@ class MIRLowering
   # field as lazy via AST::Node#lazy_fields. Single entry point so callers
   # never write the save/restore pattern by hand. New lazy positions are
   # added by adding a `lazy_fields` method to the relevant AST class.
+  sig { params(parent: T.untyped, field: T.untyped).returns(T.untyped) }
   def descend(parent, field)
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
@@ -105,6 +111,7 @@ class MIRLowering
   # Frame allocations are intentionally excluded: they're ephemeral (cleaned
   # up by frame mark/rewind) and don't need cleanup tracking. Only heap
   # allocations require hoisting so the checker can verify their cleanup paths.
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_allocates?(node)
     case node
     when MIR::DupeSlice    then node.alloc == :heap
@@ -141,6 +148,7 @@ class MIRLowering
   #   up on error). Use when the value is consumed by a TAKES arg, a struct/union
   #   field init, or any position where the receiver takes ownership on success.
   #   false (default) => emit Cleanup (defer; freed on all paths).
+  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.untyped).returns(T.untyped) }
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false)
     return expr unless mir_allocates?(expr) || call_union_return_needs_hoist?(expr, ast_node)
     @tmp_counter += 1
@@ -157,6 +165,7 @@ class MIRLowering
 
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(Hash)) }
   def hoist_cleanup_entry(mir, ast_node)
     case mir
     when MIR::DupeSlice, MIR::ConcatStr
@@ -226,6 +235,7 @@ class MIRLowering
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def lower(node)
     case node
 
@@ -360,6 +370,7 @@ class MIRLowering
   # Lower a body (array of statements) into an array of MIR nodes.
   # Flushes @pending_stmts before each statement so hoisted Lets (from
   # hoist_alloc calls inside lower()) precede the statement that uses them.
+  sig { params(stmts: T.untyped).returns(Array) }
   def lower_body(stmts)
     return [] unless stmts
     result = []
@@ -391,6 +402,7 @@ class MIRLowering
 
   # Like lower_body, but the last user-visible statement becomes break :label expr
   # instead of a regular statement. Used for IF/MATCH expression branches.
+  sig { params(stmts: T.untyped, label: T.untyped).returns(Array) }
   def lower_body_with_break(stmts, label)
     return [] unless stmts && !stmts.empty?
 
@@ -411,6 +423,7 @@ class MIRLowering
   end
 
   # Lower a full program into MIR::Program with standard imports + footer.
+  sig { params(node: T.untyped, use_c_allocator: T.untyped, needs_safety: T.untyped, use_debug_allocator: T.untyped).returns(T.untyped) }
   def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
     @use_debug_allocator = use_debug_allocator
     items = []
@@ -454,6 +467,7 @@ class MIRLowering
   # No standard imports or runtime footer -- the importing file provides those.
   #
   # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
+  sig { params(node: T.untyped).returns(Hash) }
   def lower_module(node)
     type_items = []
     fn_items = []
@@ -710,12 +724,9 @@ class MIRLowering
     elem_zig = case entry[:kind]
     when :list_with_elem_cleanup, :takes_slice
       et = ti&.element_type
-      if et
-        t = et.is_a?(Type) ? et : Type.new(et)
-        t.zig_type
-      end
+      et&.zig_type
     when :array_with_struct_strings
-      ti&.element_type ? Type.new(ti.element_type).zig_type : nil
+      ti&.element_type&.zig_type
     end
 
     entry[:zig_type] = zig_type || entry[:zig_type] || "UNKNOWN"
@@ -2293,8 +2304,8 @@ class MIRLowering
   # path (storage = :shared) instead of the polymorphic c.* path that
   # only works for non-Arc parameters.
   def with_cap_sync_storage(var_node)
-    if var_node.is_a?(AST::GetField) && var_node.full_type.is_a?(Type)
-      ft = var_node.full_type
+    ft = var_node.full_type
+    if var_node.is_a?(AST::GetField) && ft.is_a?(Type)
       sync = ft.sync
       storage = case ft.ownership
                 when :shared     then :shared
@@ -5157,13 +5168,13 @@ class MIRLowering
       # `elem` field carries the element type name so bc_emitter can
       # stamp the capture slot's struct hint when this gets bound via
       # `IF pool[id] AS env`.
-      elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
+      elem_t = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type)
       elem_name = elem_t.respond_to?(:resolved) ? elem_t.resolved.to_s : elem_t.to_s
       pool_get_def = POOL_METHODS["get"].merge(elem: elem_name)
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
     elsif ti&.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)
-      elem_zig = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type.zig_type
+      elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
       emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
@@ -6203,7 +6214,7 @@ class MIRLowering
         end
       end
 
-      key_zig = (kind == :numeric_map) ? receiver_type.key_type&.zig_type : nil
+      key_zig = (kind == :numeric_map) ? receiver_type.key_type.zig_type : nil
       val_zig = (kind == :numeric_map) ? receiver_type.value_type&.zig_type : nil
       template_kind = if shard_direct then :shard_direct_zig
                       elsif (receiver_type.sharded? || receiver_type.striped?) && op[:sharded_zig]
@@ -6307,7 +6318,7 @@ class MIRLowering
 
     # Resolve type placeholders from receiver (not allocators -- safe to inline)
     if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      pattern = pattern.gsub("{key_zig}", receiver_type.key_type&.zig_type || "i64")
+      pattern = pattern.gsub("{key_zig}", receiver_type.key_type.zig_type)
       pattern = pattern.gsub("{val_zig}", receiver_type.value_type&.zig_type || "f64")
     end
 
@@ -7185,6 +7196,7 @@ class MIRLowering
   # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
   # compile fails with "cannot dereference non-pointer type Arc(...)".
   # See transpile-tests/257_concurrent_capture_locked_param.cht.
+  sig { params(new_entries: T.untyped, capture_symbols: T.untyped, rt_override: T.untyped, blk: T.untyped).returns(T.untyped) }
   def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
     prev_map = @do_capture_map || {}
     prev_syms = @current_fiber_capture_symbols || {}

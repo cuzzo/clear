@@ -24,6 +24,8 @@ require_relative "../mir/mir_emitter"
 require_relative "../mir/mir_checker"
 
 class ZigTranspiler
+    extend T::Sig
+
   include ZigTypeMapper
 
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
@@ -51,6 +53,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
+  sig { params(cheat_code: T.untyped, source_dir: T.untyped, pkg_paths: T.untyped, use_c_allocator: T.untyped, use_debug_allocator: T.untyped, test_mode: T.untyped, strict_test: T.untyped, exact_tiers: T.untyped, main_tier: T.untyped, default_stack: T.untyped).returns(String) }
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
@@ -60,6 +63,7 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
+  sig { params(cheat_code: T.untyped, source_dir: T.untyped, pkg_paths: T.untyped, use_c_allocator: T.untyped, use_debug_allocator: T.untyped, test_mode: T.untyped, strict_test: T.untyped, exact_tiers: T.untyped, main_tier: T.untyped, default_stack: T.untyped).returns(String) }
   def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
@@ -127,6 +131,7 @@ class ZigTranspiler
   # annotator registered). Each emitted value's integer id is stable
   # across runs and matches runtime.zig's ErrorName_<N> constants for
   # the stdlib-seeded entries.
+  sig { returns(String) }
   def emit_error_name_enum
     lines = AST.enum_entries.map { |sym, id| "    #{sym} = #{id}," }
     <<~ZIG.chomp
@@ -143,6 +148,7 @@ class ZigTranspiler
     service: "Huge", unbounded: "Huge"
   }.freeze
 
+  sig { params(main_fn: T.untyped, override: T.untyped).returns(T.untyped) }
   def main_stack_variant(main_fn, override: nil)
     tier = override&.to_sym || main_fn&.stack_tier || :standard
     MAIN_STACK_VARIANTS.fetch(tier, "Standard")
@@ -150,6 +156,7 @@ class ZigTranspiler
 
   # Module entry point: transpile code as a Zig module (--module flag).
   # Emits @import("cheat_runtime") instead of runtime-header.zig, no runtime footer.
+  sig { params(cheat_code: T.untyped, source_dir: T.untyped, pkg_paths: T.untyped).returns(String) }
   def transpile_as_module(cheat_code, source_dir: @source_dir, pkg_paths: {})
     @source_dir = File.expand_path(source_dir)
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)

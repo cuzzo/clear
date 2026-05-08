@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative 'diagnostic_registry'
 
 module ErrorDefinitions
@@ -11,6 +13,8 @@ module ErrorDefinitions
 end
 
 module ErrorHelper
+    extend T::Sig
+
   include ErrorDefinitions
 
   # usage:
@@ -54,6 +58,7 @@ module ErrorHelper
 
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
+  sig { params(template: T.untyped, args: T.untyped, kwargs: T.untyped).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
     if !kwargs.empty? || template.include?("%{")
@@ -71,6 +76,7 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
+  sig { params(node_or_token: T.untyped, message: T.untyped).returns(T.nilable(Array)) }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -81,6 +87,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
+  sig { params(node_or_token: T.untyped, message: T.untyped).returns(Array) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -189,9 +196,15 @@ class SourceError < StandardError
 end
 
 class ParserError < SourceError
+    extend T::Sig
+
+  sig { returns(String) }
   def error_type; "Parser Error"; end
 end
 
 class CompilerError < SourceError
+    extend T::Sig
+
+  sig { returns(String) }
   def error_type; "Compiler Error"; end
 end

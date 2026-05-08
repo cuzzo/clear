@@ -67,7 +67,11 @@
 # regardless of shape (`[]` for nil / :current_scope, the source list
 # for tied). Walkers consume that uniform list and compare each
 # source's declaring scope against the destination.
+require "sorbet-runtime"
+
 class SymbolEntry
+    extend T::Sig
+
   attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,
                 :mutated,        # set by mark_var_mutated when the binding
@@ -102,10 +106,12 @@ class SymbolEntry
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,
   # annotator visit_*, escape_analysis) read and write this; both paths
   # delegate to `lifetime` so there's a single source of truth.
+  sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope
   end
 
+  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
   def non_escaping=(value)
     if value
       @lifetime = :current_scope
@@ -124,6 +130,7 @@ class SymbolEntry
   #                                 stands in as the source; declaring
   #                                 scope is the limit)
   #   { sources: [...] } -> the source list verbatim
+  sig { returns(T.untyped) }
   def lifetime_sources
     case @lifetime
     when nil           then []
@@ -137,6 +144,7 @@ class SymbolEntry
   # empty Array of source SymbolEntries. Empty / nil input returns nil
   # (unconstrained), so callers can pass through the result of
   # collecting captured bindings without a guard.
+  sig { params(sources: T.untyped).returns(T.nilable(Hash)) }
   def self.tied_lifetime(sources)
     return nil if sources.nil? || sources.empty?
     { sources: sources.uniq }

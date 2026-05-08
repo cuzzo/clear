@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "mir"
 require_relative "capture_strategy"
 
@@ -59,6 +61,8 @@ require_relative "capture_strategy"
 # unchanged -- that is the language-level COPY @list bug (258), not
 # this builder's concern.
 module FiberCtxBuilder
+    extend T::Sig
+
   # name           : String              -- captured outer-scope name
   # field_type_zig : String              -- Zig type expression for the ctx field
   # init_value_zig : String              -- Zig expression for the field init
@@ -98,6 +102,7 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
+  sig { params(analysis: T.untyped, body_access_prefix: T.untyped, promoted_names: T.untyped, fresh_heap_alloc: T.untyped, fresh_heap_id: T.untyped).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
                  fresh_heap_alloc: nil, fresh_heap_id: 0)
     captured = analysis&.captures || {}

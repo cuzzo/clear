@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "../ast/type"
 
 # Pass C: Escape Promotion Planning
@@ -17,6 +19,8 @@ require_relative "../ast/type"
 # Ruby just decides WHICH variables/values to call it on.
 
 module PromotionClassifier
+    extend T::Sig
+
   # Performance optimization: identifies frame variables that always escape via return
   # and upgrades them to heap at declaration (avoiding runtime CheatLib.promote calls).
   #
@@ -30,6 +34,7 @@ module PromotionClassifier
   # @param schema_lookup [Proc] lambda(type_name_sym) -> schema hash or nil
   # @return [Hash] { var_promotes:, struct_promote:, promote_return_ids:, unhandled_promote_fields: }
   #                or empty hash
+  sig { params(fn_node: T.untyped, schema_lookup: T.untyped).returns(Hash) }
   def self.classify(fn_node, schema_lookup:)
     return {} unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_has_escapable_return?(fn_node, schema_lookup)
 
@@ -141,6 +146,7 @@ module PromotionClassifier
   end
 
   # Filter var_promotes to only those referenced in a return expression.
+  sig { params(plan: T.untyped, return_value: T.untyped).returns(Hash) }
   def self.filter_for_return(plan, return_value)
     return plan if plan[:var_promotes]&.empty?
 
@@ -151,6 +157,7 @@ module PromotionClassifier
   end
 
   # Check if a specific return node needs struct_promote.
+  sig { params(plan: T.untyped, ret_node: T.untyped).returns(T::Boolean) }
   def self.needs_promote?(plan, ret_node)
     return true if plan[:promote_return_ids].nil?
     plan[:promote_return_ids].include?(ret_node.object_id)
@@ -264,12 +271,15 @@ end
 #   - union/struct schemas (for non-Copy checks)
 # =========================================================================
 module CleanupClassifier
+    extend T::Sig
+
   # Classify all bindings in a function that need cleanup.
   #
   # @param fn_node [AST::FunctionDef]
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   # @return [Hash] { var_name => entry_hash } or empty hash
+  sig { params(fn_node: T.untyped, fn_nodes: T.untyped, schema_lookup: T.untyped).returns(Hash) }
   def self.classify(fn_node, fn_nodes:, schema_lookup:)
     return {} unless fn_node.body
 
@@ -294,6 +304,7 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment nodes directly with { zig_type:, alloc: }.
+  sig { params(body: T.untyped, bindings: T.untyped, schema_lookup: T.untyped).returns(T.untyped) }
   def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)

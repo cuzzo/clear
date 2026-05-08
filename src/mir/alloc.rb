@@ -5,9 +5,14 @@
 # Loop frame analysis (mark_per_iter, container heap promotion) lives in
 # LoopFrameAnalysis (control_flow.rb), which runs in Pass 2 after
 # CleanupClassifier has finalized every binding's allocator.
+require "sorbet-runtime"
+
 module AllocHelper
+    extend T::Sig
+
   # Downgrade :frame to :stack for struct literals inside loop bodies.
   # The OS stack reclaims them each iteration; LLVM can SROA the fields.
+  sig { params(node: T.untyped, storage: T.untyped).returns(Symbol) }
   def downgrade_frame_to_stack(node, storage)
     T.bind(self, SemanticAnnotator) rescue nil
     return storage unless storage == :frame && (current_fn_ctx&.loop_depth || @loop_depth) > 0
@@ -20,6 +25,7 @@ module AllocHelper
   end
 
   # Finalize storage tier (stack/frame/heap) and record allocation effects.
+  sig { params(node: T.untyped, final_type: T.untyped).returns(Symbol) }
   def finalize_decl_storage!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n) }
@@ -35,6 +41,7 @@ module AllocHelper
   # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
   # Returns [is_resource, resource_close_zig].
   # Delegates to Type#resolve_resource_close for type-specific logic.
+  sig { params(node: T.untyped, final_type: T.untyped).returns(Array) }
   def resolve_resource_close(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     ft_obj = node.type_info

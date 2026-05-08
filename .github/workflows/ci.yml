@@ -58,6 +58,17 @@ jobs:
           SRB_YES: "1"
           NO_COLOR: "1"
 
+  rubocop-signatures:
+    name: Rubocop Sorbet/EnforceSignatures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - run: bundle exec rubocop --only Sorbet/EnforceSignatures src/
+
   ruby-integration:
     name: Ruby integration specs (builds binaries via clear)
     runs-on: ubuntu-latest

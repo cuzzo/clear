@@ -13,7 +13,11 @@
 #   can_write?(path)                   — any borrow edges to this path or ancestors?
 #   fork_lightweight / merge(other)    — branch analysis (IF/ELSE)
 
+require "sorbet-runtime"
+
 class OwnershipGraph
+    extend T::Sig
+
   Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
                     :move_line, :move_col, :move_action,
                     keyword_init: true) do
@@ -39,12 +43,14 @@ class OwnershipGraph
 
   # ── Edge index helpers ────────────────────────────────────────────
 
+  sig { params(edge: T.untyped).returns(Array) }
   def add_edge(edge)
     @edges << edge
     @edges_by_target[edge.to] << edge
     @edges_by_source[edge.from] << edge
   end
 
+  sig { params(edge: T.untyped).returns(T.nilable(OwnershipGraph::Edge)) }
   def remove_edge(edge)
     @edges.delete(edge)
     @edges_by_target[edge.to]&.delete(edge)
@@ -54,6 +60,7 @@ class OwnershipGraph
   # ── Core Operations ───────────────────────────────────────────────
 
   # Declare a new variable or field path.
+  sig { params(path: T.untyped, kind: T.untyped, type_info: T.untyped, scope_depth: T.untyped, line: T.untyped).returns(T.nilable(Set)) }
   def declare(path, kind: :affine, type_info: nil, scope_depth: 0, line: 0)
     @nodes[path] = Node.new(
       path: path, kind: kind, state: :live,
@@ -67,6 +74,7 @@ class OwnershipGraph
   end
 
   # Move ownership from source to target. Invalidates source and all children.
+  sig { params(from: T.untyped, to: T.untyped, at_token: T.untyped, action: T.untyped).returns(T.nilable(Set)) }
   def transfer(from, to, at_token: nil, action: :move)
     source = @nodes[from]
     return unless source
@@ -84,6 +92,7 @@ class OwnershipGraph
     invalidate(from, source)
   end
 
+  sig { params(path: T.untyped, at_token: T.untyped, action: T.untyped).returns(T.nilable(Set)) }
   def mark_moved(path, at_token: nil, action: :move)
     source = @nodes[path]
     return unless source
@@ -92,6 +101,7 @@ class OwnershipGraph
   end
 
   # Add a borrow edge. Returns nil on success, error string on conflict.
+  sig { params(borrower: T.untyped, source: T.untyped, mutable: T.untyped).returns(T.nilable(String)) }
   def borrow(borrower, source, mutable: false)
     source_node = @nodes[source]
     return "cannot borrow '#{source}': not declared" unless source_node
@@ -112,12 +122,14 @@ class OwnershipGraph
   end
 
   # Remove all borrow edges from a borrower.
+  sig { params(borrower: T.untyped).returns(Array) }
   def release_borrow(borrower)
     to_remove = @edges_by_source[borrower]&.select { |e| e.kind == :borrows || e.kind == :borrows_mut } || []
     to_remove.each { |e| remove_edge(e) }
   end
 
   # Drop a path and all owned children. Returns list of paths to emit cleanup for.
+  sig { params(path: T.untyped).returns(Array) }
   def drop(path)
     node = @nodes[path]
     return [] unless node && node.live?
@@ -137,6 +149,7 @@ class OwnershipGraph
   end
 
   # Check if a path can be written to (no active borrows on it or ancestors).
+  sig { params(path: T.untyped).returns(T::Boolean) }
   def can_write?(path)
     # Check this path and all ancestors
     current = path
@@ -149,11 +162,13 @@ class OwnershipGraph
   end
 
   # Is the path live?
+  sig { params(path: T.untyped).returns(T::Boolean) }
   def live?(path)
     @nodes[path]&.live? || false
   end
 
   # Is the path moved?
+  sig { params(path: T.untyped).returns(T::Boolean) }
   def moved?(path)
     @nodes[path]&.moved? || false
   end
@@ -162,6 +177,7 @@ class OwnershipGraph
 
   # Lightweight snapshot: only saves node states, not full graph.
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
+  sig { returns(Hash) }
   def fork_lightweight
     states = {}
     @nodes.each do |k, v|
@@ -176,6 +192,7 @@ class OwnershipGraph
   end
 
   # Restore from lightweight snapshot: reset states and truncate edges.
+  sig { params(snapshot: T.untyped).returns(T.untyped) }
   def restore_lightweight(snapshot)
     snapshot[:node_states].each do |path, saved|
       node = @nodes[path]
@@ -200,6 +217,7 @@ class OwnershipGraph
 
   # Merge a branch's graph state back. Both branches must agree on
   # moved/dropped state; conflicts are returned as error strings.
+  sig { params(other: T.untyped).returns(Array) }
   def merge(other)
     errors = []
     all_paths = (@nodes.keys + other.nodes.keys).uniq
@@ -240,11 +258,13 @@ class OwnershipGraph
   # ── Queries ───────────────────────────────────────────────────────
 
   # Get the node for a path.
+  sig { params(path: T.untyped).returns(T.untyped) }
   def [](path)
     @nodes[path]
   end
 
   # All paths that are children of the given path.
+  sig { params(path: T.untyped).returns(Array) }
   def owned_children(path)
     result = []
     collect_descendants(path, result)

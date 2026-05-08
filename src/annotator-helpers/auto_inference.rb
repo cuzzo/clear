@@ -24,6 +24,8 @@ require "sorbet-runtime"
 # See docs/agents/gradual-typing.md §4.1 for the constraint-collection
 # specification.
 class AutoConstraintCollector
+    extend T::Sig
+
   # `shape` (M2.2): nil for scalar slots; for empty `[]` / `{}`
   # initializers, one of `:list_element`, `:map_key`, `:map_value`.
   # Shape slots carry no initializer source — their evidence comes
@@ -58,6 +60,7 @@ class AutoConstraintCollector
   # Walk the program. Populates @slots with one entry per Auto slot
   # and accumulates source-node lists. Returns @slots so callers can
   # inspect / pass directly to the unifier.
+  sig { params(program_node: T.untyped).returns(Hash) }
   def collect!(program_node)
     register_signature_slots
     walk(program_node, current_fn: nil)
@@ -316,6 +319,8 @@ end
 # structured Result that M1.4 (fix emission) consumes and turns into
 # FixableFindings with the appropriate ranked options.
 class AutoUnifier
+    extend T::Sig
+
   # Aggregated unifier output. Each map keys by the same slot id
   # used in @slots: resolved → Resolution, ambiguous → Ambiguity,
   # unresolved → the original Slot (no observations gathered).
@@ -344,6 +349,7 @@ class AutoUnifier
     }
   end
 
+  sig { returns(AutoUnifier::Result) }
   def resolve!
     resolved   = {}
     ambiguous  = {}
@@ -471,6 +477,7 @@ class AutoUnifier
   # decl. Returns the list of decl_nodes whose stamping is
   # incomplete (only one half resolved) — the caller emits per-slot
   # unresolved findings for those.
+  sig { params(resolved_slots: T.untyped).returns(Hash) }
   def stamp_map_pairs!(resolved_slots)
     by_decl = Hash.new { |h, k| h[k] = {} }
     resolved_slots.each_value do |resolution|
@@ -506,11 +513,14 @@ end
 # corresponding slot's `sources` list. The unifier then resolves
 # them like any other slot.
 class ShapeEvidenceCollector
+    extend T::Sig
+
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
   end
 
+  sig { returns(Hash) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @slots
@@ -654,12 +664,15 @@ end
 #
 # Output: { slot_id => Set<op_symbol> }
 class OperatorEvidenceCollector
+    extend T::Sig
+
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
     @evidence = Hash.new { |h, k| h[k] = Set.new }
   end
 
+  sig { returns(Hash) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @evidence

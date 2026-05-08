@@ -5,9 +5,12 @@ require_relative "../ast/type"
 require 'set'
 
 module PipeAnalysis
+    extend T::Sig
+
   # =========================================================
   # SMOOTH OPERATOR (|>)
   # =========================================================
+  sig { params(node: T.untyped).returns(Integer) }
   def visit_Smooth(node)
     T.bind(self, SemanticAnnotator) rescue nil
     @smooth_depth += 1
@@ -615,7 +618,7 @@ module PipeAnalysis
     end
 
     # Result type is the element type of the nested array
-    nested_element_type = expr_type.element_type.resolved
+    nested_element_type = T.must(expr_type.element_type).resolved
     node.full_type = :"#{nested_element_type}[]"
     node.right.full_type = node.right.expression.full_type
     node.storage = :frame

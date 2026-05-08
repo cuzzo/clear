@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require "set"
 
 class CircularDependencyError < StandardError; end
@@ -6,6 +8,8 @@ class CircularDependencyError < StandardError; end
 # Orchestrates multi-file compilation with a shared module cache.
 # Prevents circular dependencies and compiles each .cht file exactly once.
 class ModuleImporter
+    extend T::Sig
+
   CompiledModule = Struct.new(
     :ast,
     :global_scope,    # annotator's global Scope (for importing symbols)
@@ -38,6 +42,7 @@ class ModuleImporter
   #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.cht
   #
   # @param pkg_name [String] Package name (e.g. "math", "testing")
+  sig { params(pkg_name: T.untyped, caller_dir: T.untyped).returns(ModuleImporter::CompiledModule) }
   def compile_package(pkg_name, caller_dir: @base_dir)
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
     unless path
@@ -48,6 +53,7 @@ class ModuleImporter
     compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
   end
 
+  sig { params(pkg_name: T.untyped).returns(T.nilable(String)) }
   def resolve_stdlib_package(pkg_name)
     return nil unless @stdlib_root
     candidate = File.join(@stdlib_root, pkg_name.to_s, 'src', 'lib.cht')
@@ -61,14 +67,16 @@ class ModuleImporter
   # (no separate .zig file is produced for them), whereas
   # explicitly-registered packages are emitted as `@import("name.zig")`
   # so an outer `build.zig` can orchestrate per-package compilation.
+  sig { params(pkg_name: T.untyped).returns(T::Boolean) }
   def stdlib_package?(pkg_name)
-    !@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?
+    !!(!@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?)
   end
 
   # Compile a .cht file and return a CompiledModule (cached after first call).
   #
   # @param path [String] Relative or absolute path to the .cht file
   # @param caller_dir [String] Directory of the file issuing the REQUIRE
+  sig { params(path: T.untyped, caller_dir: T.untyped).returns(ModuleImporter::CompiledModule) }
   def compile_file(path, caller_dir: @base_dir)
     abs_path = File.expand_path(path, caller_dir)
 
@@ -119,6 +127,7 @@ class ModuleImporter
   # (gradual-typing.md §7). The importer rejects with a diagnostic
   # that points the user at running `clear fix --apply` on the
   # imported module before re-importing.
+  sig { params(ast: T.untyped, abs_path: T.untyped).returns(Array) }
   def reject_auto_in_public_signatures!(ast, abs_path)
     rel_path = File.basename(abs_path)
     ast.statements.each do |stmt|
@@ -145,8 +154,9 @@ class ModuleImporter
     end
   end
 
+  sig { params(t: T.untyped).returns(T::Boolean) }
   def auto_type?(t)
-    t.is_a?(Type) && t.auto?
+    !!(t.is_a?(Type) && t.auto?)
   end
 
   private
@@ -179,16 +189,11 @@ class ModuleImporter
     fn_sigs = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        fn_sigs[stmt.name] = fs
-      end
+      fs = FunctionSignature.new(params: [], return_type: :Any)
+      fs.needs_rt = stmt.needs_rt
+      fs.can_fail = stmt.can_fail
+      fs.effects = stmt.effects
+      fn_sigs[stmt.name] = fs
     end
 
     moved_guard_info = {}

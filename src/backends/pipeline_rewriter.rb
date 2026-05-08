@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "../ast/ast"
 require_relative "../ast/std_lib"
 
@@ -11,6 +13,8 @@ require_relative "../ast/std_lib"
 # Since we run after annotation, we manually stamp newly created nodes with
 # type and storage information so the transpiler can process them correctly.
 class PipelineRewriter
+    extend T::Sig
+
   FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp,
                     AST::SkipOp, AST::LimitOp].freeze
   TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::CountOp, AST::ReduceOp,
@@ -25,6 +29,7 @@ class PipelineRewriter
     @var_counter = 0
   end
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def rewrite!(node)
     return node unless node
 

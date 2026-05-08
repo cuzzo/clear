@@ -38,6 +38,8 @@
 #   - Continuation indent for arbitrary expression wrap.
 #   - Integer `_` separator normalization.
 
+require "sorbet-runtime"
+
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
 require_relative 'method_rewriter'
@@ -47,6 +49,8 @@ require 'strscan'
 require 'set'
 
 class Formatter
+    extend T::Sig
+
   class Error < StandardError; end
 
   INDENT = '  '
@@ -85,6 +89,7 @@ class Formatter
     ASSERT ASSERT_RAISES CAST
   ].to_set.freeze
 
+  sig { params(source: T.untyped).returns(String) }
   def self.format(source)
     new(source).format
   end
@@ -93,6 +98,7 @@ class Formatter
     @source = source
   end
 
+  sig { returns(String) }
   def format
     validate_parse!
     # Lint-fix pre-pass: drop unused MUTABLE keywords and redundant
@@ -128,6 +134,8 @@ end
 # String tokens are kept opaque: we don't decode escapes or desugar `${}`.
 # -----------------------------------------------------------------------
 class Formatter::FormatLexer
+    extend T::Sig
+
   Token = Struct.new(:type, :raw, :line, :col)
 
   NUMERIC_SUFFIX_RE = /i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze
@@ -140,6 +148,7 @@ class Formatter::FormatLexer
     @out  = []
   end
 
+  sig { returns(Array) }
   def tokenize
     until @s.eos?
       sl, sc = @line, @col
@@ -255,6 +264,8 @@ end
 #      for indent, normalizes blank lines, places comments.
 # -----------------------------------------------------------------------
 class Formatter::Emitter
+    extend T::Sig
+
   INDENT          = Formatter::INDENT
   OPEN_TERMINAL   = Formatter::OPEN_TERMINAL
   CLOSE_LEADING   = Formatter::CLOSE_LEADING
@@ -269,6 +280,7 @@ class Formatter::Emitter
     @tokens = tokens
   end
 
+  sig { returns(String) }
   def emit
     toks = @tokens.reject { |t| t.type == :WS }
     toks = collapse_newlines(toks)
@@ -296,6 +308,7 @@ class Formatter::Emitter
   # examples/json_parser/jsonToString JBool arm.) Excludes the case
   # where END is followed by a close-bracket — `BG { ... END }` keeps
   # the `}` on the next render line via CLOSE_LEADING anyway.
+  sig { params(toks: T.untyped).returns(Array) }
   def nl_after_end(toks)
     out = []
     i = 0

@@ -1,0 +1,37 @@
+inherit_from: .rubocop_todo.yml
+
+# Minimal Rubocop config — single purpose: gate that new method
+# definitions in src/ have a Sorbet `sig {}` block. We deliberately
+# DO NOT run general Rubocop style; that would conflict with the
+# project's existing patterns and add ongoing churn unrelated to
+# the typing migration.
+#
+# Run:  bundle exec rubocop src/
+# CI:   .github/workflows/ci.yml's `rubocop-signatures` job
+
+inherit_from: .rubocop_todo.yml
+
+plugins:
+  - rubocop-sorbet
+
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: disable
+  # Disable every cop by default — we only want the one below.
+  DisabledByDefault: true
+  Include:
+    - 'src/**/*.rb'
+  Exclude:
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+    - 'sorbet/**/*'
+
+Sorbet/EnforceSignatures:
+  Enabled: true
+  Include:
+    - 'src/**/*.rb'
+  # Currently we have 2144 unsigned methods. Forcing them all at
+  # once is unrealistic. The cop fires on every existing method
+  # without a sig — we'll address those in batches via the
+  # auto-generation tool. New methods landed via PR will be caught
+  # by CI immediately.

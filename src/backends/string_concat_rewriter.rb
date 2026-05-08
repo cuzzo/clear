@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
@@ -12,6 +14,9 @@ require_relative "../ast/type"
 # Any backend emits one allocation for all parts instead of N-1 nested concats.
 
 class StringConcatRewriter
+    extend T::Sig
+
+  sig { params(ast: T.untyped).returns(Array) }
   def rewrite!(ast)
     ast.statements.each { |stmt| rewrite_in_node!(stmt) }
   end

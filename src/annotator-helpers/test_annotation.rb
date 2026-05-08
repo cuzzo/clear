@@ -16,6 +16,8 @@ require 'set'
 # See examples/testing/*.cht for grammar examples.
 
 module TestAnnotation
+    extend T::Sig
+
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
   # Used by `validate_strict_io!` to demand a STUB for any reachable
   # IO call when strict-test mode is on.
@@ -23,6 +25,7 @@ module TestAnnotation
                    readLine readLinePrompt listDir listAll fileSize
                    socketRead socketWrite socketClose].to_set.freeze
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_TestBlock(node)
     T.bind(self, SemanticAnnotator) rescue nil
     with_new_scope do
@@ -34,6 +37,7 @@ module TestAnnotation
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_WhenBlock(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.setup.each { |s| visit(s) }
@@ -63,6 +67,7 @@ module TestAnnotation
   # bodies, AFTER EACH bodies, sibling LETs, and every TEST THAT
   # body inside the enclosing block. Lowering injects the actual
   # variable declarations at the top of each test body.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def visit_test_lets(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:lets)
@@ -83,6 +88,7 @@ module TestAnnotation
   # ALL bodies become standalone Zig test blocks but still need to be
   # annotated against the enclosing scope so type errors surface at
   # compile time.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def visit_test_hook_bodies(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:before_each)
@@ -92,6 +98,7 @@ module TestAnnotation
     (node.after_all   || []).each { |body| body.each { |s| visit(s) } }
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_TestThat(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit_stmts(node.body)
@@ -104,24 +111,28 @@ module TestAnnotation
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_BenchmarkStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_SmashStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_ProfileStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(Symbol) }
   def visit_StubDecl(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # Visit the value for type checking if it's an expression.
@@ -143,6 +154,7 @@ module TestAnnotation
   # has been stubbed in the enclosing WHEN block. Both runtime-level
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
+  sig { params(test_that: T.untyped, stubbed_fns: T.untyped).returns(T.untyped) }
   def validate_strict_io!(test_that, stubbed_fns)
     T.bind(self, SemanticAnnotator) rescue nil
     calls = scan_for_calls(test_that.body).first

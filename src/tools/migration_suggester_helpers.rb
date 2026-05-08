@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../annotator"
@@ -25,9 +27,12 @@ require_relative "../annotator"
 #                                              on each module) can be
 #                                              called as `self.foo`.
 module MigrationSuggesterHelpers
+    extend T::Sig
+
   # Shared `analyze` shape: parse + annotate + walk fns + collect.
   # Each suggester's `analyze(source)` calls this with `self`; the
   # suggester provides the per-fn policy via `analyze_fn`.
+  sig { params(source: T.untyped).returns(Array) }
   def run_analyze(source)
     tokens = Lexer.new(source).tokenize
     ast    = Parser.new(tokens, source).parse
@@ -52,6 +57,7 @@ module MigrationSuggesterHelpers
   # `classify_uses!` (also shared) handles the non-WITH cases
   # (Identifier disqualify, FuncCall/MethodCall arg disqualify,
   # ReturnNode disqualify).
+  sig { params(fn_node: T.untyped, annotator: T.untyped).returns(Array) }
   def analyze_fn(fn_node, annotator)
     candidates = {}
     walk_recursive(fn_node.body) do |node|
@@ -75,6 +81,7 @@ module MigrationSuggesterHelpers
   # yielded directly. Suggesters need to see WITH blocks nested inside
   # those BG bodies, so descend into VarDecl / BindExpr / Assignment
   # values too.
+  sig { params(body: T.untyped, visitor: T.untyped).returns(T.untyped) }
   def walk_recursive(body, &visitor)
     AST.walk_body(body) do |node|
       yield node
@@ -95,6 +102,7 @@ module MigrationSuggesterHelpers
   #   - ReturnNode value (binding escapes via RETURN)
   # Per-suggester WITH handling is dispatched to the suggester's
   # `classify_with_block!`.
+  sig { params(node: T.untyped, candidates: T.untyped).returns(T.nilable(Array)) }
   def classify_uses!(node, candidates)
     case node
     when AST::WithBlock
@@ -118,6 +126,7 @@ module MigrationSuggesterHelpers
   # Class-name-based control-flow detection. Used by the body-stmt
   # eligibility check to disqualify nested control-flow inside a WITH
   # body (the body shape we can't 1:1 rewrite into atomic ops).
+  sig { params(stmt: T.untyped).returns(T::Boolean) }
   def control_flow_stmt?(stmt)
     return false unless stmt.respond_to?(:class)
     name = stmt.class.name.to_s
@@ -133,6 +142,7 @@ module MigrationSuggesterHelpers
   # name anywhere? Used by both suggesters' body-eligibility checks
   # to detect bare alias references (which DISQUALIFY) vs field-only
   # references (which are eligible reads).
+  sig { params(expr: T.untyped, alias_name: T.untyped).returns(T::Boolean) }
   def references_alias?(expr, alias_name)
     found = false
     walk = lambda do |n|
@@ -156,6 +166,7 @@ module MigrationSuggesterHelpers
   # (atomic-ptr semantics: read any field of the snapshot); when set,
   # only the matching field is eligible (atomic-primitive semantics:
   # the single primitive field is the cell).
+  sig { params(expr: T.untyped, alias_name: T.untyped, field_name: T.untyped).returns(T::Boolean) }
   def rhs_uses_alias_only_for_field_get?(expr, alias_name, field_name = nil)
     eligible = true
     walk = lambda do |n|

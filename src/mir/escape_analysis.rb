@@ -13,16 +13,21 @@
 #   E3 - tag_transitive_provenance! propagate heap provenance to binding type_infos
 #         tag_carry_call_sites!     stamp heap provenance on carry-call expressions
 
+require "sorbet-runtime"
+
 require_relative "../ast/type"
 require_relative "../ast/ast"
 
 module EscapeAnalysis
+    extend T::Sig
+
   # ── Phase E1 ─────────────────────────────────────────────────────────────
 
   # Compute the set of functions whose return value is heap-owned.
   # Fixed-point iteration over the call graph.
   # Writes fn.return_provenance = :heap on each discovered function.
   # Returns a frozen Set of function names.
+  sig { params(fn_nodes: T.untyped).returns(Set) }
   def self.compute_heap_return_fns!(fn_nodes)
     heap_fns = fn_nodes.each_with_object(Set.new) do |(name, fn), s|
       s << name if fn&.return_provenance == :heap
@@ -75,6 +80,7 @@ module EscapeAnalysis
   # @param heap_fns       [Set]   function names with heap return_provenance (from E1)
   # @param promotion_plans [Hash] name -> PromotionClassifier plan hash
   # @return [Set<String>] BG-upgraded variable names (for insert_bg_escape_promote! filtering)
+  sig { params(fn_nodes: T.untyped, heap_fns: T.untyped, promotion_plans: T.untyped).returns(Set) }
   def self.analyze!(fn_nodes, heap_fns:, promotion_plans: {})
     all_bg_upgraded = Set.new
 
@@ -632,6 +638,7 @@ module EscapeAnalysis
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
   # @param heap_fns [Set]   function names with heap return_provenance (from E1)
+  sig { params(fn_nodes: T.untyped, heap_fns: T.untyped).returns(Hash) }
   def self.tag_transitive_provenance!(fn_nodes, heap_fns)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
@@ -641,7 +648,8 @@ module EscapeAnalysis
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+          ti = node.type_info
+          ti.provenance = :heap if ti.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             decl = e3_find_decl(fn.body, node.name)
             decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
@@ -673,6 +681,7 @@ module EscapeAnalysis
   # value. Params with declared sync (legacy) are not overwritten.
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
+  sig { params(fn_nodes: T.untyped).returns(T.untyped) }
   def self.propagate_caller_sync!(fn_nodes)
     return if fn_nodes.empty?
 
@@ -805,6 +814,7 @@ module EscapeAnalysis
   # Replaces MIRPass#mark_heap_carry_call_sites!
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
+  sig { params(fn_nodes: T.untyped).returns(T.nilable(Hash)) }
   def self.tag_carry_call_sites!(fn_nodes)
     carry_fns = fn_nodes.each_with_object(Set.new) do |(_, fn), s|
       s << fn.name.to_s if fn.respond_to?(:heap_carry_return) && fn.heap_carry_return

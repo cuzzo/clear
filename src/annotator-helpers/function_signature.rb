@@ -5,7 +5,11 @@
 # Carries both the static signature (params, return type, visibility) and
 # computed metadata (needs_rt, can_fail, return_provenance) that callers
 # need for code generation and cleanup planning.
+require "sorbet-runtime"
+
 class FunctionSignature
+    extend T::Sig
+
   # Static signature fields (set at creation)
   attr_reader :params, :visibility, :type_params, :reentrant
   attr_accessor :return_type, :return_lifetime, :return_strategy
@@ -46,6 +50,7 @@ class FunctionSignature
     @zig_pattern = zig_pattern
   end
 
+  sig { returns(FunctionSignature) }
   def dup
     FunctionSignature.new(
       params: @params, return_type: @return_type, return_lifetime: @return_lifetime,

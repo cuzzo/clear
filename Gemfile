@@ -26,5 +26,13 @@ group :development do
   gem 'sorbet', require: false
   gem 'sorbet-runtime'
   gem 'tapioca', require: false
+
+  # Rubocop with the rubocop-sorbet plugin. We don't run general
+  # Rubocop style — only the `Sorbet/EnforceSignatures` cop, which
+  # gates that every method definition has a `sig {}` block. This
+  # prevents new untyped methods from landing while we incrementally
+  # type the existing ~2100 methods.
+  gem 'rubocop', require: false
+  gem 'rubocop-sorbet', require: false
 end
 

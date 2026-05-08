@@ -18,6 +18,8 @@
 #
 # Runs AFTER annotation + plan computation, BEFORE transpilation.
 
+require "sorbet-runtime"
+
 require_relative "../ast/ast"
 
 # ==========================================
@@ -25,6 +27,8 @@ require_relative "../ast/ast"
 # ==========================================
 
 class BasicBlock
+    extend T::Sig
+
   attr_accessor :id, :stmts, :successors, :predecessors
 
   def initialize(id)
@@ -34,6 +38,7 @@ class BasicBlock
     @predecessors = []
   end
 
+  sig { params(block: T.untyped).returns(T.untyped) }
   def add_successor(block)
     @successors << block unless @successors.include?(block)
     block.predecessors << self unless block.predecessors.include?(self)
@@ -45,6 +50,8 @@ class BasicBlock
 end
 
 class FunctionCFG
+    extend T::Sig
+
   attr_reader :blocks, :entry, :exit_block, :fn_name
 
   def initialize(fn_name)
@@ -55,6 +62,7 @@ class FunctionCFG
     @exit_block = new_block  # virtual exit - all returns target this
   end
 
+  sig { returns(BasicBlock) }
   def new_block
     block = BasicBlock.new(@block_counter)
     @block_counter += 1
@@ -70,6 +78,7 @@ class FunctionCFG
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail.
   #   When provided, statements containing calls to these functions get an
   #   error edge to the exit block (models Zig try/error-unwind semantics).
+  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped).returns(FunctionCFG) }
   def self.build(fn_node, can_fail_fns: nil)
     cfg = new(fn_node.name)
     cfg.instance_variable_set(:@can_fail_fns, can_fail_fns)
@@ -81,6 +90,7 @@ class FunctionCFG
 
   private
 
+  sig { params(stmts: T.untyped, current_block: T.untyped, exit_target: T.untyped, cfg: T.untyped).returns(T.nilable(BasicBlock)) }
   def self.build_body(stmts, current_block, exit_target, cfg)
     stmts = [stmts] unless stmts.is_a?(Array)
     stmts.each do |stmt|
@@ -217,6 +227,7 @@ class FunctionCFG
   # can_fail function. Used to determine whether an error edge is needed.
   # Checks node.can_fail (stamped by annotator on stdlib/static calls) and
   # can_fail_fns set (user-defined functions computed by compute_can_fail!).
+  sig { params(node: T.untyped, can_fail_fns: T.untyped).returns(T::Boolean) }
   def self.stmt_can_fail?(node, can_fail_fns)
     return false unless node
     case node
@@ -278,6 +289,8 @@ end
 # whether a _moved guard is required at the point where the function returns.
 
 class OwnershipDataflow
+    extend T::Sig
+
   UNINIT      = :uninit
   OWNED       = :owned
   MOVED       = :moved
@@ -319,6 +332,7 @@ class OwnershipDataflow
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
+  sig { returns(OwnershipDataflow) }
   def analyze!
     # Initialize all blocks to empty state.
     @cfg.blocks.each do |b|
@@ -367,12 +381,14 @@ class OwnershipDataflow
   end
 
   # Ownership state at function exit (join of all paths reaching exit_block).
+  sig { returns(T.untyped) }
   def exit_states
     @block_in[@cfg.exit_block.id] || {}
   end
 
   # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
   # Backward-compatible: reads .state from OwnerEntry.
+  sig { returns(Hash) }
   def cleanup_summary
     summary = {}
     exit_states.each do |name, entry|
@@ -403,6 +419,7 @@ class OwnershipDataflow
   #      error unwind) -> no defer needed.
   #   3. Exception: MATCH TAKES unions that are moved on all paths still need
   #      a guard because non-AS branches don't extract ownership.
+  sig { params(fn_node: T.untyped, bindings: T.untyped).returns(Hash) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
 
@@ -451,6 +468,7 @@ class OwnershipDataflow
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
   # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
+  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped, schema_lookup: T.untyped).returns(OwnershipDataflow) }
   def self.analyze(fn_node, can_fail_fns: nil, schema_lookup: nil)
     cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
     new(cfg, fn_node, schema_lookup: schema_lookup).analyze!
@@ -939,6 +957,8 @@ end
 # Every use-after-free is a use-after-move.
 
 class UseAfterMoveChecker
+    extend T::Sig
+
   attr_reader :errors
 
   def initialize(fn_node, dataflow)
@@ -948,6 +968,7 @@ class UseAfterMoveChecker
   end
 
   # Run the check. Returns self for chaining.
+  sig { returns(UseAfterMoveChecker) }
   def check!
     # Walk the CFG blocks, check reads against per-statement state.
     @dataflow.instance_variable_get(:@cfg).blocks.each do |block|
@@ -967,6 +988,7 @@ class UseAfterMoveChecker
   end
 
   # Convenience: build dataflow + run check in one call.
+  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped, schema_lookup: T.untyped).returns(Array) }
   def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
     df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
     checker = new(fn_node, df)
@@ -1188,7 +1210,11 @@ end
 #
 module LoopFrameAnalysis
 
+  extend T::Sig
+
+
   # Entry point.  Call once per pass, after CleanupClassifier.
+  sig { params(fn_nodes: T.untyped).returns(Hash) }
   def self.analyze!(fn_nodes)
     fn_nodes.each_value do |fn|
       next unless fn.body
@@ -1199,11 +1225,13 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
+  sig { params(stmts: T.untyped).returns(T.nilable(Array)) }
   def self.walk_stmts!(stmts)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s) }
   end
 
+  sig { params(stmt: T.untyped).returns(T.nilable(Array)) }
   def self.walk_stmt!(stmt)
     case stmt
     when AST::WhileLoop, AST::WhileBindLoop
@@ -1230,6 +1258,7 @@ module LoopFrameAnalysis
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
+  sig { params(loop_node: T.untyped, body: T.untyped).returns(T.nilable(Array)) }
   def self.process_loop!(loop_node, body)
     return if loop_node.tight  # tight loops suppress all frame marks
 
@@ -1266,6 +1295,7 @@ module LoopFrameAnalysis
   # ── helpers: local name / frame-decl collection ──────────────────────────
 
   # Collect names declared directly in body (stop at nested loop / fn boundaries).
+  sig { params(body: T.untyped).returns(Set) }
   def self.collect_local_names(body)
     names = Set.new
     scan_direct(body) do |s|
@@ -1285,6 +1315,7 @@ module LoopFrameAnalysis
   # but location=nil (their storage field stays :stack after finalize_storage!).
   # Only includes types that actually make frame-arena allocations (collections,
   # strings) -- primitives like Int64 are excluded even when frame_provenance? is set.
+  sig { params(body: T.untyped, _local_names: T.untyped).returns(Array) }
   def self.local_frame_decls(body, _local_names)
     decls = []
     scan_direct(body) do |s|
@@ -1306,6 +1337,7 @@ module LoopFrameAnalysis
 
   # Does var_name appear as a value arg to a mutates_receiver call on an outer
   # container anywhere in the loop body (including nested loops)?
+  sig { params(var_name: T.untyped, body: T.untyped, local_names: T.untyped).returns(T::Boolean) }
   def self.escapes_to_outer?(var_name, body, local_names)
     found = T.let(false, T::Boolean)
     AST.walk_body(body) do |node|
@@ -1331,6 +1363,7 @@ module LoopFrameAnalysis
   # Identity check via `ident.symbol.reg` (set by the annotator) is the
   # authoritative locality answer — no need to re-derive it from string-name
   # matching against a recomputed local_names set.
+  sig { params(body: T.untyped).returns(T.untyped) }
   def self.promote_outer_mutations!(body)
     # Pre-collect the declaration AST nodes that live anywhere within this
     # loop's subtree. AST.walk_body is the existing deep walker; we only
@@ -1408,6 +1441,7 @@ module LoopFrameAnalysis
   # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
   # toString, etc.). The MIR cleanup-before-reassign uses the field's declared
   # allocator (heap), so the new value must also be heap to avoid a mismatch.
+  sig { params(body: T.untyped, local_names: T.untyped).returns(T.untyped) }
   def self.promote_outer_field_assigns!(body, local_names)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::Assignment)
@@ -1433,6 +1467,7 @@ module LoopFrameAnalysis
   # Set storage=:heap on an expression node so it uses heapAlloc.
   # Handles BinaryOp, StringConcat, FuncCall/MethodCall (via heap_dupe_result),
   # and nodes with a direct storage= accessor.
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   def self.promote_value_to_heap!(node)
     return unless node
     ti = node.type_info rescue nil
@@ -1469,6 +1504,7 @@ module LoopFrameAnalysis
   end
 
   # Promote a container Identifier's declaration to heap.
+  sig { params(ident_node: T.untyped).returns(T.untyped) }
   def self.promote_to_heap!(ident_node)
     decl_node = ident_node.symbol&.reg
     return unless decl_node
@@ -1484,6 +1520,7 @@ module LoopFrameAnalysis
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
   # nested loops and function definitions.
+  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.scan_direct(body, &block)
     return unless body.is_a?(Array)
     body.each do |s|
@@ -1511,6 +1548,7 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
+  sig { params(nodes: T.untyped, visited: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     return unless nodes
     nodes = [nodes] unless nodes.is_a?(Array)
@@ -1535,6 +1573,7 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
+  sig { params(body: T.untyped, fn_nodes: T.untyped).returns(Array) }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1555,6 +1594,7 @@ module LoopFrameAnalysis
 
   # Returns true when expr is a call to a frame-allocating function
   # (uses_frame=true and NOT heap-promoted on return).
+  sig { params(expr: T.untyped, fn_nodes: T.untyped).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     case expr
     when AST::FuncCall
@@ -1593,8 +1633,11 @@ end
 # Only RESTRICT and BORROWED create compile-time borrows. EXCLUSIVE, multiowned,
 # shared, and write_locked_read use runtime protection (locks / Rc / Arc).
 class BorrowChecker
+    extend T::Sig
+
   attr_reader :errors
 
+  sig { params(fn_node: T.untyped, schema_lookup: T.untyped).returns(Array) }
   def self.check(fn_node, schema_lookup:)
     checker = new(fn_node, schema_lookup: schema_lookup)
     checker.check!
@@ -1609,6 +1652,7 @@ class BorrowChecker
     @active_borrows = {} # { source_name => [{ kind: :mutable/:immutable }] }
   end
 
+  sig { returns(Array) }
   def check!
     check_stmts(@fn_node.body || [])
   end

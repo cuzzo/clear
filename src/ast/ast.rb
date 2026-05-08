@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "type"
 require_relative "schemas"
 
@@ -6,10 +8,13 @@ require_relative "schemas"
 # AST
 # ==========================================
 module AST
+    extend T::Sig
+
   # Walk all statements in a body, recursing into control flow branches.
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
+  sig { params(body: T.untyped, visitor: T.untyped).returns(T.nilable(Array)) }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -25,12 +30,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
+  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
+  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -48,6 +55,7 @@ module AST
     end
   end
 
+  sig { params(expr: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -69,6 +77,7 @@ module AST
   # gets its own transform_body call which handles its BGs separately;
   # nested BGs capture from their parent BG body's scope, not this
   # stmt's scope.
+  sig { params(stmt: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.each_bg_block_in_stmt(stmt, &block)
     case stmt
     when BgBlock, BgStreamBlock
@@ -85,6 +94,7 @@ module AST
     end
   end
 
+  sig { params(expr: T.untyped, block: T.untyped).returns(T.untyped) }
   def self._expr_each_bg_block_shallow(expr, &block)
     return unless expr
     case expr
@@ -107,6 +117,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
+  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -121,6 +132,7 @@ module AST
     end
   end
 
+  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
   def self._expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
@@ -158,6 +170,9 @@ module AST
   end
 
   module Locatable
+      extend T::Sig
+
+    sig { returns(Integer) }
     def line; token.line; end
     def column; token.column; end
     def token_value; token.value; end
@@ -185,16 +200,23 @@ module AST
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).
+    sig { params(val: T.untyped).returns(Type) }
     def full_type=(val)
       @type_object = val.is_a?(Type) ? val : Type.new(val)
     end
 
     # Returns the Type object directly. Callers use type_info for rich access
     # and == / .to_s / Type.new(full_type) for interop.
+    # Widened to T.untyped because @type_object is sometimes a Symbol
+    # (raw type alias before annotation resolves it) and sometimes a
+    # FunctionSignature (FunctionDef / ExternFnDecl). Caller-side
+    # `is_a?(Type) ? : Type.new(...)` defensive patterns rely on this.
+    sig { returns(T.untyped) }
     def full_type
       @type_object
     end
 
+    sig { params(val: T.untyped).returns(T.nilable(Type)) }
     def coerced_type=(val)
       return @coerced_type_object = nil if val.nil?
 
@@ -202,11 +224,13 @@ module AST
       @coerced_type_object = val.is_a?(Type) ? val : Type.new(val)
     end
 
+    sig { returns(T.untyped) }
     def coerced_type
       @coerced_type_object&.raw
     end
 
     # Use this to access the rich object for coerced types
+    sig { returns(T.nilable(Type)) }
     def coerced_type_info
       @coerced_type_object
     end
@@ -217,6 +241,7 @@ module AST
     # @param declared_type [Symbol, nil] The explicitly declared type (or nil/:Any for inference)
     # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
+    sig { params(declared_type: T.untyped).returns(Array) }
     def coerce!(declared_type)
       # fn_type must not be flattened to its return type — preserve the full Type object.
       return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
@@ -246,6 +271,7 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
+    sig { params(final_type: T.untyped, schema_lookup: T.untyped).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
       # Calculate slot size
@@ -365,13 +391,19 @@ module AST
     end
 
     # -- NEW PREFERRED ACCESSOR --
-    # Use this in new code to get the rich object
+    # Use this in new code to get the rich object.
+    # Widened to T.untyped because @type_object is sometimes a Symbol
+    # (raw type alias before annotation resolves it) — the defensive
+    # `Type.new(ti) if ti && !ti.is_a?(Type)` chain across promotion_plan
+    # / mir_pass / control_flow / annotator / mir_lowering relies on it.
+    sig { returns(T.untyped) }
     def type_info
       @type_object
     end
 
     # -- REFACTORED HELPERS --
     # Delegate to the new class
+    sig { returns(Symbol) }
     def resolved_type
       @type_object&.resolved
     end
@@ -380,10 +412,12 @@ module AST
       @type_object&.base_type
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def storage
       @storage_override || (@type_object && (@type_object.provenance || :stack))
     end
 
+    sig { params(val: T.untyped).returns(T.nilable(Symbol)) }
     def storage=(val)
       # Use a node-local override rather than mutating @type_object.provenance.
       # @type_object may be a shared Type (e.g. STRING_TYPE from std_lib, or the
@@ -395,6 +429,7 @@ module AST
     end
 
 
+    sig { returns(T.nilable(Symbol)) }
     def metatype
       return :lambda if self.is_a?(LambdaLit)
       return :named_function if self.is_a?(FunctionDef)

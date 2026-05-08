@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "./ast"
 require_relative "./lexer"
 require_relative "./error_registry"
@@ -10,6 +12,8 @@ require_relative "../annotator-helpers/fixable_helpers"
 # PARSER
 # ==========================================
 class Parser
+    extend T::Sig
+
   include ErrorHelper
   include FixableHelper
 
@@ -74,6 +78,7 @@ class Parser
   end
   self.gradual_mode = false
 
+  sig { returns(T.untyped) }
   def parse
     stmts = []
     stmts << parse_statement() while current.type != :EOF
@@ -3105,6 +3110,7 @@ class Parser
 
   # parse_striped_modifier! removed — striped is now :sharded(N) @locked composition
 
+  sig { returns(T.untyped) }
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
 
@@ -3266,6 +3272,7 @@ class Parser
   # is read-only, `:transaction` if any cell is MUTABLE. Annotator-
   # side validation (L5) enforces ON Conflict presence when
   # `snapshot_mode == :transaction`.
+  sig { params(with_token: T.untyped).returns(T.untyped) }
   def parse_snapshot_block(with_token)
     capabilities = []
     any_mutable = T.let(false, T::Boolean)
@@ -3331,6 +3338,7 @@ class Parser
   # Builds an AST::WithBlock with view_kind = :view / :materialized_view
   # and a single capability entry { capability: :VIEW | :MATERIALIZED_VIEW,
   # var_node:, alias: }. The optional END after `}` is consumed if present.
+  sig { params(with_token: T.untyped).returns(T.untyped) }
   def parse_view_block(with_token)
     view_kind = nil
     view_token = nil
@@ -3384,6 +3392,7 @@ class Parser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
+  sig { returns(Array) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3418,6 +3427,7 @@ class Parser
   # exactly { LockTimeout, MvccConflict, AtomicConflict }, and must NOT
   # handle Deadlock or LockCycle (those are inline-only — see #325 for
   # the error message).
+  sig { returns(T.untyped) }
   def parse_sync_policy_block
     sync_tok = consume(:KEYWORD, 'SYNC')
     consume(:KEYWORD, 'POLICY')
@@ -3442,6 +3452,7 @@ class Parser
   #   RETRY(N) THEN <action>                  -- sugar for ON Transient
   # Returns a Hash { selectors:, kinds:, types:, action:, retries:, ... } or nil.
   # Selector validation (existence, retry-is-Transient) runs in the annotator.
+  sig { returns(T.nilable(Hash)) }
   def parse_lock_error_clause
     if match?(:KEYWORD, 'ON')
       consume(:KEYWORD, 'ON')
@@ -3461,6 +3472,7 @@ class Parser
   end
 
   # Consume `RETRY '(' N ')' THEN` if present. Returns the N or nil.
+  sig { returns(T.nilable(Integer)) }
   def match_optional_retry!
     return nil unless match!(:KEYWORD, 'RETRY')
     consume(:CHAR, '(')
@@ -3477,6 +3489,7 @@ class Parser
   # selector; anything else is a type selector. Types are enum values
   # (no `:` prefix) per the unified error-system design; the 6 kind
   # names are effectively reserved.
+  sig { returns(Array) }
   def parse_error_selectors
     selectors = [parse_error_selector]
     while match!(:CHAR, ',')
@@ -3485,6 +3498,7 @@ class Parser
     selectors
   end
 
+  sig { returns(Hash) }
   def parse_error_selector
     unless match?(:TYPE_ID)
       error!(current, :EXPECTED_ERROR_SELECTOR)
@@ -3495,6 +3509,7 @@ class Parser
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
+  sig { returns(Hash) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       { action: :raise, token: previous }
@@ -3525,6 +3540,7 @@ class Parser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
+  sig { params(tok: T.untyped, first_attrs: T.untyped).returns(Array) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3563,6 +3579,7 @@ class Parser
     [dims[:ownership], dims[:sync], dims[:layout], dims[:lock_rank]]
   end
 
+  sig { params(tok: T.untyped, attrs: T.untyped, dims: T.untyped).returns(Symbol) }
   def apply_cap_dim!(tok, attrs, dims)
     dim = attrs[:dim]
     if dims[dim]
@@ -3574,6 +3591,7 @@ class Parser
   # Parse an optional `(rank: N)` argument after @locked / @writeLocked.
   # The N is an integer; sign and magnitude are free. Duplicate rank on
   # the same capability chain is an error.
+  sig { params(sigil_tok: T.untyped, attrs: T.untyped, dims: T.untyped).returns(T.nilable(Integer)) }
   def parse_lock_rank_arg!(sigil_tok, attrs, dims)
     return unless attrs[:dim] == :sync
     return unless attrs[:val] == :locked || attrs[:val] == :write_locked
@@ -3628,6 +3646,7 @@ class Parser
   # Returns { pinned: Bool, stack_size: Symbol|nil }.
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
+  sig { returns(Hash) }
   def parse_branch_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3671,6 +3690,7 @@ class Parser
     { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash }
   end
 
+  sig { returns(T.untyped) }
   def parse_do_block
     do_token = consume(:KEYWORD, 'DO')
     consume(:CHAR, '{')
@@ -3697,6 +3717,7 @@ class Parser
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
   # Returns { ..., stack_size_token: } where stack_size_token is the
   # token of the FIRST sigil that contributed a stack_size (or nil).
+  sig { returns(Hash) }
   def parse_bg_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3749,6 +3770,7 @@ class Parser
     { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: stack_size_token, can_smash_token: can_smash_token }
   end
 
+  sig { returns(T.untyped) }
   def parse_bg_block
     bg_token = consume(:KEYWORD, 'BG')
     if match?(:KEYWORD, 'STREAM')
@@ -3766,6 +3788,7 @@ class Parser
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
+  sig { returns(Array) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)
@@ -3777,6 +3800,7 @@ class Parser
 
   # Parse one statement from a BG block body.
   # If the expression is followed by AS or THEN, builds a ThenChain node.
+  sig { returns(T.untyped) }
   def parse_bg_body_stmt
     # Keywordless bind/assign: x = ..., x.field = ..., x[0] = ...
     if current.type == :VAR_ID
@@ -3821,6 +3845,7 @@ class Parser
     expr
   end
 
+  sig { params(bg_token: T.untyped).returns(T.untyped) }
   def parse_bg_stream_block(bg_token)
     consume(:KEYWORD, 'STREAM')
     consume(:CHAR, '{')
@@ -3829,6 +3854,7 @@ class Parser
     AST::BgStreamBlock.new(bg_token, body, nil)
   end
 
+  sig { returns(T.untyped) }
   def parse_yield_expr
     tok = consume(:KEYWORD, 'YIELD')
     expr = parse_expression
@@ -3836,6 +3862,7 @@ class Parser
     AST::YieldExpr.new(tok, expr)
   end
 
+  sig { returns(T.untyped) }
   def parse_next_expr
     tok = consume(:KEYWORD, 'NEXT')
     expr = parse_expression
@@ -3856,6 +3883,7 @@ class Parser
   # Deep-clone an AST node for compound assignment desugaring.
   # The target appears on both sides (LHS = target, RHS = target op expr),
   # so each side needs its own node to avoid double-visit issues.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def deep_clone_node(node)
     case node
     when AST::Identifier
@@ -3872,6 +3900,7 @@ class Parser
   # ── Test Framework Parsing ──────────────────────────────────────
 
   # TEST <name> DO ... END
+  sig { returns(T.untyped) }
   def parse_test_block
     tok = consume(:KEYWORD, 'TEST')
     name = consume(:TYPE_ID).value  # TestName is a TYPE_ID (capitalized)
@@ -3917,6 +3946,7 @@ class Parser
   # var binding but stored on the enclosing TEST/WHEN block rather
   # than emitted in setup, so lowering can inject a fresh evaluation
   # at the top of every TEST THAT.
+  sig { returns(T.untyped) }
   def parse_let_binding
     tok = consume(:KEYWORD, 'LET')
     name = consume(:VAR_ID).value
@@ -3928,6 +3958,7 @@ class Parser
 
   # Match `BEFORE EACH` or `AFTER EACH` as a two-keyword sequence. Used by
   # the test-block / when-block parsers; both share the same hook syntax.
+  sig { params(first: T.untyped, second: T.untyped).returns(T::Boolean) }
   def test_hook_match?(first, second)
     match?(:KEYWORD, first) && @tokens[@pos + 1]&.value == second
   end
@@ -3935,6 +3966,7 @@ class Parser
   # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
   # statement array. The kind sequence (BEFORE/AFTER + EACH/ALL) is
   # already validated by test_hook_match? at the call site.
+  sig { params(first: T.untyped, second: T.untyped).returns(Array) }
   def parse_test_hook(first, second)
     consume(:KEYWORD, first)
     consume(:KEYWORD, second)
@@ -3948,6 +3980,7 @@ class Parser
   end
 
   # WHEN "description" [TAGS [tag1, tag2, ...]] DO ... END
+  sig { returns(T.untyped) }
   def parse_when_block
     tok = consume(:KEYWORD, 'WHEN')
     desc = consume(:STRING).value
@@ -4014,6 +4047,7 @@ class Parser
   # clause is absent. Names are validated to be VAR_IDs (snake_case)
   # so `--tag slow` filtering can match unambiguously; allowing
   # arbitrary strings would invite typo-mismatches that pass silently.
+  sig { returns(Array) }
   def parse_when_tags
     return [] unless match!(:KEYWORD, 'TAGS')
     consume(:CHAR, '[')
@@ -4028,6 +4062,7 @@ class Parser
   end
 
   # TEST THAT "description" DO ... END
+  sig { returns(T.untyped) }
   def parse_test_that
     tok = consume(:KEYWORD, 'TEST')
     consume(:KEYWORD, 'THAT')
@@ -4044,6 +4079,7 @@ class Parser
   end
 
   # ASSERT_RAISES Kind, expr;  OR  ASSERT_RAISES Kind, ErrorName, expr;
+  sig { returns(T.untyped) }
   def parse_assert_raises
     tok = consume(:KEYWORD, 'ASSERT_RAISES')
     kind = consume(:TYPE_ID).value  # e.g., Input, System, Transient
@@ -4064,6 +4100,7 @@ class Parser
   end
 
   # BENCHMARK expr x<N>;
+  sig { returns(T.untyped) }
   def parse_benchmark_stmt
     tok = consume(:KEYWORD, 'BENCHMARK')
     expr = parse_expression
@@ -4080,6 +4117,7 @@ class Parser
   end
 
   # SMASH expr;
+  sig { returns(T.untyped) }
   def parse_smash_stmt
     tok = consume(:KEYWORD, 'SMASH')
     expr = parse_expression
@@ -4088,6 +4126,7 @@ class Parser
   end
 
   # PROFILE expr;
+  sig { returns(T.untyped) }
   def parse_profile_stmt
     tok = consume(:KEYWORD, 'PROFILE')
     expr = parse_expression
@@ -4099,6 +4138,7 @@ class Parser
   # STUB fn CAPTURES var;
   # STUB fn SEQUENCE [values];
   # STUB fn WITH %(params) -> expr;
+  sig { returns(T.untyped) }
   def parse_stub
     tok = consume(:KEYWORD, 'STUB')
     fn_name = consume(:VAR_ID).value

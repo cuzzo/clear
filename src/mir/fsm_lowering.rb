@@ -34,16 +34,20 @@ require_relative 'fsm_wrapper_emitter'
 #   default_fsm_lock_error_arm_split   -- default error-arm body when
 #                                          no ON clause is present
 module FsmLowering
+    extend T::Sig
+
   # The stackful capture_inits string starts with `.inner = ..., .alloc = ...`
   # followed by user captures. For FSM we pre-set those fields with their
   # explicit values in the struct-literal, so extract just the capture
   # portion (everything after the alloc init).
+  sig { params(capture_inits: T.untyped).returns(String) }
   def capture_inits_fsm(capture_inits)
     T.bind(self, MIRLowering) rescue nil
     # Drop leading ".inner = X.inner, .alloc = Y, " portion.
     parts = capture_inits.split(", ").drop(2)
     parts.empty? ? "" : parts.join(", ") + ","
   end
+  sig { params(code: T.untyped, promoted_names: T.untyped, ctx_var: T.untyped).returns(String) }
   def promote_fsm_decls_to_fields(code, promoted_names, ctx_var)
     T.bind(self, MIRLowering) rescue nil
     return code if promoted_names.empty?
@@ -79,6 +83,7 @@ module FsmLowering
   # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
   # below renders the same MIR to Zig text via MIREmitter. The
   # recursive emit path uses emit_step_stmts.
+  sig { params(stmts: T.untyped, no_result: T.untyped, ctx_id: T.untyped, exit_promote: T.untyped).returns(Array) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
     T.bind(self, MIRLowering) rescue nil
     flat_steps = []
@@ -157,6 +162,7 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
+  sig { params(step: T.untyped).returns(T.untyped) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step[:expr])
@@ -182,6 +188,7 @@ module FsmLowering
   # MIR::ExprStmt(value-as-statement). Statement-shaped nodes
   # (MIR::Let, MIR::Set, MIR::IfStmt, MIR::BgBlock, ...) pass
   # through unchanged.
+  sig { params(step: T.untyped, mir: T.untyped).returns(T.untyped) }
   def wrap_step_as_stmt(step, mir)
     T.bind(self, MIRLowering) rescue nil
     return nil if mir.nil?
@@ -200,6 +207,7 @@ module FsmLowering
   # no_result: true, or a [pre, result] tuple otherwise (where
   # `result` is the trailing `__ctx.inner.result = <expr>;`
   # assignment ready for splicing into the dispatch).
+  sig { params(stmts: T.untyped, no_result: T.untyped, ctx_id: T.untyped, exit_promote: T.untyped).returns(T.untyped) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
     T.bind(self, MIRLowering) rescue nil
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id, exit_promote: exit_promote)
@@ -209,6 +217,7 @@ module FsmLowering
       [render_mir_list(result[0]), render_mir_list(result[1])]
     end
   end
+  sig { params(mir_list: T.untyped).returns(String) }
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
     return "" if mir_list.nil? || mir_list.empty?
@@ -234,6 +243,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
+  sig { params(cap: T.untyped, with_node: T.untyped, ctx_id: T.untyped, captured: T.untyped).returns(T.nilable(Hash)) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||
@@ -307,6 +317,7 @@ module FsmLowering
   #   :goto_post  -> fail-step segment Gotos to the post-WITH
   #                  segment. Body is empty for :pass, the user
   #                  block for :block.
+  sig { params(clause: T.untyped, ctx_id: T.untyped, with_node: T.untyped, capture_map: T.untyped, pointer_captures: T.untyped, bg_rt: T.untyped, rt_name: T.untyped).returns(T.untyped) }
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
                                     capture_map:, pointer_captures:, bg_rt:,
                                     rt_name:)
@@ -350,6 +361,7 @@ module FsmLowering
 
   # Default error arm body when no clause is present: surface as a
   # generic LockError (body sets inner.result; exit_kind = :done).
+  sig { params(id: T.untyped).returns(Hash) }
   def default_fsm_lock_error_arm_split(id)
     T.bind(self, MIRLowering) rescue nil
     {

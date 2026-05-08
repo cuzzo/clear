@@ -20,9 +20,13 @@
 # IMPORTANT: This file must NOT require type.rb, annotator.rb, scope.rb,
 # or any analysis module. It depends only on mir.rb.
 
+require "sorbet-runtime"
+
 require_relative "mir"
 
 class MIREmitter
+    extend T::Sig
+
   attr_accessor :rt_name
 
   def initialize
@@ -32,6 +36,7 @@ class MIREmitter
 
   # Emit Zig code from an MIR node. Returns a String.
   # Accepts MIR nodes or raw Strings (pre-computed Zig fragments).
+  sig { params(node: T.untyped).returns(T.nilable(String)) }
   def emit(node)
     case node
     when String then node
@@ -163,6 +168,7 @@ class MIREmitter
   # we only see them when a :bc-target lowering pipeline (e.g. bc_run.rb) still
   # routes through a Zig-producing lowering step that calls emit_expr. Fall
   # back to the Zig template from the registry so emission completes.
+  sig { params(node: T.untyped).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
@@ -176,6 +182,7 @@ class MIREmitter
   # and use putDirect; otherwise pick sharded_zig (when the receiver
   # type is sharded/striped) or default zig. Substitutes positional
   # placeholders, allocator placeholders, and shard-direct identifiers.
+  sig { params(node: T.untyped).returns(String) }
   def emit_sharded_map_put(node)
     pattern = sharded_map_template(node).dup
     pattern = pattern
@@ -186,6 +193,7 @@ class MIREmitter
     sharded_map_substitute_common(pattern, node)
   end
 
+  sig { params(node: T.untyped).returns(String) }
   def emit_sharded_map_get(node)
     pattern = sharded_map_template(node).dup
     pattern = pattern
@@ -197,12 +205,14 @@ class MIREmitter
   # Pick the Zig template the lowering committed to. template_kind is
   # set on the node by mir_lowering after inspecting shard_context and
   # the receiver type.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def sharded_map_template(node)
     op = node.stdlib_def
     kind = node.template_kind || :zig
     op[kind] or raise "ShardedMap: op has no :#{kind} template (op keys=#{op.keys})"
   end
 
+  sig { params(pattern: T.untyped, node: T.untyped).returns(String) }
   def sharded_map_substitute_common(pattern, node)
     if node.shard_idx
       pattern = pattern
@@ -633,7 +643,7 @@ class MIREmitter
     cap = node.capture ? " |#{node.capture}|" : ""
     upd = if node.update
       # Strip trailing semicolon for update expression in while header
-      update_code = emit(node.update).chomp(";")
+      update_code = T.must(emit(node.update)).chomp(";")
       " : (#{update_code})"
     else
       ""
@@ -683,7 +693,7 @@ class MIREmitter
   def emit_break(node)
     parts = ["break"]
     parts << ":#{node.label}" if node.label
-    parts << emit(node.value) if node.value
+    parts << T.must(emit(node.value)) if node.value
     "#{parts.join(' ')};"
   end
 
@@ -727,7 +737,7 @@ class MIREmitter
   end
 
   def emit_defer(node)
-    body = emit(node.body)
+    body = T.must(emit(node.body))
     if body.include?("\n") || body.start_with?("{")
       "defer #{body}"
     else
@@ -736,7 +746,7 @@ class MIREmitter
   end
 
   def emit_errdefer(node)
-    body = emit(node.body)
+    body = T.must(emit(node.body))
     if body.include?("\n") || body.start_with?("{")
       "errdefer #{body}"
     else

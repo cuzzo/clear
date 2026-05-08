@@ -1,8 +1,12 @@
 # typed: true
+require "sorbet-runtime"
+
 require 'strscan'
 require 'set'
 
 class Lexer
+    extend T::Sig
+
   Token = Struct.new(:type, :value, :line, :column)
 
   # We use a hash for O(1) lookups
@@ -37,6 +41,7 @@ class Lexer
     @tokens = []
   end
 
+  sig { returns(Array) }
   def tokenize
     until @s.eos?
       # 1. Snapshot start column before scanning

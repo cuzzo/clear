@@ -1,6 +1,8 @@
 # typed: true
 # frozen_string_literal: true
 
+require "sorbet-runtime"
+
 require 'set'
 
 # Phase 3 effect lattice for CLEAR's concurrency model.
@@ -24,6 +26,8 @@ require 'set'
 # EffectSet is intentionally tiny and stateless. Pass instances by value;
 # operations return new sets. Same value, same set — `==` works.
 class EffectSet
+    extend T::Sig
+
   # True-Sync-Polymorphism (#327): the ?-form contention/blocking
   # effects are now spelled `contends_maybe` / `blocks_maybe` for
   # readability. The legacy spellings (`contention?`, `blocking?`)
@@ -52,6 +56,7 @@ class EffectSet
     @empty ||= new
   end
 
+  sig { params(effect: T.untyped).returns(T::Boolean) }
   def include?(effect)
     @effects.include?(effect)
   end
@@ -60,10 +65,12 @@ class EffectSet
     @effects.empty?
   end
 
+  sig { params(other: T.untyped).returns(EffectSet) }
   def union(other)
     EffectSet.new(@effects | other.effects)
   end
 
+  sig { params(other: T.untyped).returns(T::Boolean) }
   def ==(other)
     other.is_a?(EffectSet) && @effects == other.effects
   end
@@ -81,6 +88,7 @@ class EffectSet
     blocking blocks_maybe blocking?
   ].freeze
 
+  sig { returns(Array) }
   def to_a
     EFFECT_ORDER.select { |e| @effects.include?(e) }
   end

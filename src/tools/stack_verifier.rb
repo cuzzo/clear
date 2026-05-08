@@ -10,7 +10,11 @@
 #   report = verifier.analyze(fn_nodes: fn_nodes, source_file: "foo.cht")
 #   verifier.print_report(report)
 
+require "sorbet-runtime"
+
 class StackVerifier
+    extend T::Sig
+
   # Fiber stack tier budgets (total allocation minus 4 KB frame arena).
   TIER_BUDGET = {
     micro:    4096,           # 4 KB (no arena at micro tier)
@@ -28,11 +32,13 @@ class StackVerifier
   end
 
   # Run objdump once and cache the output.
+  sig { returns(String) }
   def objdump_output
     @objdump_output ||= `objdump -d #{@binary_path} 2>/dev/null`
   end
 
   # Parse objdump output and return per-function stack frame sizes.
+  sig { returns(Array) }
   def extract_frame_sizes
     output = objdump_output
     return [] if output.empty?
@@ -57,6 +63,7 @@ class StackVerifier
   end
 
   # Full analysis: extract frame sizes, compare against tiers.
+  sig { params(fn_nodes: T.untyped, source_file: T.untyped).returns(Hash) }
   def analyze(fn_nodes: nil, source_file: nil)
     frames = extract_frame_sizes
     report = { functions: [], warnings: [], source_file: source_file }
@@ -117,6 +124,7 @@ class StackVerifier
     report
   end
 
+  sig { params(report: T.untyped, io: T.untyped).returns(T.nilable(Array)) }
   def print_report(report, io: $stderr)
     return if report[:functions].empty?
 
@@ -145,6 +153,7 @@ class StackVerifier
   end
 
   # Returns true if any overflow errors were detected.
+  sig { params(report: T.untyped).returns(T.nilable(T::Boolean)) }
   def has_errors?(report)
     report[:warnings]&.any? { |w| w[:level] == :error }
   end
@@ -152,6 +161,7 @@ class StackVerifier
   # Verify that @reentrant:tailCall functions were actually TCO'd in the binary.
   # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
   # Returns array of { name:, tco_verified: bool, has_self_call: bool }
+  sig { params(fn_nodes: T.untyped).returns(Array) }
   def verify_tail_calls(fn_nodes)
     output = objdump_output
     return [] if output.empty?
@@ -205,6 +215,7 @@ class StackVerifier
   # Parse ALL functions from objdump: frame sizes and call edges.
   # Returns { frame_sizes: { addr => bytes }, call_graph: { addr => [addr, ...] },
   #           fn_names: { addr => name }, bg_entries: [addr, ...] }
+  sig { returns(T.nilable(Hash)) }
   def extract_full_call_graph
     output = objdump_output
     return nil if output.empty?
@@ -283,6 +294,7 @@ class StackVerifier
   #                                  :reentrant, so this path only
   #                                  matters as a sanity check)
   # Functions that trampoline off the fiber stack are treated as leaf nodes.
+  sig { params(entry_addr: T.untyped, graph_data: T.untyped, fn_nodes: T.untyped).returns(Integer) }
   def deepest_path_cost(entry_addr, graph_data, fn_nodes: nil)
     frame_sizes = graph_data[:frame_sizes]
     call_graph  = graph_data[:call_graph]
@@ -332,6 +344,7 @@ class StackVerifier
 
   # Compute optimal tier for the main fiber (clearMain entry point).
   # Returns { entry_name:, path_cost:, optimal_tier: } or nil if clearMain not found.
+  sig { params(fn_nodes: T.untyped).returns(T.nilable(Hash)) }
   def compute_main_optimal_tier(fn_nodes: nil)
     graph_data = extract_full_call_graph
     return nil unless graph_data
@@ -345,6 +358,7 @@ class StackVerifier
 
   # Compute optimal tiers for all BG entry functions in the binary.
   # Returns array of { bg_index:, entry_name:, path_cost:, optimal_tier:, current_tier: }
+  sig { params(fn_nodes: T.untyped).returns(Array) }
   def compute_optimal_tiers(fn_nodes: nil)
     graph_data = extract_full_call_graph
     return [] unless graph_data
@@ -371,6 +385,7 @@ class StackVerifier
   end
 
   # Map a byte cost to the smallest tier that fits.
+  sig { params(bytes: T.untyped).returns(Symbol) }
   def cost_to_tier(bytes)
     if bytes <= TIER_BUDGET[:micro]
       :micro
@@ -384,6 +399,7 @@ class StackVerifier
   end
 
   # Print optimal tier report.
+  sig { params(results: T.untyped, io: T.untyped).returns(T.nilable(Array)) }
   def print_tier_report(results, io: $stderr)
     return if results.empty?
 

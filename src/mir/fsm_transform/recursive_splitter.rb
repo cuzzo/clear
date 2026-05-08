@@ -37,6 +37,8 @@
 # kind-agnostic at the splitter level: classify_suspend produces
 # the appropriate tail variant).
 
+require "sorbet-runtime"
+
 require_relative "segments"
 
 module FsmTransform
@@ -45,6 +47,8 @@ module FsmTransform
     # counter. Segments are filled in any order (forward refs are
     # resolved by reserving an index, then filling later).
     class Builder
+        extend T::Sig
+
       attr_reader :segments, :synthetic_fields
 
       def initialize
@@ -67,6 +71,7 @@ module FsmTransform
       # Push a frame of alias overrides during a recursive emit call.
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
+      sig { params(overrides: T.untyped, blk: T.untyped).returns(Integer) }
       def with_alias_overrides(overrides, &blk)
         T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides
@@ -76,6 +81,7 @@ module FsmTransform
         @current_alias_overrides = prev
       end
 
+      sig { params(idx: T.untyped).returns(T.nilable(Hash)) }
       def stamp_overrides(idx)
         T.bind(self, T.untyped) rescue nil
         return if @current_alias_overrides.nil? || @current_alias_overrides.empty?
@@ -85,6 +91,7 @@ module FsmTransform
       # Synthetic ctx field decls produced by control-flow-form
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
+      sig { params(decl: T.untyped).returns(T.untyped) }
       def add_synthetic_field(decl)
         T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)
@@ -93,6 +100,7 @@ module FsmTransform
       # Reserve a segment index for later filling. Returns the
       # index. Callers MUST call `fill(idx, segment)` before the
       # builder is finalized.
+      sig { returns(Integer) }
       def reserve_index
         T.bind(self, T.untyped) rescue nil
         idx = @segments.length
@@ -101,6 +109,7 @@ module FsmTransform
       end
 
       # Fill a previously-reserved index with the actual segment.
+      sig { params(idx: T.untyped, stmts: T.untyped, tail: T.untyped).returns(Integer) }
       def fill(idx, stmts, tail)
         T.bind(self, T.untyped) rescue nil
         @segments[idx] = Segments::Segment.new(idx, stmts, tail)
@@ -109,6 +118,7 @@ module FsmTransform
       end
 
       # Allocate + fill in one step. Returns the index.
+      sig { params(stmts: T.untyped, tail: T.untyped).returns(Integer) }
       def push(stmts, tail)
         T.bind(self, T.untyped) rescue nil
         idx = reserve_index
@@ -116,6 +126,7 @@ module FsmTransform
         idx
       end
 
+      sig { returns(Array) }
       def finalize
         T.bind(self, T.untyped) rescue nil
         unfilled = @segments.each_with_index.select { |s, _| s == :placeholder }

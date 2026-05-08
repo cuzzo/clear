@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "ast/source_error"
 require_relative "ast/fixable_error"
 require_relative "ast/scope"
@@ -29,6 +31,8 @@ require_relative "annotator-helpers/auto_inference"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
+    extend T::Sig
+
   include ErrorHelper
   include FixableHelper
   include FunctionAnalysis
@@ -48,6 +52,7 @@ class SemanticAnnotator
 
   attr_reader :scope_stack
 
+  sig { returns(T.untyped) }
   def current_fn_ctx
     @function_context_stack.last
   end
@@ -125,6 +130,7 @@ class SemanticAnnotator
     setup_builtins
   end
 
+  sig { params(node: T.untyped).returns(Hash) }
   def annotate!(node)
     # Reset user-registered error types so state from prior runs (rspec
     # parallel, multi-program test harness) doesn't leak in. Stdlib
@@ -2598,8 +2604,9 @@ private
     # only the fold's analyzer knows whether this is :sum/:count/:max/...
     # Copying it onto node.type also propagates the kind to the binding's
     # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
-    if pipe.full_type.is_a?(Type) && pipe.full_type.observable_terminal
-      pipe_terminal = pipe.full_type.observable_terminal
+    pipe_ft = pipe.full_type
+    if pipe_ft.is_a?(Type) && pipe_ft.observable_terminal
+      pipe_terminal = pipe_ft.observable_terminal
       target_t = node.type.is_a?(Type) ? node.type : Type.new(node.type)
       # The pipe is the authority on terminal kind: only the fold's
       # analyzer knows whether this is :sum / :count / :max / ... .
@@ -2942,7 +2949,7 @@ private
       # tagged as a fn_ref so the transpiler emits `&fn_name`.
       node.full_type = Type.new(raw_type.raw)
       node.fn_ref = true
-    elsif raw_type.is_a?(Type) && raw_type.atomic? && raw_type.layout != :indirect
+    elsif raw_type.atomic? && raw_type.layout != :indirect
       # Atomics M1.5: a read of an `@shared:atomic` binding produces
       # the bare inner value (load semantics). Type-system-wise the
       # binding shows as the inner T at use sites — the Arc/Atomic
@@ -3525,7 +3532,7 @@ private
       indirect_payload = raw_expected.is_a?(Hash) && raw_expected[:kind] == :indirect_payload
       raw_for_check = indirect_payload ? raw_expected[:type] : raw_expected
       # Apply type param substitution (e.g. T → Number for generic unions)
-      expected_type = union_subst.any? ? apply_type_subst(raw_for_check, union_subst) : raw_for_check
+      expected_type = T.let(union_subst.any? ? apply_type_subst(raw_for_check, union_subst) : raw_for_check, T.untyped)
       visit(val_node)
       if indirect_payload
         val_node.needs_heap_create = true
@@ -5539,7 +5546,7 @@ private
     root_var = path.first.to_s
     borrowed_scope = lookup_scope_for(root_var)
     error!(node, :BORROWED_VAR_NOT_FOUND) if borrowed_scope.nil?
-    return if borrowed_scope.is_immutable?(root_var)
+    return if T.must(borrowed_scope).is_immutable?(root_var)
 
     lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
     err = @og.borrow(lhs_name, root_var, mutable: node.mutable)
@@ -6231,14 +6238,14 @@ private
         n.body.each { |s| traverse.call(s) }
       when AST::BgStreamBlock
         calls = scan_for_calls(n.body).first
-        raw = max_tier_for_calls(calls)
+        raw = T.let(max_tier_for_calls(calls), T.untyped)
         n.computed_stack_tier = (raw == :unbounded) ? :service : raw
         validate_fiber_stack!(n, calls, n.stack_size, false)
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
           calls = scan_for_calls(branch[:body]).first
-          raw = max_tier_for_calls(calls)
+          raw = T.let(max_tier_for_calls(calls), T.untyped)
           branch[:computed_stack_tier] = (raw == :unbounded) ? :service : raw
           validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
           branch[:body].each { |s| traverse.call(s) }

@@ -60,10 +60,14 @@
 #   UseAfterMoveChecker  -- use-after-move (Rule 1)
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
+require "sorbet-runtime"
+
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
 
 class MIRChecker
+    extend T::Sig
+
   attr_reader :errors
 
   def initialize(fn_name: nil)
@@ -77,6 +81,7 @@ class MIRChecker
   # and list literal that hasn't been hoisted yet.  Each phase task fixes a
   # category and re-enables the check for that category.  Once all violations
   # are resolved this parameter will be removed and the check always runs.
+  sig { params(fn_def: T.untyped, strict: T.untyped).returns(Array) }
   def check_fn!(fn_def, strict: false)
     @fn_name = fn_def.name
     @errors = []
@@ -135,6 +140,7 @@ class MIRChecker
     @errors
   end
 
+  sig { params(program: T.untyped, strict: T.untyped).returns(Array) }
   def check_program!(program, strict: false)
     all_errors = []
     program.items.each do |item|
@@ -192,6 +198,7 @@ class MIRChecker
   # added here, NOT in the rendering code.
   class FsmStructureError < StandardError; end
 
+  sig { params(structure: T.untyped, source: T.untyped).returns(NilClass) }
   def self.check_fsm_structure!(structure, source: nil)
     return unless structure
     captures = structure.captures || []
@@ -263,6 +270,7 @@ class MIRChecker
     nil
   end
 
+  sig { params(invariant: T.untyped, message: T.untyped, source: T.untyped).returns(String) }
   def self.format_fsm_error(invariant, message, source)
     loc = source&.line ? " at line #{source.line}" : ""
     "[FSM checker]#{loc} #{invariant}: #{message}"

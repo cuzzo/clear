@@ -24,7 +24,11 @@
 # statement's worth of side effects; expression ops carry one
 # value-producing fragment. The emitter dispatches on Struct class.
 
+require "sorbet-runtime"
+
 module FsmOps
+    extend T::Sig
+
   # =====================================================================
   # Statement ops
   # =====================================================================
@@ -129,34 +133,55 @@ module FsmOps
   # Convenience constructors (terser to write in std_lib.rb)
   # =====================================================================
   module DSL
+      extend T::Sig
+
     extend self
 
+    sig { params(field: T.untyped, value: T.untyped).returns(FsmOps::AssignField) }
     def assign_field(field, value);          AssignField.new(field, value); end
+    sig { params(name: T.untyped, zig_type: T.untyped, value: T.untyped).returns(FsmOps::LetConst) }
     def let_const(name, zig_type, value);    LetConst.new(name, zig_type, value); end
+    sig { params(fn: T.untyped, args: T.untyped).returns(FsmOps::ErrDeferCall) }
     def err_defer_call(fn, args);            ErrDeferCall.new(fn, args); end
+    sig { params(field: T.untyped).returns(FsmOps::ErrDeferFreeField) }
     def err_defer_free_field(field);         ErrDeferFreeField.new(field); end
+    sig { params(field: T.untyped).returns(FsmOps::DeferFreeField) }
     def defer_free_field(field);             DeferFreeField.new(field); end
+    sig { params(fn: T.untyped, args: T.untyped, is_try: T.untyped).returns(FsmOps::StmtCall) }
     def stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
+    sig { params(verb: T.untyped, waiter: T.untyped, extra_args: T.untyped).returns(FsmOps::IoSubmit) }
     def io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
       waiter_op = waiter.is_a?(String) ? StateField.new(waiter) : waiter
       IoSubmit.new(verb, waiter_op, extra_args)
     end
+    sig { params(field: T.untyped, sub: T.untyped, return_fn: T.untyped, return_args: T.untyped).returns(FsmOps::IfFieldSubLtZeroReturnCall) }
     def if_neg_return_call(field, sub, return_fn, return_args)
       IfFieldSubLtZeroReturnCall.new(field, sub, return_fn, return_args)
     end
 
+    sig { params(idx: T.untyped).returns(FsmOps::ArgRef) }
     def arg(idx);                            ArgRef.new(idx); end
+    sig { params(name: T.untyped).returns(FsmOps::StateField) }
     def state(name);                         StateField.new(name); end
+    sig { params(base: T.untyped, name: T.untyped).returns(FsmOps::SubField) }
     def subf(base, name);                    SubField.new(base, name); end
+    sig { params(name: T.untyped).returns(FsmOps::LocalRef) }
     def local(name);                         LocalRef.new(name); end
+    sig { params(expr: T.untyped).returns(FsmOps::AddrOf) }
     def addr(expr);                          AddrOf.new(expr); end
+    sig { params(zig: T.untyped).returns(FsmOps::ZigLit) }
     def lit(zig);                            ZigLit.new(zig); end
+    sig { params(zig_type: T.untyped, expr: T.untyped).returns(FsmOps::IntCast) }
     def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
+    sig { params(fn: T.untyped, args: T.untyped, is_try: T.untyped).returns(FsmOps::CallExpr) }
     def call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
+    sig { params(elem_type: T.untyped, count: T.untyped).returns(FsmOps::AllocExpr) }
     def alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
+    sig { params(base: T.untyped, end_expr: T.untyped).returns(FsmOps::SliceUntilIntCast) }
     def slice_intcast(base, end_expr);       SliceUntilIntCast.new(base, end_expr); end
+    sig { params(op: T.untyped, left: T.untyped, right: T.untyped).returns(FsmOps::BinOp) }
     def binop(op, left, right);              BinOp.new(op, left, right); end
   end
 
@@ -193,6 +218,8 @@ module FsmOps
   #
   # The emitter is stateless; create one per FSM body or reuse safely.
   class Emitter
+      extend T::Sig
+
     def initialize(ctx_id:, bg_rt:, arg_codes:)
       @ctx_id = ctx_id
       @bg_rt = bg_rt
@@ -201,11 +228,13 @@ module FsmOps
 
     # Render a list of statement ops into newline-joined Zig text
     # with each statement properly terminated. Empty list -> "".
+    sig { params(ops: T.untyped).returns(String) }
     def emit_stmts(ops)
       return "" if ops.nil? || ops.empty?
       ops.map { |op| emit_stmt(op) }.join("\n")
     end
 
+    sig { params(op: T.untyped).returns(String) }
     def emit_stmt(op)
       case op
       when AssignField
@@ -240,10 +269,12 @@ module FsmOps
     # method paths rooted at the FSM ctx (e.g.
     # `__FSM_CTX.rt.getSched().fsmSleepTask`). Limited to the fn
     # field; expression args use structured ops, not placeholders.
+    sig { params(fn_str: T.untyped).returns(String) }
     def resolve_fn(fn_str)
       fn_str.gsub("__FSM_CTX", ctx)
     end
 
+    sig { params(expr: T.untyped).returns(T.untyped) }
     def emit_expr(expr)
       case expr
       when ArgRef
@@ -338,6 +369,8 @@ module FsmOps
   # tree carries unsubstituted placeholders.
 
   class Lowerer
+      extend T::Sig
+
     def initialize(ctx_id:, bg_rt:, arg_mirs:)
       @ctx_id = ctx_id
       @bg_rt = bg_rt
@@ -345,11 +378,13 @@ module FsmOps
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
+    sig { params(ops: T.untyped).returns(Array) }
     def lower_stmts(ops)
       return [] if ops.nil? || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 
+    sig { params(op: T.untyped).returns(T.untyped) }
     def lower_stmt(op)
       case op
       when AssignField
@@ -397,6 +432,7 @@ module FsmOps
       end
     end
 
+    sig { params(expr: T.untyped).returns(T.untyped) }
     def lower_expr(expr)
       case expr
       when ArgRef
@@ -493,6 +529,7 @@ module FsmOps
   # The lowering composes these per step to populate FsmStructure
   # without a textual scan of the rendered Zig.
 
+  sig { params(ops_or_expr: T.untyped).returns(Array) }
   def self.referenced_state_fields(ops_or_expr)
     out = []
     walk(ops_or_expr) do |node|
@@ -501,6 +538,7 @@ module FsmOps
     out.uniq
   end
 
+  sig { params(ops: T.untyped).returns(Array) }
   def self.alloc_state_fields(ops)
     out = []
     Array(ops).each do |op|
@@ -511,6 +549,7 @@ module FsmOps
     out.uniq
   end
 
+  sig { params(ops: T.untyped).returns(Array) }
   def self.free_state_fields(ops)
     out = []
     Array(ops).each do |op|
@@ -522,6 +561,7 @@ module FsmOps
     out.uniq
   end
 
+  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
   def self.walk(node, &block)
     return unless node
     if node.is_a?(Array)

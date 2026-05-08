@@ -64,10 +64,13 @@ GEM
       prism (~> 1.7)
       sexp_processor (~> 4.8)
     ice_nine (0.11.2)
+    json (2.19.5)
+    language_server-protocol (3.17.0.5)
     launchy (3.1.1)
       addressable (~> 2.8)
       childprocess (~> 5.0)
       logger (~> 1.6)
+    lint_roller (1.1.0)
     logger (1.7.0)
     msgpack (1.8.0)
     netrc (0.11.0)
@@ -98,6 +101,7 @@ GEM
       parser (~> 3.3.0)
       rainbow (>= 2.0, < 4.0)
       rexml (~> 3.1)
+    regexp_parser (2.12.0)
     require-hooks (0.4.0)
     rexml (3.4.4)
     rspec (3.13.2)
@@ -113,6 +117,24 @@ GEM
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
     rspec-support (3.13.6)
+    rubocop (1.86.1)
+      json (~> 2.3)
+      language_server-protocol (~> 3.17.0.2)
+      lint_roller (~> 1.1.0)
+      parallel (>= 1.10)
+      parser (>= 3.3.0.2)
+      rainbow (>= 2.2.2, < 4.0)
+      regexp_parser (>= 2.9.3, < 3.0)
+      rubocop-ast (>= 1.49.0, < 2.0)
+      ruby-progressbar (~> 1.7)
+      unicode-display_width (>= 2.4.0, < 4.0)
+    rubocop-ast (1.49.1)
+      parser (>= 3.3.7.2)
+      prism (~> 1.7)
+    rubocop-sorbet (0.12.0)
+      lint_roller
+      rubocop (>= 1.75.2)
+    ruby-progressbar (1.13.0)
     ruby_parser (3.22.0)
       racc (~> 1.5)
       sexp_processor (~> 4.16)
@@ -172,6 +194,9 @@ GEM
     thread_safe (0.3.6)
     tsort (0.2.0)
     tty-which (0.5.0)
+    unicode-display_width (3.2.0)
+      unicode-emoji (~> 4.1)
+    unicode-emoji (4.2.0)
     virtus (2.0.0)
       axiom-types (~> 0.1)
       coercible (~> 1.0)
@@ -190,6 +215,8 @@ DEPENDENCIES
   parallel_rspec
   reek
   rspec
+  rubocop
+  rubocop-sorbet
   rubycritic
   simplecov
   simplecov-cobertura

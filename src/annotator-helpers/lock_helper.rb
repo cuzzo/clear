@@ -33,9 +33,12 @@ require "set"
 # Future Phase 3 (@locked(rank: N)) will slot in here too, adding
 # rank-based validation before the SCC step.
 module LockHelper
+    extend T::Sig
+
   LockEdge = Struct.new(:held, :acquired, :site_token, :fn_name, :opted_out, keyword_init: true)
 
   # Called once from SemanticAnnotator#initialize.
+  sig { returns(Hash) }
   def init_lock_analysis!
     T.bind(self, SemanticAnnotator) rescue nil
     @lock_direct_edges    ||= Hash.new { |h, k| h[k] = [] }
@@ -51,6 +54,7 @@ module LockHelper
   end
 
   # First declaration of T with a rank wins; subsequent mismatches error.
+  sig { params(type_sym: T.untyped, rank: T.untyped, node: T.untyped).returns(T.untyped) }
   def record_lock_type_rank!(type_sym, rank, node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless type_sym && rank
@@ -64,6 +68,7 @@ module LockHelper
 
   # For the Phase 3 ordering check: return the rank of a WITH capability's
   # lock type, or nil if the type has no rank declared anywhere.
+  sig { params(cap: T.untyped).returns(T.nilable(Integer)) }
   def rank_of_cap(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     t = lock_identity_of(cap)
@@ -71,6 +76,7 @@ module LockHelper
     @lock_type_ranks[t]
   end
 
+  sig { params(node: T.untyped, expanded_capabilities: T.untyped).returns(T.nilable(Array)) }
   def record_lock_clause_site!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
@@ -88,6 +94,7 @@ module LockHelper
   # same-name; does not chase aliases or cross function boundaries (Phase
   # 2 handles cross-function type-level cycles). Opt-outs downgrade to a
   # [Note].
+  sig { params(node: T.untyped, expanded_capabilities: T.untyped).returns(T.nilable(Array)) }
   def check_nested_lock_reacquire!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless @held_locks
@@ -115,6 +122,7 @@ module LockHelper
   # cycle detection covers those). POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE
   # on the inner WITH downgrades the error to a [Note] so the risk is
   # visible but not blocking.
+  sig { params(node: T.untyped, expanded_capabilities: T.untyped).returns(T.nilable(Array)) }
   def check_lock_rank_ordering!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless @held_lock_types && !@held_lock_types.empty?
@@ -147,6 +155,7 @@ module LockHelper
   # Extract the lock-identity symbol for a WITH capability. Returns the
   # inner type's base symbol (:Counter for Locked(Counter) or
   # @shared:locked Counter), or nil if we can't determine it.
+  sig { params(cap: T.untyped).returns(T.untyped) }
   def lock_identity_of(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     ti = cap[:resolved_type]
@@ -161,6 +170,7 @@ module LockHelper
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
+  sig { params(fn_name: T.untyped, cap: T.untyped, held_stack: T.untyped, escape: T.untyped).returns(T.untyped) }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
     T.bind(self, SemanticAnnotator) rescue nil
     t = lock_identity_of(cap)
@@ -177,6 +187,7 @@ module LockHelper
     end
   end
 
+  sig { params(fn_name: T.untyped, callee_name: T.untyped, held_stack: T.untyped, site_token: T.untyped).returns(Array) }
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
     T.bind(self, SemanticAnnotator) rescue nil
     held_stack.each do |held|
@@ -191,6 +202,7 @@ module LockHelper
   # fn's "transitive acquires" set contains every lock type it or any
   # transitive callee takes. Mirrors compute_needs_rt! / compute_can_fail!
   # structure.
+  sig { returns(Hash) }
   def propagate_lock_acquires!
     T.bind(self, SemanticAnnotator) rescue nil
     transitive = {}
@@ -215,6 +227,7 @@ module LockHelper
     @lock_transitive_acquires = transitive
   end
 
+  sig { returns(Hash) }
   def resolve_held_calls!
     T.bind(self, SemanticAnnotator) rescue nil
     @lock_held_calls.each do |fn, sites|
@@ -235,6 +248,7 @@ module LockHelper
   # are bugs). When true, includes every edge — used for handler
   # reachability analysis (opt-out edges are paths that CAN fire at
   # runtime, so ON :LockCycle handlers reaching them are live).
+  sig { params(include_opted_out: T.untyped).returns(Hash) }
   def build_lock_graph(include_opted_out: false)
     T.bind(self, SemanticAnnotator) rescue nil
     adj = Hash.new { |h, k| h[k] = Set.new }
@@ -253,6 +267,7 @@ module LockHelper
   end
 
   # Iterative Tarjan SCC. Returns array of SCCs (each an array of nodes).
+  sig { params(nodes: T.untyped, adj: T.untyped).returns(Array) }
   def tarjan_scc(nodes, adj)
     T.bind(self, SemanticAnnotator) rescue nil
     index = {}
@@ -305,6 +320,7 @@ module LockHelper
   end
 
   # Called as a post-pass once @call_graph is complete.
+  sig { returns(T.nilable(Array)) }
   def check_lock_cycles!
     T.bind(self, SemanticAnnotator) rescue nil
     propagate_lock_acquires!
@@ -323,6 +339,7 @@ module LockHelper
     check_lock_handler_reachability!
   end
 
+  sig { returns(T.nilable(Array)) }
   def check_lock_handler_reachability!
     T.bind(self, SemanticAnnotator) rescue nil
     return if @lock_clause_sites.nil? || @lock_clause_sites.empty?
@@ -353,6 +370,7 @@ module LockHelper
   #   - :Deadlock       iff any of the WITH's cap types has a graph self-loop
   # Each selector in the clause must expand to at least one type in this
   # set. A selector that expands to the empty set here is dead code.
+  sig { params(site: T.untyped, types_in_cycle: T.untyped, types_with_self: T.untyped).returns(T.untyped) }
   def verify_handler_reachability!(site, types_in_cycle, types_with_self)
     T.bind(self, SemanticAnnotator) rescue nil
     node    = site[:node]
@@ -399,6 +417,7 @@ module LockHelper
     end
   end
 
+  sig { params(scc: T.untyped, adj: T.untyped).returns(T::Boolean) }
   def scc_is_cyclic?(scc, adj)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if scc.length > 1

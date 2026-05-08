@@ -17,6 +17,8 @@
 #            category :lint | :ownership | :capability | :escape | :type
 #                     | :registry
 
+require "sorbet-runtime"
+
 require_relative "source_error"
 require_relative "diagnostic_registry"
 
@@ -69,6 +71,8 @@ class Fix
 end
 
 class FixableFinding
+    extend T::Sig
+
   # Ordered low-to-high; the set matches LSP's four DiagnosticSeverity
   # values (Hint, Information, Warning, Error). :error is the only
   # blocking level; everything else is advisory.
@@ -94,6 +98,7 @@ class FixableFinding
     # applicable fix; the message is still surfaced.
   end
 
+  sig { returns(T::Boolean) }
   def fatal?; @level == :error; end
 end
 
@@ -109,24 +114,31 @@ end
 # findings exist; `has_fatal?` / `fatal_count` expose that signal to
 # the CLI.
 module FixCollector
+    extend T::Sig
+
   @findings = nil
 
+  sig { returns(Array) }
   def self.enable!
     @findings = []
   end
 
+  sig { returns(T.untyped) }
   def self.disable!
     @findings = nil
   end
 
+  sig { returns(T::Boolean) }
   def self.enabled?
     !@findings.nil?
   end
 
+  sig { params(finding: T.untyped).returns(T.untyped) }
   def self.push(finding)
     @findings << finding if @findings
   end
 
+  sig { returns(Array) }
   def self.drain
     out = @findings || []
     @findings = [] if @findings

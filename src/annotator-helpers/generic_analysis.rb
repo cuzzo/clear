@@ -15,6 +15,8 @@ require_relative "../ast/ast"
 #   current_fn_ctx&.type_params        — Array<Symbol> of active fn type params
 #
 module GenericAnalysis
+    extend T::Sig
+
   BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
 
   # ----------------------------------------
@@ -26,6 +28,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
+  sig { params(node: T.untyped, type_params: T.untyped, kind: T.untyped).returns(Array) }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
@@ -64,6 +67,7 @@ module GenericAnalysis
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
+  sig { params(node: T.untyped, type_obj: T.untyped, is_param: T.untyped).returns(T.nilable(Array)) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless type_obj.is_a?(Type)
@@ -257,6 +261,7 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
+  sig { params(node: T.untyped, signature: T.untyped, actual_args: T.untyped, type_params: T.untyped).returns(Hash) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     subst = {}
@@ -280,6 +285,7 @@ module GenericAnalysis
     subst
   end
 
+  sig { params(node: T.untyped, signature: T.untyped, actual_args: T.untyped, type_params: T.untyped).returns(T.untyped) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     shared_args = T.let([], T::Array[T.untyped])
@@ -315,6 +321,7 @@ module GenericAnalysis
 
   # Recursively match param_type against actual_type to bind type params.
   # Handles both direct uses (T) and nested generic uses (Cache<T>).
+  sig { params(node: T.untyped, param_type: T.untyped, actual_type: T.untyped, type_params: T.untyped, subst: T.untyped).returns(T.untyped) }
   def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     p_res = param_type.resolved
@@ -345,6 +352,7 @@ module GenericAnalysis
   # Apply a substitution map to a type object.
   # e.g. apply_type_subst(Type(:T), { T: :Number }) → Type(:Number)
   #      apply_type_subst(Type(:"Cache<T>"), { T: :Number }) → Type(:"Cache<Number>")
+  sig { params(type_obj: T.untyped, subst: T.untyped).returns(Type) }
   def apply_type_subst(type_obj, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     return Type.new(:Any) if type_obj.nil?
@@ -370,7 +378,7 @@ module GenericAnalysis
       # Handle array suffix: T[] → String[] when T → String
       str = resolved.to_s
       if str.end_with?('[]')
-        inner = str[0..-3].to_sym
+        inner = T.must(str[0..-3]).to_sym
         if subst.key?(inner)
           return Type.new(:"#{subst[inner]}[]")
         end
@@ -379,7 +387,7 @@ module GenericAnalysis
       # Handle prefixed types: !T, ?T, ~T — substitute the inner type.
       prefix = str.match(/\A([!?~]+)/)&.[](1)
       if prefix
-        inner = str[prefix.length..].to_sym
+        inner = T.must(str[prefix.length..]).to_sym
         if subst.key?(inner)
           Type.new(:"#{prefix}#{subst[inner]}")
         else
@@ -391,17 +399,20 @@ module GenericAnalysis
     end
   end
 
+  sig { params(type: T.untyped).returns(T.untyped) }
   def generic_binding_value(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     generic_type_has_capabilities?(t) ? Type.new(t) : t.resolved
   end
 
+  sig { params(type: T.untyped).returns(T::Boolean) }
   def generic_shared_family_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
+    !!(type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/))
   end
 
+  sig { params(type: T.untyped).returns(Type) }
   def generic_shared_payload_binding(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
@@ -411,6 +422,7 @@ module GenericAnalysis
     t
   end
 
+  sig { params(left: T.untyped, right: T.untyped).returns(T::Boolean) }
   def same_generic_binding?(left, right)
     T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
@@ -423,6 +435,7 @@ module GenericAnalysis
       l.elem_sync == r.elem_sync
   end
 
+  sig { params(left: T.untyped, right: T.untyped).returns(T::Boolean) }
   def same_shared_call_capability?(left, right)
     T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
@@ -433,6 +446,7 @@ module GenericAnalysis
       l.elem_sync == r.elem_sync
   end
 
+  sig { params(type: T.untyped).returns(T::Boolean) }
   def generic_type_has_capabilities?(type)
     T.bind(self, SemanticAnnotator) rescue nil
     type.ownership != :affine ||
@@ -442,6 +456,7 @@ module GenericAnalysis
       !type.elem_sync.nil?
   end
 
+  sig { params(type: T.untyped).returns(String) }
   def generic_binding_source(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
@@ -469,6 +484,7 @@ module GenericAnalysis
     parts.join("")
   end
 
+  sig { params(type: T.untyped).returns(String) }
   def shared_call_capability_display(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
@@ -487,6 +503,7 @@ module GenericAnalysis
 
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
+  sig { params(signature: T.untyped, subst: T.untyped).returns(FunctionSignature) }
   def substitute_type_params(signature, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(
@@ -502,6 +519,7 @@ module GenericAnalysis
   # ==========================================
 
   # Validate stream type annotations on variable declarations.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def validate_stream_type!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type.is_a?(Type) && node.type.future?
@@ -516,6 +534,7 @@ module GenericAnalysis
   # After coerce! validates type compatibility, propagate declared-type metadata
   # into the value node so the transpiler sees the correct runtime type.
   # Handles: BgStreamBlock ~T[INF] retyping, shard_count, @shared promise ownership.
+  sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Type)) }
   def propagate_declared_type_to_value!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type.is_a?(Type)
@@ -545,6 +564,7 @@ module GenericAnalysis
   # Propagate collection, shard_count, soa, and sync metadata from the declared
   # type annotation (or inferred value type) into node.type_info and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
+  sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Symbol)) }
   def propagate_collection_metadata!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
@@ -591,6 +611,7 @@ module GenericAnalysis
   # Looks through OR expressions (BinaryOp :OR) to find the underlying
   # call — `x = failableFunc() OR default` should still propagate
   # heap_promoted from failableFunc's returns_promoted flag.
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   def propagate_call_flags!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if has_heap_promoted_call?(node.value)
@@ -601,6 +622,7 @@ module GenericAnalysis
 
   # Register container borrow in the OG when a binding receives a value
   # from container access (HashMap/Pool/List indexing, through OR).
+  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
   def register_container_borrow!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     container = find_container_source(node.value)
@@ -613,6 +635,7 @@ module GenericAnalysis
   # Walk through OR/OR_RESCUE to find the root container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
+  sig { params(expr: T.untyped).returns(T.nilable(String)) }
   def find_container_source(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless expr
@@ -654,6 +677,7 @@ module GenericAnalysis
   # OR/OR_RESCUE wrappers. Used by propagate_call_flags! and visit_BgBlock.
   # Both OR (orelse) and OR_RESCUE (catch) propagate because the transpiler
   # ensures fallback struct values also have their string fields duped to heap.
+  sig { params(expr: T.untyped).returns(T::Boolean) }
   def has_heap_promoted_call?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
@@ -669,6 +693,7 @@ module GenericAnalysis
   # Returns true when a BG block's last expression is a string that will be
   # frame-allocated and thus needs heap-duping before the fiber exits.
   # Mirrors bg_exit_needs_string_dupe? in MIRPass but runs at annotation time.
+  sig { params(expr: T.untyped).returns(T::Boolean) }
   def bg_exit_frame_string?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr

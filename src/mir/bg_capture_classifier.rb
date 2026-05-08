@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "capture_strategy"
 require_relative "../ast/scope"
 
@@ -33,6 +35,9 @@ require_relative "../ast/scope"
 # MIRPass's view of "we should suppress cleanup for this" structurally
 # impossible -- they read the same field.
 module BgCaptureClassifier
+    extend T::Sig
+
+  sig { params(fn_nodes: T.untyped, schema_lookup: T.untyped).returns(Hash) }
   def self.classify_all!(fn_nodes, schema_lookup: nil)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
@@ -53,6 +58,7 @@ module BgCaptureClassifier
   # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
   # or ConcurrentOp -- all use the same analysis machinery and now
   # share strategy classification.
+  sig { params(a: T.untyped, live_param_syms: T.untyped, schema_lookup: T.untyped).returns(T.untyped) }
   def self.classify_one!(a, live_param_syms = {}, schema_lookup: nil)
     return unless a && a.captures
     # Refresh capture_symbols against the live function-param entries
@@ -128,6 +134,7 @@ module BgCaptureClassifier
   # no live scope -- only @fn_nodes). The capture's nominal type comes
   # from the snapshot; sync/storage come from the live entry (post
   # propagate_caller_sync!).
+  sig { params(type_obj: T.untyped, sym: T.untyped).returns(T.untyped) }
   def self.resolve_capture_type(type_obj, sym)
     return nil unless type_obj
     base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)

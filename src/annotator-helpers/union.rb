@@ -5,9 +5,12 @@ require "sorbet-runtime"
 # Provides validation for union method requirements (UNION ... REQUIRES)
 # and union variant literal type-checking. Mixed into SemanticAnnotator.
 module UnionAnalysis
+    extend T::Sig
+
   # Validate that all required methods for a union type exist and have
   # compatible signatures. Synthesizes default functions for stubs with
   # default bodies that have no concrete override.
+  sig { params(node: T.untyped).returns(Array) }
   def validate_union_methods!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     union_name = node.name
@@ -87,6 +90,7 @@ module UnionAnalysis
 
   # Resolve enum or union variant access on a GetField node (TypeName.Variant).
   # Returns true if handled, false if the target is not an enum/union.
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def resolve_variant_access(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless node.target.is_a?(AST::Identifier)
@@ -133,6 +137,7 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
+  sig { params(node: T.untyped, schema: T.untyped).returns(Hash) }
   def validate_union_schema!(node, schema)
     T.bind(self, SemanticAnnotator) rescue nil
     if schema.nil?
@@ -165,6 +170,7 @@ module UnionAnalysis
 
   # Validate fields of an inline struct union variant: check for unknown fields,
   # missing required fields, and type-check each field value.
+  sig { params(node: T.untyped, expected_fields: T.untyped).returns(Hash) }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
     node.fields.each_key do |fname|

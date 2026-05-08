@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 module LSP
   # In-memory store of open documents. The LSP advertises full-sync
   # mode (`textDocumentSync: 1`) so `didChange` notifications carry
@@ -14,6 +16,8 @@ module LSP
   # the main message-loop thread. Re-analysis runs on a separate
   # thread but only reads the latest text snapshot.
   class DocumentStore
+      extend T::Sig
+
     Document = Struct.new(:uri, :text, :version, keyword_init: true) do
       # Cached findings + the version they reflect. Hover and
       # codeAction read these without re-analysing. Set by the Server
@@ -29,11 +33,13 @@ module LSP
     end
 
     # didOpen — new document arrives.
+    sig { params(uri: T.untyped, text: T.untyped, version: T.untyped).returns(LSP::DocumentStore::Document) }
     def open(uri, text, version)
       @docs[uri] = Document.new(uri: uri, text: text, version: version)
     end
 
     # didChange — full-sync replacement.
+    sig { params(uri: T.untyped, text: T.untyped, version: T.untyped).returns(T.nilable(LSP::DocumentStore::Document)) }
     def update(uri, text, version)
       doc = @docs[uri]
       return nil unless doc
@@ -46,22 +52,27 @@ module LSP
     end
 
     # didClose — drop the document.
+    sig { params(uri: T.untyped).returns(T.nilable(LSP::DocumentStore::Document)) }
     def close(uri)
       @docs.delete(uri)
     end
 
+    sig { params(uri: T.untyped).returns(T.untyped) }
     def get(uri)
       @docs[uri]
     end
 
+    sig { params(uri: T.untyped).returns(String) }
     def text(uri)
       @docs[uri]&.text
     end
 
+    sig { params(uri: T.untyped).returns(Integer) }
     def version(uri)
       @docs[uri]&.version
     end
 
+    sig { params(block: T.untyped).returns(Hash) }
     def each(&block)
       @docs.each_value(&block)
     end

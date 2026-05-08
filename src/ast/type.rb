@@ -1,10 +1,14 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "../annotator-helpers/function_signature"
 
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
 class Type
+    extend T::Sig
+
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
   attr_accessor :sync        # nil (default), :locked, :write_locked, :versioned, :atomic, :always_mutable, :local, :raw, :symbol
@@ -40,6 +44,7 @@ class Type
 
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
+  sig { params(op: T.untyped, left_type: T.untyped, right_type: T.untyped).returns(BinaryOpResult) }
   def self.binary_op(op, left_type, right_type)
     # Gradual-typing tolerance: if either operand is an unresolved
     # Auto, the body-validation pass would crash with
@@ -92,6 +97,7 @@ class Type
   # @param target_type [Type, Symbol, String] The declared/expected type
   # @return [String, nil] Error message or nil if coercion is valid
   #
+  sig { params(source_type: T.untyped, target_type: T.untyped).returns(T.nilable(String)) }
   def self.coerce_error(source_type, target_type)
     source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
@@ -115,6 +121,7 @@ class Type
 
   private
 
+  sig { params(t_left: T.untyped, t_right: T.untyped).returns(BinaryOpResult) }
   def self.resolve_numeric_op(t_left, t_right)
     lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
     rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
@@ -149,6 +156,7 @@ class Type
     BinaryOpResult.new(type: :Float64)
   end
 
+  sig { params(t_left: T.untyped, t_right: T.untyped, left_type: T.untyped, right_type: T.untyped).returns(BinaryOpResult) }
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
     lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
     rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
@@ -173,6 +181,7 @@ class Type
     BinaryOpResult.new(error: "Cannot add types: #{t_left} and #{t_right}")
   end
 
+  sig { params(from_type: T.untyped, to_type: T.untyped).returns(T::Boolean) }
   def self.safe_autocast?(from_type, to_type)
     return false if from_type.nil?
     from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
@@ -266,6 +275,7 @@ class Type
 
   # Allow code to compare this object directly to symbols/strings
   # e.g. if node.type == :Float64
+  sig { params(other: T.untyped).returns(T::Boolean) }
   def ==(other)
     # fn_types must never compare equal to a plain symbol (resolved returns the return type,
     # not a unique identity). Two fn_types are equal only when their raw hashes match.
@@ -277,10 +287,13 @@ class Type
     resolved == other.to_sym || @raw == other
   end
 
+  sig { returns(String) }
   def to_s; resolved.to_s; end
+  sig { returns(Symbol) }
   def to_sym; resolved; end
 
   # Backward API: Deprecate
+  sig { returns(Symbol) }
   def resolved
     # Logic moved from Locatable#resolved_type
     return @resolved_cache if @resolved_cache
@@ -293,10 +306,12 @@ class Type
   end
 
   # Backward API: Deprecate
+  sig { returns(Symbol) }
   def base_type
     resolved.to_s.sub(/\[.*\]$/, "").to_sym
   end
 
+  sig { returns(T::Boolean) }
   def primitive?
     AST::PRIMITIVE_TYPES.include?(resolved)
   end
@@ -304,6 +319,7 @@ class Type
   # ----------------------------------------------
   # Coercion helpers
   # ----------------------------------------------
+  sig { params(other_type: T.untyped).returns(T::Boolean) }
   def accepts?(other_type)
     # 0. Function type: must precede == shortcut (resolved strips fn signature to return type)
     return accepts_fn_type?(other_type) if fn_type?
@@ -344,6 +360,7 @@ class Type
   end
 
   # Used specifically to check if assigning an array too large to a fixed array
+  sig { params(other_type: T.untyped).returns(T.untyped) }
   def array_overflow?(other_type)
     return false if !other_type.array? || !self.array?
     return false if self.base_type != other_type.base_type
@@ -370,10 +387,12 @@ class Type
     Int8: -128, Int16: -32_768, Int32: -2_147_483_648, Int64: -9_223_372_036_854_775_808,
   }.freeze
 
+  sig { returns(T::Boolean) }
   def numeric?
     NUMERIC_TYPES.include?(resolved)
   end
 
+  sig { returns(T::Boolean) }
   def integer?
     INT_TYPES.include?(resolved)
   end
@@ -382,24 +401,29 @@ class Type
     SIGNED_INT_TYPES.include?(resolved)
   end
 
+  sig { returns(T::Boolean) }
   def unsigned_integer?
     UNSIGNED_INT_TYPES.include?(resolved)
   end
 
+  sig { returns(T::Boolean) }
   def float?
     FLOAT_TYPES.include?(resolved)
   end
 
+  sig { returns(T::Boolean) }
   def byte?
     resolved == :Byte
   end
 
+  sig { returns(T::Boolean) }
   def void?
     resolved == :Void
   end
 
   # Gradual-typing placeholder. True when this Type is an unresolved
   # `Auto` slot waiting for the inference pass to fill it in.
+  sig { returns(T::Boolean) }
   def auto?
     !!@is_auto
   end
@@ -411,27 +435,33 @@ class Type
   # which has no source token to point at.
   attr_accessor :auto_token
 
+  sig { returns(T::Boolean) }
   def fn_type?
     @raw.is_a?(FunctionSignature)
   end
 
+  sig { returns(T::Boolean) }
   def array?
     !!@is_array
   end
 
+  sig { returns(T::Boolean) }
   def string?
     resolved == :String || (array? && base_type == :Byte)
   end
 
+  sig { returns(T::Boolean) }
   def any?
     resolved == :Any
   end
 
+  sig { returns(T::Boolean) }
   def dynamic?
     # It is dynamic if it is an array, but has NO fixed capacity
     array? && capacity.nil?
   end
 
+  sig { returns(T::Boolean) }
   def fixed?
     # It is fixed if it is an array AND has a specific integer capacity (not [?] or [INF])
     array? && capacity.is_a?(Integer)
@@ -439,30 +469,36 @@ class Type
 
   # True when this is the legacy [?] marker (open stream element-type annotation).
   # Only meaningful as the tense_type of an open stream: ~T[?].
+  sig { returns(T::Boolean) }
   def open_stream_marker?
     array? && capacity == :STREAM_OPEN
   end
 
   # True when this is the [INF] marker (infinite stream element-type annotation).
   # Only meaningful as the tense_type of an infinite stream: ~T[INF].
+  sig { returns(T::Boolean) }
   def inf_stream_marker?
     array? && capacity == :INF
   end
 
+  sig { returns(T::Boolean) }
   def empty_list?
     # Handles the empty list literal "Any[]" or heap "%Any[]"
     # This is crucial for initializing typed arrays (e.g., `var x: Number[] = []`)
     resolved == :"Any[]"
   end
 
+  sig { returns(T::Boolean) }
   def heap?
     @provenance == :heap
   end
 
+  sig { returns(T::Boolean) }
   def frame?
     @provenance == :frame
   end
 
+  sig { returns(T::Boolean) }
   def rodata?
     @provenance == :rodata
   end
@@ -472,11 +508,13 @@ class Type
   alias frame_provenance?  frame?
   alias rodata_provenance? rodata?
 
+  sig { returns(T::Boolean) }
   def borrow_provenance?
     @provenance == :borrow
   end
 
   # Returns the allocator symbol for this provenance (:heap or :frame), or nil.
+  sig { returns(T.nilable(Symbol)) }
   def provenance_alloc
     case @provenance
     when :heap  then :heap
@@ -490,34 +528,42 @@ class Type
     @provenance
   end
 
+  sig { returns(T::Boolean) }
   def multiowned?
     @ownership == :multiowned
   end
 
+  sig { returns(T::Boolean) }
   def shared?
     @ownership == :shared
   end
 
+  sig { returns(T::Boolean) }
   def polymorphic_shared?
     !!@polymorphic_shared
   end
 
+  sig { returns(T::Boolean) }
   def frozen?
     @ownership == :frozen
   end
 
+  sig { returns(T::Boolean) }
   def split?
     @ownership == :split
   end
 
+  sig { returns(T::Boolean) }
   def link?
     @ownership == :link
   end
 
+  sig { returns(T::Boolean) }
   def locked?
     @sync == :locked
   end
 
+  sig { returns(T::Boolean) }
   def write_locked?
     @sync == :write_locked
   end
@@ -526,6 +572,7 @@ class Type
   # Readers see consistent snapshots via `WITH SNAPSHOT x AS y`;
   # writers do optimistic update via `WITH SNAPSHOT x AS MUTABLE y`
   # with `ON MvccConflict ...` for the retries-exhausted case.
+  sig { returns(T::Boolean) }
   def versioned?
     @sync == :versioned
   end
@@ -534,27 +581,33 @@ class Type
   # load/store/CAS/fetch_*). v0.2 surface limited to Int64, Float64,
   # Bool primitives. Composes with @shared (Arc<Atomic(T)>) in M1;
   # M2 will drop the Arc and tie the lifetime to declaring scope.
+  sig { returns(T::Boolean) }
   def indirect?
     @layout == :indirect
   end
 
+  sig { returns(T::Boolean) }
   def atomic?
     @sync == :atomic
   end
 
+  sig { returns(T::Boolean) }
   def local?
     @sync == :local
   end
 
+  sig { returns(T::Boolean) }
   def raw?
     @sync == :raw
   end
 
+  sig { returns(T::Boolean) }
   def symbol?
     @sync == :symbol
   end
 
   # True for any sync capability (excludes :raw and :symbol which are data-access modes, not locks)
+  sig { returns(T::Boolean) }
   def any_sync?
     !@sync.nil? && @sync != :raw && @sync != :symbol
   end
@@ -570,6 +623,7 @@ class Type
   # lowering bakes the sync/ownership wrappers into the `initCapacity`
   # receiver type and emits `Arc(Locked(Pool)).initCapacity(...)`, which
   # fails because `initCapacity` lives on the inner `Pool`.
+  sig { returns(Type) }
   def bare_data_type
     bare = Type.new(self)
     bare.ownership = :affine
@@ -588,37 +642,44 @@ class Type
     bare
   end
 
+  sig { returns(T::Boolean) }
   def any_rc?
     # SharedPromise uses its own ref-counting internally — it is NOT an Rc/Arc wrapper.
     return false if shared_promise? || split_open_stream?
     multiowned? || shared?
   end
 
+  sig { returns(T::Boolean) }
   def map?
     @is_map
   end
 
   # True when this is a numeric-keyed map (HashMap<Number,V> or HashMap<Int64,V>).
   # Backed by AutoHashMapUnmanaged — no key duplication, pure arena-allocated.
+  sig { returns(T::Boolean) }
   def numeric_map?
     @is_map && @key_type_raw && @key_type_raw != :String
   end
 
+  sig { returns(Type) }
   def key_type
     Type.new(@key_type_raw || :String)
   end
 
   # True when this is an explicit @pool (generational pool) collection.
+  sig { returns(T::Boolean) }
   def pool?
     @collection == :pool
   end
 
   # True when this is an explicit @list (heap list) collection.
+  sig { returns(T::Boolean) }
   def list_collection?
     @collection == :list
   end
 
   # True when this is an explicit @set (hash set) collection.
+  sig { returns(T::Boolean) }
   def set_collection?
     @collection == :set
   end
@@ -628,6 +689,7 @@ class Type
   # to ensure new collection types get consistent treatment automatically.
 
   # True for any collection type (HashMap, @pool, @list, @set).
+  sig { returns(T::Boolean) }
   def collection?
     map? || pool? || list_collection? || set_collection?
   end
@@ -650,6 +712,7 @@ class Type
   #
   # Adding a new collection = adding one branch here. The splitter
   # never inspects the type directly.
+  sig { returns(T.untyped) }
   def fsm_foreach_descriptor
     if pool?
       { kind: :pool_indexed, var_zig_type: element_type&.zig_type || "anyopaque" }
@@ -680,6 +743,7 @@ class Type
   # Used as the single lookup key for INDEX_OPS, COLLECTION_METHOD_CONFIGS, etc.
   # All type-to-dispatch mappings must go through here — never add new if/elsif
   # chains on type predicates in lowering or annotation code.
+  sig { returns(T.nilable(Symbol)) }
   def dispatch_key
     if numeric_map?         then :numeric_map
     elsif map?              then :string_map
@@ -696,6 +760,7 @@ class Type
   # Collections that need shared mutable state across call boundaries.
   # Passed by pointer (&) at call sites, use anytype params, tracked in
   # @current_fn_collection_params to prevent double-& in recursive calls.
+  sig { returns(T::Boolean) }
   def needs_pointer_passing?
     map? || pool?
   end
@@ -711,6 +776,7 @@ class Type
   # `name.destroy(<alloc>)` would emit a frame allocator for a wrapper
   # that was created on the heap -- a cross-allocator destroy that
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
+  sig { returns(T::Boolean) }
   def needs_heap_backing?
     pool? || sharded? || heap_provenance? || map? || tense_observable?
   end
@@ -718,6 +784,7 @@ class Type
   # True when this map type stores an allocator in its Zig struct initializer.
   # StringMaps/StripedMaps need .alloc = heapAlloc(); NumericMaps and
   # PartitionedMaps (shared-nothing sharded) don't have an alloc field.
+  sig { returns(T::Boolean) }
   def map_init_needs_alloc?
     return false unless map?
     return false if numeric_map?
@@ -729,6 +796,7 @@ class Type
   # before escaping its scope (return, BG capture, etc.).
   # Covers: @list (frame-backed buffer), string HashMap (frame-backed keys/buckets),
   # and strings ([]const u8 slices pointing into the frame arena).
+  sig { returns(T::Boolean) }
   def needs_escape_promotion?
     return false if sharded?  # sharded collections are always heap-backed
     list_collection? || (map? && !numeric_map?) || string?
@@ -763,6 +831,7 @@ class Type
   # True when this type is a resource (File, TCPClient, TCPServer, etc.)
   # Checks the explicit flag (set by annotator after resolve_resource_close)
   # and falls back to checking known resource type names.
+  sig { returns(T::Boolean) }
   def resource?
     @is_resource || RESOURCE_TYPES.include?(resolved)
   end
@@ -776,6 +845,7 @@ class Type
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
+  sig { params(schema_lookup: T.untyped).returns(Array) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
     return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
@@ -808,20 +878,24 @@ class Type
 
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
   # Declared as `MUTABLE futures: ~T[]@list = []`; populated via append(futures, BG { ... }).
+  sig { returns(T::Boolean) }
   def promise_list?
     future? && list_collection?
   end
 
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
+  sig { returns(T::Boolean) }
   def sharded?
     !@shard_count.nil?
   end
 
+  sig { returns(T::Boolean) }
   def soa?
     !!@soa
   end
 
   # Fixed-size SOA array without collection wrapper (T[N]@soa).
+  sig { returns(T::Boolean) }
   def fixed_soa?
     fixed? && soa? && !collection?
   end
@@ -829,56 +903,67 @@ class Type
   # A sharded collection with sync capability = lock-striped (skew-safe).
   # Replaces the old :striped(N) keyword — now expressed via composition:
   #   HashMap<V>:sharded(N) @locked → StripedStringMap
+  sig { returns(T::Boolean) }
   def striped?
     sharded? && any_sync?
   end
 
+  sig { returns(T.untyped) }
   def value_type
     return nil unless map?
     @value_type_obj ||= Type.new(@value_type_raw || :Any)
   end
 
   # Generic struct instance: Pair<Number>, Map<String, Number>
+  sig { returns(T::Boolean) }
   def generic_instance?
     !!@is_generic_instance
   end
 
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
+  sig { returns(Symbol) }
   def generic_base
     @generic_base_raw
   end
 
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
+  sig { returns(T.untyped) }
   def generic_args
     return nil unless @is_generic_instance
     @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
   end
 
   # TODO: keep metatype from ast, use that
+  sig { returns(T::Boolean) }
   def struct?
     !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense? && !fn_type?
   end
 
+  sig { returns(T::Boolean) }
   def optional?
     @is_optional
   end
 
+  sig { returns(T.untyped) }
   def wrapped_type
     return nil unless optional?
     @wrapped_type_obj ||= Type.new(@wrapped_type_raw || :Any)
   end
 
   # Error union types: !T (Zig-style error returns)
+  sig { returns(T::Boolean) }
   def error_union?
     @is_error_union
   end
 
+  sig { returns(T.untyped) }
   def payload_type
     return nil unless error_union?
     @payload_type_obj ||= Type.new(@payload_type_raw || :Any)
   end
 
   # Tense (Promise) types: ~T — a background task that will produce T
+  sig { returns(T::Boolean) }
   def tense?
     !!@is_tense
   end
@@ -886,6 +971,7 @@ class Type
   # Observable accumulator: ~T@observable.
   # The runtime backing is a single-writer snapshot (Observable<T>) or atomic
   # accumulator. Only such types may be the target of `WITH VIEW`.
+  sig { returns(T::Boolean) }
   def observable?
     !!@is_observable
   end
@@ -896,6 +982,7 @@ class Type
   # Captures the carve-out used by both Type#zig_type's observable
   # branch and CleanupClassifier's classify_observable so the
   # invariant lives in one place.
+  sig { returns(T::Boolean) }
   def tense_observable?
     return false unless tense? && observable?
     inner = tense_type
@@ -927,6 +1014,7 @@ class Type
   # class references resolve at first-call time, after src/ast/ast.rb
   # has finished loading. type.rb is required from inside ast.rb, so
   # AST::SumOp is not yet defined while type.rb's class body evaluates.
+  sig { returns(Hash) }
   def self.observable_terminals
     @observable_terminals ||= {
       sum: {
@@ -1000,9 +1088,11 @@ class Type
   # (and the existing observable_wrapper_zig method) can continue to
   # work without rewriting. Lazy via class method for the same load-order
   # reason as observable_terminals.
+  sig { returns(Hash) }
   def self.observable_wrappers
     @observable_wrappers ||= observable_terminals.transform_values { |e| e[:wrapper] }.freeze
   end
+  sig { params(tense_type: T.untyped).returns(String) }
   def observable_wrapper_zig(tense_type)
     # A2: a missing terminal stamp here means an upstream pass produced
     # an `~T@observable` Type without going through pipe_analysis's
@@ -1034,10 +1124,12 @@ class Type
   end
 
   # Preferred predicate name for ~T / stream-like future values.
+  sig { returns(T::Boolean) }
   def future?
     tense?
   end
 
+  sig { returns(T.untyped) }
   def tense_type
     return nil unless future?
     @tense_type_obj ||= Type.new(@tense_type_raw || :Void)
@@ -1045,45 +1137,52 @@ class Type
 
   # Finite dynamic stream: ~T[].
   # Used for lazy finite producers like ranges. NEXT returns ?T until exhausted.
+  sig { returns(T::Boolean) }
   def dynamic_stream?
-    future? && tense_type.dynamic? && !tense_type.optional? && !list_collection?
+    !!(future? && tense_type.dynamic? && !tense_type.optional? && !list_collection?)
   end
 
   # New syntax alias: ~?T[] means an open stream of T (NEXT returns ?T).
   # Parsed as future of ?T[] by the general type parser, then reinterpreted here.
+  sig { returns(T.nilable(Type)) }
   def optional_stream_shape_type
     return nil unless future? && tense_type.optional?
     wrapped = tense_type.wrapped_type
     wrapped if wrapped&.array?
   end
 
+  sig { returns(T::Boolean) }
   def open_stream_alias?
     shape = optional_stream_shape_type
     shape&.dynamic? || false
   end
 
+  sig { returns(T::Boolean) }
   def stream?
     dynamic_stream? || bounded_stream? || open_stream? || inf_stream? || split_open_stream?
   end
 
+  sig { returns(T::Boolean) }
   def split_open_stream?
     split? && open_stream?
   end
 
   # Bounded stream: ~T[N] or ~?T[N] — a fixed stream of N elements consumed via NEXT.
   # Distinct from a single promise (~T): NEXT can be called N times, not exactly once.
+  sig { returns(T::Boolean) }
   def bounded_stream?
     # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
     # even though String is internally []const u8 (a fixed array) - it's a Promise.
     !!(future? && (
       (tense_type.fixed? && !tense_type.string?) ||
-      (optional_stream_shape_type&.fixed? && !optional_stream_shape_type.string?)
+      ((oss = optional_stream_shape_type) && oss.fixed? && !oss.string?)
     ))
   end
 
   # Shared promise: ~T@shared — a memoized promise backed by Arc-style ref counting.
   # Multiple holders can call NEXT independently; NEXT is idempotent per handle.
   # NOT linearly affine — can be retained (cloned) without consuming it.
+  sig { returns(T::Boolean) }
   def shared_promise?
     future? && shared?
   end
@@ -1091,46 +1190,54 @@ class Type
   # Open stream: ~?T[] (preferred) or legacy ~T[?].
   # Generator-backed stream; NEXT returns ?T (nil when exhausted).
   # Resource semantics: call deinit() to free the heap-allocated buffer.
+  sig { returns(T::Boolean) }
   def open_stream?
     future? && (tense_type.open_stream_marker? || open_stream_alias?)
   end
 
   # The element type T in ~?T[] / ~T[?].
+  sig { returns(T.untyped) }
   def open_stream_element_type
     return nil unless open_stream?
-    return optional_stream_shape_type.element_type if open_stream_alias?
+    return T.must(optional_stream_shape_type).element_type if open_stream_alias?
     tense_type.element_type
   end
 
   # Infinite stream: ~T[INF] — a lazy rendezvous generator; NEXT returns T (never nil).
   # Generator and consumer rendezvous on each value: push() blocks until next() reads it.
   # Resource semantics: call deinit() to free the heap-allocated Inner.
+  sig { returns(T::Boolean) }
   def inf_stream?
     future? && tense_type.inf_stream_marker?
   end
 
   # The element type T in ~T[INF].
+  sig { returns(T.untyped) }
   def inf_stream_element_type
     return nil unless inf_stream?
     tense_type.element_type
   end
 
   # The element type T in ~T[N], or ?T in ~?T[N].
+  sig { returns(T.untyped) }
   def stream_element_type
     return nil unless bounded_stream?
-    if optional_stream_shape_type&.fixed?
-      Type.new(:"?#{optional_stream_shape_type.element_type.to_sym}")
+    oss = optional_stream_shape_type
+    if oss&.fixed?
+      Type.new(:"?#{T.must(oss.element_type).to_sym}")
     else
       tense_type.element_type
     end
   end
 
   # The capacity N in ~T[N] / ~?T[N].
+  sig { returns(T.untyped) }
   def stream_capacity
     return nil unless bounded_stream?
     optional_stream_shape_type&.capacity || tense_type.capacity
   end
 
+  sig { returns(T.nilable(Type)) }
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
@@ -1142,6 +1249,7 @@ class Type
     end
   end
 
+  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(Integer) }
   def slot_size(lookup_arg = nil, &lookup_block)
     resolver = lookup_arg || lookup_block
 
@@ -1151,7 +1259,7 @@ class Type
 
     # 2. Fixed Arrays (Recursion)
     if fixed?
-      return capacity * element_type.slot_size(resolver)
+      return capacity * T.must(element_type).slot_size(resolver)
     end
 
     # 3. Structs (The tricky part)
@@ -1171,6 +1279,7 @@ class Type
   end
 
   # TODO: In future, need to be able to call slot-size for small structs.
+  sig { returns(T::Boolean) }
   def requires_move?
     return false if fn_type?                # Function pointers are pointer-sized; no move semantics
     return false if bounded_stream?         # Bounded streams are consumed incrementally — not linearly affine
@@ -1188,6 +1297,7 @@ class Type
     !primitive?
   end
 
+  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(T::Boolean) }
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     return true if string?  # Zig strings ([]const u8) are trivially copyable (pointer + length)
@@ -1212,6 +1322,7 @@ class Type
   # Implicitly copyable: used for branch merge and loop checks.
   # Same as copyable? but excludes user structs — structs need explicit COPY.
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
+  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(T::Boolean) }
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     # Pool Id<T> handles are u64 indices — always Copy.
@@ -1254,6 +1365,7 @@ class Type
   # Mirror of Zig's needsPromotion comptime predicate.
   # Returns true if this type contains frame-arena data that must be
   # duped to heap before returning from a function.
+  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
   def needs_promotion?(schema_lookup = nil)
     return true if string? || list_collection? || (map? && !numeric_map?)
     if schema_lookup
@@ -1272,6 +1384,7 @@ class Type
   # Same as needs_promotion? but excludes bare strings (freed by
   # StringMap.freeUnionPayload inside collections, not at top level).
   # Plus: RC, NumericMap, Pool, Set.
+  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
   def needs_cleanup?(schema_lookup = nil)
     return true if any_rc? || link? || list_collection? || map? || pool? ||
                    set_collection? || (string? && heap_provenance?) ||
@@ -1294,6 +1407,7 @@ class Type
   #
   # This is the ownership-aware version of needs_cleanup?. It answers:
   # "if this variable is :live at scope exit, must we emit a defer?"
+  sig { params(allocator: T.untyped, schema_lookup: T.untyped).returns(T::Boolean) }
   def needs_explicit_cleanup?(allocator, schema_lookup = nil)
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
@@ -1328,10 +1442,9 @@ class Type
   end
 
   # Check if collection elements have heap internals (RC, resource, etc.)
+  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
   def elem_has_heap_internals?(schema_lookup = nil)
-    et = element_type
-    return false unless et
-    t = et.is_a?(Type) ? et : (Type.new(et) rescue nil)
+    t = element_type
     return false unless t
     return true if t.any_rc? || t.link? || t.any_sync? || t.resource?
     # Check struct/union element types via schema
@@ -1359,6 +1472,7 @@ class Type
   # :heap entry. With it here, the entry-derived allocator path is
   # self-consistent and the needs_heap_backing? guard becomes a defense-
   # in-depth backstop rather than the load-bearing path.
+  sig { params(schema_lookup: T.untyped).returns(Symbol) }
   def cleanup_allocator(schema_lookup = nil)
     return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
                      resource? || sharded? || striped? || link? ||
@@ -1376,6 +1490,7 @@ class Type
 
   # Check if a union variant type contains heap-allocated data (collections, maps, dynamic arrays).
   # Used to determine if a union needs cleanup.
+  sig { params(vt: T.untyped).returns(T::Boolean) }
   def self.variant_has_heap?(vt)
     return false unless vt
     # Single-type payload with @indirect: always heap (stored as *T pointer)
@@ -1399,6 +1514,7 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.type_info rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
+  sig { params(node: T.untyped).returns(T.untyped) }
   def self.from_node(node)
     return nil unless node
     t = node.respond_to?(:type_info) ? (node.type_info rescue nil) : node
@@ -1406,11 +1522,13 @@ class Type
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
   end
 
+  sig { params(value: T.untyped).returns(Symbol) }
   def ownership=(value)
     @zig_type_cache = nil
     @ownership = value
   end
 
+  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
@@ -1421,6 +1539,7 @@ class Type
 
   # Returns the Zig type string representation of this type.
   # Memoized for performance; cache is invalidated when location changes.
+  sig { params(is_param: T.untyped, is_field: T.untyped).returns(String) }
   def zig_type(is_param: false, is_field: false)
     return compute_zig_type(is_param: is_param, is_field: is_field) if is_param || is_field
     @zig_type_cache ||= compute_zig_type
@@ -1433,6 +1552,7 @@ class Type
   # @param current_storage [Symbol, nil] The current storage if already set
   # @return [Symbol] One of :stack, :frame, or :heap
   #
+  sig { params(size: T.untyped, current_storage: T.untyped).returns(Symbol) }
   def finalize_storage(size, current_storage = nil)
     # Frozen (compact buffer) always stays frozen
     return :frozen if frozen? || current_storage == :frozen
@@ -1558,14 +1678,15 @@ class Type
   # Array coercion. Called by accepts? when self.array?.
   def accepts_array?(other_type)
     # Any[] accepts stream types for append/list intrinsic matching
-    if element_type.any? && other_type.future?
+    et = T.must(element_type)
+    if et.any? && other_type.future?
       return true if other_type.dynamic_stream? || other_type.promise_list? ||
                      other_type.bounded_stream? || other_type.open_stream? ||
                      other_type.inf_stream?
     end
     return false unless other_type.array?
     return true  if other_type.empty_list?
-    return false unless element_type.accepts?(other_type.element_type)
+    return false unless et.accepts?(other_type.element_type)
     return true  if dynamic? && other_type.fixed?
     return other_type.capacity <= capacity if fixed? && other_type.fixed?
     dynamic? && other_type.dynamic?
@@ -1880,7 +2001,7 @@ class Type
       else
         if fixed_soa?
           # T[N]@soa:shared etc. — inner type is SoaList, not bare [N]T
-          base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+          base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
           inner_zig = "CheatLib.SoaList(#{base_zig})"
         else
           # Group 1 / Group 2 separation: the inner zig type is the data
@@ -1952,7 +2073,7 @@ class Type
 
     # 3b. Handle Pool / ShardedPool collection
     if pool?
-      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
       if soa?
         return "CheatLib.SoaPool(#{base_zig})"
       end
@@ -1961,13 +2082,13 @@ class Type
 
     # 3c. Handle @set collection
     if set_collection?
-      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Set(#{base_zig})"
     end
 
     # 3d. Handle @list / ShardedList / SoaList collection
     if list_collection?
-      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
       if soa?
         return "CheatLib.SoaList(#{base_zig})"
       end
@@ -1976,7 +2097,7 @@ class Type
 
     # 3e. Handle fixed SOA arrays (T[N]@soa — no @pool/@list wrapper)
     if fixed_soa?
-      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.SoaList(#{base_zig})"
     end
 
@@ -1984,7 +2105,7 @@ class Type
     #    Dynamic arrays use ArrayListUnmanaged only for local variables to support growth.
     #    Struct fields and function parameters use slices.
     if array?
-      base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
       if dynamic? && !is_param && !is_field
         # Dynamic arrays (ArrayListUnmanaged) are always value-typed locals.
         # The list header is a struct value; the backing store lives on the heap internally.
@@ -2054,11 +2175,15 @@ end
 # TYPE CHECKING & AUTOCAST LOGIC
 # ==========================================
 module TypeHelper
+    extend T::Sig
+
   # Coerce input to Type object if needed
+  sig { params(input: T.untyped).returns(Type) }
   def to_type(input)
     input.is_a?(Type) ? input : Type.new(input)
   end
 
+  sig { params(source_type: T.untyped, target_type: T.untyped).returns(T::Boolean) }
   def is_safe_autocast?(source_type, target_type)
     to_type(target_type).accepts?(to_type(source_type))
   end
@@ -2066,6 +2191,7 @@ module TypeHelper
   # Called after coercion context is known for integer literals and constant-foldable
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
   # target type. No-op for non-integer or non-literal nodes.
+  sig { params(node: T.untyped, effective_type: T.untyped).returns(T.untyped) }
   def check_prefixed_int_range!(node, effective_type)
     T.bind(self, SemanticAnnotator) rescue nil
     val = if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)

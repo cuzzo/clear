@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require_relative "rpc"
 require_relative "logger"
 require_relative "document_store"
@@ -13,6 +15,8 @@ module LSP
   # canonical Lexer→Parser→SemanticAnnotator pipeline against open
   # documents and publish diagnostics back to the client.
   class Server
+      extend T::Sig
+
     # JSON-RPC 2.0 reserved error codes used by LSP.
     METHOD_NOT_FOUND = -32601
 
@@ -41,6 +45,7 @@ module LSP
     end
 
     # Main loop. Runs until `exit` notification or stdin EOF.
+    sig { returns(T.untyped) }
     def run
       @logger.info("clear-lsp starting")
       loop do
@@ -64,6 +69,7 @@ module LSP
     # Production never needs this — the LSP runs forever and exits
     # via `exit` notification — but tests use it to step past the
     # debounce window deterministically.
+    sig { returns(Array) }
     def flush_pending!
       threads = T.let(nil, T.nilable(T::Array[Thread]))
       @timer_mutex.synchronize { threads = @timers.values.dup }

@@ -10,7 +10,11 @@
 # Migration is incremental — see TODO.md "Self-host preparation" task #2.
 # Until all kinds (struct, union, resource) move out of Hash, callers
 # may see EITHER a typed schema or a Hash, and must handle both.
+require "sorbet-runtime"
+
 module Schemas
+    extend T::Sig
+
   # Plain classes (not Data.define) so Sorbet's 4010 doesn't fire on
   # the kwarg-only initialize signatures we need for default values.
   # Frozen at the end of initialize so callers still see immutable shapes.
@@ -89,6 +93,7 @@ module Schemas
   # when the input isn't a struct / union schema), so a single call
   # site can use `.fields` / `.variants` regardless of source.
 
+  sig { params(schema: T.untyped).returns(T.nilable(Schemas::StructSchema)) }
   def self.as_struct_schema(schema)
     return schema if schema.is_a?(StructSchema)
     return nil unless schema.is_a?(Hash) && !schema[:kind]
@@ -104,6 +109,7 @@ module Schemas
     )
   end
 
+  sig { params(schema: T.untyped).returns(T.nilable(Schemas::UnionSchema)) }
   def self.as_union_schema(schema)
     return schema if schema.is_a?(UnionSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :union
@@ -114,6 +120,7 @@ module Schemas
     )
   end
 
+  sig { params(schema: T.untyped).returns(T.untyped) }
   def self.as_resource_schema(schema)
     return schema if schema.is_a?(ResourceSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :resource

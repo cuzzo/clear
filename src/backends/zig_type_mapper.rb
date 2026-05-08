@@ -1,5 +1,9 @@
 # typed: true
+require "sorbet-runtime"
+
 module ZigTypeMapper
+    extend T::Sig
+
   ZIG_OPS = {
     :ADD => "+",
     :SUB => "-",
@@ -30,6 +34,7 @@ module ZigTypeMapper
 
   # Delegates to Type#zig_type for type-to-Zig conversion.
   # This keeps the transpiler interface stable while the logic lives in Type.
+  sig { params(type: T.untyped, is_param: T.untyped, is_field: T.untyped).returns(String) }
   def transpile_type(type, is_param: false, is_field: false)
     # If already a Type, use it directly — avoids losing shard_count through round-trip.
     t = type.is_a?(Type) ? type : Type.new(type)

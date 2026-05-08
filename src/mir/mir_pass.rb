@@ -6,10 +6,14 @@
 #
 # Dependencies are defined in control_flow.rb (required first) and promotion_plan.rb.
 
+require "sorbet-runtime"
+
 require_relative "promotion_plan"
 require_relative "escape_analysis"
 
 class MIRPass
+    extend T::Sig
+
   # Read-only context threaded through transform_body / recurse_branches!.
   # Reek flagged the (bindings, promo) carry-down across many call sites.
   WalkCtx = Data.define(:bindings, :promo)
@@ -30,6 +34,7 @@ class MIRPass
   # PromotionClassifier must run before cleanup classification because its Phase 0
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
   # that the classifier depends on.
+  sig { params(ast: T.untyped).returns(Hash) }
   def transform!(ast)
     # E1: compute which functions return heap-owned values (fixed-point over call graph).
     heap_fns = EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)

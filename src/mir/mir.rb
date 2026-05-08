@@ -16,21 +16,33 @@
 # ReassignCleanup, FieldCleanup) in ast.rb remain for the existing pipeline.
 # New nodes here use distinct names to coexist during migration.
 
+require "sorbet-runtime"
+
 module MIR
   # Common interface for all MIR nodes.
   module Emittable
+      extend T::Sig
+
     def mir?; true; end
+    sig { returns(T::Boolean) }
     def stmt?; false; end
+    sig { returns(T::Boolean) }
     def expr?; false; end
   end
 
   module Stmt
+      extend T::Sig
+
     include Emittable
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   module Expr
+      extend T::Sig
+
     include Emittable
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 

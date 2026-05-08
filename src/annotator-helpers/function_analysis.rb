@@ -3,6 +3,8 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 
 module FunctionAnalysis
+    extend T::Sig
+
   # Converts an intrinsic definition from STD_LIB format to the standard
   # function signature format used by verify_function_signature!.
   #
@@ -40,6 +42,7 @@ module FunctionAnalysis
   #
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
+  sig { params(node: T.untyped, body: T.untyped, declared_return: T.untyped, is_implicit: T.untyped).returns(Symbol) }
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Routine Prologue (Before Scope)
@@ -99,6 +102,7 @@ module FunctionAnalysis
     return_type
   end
 
+  sig { params(params: T.untyped, return_type: T.untyped).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
@@ -119,6 +123,7 @@ module FunctionAnalysis
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
   # heap_promoted_call flags.
+  sig { params(node: T.untyped, args: T.untyped).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, SemanticAnnotator) rescue nil
     func_name = node.name
@@ -297,6 +302,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(config: T.untyped).returns(T.nilable(FunctionSignature)) }
   def normalize_intrinsic_signature(config)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil if config[:args] == :Varargs
@@ -331,6 +337,7 @@ module FunctionAnalysis
     )
   end
 
+  sig { params(node: T.untyped, signature: T.untyped).returns(T.nilable(Array)) }
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     params = signature.params
@@ -568,6 +575,7 @@ module FunctionAnalysis
     warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
   end
 
+  sig { params(arg_node: T.untyped, expected_type_obj: T.untyped, param: T.untyped).returns(T::Boolean) }
   def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -582,6 +590,7 @@ module FunctionAnalysis
     expected_type_obj.primitive?
   end
 
+  sig { params(arg_node: T.untyped, param: T.untyped, signature: T.untyped).returns(T::Boolean) }
   def atomic_cell_to_atomic_param?(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -597,6 +606,7 @@ module FunctionAnalysis
     families.respond_to?(:include?) && families.include?(:ATOMIC)
   end
 
+  sig { params(arg_node: T.untyped).returns(T::Boolean) }
   def atomic_cell_arg?(arg_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -604,11 +614,13 @@ module FunctionAnalysis
     sym&.sync == :atomic && !(sym.respond_to?(:layout) && sym.layout == :indirect)
   end
 
+  sig { params(type: T.untyped).returns(T::Boolean) }
   def explicit_primitive_atomic_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.sync == :atomic && type.primitive?
+    !!(type.is_a?(Type) && type.sync == :atomic && type.primitive?)
   end
 
+  sig { params(node: T.untyped, atomic_args: T.untyped).returns(T.nilable(Array)) }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, SemanticAnnotator) rescue nil
     unique_args = atomic_args.compact
@@ -624,6 +636,7 @@ module FunctionAnalysis
 
   # TODO: Needs updated once lifetimes are complex
   # TODO: At definition time, verify the full path is valid
+  sig { params(arg_node: T.untyped, param: T.untyped, signature: T.untyped).returns(T::Boolean) }
   def verify_param_lifetime!(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
@@ -663,6 +676,7 @@ module FunctionAnalysis
   #   Array<AST::Identifier|GetField>
   #                          -- `RETURNS foo:T` (one element) or
   #                             `RETURNS (a b c):T` (multi)
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def verify_lifetime!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     rl = node.return_lifetime
@@ -707,6 +721,7 @@ module FunctionAnalysis
   # mixed declaration is ambiguous in a way the lifetime checker
   # can't model. Force the user to split into separate fns or pick
   # one family.
+  sig { params(node: T.untyped, sources: T.untyped).returns(T.nilable(Array)) }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
@@ -726,6 +741,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped, source_node: T.untyped).returns(Array) }
   def verify_lifetime_source!(node, source_node)
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
@@ -763,6 +779,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped).returns(Array) }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.params.each do |param|
@@ -884,6 +901,7 @@ module FunctionAnalysis
   end
 
   # Cannot be part of declare, needs to happen in outer-scope
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def verify_captures!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.captures.nil? || node.captures.empty?
@@ -922,6 +940,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def declare_captures(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.captures.nil? || node.captures.empty?
@@ -939,6 +958,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped, found_returns: T.untyped, declared_return: T.untyped).returns(T.untyped) }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
     if found_returns.size > 1
@@ -953,6 +973,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(return_type: T.untyped).returns(Symbol) }
   def get_return_strategy(return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     type = Type.new(return_type)
@@ -968,6 +989,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
   def verify_return(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # A returned value is a borrow when it is a direct indexed/field access OR
@@ -1028,6 +1050,7 @@ module FunctionAnalysis
     end
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def return_is_borrow?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if node.is_a?(AST::Identifier)
@@ -1044,6 +1067,7 @@ module FunctionAnalysis
     false
   end
 
+  sig { params(path_a: T.untyped, path_b: T.untyped).returns(T::Boolean) }
   def paths_overlap?(path_a, path_b)
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Different Roots? (e.g. [:x, ...] vs [:y, ...]) -> No Overlap
@@ -1068,6 +1092,7 @@ module FunctionAnalysis
     unsigned_integer: ->(t) { t.respond_to?(:unsigned_integer?) && t.unsigned_integer? },
   }.freeze
 
+  sig { params(arg: T.untyped, kind: T.untyped).returns(T::Boolean) }
   def reject_arg_type_matches?(arg, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     pred = REJECT_TYPE_PREDICATES[kind]
@@ -1077,6 +1102,7 @@ module FunctionAnalysis
     pred.call(type)
   end
 
+  sig { params(definitions: T.untyped, args: T.untyped).returns(T.nilable(Hash)) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
     definitions.find do |config|
@@ -1107,6 +1133,7 @@ module FunctionAnalysis
   end
 
   # Formats intrinsic args for error messages
+  sig { params(args: T.untyped).returns(String) }
   def format_intrinsic_args(args)
     T.bind(self, SemanticAnnotator) rescue nil
     return "(varargs)" if args == :Varargs

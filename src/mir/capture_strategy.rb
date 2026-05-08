@@ -33,7 +33,11 @@
 # migration plan (docs/agents/vm-bugs.md) adds it but does not call it
 # from lower_bg_block yet. Step 2 onwards converts the emission.
 
+require "sorbet-runtime"
+
 module CaptureStrategy
+    extend T::Sig
+
   # A capture that can be byte-copied into the ctx struct: primitives,
   # strings (CLEAR treats []const u8 as copyable), enums, small
   # all-primitive structs. No markers required; no runtime ownership
@@ -116,6 +120,7 @@ module CaptureStrategy
   #                                     (File, TCPClient, etc.); the
   #                                     existing resource_captures machinery
   #                                     handles the ownership transfer.
+  sig { params(name: T.untyped, type: T.untyped, site_info: T.untyped, rt_name: T.untyped, is_resource: T.untyped, schema_lookup: T.untyped).returns(T.untyped) }
   def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false, schema_lookup: nil)
     zig_t = field_zig_type(type)
 
@@ -160,6 +165,7 @@ module CaptureStrategy
 
   # True iff the capture's data fits entirely in the union/value header,
   # with no aliased heap backing. Safe to byte-copy into the ctx struct.
+  sig { params(type: T.untyped, schema_lookup: T.untyped).returns(T::Boolean) }
   def self.value_like?(type, schema_lookup = nil)
     return true if type.primitive?
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
@@ -186,6 +192,7 @@ module CaptureStrategy
   # @shared is Arc; @locked/@writeLocked/@local are sync wrappers on
   # top of these; @sharded/@striped are Arc-containing container
   # topologies. All of these preserve the safe-sharing guarantee.
+  sig { params(type: T.untyped).returns(T::Boolean) }
   def self.safe_shared_across_fibers?(type)
     return true if type.multiowned? || type.shared?
     return true if type.respond_to?(:any_sync?) && type.any_sync?
@@ -196,6 +203,7 @@ module CaptureStrategy
 
   # Where the fiber's deep-copy should live when the user writes COPY.
   # Fibers outlive the spawning scope, so heap is the safe default.
+  sig { params(_type: T.untyped).returns(Symbol) }
   def self.fiber_copy_alloc_for(_type)
     :heap
   end
@@ -204,11 +212,13 @@ module CaptureStrategy
   # so dynamic arrays render as []T (slices) rather than ArrayListUnmanaged.
   # Pointer-passed types render as *T in the field (same as historical
   # behavior for @pool / @map captures).
+  sig { params(type: T.untyped).returns(String) }
   def self.field_zig_type(type)
     base = type.zig_type(is_field: true)
     (type.respond_to?(:needs_pointer_passing?) && type.needs_pointer_passing?) ? "*#{base}" : base
   end
 
+  sig { params(type: T.untyped).returns(Symbol) }
   def self.refuse_reason_for(type)
     return :pointer_passed_without_transfer if type.respond_to?(:needs_pointer_passing?) && type.needs_pointer_passing?
     return :list_borrow_without_transfer   if type.list_collection?

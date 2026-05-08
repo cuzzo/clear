@@ -6,9 +6,12 @@ require "sorbet-runtime"
 # in std_lib.rb (POOL_METHODS, MAP_METHODS) instead of hard-coded case
 # statements. Mixed into SemanticAnnotator.
 module MethodAnalysis
+    extend T::Sig
+
   # Attempt to resolve a method call on a collection type (Pool, Set, or HashMap).
   # Returns true if handled, false if the caller should fall through to UFCS.
   # Dispatch is driven by COLLECTION_METHOD_CONFIGS keyed on Type#dispatch_key.
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
     obj_type = node.object.type_info
@@ -25,6 +28,7 @@ module MethodAnalysis
   #
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
+  sig { params(matched_def: T.untyped, args: T.untyped).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless matched_def[:narrows_collection] && args.size >= 2
