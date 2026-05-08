@@ -28,17 +28,17 @@ module Doctor
     line&.sub(/\A# /, '')&.rstrip
   end
 
-  def run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil)
+  def run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil, by: :bytes)
     if diff
       return run_diff(diff, profile_dir, focus: focus)
     end
 
     unless profile_dir && Dir.exist?(profile_dir)
-      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir> [--cumulative] [--focus=REGEX] [--ignore=REGEX] [--peek=REGEX] [--diff <before-dir>]"
+      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir> [--cumulative] [--focus=REGEX] [--ignore=REGEX] [--peek=REGEX] [--by=bytes|allocs|inuse_bytes|inuse_allocs] [--diff <before-dir>]"
       exit 1
     end
 
-    @opts = { cumulative: cumulative, focus: focus, ignore: ignore, peek: peek }
+    @opts = { cumulative: cumulative, focus: focus, ignore: ignore, peek: peek, by: by }
 
     if peek
       return run_peek(profile_dir, peek)
@@ -74,6 +74,42 @@ module Doctor
     !!(@opts && @opts[:cumulative])
   end
 
+  # Which Site field to sort/display by. Maps the user's --by flag
+  # (`bytes` / `allocs` / `inuse_bytes` / `inuse_allocs`) to the
+  # corresponding key in the parsed Site hash. Default `:bytes`.
+  def sort_key
+    return :bytes unless @opts && @opts[:by]
+    case @opts[:by]
+    when :allocs        then :allocs
+    when :inuse_bytes   then :inuse_bytes
+    when :inuse_allocs  then :inuse_allocs
+    else :bytes
+    end
+  end
+
+  # Human-readable label for the sort axis (used in section headers).
+  def sort_label
+    case sort_key
+    when :allocs        then "allocations"
+    when :inuse_bytes   then "in-use bytes (alloc - free)"
+    when :inuse_allocs  then "in-use allocations (alloc - free)"
+    else "bytes"
+    end
+  end
+
+  # Format the sort metric as a string for the per-row display.
+  # Bytes get KB/MB pretty-printing; counts get thousand-separators.
+  def fmt_sort_value(s)
+    v = s[sort_key]
+    case sort_key
+    when :allocs, :inuse_allocs
+      "%s allocs" % v.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')
+    else
+      kb = v / 1024.0
+      kb >= 1.0 ? ("%.1f KB" % kb) : ("%d B" % v)
+    end
+  end
+
   # ── Heap Profile ──
   def section_heap(profile_dir, binary)
     alloc_file = File.join(profile_dir, 'alloc.txt')
@@ -97,10 +133,19 @@ module Doctor
       parts = line.strip.split
       next nil if parts.size < 6
       trace = parts[0].split(',')
+      allocs = parts[1].to_i
+      frees  = parts[3].to_i
+      bytes  = parts[2].to_i
+      free_bytes = parts[4].to_i
       { addr: trace.first, trace: trace,
-        allocs: parts[1].to_i, bytes: parts[2].to_i,
-        frees: parts[3].to_i, free_bytes: parts[4].to_i, live: parts[5].to_i }
-    end.compact.sort_by { |s| -s[:bytes] }
+        allocs: allocs, bytes: bytes,
+        frees: frees, free_bytes: free_bytes,
+        live: parts[5].to_i,
+        # Inuse columns: live counts derived from alloc - free.
+        # Doctor uses these when --by=inuse_bytes / --by=inuse_allocs.
+        inuse_allocs: [allocs - frees, 0].max,
+        inuse_bytes:  [bytes  - free_bytes, 0].max }
+    end.compact.sort_by { |s| -s[sort_key] }
 
     resolved = nil
     if binary
@@ -187,7 +232,7 @@ module Doctor
       puts "Ignore: /#{@opts[:ignore].source}/"
     end
     puts "" if @opts && (@opts[:focus] || @opts[:ignore])
-    label = cumulative? ? "Top functions by cumulative bytes:" : "Top sites by bytes:"
+    label = cumulative? ? "Top functions by cumulative #{sort_label}:" : "Top sites by #{sort_label}:"
     puts label
 
     if cumulative?

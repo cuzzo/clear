@@ -1205,7 +1205,7 @@ when 'doctor'
   # --focus=REGEX filters samples whose trace touches a function
   # matching the pattern; --diff <before-dir> compares two profile
   # runs and shows top deltas per section.
-  doctor_opts = { cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil }
+  doctor_opts = { cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil, by: :bytes }
   positional = []
   i = 1
   while i < ARGV.length
@@ -1219,6 +1219,8 @@ when 'doctor'
       doctor_opts[:ignore] = Regexp.new($1)
     when /\A--peek=(.+)\z/
       doctor_opts[:peek] = Regexp.new($1)
+    when /\A--by=(bytes|allocs|inuse_bytes|inuse_allocs)\z/
+      doctor_opts[:by] = $1.to_sym
     when '--diff'
       doctor_opts[:diff] = ARGV[i + 1]
       i += 1

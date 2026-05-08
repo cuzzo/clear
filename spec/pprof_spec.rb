@@ -345,6 +345,42 @@ RSpec.describe PprofConverter do
     end
   end
 
+  describe '.convert_channels' do
+    it 'returns nil for an empty channels.txt' do
+      File.write(File.join(@profile_dir, 'channels.txt'), <<~PROF)
+        # channel-profile v1
+        # id pushes pops push_blocked pop_blocked max_depth capacity
+      PROF
+      expect(described_class.convert_channels(@profile_dir, nil)).to be_nil
+    end
+
+    it 'emits one Sample per registered channel' do
+      tab = "\t"
+      File.write(File.join(@profile_dir, 'channels.txt'), <<~PROF)
+        # channel-profile v1
+        0#{tab}5#{tab}5#{tab}0#{tab}2#{tab}5#{tab}8
+        1#{tab}9#{tab}9#{tab}0#{tab}3#{tab}9#{tab}16
+      PROF
+      out = described_class.convert_channels(@profile_dir, nil)
+      expect(out).to eq(File.join(@profile_dir, 'channels.pb.gz'))
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      expect(decoded[1].length).to eq(5)             # 5 sample-type columns
+      expect(decoded[2].length).to eq(2)             # 2 samples
+      expect(bytes).to include('channel#0')
+      expect(bytes).to include('channel#1')
+    end
+
+    it 'tags each sample with the channel capacity' do
+      tab = "\t"
+      File.write(File.join(@profile_dir, 'channels.txt'),
+                 "# channel-profile v1\n0#{tab}5#{tab}5#{tab}0#{tab}2#{tab}5#{tab}8\n")
+      out = described_class.convert_channels(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      expect(bytes).to include('capacity')
+    end
+  end
+
   describe '.convert_perf' do
     it 'returns nil when perf_to_profile is unavailable or perf.data is missing' do
       # No perf.data => nil regardless of perf_to_profile presence.

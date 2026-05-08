@@ -104,6 +104,49 @@ RSpec.describe Doctor do
     end
   end
 
+  describe ".run --by sample-type pivoting" do
+    around do |ex|
+      Dir.mktmpdir do |dir|
+        @profile_dir = File.join(dir, "p.profile")
+        FileUtils.mkdir_p(@profile_dir)
+        # Two sites: 0xbig has few large allocs, 0xsmall has many tiny.
+        # Sorted by bytes, 0xbig wins; sorted by allocs, 0xsmall wins.
+        File.write(File.join(@profile_dir, "alloc.txt"), <<~ALLOC)
+          # alloc-profile v2
+          0xbig     2  10000  0  0  10000
+          0xsmall   200  200  0  0  200
+        ALLOC
+        ex.run
+      end
+    end
+
+    it "default sort is by bytes (largest sites first)" do
+      out = capture_stdout { described_class.run(@profile_dir) }
+      first_idx = out.index("0xbig")
+      second_idx = out.index("0xsmall")
+      expect(first_idx).to be < second_idx
+    end
+
+    it "--by=allocs sorts by allocation count" do
+      out = capture_stdout { described_class.run(@profile_dir, by: :allocs) }
+      expect(out).to include("Top sites by allocations:")
+      first_idx = out.index("0xsmall")
+      second_idx = out.index("0xbig")
+      expect(first_idx).to be < second_idx
+    end
+
+    it "--by=inuse_bytes computes alloc_bytes - free_bytes" do
+      File.write(File.join(@profile_dir, "alloc.txt"), <<~ALLOC)
+        # alloc-profile v2
+        0xleak     1  1000   0    0    1000
+        0xpaired   1  1000   1    1000   0
+      ALLOC
+      out = capture_stdout { described_class.run(@profile_dir, by: :inuse_bytes) }
+      expect(out).to include("Top sites by in-use bytes")
+      expect(out.index("0xleak")).to be < out.index("0xpaired")
+    end
+  end
+
   describe "runtime-function attribution" do
     around do |ex|
       Dir.mktmpdir do |dir|

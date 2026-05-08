@@ -51,6 +51,13 @@ Sample columns: `reads` / `commits` / `retries` / `cow_bytes`.
 moved by copy-on-write commits, the most direct cost signal for
 `@shared:versioned` cells.
 
+### `channels.pb.gz`
+
+Sample columns: `pushes` / `pops` / `push_blocked` / `pop_blocked` /
+`max_depth`. One sample per registered channel; the synthetic
+function name is `channel#<id>` and the channel's capacity travels
+as a label (`pprof -tags channels.pb.gz`).
+
 ### `cpu.pb.gz`
 
 Standard CPU profile from `perf.data`, converted by
@@ -110,6 +117,8 @@ clear doctor foo.profile/ --cumulative           # rank functions by cum bytes
 clear doctor foo.profile/ --focus=intToString    # filter to traces that touch this function
 clear doctor foo.profile/ --ignore=intToString   # drop traces that touch this function
 clear doctor foo.profile/ --peek=processRequest  # callers + callees of one function
+clear doctor foo.profile/ --by=allocs            # sort heap by allocation count, not bytes
+clear doctor foo.profile/ --by=inuse_bytes       # sort by allocs - frees (live bytes)
 clear doctor old.profile/ --diff new.profile/    # perf-regression diff between two runs
 ```
 

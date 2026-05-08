@@ -33,9 +33,60 @@ module PprofConverter
     if (path = convert_mvcc(profile_dir, binary))
       out[:mvcc] = path
     end
+    if (path = convert_channels(profile_dir, binary))
+      out[:channels] = path
+    end
     if (path = convert_perf(profile_dir, binary))
       out[:cpu] = path
     end
+    out
+  end
+
+  # ── channels.txt → channels.pb.gz ─────────────────────────────────
+  # Channel telemetry has no call site — channels are identified by a
+  # registry id, not an address. We emit one Sample per registered
+  # channel, with synthetic Function names like `channel#7` so pprof's
+  # views show the per-channel breakdown with stable identifiers.
+  # Sample columns: pushes / pops / push_blocked / pop_blocked /
+  # max_depth (capacity travels as a label).
+  def convert_channels(profile_dir, binary)
+    src = File.join(profile_dir, 'channels.txt')
+    return nil unless File.exist?(src)
+
+    rows = parse_tabbed_columns(src, 7).map do |f|
+      f = f.first(7)  # ignore any future trailing columns
+      {
+        id: f[0].to_i,
+        pushes: f[1].to_i, pops: f[2].to_i,
+        push_blocked: f[3].to_i, pop_blocked: f[4].to_i,
+        max_depth: f[5].to_i, capacity: f[6].to_i,
+      }
+    end.reject { |c| c[:pushes].zero? && c[:pops].zero? }
+    return nil if rows.empty?
+
+    pb = Pprof::Profile.new
+    pb.add_mapping(binary: binary.to_s) if binary
+    pb.add_sample_type('pushes',       'count')
+    pb.add_sample_type('pops',         'count')
+    pb.add_sample_type('push_blocked', 'count')
+    pb.add_sample_type('pop_blocked',  'count')
+    pb.add_sample_type('max_depth',    'count')
+    pb.set_period_type('operations', 'count', 1)
+    pb.default_sample_type = 'pushes'
+
+    rows.each do |r|
+      name = "channel##{r[:id]}"
+      fid = pb.add_function(name: name, filename: '', system_name: name)
+      lid = pb.add_location(function_id: fid, line: 0, address: r[:id])
+      pb.add_sample(
+        [lid],
+        [r[:pushes], r[:pops], r[:push_blocked], r[:pop_blocked], r[:max_depth]],
+        capacity: r[:capacity], id: r[:id]
+      )
+    end
+
+    out = File.join(profile_dir, 'channels.pb.gz')
+    pb.write_gzip(out)
     out
   end
 
