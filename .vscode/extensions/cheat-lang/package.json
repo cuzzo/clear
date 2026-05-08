@@ -1,0 +1,69 @@
+{
+  "name": "clear-lang",
+  "displayName": "CLEAR Language Support",
+  "description": "Syntax highlighting + LSP integration for the CLEAR programming language (.cht files)",
+  "version": "0.2.0",
+  "publisher": "clear",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:clear"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "clear",
+        "aliases": ["CLEAR", "clear"],
+        "extensions": [".cht"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "clear",
+        "scopeName": "source.clear",
+        "path": "./syntaxes/clear.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "CLEAR",
+      "properties": {
+        "clear.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the cheat repo's `bin/clear-lsp`. When empty, the extension auto-detects by walking up from the extension's install location (works when the extension lives inside the repo at `.vscode/extensions/cheat-lang/`)."
+        },
+        "clear.serverArgs": {
+          "type": "array",
+          "default": ["--log-level=info"],
+          "items": { "type": "string" },
+          "description": "Extra arguments passed to clear-lsp."
+        },
+        "clear.useBundleExec": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to invoke the server via `bundle exec`. Set to false if your environment already has the right gems on $LOAD_PATH (uncommon)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch":   "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node":   "^18.0.0",
+    "@types/vscode": "^1.70.0",
+    "typescript":    "^5.0.0"
+  }
+}

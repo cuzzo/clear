@@ -1,0 +1,38 @@
+#!/usr/bin/env ruby
+# clear-lsp — Language Server for the CLEAR programming language.
+#
+# Speaks the Language Server Protocol (LSP) over stdio. Editors that
+# support LSP (Neovim, VS Code, etc.) launch this binary and send
+# JSON-RPC requests; the server replies with diagnostics, hover
+# content, and code actions sourced from the existing CLEAR compiler
+# (Lexer → Parser → SemanticAnnotator + FixCollector).
+#
+# Usage:
+#   clear-lsp [--log-level=debug|info|warn|error]
+#
+# The server reads from stdin, writes JSON-RPC frames to stdout, and
+# logs to stderr (LSP convention; clients display server stderr).
+
+require_relative "../src/lsp/server"
+
+log_level = :info
+ARGV.each do |arg|
+  if arg.start_with?("--log-level=")
+    raw = arg.split("=", 2).last
+    sym = raw.to_sym
+    if LSP::Logger::LEVELS.key?(sym)
+      log_level = sym
+    else
+      $stderr.puts "clear-lsp: unknown --log-level=#{raw} (expected one of: #{LSP::Logger::LEVELS.keys.join(', ')})"
+      exit 2
+    end
+  elsif arg == "--help" || arg == "-h"
+    puts "Usage: clear-lsp [--log-level=debug|info|warn|error]"
+    exit 0
+  else
+    $stderr.puts "clear-lsp: unknown argument #{arg.inspect}"
+    exit 2
+  end
+end
+
+LSP::Server.new(log_level: log_level).run
