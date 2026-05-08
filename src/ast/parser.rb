@@ -3,12 +3,14 @@ require_relative "./lexer"
 require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
+require_relative "../annotator-helpers/fixable_helpers"
 
 # ==========================================
 # PARSER
 # ==========================================
 class Parser
   include ErrorHelper
+  include FixableHelper
 
   @@stmt_rules = {}
   @@primary_rules = {}
@@ -3035,7 +3037,12 @@ class Parser
       # on type semantics; consumed by capabilities that need a span.
       result[:observable_token] = token
     else
-      error!(token, :UNKNOWN_CAPABILITY_MODIFIER, value: value)
+      emit_typo_suggestion!(
+        token, value, CAPABILITY_TOKENS,
+        "Unknown capability modifier '#{value}'",
+        "closest capability",
+        category: :capability, cascade: true
+      )
     end
   end
 
@@ -3089,11 +3096,32 @@ class Parser
     # Locked form:   WITH EXCLUSIVE lockedVar AS alias { } — acquire mutex, bind inner value.
     capabilities = []
 
+    # `WITH RESTRIKT x { ... }` — a typo of an UPPERCASE capability
+    # keyword tokenizes as TYPE_ID and the loop below would silently
+    # exit the capability list, then fail at the `{` body. Catch this
+    # shape early and offer a typo suggestion against the known
+    # capability keyword set.
+    if match?(:TYPE_ID)
+      typo_tok = current
+      emit_typo_suggestion!(
+        typo_tok, typo_tok.value, AST::CAPABILITIES.map(&:to_s),
+        "Unknown WITH capability '#{typo_tok.value}'",
+        "closest WITH capability",
+        category: :capability, cascade: true
+      )
+    end
+
     while match?(:KEYWORD) || match?(:VAR_ID) do
       capability = if match?(:KEYWORD) && current.value != 'AS'
-        cap = consume(:KEYWORD).value.to_sym
+        cap_tok = consume(:KEYWORD)
+        cap = cap_tok.value.to_sym
         unless AST::CAPABILITIES.include?(cap)
-          error!(previous, :UNKNOWN_WITH_CAPABILITY, value: cap)
+          emit_typo_suggestion!(
+            cap_tok, cap_tok.value, AST::CAPABILITIES.map(&:to_s),
+            "Unknown WITH capability '#{cap}'",
+            "closest WITH capability",
+            category: :capability, cascade: true
+          )
         end
         cap
       else
@@ -3455,7 +3483,17 @@ class Parser
       normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
       attrs = CAP_SIGIL_ATTRS[normalized]
       unless attrs
-        error!(current, :UNKNOWN_CAPABILITY_SIGIL, value: current.value)
+        # Chain form `@shared:foo` arrives without the `@`; root form
+        # arrives with it. Match the candidate-set shape to whichever
+        # form the user typed so the replacement slots in cleanly.
+        has_at = current.value.start_with?('@')
+        candidates = has_at ? CAP_SIGIL_ATTRS.keys : CAP_SIGIL_ATTRS.keys.map { |k| k.sub(/^@/, '') }
+        emit_typo_suggestion!(
+          current, current.value, candidates,
+          "Unknown capability sigil '#{current.value}'",
+          "closest capability sigil",
+          category: :capability, cascade: true
+        )
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)
