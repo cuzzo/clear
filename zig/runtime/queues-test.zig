@@ -5,119 +5,10 @@ const testing = std.testing;
 const queues = @import("queues.zig");
 
 const RunQueue = queues.RunQueue;
-const AtomicInbox = queues.AtomicInbox;
-const InboxNode = queues.InboxNode;
 const Task = queues.Task;
 
 // -------------------------------------------------------------------------
-// 1. AtomicInbox Tests
-// -------------------------------------------------------------------------
-
-const StressNode = struct {
-    link: InboxNode = .{ .type = .Resume },
-    id: usize,
-};
-
-fn inboxProducer(inbox: *AtomicInbox, count: usize, start_id: usize) void {
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        // In a real app, these would be heap allocated.
-        // For testing, we leak them or use a tailored allocator.
-        // Here we just allocate to verify the pointers survive the trip.
-        const node = std.testing.allocator.create(StressNode) catch unreachable;
-        node.* = .{ .id = start_id + i };
-
-        inbox.push(&node.link);
-    }
-}
-
-test "AtomicInbox: Multi-Producer Single-Consumer" {
-    var inbox = AtomicInbox{};
-    const producer_count = 4;
-    const items_per_thread = 25_000;
-
-    var threads: [producer_count]std.Thread = undefined;
-
-    // 1. Spawn Producers
-    for (0..producer_count) |i| {
-        threads[i] = try std.Thread.spawn(.{}, inboxProducer, .{
-            &inbox,
-            items_per_thread,
-            i * items_per_thread
-        });
-    }
-
-    // 2. Join Producers
-    for (threads) |t| t.join();
-
-    // 3. Pop All (Single Consumer)
-    var list = inbox.popAll();
-
-    // 4. Verification
-    var count: usize = 0;
-    var seen_map = std.AutoHashMap(usize, void).init(std.testing.allocator);
-    defer seen_map.deinit();
-
-    while (list) |node| {
-        const item: *StressNode = @fieldParentPtr("link", node);
-        list = node.next;
-
-        try seen_map.put(item.id, {});
-        count += 1;
-
-        std.testing.allocator.destroy(item);
-    }
-
-    // Did we get everyone?
-    try testing.expectEqual(producer_count * items_per_thread, count);
-    try testing.expectEqual(producer_count * items_per_thread, seen_map.count());
-}
-
-test "AtomicInbox: LIFO Reversal" {
-    var inbox = AtomicInbox{};
-
-    // Push 0, 1, 2
-    for (0..3) |i| {
-        const node = try std.testing.allocator.create(StressNode);
-        node.* = .{ .link = .{ .type = .Resume }, .id = i };
-        inbox.push(&node.link);
-    }
-
-    // Pop All (Should be 2 -> 1 -> 0)
-    var head = inbox.popAll();
-
-    // Verify LIFO order
-    var curr = head;
-    var expected: usize = 2;
-    while (curr) |node| {
-        const item: *StressNode = @fieldParentPtr("link", node);
-        try testing.expectEqual(expected, item.id);
-        curr = node.next;
-
-        // Only decrement if we are not at 0 to avoid overflow
-        if (expected > 0) {
-            expected -= 1;
-        }
-    }
-
-    // Reverse (Should be 0 -> 1 -> 2)
-    head = AtomicInbox.reverse(head);
-
-    curr = head;
-    expected = 0;
-    while (curr) |node| : (expected += 1) {
-        const item: *StressNode = @fieldParentPtr("link", node);
-        try testing.expectEqual(expected, item.id);
-
-        // Clean up
-        const next = node.next;
-        std.testing.allocator.destroy(item);
-        curr = next;
-    }
-}
-
-// -------------------------------------------------------------------------
-// 2. RunQueue (Chase-Lev) Tests
+// RunQueue (Chase-Lev) Tests
 // -------------------------------------------------------------------------
 
 // Helper to create dummy tasks
@@ -224,7 +115,7 @@ fn markProcessed(t: *Task) void {
     }
 }
 
-fn thiefWorker(my_q: *RunQueue, victim_q: *RunQueue, done: *std.atomic.Value(bool), _: *AtomicInbox) void {
+fn thiefWorker(my_q: *RunQueue, victim_q: *RunQueue, done: *std.atomic.Value(bool)) void {
     while (!done.load(.monotonic) or victim_q.len() > 0) {
         // 1. Try to process my own tasks
         while (my_q.pop()) |t| {
@@ -253,7 +144,6 @@ test "RunQueue: Concurrent Thieves" {
     var owner_q = RunQueue.initWithAllocator(std.testing.allocator) catch unreachable;
     defer owner_q.deinit();
     var thief_queues: [THIEF_COUNT]RunQueue = undefined;
-    var inbox = AtomicInbox{}; // Dummy inbox
 
     var done_flag = std.atomic.Value(bool).init(false);
 
@@ -267,7 +157,6 @@ test "RunQueue: Concurrent Thieves" {
             &thief_queues[i],
             &owner_q,
             &done_flag,
-            &inbox
         });
     }
 

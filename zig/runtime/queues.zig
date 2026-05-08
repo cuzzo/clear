@@ -12,78 +12,6 @@ pub const Atomic = blk: {
     break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
 };
 
-pub const InboxType = enum { Spawn, Resume, RemoteCall };
-
-
-// A generic node header that must be embedded in any struct sent to the Inbox.
-pub const InboxNode = struct {
-    next: ?*InboxNode = null,
-    type: InboxType,
-    canary: u64 = INBOX_CANARY,
-
-    pub const INBOX_CANARY: u64 = 0xCAFE_BABE_DEAD_BEEF;
-
-    pub fn validate(self: *const InboxNode, label: []const u8) void {
-        if (self.canary != INBOX_CANARY) {
-            std.debug.print("INBOX CANARY FAIL [{s}]: addr={*} canary=0x{x} type={d} next={?*}\n", .{
-                label, self, self.canary, @intFromEnum(self.type), self.next,
-            });
-            @panic("InboxNode canary corrupted");
-        }
-    }
-};
-
-// Multi-Producer, Single-Consumer Atomic Stack
-// Provides a scalable, thread-safe way to spawn new tasks / fibers
-pub const AtomicInbox = struct {
-    // The "Head" of the linked list.
-    // Producers CAS this to push. Consumer SWAPs this to pop all.
-    head: Atomic(?*InboxNode) = Atomic(?*InboxNode).init(null),
-
-    /// Producer: Push a single node. Wait-Free.
-    pub fn push(self: *AtomicInbox, node: *InboxNode) void {
-        node.validate("push");
-        var old_head = self.head.load(.monotonic);
-        while (true) {
-            node.next = old_head;
-            // Try to swap Head with Node.
-            // If Head is still OldHead, it works. If not, OldHead updates to current.
-            old_head = self.head.cmpxchgWeak(
-                old_head,
-                node,
-                .release,
-                .monotonic
-            ) orelse break;
-        }
-    }
-
-    /// Consumer: Detach the entire list and return it. Wait-Free.
-    pub fn popAll(self: *AtomicInbox) ?*InboxNode {
-        // Atomically replace HEAD with NULL. We now own the entire chain.
-        return self.head.swap(null, .acquire);
-    }
-
-    /// Helper: The list comes out LIFO (Reverse order).
-    /// If you strictly need FIFO, call this on the result of popAll.
-    pub fn reverse(list: ?*InboxNode) ?*InboxNode {
-        var prev: ?*InboxNode = null;
-        var curr = list;
-        var depth: usize = 0;
-        while (curr) |node| {
-            node.validate("reverse");
-            depth += 1;
-            if (depth > 100_000) {
-                std.debug.print("INBOX CYCLE: reverse depth > 100K, node={*}\n", .{node});
-                @panic("inbox linked list cycle detected");
-            }
-            const next = node.next;
-            node.next = prev;
-            prev = node;
-            curr = next;
-        }
-        return prev;
-    }
-};
 
 // Dynamic Chase-Lev Work-Stealing Deque (Chase & Lev, 2005)
 //
@@ -289,9 +217,11 @@ pub const WaiterList = struct {
     spin: Atomic(u32) = Atomic(u32).init(0),
 
     pub fn spinAcquire(self: *WaiterList) void {
+        // VOPR-START-RETRY: WaiterList spinlock CAS acquire
         while (self.spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
             std.atomic.spinLoopHint();
         }
+        // VOPR-END-RETRY
     }
 
     pub fn spinRelease(self: *WaiterList) void {
@@ -475,7 +405,6 @@ pub const Task = struct {
     lock_wait_start_ms: Atomic(i64) = Atomic(i64).init(0),
 
     // ── Group 3: cold/rare ──────────────────────────────────────────────
-    inbox_link: InboxNode = .{ .type = .Resume },
     /// Back-pointer to lock's waiter list. Set by lockSlow before
     /// yield, cleared by either the wake-side (lockSlow after yield,
     /// or notifier-side wakeNext) or the timeout scanner. Atomic so

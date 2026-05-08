@@ -816,6 +816,9 @@ pub const ParkingMutex = struct {
     fn lockSlow(self: *ParkingMutex) LockError!void {
         const sched_opt = getScheduler();
 
+        // LOOM-EXCLUDE-BEGIN: thread-only acquire path. Loom always runs with
+        // a scheduler, so getScheduler() never returns null in loom scenarios.
+        // Atomic ops here are exercised by parking-lot-hammer-test.zig under TSan.
         if (sched_opt == null) {
             // Non-fiber: spin-then-yield-then-futex.
             //
@@ -865,6 +868,7 @@ pub const ParkingMutex = struct {
                 if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) return;
             }
         }
+        // LOOM-EXCLUDE-END
 
         const sched = sched_opt.?;
         const task = sched.current_task.?;
@@ -1175,6 +1179,10 @@ pub const ParkingRwLock = struct {
     fn lockSlow(self: *ParkingRwLock) LockError!void {
         const sched_opt = getScheduler();
 
+        // LOOM-EXCLUDE-BEGIN: thread-only acquire path. Loom always runs with
+        // a scheduler, so getScheduler() never returns null in loom scenarios.
+        // Atomic ops here are exercised by parking-rwlock-fiber-hammer-test.zig
+        // under TSan.
         if (sched_opt == null) {
             // Non-fiber: test-then-CAS. CAS-spinning bounces the cache line
             // every iteration; reading-then-CAS lets all waiters share the
@@ -1194,6 +1202,7 @@ pub const ParkingRwLock = struct {
                 // Lost the race; loop back to read-spin.
             }
         }
+        // LOOM-EXCLUDE-END
 
         const sched = sched_opt.?;
         const task = sched.current_task.?;
@@ -1549,6 +1558,10 @@ pub const ParkingRwLock = struct {
         const sched_opt = getScheduler();
         const wait_start: u64 = if (rt_profile.CLEAR_PROFILE) lock_profile.now() else 0;
 
+        // LOOM-EXCLUDE-BEGIN: thread-only acquire path. Loom always runs with
+        // a scheduler, so getScheduler() never returns null in loom scenarios.
+        // Atomic ops here are exercised by parking-rwlock-fiber-hammer-test.zig
+        // under TSan.
         if (sched_opt == null) {
             // Test-then-fetchAdd. fetchAdd thrashes the cache line on every
             // failed attempt (the +1/-1 still touches the line). Read-spin
@@ -1574,6 +1587,7 @@ pub const ParkingRwLock = struct {
                 _ = self.state.fetchSub(1, .release);
             }
         }
+        // LOOM-EXCLUDE-END
 
         const sched = sched_opt.?;
         const task = sched.current_task.?;

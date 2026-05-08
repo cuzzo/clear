@@ -322,6 +322,88 @@ fn racingMutator(p: *i64, r: Racer) void {
     r.tle_ref.retire(testing.allocator, old) catch {};
 }
 
+// Flow-control struct for updateFlow. Mirrors __PolyFlow generated
+// by the transpiler (src/mir/mir_emitter.rb:318): the enum field
+// drives the same-shape switch inside updateFlow. The non-commit
+// variants short-circuit before CAS; the commit variants fall
+// through to the load+cmpxchgWeak path that update() already
+// exercises but updateFlow's clone of did not, leaving lines 266
+// and 277 as line-missing in the kcov report.
+const FlowKind = enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit };
+const Flow = struct { kind: FlowKind = .cont_commit };
+
+fn flowSetThenContinue(p: *Sample, flow: *Flow) void {
+    p.a = 7;
+    p.b = 14;
+    flow.kind = .cont_commit;
+}
+
+fn flowSkipBeforeCommit(p: *Sample, flow: *Flow) void {
+    p.a = 999;
+    p.b = 999;
+    flow.kind = .skip_no_commit;
+}
+
+test "AtomicPtr: updateFlow commits on .cont_commit (covers load + CAS path)" {
+    // updateFlow has its own load+cmpxchgWeak loop separate from
+    // update(). Without this test the load and CAS at lib/atomic_ptr.zig
+    // lines 266 and 277 are line-missing in the loom kcov report
+    // because no test calls updateFlow with a commit kind.
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var tle = try newTle(&ctx, testing.allocator);
+    defer ctx.unregister(&tle);
+    defer tle.deinit(testing.allocator);
+
+    var cell = try AtomicPtr(Sample).init(testing.allocator, .{ .a = 0, .b = 0 });
+    defer {
+        cell.deinit(&tle, testing.allocator) catch unreachable;
+        var d: usize = 0;
+        while (d < 6) : (d += 1) {
+            tle.reclaimLocal(testing.allocator);
+            ctx.reclaim(testing.allocator);
+        }
+    }
+
+    var flow = Flow{};
+    try cell.updateFlow(&tle, testing.allocator, flowSetThenContinue, .{&flow});
+
+    var g = cell.read(&tle);
+    defer g.release();
+    try testing.expectEqual(@as(i64, 7), g.get().a);
+    try testing.expectEqual(@as(i64, 14), g.get().b);
+}
+
+test "AtomicPtr: updateFlow short-circuits on .skip_no_commit (no publish)" {
+    // The non-commit kinds bail before the CAS; cell value must
+    // remain at the seed.
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var tle = try newTle(&ctx, testing.allocator);
+    defer ctx.unregister(&tle);
+    defer tle.deinit(testing.allocator);
+
+    var cell = try AtomicPtr(Sample).init(testing.allocator, .{ .a = 100, .b = 200 });
+    defer {
+        cell.deinit(&tle, testing.allocator) catch unreachable;
+        var d: usize = 0;
+        while (d < 6) : (d += 1) {
+            tle.reclaimLocal(testing.allocator);
+            ctx.reclaim(testing.allocator);
+        }
+    }
+
+    var flow = Flow{};
+    try cell.updateFlow(&tle, testing.allocator, flowSkipBeforeCommit, .{&flow});
+
+    var g = cell.read(&tle);
+    defer g.release();
+    try testing.expectEqual(@as(i64, 100), g.get().a);
+    try testing.expectEqual(@as(i64, 200), g.get().b);
+}
+
 test "AtomicPtr: bounded retry surfaces error.AtomicConflict when cap is exhausted (#330)" {
     // Pin the new bounded-retry contract: under sustained CAS
     // contention that defeats every retry, the loop returns

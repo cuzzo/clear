@@ -24,7 +24,17 @@ const ebr = @import("../lib/ebr.zig");
 const fsm = @import("fsm.zig");
 const build_options = @import("build_options");
 
-const alloc = std.testing.allocator;
+var gpa: std.heap.DebugAllocator(.{}) = .{};
+var alloc: std.mem.Allocator = gpa.allocator();
+
+/// Called by the executable wrapper after each test fn returns
+/// (i.e. after the fn's defers have fired and freed all scoped state).
+/// Detects leaks across runs and resets the allocator for hermeticity.
+pub fn checkLeaksAndReset() !void {
+    if (gpa.deinit() != .ok) return error.LeaksDetected;
+    gpa = .{};
+    alloc = gpa.allocator();
+}
 
 const MAX_TASKS = if (build_options.coverage) 32 else 128;
 const STEPS = if (build_options.coverage) 32 else 256;
@@ -246,7 +256,7 @@ fn runSeed(seed: u64) !void {
     for (world.blockers.items) |b| try std.testing.expect(b.completed);
 }
 
-test "FSM VOPR: 128 seeds of PRNG-driven fuzzing" {
+pub fn testManySeeds() !void {
     const N_SEEDS = if (build_options.coverage) 4 else 128;
     var seed: u64 = 0;
     while (seed < N_SEEDS) : (seed += 1) {
@@ -257,11 +267,11 @@ test "FSM VOPR: 128 seeds of PRNG-driven fuzzing" {
     }
 }
 
-test "FSM VOPR: single targeted seed with final state checks" {
+pub fn testTargetedSeed() !void {
     try runSeed(0xDEAD_BEEF);
 }
 
-test "FSM VOPR: enqueue -> drain round-trip preserves active_tasks" {
+pub fn testEnqueueDrainRoundTrip() !void {
     var global_ebr: ebr.EbrContext = .{};
     defer global_ebr.deinit(alloc);
     var stack_pool = fm.StackPool.init(alloc);
@@ -286,7 +296,7 @@ test "FSM VOPR: enqueue -> drain round-trip preserves active_tasks" {
     try std.testing.expect(sched.fsm_ready_queue.len() == 0);
 }
 
-test "FSM VOPR: remote ctx slab frees drain through owner scheduler" {
+pub fn testRemoteCtxSlabFrees() !void {
     const N_SEEDS = if (build_options.coverage) 2 else 32;
     const OPS = if (build_options.coverage) 16 else 128;
     const MAX_LIVE = 64;

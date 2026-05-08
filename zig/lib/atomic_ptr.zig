@@ -225,6 +225,7 @@ pub fn AtomicPtr(comptime T: type) type {
             defer if (!success) allocator.destroy(new_ptr);
 
             var retries: usize = 0;
+            // VOPR-START-RETRY: AtomicPtr update CAS-loser retry, bounded by MAX_UPDATE_RETRIES
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 const old_ptr = self.ptr.load(.acquire) orelse unreachable;
 
@@ -246,6 +247,7 @@ pub fn AtomicPtr(comptime T: type) type {
                 try ebr.retire(allocator, old_ptr);
                 return;
             }
+            // VOPR-END-RETRY
             return error.AtomicConflict;
         }
 
@@ -262,6 +264,7 @@ pub fn AtomicPtr(comptime T: type) type {
             defer if (!success) allocator.destroy(new_ptr);
 
             var retries: usize = 0;
+            // VOPR-START-RETRY: AtomicPtr updateFlow CAS-loser retry
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 const old_ptr = self.ptr.load(.acquire) orelse unreachable;
 
@@ -283,6 +286,7 @@ pub fn AtomicPtr(comptime T: type) type {
                 try ebr.retire(allocator, old_ptr);
                 return;
             }
+            // VOPR-END-RETRY
             return error.AtomicConflict;
         }
 

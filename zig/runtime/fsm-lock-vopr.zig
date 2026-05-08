@@ -24,7 +24,18 @@ const CheatHeader = @import("runtime-header.zig");
 const Runtime = rt_mod.Runtime;
 const build_options = @import("build_options");
 
-const alloc = std.testing.allocator;
+// Module-global DebugAllocator: same leak detection as testing.allocator,
+// available outside `b.addTest`. The wrapper main() calls
+// checkLeaksAndReset() AFTER each test fn returns (so the test's
+// `defer` cleanup has fired). Mirrors std.testing's allocator pair.
+var gpa: std.heap.DebugAllocator(.{}) = .{};
+var alloc: std.mem.Allocator = gpa.allocator();
+
+pub fn checkLeaksAndReset() !void {
+    if (gpa.deinit() != .ok) return error.LeaksDetected;
+    gpa = .{};
+    alloc = gpa.allocator();
+}
 
 // Same shape as fsm-lock-test's LockingFsm, inlined here for clarity.
 const LockFsm = struct {
@@ -190,7 +201,7 @@ fn runSeed(seed: u64) !void {
     try std.testing.expectEqual(@as(u64, 0), sched.active_tasks.load(.monotonic));
 }
 
-test "FSM lock VOPR: 32 seeds of randomized FSM+stackful contention" {
+pub fn testManySeeds() !void {
     const N = if (build_options.coverage) 4 else 32;
     var seed: u64 = 0;
     while (seed < N) : (seed += 1) {
@@ -201,6 +212,6 @@ test "FSM lock VOPR: 32 seeds of randomized FSM+stackful contention" {
     }
 }
 
-test "FSM lock VOPR: reproduce targeted seed 42" {
+pub fn testTargetedSeed42() !void {
     try runSeed(42);
 }

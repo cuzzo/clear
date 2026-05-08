@@ -538,13 +538,30 @@ pub fn main(init: std.process.Init.Minimal) !void {
 // memory (SimAtomic uses plain values, not raw memory).
 // -----------------------------------------------------------------------
 
-test "vopr: task conservation and pinned affinity" {
+// Module-global DebugAllocator for the executable VOPR runner. The
+// wrapper main() calls checkLeaksAndReset() AFTER each test fn returns
+// (after its `defer` cleanup has fired) -- doing it inside the test fn
+// would gpa.deinit() while scoped state is still alive and false-fail.
+var vopr_test_gpa: std.heap.DebugAllocator(.{}) = .{};
+var vopr_test_alloc: std.mem.Allocator = vopr_test_gpa.allocator();
+
+pub fn checkLeaksAndReset() !void {
+    if (vopr_test_gpa.deinit() != .ok) return error.LeaksDetected;
+    vopr_test_gpa = .{};
+    vopr_test_alloc = vopr_test_gpa.allocator();
+}
+
+pub fn testTaskConservation() !void {
     for (0..100) |seed| {
-        try runVoprAlloc(seed, 200, std.testing.allocator);
+        try runVoprAlloc(seed, 200, vopr_test_alloc);
     }
 }
 
-test "vopr: ready queue starves the older of two co-located cooperative tasks" {
+test "vopr: task conservation and pinned affinity" {
+    try testTaskConservation();
+}
+
+pub fn testCooperativeFairness() !void {
     // Reproduces the runtime bug uncovered by
     //   versioned-fiber-stress-test.zig "Versioned: retired version
     //   survives writer task exit while another task holds a guard".
@@ -568,7 +585,7 @@ test "vopr: ready queue starves the older of two co-located cooperative tasks" {
     // fibers, atomics-races, or test-runner timing: it is pure queue
     // policy. Today it FAILS on master; if any future change makes it
     // pass, the production cooperative-fairness contract is restored.
-    const allocator = std.testing.allocator;
+    const allocator = vopr_test_alloc;
     var state = VoprState.init(7, allocator);
     state.random = state.rng.random();
     defer state.deinit();
@@ -629,7 +646,7 @@ fn simulateSubmitResume(state: *VoprState, target_sched: usize, task: *qs.Task) 
     return true;
 }
 
-test "vopr: submitResume after .Finished destroy is rejected by in_inbox state machine" {
+pub fn testSubmitResumeAfterFinished() !void {
     // Reproduces the bug class behind the SplitStream-pubsub-hammer
     // crash ("Segmentation fault at scheduler.zig run() destroy(task.
     // base)") and verifies the runtime fix:
@@ -648,7 +665,7 @@ test "vopr: submitResume after .Finished destroy is rejected by in_inbox state m
     // submitResume MUST be rejected -- if it isn't, the destroyed
     // task reaches a queue and the DestroyedTaskReferenced invariant
     // fires.
-    const allocator = std.testing.allocator;
+    const allocator = vopr_test_alloc;
     var state = VoprState.init(13, allocator);
     state.random = state.rng.random();
     defer state.deinit();
@@ -677,7 +694,7 @@ test "vopr: submitResume after .Finished destroy is rejected by in_inbox state m
     try vi.checkAllSilent(&state);
 }
 
-test "vopr: submitResume that wins the CAS race -- destroyer skips destroy" {
+pub fn testSubmitResumeWinsCasRace() !void {
     // The mirror-image case: submitResume's CAS IDLE -> IN_QUEUE
     // succeeds BEFORE the destroyer's CAS attempt (the wake fired
     // before the body finished its yield-to-scheduler hop). The
@@ -691,7 +708,7 @@ test "vopr: submitResume that wins the CAS race -- destroyer skips destroy" {
     // failed CAS. The task must remain alive (no destroy) and live
     // in resume_inbox awaiting the next pop. The invariant must
     // hold.
-    const allocator = std.testing.allocator;
+    const allocator = vopr_test_alloc;
     var state = VoprState.init(17, allocator);
     state.random = state.rng.random();
     defer state.deinit();
@@ -730,7 +747,7 @@ test "vopr: submitResume that wins the CAS race -- destroyer skips destroy" {
     try vi.checkAllSilent(&state);
 }
 
-test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAccess" {
+pub fn testStolenTaskShardConcurrentAccess() !void {
     // Deterministic reproduction: verifies the invariant checker catches the
     // scenario that sendAndWait's temporary pin prevents in the real runtime.
     //   1. Unpinned task on sched 1 (no shards yet, so no temporary pin)
@@ -738,7 +755,7 @@ test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAcc
     //   3. Steal the task to sched 0
     //   4. Invariant fires: task is in sched 0's queue AND sched 0 has a pending
     //      remote op from that same task.
-    const allocator = std.testing.allocator;
+    const allocator = vopr_test_alloc;
     var state = VoprState.init(42, allocator);
     state.random = state.rng.random();
     defer state.deinit();

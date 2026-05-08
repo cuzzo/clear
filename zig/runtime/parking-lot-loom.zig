@@ -2520,6 +2520,7 @@ fn fsmRwReaderBody(slot: usize) void {
 }
 
 fn entryFsmRwWriter0() callconv(.c) void { fsmRwWriterBody(0); }
+fn entryFsmRwWriter1() callconv(.c) void { fsmRwWriterBody(1); }
 fn entryFsmRwReader1() callconv(.c) void { fsmRwReaderBody(1); }
 fn entryFsmRwReader2() callconv(.c) void { fsmRwReaderBody(2); }
 
@@ -2674,6 +2675,64 @@ pub fn testFsmRwlockOneWriterTwoReaders() !void {
 
     if (failures > 0) {
         std.debug.print("\n{d}/{d} fsm-rw-1W2R schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// Two FSM writers contesting the same rwlock. The second one to enter
+// tryWriteLockForFsm sees WRITE_LOCKED_BIT set (held by the first),
+// hits the line 1326-1333 re-entrancy / cycle-pre-check that loads
+// `fsm_write_owner` (line 1327). Without this scenario the existing
+// FSM rwlock tests (1W+1R, 1W+2R) all enter tryWriteLockForFsm with
+// state == 0 and never trigger the if at 1326.
+pub fn testFsmRwlockTwoWriters() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = if (build_options.coverage) 4 else 8;
+    const total_schedules: usize = @as(usize, 1) << depth;
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+        fsmRwReset();
+        fsmLockReset();
+
+        try h.createThread(0, @intFromPtr(&entryFsmRwWriter0));
+        try h.createThread(1, @intFromPtr(&entryFsmRwWriter1));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (!h.done[0] or !h.done[1]) {
+            failures += 1;
+            continue;
+        }
+        if (!fsmRwCheck(2, &.{})) failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} fsm-rw-2W schedules failed\n", .{ failures, total_schedules });
         return error.LoomFailures;
     }
 }
@@ -2977,4 +3036,1114 @@ pub fn testMultiFallibleSortedAcquire() !void {
         );
         return error.LoomFailures;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// tryLock + presetLocked (no-fiber paths)
+//
+// `presetLocked` (test rendezvous helper) and `tryLock` are public
+// ParkingMutex methods that the harness-driven scenarios above never
+// call -- they go through `lock()` which routes to lockSlow's parking
+// path. Without a direct caller, lib/parking-lot.zig:640/644/651 are
+// line-missing in the loom kcov report.
+//
+// These tests run synchronously (no harness, no fibers): tryLock is
+// a single-call public API and presetLocked is a one-liner setter.
+// The atomic ops inside still go through SimAtomic because the
+// root-module export of `SimAtomic` makes parking-lot.zig's
+// `Atomic(...)` alias resolve to it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testTryLockHappyAndContended() !void {
+    var m: ParkingMutex = .{};
+
+    // Happy path: lock is free -> tryLock acquires (covers 644 + 651).
+    if (!m.tryLock()) return error.TryLockShouldHaveSucceeded;
+    if (!m.isLocked()) return error.LockNotHeldAfterTryLock;
+
+    // Release via direct state clear -- no waiters to wake.
+    _ = m.state.fetchAnd(~ParkingMutex.STATE_LOCKED, .release);
+
+    // Pre-lock the mutex via the test rendezvous helper (covers 640).
+    m.presetLocked();
+    if (!m.isLocked()) return error.PresetLockedDidNotSetBit;
+
+    // Contended path: tryLock must reject.
+    if (m.tryLock()) return error.TryLockShouldHaveFailed;
+
+    _ = m.state.fetchAnd(~ParkingMutex.STATE_LOCKED, .release);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-park "lock_timed_out" epilogue coverage (parking-lot.zig clusters C+E)
+//
+// When a parker exits its park-loop with `task.lock_timed_out == true`,
+// lockSlow runs an epilogue that resets the flag and checks whether the
+// wake-vs-timeout race granted the lock anyway. This block exists for
+// the mutex (lines 968-975) and both rwlock variants. Existing scenarios
+// never get a parker to wake with timed_out=true because they don't
+// cross the scanner-set into a real lock() call -- testTimeoutAtomicCoverage
+// drives a synthetic parker that bypasses lockSlow's epilogue entirely.
+//
+// Pattern: holder fiber acquires the lock, yields to let parker park,
+// pre-sets the parker task's `lock_timed_out=true` via direct atomic
+// store, then unlocks (which wakeNext-clears `waiting_for_lock=null`).
+// The .release on `lock_timed_out` chains-acquires through the
+// .release/.acquire pair on `waiting_for_lock`, so the parker observes
+// timed_out=true once it exits the park-loop. Coverage: parker runs
+// the real epilogue's load + store + state-load.
+// ─────────────────────────────────────────────────────────────────────────────
+
+var g_epilogue_observed: bool = false;
+
+fn entryEpilogueParkerMutex() callconv(.c) void {
+    const t = &harness.stub_tasks[0];
+    // `lock()` returns on either branch of the post-park epilogue:
+    //   - Success: wake-races-timeout-with-grant -> ownerOf(state)==task,
+    //     line 970 takes `return`, lock() returns void.
+    //   - Failure: ownerOf(state) != task, falls through to LockTimeout.
+    // Both branches first execute the .release-store at line 969 that
+    // resets `lock_timed_out` to false. So observing `lock_timed_out`
+    // false after `lock()` returns confirms the epilogue ran.
+    g_mutex.lock() catch {
+        if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+        harness.done[0] = true;
+        while (true) fc.__fiber.?.yield();
+        return;
+    };
+    if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+    g_mutex.unlock();
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryEpilogueHolderMutex() callconv(.c) void {
+    g_mutex.lock() catch unreachable;
+    // Yield twice so the parker fiber gets a chance to call lock(),
+    // execute lockSlow up to the park yield, and register as a waiter.
+    fc.__fiber.?.yield();
+    fc.__fiber.?.yield();
+    // Inject timeout flag on the parker task BEFORE unlock so the
+    // .release-store chains through the wakeNext .release on
+    // waiting_for_lock. wakeNext is inside unlock().
+    harness.stub_tasks[0].lock_timed_out.store(true, .release);
+    g_mutex.unlock();
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testMutexLockTimeoutEpilogue() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    // Single deterministic schedule is enough for line coverage; we just
+    // need one ordering where parker actually parks and holder unlocks
+    // after setting the timeout flag.
+    var schedule_buf: [16]u8 = [_]u8{ 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    g_mutex = .{};
+    g_epilogue_observed = false;
+    h.resetExhaustive(&schedule_buf);
+
+    try h.createThread(0, @intFromPtr(&entryEpilogueParkerMutex));
+    try h.createThread(1, @intFromPtr(&entryEpilogueHolderMutex));
+
+    h.run() catch {};
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (!g_epilogue_observed) return error.EpilogueNotObserved;
+}
+
+fn entryEpilogueParkerRwlockWrite() callconv(.c) void {
+    const t = &harness.stub_tasks[0];
+    g_rw.lock() catch {
+        if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+        harness.done[0] = true;
+        while (true) fc.__fiber.?.yield();
+        return;
+    };
+    if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+    g_rw.unlock();
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryEpilogueHolderRwlockWrite() callconv(.c) void {
+    g_rw.lock() catch unreachable;
+    fc.__fiber.?.yield();
+    fc.__fiber.?.yield();
+    harness.stub_tasks[0].lock_timed_out.store(true, .release);
+    g_rw.unlock();
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testRwlockWriteLockTimeoutEpilogue() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = [_]u8{ 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    rwReset();
+    g_epilogue_observed = false;
+    h.resetExhaustive(&schedule_buf);
+
+    try h.createThread(0, @intFromPtr(&entryEpilogueParkerRwlockWrite));
+    try h.createThread(1, @intFromPtr(&entryEpilogueHolderRwlockWrite));
+
+    h.run() catch {};
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (!g_epilogue_observed) return error.EpilogueNotObserved;
+}
+
+fn entryEpilogueParkerRwlockRead() callconv(.c) void {
+    const t = &harness.stub_tasks[0];
+    g_rw.lockShared() catch {
+        if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+        harness.done[0] = true;
+        while (true) fc.__fiber.?.yield();
+        return;
+    };
+    if (!t.lock_timed_out.load(.acquire)) g_epilogue_observed = true;
+    g_rw.unlockShared();
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryEpilogueHolderRwlockRead() callconv(.c) void {
+    g_rw.lock() catch unreachable;
+    fc.__fiber.?.yield();
+    fc.__fiber.?.yield();
+    harness.stub_tasks[0].lock_timed_out.store(true, .release);
+    g_rw.unlock();
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testRwlockReadLockTimeoutEpilogue() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = [_]u8{ 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    rwReset();
+    g_epilogue_observed = false;
+    h.resetExhaustive(&schedule_buf);
+
+    try h.createThread(0, @intFromPtr(&entryEpilogueParkerRwlockRead));
+    try h.createThread(1, @intFromPtr(&entryEpilogueHolderRwlockRead));
+
+    h.run() catch {};
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (!g_epilogue_observed) return error.EpilogueNotObserved;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S6: scheduler.zig active_tasks accounting on idle-steal (lines 1358, 1360,
+// 1370, 1371)
+//
+// idleStealFrom is the run-loop's per-iteration "if idle, steal from a
+// victim" block, refactored to a method so loom can drive it without
+// running the whole run() loop. Two scenarios cover both arms (stackful
+// and FSM) of the steal+accounting path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn s6DummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+fn fsmS6NoopResume(_: *fsm_mod.FsmTask) fsm_mod.YieldReason {
+    return .Done;
+}
+
+fn testIdleStealFromStackful() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        const final_b = sched_a.ready_queue.bottom.load(.monotonic);
+        sched_a.ready_queue.top.store(final_b, .monotonic);
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        const final_b = sched_b.ready_queue.bottom.load(.monotonic);
+        sched_b.ready_queue.top.store(final_b, .monotonic);
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    // Push 4 stub tasks onto sched_b (the victim). tryStealFrom takes
+    // half. 4 -> 2 stolen.
+    var stubs: [4]Task = undefined;
+    for (&stubs) |*t| {
+        t.* = .{
+            .base = undefined,
+            .user_fn = @ptrCast(&s6DummyFn),
+            .status = qs.Atomic(TaskStatus).init(.Ready),
+        };
+        try sched_b.ready_queue.push(allocator, t);
+        _ = sched_b.active_tasks.fetchAdd(1, .monotonic);
+    }
+
+    const victim_before = sched_b.active_tasks.load(.monotonic);
+    const stealer_before = sched_a.active_tasks.load(.monotonic);
+
+    // Drives lines 1358 (stealer fetchAdd) + 1360 (victim fetchSub).
+    sched_a.idleStealFrom(&sched_b);
+
+    const stolen = sched_a.active_tasks.load(.monotonic) - stealer_before;
+    if (stolen == 0) return error.StealDidNotOccur;
+    if (victim_before - sched_b.active_tasks.load(.monotonic) != stolen) {
+        return error.AccountingInconsistent;
+    }
+}
+
+fn testIdleStealFromFsm() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    // Empty stackful queue, FSM queue full -> first tryStealFrom returns
+    // 0, FSM tryStealFrom succeeds. Drives lines 1370 (stealer fetchAdd)
+    // + 1371 (victim fetchSub).
+    var fsm_stubs: [4]fsm_mod.FsmTask = undefined;
+    for (&fsm_stubs) |*t| {
+        t.* = .{ .resume_fn = &fsmS6NoopResume };
+        try sched_b.fsm_ready_queue.push(allocator, t);
+        _ = sched_b.active_tasks.fetchAdd(1, .monotonic);
+    }
+
+    const victim_before = sched_b.active_tasks.load(.monotonic);
+    const stealer_before = sched_a.active_tasks.load(.monotonic);
+
+    sched_a.idleStealFrom(&sched_b);
+
+    const stolen = sched_a.active_tasks.load(.monotonic) - stealer_before;
+    if (stolen == 0) return error.FsmStealDidNotOccur;
+    if (victim_before - sched_b.active_tasks.load(.monotonic) != stolen) {
+        return error.FsmAccountingInconsistent;
+    }
+}
+
+pub fn testIdleStealAccounting() !void {
+    try testIdleStealFromStackful();
+    try testIdleStealFromFsm();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S2+S5: cross-scheduler submitResume flow
+//
+// Drives submitResume's cross-scheduler path which exercises:
+//   - in_inbox.cmpxchgStrong IDLE -> IN_QUEUE (S5 wake CAS, line 896)
+//   - dirty_mask.fetchOr to signal target scheduler (S1, line 928)
+//   - drainChannels Resume case status.store(.Ready) (S2 wake, line 1053)
+//
+// `submitResume` short-circuits when sender == target via the
+// "same-scheduler fast path" at line 905. To hit the cross-scheduler
+// branch we set active_scheduler = sched_a but submit into sched_b.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn s25DummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+pub fn testCrossSchedulerResumeFlow() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        // Drain ready_queue before deinit -- our drainChannels' Resume
+        // case enqueued the stub Task whose .base = undefined, so
+        // scheduler deinit walking pending tasks would dereference it.
+        const final_b = sched_b.ready_queue.bottom.load(.monotonic);
+        sched_b.ready_queue.top.store(final_b, .monotonic);
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched_a;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+
+    // Cross-scheduler submitResume: sender is sched_a (active),
+    // target is sched_b. Lines: 896 (in_inbox CAS), 928 (dirty_mask
+    // fetchOr).
+    sched_b.submitResume(&stub_task);
+
+    if (sched_b.dirty_mask.load(.monotonic) == 0) return error.DirtyMaskBitNotSet;
+    if (stub_task.in_inbox.load(.monotonic) != qs.IN_INBOX_IN_QUEUE) {
+        return error.InboxStateUnexpected;
+    }
+
+    // drainChannels processes the queued Resume message: line 1053
+    // status.store(.Ready) + line 1054 enqueueTask.
+    sched_b.drainChannels();
+
+    if (stub_task.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+    if (sched_b.dirty_mask.load(.monotonic) != 0) return error.DirtyMaskNotCleared;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S2: coopYield wake path (line 1631)
+//
+// Scheduler.coopYield checks hasWork() and, if true, marks the running
+// task .Ready + co_yielded and yields. To exercise it we push a stub
+// task to the scheduler's ready_queue (so hasWork() is true), then
+// invoke coopYield from inside a fiber. Returns naturally because the
+// harness picks the same fiber back up (status=.Ready).
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn entryS2CoopYield() callconv(.c) void {
+    // Push fiber 1's stub task as a placeholder to make hasWork() true.
+    g_sched.ready_queue.push(g_sched.allocator, &harness.stub_tasks[1]) catch unreachable;
+    g_sched.coopYield();
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S2: wakeExpiredSleepers (line 1188 in run-loop, now extracted)
+//
+// Push a stub Task onto sleeping_queue with wake_time in the past,
+// call wakeExpiredSleepers. Drives `task.status.store(.Ready)` for
+// the sleep-wake path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testWakeExpiredSleepers() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        // Drain ready_queue: wakeExpiredSleepers' enqueueTask added the
+        // stub Task whose .base = undefined.
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+        .wake_time = 1,
+    };
+    try sched.sleeping_queue.append(allocator, &stub_task);
+
+    sched.wakeExpiredSleepers();
+
+    if (stub_task.status.load(.monotonic) != .Ready) return error.SleeperNotWoken;
+    if (sched.sleeping_queue.items.len != 0) return error.SleeperNotRemoved;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S9: SchedulerRegistry.pickTwo round-robin (lines 2123-2125)
+//
+// pickTwo is the work-stealing power-of-two-choice load-balancer.
+// Lines: next.fetchAdd(1, .monotonic), then two slots[].load(.acquire).
+// Drive by registering >= 2 schedulers and calling pickTwo. Drive-by:
+// register's slot.cmpxchgStrong(null, sched, .acq_rel, .monotonic)
+// at line 2153 (S10).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testPickTwoRoundRobin() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebrs: [3]ebr_mod.EbrContext = .{ .{}, .{}, .{} };
+    var pools: [3]fm.StackPool = undefined;
+    var scheds: [3]fp.Scheduler = undefined;
+    for (0..3) |i| {
+        pools[i] = fm.StackPool.init(allocator);
+        scheds[i] = try fp.Scheduler.init(allocator, &ebrs[i], &pools[i]);
+    }
+    defer {
+        // Unregister + tear down in reverse order. unregister clears the
+        // slot so the next test's registration starts from a clean state.
+        for (0..3) |i| {
+            const idx = 2 - i;
+            fp.global_registry.unregister(@as(std.Thread.Id, @intCast(idx + 1)));
+            scheds[idx].deinit();
+            pools[idx].deinit();
+            ebrs[idx].deinit(allocator);
+        }
+    }
+
+    // Use synthetic thread ids; register each scheduler (drives line 2153
+    // -- the slot.cmpxchgStrong(null, sched) registry insert path, S10
+    // drive-by).
+    for (0..3) |i| {
+        try fp.global_registry.register(allocator, @as(std.Thread.Id, @intCast(i + 1)), &scheds[i]);
+    }
+
+    // Hammer pickTwo a few times to drive the round-robin past several
+    // increments. Each call drives lines 2123 (next.fetchAdd) + 2124,
+    // 2125 (slots[].load). With 3 registered schedulers, every pair
+    // returned must be 2 distinct registered schedulers.
+    var k: usize = 0;
+    while (k < 8) : (k += 1) {
+        const pair = fp.global_registry.pickTwo();
+        const a = pair.a orelse return error.PairAEmpty;
+        const b = pair.b orelse return error.PairBEmpty;
+        if (a == b) return error.PairsMustDiffer;
+        // Verify both pointers are actually registered.
+        var found_a = false;
+        var found_b = false;
+        for (&scheds) |*s| {
+            if (a == s) found_a = true;
+            if (b == s) found_b = true;
+        }
+        if (!found_a or !found_b) return error.PairContainsUnregistered;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S1: dirty_mask.fetchOr in submitFsmResume (line 878)
+//
+// Mirror of testCrossSchedulerResumeFlow but routed through
+// submitFsmResume to exercise the FSM Resume cross-scheduler path.
+// Drives line 878 (dirty_mask.fetchOr) + the FSM-side ring push.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testCrossSchedulerFsmResumeFlow() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        // Drain fsm_ready_queue before deinit (the FsmResume processed
+        // by drainChannels enqueues a stub FsmTask). The FSM queue's
+        // tasks are pointers we own, so just zeroing top/bottom is fine.
+        const final_b = sched_b.fsm_ready_queue.bottom.load(.monotonic);
+        sched_b.fsm_ready_queue.top.store(final_b, .monotonic);
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched_a;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+
+    try sched_b.submitFsmResume(&stub_fsm);
+
+    if (sched_b.dirty_mask.load(.monotonic) == 0) return error.DirtyMaskBitNotSet;
+
+    // drainChannels processes the FsmResume message: status=.Ready
+    // and pushes onto fsm_ready_queue.
+    sched_b.drainChannels();
+
+    if (sched_b.dirty_mask.load(.monotonic) != 0) return error.DirtyMaskNotCleared;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S10: pinTask / pinFsmTask cross-iter loads (lines 2317, 2328, 2376, 2383)
+//
+// Both walk global_registry.slots to find the scheduler whose
+// task_slab / fsm_task_slab contains a given pointer. With at least
+// one registered scheduler, the load+continue pattern fires. We
+// don't have a real slab-allocated Task to pin, but for COVERAGE we
+// just need the two atomic loads (slot and generation) per arm.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testRegistryCrossIterPinPaths() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        fp.global_registry.unregister(@as(std.Thread.Id, @intCast(99)));
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+    try fp.global_registry.register(allocator, @as(std.Thread.Id, @intCast(99)), &sched);
+
+    // pinTask: pass a synthetic Task pointer that's NOT in any slab.
+    // The walk loads slots[i] (line 2317), then refFromPtr returns
+    // null -> `continue`. Loop exits, returns null. Generation load
+    // at line 2328 only fires in the no-registered-schedulers branch
+    // (already covered) -- the post-pin gen load is line 2328 too,
+    // executed when refFromPtr+pin succeed. To cover that, would
+    // need a real slab task; the slot-load alone is the practical
+    // S10 site we can hit here.
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    const result = fp.pinTask(&stub_task);
+    if (result != null) {
+        // Synthetic task happened to land in the slab; unpin so we
+        // don't leak the pin_count.
+        fp.unpinTask(result.?);
+    }
+
+    // Same shape for FSM.
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+    const fresult = fp.pinFsmTask(&stub_fsm);
+    if (fresult != null) {
+        fp.unpinFsmTask(fresult.?);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S11: WaitGroup.done internal spinlock (lines 2749, 2753, 2755, 2765)
+//
+// WaitGroup.done takes a busy-spin internal lock to atomically
+// decrement counter + check-zero + wake-waiter. add(2) then done()
+// twice exercises both branches: prev != 1 path (line 2755 release),
+// and prev == 1 last-decrement path (line 2765 release).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testWaitGroupDoneSpinlock() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var wg = fp.WaitGroup.init(&sched);
+    wg.add(2);
+
+    // First done: counter was 2, prev=2, prev != 1 -> line 2755
+    // release branch.
+    wg.done();
+    // Second done: counter was 1, prev=1 -> last-decrement branch
+    // (lines 2760-2765 + 2765 release).
+    wg.done();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S3: drainChannels RemoteCall completion store (line 1097)
+//
+// Pushes a synthetic RemoteCall message into a scheduler's channel,
+// calls drainChannels. The handler invokes the func, then sets
+// completion.finished=true (line 1097) and calls wg.done(). The
+// wg.done() also drives the WaitGroup spinlock paths (S11 already
+// covered).
+// ─────────────────────────────────────────────────────────────────────────────
+
+var s3_remote_func_called: bool = false;
+
+fn s3RemoteFunc(_: *anyopaque) void {
+    s3_remote_func_called = true;
+}
+
+pub fn testRemoteCallCompletion() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Build a RemoteCompletion with counter=1, no waiter -- done()
+    // last-decrement falls through with no schedule call.
+    var completion = fp.RemoteCompletion{ .wg = fp.WaitGroup.init(&sched) };
+    completion.wg.add(1);
+
+    // Allocate channel from sender 0 to sched.
+    const ring = try sched.ensureChannel(0);
+    var ctx_unused: u8 = 0;
+    const msg = fp.SpscMessage{
+        .tag = .RemoteCall,
+        .rc_func = &s3RemoteFunc,
+        .rc_ctx = &ctx_unused,
+        .rc_wg = &completion,
+    };
+    if (!ring.push(msg)) return error.RingPushFailed;
+    _ = sched.dirty_mask.fetchOr(@as(u64, 1), .release);
+
+    s3_remote_func_called = false;
+    sched.drainChannels();
+
+    if (!s3_remote_func_called) return error.RemoteFuncNotCalled;
+    if (!completion.finished.load(.acquire)) return error.CompletionFinishedNotSet;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S8: scanLockWaiters timeout-fire wake (lines 1907, 1912, 1914,
+//     1957, 1965-1970). Builds on scanLockWaitersPub seam.
+//
+// Setup: synthetic Task in lock_waiters with waiting_for_lock pointing
+// at a sentinel and lock_wait_start_ms long enough ago that
+// `now - start > lock_timeout_ms`. waiting_for_lock_list = null so the
+// scanner skips the WaiterList re-check block (those sites need a real
+// parking-lot WaiterList — defer).
+//
+// Mirror scenario uses scanFsmLockWaitersPub (already public) on the
+// FSM-side fields (lines 1702, 1706-1738).
+// ─────────────────────────────────────────────────────────────────────────────
+
+var s8_lock_sentinel: u8 = 0;
+
+pub fn testScanLockWaitersTimeoutFire() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Force a short timeout so `now - 0 > timeout` is trivially true.
+    sched.lock_timeout_ms = 1;
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    // Pretend we're parked on a lock. Use a non-null sentinel so the
+    // initial `if (waiting_for_lock == null)` branch is skipped.
+    stub_task.waiting_for_lock.store(@ptrCast(&s8_lock_sentinel), .release);
+    // lock_wait_start_ms = 0 -> deadline = 0 + 1 = 1ms. now is far
+    // beyond that, so timeout fires.
+    stub_task.lock_wait_start_ms.store(0, .release);
+    // No real WaiterList -- scanner skips the inner re-check block.
+    stub_task.waiting_for_lock_list.store(null, .release);
+
+    try sched.lock_waiters.append(allocator, &stub_task);
+
+    _ = sched.scanLockWaitersPub();
+
+    // After timeout-fire: waiting_for_lock cleared, lock_timed_out set,
+    // status = .Ready, removed from lock_waiters, enqueued.
+    if (stub_task.waiting_for_lock.load(.monotonic) != null) return error.WaitFieldNotCleared;
+    if (!stub_task.lock_timed_out.load(.monotonic)) return error.LockTimedOutNotSet;
+    if (stub_task.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+    if (sched.lock_waiters.items.len != 0) return error.LockWaiterNotRemoved;
+}
+
+pub fn testScanFsmLockWaitersTimeoutFire() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    sched.lock_timeout_ms = 1;
+
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+    stub_fsm.waiting_for_lock.store(@ptrCast(&s8_lock_sentinel), .release);
+    stub_fsm.lock_wait_start_ms.store(0, .release);
+    stub_fsm.waiting_for_lock_list.store(null, .release);
+
+    try sched.fsm_lock_waiters.append(allocator, &stub_fsm);
+
+    sched.scanFsmLockWaitersPub();
+
+    if (stub_fsm.waiting_for_lock.load(.monotonic) != null) return error.FsmWaitFieldNotCleared;
+    if (sched.fsm_lock_waiters.items.len != 0) return error.FsmLockWaiterNotRemoved;
+}
+
+pub fn testCoopYieldWithWork() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [8]u8 = [_]u8{0} ** 8;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    try h.createThread(0, @intFromPtr(&entryS2CoopYield));
+    h.run() catch {};
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N1: Link WaitGroup.{registerFsmWaiter, wait} and Semaphore.{acquire,
+//     release} into the loom binary so kcov can track their atomic
+//     sites. Without these tests the functions are dead-stripped from
+//     parking-lot-loom (no caller) and cobertura reports MISSING for
+//     every line, even though they execute fine in production.
+//
+// Each test exercises the easy reachable path. Slow-paths that require
+// a real fiber stack (wait()'s yield branch, acquire()'s park branch)
+// are covered indirectly via the runtime's TSan/integration tests.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testWaitGroupRegisterFsmWaiter() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var wg = fp.WaitGroup.init(&sched);
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+
+    // counter==0 fast-path — no parking, returns false (covers L2798).
+    if (wg.registerFsmWaiter(&stub_fsm)) return error.RegisteredAtZero;
+
+    // counter>0 slow path — takes lock, re-checks, parks, returns true
+    // (covers L2800, L2806, L2812).
+    wg.add(1);
+    if (!wg.registerFsmWaiter(&stub_fsm)) return error.NotRegistered;
+    if (wg.waiting_fsm != &stub_fsm) return error.FsmNotStored;
+
+    // Counter→0 between load and lock. Set counter to 0 directly while
+    // unlocked, then reset waiting_fsm and call again -- the inner
+    // re-check fires (covers L2806-L2808 returning false under lock).
+    wg.counter.store(0, .seq_cst);
+    wg.waiting_fsm = null;
+    // Re-arm the outer load by setting counter back via a tiny race
+    // window: bump it, then drop to 0 before the lock acquire. We
+    // simulate this by patching counter inside a wrapper that takes
+    // the lock first.
+    wg.counter.store(1, .seq_cst);
+    while (wg.lock.swap(1, .acquire) == 1) {}
+    wg.counter.store(0, .seq_cst);
+    wg.lock.store(0, .release);
+    if (wg.registerFsmWaiter(&stub_fsm)) return error.RegisteredAfterRecheck;
+}
+
+pub fn testWaitGroupWaitNonFiber() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // sched.current_task is null at construction -- non-fiber branch
+    // (covers L2822-L2826: spinlock, counter check, release, return).
+    var wg = fp.WaitGroup.init(&sched);
+    // counter already 0; wait() should return immediately.
+    wg.wait();
+}
+
+pub fn testSemaphoreFastPath() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // count=2: two acquires take the fast-path CAS-decrement
+    // (covers L2879, L2881 success branch).
+    var sem = fp.Semaphore.init(2, &sched);
+    sem.acquire();
+    sem.acquire();
+    // counter is 0 now. release() with no waiter takes the
+    // counter.fetchAdd branch (covers L2913, L2922, L2923).
+    sem.release();
+    sem.release();
+    if (sem.counter.load(.seq_cst) != 2) return error.SemaphoreCounterMismatch;
+}
+
+pub fn testSemaphoreReleaseWithWaiter() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Same-scheduler routing for submitResume; otherwise schedule()'s
+    // cross-scheduler path requires a registered sender index.
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    var sem = fp.Semaphore.init(0, &sched);
+
+    // Stage a synthetic waiting_task. release() takes the
+    // direct-grant branch: nulls waiting_task, releases lock,
+    // schedule(task). Covers L2913, L2916-L2920 (sched.schedule
+    // path enqueues into ready_queue).
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+    sem.waiting_task = &stub_task;
+
+    sem.release();
+
+    if (sem.waiting_task != null) return error.WaitingTaskNotCleared;
+    // counter must NOT have been incremented (slot granted directly).
+    if (sem.counter.load(.seq_cst) != 0) return error.CounterIncrementedOnDirectGrant;
+}
+
+// N1 batch 2: io_uring submit functions. Each parks a task by storing
+// .Blocked into status. SimRing makes this safe under loom (no real
+// fds, just staged SQEs). One test calls all 6 (read/write/accept/
+// connect/recv/send), confirming each status-store fires.
+pub fn testIoSubmitFns() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+    var w: fp.Scheduler.IoWaiter = .{ .task = &stub_task };
+    var buf: [16]u8 = undefined;
+    const cbuf: []const u8 = &buf;
+
+    // Each submit stores .Blocked. Reset between calls so we can
+    // observe each store fire (covers L1811, 1834, 1842, 1850,
+    // 1858, 1886).
+    stub_task.status.store(.Ready, .release);
+    try sched.submitRead(&w, 0, &buf);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.ReadStatusMissing;
+
+    stub_task.status.store(.Ready, .release);
+    try sched.submitWrite(&w, 0, cbuf);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.WriteStatusMissing;
+
+    stub_task.status.store(.Ready, .release);
+    try sched.submitAccept(&w, 0);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.AcceptStatusMissing;
+
+    stub_task.status.store(.Ready, .release);
+    var addr: std.posix.sockaddr = undefined;
+    try sched.submitConnect(&w, 0, &addr, @sizeOf(std.posix.sockaddr));
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.ConnectStatusMissing;
+
+    stub_task.status.store(.Ready, .release);
+    try sched.submitRecv(&w, 0, &buf);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.RecvStatusMissing;
+
+    stub_task.status.store(.Ready, .release);
+    try sched.submitSend(&w, 0, cbuf);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.SendStatusMissing;
+}
+
+// N1 batch 3: sleepTask + fsmSleepTask. Both link in via direct call
+// with a stub. They store .Blocked + push to sleeping_queue. wake side
+// is already covered by testWakeExpiredSleepers.
+pub fn testSleepTaskLinking() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        // sleeping_queue still holds our stub on deinit; it walks
+        // pending tasks. Drain it so .base = undefined isn't touched.
+        sched.sleeping_queue.clearRetainingCapacity();
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+
+    // Covers L1650 status.store(.Blocked) + sleeping_queue.append.
+    sched.sleepTask(&stub_task, 9_999_999_999_999);
+    if (stub_task.status.load(.monotonic) != .Blocked) return error.SleepStatusMissing;
+    if (sched.sleeping_queue.items.len != 1) return error.SleepQueueEmpty;
+}
+
+// N1 batch 2: SchedulerRegistry getLeastLoaded, notifyAll, deinit,
+// count. Drives L2147-2148, 2207, 2209, 2219-2224, 2252-2255.
+pub fn testSchedulerRegistryFns() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    var registry: fp.SchedulerRegistry = .{};
+
+    try registry.register(allocator, 1, &sched_a);
+    try registry.register(allocator, 2, &sched_b);
+
+    // getLeastLoaded: bias load so b is selected (covers L2147-2148).
+    sched_a.active_tasks.store(5, .monotonic);
+    sched_b.active_tasks.store(1, .monotonic);
+    const least = registry.getLeastLoaded() orelse return error.GetLeastLoadedNull;
+    if (least != &sched_a and least != &sched_b) return error.GetLeastLoadedUnknown;
+
+    // count walks slots and counts non-null (L2252, L2255).
+    if (registry.count() != 2) return error.CountMismatch;
+
+    // notifyAll iterates and calls event_fd.notify (L2207, L2209).
+    registry.notifyAll();
+
+    // deinit resets atomics (L2219-2224).
+    registry.deinit(allocator);
+    if (registry.len.load(.monotonic) != 0) return error.LenNotReset;
+    if (registry.next.load(.monotonic) != 0) return error.NextNotReset;
 }

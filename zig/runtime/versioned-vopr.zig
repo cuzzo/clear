@@ -39,6 +39,7 @@ const testing = std.testing;
 const ebr_mod = @import("../lib/ebr.zig");
 const versioned = @import("versioned.zig");
 const Runtime = @import("runtime.zig").Runtime;
+const sim_atomic = @import("vopr-atomic.zig");
 const build_options = @import("build_options");
 
 const EbrContext = ebr_mod.EbrContext;
@@ -157,61 +158,214 @@ fn runSequence(seed: u64, steps: usize, allocator: std.mem.Allocator) !void {
     }
 }
 
-test "mvcc-vopr: 200 seeds x 200 steps each, no UAF, no leak, no torn read" {
+var gpa: std.heap.DebugAllocator(.{}) = .{};
+
+fn vopr_alloc() std.mem.Allocator {
+    return gpa.allocator();
+}
+
+pub fn checkLeaksAndReset() !void {
+    if (gpa.deinit() != .ok) return error.LeaksDetected;
+    gpa = .{};
+    // Fault injection state is process-global; reset between tests.
+    sim_atomic.resetFault();
+}
+
+/// Drives MVCC Versioned.update CAS-loser retry path under fault
+/// injection. Mirrors testUpdateRetryBodyUnderFault in atomic-ptr-vopr
+/// but for the MVCC primitive at zig/runtime/versioned.zig.
+///
+/// Asserts at least one synthetic CAS fault fires across 16 sequential
+/// updates at 50% rate, and the final committed value reflects all 16.
+pub fn testMvccRetryBodyUnderFault() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 0);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.seedFault(0xBADC0FFEE);
+    sim_atomic.inject_cas_fault = true;
+    sim_atomic.inject_cas_fault_rate = 5000;
+
+    const synthetic_before = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+
+    var i: i64 = 0;
+    while (i < 16) : (i += 1) {
+        try s.update(&rt, allocator, struct {
+            fn call(p: *i64, _: i64) void {
+                p.* = p.* + 1;
+            }
+        }.call, .{0});
+    }
+
+    const synthetic_after = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+    if (synthetic_after == synthetic_before) return error.NoFaultInjected;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 16) return error.MvccUpdateValueWrong;
+}
+
+/// Drives Versioned.update's tag-spin retry body at versioned.zig:315.
+/// The path fires when an updateMulti has tagged this cell's ptr
+/// (low-bit set); update spins reloading until the tag is cleared.
+/// Single-thread VOPR can't normally reach this -- there's no
+/// concurrent updateMulti to set the tag. SimAtomic's
+/// inject_load_tagged_count_remaining knob simulates the race: the
+/// first load returns the addr OR'd with 1 (tagged), the second
+/// returns raw, exiting the spin.
+pub fn testMvccTagSpinRetryBody() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 7);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    // Inject 3 synthetic tagged loads. update's first ptr.load
+    // returns tagged; the spin body's L315 reload also returns
+    // tagged (fault still active); a second spin iteration's L315
+    // reload also returns tagged; the FOURTH load returns raw and
+    // spin exits. Using 3 instead of 1 forces the body to execute
+    // even if the optimizer folds single-iteration cases.
+    sim_atomic.resetFault();
+    sim_atomic.inject_load_tagged_count_remaining = 3;
+
+    const synthetic_before = sim_atomic.sim_load_synthetic_tag_count;
+
+    try s.update(&rt, allocator, struct {
+        fn call(p: *i64, v: i64) void {
+            p.* = v;
+        }
+    }.call, .{99});
+
+    const synthetic_after = sim_atomic.sim_load_synthetic_tag_count;
+    if (synthetic_after == synthetic_before) return error.NoTagInjected;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 99) return error.UpdateValueWrong;
+}
+
+/// Drives MVCC Versioned.update bounded-retry exhaustion at 100% fault
+/// rate. Verifies the loop reaches MAX_UPDATE_RETRIES and surfaces
+/// error.UpdateRetriesExhausted (the MVCC bridge to AtomicConflict).
+pub fn testMvccRetryExhaustionUnderFault() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 0);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.seedFault(7);
+    sim_atomic.inject_cas_fault = true;
+    sim_atomic.inject_cas_fault_rate = 10_000;
+
+    const result = s.update(&rt, allocator, struct {
+        fn call(p: *i64, _: i64) void {
+            p.* = p.* + 1;
+        }
+    }.call, .{0});
+
+    if (result) |_| {
+        return error.UpdateUnexpectedlySucceeded;
+    } else |err| if (err != error.UpdateRetriesExhausted) return err;
+
+    // Cell value unchanged (no successful publish at any iteration).
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 0) return error.CellMutatedDespiteAllFaults;
+}
+
+pub fn testManySeedsShortSteps() !void {
     var i: u64 = 0;
     const seeds = if (build_options.coverage) 4 else 200;
     const steps = if (build_options.coverage) 40 else 200;
     while (i < seeds) : (i += 1) {
-        try runSequence(i, steps, testing.allocator);
+        try runSequence(i, steps, vopr_alloc());
     }
 }
 
-test "mvcc-vopr: 50 seeds x 1000 steps each (longer sequences)" {
+pub fn testFewSeedsLongSteps() !void {
     var i: u64 = 1000;
     const seeds = if (build_options.coverage) 2 else 50;
     const steps = if (build_options.coverage) 80 else 1000;
     while (i < 1000 + seeds) : (i += 1) {
-        try runSequence(i, steps, testing.allocator);
+        try runSequence(i, steps, vopr_alloc());
     }
 }
 
-test "mvcc-vopr: reproducibility -- seed 42 produces identical state across runs" {
-    // Run the same sequence twice and verify the final live_value
-    // matches.  If runSequence is non-deterministic, this fails.
-    // (We don't expose live_value externally; instead we verify
-    // the DebugAllocator stays clean across repeated runs of the
-    // same seed -- a non-determinism would surface as a leak or
-    // panic on at least one run.)
+pub fn testReproducibility() !void {
     var i: usize = 0;
     while (i < 5) : (i += 1) {
-        try runSequence(42, 100, testing.allocator);
+        try runSequence(42, 100, vopr_alloc());
     }
 }
 
-// Targeted scenario: many readers hold guards across many updates;
-// at the end every guard must release cleanly and reclamation
-// drains all retires.
-test "mvcc-vopr: 50 held guards across 100 updates, all release cleanly" {
-    var rng = std.Random.DefaultPrng.init(7);
-    const random = rng.random();
-    _ = random;
+pub fn testFiftyHeldGuards() !void {
+    const allocator = vopr_alloc();
 
     var ctx = EbrContext{};
-    defer ctx.deinit(testing.allocator);
+    defer ctx.deinit(allocator);
 
     var frame: [2048]u8 = undefined;
-    var rt = try Runtime.initFromSlice(&frame, &ctx, testing.allocator, 0);
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
     defer rt.deinit();
-    try ctx.register(testing.allocator, rt.ebr);
+    try ctx.register(allocator, rt.ebr);
     defer ctx.unregister(rt.ebr);
 
-    var s = try versioned.Versioned(i64).init(testing.allocator, 0);
+    var s = try versioned.Versioned(i64).init(allocator, 0);
     defer {
-        s.deinit(&rt, testing.allocator) catch unreachable;
+        s.deinit(&rt, allocator) catch unreachable;
         var i: usize = 0;
         while (i < 6) : (i += 1) {
-            ctx.reclaim(testing.allocator);
-            rt.ebr.reclaimLocal(testing.allocator);
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
         }
     }
 
@@ -222,19 +376,15 @@ test "mvcc-vopr: 50 held guards across 100 updates, all release cleanly" {
     while (i < 50) : (i += 1) {
         guards[i] = s.read(&rt);
         captured_values[i] = guards[i].get().*;
-
-        // Every other guard -> do an update too.
         if (i & 1 == 1) {
-            try s.update(&rt, testing.allocator, struct {
+            try s.update(&rt, allocator, struct {
                 fn call(p: *i64, v: i64) void { p.* = v; }
             }.call, .{@as(i64, @intCast(i)) + 1});
         }
     }
 
-    // Each guard's pointer must still dereference to the value it
-    // saw at read-time (EBR keeps the old node alive).
     for (&guards, 0..) |*g, idx| {
-        try testing.expectEqual(captured_values[idx], g.get().*);
+        if (g.get().* != captured_values[idx]) return error.GuardValueChanged;
     }
 
     // Release in REVERSE order to test out-of-order release paths.
@@ -244,11 +394,13 @@ test "mvcc-vopr: 50 held guards across 100 updates, all release cleanly" {
         guards[j].release();
     }
 
-    // After all releases + reclaim cycles, limbo should drain.
     var k: usize = 0;
     while (k < 6) : (k += 1) {
-        ctx.reclaim(testing.allocator);
-        rt.ebr.reclaimLocal(testing.allocator);
+        ctx.reclaim(allocator);
+        rt.ebr.reclaimLocal(allocator);
     }
-    try testing.expectEqual(@as(usize, 0), rt.ebr.limbo_list.items.len);
+    if (rt.ebr.limbo_list.items.len != 0) return error.LimboNotDrained;
+
+    // defers above run after this fn returns, which frees s/rt/ctx.
+    // The wrapper main() calls checkLeaksAndReset() afterward.
 }

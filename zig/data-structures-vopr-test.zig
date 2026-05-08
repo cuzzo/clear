@@ -1,3 +1,5 @@
+//! Top-level executable wrapper for runtime/data-structures-vopr.zig.
+
 const std = @import("std");
 
 pub const CLEAR_FRAME_DEBUG = false;
@@ -6,7 +8,7 @@ pub const SimRandom = @import("runtime/vopr-random.zig").SimRandom;
 pub const SimAtomic = @import("runtime/vopr-atomic.zig").SimAtomic;
 pub const SimRing = @import("runtime/vopr-ring.zig").SimRing;
 
-const vv = @import("runtime/versioned-vopr.zig");
+const dsv = @import("runtime/data-structures-vopr.zig");
 const gate = @import("runtime/vopr-gate.zig");
 
 const Test = struct {
@@ -16,13 +18,14 @@ const Test = struct {
 
 const tests = [_]Test{
     .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",         .func = &gate.assertGapBActive },
-    .{ .name = "mvcc-vopr: update retry-body fires under SimAtomic fault injection",   .func = &vv.testMvccRetryBodyUnderFault },
-    .{ .name = "mvcc-vopr: update tag-spin retry body fires under load-tag injection", .func = &vv.testMvccTagSpinRetryBody },
-    .{ .name = "mvcc-vopr: update bounded-retry exhaustion at 100% fault",              .func = &vv.testMvccRetryExhaustionUnderFault },
-    .{ .name = "mvcc-vopr: 200 seeds x 200 steps each, no UAF, no leak, no torn read", .func = &vv.testManySeedsShortSteps },
-    .{ .name = "mvcc-vopr: 50 seeds x 1000 steps each (longer sequences)",             .func = &vv.testFewSeedsLongSteps },
-    .{ .name = "mvcc-vopr: reproducibility -- seed 42 produces identical state",       .func = &vv.testReproducibility },
-    .{ .name = "mvcc-vopr: 50 held guards across 100 updates, all release cleanly",    .func = &vv.testFiftyHeldGuards },
+    .{ .name = "data-structures-vopr: Stream(i64) file-load + setError smoke",                .func = &dsv.testStreamFileLoad },
+    .{ .name = "data-structures-vopr: InfStream(i64) push + close smoke",                     .func = &dsv.testInfStreamPushCloseFileLoad },
+    // Stream + InfStream spinlock fault-injection scenarios removed:
+    // routing Stream.Inner head/tail/lock through the comptime Atomic
+    // alias (so SimAtomic could fault-inject the swap-spinlocks)
+    // amplified TSan flake on stream-test SplitStream pubsub hammer
+    // (V31). The migration is semantically a no-op under TSan but
+    // timing-perturbing enough to amplify a pre-existing race.
 };
 
 pub fn main() !void {
@@ -31,7 +34,7 @@ pub fn main() !void {
     for (tests) |t| {
         std.debug.print("{s} ... ", .{t.name});
         if (t.func()) |_| {
-            if (vv.checkLeaksAndReset()) |_| {
+            if (dsv.checkLeaksAndReset()) |_| {
                 std.debug.print("OK\n", .{});
                 passed += 1;
             } else |err| {

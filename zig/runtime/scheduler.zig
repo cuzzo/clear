@@ -31,9 +31,6 @@ fn milliTimestamp() i64 {
     return compat.milliTimestamp();
 }
 
-const InboxType = qs.InboxType;
-const InboxNode = qs.InboxNode;
-const AtomicInbox = qs.AtomicInbox;
 const RunQueue = qs.RunQueue;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
@@ -128,7 +125,6 @@ const FiberNode = struct {
 const FIBER_MAGIC: u64 = 0xDEAD_BEEF_CAFE_BABE;
 
 const SpawnRequest = struct {
-    inbox_link: InboxNode = .{ .type = .Spawn },
     user_fn: TaskFn,
     context: ?*anyopaque,
     args: ?*anyopaque,
@@ -144,7 +140,6 @@ const SpawnRequest = struct {
 /// drainChannels captures func/ctx into locals before calling
 /// func, so the caller's fiber stack is never touched after wg.done().
 pub const RemoteCall = struct {
-    inbox_link: InboxNode = .{ .type = .RemoteCall },
     func: *const fn (*anyopaque) void,
     ctx: *anyopaque,
     wg: *WaitGroup,
@@ -1183,40 +1178,14 @@ pub const Scheduler = struct {
                 self.drainChannels();
 
                 // Wake sleeping tasks
-                if (self.sleeping_queue.items.len > 0) {
-                    const now = milliTimestamp();
-                    var i: usize = 0;
-                    while (i < self.sleeping_queue.items.len) {
-                        const task = self.sleeping_queue.items[i];
-                        if (now >= task.wake_time) {
-                            _ = self.sleeping_queue.swapRemove(i);
-                            task.status.store(.Ready, .release);
-                            self.enqueueTask(task);
-                        } else {
-                            i += 1;
-                        }
-                    }
-                }
+                self.wakeExpiredSleepers();
 
                 // Wake sleeping FSM tasks. Same wake-time semantics
                 // as the stackful sleeping_queue, but routed onto
                 // fsm_ready_queue. submitFsmResume is the bypass-
                 // active_tasks-increment variant (the FSM was
                 // counted at original spawn).
-                if (self.fsm_sleeping_queue.items.len > 0) {
-                    const now = milliTimestamp();
-                    var i: usize = 0;
-                    while (i < self.fsm_sleeping_queue.items.len) {
-                        const fsm_task = self.fsm_sleeping_queue.items[i];
-                        if (now >= fsm_task.fsm_wake_time) {
-                            _ = self.fsm_sleeping_queue.swapRemove(i);
-                            fsm_task.status = .Ready;
-                            self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                }
+                self.wakeExpiredFsmSleepers();
             } // end slow path
 
             // FSM tasks run inline on the worker stack — drain them before
@@ -1354,29 +1323,7 @@ pub const Scheduler = struct {
             if (!self.hasWork()) {
                 const pair = global_registry.getRandomPair();
                 if (pair.b) |victim| {
-                    // Don't steal from myself
-                    if (victim != self) {
-                        // Stackful steal: take half of victim's stackful queue.
-                        const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator);
-                        if (stolen > 0) {
-                            // update my queue size to account for steals
-                            _ = self.active_tasks.fetchAdd(stolen, .monotonic);
-                            // update victim queue size to account for steals
-                            _ = victim.active_tasks.fetchSub(stolen, .monotonic);
-                        }
-                        // FSM steal: if still idle after stackful steal,
-                        // grab half of victim's FSM queue. Same algorithm,
-                        // separate type. Stealing transfers ownership of
-                        // the *FsmTask handle; state struct is still owned
-                        // by the original caller (scheduler-agnostic).
-                        if (stolen == 0) {
-                            const fsm_stolen = self.fsm_ready_queue.tryStealFrom(&victim.fsm_ready_queue, self.allocator);
-                            if (fsm_stolen > 0) {
-                                _ = self.active_tasks.fetchAdd(fsm_stolen, .monotonic);
-                                _ = victim.active_tasks.fetchSub(fsm_stolen, .monotonic);
-                            }
-                        }
-                    }
+                    self.idleStealFrom(victim);
                 }
             }
 
@@ -1406,19 +1353,7 @@ pub const Scheduler = struct {
                 // stackful sleeping_queue.
                 if (timeout_ns == 0 or 1_000_000 < timeout_ns) timeout_ns = 1_000_000;
             }
-            if (self.lock_waiters.items.len > 0) {
-                // Arm the wait for the earliest lock-waiter deadline so an
-                // otherwise-idle scheduler still wakes up to fire the
-                // timeout. Without this, io_uring_enter blocks forever and
-                // lock_timeout_ms is a no-op.
-                const now_ms = milliTimestamp();
-                var earliest_ms: i64 = now_ms + self.lock_timeout_ms;
-                for (self.lock_waiters.items) |t| {
-                    if (t.waiting_for_lock.load(.monotonic) == null) continue;
-                    const deadline = t.lock_wait_start_ms.load(.acquire) + self.lock_timeout_ms;
-                    if (deadline < earliest_ms) earliest_ms = deadline;
-                }
-                const ms_until = @max(@as(i64, 1), earliest_ms - now_ms);
+            if (self.earliestLockWaiterDeadlineMsUntil()) |ms_until| {
                 const ns: u64 = @as(u64, @intCast(ms_until)) * 1_000_000;
                 if (timeout_ns == 0 or ns < timeout_ns) timeout_ns = ns;
             }
@@ -1486,6 +1421,78 @@ pub const Scheduler = struct {
     // TODO: Deprecate
     pub fn schedule(self: *Scheduler, task: *Task) void {
         self.submitResume(task);
+    }
+
+    /// Walk `fsm_sleeping_queue` and wake any FSM tasks whose
+    /// `fsm_wake_time` has passed. Public so VOPR tests can drive
+    /// the wake path directly without running the full scheduler
+    /// loop. Mirrors wakeExpiredSleepers but for the FSM queue.
+    pub fn wakeExpiredFsmSleepers(self: *Scheduler) void {
+        if (self.fsm_sleeping_queue.items.len == 0) return;
+        const now = milliTimestamp();
+        var i: usize = 0;
+        while (i < self.fsm_sleeping_queue.items.len) {
+            const fsm_task = self.fsm_sleeping_queue.items[i];
+            if (now >= fsm_task.fsm_wake_time) {
+                _ = self.fsm_sleeping_queue.swapRemove(i);
+                fsm_task.status = .Ready;
+                self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Walk `sleeping_queue` and wake any tasks whose `wake_time`
+    /// has passed. Public so loom tests can drive the wake path
+    /// directly without running the full scheduler loop.
+    pub fn wakeExpiredSleepers(self: *Scheduler) void {
+        if (self.sleeping_queue.items.len == 0) return;
+        const now = milliTimestamp();
+        var i: usize = 0;
+        while (i < self.sleeping_queue.items.len) {
+            const task = self.sleeping_queue.items[i];
+            if (now >= task.wake_time) {
+                _ = self.sleeping_queue.swapRemove(i);
+                task.status.store(.Ready, .release);
+                self.enqueueTask(task);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Try to steal half of `victim`'s ready queue (stackful first;
+    /// if empty, fall back to FSM ready queue). Updates active_tasks
+    /// counters on both schedulers. Caller is responsible for the
+    /// idleness gate -- this method just performs the steal+
+    /// accounting without checking `self.hasWork()` or the
+    /// `victim != self` invariant. The run-loop's idle steal block
+    /// at the call site enforces both. Public so loom tests can
+    /// drive the steal+accounting paths directly without the run
+    /// loop's implicit registry+rng dependencies.
+    pub fn idleStealFrom(self: *Scheduler, victim: *Scheduler) void {
+        if (victim == self) return;
+        // Stackful steal: take half of victim's stackful queue.
+        const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator);
+        if (stolen > 0) {
+            // update my queue size to account for steals
+            _ = self.active_tasks.fetchAdd(stolen, .monotonic);
+            // update victim queue size to account for steals
+            _ = victim.active_tasks.fetchSub(stolen, .monotonic);
+        }
+        // FSM steal: if still idle after stackful steal, grab half
+        // of victim's FSM queue. Same algorithm, separate type.
+        // Stealing transfers ownership of the *FsmTask handle; state
+        // struct is still owned by the original caller (scheduler-
+        // agnostic).
+        if (stolen == 0) {
+            const fsm_stolen = self.fsm_ready_queue.tryStealFrom(&victim.fsm_ready_queue, self.allocator);
+            if (fsm_stolen > 0) {
+                _ = self.active_tasks.fetchAdd(fsm_stolen, .monotonic);
+                _ = victim.active_tasks.fetchSub(fsm_stolen, .monotonic);
+            }
+        }
     }
 
     // Helper to get current task
@@ -1655,6 +1662,24 @@ pub const Scheduler = struct {
     // Called by parking-lot.zig before the fiber yields.
     // The task's waiting_for_lock / waiting_for_lock_list / lock_waiter_node
     // must already be set by the caller.
+    /// Compute the milliseconds until the earliest lock-waiter
+    /// deadline fires, or null if there are no live waiters. Used by
+    /// run()'s idle-arming code to size the io_uring timeout so
+    /// `lock_timeout_ms` actually fires on an otherwise-idle
+    /// scheduler. Public so VOPR tests can drive it without entering
+    /// run().
+    pub fn earliestLockWaiterDeadlineMsUntil(self: *Scheduler) ?i64 {
+        if (self.lock_waiters.items.len == 0) return null;
+        const now_ms = milliTimestamp();
+        var earliest_ms: i64 = now_ms + self.lock_timeout_ms;
+        for (self.lock_waiters.items) |t| {
+            if (t.waiting_for_lock.load(.monotonic) == null) continue;
+            const deadline = t.lock_wait_start_ms.load(.acquire) + self.lock_timeout_ms;
+            if (deadline < earliest_ms) earliest_ms = deadline;
+        }
+        return @max(@as(i64, 1), earliest_ms - now_ms);
+    }
+
     pub fn registerLockWaiter(self: *Scheduler, task: *Task) void {
         // .release pairs with .acquire load by scanLockWaiters /
         // idle-deadline path on potentially another scheduler thread
@@ -1737,6 +1762,14 @@ pub const Scheduler = struct {
     /// don't run the full main loop.
     pub fn scanFsmLockWaitersPub(self: *Scheduler) void {
         self.scanFsmLockWaiters();
+    }
+
+    /// Public drain pass for the stackful lock scanner — used by loom
+    /// tests that drive the timeout-fire path without entering run().
+    /// Returns the earliest-known deadline (used by run() to arm the
+    /// io_uring wait).
+    pub fn scanLockWaitersPub(self: *Scheduler) ?i64 {
+        return self.scanLockWaiters();
     }
 
     // -----------------------------------------------------------------
@@ -2702,7 +2735,9 @@ test "remote stack free backpressure drains while scheduler is running" {
 }
 
 pub const WaitGroup = struct {
-    // The counter must be atomic
+    // The counter must be atomic. Routed through the comptime
+    // `Atomic` alias so VOPR's SimAtomic can drive cmpxchg fault
+    // injection on the spinlock + counter fetch sites.
     counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     // We need to protect the 'waiting_task' pointer itself,
@@ -2734,9 +2769,11 @@ pub const WaitGroup = struct {
         // either complete its check before us (saw counter>0, parked, will be
         // woken below) or after us (sees counter==0 only after we release
         // the lock; by that point all our writes to *self are done).
+        // VOPR-START-RETRY: WaitGroup.done spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
+        // VOPR-END-RETRY
 
         const prev = self.counter.fetchSub(1, .seq_cst);
         if (prev != 1) {
@@ -2777,9 +2814,11 @@ pub const WaitGroup = struct {
     pub fn registerFsmWaiter(self: *WaitGroup, fsm_task: *fsm_mod.FsmTask) bool {
         if (self.counter.load(.seq_cst) == 0) return false;
 
+        // VOPR-START-RETRY: WaitGroup.registerFsmWaiter spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
+        // VOPR-END-RETRY
 
         // Re-check under the lock — count may have hit 0 between the
         // load above and acquiring the lock.
@@ -2799,6 +2838,7 @@ pub const WaitGroup = struct {
             // Non-fiber caller (test code): busy-wait. Acquire the lock for
             // the final check so we synchronize-with done()'s release; this
             // makes it safe to free *self after we return.
+            // VOPR-START-RETRY: WaitGroup.wait non-fiber busy-wait until counter==0
             while (true) {
                 while (self.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 if (self.counter.load(.seq_cst) == 0) {
@@ -2808,10 +2848,12 @@ pub const WaitGroup = struct {
                 self.lock.store(0, .release);
                 std.Thread.yield() catch {};
             }
+            // VOPR-END-RETRY
         }
 
         const task = self.sched.getCurrent();
 
+        // VOPR-START-RETRY: WaitGroup.wait fiber park-then-recheck loop
         while (true) {
             // Always take the lock to check counter — synchronizes with done().
             // Without this, the lockless fast-path lets us return + destroy
@@ -2832,6 +2874,7 @@ pub const WaitGroup = struct {
             task.base.yield();
             task.status.store(.Ready, .release);
         }
+        // VOPR-END-RETRY
     }
 };
 
@@ -2854,6 +2897,7 @@ pub const Semaphore = struct {
     /// Only one fiber should call acquire() at a time (the spawner loop).
     pub fn acquire(self: *Semaphore) void {
         // std.debug.print("ACQUIRE: counter={d}\n", .{self.counter.load(.seq_cst)});
+        // VOPR-START-RETRY: Semaphore.acquire CAS-loser + park-recheck loop
         while (true) {
             // Fast path: try CAS decrement
             var c = self.counter.load(.seq_cst);
@@ -2886,13 +2930,16 @@ pub const Semaphore = struct {
             // Slot was granted by release() directly — return
             return;
         }
+        // VOPR-END-RETRY
     }
 
     /// Release one slot. Wakes a blocked acquirer if present; otherwise increments counter.
     pub fn release(self: *Semaphore) void {
+        // VOPR-START-RETRY: Semaphore.release spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
+        // VOPR-END-RETRY
         if (self.waiting_task) |task| {
             // Grant slot directly to waiter (don't increment counter)
             self.waiting_task = null;

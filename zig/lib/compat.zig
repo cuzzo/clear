@@ -132,13 +132,29 @@ pub fn sleepNs(ns: u64) void {
     }
 }
 
+// Comptime SimClock seam: when the test root exports `SimClock`,
+// every milliTimestamp/nanoTimestamp call returns the simulator's
+// virtual clock instead of the OS monotonic clock. Mirrors the
+// SimRing/SimAtomic pattern. Production builds (no SimClock decl on
+// root) inline these to direct clock_gettime calls -- zero overhead.
+//
+// SimClock contract: must expose `pub fn milliTimestamp() i64` and
+// `pub fn nanoTimestamp() u64`. Tests advance the virtual clock via
+// SimClock-specific APIs (e.g., `SimClock.advanceMs`).
+const sim_clock_decl = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimClock")) root.SimClock else void;
+};
+
 pub fn milliTimestamp() i64 {
+    if (sim_clock_decl != void) return sim_clock_decl.milliTimestamp();
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts) != 0) return 0;
     return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
 }
 
 pub fn nanoTimestamp() u64 {
+    if (sim_clock_decl != void) return sim_clock_decl.nanoTimestamp();
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts) != 0) return 0;
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
@@ -162,7 +178,21 @@ pub const Timer = struct {
     }
 };
 
+// Comptime SimRandom seam: when the test root exports `SimRandom`,
+// randomBytes draws from the simulator's deterministic PRNG instead
+// of the OS getrandom syscall. Mirrors the SimClock pattern.
+//
+// SimRandom contract: must expose `pub fn fill(buf: []u8) void`.
+const sim_random_decl = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimRandom")) root.SimRandom else void;
+};
+
 pub fn randomBytes(buf: []u8) !void {
+    if (sim_random_decl != void) {
+        sim_random_decl.fill(buf);
+        return;
+    }
     var filled: usize = 0;
     while (filled < buf.len) {
         const rc = std.c.getrandom(buf[filled..].ptr, buf.len - filled, 0);

@@ -297,6 +297,7 @@ pub fn Versioned(comptime T: type) type {
             defer ebr.exit();
 
             var retries: usize = 0;
+            // VOPR-START-RETRY: MVCC update CAS-loser retry, bounded by MAX_UPDATE_RETRIES
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 // 1. Load the current state (Snapshot). `.acquire`
                 // synchronizes with the prior writer's CAS .release
@@ -347,6 +348,7 @@ pub fn Versioned(comptime T: type) type {
                 return;
             }
 
+            // VOPR-END-RETRY
             if (rt_profile.CLEAR_PROFILE) {
                 mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), MAX_UPDATE_RETRIES, false);
             }
@@ -362,6 +364,7 @@ pub fn Versioned(comptime T: type) type {
             defer trt.ebr.exit();
 
             var retries: usize = 0;
+            // VOPR-START-RETRY: MVCC updateFlow CAS-loser retry
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 var old_addr = self.ptr.load(.acquire);
                 while (addrIsTagged(old_addr)) {
@@ -393,6 +396,7 @@ pub fn Versioned(comptime T: type) type {
                 }
                 return;
             }
+            // VOPR-END-RETRY
 
             if (rt_profile.CLEAR_PROFILE) {
                 mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), MAX_UPDATE_RETRIES, false);
@@ -446,7 +450,16 @@ pub const MultiUpdateError = anyerror;
 // as "stuck" and trigger an outer retry to re-walk acquisition from
 // the start. Distinct from MAX_UPDATE_RETRIES: this is the per-cell
 // tag-installation spin budget, not the txn-level give-up cap.
-const MAX_INNER_RETRIES_MULTI: usize = 1024;
+//
+// Test seam: a test wrapper at zig/ root may declare
+// `pub const CLEAR_MVCC_MAX_INNER_RETRIES_MULTI: usize = N;` to lower
+// the cap so the contention-rollback path (release tags + outer-retry)
+// fires deterministically under modest concurrency. Mirrors the
+// MAX_UPDATE_RETRIES seam pattern at line 35.
+const MAX_INNER_RETRIES_MULTI: usize = if (@hasDecl(@import("root"), "CLEAR_MVCC_MAX_INNER_RETRIES_MULTI"))
+    @import("root").CLEAR_MVCC_MAX_INNER_RETRIES_MULTI
+else
+    1024;
 
 /// Build a comptime tuple type `.{*T_0, *T_1, ...}` from the cells
 /// tuple type `.{*Versioned(T_0), *Versioned(T_1), ...}`. This is the type
@@ -519,6 +532,7 @@ pub fn updateMulti(
     // 4. Outer retry loop: re-walks tag acquisition if we hit
     //    pathological contention from another multi-cell txn.
     var outer_retries: usize = 0;
+    // VOPR-START-RETRY: updateMulti outer retry on inner contention rollback
     outer: while (outer_retries < MAX_UPDATE_RETRIES) : (outer_retries += 1) {
         var acquired: usize = 0;
         var contended = false;
@@ -529,6 +543,7 @@ pub fn updateMulti(
                 if (slot == k) {
                     const cell = cells[k];
                     var inner_retries: usize = 0;
+                    // VOPR-START-RETRY: updateMulti per-cell tag-install spin
                     inner: while (inner_retries < MAX_INNER_RETRIES_MULTI) : (inner_retries += 1) {
                         const curr_addr = cell.ptr.load(.acquire);
                         if (addrIsTagged(curr_addr)) {
@@ -550,6 +565,7 @@ pub fn updateMulti(
                         // acquisition and re-walk from the start.
                         contended = true;
                     }
+                    // VOPR-END-RETRY
                 }
             }
             if (contended) break :sorted_loop;
@@ -619,6 +635,7 @@ pub fn updateMulti(
         }
         return;
     }
+    // VOPR-END-RETRY
 
     return error.UpdateRetriesExhausted;
 }

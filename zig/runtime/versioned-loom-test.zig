@@ -416,6 +416,140 @@ test "Loom-shim sanity: full Versioned(T) lifecycle through the shim" {
 // to value `k` even after updates k+1..k+N retire intermediate snapshots
 // and reclaim cycles fire. The expectation flows from the EBR pin
 // preventing reclamation past `local_epoch[k]`.
+// Flow-control struct for updateFlow. Mirrors __PolyFlow generated
+// by the transpiler at src/mir/mir_emitter.rb:318. Without this test,
+// versioned.zig's updateFlow body (the `args[0].kind` switch + the
+// load+cmpxchgWeak retry loop at lines 366/369/382) is line-missing
+// in the loom kcov report -- update() exercises the same shape but
+// updateFlow is a separate function and never gets called.
+const VFlowKind = enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit };
+const VFlow = struct { kind: VFlowKind = .cont_commit };
+
+fn vflowSetThenContinue(p: *i64, flow: *VFlow) void {
+    p.* = 314;
+    flow.kind = .cont_commit;
+}
+
+fn vflowSkipBeforeCommit(p: *i64, flow: *VFlow) void {
+    p.* = 999;
+    flow.kind = .skip_no_commit;
+}
+
+test "Versioned: deinitSync destroys current ptr without readers (covers no-reader teardown)" {
+    // deinitSync is the synchronous-no-readers destructor at versioned.zig:195.
+    // The full loom-shim lifecycle test above uses the `.deinit(&rt, ...)`
+    // path, leaving deinitSync's atomic-load-and-destroy line uncovered.
+    // Single-thread call here exercises that line under SimAtomic shimming.
+    var s = try versioned.Versioned(i64).init(testing.allocator, 42);
+    s.deinitSync(testing.allocator);
+}
+
+test "Versioned: updateFlow commits on .cont_commit (covers retry-loop load + CAS)" {
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [1024]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, testing.allocator, 0);
+    defer rt.deinit();
+
+    var s = try versioned.Versioned(i64).init(testing.allocator, 0);
+    defer s.deinit(&rt, testing.allocator) catch unreachable;
+
+    var flow = VFlow{};
+    try s.updateFlow(&rt, testing.allocator, vflowSetThenContinue, .{&flow});
+
+    const observed = s.withRead(&rt, struct {
+        fn call(p: *i64) i64 { return p.*; }
+    }.call, .{});
+    try testing.expectEqual(@as(i64, 314), observed);
+}
+
+test "Versioned: updateFlow short-circuits on .skip_no_commit (no publish)" {
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [1024]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, testing.allocator, 0);
+    defer rt.deinit();
+
+    var s = try versioned.Versioned(i64).init(testing.allocator, 555);
+    defer s.deinit(&rt, testing.allocator) catch unreachable;
+
+    var flow = VFlow{};
+    try s.updateFlow(&rt, testing.allocator, vflowSkipBeforeCommit, .{&flow});
+
+    const observed = s.withRead(&rt, struct {
+        fn call(p: *i64) i64 { return p.*; }
+    }.call, .{});
+    try testing.expectEqual(@as(i64, 555), observed);
+}
+
+const TxnError = error{TxnAborted};
+
+fn multiSwap(views: anytype) TxnError!void {
+    // 2-cell transaction: write paired values into both cells.
+    // updateMulti's user txn signature is `fn(views) !void` -- the
+    // `catch` at versioned.zig:590 requires an error union return,
+    // even if the body never raises.
+    views[0].* = 100;
+    views[1].* = 200;
+}
+
+fn multiAbort(_: anytype) TxnError!void {
+    return error.TxnAborted;
+}
+
+test "Versioned: updateMulti commits across two cells (covers tag-acquire + commit-store)" {
+    // updateMulti has its own atomic surface separate from update():
+    // the per-cell load+CAS to install a tag (versioned.zig:533/539)
+    // and the per-cell store to publish new pointers (601). No existing
+    // loom test calls updateMulti, so those lines are line-missing.
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, testing.allocator, 0);
+    defer rt.deinit();
+
+    var a = try versioned.Versioned(i64).init(testing.allocator, 0);
+    defer a.deinit(&rt, testing.allocator) catch unreachable;
+    var b = try versioned.Versioned(i64).init(testing.allocator, 0);
+    defer b.deinit(&rt, testing.allocator) catch unreachable;
+
+    try versioned.updateMulti(.{ &a, &b }, &rt, testing.allocator, multiSwap, .{});
+
+    const got_a = a.withRead(&rt, struct { fn call(p: *i64) i64 { return p.*; } }.call, .{});
+    const got_b = b.withRead(&rt, struct { fn call(p: *i64) i64 { return p.*; } }.call, .{});
+    try testing.expectEqual(@as(i64, 100), got_a);
+    try testing.expectEqual(@as(i64, 200), got_b);
+}
+
+test "Versioned: updateMulti rolls back on txn error (covers per-cell tag-release store)" {
+    // When the user txn returns an error, updateMulti must restore the
+    // original snapshot pointers via per-cell `store(snap_addrs[i], .release)`
+    // at versioned.zig:592. Without this test that store is uncovered.
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, testing.allocator, 0);
+    defer rt.deinit();
+
+    var a = try versioned.Versioned(i64).init(testing.allocator, 11);
+    defer a.deinit(&rt, testing.allocator) catch unreachable;
+    var b = try versioned.Versioned(i64).init(testing.allocator, 22);
+    defer b.deinit(&rt, testing.allocator) catch unreachable;
+
+    const result = versioned.updateMulti(.{ &a, &b }, &rt, testing.allocator, multiAbort, .{});
+    try testing.expectError(error.TxnAborted, result);
+
+    // Cell values must be unchanged after rollback.
+    const got_a = a.withRead(&rt, struct { fn call(p: *i64) i64 { return p.*; } }.call, .{});
+    const got_b = b.withRead(&rt, struct { fn call(p: *i64) i64 { return p.*; } }.call, .{});
+    try testing.expectEqual(@as(i64, 11), got_a);
+    try testing.expectEqual(@as(i64, 22), got_b);
+}
+
 test "Versioned: pin survives N successive update+reclaim cycles (single-thread EBR contract)" {
     var ctx = EbrContext{};
     defer ctx.deinit(testing.allocator);

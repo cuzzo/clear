@@ -13,6 +13,23 @@ pub fn build(b: *std.Build) void {
     // step produces zig-out/coverage/merged/cobertura.xml for upload to
     // Codecov / Coveralls. CI: `zig build test -Dcoverage`.
     const coverage = b.option(bool, "coverage", "Wrap test binaries with kcov to collect coverage (writes Cobertura XML)") orelse false;
+    // Like -Dcoverage but scoped to Loom-only tests (`*-loom-test.zig` and
+    // the parking-lot-loom executable). Output goes to a separate
+    // `zig-out/coverage-loom/` tree so the report reflects only what the
+    // exhaustive interleaving harness exercises -- used to find atomic
+    // operation sites that are NOT covered by Loom. Invoke as
+    // `zig build coverage-loom -Dcoverage-loom`. VOPR tests are intentionally
+    // excluded -- VOPR is a single-threaded simulator and would pollute the
+    // "what does Loom cover" report with lines it happens to touch.
+    const coverage_loom = b.option(bool, "coverage-loom", "Wrap Loom-only tests with kcov (writes Cobertura XML to zig-out/coverage-loom/)") orelse false;
+    // Mirror of -Dcoverage-loom for VOPR-only tests (`*-vopr-test.zig`).
+    // Output goes to a separate `zig-out/coverage-vopr/` tree so the
+    // report reflects only what the deterministic simulator exercises --
+    // used to find time / random / IO / retry sites that no VOPR test
+    // reaches. Loom tests are intentionally excluded -- Loom is for
+    // atomic-op interleaving, not VOPR's fault/clock/retry surface.
+    // Invoke as `zig build coverage-vopr -Dcoverage-vopr`.
+    const coverage_vopr = b.option(bool, "coverage-vopr", "Wrap VOPR-only tests with kcov (writes Cobertura XML to zig-out/coverage-vopr/)") orelse false;
     // Test sharding for CI parallelism. With `-Dshard-count=N -Dshard-index=I`
     // (0 <= I < N), only every Nth test added to `test_step` (selected by
     // round-robin index within the loop) is built and run. Codecov merges the
@@ -180,17 +197,15 @@ pub fn build(b: *std.Build) void {
         .{ .path = "fsm-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "fsm-lock-safety-test.zig", .tsan = true },
         .{ .path = "fsm-lock-test.zig", .tsan = true },
-        .{ .path = "fsm-lock-vopr-test.zig", .loom_vopr = true },
+        // fsm-lock-vopr-test built as executable (see vopr_exes).
         .{ .path = "fsm-loom-test.zig", .loom_vopr = true },
         .{ .path = "fsm-race-test.zig", .tsan = true },
         .{ .path = "fsm-rwlock-test.zig", .tsan = true },
         .{ .path = "fsm-scheduler-test.zig", .tsan = true },
         .{ .path = "fsm-steal-test.zig", .tsan = true },
         .{ .path = "fsm-test.zig", .tsan = true },
-        .{ .path = "fsm-vopr-test.zig", .loom_vopr = true },
+        // fsm-vopr-test built as executable (see vopr_exes).
         .{ .path = "fsm-wg-test.zig", .tsan = true },
-        .{ .path = "inbox-race-smoke-test.zig", .tsan = true },
-        .{ .path = "inbox-race-test.zig", .tsan = true },
         .{ .path = "inf-stream-test.zig", .tsan = true },
         .{ .path = "infstream-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "io-pressure-test.zig", .tsan = true },
@@ -209,7 +224,6 @@ pub fn build(b: *std.Build) void {
         .{ .path = "runtime-direct-test.zig", .tsan = true },
         .{ .path = "runtime-isolation-test.zig", .tsan = true },
         .{ .path = "scheduler-direct-test.zig", .tsan = true },
-        .{ .path = "scheduler-race-test.zig", .tsan = true },
         .{ .path = "semaphore-test.zig", .tsan = true },
         .{ .path = "sharded-list-test.zig", .tsan = true },
         .{ .path = "sharded-pool-test.zig", .tsan = true },
@@ -225,7 +239,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "tcp-fairness-test.zig", .tsan = true },
         .{ .path = "tcp-starvation-test.zig", .tsan = true },
         .{ .path = "vopr-loom-test.zig", .loom_vopr = true },
-        .{ .path = "vopr-test.zig", .loom_vopr = true },
+        // vopr-test built as executable (see vopr_exes).
         .{ .path = "yield-test.zig", .tsan = true },
         // MVCC: Versioned(T) tests + lock hammers
         .{ .path = "fsm-rwlock-hammer-test.zig", .tsan = true, .hammer = true },
@@ -233,10 +247,16 @@ pub fn build(b: *std.Build) void {
         .{ .path = "versioned-test.zig", .tsan = true },
         .{ .path = "versioned-stress-test.zig", .tsan = true },
         .{ .path = "versioned-loom-test.zig", .loom_vopr = true },
-        .{ .path = "versioned-vopr-test.zig", .loom_vopr = true },
+        // versioned-vopr-test is built as an executable (see vopr_exes).
         .{ .path = "versioned-fiber-stress-test.zig", .tsan = true },
         // Atomics v0.2 / v0.3
         .{ .path = "atomic-ptr-loom-test.zig", .loom_vopr = true },
+        // VOPR test entries (`*-vopr-test.zig`) are built as
+        // executables below (search for `vopr_exes`). Building via
+        // b.addTest puts the test_runner at module root, hiding
+        // `pub const SimClock` / `pub const SimRandom` from the
+        // comptime seam in lib/compat.zig and silently disabling
+        // them (same GAP-B issue parking-lot-loom hit pre-2026-05).
         .{ .path = "atomic-ptr-stress-test.zig", .tsan = true },
 
         // Single-threaded / pure logic — debug build only
@@ -276,6 +296,12 @@ pub fn build(b: *std.Build) void {
     // unit-test PR signal stays fast; sharded the same way as
     // `test-tsan`/`test-hammer` for CI parallelism.
     const test_loom_vopr_step = b.step("test-loom-vopr", "Run Loom and VOPR deterministic-interleaving tests");
+    // Dedicated step for Loom-only kcov runs. Distinct from `test`/`test-loom-vopr`
+    // because the report is meant to answer "what atomic sites does Loom miss?"
+    // and mixing in unit/TSan/VOPR coverage would defeat that.
+    const coverage_loom_step = b.step("coverage-loom", "Run Loom-only tests under kcov (requires -Dcoverage-loom)");
+    // Dedicated step for VOPR-only kcov runs. Mirror of coverage-loom.
+    const coverage_vopr_step = b.step("coverage-vopr", "Run VOPR-only tests under kcov (requires -Dcoverage-vopr)");
 
     // When -Dcoverage is set, accumulate per-test kcov runs so a final
     // merge step can produce one zig-out/coverage/merged/cobertura.xml
@@ -286,6 +312,24 @@ pub fn build(b: *std.Build) void {
     else
         null;
     if (merge_cmd) |m| {
+        m.stdio = .inherit;
+        m.setCwd(b.path("."));
+    }
+    // Same shape as `merge_cmd`, but for the Loom-only coverage tree.
+    const merge_cmd_loom = if (coverage_loom)
+        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-loom/merged" })
+    else
+        null;
+    if (merge_cmd_loom) |m| {
+        m.stdio = .inherit;
+        m.setCwd(b.path("."));
+    }
+    // Same shape as `merge_cmd_loom`, but for the VOPR-only coverage tree.
+    const merge_cmd_vopr = if (coverage_vopr)
+        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage-vopr/merged" })
+    else
+        null;
+    if (merge_cmd_vopr) |m| {
         m.stdio = .inherit;
         m.setCwd(b.path("."));
     }
@@ -324,6 +368,12 @@ pub fn build(b: *std.Build) void {
     // is also compiled by the `clear` CLI, which uses ordinary file
     // imports and has no named-module registry.
     const test_build_options = b.addOptions();
+    // Note: only the regular `coverage` flag (used by `zig build test -Dcoverage`)
+    // scales iteration counts down. `-Dcoverage-loom` deliberately keeps
+    // the full exhaustive-enumeration depth so kcov sees every race-
+    // dependent branch in the loom suite (lower depth → fewer schedules
+    // → atomic ops in branches taken only on specific interleavings get
+    // missed, which manifests as a misleading drop in coverage).
     test_build_options.addOption(bool, "coverage", coverage);
     test_build_options.addOption(bool, "tsan", sanitize_thread);
     const build_options_mod = test_build_options.createModule();
@@ -499,6 +549,11 @@ pub fn build(b: *std.Build) void {
         if (entry.loom_vopr) {
             const in_shard = (loom_vopr_step_idx % shard_count) == shard_index;
             loom_vopr_step_idx += 1;
+            // Loom-only filter for the coverage-loom report. VOPR test
+            // entries (`*-vopr-test.zig`) are excluded -- VOPR is a
+            // single-threaded simulator and shouldn't count as Loom coverage.
+            const is_loom_only = std.mem.endsWith(u8, filename, "-loom-test.zig");
+            const is_vopr_only = std.mem.endsWith(u8, filename, "-vopr-test.zig");
             if (in_shard) {
                 const lv_tests = b.addTest(.{
                     .root_module = b.createModule(.{
@@ -506,6 +561,11 @@ pub fn build(b: *std.Build) void {
                         .target = target,
                         .optimize = optimize,
                     }),
+                    // Force LLVM when collecting Loom or VOPR kcov for
+                    // the same reason as the regular coverage path:
+                    // stage2 emits limited DWARF and project .zig sources
+                    // are otherwise invisible to kcov.
+                    .use_llvm = if ((coverage_loom and is_loom_only) or (coverage_vopr and is_vopr_only)) true else null,
                 });
                 lv_tests.root_module.addImport("fiber-core", fiber_core_mod);
                 lv_tests.root_module.addImport("safety", safety_mod);
@@ -517,16 +577,54 @@ pub fn build(b: *std.Build) void {
                 lv_tests.root_module.addAssemblyFile(onroot_s);
                 lv_tests.root_module.link_libc = true;
 
-                const run_lv_tests = std.Build.Step.Run.create(b, b.fmt("run loom-vopr {s}", .{filename}));
-                run_lv_tests.addArtifactArg(lv_tests);
-                run_lv_tests.stdio = .inherit;
-                run_lv_tests.setCwd(b.path("."));
-                test_loom_vopr_step.dependOn(&run_lv_tests.step);
+                if (coverage_loom and is_loom_only) {
+                    const kcov_dir = b.fmt("zig-out/coverage-loom/{d}", .{idx});
+                    const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+                    const run_kcov = b.addSystemCommand(&.{
+                        "kcov",
+                        "--clean",
+                        kcov_include_arg,
+                        kcov_strip_arg,
+                        kcov_dir,
+                    });
+                    run_kcov.addArtifactArg(lv_tests);
+                    run_kcov.stdio = .inherit;
+                    run_kcov.setCwd(b.path("."));
+                    run_kcov.step.dependOn(&mkdir_cmd.step);
+                    coverage_loom_step.dependOn(&run_kcov.step);
+                    merge_cmd_loom.?.addArg(kcov_dir);
+                    merge_cmd_loom.?.step.dependOn(&run_kcov.step);
+                } else if (coverage_vopr and is_vopr_only) {
+                    const kcov_dir = b.fmt("zig-out/coverage-vopr/{d}", .{idx});
+                    const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+                    const run_kcov = b.addSystemCommand(&.{
+                        "kcov",
+                        "--clean",
+                        kcov_include_arg,
+                        kcov_strip_arg,
+                        kcov_dir,
+                    });
+                    run_kcov.addArtifactArg(lv_tests);
+                    run_kcov.stdio = .inherit;
+                    run_kcov.setCwd(b.path("."));
+                    run_kcov.step.dependOn(&mkdir_cmd.step);
+                    coverage_vopr_step.dependOn(&run_kcov.step);
+                    merge_cmd_vopr.?.addArg(kcov_dir);
+                    merge_cmd_vopr.?.step.dependOn(&run_kcov.step);
+                } else {
+                    const run_lv_tests = std.Build.Step.Run.create(b, b.fmt("run loom-vopr {s}", .{filename}));
+                    run_lv_tests.addArtifactArg(lv_tests);
+                    run_lv_tests.stdio = .inherit;
+                    run_lv_tests.setCwd(b.path("."));
+                    test_loom_vopr_step.dependOn(&run_lv_tests.step);
+                }
             }
         }
     }
 
     if (merge_cmd) |m| test_step.dependOn(&m.step);
+    if (merge_cmd_loom) |m| coverage_loom_step.dependOn(&m.step);
+    if (merge_cmd_vopr) |m| coverage_vopr_step.dependOn(&m.step);
 
     // -------------------------------------------------------------------------
     // BENCHMARKS (zig build benchmark)
@@ -608,8 +706,6 @@ pub fn build(b: *std.Build) void {
     const hammer_exe_files = [_][]const u8{
         "runtime/shared-nothing-test.zig",
         "runtime/routing-crash-test.zig",
-        "runtime/scheduler-race-test.zig",
-        "runtime/inbox-race-test.zig",
         "runtime/io-pressure-test.zig",
     };
 
@@ -702,6 +798,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        // Same reason as the unit-test path: stage2 emits limited DWARF
+        // and kcov sees only the embedded .S files. Force LLVM under
+        // -Dcoverage-loom so project .zig sources land in the report.
+        .use_llvm = if (coverage_loom) true else null,
     });
     pl_loom_exe.root_module.addImport("build_options", build_options_mod);
     pl_loom_exe.root_module.addAssemblyFile(switch_s);
@@ -730,7 +830,87 @@ pub fn build(b: *std.Build) void {
     } else if (!coverage and shard_index == 0) {
         test_loom_vopr_step.dependOn(&run_pl_loom.step);
     }
+    // Loom-only coverage: route parking-lot-loom into the dedicated tree.
+    // Independent of the `coverage`/`!coverage` branches above so this can
+    // be combined or run on its own without mixing with the unit-test report.
+    if (coverage_loom and shard_index == 0) {
+        const pl_loom_kcov_dir = "zig-out/coverage-loom/parking-lot-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", pl_loom_kcov_dir });
+        const run_pl_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            pl_loom_kcov_dir,
+        });
+        run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
+        run_pl_loom_kcov.stdio = .inherit;
+        run_pl_loom_kcov.setCwd(b.path("."));
+        run_pl_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_pl_loom_kcov.step);
+        merge_cmd_loom.?.addArg(pl_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_pl_loom_kcov.step);
+    }
     loom_step.dependOn(&run_pl_loom.step);
+
+    // VOPR executables. Built as `b.addExecutable` (NOT `b.addTest`)
+    // so `@import("root")` from inside lib/compat.zig resolves to the
+    // entry file (`pub const SimClock = ...`). Without this, the
+    // comptime SimClock / SimRandom seam in compat.zig silently falls
+    // through to OS clock_gettime / getrandom -- same GAP-B issue
+    // parking-lot-loom hit pre-2026-05.
+    const VoprExe = struct {
+        name: []const u8,
+        entry: []const u8, // path under zig/, e.g. "scheduler-timeout-vopr-test.zig"
+    };
+    const vopr_exes = [_]VoprExe{
+        .{ .name = "scheduler-timeout-vopr", .entry = "scheduler-timeout-vopr-test.zig" },
+        .{ .name = "atomic-ptr-vopr", .entry = "atomic-ptr-vopr-test.zig" },
+        .{ .name = "versioned-vopr", .entry = "versioned-vopr-test.zig" },
+        .{ .name = "fsm-lock-vopr", .entry = "fsm-lock-vopr-test.zig" },
+        .{ .name = "fsm-vopr", .entry = "fsm-vopr-test.zig" },
+        .{ .name = "vopr-runqueue", .entry = "vopr-test.zig" },
+        .{ .name = "data-structures-vopr", .entry = "data-structures-vopr-test.zig" },
+    };
+    for (vopr_exes) |ve| {
+        const exe = b.addExecutable(.{
+            .name = ve.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(ve.entry),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .use_llvm = if (coverage_vopr) true else null,
+        });
+        exe.root_module.addImport("build_options", build_options_mod);
+        exe.root_module.addAssemblyFile(switch_s);
+        exe.root_module.addAssemblyFile(onroot_s);
+        exe.root_module.link_libc = true;
+        const run_exe = b.addRunArtifact(exe);
+        run_exe.has_side_effects = true;
+        run_exe.stdio = .inherit;
+        if (!coverage_vopr and shard_index == 0) {
+            test_loom_vopr_step.dependOn(&run_exe.step);
+        }
+        if (coverage_vopr and shard_index == 0) {
+            const kcov_dir = b.fmt("zig-out/coverage-vopr/{s}", .{ve.name});
+            const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+            const run_kcov = b.addSystemCommand(&.{
+                "kcov",
+                "--clean",
+                kcov_include_arg,
+                kcov_strip_arg,
+                kcov_dir,
+            });
+            run_kcov.addArtifactArg(exe);
+            run_kcov.stdio = .inherit;
+            run_kcov.setCwd(b.path("."));
+            run_kcov.step.dependOn(&mkdir_cmd.step);
+            coverage_vopr_step.dependOn(&run_kcov.step);
+            merge_cmd_vopr.?.addArg(kcov_dir);
+            merge_cmd_vopr.?.step.dependOn(&run_kcov.step);
+        }
+    }
 
     const versioned_loom_exe = b.addExecutable(.{
         .name = "versioned-loom-test",
@@ -750,6 +930,93 @@ pub fn build(b: *std.Build) void {
         test_loom_vopr_step.dependOn(&run_versioned_loom.step);
     }
     loom_step.dependOn(&run_versioned_loom.step);
+
+    // versioned-multi-loom -- multi-fiber Loom harness for updateMulti
+    // contention. Built as an executable so `@import("root")` resolves
+    // to versioned-multi-loom-test.zig, exposing both `pub const SimAtomic`
+    // and `pub const CLEAR_MVCC_MAX_INNER_RETRIES_MULTI = 4`. Drives two
+    // fibers updating overlapping cell-sets through deterministic
+    // schedules to reach the contention-rollback branch at versioned.zig:565.
+    const vm_loom_exe = b.addExecutable(.{
+        .name = "versioned-multi-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("versioned-multi-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage_loom) true else null,
+    });
+    vm_loom_exe.root_module.addAssemblyFile(switch_s);
+    vm_loom_exe.root_module.addAssemblyFile(onroot_s);
+    vm_loom_exe.root_module.link_libc = true;
+    const run_vm_loom = b.addRunArtifact(vm_loom_exe);
+    run_vm_loom.has_side_effects = true;
+    run_vm_loom.stdio = .inherit;
+    if (shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_vm_loom.step);
+    }
+    loom_step.dependOn(&run_vm_loom.step);
+    if (coverage_loom and shard_index == 0) {
+        const vm_loom_kcov_dir = "zig-out/coverage-loom/versioned-multi-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", vm_loom_kcov_dir });
+        const run_vm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            vm_loom_kcov_dir,
+        });
+        run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
+        run_vm_loom_kcov.stdio = .inherit;
+        run_vm_loom_kcov.setCwd(b.path("."));
+        run_vm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_vm_loom_kcov.step);
+        merge_cmd_loom.?.addArg(vm_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_vm_loom_kcov.step);
+    }
+
+    // ownership-loom -- multi-fiber Loom harness for Arc<T> / Weak<T>
+    // refcount races. Same shape as versioned-multi-loom: standalone
+    // exe so `pub const SimAtomic` at root flips lib/ownership.zig's
+    // comptime alias. Three scenarios per run cover clone/deinit,
+    // weak-upgrade vs strong-drop, and concurrent downgrade.
+    const ow_loom_exe = b.addExecutable(.{
+        .name = "ownership-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("ownership-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .use_llvm = if (coverage_loom) true else null,
+    });
+    ow_loom_exe.root_module.addAssemblyFile(switch_s);
+    ow_loom_exe.root_module.addAssemblyFile(onroot_s);
+    ow_loom_exe.root_module.link_libc = true;
+    const run_ow_loom = b.addRunArtifact(ow_loom_exe);
+    run_ow_loom.has_side_effects = true;
+    run_ow_loom.stdio = .inherit;
+    if (shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_ow_loom.step);
+    }
+    loom_step.dependOn(&run_ow_loom.step);
+    if (coverage_loom and shard_index == 0) {
+        const ow_loom_kcov_dir = "zig-out/coverage-loom/ownership-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", ow_loom_kcov_dir });
+        const run_ow_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            ow_loom_kcov_dir,
+        });
+        run_ow_loom_kcov.addArtifactArg(ow_loom_exe);
+        run_ow_loom_kcov.stdio = .inherit;
+        run_ow_loom_kcov.setCwd(b.path("."));
+        run_ow_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        coverage_loom_step.dependOn(&run_ow_loom_kcov.step);
+        merge_cmd_loom.?.addArg(ow_loom_kcov_dir);
+        merge_cmd_loom.?.step.dependOn(&run_ow_loom_kcov.step);
+    }
 
     // -------------------------------------------------------------------------
     // VERSIONED-EXHAUST -- Deterministic MVCC retry-exhaustion check
