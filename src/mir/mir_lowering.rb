@@ -2318,6 +2318,16 @@ class MIRLowering
   def lower_cast(node)
     inner = lower(node.value)
     target_type = transpile_type(node.target)
+
+    # Int -> enum: emit `@enumFromInt(value)` instead of `@as(EnumT, value)`.
+    # Modern Zig rejects `@as(EnumT, intExpr)` (type coercion is enum-from-
+    # int, which is its own builtin). Detected by checking whether the
+    # target name matches a registered enum schema.
+    target_resolved = node.target.is_a?(Type) ? node.target.resolved : node.target
+    if @enum_schemas&.key?(target_resolved)
+      return MIR::Cast.new(inner, target_type, :enumFromInt)
+    end
+
     MIR::Cast.new(inner, target_type, :as)
   end
 

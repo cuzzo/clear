@@ -1274,7 +1274,10 @@ class MIREmitter
     when :truncate
       "@truncate(#{inner})"
     when :enumFromInt
-      "@enumFromInt(#{inner})"
+      # Modern Zig requires the result type to be known at the call site.
+      # When we have one (cast targets a named enum), wrap with @as so it
+      # works in any expression position (`const x =`, `arr.append(...)`).
+      target_t ? "@as(#{target_t}, @enumFromInt(#{inner}))" : "@enumFromInt(#{inner})"
     else
       raise "MIREmitter#emit_cast: unknown method :#{node.method}"
     end
