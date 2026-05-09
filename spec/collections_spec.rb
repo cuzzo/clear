@@ -618,27 +618,6 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    # -------------------------------------------------------------------------
-    # `.keys()` and `.values()` return `T[]@list` (ArrayList).
-    #
-    # Regression coverage for a fixed type-system bug. Previously the
-    # stdlib registry typed these as `String[]` / `T[]` (slices) even
-    # though the runtime allocated an owned ArrayList. Assigning to a
-    # `T[]@list` local slipped past the annotator, then Zig codegen
-    # fell over with "expected '*const ArrayListUnmanaged...', found
-    # '*[][]const u8'" inside CheatLib.cleanup.
-    #
-    # Fix: registry now returns `String[]@list` / `T[]@list`, and the
-    # runtime helpers (`mapKeys`, `mapValues`, `numericMapKeys`,
-    # `numericMapValues`) return `std.ArrayListUnmanaged(T)` rather
-    # than slices. Sharded-map `.keys()`/`.values()` already returned
-    # ArrayLists; the asymmetry was the bug.
-    #
-    # The stack machine (`_bc_runner.cht` line 3120) used to work
-    # around this by leaving the local untyped, then iterating by
-    # index. That pattern still works (ArrayList supports `xs[i]` and
-    # `xs.length()`) -- it's just no longer required.
-    # -------------------------------------------------------------------------
     describe "HashMap.keys() returns String[]@list" do
       let(:repro_src) { <<~CLEAR }
         FN main() RETURNS Void ->
