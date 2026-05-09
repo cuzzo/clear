@@ -568,7 +568,8 @@ pub const CheatLib = struct {
     // Unwraps optional containers (e.g. from hashmap.get()) before indexing.
     pub fn getAt(container: anytype, index: anytype) ElementType(@TypeOf(container)) {
         const i: usize = @intCast(index);
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
 
         if (@hasField(@TypeOf(c), "items")) {
             return c.items[i];
@@ -578,7 +579,12 @@ pub const CheatLib = struct {
     }
 
     fn ElementType(comptime C: type) type {
-        const Inner = if (@typeInfo(C) == .optional) @typeInfo(C).optional.child else C;
+        // Unwrap one layer of optional, then one layer of single-pointer
+        // (e.g. *ArrayList from a MUTABLE @list param forwarded into a
+        // borrow-shape helper), so containers can be read polymorphically
+        // regardless of whether the caller passed by value or by pointer.
+        const Inner0 = if (@typeInfo(C) == .optional) @typeInfo(C).optional.child else C;
+        const Inner = if (@typeInfo(Inner0) == .pointer and @typeInfo(Inner0).pointer.size == .one) @typeInfo(Inner0).pointer.child else Inner0;
         if (@hasField(Inner, "items")) {
             // ArrayList: .items is []T, element type is T
             for (@typeInfo(Inner).@"struct".fields) |f| {
@@ -594,7 +600,8 @@ pub const CheatLib = struct {
     // Bounds-safe index: returns null on out-of-bounds instead of panicking.
     pub fn getAtOpt(container: anytype, index: anytype) ?ElementType(@TypeOf(container)) {
         const i: usize = @intCast(index);
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
         if (@hasField(@TypeOf(c), "items")) {
             if (i >= c.items.len) return null;
             return c.items[i];
@@ -606,7 +613,8 @@ pub const CheatLib = struct {
 
     // First element, or null if empty. Backs CLEAR's `.first()` predicate.
     pub fn firstOpt(container: anytype) ?ElementType(@TypeOf(container)) {
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
         if (@hasField(@TypeOf(c), "items")) {
             if (c.items.len == 0) return null;
             return c.items[0];
@@ -620,7 +628,8 @@ pub const CheatLib = struct {
     // Computed via the same shape-dispatch as firstOpt — works for both
     // ArrayList (`.items`) and bare slices.
     pub fn lastOpt(container: anytype) ?ElementType(@TypeOf(container)) {
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
         if (@hasField(@TypeOf(c), "items")) {
             if (c.items.len == 0) return null;
             return c.items[c.items.len - 1];
@@ -632,7 +641,8 @@ pub const CheatLib = struct {
 
     // Linear search over a slice or ArrayList for item equality.
     pub fn sliceContains(container: anytype, item: anytype) bool {
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
         const slice = if (@hasField(@TypeOf(c), "items")) c.items else c;
         for (slice) |elem| {
             if (eql(elem, item)) return true;
@@ -703,8 +713,12 @@ pub const CheatLib = struct {
 
     // Polymorphic Length (Strings or Lists)
     // Unwraps optional containers (e.g. from hashmap.get()) before measuring.
+    // Also unwraps single-pointer containers (e.g. *ArrayList) so callers
+    // that pass a `MUTABLE @list` parameter through to a borrow-shape
+    // helper get the right length without an explicit deref.
     pub fn len(container: anytype) i64 {
-        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
         // If it has .items (ArrayList), use that. Otherwise assume it's a Slice.
         if (@hasField(@TypeOf(c), "items")) {
             return @intCast(c.items.len);
