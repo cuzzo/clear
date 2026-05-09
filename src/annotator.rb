@@ -3273,6 +3273,7 @@ private
     entry = scope.locals[name]
     return unless entry
     entry.mutated = true
+    entry.mutable_ref_target = true if entry.respond_to?(:mutable_ref_target=)
   end
 
   # Walk a chained access expression (GetField/GetIndex chain rooted at an

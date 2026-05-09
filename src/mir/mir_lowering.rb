@@ -1148,13 +1148,15 @@ class MIRLowering
       else
         transpile_type(param[:type], is_param: true)
       end
+      zig_t = "*#{zig_t}" if mutable_scalar_params.include?(param[:name]) && zig_t != "anytype"
       # `pointer_passed`: this param's receiver is a pointer-to-T at the
       # Zig level, so allocations made inside this function on its behalf
       # outlive the function. Mirrors `@current_fn_collection_params`'s
       # criteria so the MIR checker can independently verify the
       # allocator-routing decision (see INV-CROSS-FRAME-PARAM-ALLOC).
       pointer_passed = p_type_obj.needs_pointer_passing? ||
-                       (param[:mutable] && p_type_obj.list_collection?)
+                       (param[:mutable] && p_type_obj.list_collection?) ||
+                       mutable_scalar_params.include?(param[:name])
       MIR::Param.new(p_name, zig_t, pointer_passed)
     }
 
@@ -1305,7 +1307,11 @@ class MIRLowering
     # Mutable scalar param shadows
     mutable_scalar_params.each do |name|
       next unless used_names.include?(name)
-      prologue << MIR::Let.new(name, MIR::Ident.new("_m_#{name}"), true, nil, "_ = &#{name};")
+      ptr_name = "_m_#{name}"
+      prologue << MIR::Let.new(name, MIR::Deref.new(MIR::Ident.new(ptr_name)), true, nil, "_ = &#{name};")
+      prologue << MIR::DeferStmt.new(MIR::ScopeBlock.new([
+        MIR::Set.new(MIR::Deref.new(MIR::Ident.new(ptr_name)), MIR::Ident.new(name))
+      ]))
     end
 
     # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
@@ -1678,6 +1684,13 @@ class MIRLowering
         callee_param && callee_param[:mutable] &&
         callee_param[:type].respond_to?(:list_collection?) &&
         callee_param[:type].list_collection?
+      callee_param_type = if callee_param
+        callee_param[:type].is_a?(Type) ? callee_param[:type] : (Type.new(callee_param[:type] || :Any) rescue nil)
+      end
+      callee_wants_mutable_value =
+        callee_param && callee_param[:mutable] && a.is_a?(AST::Identifier) &&
+        !callee_wants_mutable_list &&
+        !(callee_param_type&.respond_to?(:needs_pointer_passing?) && callee_param_type.needs_pointer_passing?)
 
       if callee_wants_mutable_list && a.is_a?(AST::Identifier)
         if @current_fn_collection_params&.include?(a.name) || @current_bg_pointer_captures&.include?(a.name)
@@ -1685,6 +1698,8 @@ class MIRLowering
         else
           MIR::AddressOf.new(arg)
         end
+      elsif callee_wants_mutable_value
+        MIR::AddressOf.new(arg)
       elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
@@ -6059,7 +6074,7 @@ class MIRLowering
     # flip it to `const`. Without this, &binding produces *const T,
     # which doesn't unify with the body's `*T` parameter and the
     # mutation never reaches the caller.
-    is_mutable = true if node.symbol&.poly_borrow_target
+    is_mutable = true if node.symbol&.poly_borrow_target || node.symbol&.mutable_ref_target
 
     # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
     # For same-name vars in different scopes, alloc is overridden per-declaration
@@ -6075,15 +6090,15 @@ class MIRLowering
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           ft.heap_provenance? || ft.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
-    # True-Sync-Polymorphism Gate 3: a binding whose address is taken
-    # at a universal-poly call site MUST emit Zig `var` so &binding is
+    # A binding whose address is taken by a MUTABLE param or universal-poly
+    # call site MUST emit Zig `var` so &binding is
     # *T (not *const T). The local-mutation analyzer would otherwise
     # downgrade this to `const` when the binding is only "field-mutated"
-    # via the polymorphic body -- which is invisible to var_mutated.
-    poly_borrow = node.symbol&.poly_borrow_target == true
+    # via the callee body -- which is invisible to var_mutated.
+    by_ref_borrow = node.symbol&.mutable_ref_target == true || node.symbol&.poly_borrow_target == true
     keyword_mutable = if !is_mutable
       false
-    elsif actually_mutated || forced_var || poly_borrow
+    elsif actually_mutated || forced_var || by_ref_borrow
       true
     else
       false

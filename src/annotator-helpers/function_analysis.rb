@@ -401,14 +401,10 @@ module FunctionAnalysis
         # post-annotation passes like the GUARD MUTABLE-mutation check
         # (validate_with_guard_no_body_mutation!) need to see this.
         #
-        # Critically, we mark ONLY entry.mutated, NOT
-        # decl_node.var_mutated. The latter drives the var/const emit
-        # decision for the Zig-level binding, and at the Zig level the
-        # call site doesn't visibly mutate the local — Zig's
-        # "var-never-mutated" safety check would fire if we promoted
-        # the binding to `var` here. The "MUTABLE never reassigned"
-        # lint also reads decl_node.var_mutated; keeping that path
-        # untouched preserves existing lint behavior.
+        # Critically, we mark only SymbolEntry state, not
+        # decl_node.var_mutated. The declaration still should not count
+        # as locally reassigned for lints, but lowering must emit Zig
+        # `var` storage so the call site can pass `&binding` as `*T`.
         if arg_node.is_a?(AST::Identifier)
           mark_var_mutated_via_call(arg_node.name)
         end
