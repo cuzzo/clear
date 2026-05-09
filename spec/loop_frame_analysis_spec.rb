@@ -540,6 +540,70 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("saveLoopMark")
     end
 
+    it "WhileLoop heap-promotes a loop-local list that escapes into an outer list" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE outer: Int64[][]@list = [];
+          MUTABLE i = 0;
+          WHILE i < 1 DO
+            MUTABLE inner: Int64[]@list = [];
+            inner.append(i);
+            outer.append(inner);
+            i += 1;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      zig = nil
+      expect { zig = transpile(src) }.not_to raise_error
+      expect(zig).to include("inner.append(rt.heapAlloc()")
+      expect(zig).to include("inner_moved = true")
+      expect(zig).not_to include("saveLoopMark")
+    end
+
+    it "WhileLoop heap-promotes a loop-local dynamic array that escapes into an outer list" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE outer: Int64[][]@list = [];
+          MUTABLE i = 0;
+          WHILE i < 1 DO
+            inner: Int64[] = [i, i + 1];
+            outer.append(inner);
+            i += 1;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      zig = nil
+      expect { zig = transpile(src) }.not_to raise_error
+      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).not_to include("saveLoopMark")
+    end
+
+    it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE outer: HashMap<Int64>[]@list = [];
+          MUTABLE i = 0;
+          WHILE i < 1 DO
+            MUTABLE m: HashMap<Int64> = {};
+            m["x"] = i;
+            outer.append(m);
+            i += 1;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      zig = nil
+      expect { zig = transpile(src) }.not_to raise_error
+      expect(zig).to include("StringMap")
+      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).not_to include("saveLoopMark")
+    end
+
     it "ForRange emits saveLoopMark + defer restoreLoopMark for loop-local list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
