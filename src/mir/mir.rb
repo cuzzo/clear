@@ -1267,6 +1267,13 @@ module MIR
     def stmt?; true; end
   end
 
+  # Marks an owned binding whose local cleanup is intentionally absent because
+  # ownership transfers out of the current scope (TAKES arg, return, container).
+  TransferMark = Struct.new(:name, :target) do
+    include Stmt
+    def stmt?; true; end
+  end
+
   # Marks reassignment needing pre-cleanup. Subsumes old MIR::ReassignCleanup.
   ReassignMark = Struct.new(:name, :alloc) do
     include Stmt

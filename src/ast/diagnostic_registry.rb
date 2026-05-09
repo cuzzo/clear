@@ -1857,6 +1857,13 @@ module DiagnosticRegistry
       cause: "Every MIR node that allocates memory (DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap, SharePromote, deep DeepCopy, ContainerInit) must appear as the direct init of a `MIR::Let` so it has an AllocMark. Found one in argument / return / field-value position instead.",
       fix_hint: "Lowering bug — HPT hoisting (hoist_alloc) should have lifted the call into a Let. Check the producer pass that emitted the allocating node; it should bind the result to a fresh local.",
     },
+    OWNED_RETURN_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-return call is bound without a checker-visible AllocMark.",
+      cause: "A call whose return value owns heap data was lowered directly into a binding, but the binding has no MIR::AllocMark. Without the marker, MIRChecker cannot verify that cleanup exists on every path.",
+      fix_hint: "Lowering bug — preserve return provenance through FunctionSignature import/reconstruction and make the cleanup classifier emit AllocMark + Cleanup for the binding.",
+    },
     COPY_CLEANUP: {
       severity: :error, category: :mir,
       template: "%{message}",

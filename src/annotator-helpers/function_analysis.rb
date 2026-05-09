@@ -279,7 +279,8 @@ module FunctionAnalysis
     # frameAlloc internally — the caller shouldn't try to free those.
     if node.type_info.is_a?(Type)
       callee_node = @fn_nodes[func_name]
-      if callee_node&.return_provenance == :heap
+      sig_return_heap = func_type.is_a?(FunctionSignature) && func_type.return_provenance == :heap
+      if callee_node&.return_provenance == :heap || sig_return_heap
         node.type_info.provenance = :heap if node.type_info.is_a?(Type)
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
         node.type_info.provenance = :heap if node.type_info.is_a?(Type)

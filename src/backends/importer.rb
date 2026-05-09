@@ -175,6 +175,7 @@ class ModuleImporter
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir_pass.transform!(ast)
+    sync_global_scope_function_signatures!(ast, annotator)
 
     # Collect schemas
     struct_schemas = {}
@@ -191,27 +192,7 @@ class ModuleImporter
     fn_sigs = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      else
-        # The annotator stamps `full_type` as a `Type` for some imported
-        # defs (cross-file REQUIREd helpers among them). Reconstruct
-        # from the FunctionDef's own param list so call-site routing
-        # decisions that consult `callee_sig.params[idx]` (MUTABLE @list
-        # detection, takes/borrow/etc.) work for cross-file callees too.
-        # Without this, the lowering silently sees an empty param list
-        # and emits the wrong arg shape (e.g. `.items` instead of `&xs`
-        # for a MUTABLE @list parameter).
-        fs = FunctionSignature.new(
-          params: stmt.params || [],
-          return_type: stmt.return_type || :Any
-        )
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        fn_sigs[stmt.name] = fs
-      end
+      fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
     end
 
     moved_guard_info = {}
@@ -242,5 +223,16 @@ class ModuleImporter
       enum_schemas,
       type_defs
     )
+  end
+
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
+  def sync_global_scope_function_signatures!(ast, annotator)
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      entry = annotator.scope_stack.first.locals[stmt.name]
+      next unless entry&.type.is_a?(FunctionSignature)
+      FunctionSignature.sync_from_function_def!(entry.type, stmt)
+    end
+    nil
   end
 end

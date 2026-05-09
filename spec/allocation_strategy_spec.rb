@@ -1,4 +1,5 @@
 require "rspec"
+require "tmpdir"
 require_relative "../src/backends/transpiler"
 
 # Allocation Strategy Verification — spec/allocation_strategy_spec.rb
@@ -496,6 +497,32 @@ RSpec.describe "Allocation Strategy Invariants" do
       CLEAR
       caller_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
       expect(cleanup_entry(caller_fn, "x")&.dig(:alloc)).to eq(:heap)
+    end
+
+    it ":transitive_imported_callee — imported heap-returning call → cleanup :heap" do
+      Dir.mktmpdir("clear-import-owned-return") do |dir|
+        File.write(File.join(dir, "lib.cht"), <<~CLEAR)
+          FN build!() RETURNS !Float64[]@list ->
+            MUTABLE v: Float64[]@list = [];
+            v.append(1.0);
+            RETURN v;
+          END
+        CLEAR
+
+        src = <<~CLEAR
+          REQUIRE "lib.cht";
+          FN caller!() RETURNS !Void ->
+            x = build!();
+            RETURN;
+          END
+          FN main() RETURNS Void -> RETURN; END
+        CLEAR
+
+        importer = ModuleImporter.new(base_dir: dir, use_mir: true)
+        result = CompilerFrontend.compile(src, importer: importer, source_dir: dir)
+        caller_fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
+        expect(cleanup_entry(caller_fn, "x")&.dig(:alloc)).to eq(:heap)
+      end
     end
 
   end

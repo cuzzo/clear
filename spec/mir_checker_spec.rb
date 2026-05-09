@@ -34,10 +34,42 @@ RSpec.describe MIRChecker do
     it "passes for heap-returning call bound to Let" do
       call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
       body = [
+        MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
+        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :heap, has_moved_guard: false }),
       ]
       errors = checker.check_fn!(fn_def("hpt_ok", body))
       expect(errors).to be_empty
+    end
+
+    it "detects bound heap-returning call with no AllocMark" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::Let.new("x", call, false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_bound_no_alloc", body))
+      expect(errors.any? { |e| e.include?("OWNED_RETURN_WITHOUT_ALLOC") && e.include?("x") }).to be true
+    end
+
+    it "passes for bound heap-returning call transferred out of scope" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::AllocMark.new("x", :heap),
+        MIR::Let.new("x", call, false, nil, nil),
+        MIR::TransferMark.new("x", :moved),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_bound_transfer", body))
+      expect(errors).to be_empty
+    end
+
+    it "detects bound heap-returning call marked allocated but neither cleaned nor transferred" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::AllocMark.new("x", :heap),
+        MIR::Let.new("x", call, false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_bound_alloc_only", body))
+      expect(errors.any? { |e| e.include?("ALLOC_WITHOUT_CLEANUP") && e.include?("x") }).to be true
     end
 
     it "passes for ExprStmt with non-heap call" do
@@ -60,7 +92,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects discarded InlineZig stdlib call with allocates:true" do
-      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone", nil, { allocates: true, return: :String })
+      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone", nil, { allocates: true, return: :String, return_alloc: :heap })
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -720,7 +752,9 @@ RSpec.describe MIRChecker do
     it "collects errors across multiple functions" do
       call1 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
       fn1 = fn_def("good", [
+        MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call1, false, nil, nil),
+        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :heap, has_moved_guard: false }),
       ])
 
       call2 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)

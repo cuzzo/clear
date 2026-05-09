@@ -114,7 +114,7 @@ class MIREmitter
     when MIR::PolymorphicMutateFlow then emit_polymorphic_mutate_flow(node)
     when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
     # --- Verification-only (no codegen) ---
-    when MIR::AllocMark, MIR::ReturnMark, MIR::ReassignMark, MIR::FieldCleanupMark
+    when MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark
       nil
 
     # --- Expressions ---

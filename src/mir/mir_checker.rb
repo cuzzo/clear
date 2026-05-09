@@ -5,7 +5,9 @@
 #
 #   INV-ALLOC-CLEANUP: Every MIR::AllocMark has at least one matching
 #     MIR::Cleanup or MIR::ErrCleanup for the same binding name, and
-#     the allocators match. (HPT_LEAK is the leak-without-alloc case.)
+#     the allocators match, unless a MIR::TransferMark records that
+#     ownership left the current scope. (HPT_LEAK is the leak-without-alloc
+#     case.)
 #
 #   INV-CLEANUP-ALLOC: Every MIR::Cleanup or MIR::ErrCleanup has a
 #     matching MIR::AllocMark. A cleanup with no alloc is a compiler bug.
@@ -52,6 +54,8 @@
 #   MIR::Cleanup    -> always-defer cleanup (freed on both success and error)
 #   MIR::ErrCleanup -> errdefer-only cleanup (freed only on error; success
 #                      path transfers ownership to caller/container/callee)
+#   MIR::TransferMark -> no local cleanup because ownership was moved out of
+#                        this scope on every successful path
 #
 # Which type is emitted is determined by the lowering pass, not the checker.
 # The checker does NOT inspect flags or tags -- it reads the node type.
@@ -89,8 +93,10 @@ class MIRChecker
 
     allocs = {}
     cleanups = {}
+    transfers = Set.new
     errdefer_destroy_names = Set.new
     hpt_leaks = []
+    owned_return_lets = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
 
@@ -100,6 +106,8 @@ class MIRChecker
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup, MIR::ErrCleanup
         (cleanups[node.name] ||= []) << node
+      when MIR::TransferMark
+        transfers << node.name
       when MIR::ErrDeferStmt
         # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
@@ -107,6 +115,7 @@ class MIRChecker
           errdefer_destroy_names << node.body.ptr.name
         end
       when MIR::Let
+        owned_return_lets << node if owned_return_init?(node.init)
         all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
@@ -130,9 +139,10 @@ class MIRChecker
     end
 
     hpt_leaks.each { |e| @errors << e }
+    verify_owned_return_alloc_marks!(owned_return_lets, allocs)
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
-    verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names)
+    verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
     verify_zig_contracts!(all_zig_nodes)
     verify_raw_justified!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
@@ -149,6 +159,34 @@ class MIRChecker
       all_errors.concat(check_fn!(item, strict: strict))
     end
     all_errors
+  end
+
+  sig { params(init: T.untyped).returns(T::Boolean) }
+  def owned_return_init?(init)
+    return true if init.is_a?(MIR::Call) && init.heap_provenance
+    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
+      return false unless stdlib_owned_return?(init)
+      ret = init.stdlib_def[:return]
+      return !(ret == :Void || ret.nil?)
+    end
+    false
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def stdlib_owned_return?(node)
+    return false unless node.stdlib_def&.dig(:allocates)
+    return true if node.stdlib_def[:return_alloc] == :heap
+    allocs = node.respond_to?(:allocs) ? node.allocs : nil
+    allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap }
+  end
+
+  sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, Array]).returns(T.nilable(Array)) }
+  def verify_owned_return_alloc_marks!(lets, allocs)
+    lets.each do |let|
+      next if allocs.key?(let.name)
+      @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
+        "owned-return initializer is bound without MIR::AllocMark; cleanup cannot be verified")
+    end
   end
 
   # ===================================================================
@@ -331,7 +369,7 @@ class MIRChecker
       leaks << error(:HPT_LEAK, node.callee,
         "heap-returning call result not bound to variable (leak)")
     end
-    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && node.stdlib_def&.dig(:allocates)
+    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node)
       ret = node.stdlib_def[:return]
       unless ret == :Void || ret.nil?
         label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
@@ -427,14 +465,13 @@ class MIRChecker
   # call heapAlloc().free() on frame memory or vice versa -> runtime crash.
   #
   # Only checks bindings that have BOTH an AllocMark and a Cleanup. Bindings with
-  # only an AllocMark were moved/escaped (no local free needed). Bindings with only
-  # a Cleanup indicate a missing AllocMark -- every locally-allocated binding
+  # only a Cleanup indicate a missing AllocMark -- every locally-allocated binding
   # (including TAKES params via insert_takes_drops! and heap carry vars via
   # insert_drop!) must have a corresponding AllocMark. A Cleanup with no AllocMark
   # is a compiler bug: the allocation event is invisible to the checker, so
   # ALLOC_CLEANUP_MISMATCH cannot fire even if the allocators diverge.
-  sig { params(allocs: T::Hash[String, Array], cleanups: T::Hash[String, Array], errdefer_destroy_names: Set).returns(T::Hash[String, Array]) }
-  def verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names = Set.new)
+  sig { params(allocs: T::Hash[String, Array], cleanups: T::Hash[String, Array], errdefer_destroy_names: Set, transfers: Set).returns(T::Hash[String, Array]) }
+  def verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names = Set.new, transfers = Set.new)
     allocs.each do |name, alloc_marks|
       next unless cleanups.key?(name)
 
@@ -469,16 +506,17 @@ class MIRChecker
         "MIR::Cleanup present but no MIR::AllocMark (allocation event missing from MIR)")
     end
 
-    # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup, or
-    # ErrDeferStmt(DestroyPtr). Frame allocations are freed by the arena rewind and
-    # do not require an explicit cleanup node.
+    # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup,
+    # ErrDeferStmt(DestroyPtr), or explicit TransferMark. Frame allocations are
+    # freed by the arena rewind and do not require an explicit cleanup node.
     # Exception: @indirect field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
     allocs.each do |name, alloc_marks|
       next if cleanups.key?(name)
       next if errdefer_destroy_names.include?(name)
+      next if transfers.include?(name)
       next if alloc_marks.all? { |m| m.alloc == :frame }
       @errors << error(:ALLOC_WITHOUT_CLEANUP, name,
-        "AllocMark with no Cleanup, ErrCleanup, or ErrDeferStmt(DestroyPtr) -- leaked allocation")
+        "AllocMark with no Cleanup, ErrCleanup, ErrDeferStmt(DestroyPtr), or TransferMark -- leaked allocation")
     end
   end
 

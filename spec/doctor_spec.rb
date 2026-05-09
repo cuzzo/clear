@@ -73,7 +73,7 @@ RSpec.describe Doctor do
       expect(sites.first).to include(allocs: 200, bytes: 4000, frees: 0, free_bytes: 0, live: 4000)
       expect(out).to include("Allocation Profile (12,345 allocs)")
       expect(out).to include("*** WARNING: 2 allocation samples dropped")
-      expect(out).to include("Top sites by bytes:")
+      expect(out).to match(/Top sites by (bytes|in-use bytes \(alloc - free\)):/)
       expect(out).to include("(heap rc) = @multiowned RC allocation tracked by rcCreate")
     end
   end

@@ -1,0 +1,15 @@
+# Repro: returning a heap-backed list from a helper and keeping it in the
+# caller should not leak under the debug allocator.
+
+FN makeNumbers() RETURNS !Int64[]@list ->
+  MUTABLE xs: Int64[]@list = [];
+  xs.append(2);
+  RETURN xs;
+END
+
+FN main() RETURNS Void ->
+  nums = makeNumbers();
+  ASSERT nums.length() == 1, "returned list length";
+  ASSERT nums[0] == 2, "returned list contents";
+  RETURN;
+END

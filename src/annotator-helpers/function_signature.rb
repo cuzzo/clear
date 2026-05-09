@@ -29,6 +29,39 @@ class FunctionSignature
   # checks survive cross-module flow.
   attr_accessor :requires
 
+  sig { params(fn: T.untyped).returns(FunctionSignature) }
+  def self.from_function_def(fn)
+    raw_sig = fn.full_type
+    raw_sig = raw_sig.raw if raw_sig.is_a?(Type) && raw_sig.raw.is_a?(FunctionSignature)
+
+    sig = if raw_sig.is_a?(FunctionSignature)
+      raw_sig.dup
+    else
+      FunctionSignature.new(
+        params: fn.params || [],
+        return_type: fn.return_type || :Any,
+        return_lifetime: fn.return_lifetime,
+        visibility: fn.visibility,
+        type_params: fn.type_params,
+        reentrant: fn.reentrant == :reentrant
+      )
+    end
+
+    sync_from_function_def!(sig, fn)
+  end
+
+  sig { params(sig: FunctionSignature, fn: T.untyped).returns(FunctionSignature) }
+  def self.sync_from_function_def!(sig, fn)
+    sig.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
+    sig.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
+    sig.return_provenance = fn.return_provenance if fn.respond_to?(:return_provenance)
+    sig.effects = fn.effects if fn.respond_to?(:effects)
+    sig.requires = fn.requires if fn.respond_to?(:requires)
+    sig.return_strategy = fn.return_strategy if fn.respond_to?(:return_strategy)
+    sig.stack_tier = fn.stack_tier if fn.respond_to?(:stack_tier)
+    sig
+  end
+
   sig { params(params: T::Array[Hash], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(Array), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, T.untyped]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(Array), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
   def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
@@ -67,6 +100,7 @@ class FunctionSignature
       s.effects = @effects
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier
+      s.requires = @requires
     end
   end
 end

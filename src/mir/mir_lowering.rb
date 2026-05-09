@@ -4330,18 +4330,7 @@ class MIRLowering
       if T.must(mod).ast
         T.must(mod).ast.statements.each do |stmt|
           next unless stmt.is_a?(AST::FunctionDef)
-          sig = stmt.full_type
-          if sig.is_a?(FunctionSignature)
-            @fn_sigs[stmt.name] = sig
-          else
-            fs = FunctionSignature.new(
-              params: stmt.params || [],
-              return_type: stmt.return_type || :Any
-            )
-            fs.needs_rt = stmt.needs_rt
-            fs.can_fail = stmt.can_fail
-            @fn_sigs[stmt.name] = fs
-          end
+          @fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
         end
       end
 
@@ -6131,9 +6120,31 @@ class MIRLowering
       drop_entry[:alloc] = node_alloc
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.type_info), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
+    elsif owned_return_transfer_binding?(binding_entry, init)
+      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc] || :heap
+      [MIR::AllocMark.new(safe_name, mir_alloc, node.type_info), let_node, MIR::TransferMark.new(safe_name, :moved)]
     else
       let_node
     end
+  end
+
+  sig { params(binding_entry: T.untyped, init: T.untyped).returns(T::Boolean) }
+  def owned_return_transfer_binding?(binding_entry, init)
+    return false unless binding_entry && binding_entry[:needs_cleanup] == false
+    return false unless binding_entry[:alloc] == :heap || binding_entry[:alloc] == :cleanup
+
+    if init.is_a?(MIR::Call)
+      return !!init.heap_provenance
+    end
+
+    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
+      return false unless init.stdlib_def&.dig(:allocates)
+      return true if init.stdlib_def[:return_alloc] == :heap
+      allocs = init.respond_to?(:allocs) ? init.allocs : nil
+      return allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap }
+    end
+
+    false
   end
 
   sig { params(node: AST::BindExpr).returns(T.untyped) }

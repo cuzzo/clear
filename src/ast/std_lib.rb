@@ -221,7 +221,7 @@ STD_LIB = {
         else
           recv_t.element_type
         end
-        Type.new(:"#{elem_t.resolved}[]", collection: :list)
+        Type.new(:"#{elem_t.resolved}[]", collection: :list, location: :heap)
       },
       zig: "try ({0}).toList({rt}.heapAlloc())",
       bc: true, bc_op: :to_list,

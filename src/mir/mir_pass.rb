@@ -94,6 +94,16 @@ class MIRPass
       next unless fn&.body
       transform_function!(fn, promotion_plans[name])
     end
+
+    # MIR escape analysis can discover heap-return provenance after the
+    # annotator created each FunctionSignature. Resync the signature objects
+    # so cross-module imports and later lowering see the same ownership facts
+    # as the FunctionDef.
+    @fn_nodes.each_value do |fn|
+      sig = fn.full_type
+      sig = sig.raw if sig.is_a?(Type) && sig.raw.is_a?(FunctionSignature)
+      FunctionSignature.sync_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
+    end
   end
 
   private

@@ -79,24 +79,7 @@ class CompilerFrontend
     fn_sigs = {}
     T.must(ast).statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      else
-        fs = FunctionSignature.new(
-          params: stmt.params,
-          return_type: stmt.return_type || :Any,
-          return_lifetime: stmt.return_lifetime,
-          visibility: stmt.visibility,
-          type_params: stmt.type_params,
-          reentrant: stmt.reentrant == :reentrant
-        )
-        fs.needs_rt = stmt.needs_rt
-        fs.can_fail = stmt.can_fail
-        fs.effects = stmt.effects
-        fs.requires = stmt.requires
-        fn_sigs[stmt.name] = fs
-      end
+      fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
     end
 
     # Include module-imported function signatures so MIRLowering can
