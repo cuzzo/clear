@@ -685,24 +685,29 @@ pub const CheatLib = struct {
     }
 
     // Works for Lists and Slices because it modifies the memory the slice points to.
+    // Single-pointer unwrap mirrors getAt/len/etc. so a `MUTABLE @list` param
+    // (which arrives as `*ArrayList(T)` after the pointer-pass) doesn't crash
+    // the comptime `@hasField` dispatch.
     pub fn setAt(container: anytype, index: anytype, value: anytype) void {
         const i: usize = @intCast(index);
+        const c = if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) container.* else container;
 
-        if (@hasField(@TypeOf(container), "items")) {
+        if (@hasField(@TypeOf(c), "items")) {
             // ArrayListUnmanaged
-            container.items[i] = value;
+            c.items[i] = value;
         } else {
             // Standard Slice
-            container[i] = value;
+            c[i] = value;
         }
     }
 
     pub fn cleanupAt(comptime T: type, container: anytype, alloc: std.mem.Allocator, index: anytype) void {
         const i: usize = @intCast(index);
-        if (@hasField(@TypeOf(container), "items")) {
-            cleanup(T, alloc, &container.items[i]);
+        const c = if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) container.* else container;
+        if (@hasField(@TypeOf(c), "items")) {
+            cleanup(T, alloc, &c.items[i]);
         } else {
-            cleanup(T, alloc, &container[i]);
+            cleanup(T, alloc, &c[i]);
         }
     }
 
