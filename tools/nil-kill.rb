@@ -1195,24 +1195,30 @@ module NilKill
       unused_return_names = unused_return_method_names(evidence)
       param_buckets = Hash.new(0)
       return_buckets = Hash.new(0)
+      param_examples = Hash.new { |hash, key| hash[key] = [] }
+      return_examples = Hash.new { |hash, key| hash[key] = [] }
       evidence["facts"]["existing_sigs"].each do |method|
         rec = method_lookup[[method["path"], method["line"]]]
         extract_param_entries(method["sig"].to_s).each do |name, type|
           next unless type == "T.untyped"
           classes = Array(rec&.dig("params_ok", name))
           classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
-          param_buckets[untyped_bucket_for_classes(classes, rec)] += 1
+          bucket = untyped_bucket_for_classes(classes, rec)
+          param_buckets[bucket] += 1
+          param_examples[bucket] << slot_example(method, name, classes, rec) if param_examples[bucket].size < 8
         end
         ret = extract_return_type(method["sig"].to_s)
         next unless ret == "T.untyped"
-        return_buckets[untyped_return_bucket(method, rec, unused_return_names)] += 1
+        bucket = untyped_return_bucket(method, rec, unused_return_names)
+        return_buckets[bucket] += 1
+        return_examples[bucket] << slot_example(method, "return", Array(rec&.dig("returns")), rec) if return_examples[bucket].size < 8
       end
       lines << ""
       lines << "### Untyped Slot Breakdown"
       lines << "Param T.untyped buckets:"
-      append_bucket_lines(lines, param_buckets)
+      append_bucket_lines(lines, param_buckets, param_examples)
       lines << "Return T.untyped buckets:"
-      append_bucket_lines(lines, return_buckets)
+      append_bucket_lines(lines, return_buckets, return_examples)
     end
 
     def extract_param_entries(sig)
@@ -1248,12 +1254,23 @@ module NilKill
       "unknown"
     end
 
-    def append_bucket_lines(lines, buckets)
+    def append_bucket_lines(lines, buckets, examples = {})
       if buckets.empty?
         lines << "- none"
         return
       end
-      buckets.sort_by { |_, count| -count }.each { |name, count| lines << "- #{name}: #{count}" }
+      buckets.sort_by { |_, count| -count }.each do |name, count|
+        lines << "- #{name}: #{count}"
+        Array(examples[name]).each { |example| lines << "  - #{example}" }
+      end
+    end
+
+    def slot_example(method, slot_name, classes, rec)
+      observed = Array(classes).compact.uniq.sort
+      observed_text = observed.empty? ? "no observed runtime type" : observed.first(8).join(", ")
+      observed_text += ", ..." if observed.size > 8
+      calls = rec ? rec["calls"].to_i : 0
+      "#{method["path"]}:#{method["line"]} #{method["class"]}##{method["method"]} #{slot_name}; #{calls} call(s); observed #{observed_text}"
     end
 
     def unused_return_method_names(evidence)
