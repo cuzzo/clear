@@ -1439,6 +1439,51 @@ RSpec.describe Formatter do
     end
   end
 
+  describe "IF/ELSE_IF chain symmetric expansion" do
+    # Repro from examples/minivm/vm.cht: an `IF cond THEN body END /
+    # ELSE_IF cond THEN body END / ... END` chain where each branch
+    # body is a one-line MATCH was getting expanded ASYMMETRICALLY --
+    # the first IF's body broke across lines properly, but every
+    # ELSE_IF stayed on a single line as
+    # `ELSE_IF cond THEN PARTIAL MATCH ... END`.
+    #
+    # Root cause: `matching_end` didn't track `MATCH ... START ... END`
+    # (or any `START`-opened block) as a nested construct. With a one-
+    # line `MATCH` in the IF's body, the inner MATCH's `END` was
+    # mistakenly returned as the outer IF's matching `END`, so
+    # `expand_if_while_for` only walked the IF's body -- the ELSE_IFs
+    # fell outside its scope and were emitted verbatim.
+    #
+    # Fix: count `START` as opening a kdepth-tracked block in
+    # `matching_end`. Same change makes IF / ELSE_IF / ELSE bodies
+    # all flow through the same THEN/DO inline-body expansion logic.
+    it "expands IF and ELSE_IF bodies symmetrically when each contains a one-line MATCH" do
+      src = <<~CLEAR
+        ENUM Op { A, B, C }
+
+        FN main!() RETURNS !Void ->
+          op = Op.A;
+          IF op == Op.A THEN PARTIAL MATCH op START Op.A -> PASS;, DEFAULT -> PASS; END
+          ELSE_IF op == Op.B THEN PARTIAL MATCH op START Op.B -> PASS;, DEFAULT -> PASS; END
+          ELSE_IF op == Op.C THEN PARTIAL MATCH op START Op.C -> PASS;, DEFAULT -> PASS; END
+          END
+        END
+      CLEAR
+      out = Formatter.format(src)
+      # Output must parse round-trip.
+      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      # Symmetric expansion: every THEN must be followed by a NL --
+      # never by `PARTIAL` on the *same* line. (Use `[ \t]` so the
+      # regex doesn't span newlines.)
+      expect(out).not_to match(/\bTHEN[ \t]+PARTIAL\b/)
+      # And every ELSE_IF line must end at THEN (the body is on the
+      # next line).
+      out.scan(/^\s*ELSE_IF.*$/).each do |line|
+        expect(line).to match(/THEN\s*\z/), "ELSE_IF line should end at THEN, got: #{line.inspect}"
+      end
+    end
+  end
+
   describe "MATCH arm `;,` separator stays attached" do
     # Repro from examples/litedb: `Op.Get -> opName = "get";,` was
     # getting torn into `Op.Get -> opName = "get";` then a lone `,`

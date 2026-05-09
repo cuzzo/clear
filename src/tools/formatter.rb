@@ -1159,6 +1159,15 @@ class Formatter::Emitter
 
   # Find matching END for the IF/WHILE/FOR at `start` (no NL constraint).
   # Returns nil if unmatched.
+  #
+  # `START` opens a `MATCH ... START ... END` block (also `SYNC POLICY
+  # START ... END`). Without counting it as a kdepth-bumper, a nested
+  # MATCH inside an IF body has its own `END` mistaken for the outer
+  # IF's `END`, truncating expand_if_while_for's scope so any ELSE_IF
+  # branches end up outside the body walk -- and thus formatted
+  # asymmetrically with the leading IF arm. Treating every `START`
+  # uniformly here makes IF / ELSE_IF / ELSE bodies all flow through
+  # the same THEN/DO inline-body expansion in the body walk.
   sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def matching_end(toks, start)
     bdepth = 0
@@ -1173,7 +1182,7 @@ class Formatter::Emitter
         end
       elsif bdepth.zero? && t.type == :KEYWORD
         case t.raw
-        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
           kdepth += 1
         when 'END'
           return j if kdepth.zero?
