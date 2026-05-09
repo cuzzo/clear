@@ -9,6 +9,72 @@ RSpec.describe ZigTranspiler do
     ZigTranspiler.new.transpile(src)
   end
 
+  describe "BG promise capture regressions" do
+    it "allows footguns/06-style consumer BG to NEXT a producer promise captured from the same scope" do
+      pending("MIR capture classification currently refuses captured Promise handles as unclassified_capture")
+      src = <<~CLEAR
+        STRUCT State {
+          message: String
+        }
+
+        FN main() RETURNS Void ->
+          s = State{ message: "" } @shared:locked;
+
+          producer = BG {
+            WITH EXCLUSIVE s AS inner {
+              inner.message = "hello from producer";
+            }
+          };
+
+          consumer = BG {
+            NEXT producer;
+            WITH s AS inner {
+              print(inner.message);
+            }
+          };
+
+          NEXT consumer;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "allows footguns/07-style relay BG to NEXT a producer promise captured from the same scope" do
+      pending("MIR capture classification currently refuses captured Promise handles as unclassified_capture")
+      src = <<~CLEAR
+        STRUCT Payload {
+          data: String
+        }
+
+        FN main() RETURNS Void ->
+          result = Payload{ data: "" } @shared:locked;
+
+          producer = BG {
+            WITH EXCLUSIVE result AS r {
+              r.data = "important result";
+            }
+          };
+
+          relay = BG {
+            NEXT producer;
+          };
+
+          consumer = BG {
+            NEXT relay;
+            WITH result AS r {
+              print("consumer saw: " + r.data);
+            }
+          };
+
+          NEXT consumer;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+  end
+
   # ===========================================================================
   # @list allocator selection
   # ===========================================================================

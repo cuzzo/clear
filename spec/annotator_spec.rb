@@ -2945,6 +2945,27 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "EXTERN STRUCT declaration with CLOSE" do
+      let(:code) {
+        <<~CLEAR
+          EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+          EXTERN STRUCT Parsed {
+            value: JsonRecord
+          } CLOSE "deinit" AS "Parsed(JsonRecord)" FROM "std.json";
+          FN use_parsed(parsed: Parsed) RETURNS Int64 ->
+            RETURN parsed.value.id;
+          END
+        CLEAR
+      }
+
+      it "keeps fields accessible on the resource wrapper" do
+        ast = annotate_extern(code)
+        fn = ast.statements.last
+        ret = fn.body.last
+        expect(ret.value.resolved_type).to eq(:Int64)
+      end
+    end
+
     context "EXTERN STRUCT without FROM (local Zig struct)" do
       let(:code) {
         <<~CLEAR

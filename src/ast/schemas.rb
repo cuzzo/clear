@@ -105,9 +105,10 @@ module Schemas
   sig { params(schema: T.untyped).returns(T.nilable(Schemas::StructSchema)) }
   def self.as_struct_schema(schema)
     return schema if schema.is_a?(StructSchema)
-    return nil unless schema.is_a?(Hash) && !schema[:kind]
+    return nil unless schema.is_a?(Hash) && (!schema[:kind] || schema[:kind] == :resource)
+    fields = schema[:fields] || schema.reject { |k, _| k.is_a?(Symbol) }
     StructSchema.new(
-      fields: schema.reject { |k, _| k.is_a?(Symbol) },
+      fields: fields,
       field_defaults: schema[:field_defaults],
       borrowed_fields: schema[:borrowed_fields],
       type_params: schema[:type_params],
@@ -136,7 +137,7 @@ module Schemas
     ResourceSchema.new(
       close_zig: schema[:close_zig],
       static_methods: schema[:static_methods] || {},
-      fields: schema[:fields] || {},
+      fields: schema[:fields] || schema.reject { |k, _| k.is_a?(Symbol) },
       type_params: schema[:type_params],
       extern_module: schema[:extern_module],
       as_type: schema[:as_type],
