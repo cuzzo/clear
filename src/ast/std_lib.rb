@@ -1229,13 +1229,14 @@ MAP_METHODS = {
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
     # `.keys()` allocates an owned ArrayList via the supplied
     # allocator and transfers ownership to the caller. The declared
-    # return type must reflect that: `String[]@list` (ArrayList),
-    # not `String[]` (slice). Returning a slice would let the
-    # annotator silently accept assignments to a `String[]@list`
-    # local while the cleanup template still expects ArrayList,
-    # producing a Zig type-mismatch in CheatLib.cleanup at the
-    # binding's defer site.
-    return_type: ->(_) { :"String[]@list" },
+    # return type must reflect that: `K[]@list` (ArrayList of the
+    # map's key type). Returning a slice would let the annotator
+    # silently accept assignments to a `K[]@list` local while the
+    # cleanup template still expects ArrayList, producing a Zig
+    # type-mismatch in CheatLib.cleanup at the binding's defer site.
+    # For string-keyed HashMap<V>, key_type defaults to String;
+    # numeric maps return e.g. `Int64[]@list`.
+    return_type: ->(obj_type) { :"#{obj_type.key_type.resolved}[]@list" },
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
