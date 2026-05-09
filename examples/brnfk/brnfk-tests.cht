@@ -1,0 +1,52 @@
+REQUIRE "brnfk.cht";
+
+FN programErrors(program: String) RETURNS Bool ->
+  runWithLimits(program, "", 8, 1000) OR RAISE;
+  RETURN FALSE;
+
+CATCH Input
+  RETURN TRUE;
+
+DEFAULT
+  RETURN TRUE;
+END
+
+FN programErrorsWithTape(program: String, tapeSize: Int64) RETURNS Bool ->
+  runWithLimits(program, "", tapeSize, 1000) OR RAISE;
+  RETURN FALSE;
+
+CATCH Input
+  RETURN TRUE;
+
+DEFAULT
+  RETURN TRUE;
+END
+
+FN main() RETURNS Void ->
+  ASSERT incByte(255) == 0, "+ wraps 255 to 0";
+  ASSERT decByte(0) == 255, "- wraps 0 to 255";
+  ASSERT byteToString(65) == "A", "byteToString renders printable ASCII";
+  ASSERT stringToByte("A") == 65, "stringToByte reads printable ASCII";
+  ASSERT stringToByte("\n") == 10, "stringToByte reads newline";
+
+  ASSERT commands("a+b>c[.-],") == "+>[.-],", "parser ignores comments";
+
+  ASSERT run("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.", "") == "A", "prints A";
+  ASSERT run(",.", "Z") == "Z", "echoes one byte";
+  ASSERT run("+++++++++++++++++++++++++++++++++,. ", "") == "!", "EOF leaves cell unchanged";
+  ASSERT run("+++++[>+++++++++++++<-]>.", "") == "A", "loop multiplies into next cell";
+
+  hello = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++." +
+  "<<+++++++++++++++.>.+++.------.--------.>+.>.";
+  ASSERT run(hello, "") == "Hello World!\n", "hello world program";
+
+  ASSERT runWithLimits("++>+++<", "", 8, 1000) == "", "limited runner returns output";
+
+  ASSERT programErrors("[") == TRUE, "unmatched [ errors";
+  ASSERT programErrors("]") == TRUE, "unmatched ] errors";
+  ASSERT programErrors("<") == TRUE, "pointer underflow errors";
+  ASSERT programErrorsWithTape(">>", 2) == TRUE, "pointer overflow errors";
+  ASSERT programErrorsWithTape("+[]", 8) == TRUE, "step limit errors";
+
+  RETURN;
+END
