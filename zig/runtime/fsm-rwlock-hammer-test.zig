@@ -74,15 +74,24 @@ var global_ebr: ebr.EbrContext = .{};
 var stack_pool: StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
+// Two-phase shutdown coordination — see versioned-fiber-stress-test.zig.
+var post_run_workers = std.atomic.Value(usize).init(0);
+var deinit_phase = std.atomic.Value(bool).init(false);
+
 fn schedulerThread(a: std.mem.Allocator) void {
     var sched = Scheduler.init(a, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     sched.run();
     fp.scheduler_running = false;
+
+    _ = post_run_workers.fetchAdd(1, .release);
+    while (!deinit_phase.load(.acquire)) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    sched.deinit();
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) void {
@@ -97,17 +106,26 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
+    while (post_run_workers.load(.acquire) < n) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
     global_shutdown.store(false, .release);
+    post_run_workers.store(0, .release);
+    deinit_phase.store(false, .release);
 }
 
 fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerror!void) !void {
     var threads: [workers]std.Thread = undefined;
     startWorkers(&threads, workers);
-    defer stopWorkers(&threads, workers);
 
     var sched = try Scheduler.init(test_alloc, &global_ebr, &stack_pool);
+    // ORDER: stopWorkers BEFORE sched.deinit. See
+    // versioned-fiber-stress-test.zig:withMainRuntime for the
+    // worker-steals-from-main race fix.
     defer {
+        stopWorkers(&threads, workers);
         sched.deinit();
         fp.active_scheduler = undefined;
         fp.scheduler_running = false;

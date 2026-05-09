@@ -88,15 +88,47 @@ var global_ebr: EbrContext = .{};
 var stack_pool: StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
+// Two-phase shutdown counters. Workers increment `post_run_workers`
+// AFTER their run() returns and block on `deinit_phase` before
+// running their per-thread sched.deinit(). stopWorkers waits for
+// every worker to reach that fence (post_run_workers == n) before
+// flipping deinit_phase, which guarantees no worker is still inside
+// a `handleTaskAfterDispatch` -> `freeStack` -> `submitRemoteStackFree`
+// path when any peer starts freeing its SPSC channel ring buffers
+// in scheduler.deinit (line 543: `self.allocator.destroy(ring)`).
+//
+// Without this barrier, work-stolen fibers whose stack.owner is a
+// peer scheduler hit a cross-scheduler shutdown UAF: T_A enters
+// deinit and frees its channels[]; concurrently T_B is still in
+// run()'s post-dispatch logic and tries to remote-free a stack T_A
+// owns, racing the channel destroy with a ring.push memcpy. TSan
+// caught this as a "data race ... at 0x...... by thread T21 / T24"
+// in the writer-heavy / 5-scheduler tests under taskset -c 0,1.
+var post_run_workers = std.atomic.Value(usize).init(0);
+var deinit_phase = std.atomic.Value(bool).init(false);
+
 fn schedulerThread(a: std.mem.Allocator) void {
     var sched = Scheduler.init(a, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     sched.run();
     fp.scheduler_running = false;
+
+    // Phase 1: announce we have left run() and will issue no more
+    // cross-scheduler submits.
+    _ = post_run_workers.fetchAdd(1, .release);
+
+    // Phase 2: block until every peer has reached this fence. After
+    // this load returns true, no peer can still be in a
+    // submitRemoteStackFree / submitResume / submitFsmResume path,
+    // so it is safe to free our channels[].
+    while (!deinit_phase.load(.acquire)) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+
+    sched.deinit();
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) void {
@@ -111,8 +143,21 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
+    // Wait for every worker to exit run(). Past this fence, no
+    // worker can issue a submitRemote* into a peer's channels.
+    while (post_run_workers.load(.acquire) < n) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    // Now safe to release the deinit barrier — all sched.deinit()
+    // calls run concurrently, but none can race a peer's submit
+    // because all peers are also past run().
+    deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
+    // Reset for the next test in the file (each test calls
+    // startWorkers/stopWorkers in sequence).
     global_shutdown.store(false, .release);
+    post_run_workers.store(0, .release);
+    deinit_phase.store(false, .release);
 }
 
 // Multi-scheduler shape: 2 worker schedulers on 2 OS threads + main on a
@@ -120,10 +165,21 @@ fn stopWorkers(threads: []std.Thread, n: usize) void {
 fn withMainRuntime(comptime body: fn (*Runtime) anyerror!void) !void {
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     var sched = try Scheduler.init(test_alloc, &global_ebr, &stack_pool);
+    // ORDER MATTERS: stopWorkers (joins all worker threads) MUST run
+    // BEFORE sched.deinit. Workers are still in their run loops doing
+    // idleStealFrom(&sched) which touches sched.fsm_ready_queue and
+    // sched.ready_queue. If sched.deinit runs first, the FSM queue's
+    // ring buffer is freed while T_n is mid-stealOne -> UAF (caught
+    // by TSan as "FsmRunQueue.stealOne vs FsmRunQueue.freeArray" race).
+    //
+    // Combining both into one defer with the correct sequence
+    // (workers-first, then main) replaces the previous two-defer
+    // setup whose REVERSE-declaration ordering put sched.deinit
+    // before stopWorkers.
     defer {
+        stopWorkers(&threads, 2);
         sched.deinit();
         fp.active_scheduler = undefined;
         fp.scheduler_running = false;
@@ -161,10 +217,13 @@ fn withMainRuntime(comptime body: fn (*Runtime) anyerror!void) !void {
 fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerror!void) !void {
     var threads: [workers]std.Thread = undefined;
     startWorkers(&threads, workers);
-    defer stopWorkers(&threads, workers);
 
     var sched = try Scheduler.init(test_alloc, &global_ebr, &stack_pool);
+    // See withMainRuntime above for the rationale: workers must be
+    // joined BEFORE main's sched.deinit, or worker idleStealFrom
+    // races main's FsmRunQueue free.
     defer {
+        stopWorkers(&threads, workers);
         sched.deinit();
         fp.active_scheduler = undefined;
         fp.scheduler_running = false;

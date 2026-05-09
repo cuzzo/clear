@@ -123,15 +123,35 @@ test "L1: raw SPSC with pointer payload survives cross-thread" {
 // LAYER 2: submitSpawn via SPSC — spawn a fiber on a remote scheduler
 // ========================================================================
 
+// Two-phase shutdown coordination. Workers fence post-run() via
+// `post_run_workers`, then wait on `deinit_phase` before running
+// their per-thread sched.deinit(). Without this, a peer's
+// submitRemoteStackFree / submitResume can race the channel-ring
+// free in another peer's Scheduler.deinit (TSan: "Write of size 8
+// ... by thread T_a [Scheduler.deinit] vs Previous write by T_b
+// [SpscRing.push from submitRemoteStackFree]"). Mirrors the fix
+// in versioned-fiber-stress-test.zig.
+var post_run_workers = std.atomic.Value(usize).init(0);
+var deinit_phase = std.atomic.Value(bool).init(false);
+
 fn schedulerThread(a: std.mem.Allocator) void {
     var sched = fp.Scheduler.init(a, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     sched.run();
     fp.scheduler_running = false;
+
+    // Fence: announce we have left run() and will issue no more
+    // cross-scheduler submits.
+    _ = post_run_workers.fetchAdd(1, .release);
+    // Block until every peer is past their fence — only then is it
+    // safe to free our channels[].
+    while (!deinit_phase.load(.acquire)) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    sched.deinit();
 }
 
 fn startWorkers(threads: []std.Thread, n: usize) void {
@@ -145,10 +165,17 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
 fn stopWorkers(threads: []std.Thread, n: usize) void {
     global_shutdown.store(true, .release);
     fp.global_registry.notifyAll();
+    // Wait for every worker to exit run() before signalling deinit.
+    while (post_run_workers.load(.acquire) < n) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    deinit_phase.store(true, .release);
     for (threads[0..n]) |*t| t.join();
     fp.global_registry.deinit(alloc);
     fp.global_registry = .{};
     global_shutdown.store(false, .release);
+    post_run_workers.store(0, .release);
+    deinit_phase.store(false, .release);
 }
 
 const SpawnCounter = struct {
@@ -215,11 +242,16 @@ test "L2: submitSpawn via SPSC to remote scheduler" {
 
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     // Main scheduler
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    // ORDER: stopWorkers BEFORE sched.deinit. Workers' idleStealFrom
+    // touches main's queues; main.deinit frees them. See
+    // versioned-fiber-stress-test.zig:withMainRuntime for the same fix.
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
@@ -258,10 +290,12 @@ test "L3: submitResume via SPSC channel" {
 
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
@@ -323,10 +357,12 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
 
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     sched.global_shutdown = &global_shutdown;
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
@@ -400,11 +436,13 @@ test "L5: PartitionedStringMap cross-scheduler put+get" {
     // Start 2 worker schedulers and wait for registration
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     // Main scheduler (3rd) — created AFTER workers so ensureOwnership sees all 3
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
@@ -470,10 +508,12 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
 
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
@@ -584,10 +624,12 @@ test "L7: pinned fiber sendAndWait yield-poll to remote scheduler" {
 
     var threads: [2]std.Thread = undefined;
     startWorkers(&threads, 2);
-    defer stopWorkers(&threads, 2);
 
     var sched = fp.Scheduler.init(alloc, &global_ebr, &stack_pool) catch return;
-    defer sched.deinit();
+    defer {
+        stopWorkers(&threads, 2);
+        sched.deinit();
+    }
     fp.active_scheduler = &sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
