@@ -6859,7 +6859,10 @@ private
   sig { returns(Integer) }
   def og_push_scope      = (@og_scope_depth += 1)
   sig { returns(Integer) }
-  def og_pop_scope       = (@og_scope_depth -= 1)
+  def og_pop_scope
+    @og.prune_scope!(@og_scope_depth)
+    @og_scope_depth -= 1
+  end
 
   sig { params(type_info: T.untyped, sync: T.nilable(Symbol)).returns(Symbol) }
   def classify_og_kind(type_info, sync: nil)

@@ -150,6 +150,19 @@ class OwnershipGraph
     to_cleanup
   end
 
+  sig { params(scope_depth: Integer).returns(Integer) }
+  def prune_scope!(scope_depth)
+    paths = @nodes.select { |_path, node| node.scope_depth >= scope_depth }.keys
+    return 0 if paths.empty?
+
+    path_set = paths.to_set
+    paths.each { |path| @nodes.delete(path) }
+    @edges.select { |edge| path_set.include?(edge.from) || path_set.include?(edge.to) }.each { |edge| remove_edge(edge) }
+    @children.each_value { |children| children.subtract(path_set) }
+    @children.delete_if { |parent, children| path_set.include?(parent) || children.empty? }
+    paths.size
+  end
+
   # Check if a path can be written to (no active borrows on it or ancestors).
   sig { params(path: String).returns(T::Boolean) }
   def can_write?(path)

@@ -52,6 +52,32 @@ RSpec.describe "TAKES auto-move" do
     }.to raise_error(CompilerError, /USE AFTER MOVE/)
   end
 
+  it "does not leak moved local state into a later function with the same local name" do
+    expect {
+      transpile(<<~CLEAR)
+        FN first() RETURNS !Void ->
+            p: ~Int64 = BG { 1_i64; };
+            r = NEXT p;
+            RETURN;
+        END
+
+        FN second() RETURNS !Void ->
+            values: Int64[]@list = [1, 2, 3];
+            FOR p IN (0 ..< values.length()) DO
+                r = values[p];
+            END
+            RETURN;
+        END
+
+        FN main() RETURNS !Void ->
+            first() OR RAISE;
+            second() OR RAISE;
+            RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "eliminates v cleanup when always consumed by TAKES" do
     zig = transpile(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
