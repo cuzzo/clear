@@ -1482,6 +1482,50 @@ RSpec.describe Formatter do
         expect(line).to match(/THEN\s*\z/), "ELSE_IF line should end at THEN, got: #{line.inspect}"
       end
     end
+
+    # Companion case discovered while stress-testing on vm.cht but
+    # NOT fixed by the matching_end one-line change. When an IF chain
+    # is itself nested inside a MATCH arm body, the inner MATCHes
+    # within IF/ELSE_IF arm bodies do NOT get expanded — emit_match_body
+    # copies the inner tokens verbatim rather than recursively running
+    # `expand_match_blocks`. Result: even though the outer IF body walk
+    # would now visit every ELSE_IF, the inner one-line MATCHes stay
+    # collapsed because they were never multi-line in the first place.
+    #
+    # Fixing this requires teaching emit_match_body (or copy_arm_tokens)
+    # to recursively expand nested MATCH/IF/etc., which is a larger
+    # change than the matching_end fix and lives outside the "one
+    # function" scope of this hotfix. Pinned as `pending` so the
+    # observation is captured in the test corpus and the bug doesn't
+    # silently regress further.
+    it "expands IF chains nested inside a MATCH arm body" do
+      pending "emit_match_body needs recursive expansion of inner constructs"
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        ENUM SubOp { A, B }
+
+        FN main!() RETURNS !Void ->
+          op = Op.Get;
+          suboo = SubOp.A;
+          MATCH op START
+            Op.Get ->
+              IF suboo == SubOp.A THEN PARTIAL MATCH suboo OR SubOp.A START SubOp.A -> PASS;, DEFAULT -> PASS; END
+              ELSE_IF suboo == SubOp.B THEN PARTIAL MATCH suboo OR SubOp.A START SubOp.B -> PASS;, DEFAULT -> PASS; END
+              END
+            ,
+            Op.Put -> PASS;
+          END
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      # Same shape as the standalone case once the recursion lands:
+      # no `THEN PARTIAL` collocations, every ELSE_IF line ending at THEN.
+      expect(out).not_to match(/\bTHEN[ \t]+PARTIAL\b/)
+      out.scan(/^\s*ELSE_IF.*$/).each do |line|
+        expect(line).to match(/THEN\s*\z/), "ELSE_IF line should end at THEN, got: #{line.inspect}"
+      end
+    end
   end
 
   describe "MATCH arm `;,` separator stays attached" do
