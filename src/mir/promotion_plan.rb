@@ -753,7 +753,13 @@ module CleanupClassifier
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(Hash)) }
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
-    val = node.value
+    # `node` is the originating AST node for the binding being classified.
+    # For VarDecl/BindExpr this is the declaration (which has a `.value`
+    # RHS); for IF-bind / WHILE-bind captures it's the binding statement
+    # itself (no `.value` accessor — the captured expression lives inside
+    # `bindings[:expr]` / `condition`). Guard with respond_to? so non-decl
+    # callers don't crash.
+    val = node.respond_to?(:value) ? node.value : nil
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
@@ -873,7 +879,9 @@ module CleanupClassifier
     schema = schema_lookup.call(ti.resolved) rescue nil
     return nil unless (schema = Schemas.as_struct_schema(schema))
 
-    struct_lit = node.value.is_a?(AST::StructLit) ? node.value : nil
+    # Same `node` shape concerns as classify_array_struct_strings: WHILE-bind /
+    # IF-bind capture nodes don't carry `.value`; only VarDecl/BindExpr do.
+    struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
     has_cleanup = schema.fields.any? do |k, v|
       ft = v.is_a?(Hash) ? v[:type] : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
