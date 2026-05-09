@@ -2,6 +2,8 @@ require "rspec"
 require "tmpdir"
 require "fileutils"
 require_relative "../src/tools/formatter"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 
 # Unit tests for the formatter. Calls Formatter.format(src) directly --
 # the CLI's flag handling (--check / --stdout / --no-warn) and width-
@@ -1384,6 +1386,56 @@ RSpec.describe Formatter do
                  "      n = n + 1;\n" \
                  "  END\n"
       expect(out).to include(expected)
+    end
+
+    # Repro from examples/minivm/vm.cht: a MATCH arm whose body starts
+    # with a line comment (`# tag`) above a single statement was
+    # collapsed onto one line as `Pat ->  # tag stmt;,`. Because `#`
+    # extends to end-of-line, the comment then ate the statement and
+    # the resulting output failed to parse.
+    #
+    # Fix: when the arm body contains a line comment, force the multi-
+    # line layout so the comment keeps its own line.
+    it "preserves a leading comment inside a single-statement arm" do
+      src = <<~CLEAR
+        ENUM Op { Halt, Run }
+        FN main() RETURNS Void ->
+          op = Op.Halt;
+          MATCH op START
+            Op.Halt ->
+              # HALT
+              RETURN;,
+            Op.Run -> PASS;
+          END
+        END
+      CLEAR
+      out = Formatter.format(src)
+      # Output must still parse.
+      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      # And the comment must remain on its own line (not folded with `->`).
+      expect(out).not_to match(/->\s+#\s*HALT\b.*RETURN/)
+      expect(out).to include("# HALT\n")
+    end
+
+    # Companion case: ensure a `# comment` between arrow and a multi-
+    # statement body still keeps its own line.
+    it "preserves a leading comment inside a multi-statement arm" do
+      src = <<~CLEAR
+        ENUM Op { A }
+        FN main() RETURNS Void ->
+          MUTABLE n = 0;
+          MATCH Op.A START
+            Op.A ->
+              # the only arm
+              n = 1;
+              n = n + 1;
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect { Parser.new(Lexer.new(out).tokenize, out).parse }.not_to raise_error
+      expect(out).to include("# the only arm\n")
     end
   end
 

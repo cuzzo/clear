@@ -586,12 +586,20 @@ class Formatter::Emitter
     body_end = sep || e
     semi_count = 0
     has_block = false
+    has_comment = false
     bdepth = 0
     kdepth = 0
     if arrow
       ((arrow + 1)...body_end).each do |k|
         t = toks[k]
-        if t.type == :SYM
+        if t.type == :COMMENT
+          # `#` line comments inside an arm body MUST keep their own
+          # line. Without this, copy_arm_tokens drops the NL separator
+          # between the comment and the body, producing
+          # `Pat ->  # tag stmt;,` which Zig-of-CLEAR cannot parse —
+          # the comment extends to end-of-line and eats the body.
+          has_comment = true if bdepth.zero? && kdepth.zero?
+        elsif t.type == :SYM
           case t.raw
           when '(', '[', '{' then bdepth += 1
           when ')', ']', '}' then bdepth -= 1
@@ -609,7 +617,7 @@ class Formatter::Emitter
         end
       end
     end
-    multi = semi_count > 1 || has_block
+    multi = semi_count > 1 || has_block || has_comment
     { start: s, end: e, body_end: body_end, arrow: arrow, sep: sep, multi: multi }
   end
 
