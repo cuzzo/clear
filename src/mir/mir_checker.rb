@@ -177,8 +177,10 @@ class MIRChecker
   def stdlib_owned_return?(node)
     return false unless node.stdlib_def&.dig(:allocates)
     return true if node.stdlib_def[:return_alloc] == :heap
-    allocs = node.respond_to?(:allocs) ? node.allocs : nil
-    allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap }
+    return false unless node.is_a?(MIR::InlineZig)
+
+    allocs = node.allocs
+    !!(allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap })
   end
 
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, Array]).returns(T.nilable(Array)) }

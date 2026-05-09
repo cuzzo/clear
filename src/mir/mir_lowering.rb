@@ -6140,8 +6140,10 @@ class MIRLowering
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless init.stdlib_def&.dig(:allocates)
       return true if init.stdlib_def[:return_alloc] == :heap
-      allocs = init.respond_to?(:allocs) ? init.allocs : nil
-      return allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap }
+      return false unless init.is_a?(MIR::InlineZig)
+
+      allocs = init.allocs
+      return !!(allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap })
     end
 
     false
