@@ -1,10 +1,20 @@
 const std = @import("std");
 const compat = @import("compat.zig");
+const pl = @import("parking-lot.zig");
 const fp = @import("../runtime/scheduler.zig");
 const qs = @import("../runtime/queues.zig");
 
 const Scheduler = fp.Scheduler;
 const Task = qs.Task;
+
+// Comptime-switchable atomic: SimAtomic in Loom mode (when the test
+// executable re-exports `pub const SimAtomic`), real `std.atomic.Value`
+// otherwise. Same pattern as `lib/parking-lot.zig:33` so SplitStream's
+// atomic ops become Loom yield points and show up in atomic-coverage.
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
 
 pub const Range = struct {
     start: f64,
@@ -89,35 +99,64 @@ pub fn SplitStream(
         const ChunkCap = 256;
         const PublishQuantum = ChunkCap;
         const InvalidSubscriber = std.math.maxInt(usize);
+        // Producer backpressure threshold: when the live chunk count reaches
+        // this value, push() parks the producer until subscribers consume
+        // enough that releaseConsumedPrefix can free chunks. With ChunkCap=256
+        // this caps the in-flight buffer at MaxChunks * 256 values. Set to
+        // produce a reasonable RSS bound while not bottlenecking throughput.
+        const MaxChunks = 16;
 
         const Chunk = struct {
             start_seq: usize,
-            len: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+            len: Atomic(usize) = Atomic(usize).init(0),
             write_len: usize = 0,
             values: [ChunkCap]T = undefined,
             next: ?*Chunk = null,
         };
 
+        // Fields are atomic so TSan sees synchronization across the
+        // ParkingRwLock boundary. ParkingRwLock provides correct
+        // happens-before via its own atomic state (Loom-verified) but
+        // TSan does not model the parking-lot rwlock as a synchronizer
+        // (see comment in parking-rwlock-fiber-hammer-test.zig:191).
+        // Without atomic field accesses, TSan flags non-atomic field
+        // reads/writes between threads as data races even though the
+        // lock serializes them.
         const SubscriberRecord = struct {
-            active: bool = false,
-            seq: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-            parked: bool = false,
-            task: ?*Task = null,
-            sched: ?*Scheduler = null,
+            active: Atomic(u8) = Atomic(u8).init(0),
+            seq: Atomic(usize) = Atomic(usize).init(0),
+            parked: Atomic(u8) = Atomic(u8).init(0),
+            task: Atomic(?*Task) = Atomic(?*Task).init(null),
+            sched: Atomic(?*Scheduler) = Atomic(?*Scheduler).init(null),
+            // Set on first next() call. Records with is_reader == 0 are the
+            // spawnNew anchor handle (never reads — exists to keep Inner
+            // alive); excluding them from minReadSeq lets backpressure
+            // releaseConsumedPrefix actually free chunks all real readers
+            // consumed. retain() sets this to 1 since clones are explicit
+            // readers; spawnNew's sub keeps it 0 until next() promotes it.
+            is_reader: Atomic(u8) = Atomic(u8).init(0),
         };
 
         pub const Inner = struct {
             alloc: std.mem.Allocator,
-            chunks_head: ?*Chunk = null,
-            chunks_tail: ?*Chunk = null,
-            head_seq: usize = 0,
-            tail_seq: usize = 0,
+            chunks_head: Atomic(?*Chunk) = Atomic(?*Chunk).init(null),
+            chunks_tail: Atomic(?*Chunk) = Atomic(?*Chunk).init(null),
+            head_seq: Atomic(usize) = Atomic(usize).init(0),
+            tail_seq: Atomic(usize) = Atomic(usize).init(0),
             wg: WaitGroupType = undefined,
             subscribers: std.ArrayListUnmanaged(SubscriberRecord) = .{ .items = &.{}, .capacity = 0 },
-            active_subscribers: usize = 0,
-            err: ?anyerror = null,
-            closed: bool = false,
-            mutex: compat.Mutex = .{},
+            active_subscribers: Atomic(usize) = Atomic(usize).init(0),
+            err_set: Atomic(u8) = Atomic(u8).init(0),
+            err: anyerror = error.NoError,
+            closed: Atomic(u8) = Atomic(u8).init(0),
+            mutex: pl.ParkingRwLock = .{},
+            wake_cursor: usize = 0,
+            // Producer-side park/wake for backpressure (push() parks when
+            // chunkCount >= MaxChunks; subscribers' next() wakes via
+            // wakeParkedProducer after advancing seq through a chunk).
+            producer_parked: Atomic(u8) = Atomic(u8).init(0),
+            producer_task: Atomic(?*Task) = Atomic(?*Task).init(null),
+            producer_sched: Atomic(?*Scheduler) = Atomic(?*Scheduler).init(null),
         };
 
         inner: *Inner,
@@ -140,40 +179,81 @@ pub fn SplitStream(
             inner.alloc.destroy(chunk);
         }
 
+        // Conservative minReadSeq: considers ALL active subscribers (does
+        // not filter by is_reader). Used by deinit-time releaseConsumedPrefix
+        // so the spawnNew anchor's seq still constrains chunk lifetime
+        // when next() may not yet have been called on it.
         fn minReadSeq(inner: *Inner) usize {
-            var min_seq = inner.tail_seq;
+            const tail_seq = inner.tail_seq.load(.acquire);
+            var min_seq = tail_seq;
             var any_live = false;
-            for (inner.subscribers.items) |record| {
-                if (!record.active) continue;
+            for (inner.subscribers.items) |*record| {
+                if (record.active.load(.acquire) == 0) continue;
                 any_live = true;
                 const seq = record.seq.load(.acquire);
                 if (seq < min_seq) min_seq = seq;
             }
-            return if (any_live) min_seq else inner.tail_seq;
+            return if (any_live) min_seq else tail_seq;
+        }
+
+        // Aggressive minReadSeq for push-time backpressure: skips both
+        // exclude_id and is_reader=0 records. The is_reader filter excludes
+        // the spawnNew anchor (the BG STREAM producer pattern's `msgs`
+        // handle that holds Inner alive but never reads). Without this,
+        // backpressure-time releaseConsumedPrefix would never free chunks
+        // because the anchor's seq stays at 0.
+        fn minReadSeqForBackpressure(inner: *Inner, exclude_id: usize) usize {
+            const tail_seq = inner.tail_seq.load(.acquire);
+            var min_seq = tail_seq;
+            var any_live = false;
+            for (inner.subscribers.items, 0..) |*record, i| {
+                if (i == exclude_id) continue;
+                if (record.active.load(.acquire) == 0) continue;
+                if (record.is_reader.load(.acquire) == 0) continue;
+                any_live = true;
+                const seq = record.seq.load(.acquire);
+                if (seq < min_seq) min_seq = seq;
+            }
+            return if (any_live) min_seq else tail_seq;
         }
 
         fn releaseConsumedPrefix(inner: *Inner) void {
-            while (inner.chunks_head) |head| {
+            while (true) {
+                const head = inner.chunks_head.load(.acquire) orelse break;
                 const published = head.len.load(.acquire);
                 if (published == 0) break;
                 if (head.start_seq + published > minReadSeq(inner)) break;
-                inner.chunks_head = head.next;
-                inner.head_seq = head.start_seq + published;
-                if (inner.chunks_head == null) inner.chunks_tail = null;
+                inner.chunks_head.store(head.next, .release);
+                inner.head_seq.store(head.start_seq + published, .release);
+                if (inner.chunks_head.load(.acquire) == null) inner.chunks_tail.store(null, .release);
+                destroyChunk(inner, head);
+            }
+        }
+
+        // push-time variant: uses backpressure-aware minReadSeq.
+        fn releaseConsumedPrefixForBackpressure(inner: *Inner, exclude_id: usize) void {
+            while (true) {
+                const head = inner.chunks_head.load(.acquire) orelse break;
+                const published = head.len.load(.acquire);
+                if (published == 0) break;
+                if (head.start_seq + published > minReadSeqForBackpressure(inner, exclude_id)) break;
+                inner.chunks_head.store(head.next, .release);
+                inner.head_seq.store(head.start_seq + published, .release);
+                if (inner.chunks_head.load(.acquire) == null) inner.chunks_tail.store(null, .release);
                 destroyChunk(inner, head);
             }
         }
 
         fn clearAllChunks(inner: *Inner) void {
-            var cur = inner.chunks_head;
+            var cur = inner.chunks_head.load(.acquire);
             while (cur) |chunk| {
                 const next_chunk = chunk.next;
                 destroyChunk(inner, chunk);
                 cur = next_chunk;
             }
-            inner.chunks_head = null;
-            inner.chunks_tail = null;
-            inner.head_seq = inner.tail_seq;
+            inner.chunks_head.store(null, .release);
+            inner.chunks_tail.store(null, .release);
+            inner.head_seq.store(inner.tail_seq.load(.acquire), .release);
         }
 
         fn destroyInner(inner: *Inner) void {
@@ -181,22 +261,70 @@ pub fn SplitStream(
             inner.alloc.destroy(inner);
         }
 
-        fn wakeParkedSubscribers(inner: *Inner) void {
+        // Count chunks currently in the linked list. Called under exclusive
+        // lock by push() to decide whether to park the producer.
+        fn chunkCount(inner: *Inner) usize {
+            var count: usize = 0;
+            var cur = inner.chunks_head.load(.acquire);
+            while (cur) |chunk| : (cur = chunk.next) count += 1;
+            return count;
+        }
+
+        // Wake the producer if it's parked. Called by subscribers after
+        // their seq advances; releaseConsumedPrefix runs on the next push,
+        // and may free a chunk that previously kept the producer parked.
+        fn wakeParkedProducer(inner: *Inner) void {
+            if (inner.producer_parked.load(.acquire) == 0) return;
+            inner.producer_parked.store(0, .release);
+            if (inner.producer_sched.load(.acquire)) |sched| {
+                if (inner.producer_task.load(.acquire)) |task| {
+                    sched.schedule(task);
+                }
+            }
+        }
+
+        fn wakeAllParkedSubscribers(inner: *Inner) void {
             for (inner.subscribers.items) |*record| {
-                if (!record.active or !record.parked) continue;
-                record.parked = false;
-                if (record.sched) |sched| {
-                    if (record.task) |task| {
+                if (record.active.load(.acquire) == 0) continue;
+                if (record.parked.load(.acquire) == 0) continue;
+                record.parked.store(0, .release);
+                if (record.sched.load(.acquire)) |sched| {
+                    if (record.task.load(.acquire)) |task| {
                         sched.schedule(task);
                     }
                 }
             }
         }
 
-        fn findCursor(inner: *Inner, seq: usize) ?ChunkCursor {
-            if (seq < inner.head_seq or seq >= inner.tail_seq) return null;
+        // Wake one parked subscriber per call, round-robin. Avoids the
+        // thundering herd that wake-all creates with N>>1 subscribers; each
+        // subsequent push wakes the next subscriber in turn. Subscribers
+        // catch up to tail in a single next() call so per-publish wake-one
+        // is sufficient for liveness as long as publishes continue.
+        fn wakeOneParkedSubscriber(inner: *Inner) void {
+            const n = inner.subscribers.items.len;
+            if (n == 0) return;
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                const idx = (inner.wake_cursor + i) % n;
+                const record = &inner.subscribers.items[idx];
+                if (record.active.load(.acquire) == 0) continue;
+                if (record.parked.load(.acquire) == 0) continue;
+                record.parked.store(0, .release);
+                inner.wake_cursor = (idx + 1) % n;
+                if (record.sched.load(.acquire)) |sched| {
+                    if (record.task.load(.acquire)) |task| {
+                        sched.schedule(task);
+                    }
+                }
+                return;
+            }
+        }
 
-            var cur = inner.chunks_head;
+        fn findCursor(inner: *Inner, seq: usize) ?ChunkCursor {
+            if (seq < inner.head_seq.load(.acquire) or seq >= inner.tail_seq.load(.acquire)) return null;
+
+            var cur = inner.chunks_head.load(.acquire);
             while (cur) |chunk| : (cur = chunk.next) {
                 const published = chunk.len.load(.acquire);
                 const chunk_end = chunk.start_seq + published;
@@ -216,16 +344,25 @@ pub fn SplitStream(
             return findCursor(self.inner, self.next_seq);
         }
 
-        fn allocSubscriber(inner: *Inner, seq: usize) !usize {
+        fn allocSubscriber(inner: *Inner, seq: usize, is_reader: u8) !usize {
             for (inner.subscribers.items, 0..) |*record, i| {
-                if (!record.active) {
-                    record.* = .{ .active = true, .seq = std.atomic.Value(usize).init(seq) };
-                    inner.active_subscribers += 1;
+                if (record.active.load(.acquire) == 0) {
+                    record.active.store(1, .release);
+                    record.seq.store(seq, .release);
+                    record.parked.store(0, .release);
+                    record.task.store(null, .release);
+                    record.sched.store(null, .release);
+                    record.is_reader.store(is_reader, .release);
+                    _ = inner.active_subscribers.fetchAdd(1, .release);
                     return i;
                 }
             }
-            try inner.subscribers.append(inner.alloc, .{ .active = true, .seq = std.atomic.Value(usize).init(seq) });
-            inner.active_subscribers += 1;
+            try inner.subscribers.append(inner.alloc, .{
+                .active = Atomic(u8).init(1),
+                .seq = Atomic(usize).init(seq),
+                .is_reader = Atomic(u8).init(is_reader),
+            });
+            _ = inner.active_subscribers.fetchAdd(1, .release);
             return inner.subscribers.items.len - 1;
         }
 
@@ -234,7 +371,7 @@ pub fn SplitStream(
             if (chunk.write_len <= published_len) return false;
             const published = chunk.write_len - published_len;
             chunk.len.store(chunk.write_len, .release);
-            inner.tail_seq += published;
+            _ = inner.tail_seq.fetchAdd(published, .release);
             return true;
         }
 
@@ -244,36 +381,62 @@ pub fn SplitStream(
                 .alloc = alloc,
                 .wg = WaitGroupType.init(sched),
             };
-            const subscriber_id = try allocSubscriber(inner, inner.head_seq);
+            const head_seq = inner.head_seq.load(.acquire);
+            // spawnNew's anchor handle is is_reader=0 — it exists to hold
+            // a reference to Inner but typically does not call next().
+            // First next() call promotes is_reader to 1 (see next() below).
+            const subscriber_id = try allocSubscriber(inner, head_seq, 0);
             return .{
                 .inner = inner,
                 .alloc = alloc,
                 .subscriber_id = subscriber_id,
-                .next_seq = inner.head_seq,
+                .next_seq = head_seq,
             };
         }
 
         pub fn push(self: *Self, val: T) !void {
             var published = false;
-            self.inner.mutex.lock();
+            self.inner.mutex.lock() catch unreachable;
 
-            if (self.inner.active_subscribers == 0) {
+            if (self.inner.active_subscribers.load(.acquire) == 0) {
                 self.inner.mutex.unlock();
                 var tmp = val;
                 cleanupValue(self.inner.alloc, &tmp);
                 return;
             }
 
-            var tail = self.inner.chunks_tail;
+            // Backpressure: free any consumed chunks (excluding the
+            // producer's own subscriber record from minReadSeq — see
+            // releaseConsumedPrefixExcluding comment), then park if the
+            // live chunk count is still at the limit. Subscribers' next()
+            // calls wakeParkedProducer after advancing seq, allowing
+            // releaseConsumedPrefix to free chunks and the producer to
+            // push again.
+            while (true) {
+                releaseConsumedPrefixForBackpressure(self.inner, self.subscriber_id);
+                if (chunkCount(self.inner) < MaxChunks) break;
+                if (!fp.scheduler_running or fp.active_scheduler.current_task == null) break;
+                wakeAllParkedSubscribers(self.inner);
+                const task = fp.active_scheduler.getCurrent();
+                self.inner.producer_task.store(task, .release);
+                self.inner.producer_sched.store(fp.active_scheduler, .release);
+                self.inner.producer_parked.store(1, .release);
+                task.status.store(.Blocked, .release);
+                self.inner.mutex.unlock();
+                task.base.yield();
+                self.inner.mutex.lock() catch unreachable;
+            }
+
+            var tail = self.inner.chunks_tail.load(.acquire);
             if (tail == null or tail.?.write_len == ChunkCap) {
                 const chunk = try self.inner.alloc.create(Chunk);
-                chunk.* = .{ .start_seq = self.inner.tail_seq };
+                chunk.* = .{ .start_seq = self.inner.tail_seq.load(.acquire) };
                 if (tail) |existing_tail| {
                     existing_tail.next = chunk;
                 } else {
-                    self.inner.chunks_head = chunk;
+                    self.inner.chunks_head.store(chunk, .release);
                 }
-                self.inner.chunks_tail = chunk;
+                self.inner.chunks_tail.store(chunk, .release);
                 tail = chunk;
             }
 
@@ -285,23 +448,27 @@ pub fn SplitStream(
                 published = publishChunk(self.inner, chunk);
             }
             if (published) {
-                wakeParkedSubscribers(self.inner);
+                wakeOneParkedSubscriber(self.inner);
             }
             self.inner.mutex.unlock();
         }
 
         pub fn close(self: *Self) void {
-            self.inner.mutex.lock();
-            if (self.inner.chunks_tail) |tail| {
+            self.inner.mutex.lock() catch unreachable;
+            if (self.inner.chunks_tail.load(.acquire)) |tail| {
                 _ = publishChunk(self.inner, tail);
             }
-            self.inner.closed = true;
-            wakeParkedSubscribers(self.inner);
-            const should_destroy = self.inner.active_subscribers == 0;
+            self.inner.closed.store(1, .release);
+            wakeAllParkedSubscribers(self.inner);
+            // Producer may have parked itself for backpressure and never
+            // returned to push; close() must wake it (typically a no-op
+            // since close() is called by the producer after it finishes).
+            wakeParkedProducer(self.inner);
+            const should_destroy = self.inner.active_subscribers.load(.acquire) == 0;
             self.inner.mutex.unlock();
 
             if (should_destroy) {
-                self.inner.mutex.lock();
+                self.inner.mutex.lock() catch unreachable;
                 clearAllChunks(self.inner);
                 self.inner.mutex.unlock();
                 destroyInner(self.inner);
@@ -309,17 +476,20 @@ pub fn SplitStream(
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
-            self.inner.mutex.lock();
+            self.inner.mutex.lock() catch unreachable;
             self.inner.err = err;
-            wakeParkedSubscribers(self.inner);
+            self.inner.err_set.store(1, .release);
+            wakeAllParkedSubscribers(self.inner);
+            wakeParkedProducer(self.inner);
             self.inner.mutex.unlock();
         }
 
         pub fn retain(self: Self) Self {
             std.debug.assert(self.active);
 
-            self.inner.mutex.lock();
-            const subscriber_id = allocSubscriber(self.inner, self.next_seq) catch unreachable;
+            self.inner.mutex.lock() catch unreachable;
+            // CLONE / retain → explicit reader.
+            const subscriber_id = allocSubscriber(self.inner, self.next_seq, 1) catch unreachable;
             self.inner.mutex.unlock();
 
             return .{
@@ -334,11 +504,20 @@ pub fn SplitStream(
 
         pub fn next(self: *Self) anyerror!?T {
             std.debug.assert(self.active);
+            // Promote anchor handles from spawnNew to "real reader" on
+            // first next() call. Idempotent atomic store; cheap.
+            if (self.subscriber_id != InvalidSubscriber) {
+                self.inner.subscribers.items[self.subscriber_id].is_reader.store(1, .release);
+            }
             while (true) {
-                self.inner.mutex.lock();
+                // Phase 1: shared read attempt. Multiple subscribers can concurrently
+                // walk chunks and read values; the writer (push/close/setError) takes
+                // exclusive. Each subscriber atomically updates only its own seq.
+                self.inner.mutex.lockShared() catch unreachable;
 
-                if (self.inner.err) |err| {
-                    self.inner.mutex.unlock();
+                if (self.inner.err_set.load(.acquire) != 0) {
+                    const err = self.inner.err;
+                    self.inner.mutex.unlockShared();
                     return err;
                 }
 
@@ -347,7 +526,7 @@ pub fn SplitStream(
                     const chunk_len = cursor.chunk.len.load(.acquire);
                     const advance_in_same_chunk = cursor.index + 1 < chunk_len;
                     const advance_into_next_chunk = !advance_in_same_chunk and cursor.chunk.next != null;
-                    const wait_for_tail_growth = !advance_in_same_chunk and !advance_into_next_chunk and chunk_len < ChunkCap and !self.inner.closed and cursor.chunk == self.inner.chunks_tail;
+                    const wait_for_tail_growth = !advance_in_same_chunk and !advance_into_next_chunk and chunk_len < ChunkCap and self.inner.closed.load(.acquire) == 0 and cursor.chunk == self.inner.chunks_tail.load(.acquire);
 
                     if (advance_in_same_chunk) {
                         self.next_chunk = cursor.chunk;
@@ -367,11 +546,37 @@ pub fn SplitStream(
                     if (self.subscriber_id != InvalidSubscriber) {
                         self.inner.subscribers.items[self.subscriber_id].seq.store(self.next_seq, .release);
                     }
-                    self.inner.mutex.unlock();
+                    self.inner.mutex.unlockShared();
+                    // Wake the producer after advancing seq so it can free
+                    // consumed chunks and proceed if it was parked. Cheap
+                    // atomic check; only schedules a task when actually parked.
+                    wakeParkedProducer(self.inner);
                     return out;
                 }
 
-                if (self.inner.closed) {
+                if (self.inner.closed.load(.acquire) != 0) {
+                    self.inner.mutex.unlockShared();
+                    return null;
+                }
+                self.inner.mutex.unlockShared();
+
+                // Phase 2: need to park. Take exclusive to write SubscriberRecord
+                // park state. Re-check after upgrading — a writer may have published
+                // between unlockShared and lock acquire.
+                self.inner.mutex.lock() catch unreachable;
+
+                if (self.inner.err_set.load(.acquire) != 0) {
+                    const err = self.inner.err;
+                    self.inner.mutex.unlock();
+                    return err;
+                }
+
+                if (self.currentCursor() != null) {
+                    self.inner.mutex.unlock();
+                    continue;
+                }
+
+                if (self.inner.closed.load(.acquire) != 0) {
                     self.inner.mutex.unlock();
                     return null;
                 }
@@ -380,9 +585,9 @@ pub fn SplitStream(
                     const task = fp.active_scheduler.getCurrent();
                     if (self.subscriber_id != InvalidSubscriber) {
                         var record = &self.inner.subscribers.items[self.subscriber_id];
-                        record.parked = true;
-                        record.task = task;
-                        record.sched = fp.active_scheduler;
+                        record.parked.store(1, .release);
+                        record.task.store(task, .release);
+                        record.sched.store(fp.active_scheduler, .release);
                     }
                     task.status.store(.Blocked, .release);
                     self.inner.mutex.unlock();
@@ -398,28 +603,31 @@ pub fn SplitStream(
             if (!self.active) return;
 
             var should_destroy = false;
-            self.inner.mutex.lock();
+            self.inner.mutex.lock() catch unreachable;
             if (self.subscriber_id != InvalidSubscriber) {
                 var record = &self.inner.subscribers.items[self.subscriber_id];
-                record.active = false;
-                record.seq.store(self.inner.tail_seq, .release);
-                record.parked = false;
-                record.task = null;
-                record.sched = null;
-                std.debug.assert(self.inner.active_subscribers > 0);
-                self.inner.active_subscribers -= 1;
+                record.active.store(0, .release);
+                record.seq.store(self.inner.tail_seq.load(.acquire), .release);
+                record.parked.store(0, .release);
+                record.task.store(null, .release);
+                record.sched.store(null, .release);
+                std.debug.assert(self.inner.active_subscribers.load(.acquire) > 0);
+                _ = self.inner.active_subscribers.fetchSub(1, .release);
                 self.subscriber_id = InvalidSubscriber;
             }
             self.active = false;
             self.next_chunk = null;
             self.next_index = 0;
 
-            if (self.inner.active_subscribers == 0) {
+            if (self.inner.active_subscribers.load(.acquire) == 0) {
                 clearAllChunks(self.inner);
-                should_destroy = self.inner.closed;
+                should_destroy = self.inner.closed.load(.acquire) != 0;
             } else {
                 releaseConsumedPrefix(self.inner);
             }
+            // Last subscriber's deinit releases chunks; wake producer in
+            // case it was parked waiting for chunk count to drop.
+            wakeParkedProducer(self.inner);
             self.inner.mutex.unlock();
 
             if (should_destroy) destroyInner(self.inner);
@@ -460,8 +668,8 @@ pub fn concurrentBoundedSelect(
         }
     }
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -469,9 +677,9 @@ pub fn concurrentBoundedSelect(
         wg: *WaitGroupT,
         items: *[N]PromiseT,
         slots: []Slot,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -569,8 +777,8 @@ pub fn concurrentBoundedWhere(
         }
     }
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -579,9 +787,9 @@ pub fn concurrentBoundedWhere(
         items: *[N]PromiseT,
         slots: []Slot,
         alloc: std.mem.Allocator,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -673,17 +881,17 @@ pub fn concurrentBoundedEach(
     const PromiseT = @typeInfo(@typeInfo(ItemsPtr).pointer.child).array.child;
     const RuntimeT = @TypeOf(rt.*);
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: *[N]PromiseT,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -770,7 +978,7 @@ pub fn concurrentStreamSelect(
 
     var chan = try ChannelT.init(alloc, capacity);
     defer chan.deinit();
-    var err_code = std.atomic.Value(u16).init(0);
+    var err_code = Atomic(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -800,7 +1008,7 @@ pub fn concurrentStreamSelect(
         chan: *ChannelT,
         local: std.ArrayListUnmanaged(R),
         alloc: std.mem.Allocator,
-        err: *std.atomic.Value(u16),
+        err: *Atomic(u16),
         batch_size: usize,
         user_ctx: ?*anyopaque,
 
@@ -900,7 +1108,7 @@ pub fn concurrentStreamWhere(
 
     var chan = try ChannelT.init(alloc, capacity);
     defer chan.deinit();
-    var err_code = std.atomic.Value(u16).init(0);
+    var err_code = Atomic(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -930,7 +1138,7 @@ pub fn concurrentStreamWhere(
         chan: *ChannelT,
         local: std.ArrayListUnmanaged(T),
         alloc: std.mem.Allocator,
-        err: *std.atomic.Value(u16),
+        err: *Atomic(u16),
         batch_size: usize,
         user_ctx: ?*anyopaque,
 
@@ -1035,7 +1243,7 @@ pub fn concurrentStreamEach(
 
     var chan = try ChannelT.init(alloc, capacity);
     defer chan.deinit();
-    var err_code = std.atomic.Value(u16).init(0);
+    var err_code = Atomic(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -1063,7 +1271,7 @@ pub fn concurrentStreamEach(
     const Worker = struct {
         wg: *WaitGroupT,
         chan: *ChannelT,
-        err: *std.atomic.Value(u16),
+        err: *Atomic(u16),
         batch_size: usize,
         user_ctx: ?*anyopaque,
 
@@ -1151,8 +1359,8 @@ pub fn concurrentListSelect(
         }
     }
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -1160,9 +1368,9 @@ pub fn concurrentListSelect(
         wg: *WaitGroupT,
         items: []const T,
         slots: []Slot,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -1257,8 +1465,8 @@ pub fn concurrentListWhere(
         }
     }
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
@@ -1266,9 +1474,9 @@ pub fn concurrentListWhere(
         wg: *WaitGroupT,
         items: []const T,
         slots: []Slot,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -1351,17 +1559,17 @@ pub fn concurrentListEach(
 ) !void {
     const RuntimeT = @TypeOf(rt.*);
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []const T,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
@@ -1429,17 +1637,17 @@ pub fn concurrentListEachInPlace(
 ) !void {
     const RuntimeT = @TypeOf(rt.*);
 
-    var err_code = std.atomic.Value(u16).init(0);
-    var next_idx = std.atomic.Value(usize).init(0);
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
     const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []T,
-        next_idx: *std.atomic.Value(usize),
+        next_idx: *Atomic(usize),
         batch_size: usize,
-        err_code: *std.atomic.Value(u16),
+        err_code: *Atomic(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {

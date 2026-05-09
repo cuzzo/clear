@@ -2837,6 +2837,117 @@ pub fn testStreamCloseErrAtomicCoverage() !void {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// SplitStream close/err_set atomic coverage
+//
+// SplitStream (lib/streams.zig) added in 2026-05-09 atomic err_set + non-
+// atomic err to satisfy TSan after the parking-lot.ParkingRwLock
+// migration (TSan does not model parking-lot rwlock as a synchronizer).
+// The protocol mirrors Stream's closed/err but uses a separate
+// `err_set: Atomic(u8)` companion to non-atomic `err: anyerror`:
+//
+//   producer (setError, under rwlock exclusive):
+//     err = X
+//     err_set.store(1, .release)
+//                                          (close also publishes
+//                                           closed.store(1, .release))
+//   consumer (next, under rwlock shared):
+//     if err_set.load(.acquire) != 0: read err
+//     if closed.load(.acquire) != 0: return null
+//
+// The release on err_set must happen-after the non-atomic `err = X`
+// write (program order under exclusive). Acquire on consumer's err_set
+// load synchronizes-with that release; consumer's read of `err` after
+// observing err_set=1 must see X.
+//
+// This test exhaustively schedules the protocol to verify the release/
+// acquire pair establishes happens-before.
+// ─────────────────────────────────────────────────────────────────────
+
+const SplitErrShared = struct {
+    err_set: qs.Atomic(u8) = qs.Atomic(u8).init(0),
+    closed: qs.Atomic(u8) = qs.Atomic(u8).init(0),
+    // Non-atomic, written before err_set.store(1, .release). Any reader
+    // that observes err_set != 0 via .acquire must observe this value.
+    err: i64 = 0,
+};
+
+var g_split_err: SplitErrShared = .{};
+var g_split_observed_err: bool = false;
+
+fn entrySplitErrConsumer() callconv(.c) void {
+    // Mirror SplitStream.next's Phase 1 read: spin on err_set.load(.acquire)
+    // until producer publishes; then read non-atomic err. The acquire
+    // synchronizes-with producer's release on err_set.
+    while (g_split_err.err_set.load(.acquire) == 0) {
+        fc.__fiber.?.yield();
+    }
+    // Acquire-ordered: must see the producer's err = 42 write.
+    if (g_split_err.err == 42) g_split_observed_err = true;
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entrySplitErrProducer() callconv(.c) void {
+    // Mirror SplitStream.setError under exclusive lock: write err
+    // (non-atomic), then publish via err_set.store(1, .release). The
+    // release establishes happens-before with any consumer that
+    // observes err_set != 0 via .acquire.
+    g_split_err.err = 42;
+    g_split_err.err_set.store(1, .release);
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testSplitStreamErrSetAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    const total: usize = if (build_options.coverage) 64 else 4096;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        g_split_err = .{};
+        g_split_observed_err = false;
+
+        try h.createThread(0, @intFromPtr(&entrySplitErrConsumer));
+        try h.createThread(1, @intFromPtr(&entrySplitErrProducer));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        // Consumer must observe err = 42 once it sees err_set != 0. The
+        // consumer's spin-loop ensures it always reaches the err read
+        // (producer always publishes), so structurally toothless schedules
+        // are not a concern here.
+        if (!g_split_observed_err) failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\nsplit-stream-err-set-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SplitStream chunk publish-acquire protocol
 //
