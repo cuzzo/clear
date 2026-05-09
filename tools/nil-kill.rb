@@ -110,8 +110,11 @@ module NilKill
     end
 
     def collect
+      append = @argv.delete("--append-runtime")
       commands = collect_commands
       abort "usage: tools/nil-kill.rb collect [--commands FILE] [--continue-on-error] -- <command...>" if commands.empty?
+      FileUtils.rm_rf(RUNTIME_DIR) unless append
+      FileUtils.mkdir_p(RUNTIME_DIR)
       tracer = File.join(ROOT, "tools", "nil-kill", "runtime_trace.rb")
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
       env = ENV.to_h.merge("NIL_KILL_TRACE" => "1", "RUBYOPT" => rubyopt)
@@ -165,6 +168,7 @@ module NilKill
           bundle exec ruby tools/nil-kill.rb collect --commands runtime-commands.txt
           bundle exec ruby tools/nil-kill.rb collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
           bundle exec ruby tools/nil-kill.rb collect --glob "lib/**/*.rb" --template "ruby {file}"
+          bundle exec ruby tools/nil-kill.rb collect --append-runtime --commands more-runtime-commands.txt
           bundle exec ruby tools/nil-kill.rb infer [--no-sorbet]
           bundle exec ruby tools/nil-kill.rb apply [--dry-run] [--all]
           bundle exec ruby tools/nil-kill.rb review [--kind replace_nil_with_default]
@@ -613,7 +617,7 @@ module NilKill
         node.child_nodes.compact.each { |child| collect_struct_declarations(child, child_scope) } if node.respond_to?(:child_nodes)
         return
       when Prism::ConstantWriteNode
-        if struct_new_call?(node.value)
+        if struct_new_call?(node.value) || data_define_call?(node.value)
           klass = (scope + [node.name.to_s]).join("::")
           fields = struct_fields(node.value)
           if fields.any?
@@ -637,6 +641,13 @@ module NilKill
         node.name == :new &&
         node.receiver.is_a?(Prism::ConstantReadNode) &&
         node.receiver.name == :Struct
+    end
+
+    def data_define_call?(node)
+      node.is_a?(Prism::CallNode) &&
+        node.name == :define &&
+        node.receiver.is_a?(Prism::ConstantReadNode) &&
+        node.receiver.name == :Data
     end
 
     def struct_fields(node)
@@ -1766,7 +1777,11 @@ module NilKill
         return
       end
       runtime_tuples.sort_by { |tuple| [-tuple["calls"].to_i, tuple["path"], tuple["line"].to_i] }.first(30).each do |tuple|
-        lines << "- #{NilKill.rel(tuple["path"])}:#{tuple["line"]} #{tuple["kind"]} #{tuple["slot"]}; [#{Array(tuple["types"]).join(", ")}]; #{tuple["calls"]} call(s)"
+        labels = []
+        labels << "complete" if tuple["complete"]
+        labels << "mixed" if tuple["mixed"]
+        labels << "size #{tuple["size"]}"
+        lines << "- #{NilKill.rel(tuple["path"])}:#{tuple["line"]} #{tuple["kind"]} #{tuple["slot"]}; [#{Array(tuple["types"]).join(", ")}]; #{tuple["calls"]} call(s); #{labels.join(", ")}"
       end
     end
 

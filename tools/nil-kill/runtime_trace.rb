@@ -51,6 +51,13 @@ module NilKillRuntimeTrace
     end
   end
 
+  def self.source_location_for_class(klass)
+    return nil unless klass.respond_to?(:instance_method)
+    init = klass.instance_method(:initialize) rescue nil
+    loc = init&.source_location
+    loc && [File.expand_path(loc[0], ROOT), loc[1]]
+  end
+
   def self.method_owner(defined_class)
     return nil unless defined_class
     if defined_class.respond_to?(:singleton_class?) && defined_class.singleton_class?
@@ -239,17 +246,62 @@ module NilKillRuntimeTrace
         super
         value = const_get(name)
         NilKillRuntimeTrace.attach_struct(value) if value.is_a?(Class) && value < Struct
+        NilKillRuntimeTrace.attach_data(value) if defined?(Data) && value.is_a?(Class) && value < Data
       rescue NameError
         nil
       end
     end)
   end
 
+  def self.install_data_hook
+    return unless defined?(Data) && Data.respond_to?(:define)
+    return if Data.singleton_class.method_defined?(:__nil_kill_orig_define)
+    Data.singleton_class.alias_method(:__nil_kill_orig_define, :define)
+    Data.singleton_class.define_method(:define) do |*fields, &blk|
+      loc = caller_locations(1, 1)&.first
+      klass = __nil_kill_orig_define(*fields, &blk)
+      path = loc && File.expand_path(loc.absolute_path || loc.path, ROOT)
+      if path && NilKillRuntimeTrace.target_path?(path) && klass.is_a?(Class)
+        klass.instance_variable_set(:@__nil_kill_struct_path, path)
+        klass.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+        NilKillRuntimeTrace.attach_data(klass)
+      end
+      klass
+    end
+  end
+
+  def self.install_open_struct_hook
+    require "ostruct"
+    return if OpenStruct.instance_variable_get(:@__nil_kill_attached)
+    OpenStruct.instance_variable_set(:@__nil_kill_attached, true)
+    OpenStruct.prepend(Module.new do
+      define_method(:initialize) do |hash = nil|
+        super(hash)
+        NilKillRuntimeTrace.record_open_struct(self)
+      end
+
+      define_method(:[]=) do |name, value|
+        result = super(name, value)
+        NilKillRuntimeTrace.record_open_struct_field(self, name, value)
+        result
+      end
+    end)
+  rescue LoadError
+    nil
+  end
+
   def self.attach_struct(klass)
     return unless klass.is_a?(Class) && klass < Struct
-    path = klass.instance_variable_get(:@__nil_kill_struct_path)
-    return unless path && target_path?(path)
     return if klass.instance_variable_get(:@__nil_kill_attached)
+    path = klass.instance_variable_get(:@__nil_kill_struct_path)
+    line = klass.instance_variable_get(:@__nil_kill_struct_line)
+    unless path && line
+      loc = source_location_for_class(klass)
+      path, line = loc if loc
+      klass.instance_variable_set(:@__nil_kill_struct_path, path) if path
+      klass.instance_variable_set(:@__nil_kill_struct_line, line) if line
+    end
+    return unless path && target_path?(path)
     fields = klass.members
     return if fields.empty?
     klass.instance_variable_set(:@__nil_kill_attached, true)
@@ -265,6 +317,49 @@ module NilKillRuntimeTrace
         super(*args, **kw, &blk)
       end
     end)
+  end
+
+  def self.attach_data(klass)
+    return unless klass.is_a?(Class)
+    return if klass.instance_variable_get(:@__nil_kill_attached)
+    path = klass.instance_variable_get(:@__nil_kill_struct_path)
+    line = klass.instance_variable_get(:@__nil_kill_struct_line)
+    return unless path && line && target_path?(path)
+    fields = klass.respond_to?(:members) ? klass.members : []
+    return if fields.empty?
+    klass.instance_variable_set(:@__nil_kill_attached, true)
+    klass.prepend(Module.new do
+      define_method(:initialize) do |*args, **kw, &blk|
+        class_name = self.class.name || "AnonymousData"
+        args.each_with_index do |arg, idx|
+          field = fields[idx]
+          break unless field
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, arg)
+        end
+        kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
+        super(*args, **kw, &blk)
+      end
+    end)
+  end
+
+  def self.record_open_struct(instance)
+    table = instance.instance_variable_get(:@table) rescue nil
+    return unless table.respond_to?(:each)
+    table.each { |field, value| record_open_struct_field(instance, field, value) }
+  end
+
+  def self.record_open_struct_field(instance, field, value)
+    loc = caller_locations(2, 20).find do |candidate|
+      path = candidate.absolute_path || candidate.path
+      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+    end
+    return unless loc
+    singleton_name = instance.class.name
+    klass_name = singleton_name && singleton_name != "OpenStruct" ? singleton_name : "OpenStruct"
+    shim = Object.new
+    shim.instance_variable_set(:@__nil_kill_struct_path, File.expand_path(loc.absolute_path || loc.path, ROOT))
+    shim.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+    record_struct_field(shim, klass_name, field, value)
   end
 
   def self.record_struct_field(klass, klass_name, field, value)
@@ -291,11 +386,16 @@ module NilKillRuntimeTrace
 
   def self.record_tuple(kind, path, line, slot, value)
     return unless value.is_a?(Array) && value.size >= 2
-    types = value.first(ELEMENT_SAMPLE).map { |item| class_name(item) }
-    return unless types.size == value.size && types.uniq.size > 1
-    key = [kind, File.expand_path(path, ROOT), line, slot.to_s, value.size, types]
-    rec = (@tuples[key] ||= { calls: 0 })
+    sampled = value.first(ELEMENT_SAMPLE)
+    types = sampled.map { |item| class_name(item) }
+    complete = sampled.size == value.size
+    mixed = types.uniq.size > 1
+    return unless complete || mixed
+    key = [kind, File.expand_path(path, ROOT), line, slot.to_s, complete ? value.size : ">=#{ELEMENT_SAMPLE}", types]
+    rec = (@tuples[key] ||= { calls: 0, complete: complete, mixed: mixed })
     rec[:calls] += 1
+    rec[:complete] &&= complete
+    rec[:mixed] ||= mixed
   end
 
   def self.dump
@@ -343,7 +443,8 @@ module NilKillRuntimeTrace
     end
     File.open(File.join(OUT_DIR, "tuples-#{pid}.jsonl"), "w") do |file|
       @tuples.each do |(kind, path, line, slot, size, types), rec|
-        file.puts JSON.generate(kind: kind, path: path, line: line, slot: slot, size: size, types: types, calls: rec[:calls])
+        file.puts JSON.generate(kind: kind, path: path, line: line, slot: slot, size: size, types: types,
+          complete: rec[:complete], mixed: rec[:mixed], calls: rec[:calls])
       end
     end
   end
@@ -360,6 +461,15 @@ if ENV["NIL_KILL_TRACE"] == "1"
   end
   NilKillRuntimeTrace.install_tlet_hook
   NilKillRuntimeTrace.install_struct_hook
+  NilKillRuntimeTrace.install_data_hook
+  NilKillRuntimeTrace.install_open_struct_hook
   TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
+  TracePoint.new(:end) do
+    NilKillRuntimeTrace.install_data_hook
+    ObjectSpace.each_object(Class) do |klass|
+      NilKillRuntimeTrace.attach_struct(klass) if klass < Struct rescue nil
+      NilKillRuntimeTrace.attach_data(klass) if defined?(Data) && klass < Data rescue nil
+    end
+  end.enable
   at_exit { NilKillRuntimeTrace.dump }
 end
