@@ -1864,6 +1864,20 @@ module DiagnosticRegistry
       cause: "A call whose return value owns heap data was lowered directly into a binding, but the binding has no MIR::AllocMark. Without the marker, MIRChecker cannot verify that cleanup exists on every path.",
       fix_hint: "Lowering bug — preserve return provenance through FunctionSignature import/reconstruction and make the cleanup classifier emit AllocMark + Cleanup for the binding.",
     },
+    OWNED_RETURN_ALLOC_NOT_HEAP: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-return call has a non-heap AllocMark.",
+      cause: "A call whose return value owns heap data was paired with an AllocMark that says the value is frame-allocated. That lets AllocMark and Cleanup agree with each other while still freeing heap-owned data through the wrong allocator.",
+      fix_hint: "Lowering bug — the AllocMark for a heap-provenance return must use :heap or :cleanup, never :frame.",
+    },
+    TRANSFER_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "TransferMark exists without a matching AllocMark.",
+      cause: "MIR::TransferMark suppresses local cleanup because ownership left the current scope. Without a matching AllocMark, there is no checker-visible allocation event to prove what was transferred.",
+      fix_hint: "Lowering bug — emit TransferMark only alongside the AllocMark for the owned binding being moved.",
+    },
     COPY_CLEANUP: {
       severity: :error, category: :mir,
       template: "%{message}",

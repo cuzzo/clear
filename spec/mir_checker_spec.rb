@@ -72,6 +72,25 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("ALLOC_WITHOUT_CLEANUP") && e.include?("x") }).to be true
     end
 
+    it "detects heap-returning binding marked as frame-allocated" do
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [
+        MIR::AllocMark.new("x", :frame),
+        MIR::Let.new("x", call, false, nil, nil),
+        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :frame, has_moved_guard: false }),
+      ]
+      errors = checker.check_fn!(fn_def("hpt_bound_frame_alloc", body))
+      expect(errors.any? { |e| e.include?("OWNED_RETURN_ALLOC_NOT_HEAP") && e.include?("x") }).to be true
+    end
+
+    it "detects transfer marker with no allocation source" do
+      body = [
+        MIR::TransferMark.new("x", :moved),
+      ]
+      errors = checker.check_fn!(fn_def("transfer_without_alloc", body))
+      expect(errors.any? { |e| e.include?("TRANSFER_WITHOUT_ALLOC") && e.include?("x") }).to be true
+    end
+
     it "passes for ExprStmt with non-heap call" do
       call = MIR::Call.new("doWork", [MIR::Ident.new("rt")], false)
       body = [

@@ -55,7 +55,8 @@
 #   MIR::ErrCleanup -> errdefer-only cleanup (freed only on error; success
 #                      path transfers ownership to caller/container/callee)
 #   MIR::TransferMark -> no local cleanup because ownership was moved out of
-#                        this scope on every successful path
+#                        this scope on every successful path. Must pair with
+#                        a matching AllocMark.
 #
 # Which type is emitted is determined by the lowering pass, not the checker.
 # The checker does NOT inspect flags or tags -- it reads the node type.
@@ -183,9 +184,17 @@ class MIRChecker
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, Array]).returns(T.nilable(Array)) }
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
-      next if allocs.key?(let.name)
-      @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
-        "owned-return initializer is bound without MIR::AllocMark; cleanup cannot be verified")
+      marks = allocs[let.name]
+      unless marks
+        @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
+          "owned-return initializer is bound without MIR::AllocMark; cleanup cannot be verified")
+        next
+      end
+
+      if marks.any? { |m| m.alloc == :frame }
+        @errors << error(:OWNED_RETURN_ALLOC_NOT_HEAP, let.name,
+          "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")
+      end
     end
   end
 
@@ -504,6 +513,15 @@ class MIRChecker
       next if allocs.key?(name)
       @errors << error(:CLEANUP_WITHOUT_ALLOC, name,
         "MIR::Cleanup present but no MIR::AllocMark (allocation event missing from MIR)")
+    end
+
+    # TRANSFER_WITHOUT_ALLOC: a transfer marker is only meaningful if the value
+    # it transfers had an allocation event. Otherwise TransferMark can mask an
+    # untracked ownership path.
+    transfers.each do |name|
+      next if allocs.key?(name)
+      @errors << error(:TRANSFER_WITHOUT_ALLOC, name,
+        "MIR::TransferMark present but no MIR::AllocMark (transfer event missing allocation source)")
     end
 
     # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup,
