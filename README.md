@@ -23,7 +23,7 @@ bill = users AS $u
   |> UNNEST $u.orders
   |> SUM _.price * $u.discount;
 
--- Fuses nested iteration with aggregation. No intermediate allocations.
+# Fuses nested iteration with aggregation. No intermediate allocations.
 ```
 
 ### Combine with in-line error handling
@@ -31,8 +31,8 @@ bill = users AS $u
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS MyPage ->
   page = fetchData(id, name) OR RAISE
-    |> parseHeader OR EXIT "Invalid Header"   -- parseHeader RAISES Input, ParseError
-    |> parseBody OR EXIT "Invalid Body"       -- we can attach messages to be handled specifically below
+    |> parseHeader OR EXIT "Invalid Header"   # parseHeader RAISES Input, ParseError
+    |> parseBody OR EXIT "Invalid Body"       # we can attach messages to be handled specifically below
     |> fetchUser
       |> RECOVER(defaultUser())
     |> TAP saveToDb(id, name, _)
