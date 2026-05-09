@@ -155,6 +155,23 @@ RSpec.describe LintFixRewriter do
       expect(out).to include("n = 42;")
       expect(out).not_to include("MUTABLE")
     end
+
+    it "keeps MUTABLE when the binding is passed to a bang helper" do
+      src = <<~CLEAR
+        FN appendOne!(MUTABLE xs: Int64[]@list) RETURNS Void ->
+          xs.append(1_i64);
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE xs: Int64[]@list = [];
+          appendOne!(xs);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("MUTABLE xs: Int64[]@list = []")
+    end
   end
 
   describe "redundant `: Type` annotation drop — sync awareness" do

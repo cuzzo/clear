@@ -37,8 +37,9 @@ module LintFixRewriter
     ast, findings = annotate(source)
     return source unless ast
     bg_names = collect_bg_referenced_names(ast)
+    mutation_sensitive_names = collect_mutation_sensitive_names(ast)
     edits = []
-    edits.concat(mutable_unused_edits(findings, bg_names))
+    edits.concat(mutable_unused_edits(findings, bg_names, mutation_sensitive_names))
     edits.concat(redundant_type_annotation_edits(ast, source))
     return source if edits.empty?
     apply_edits(source, edits)
@@ -72,6 +73,50 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_bg_names(v, inside, set) }
   end
 
+  def collect_mutation_sensitive_names(ast)
+    set = Set.new
+    walk_for_mutation_sensitive_names(ast, set)
+    set
+  end
+
+  def walk_for_mutation_sensitive_names(node, set)
+    return if terminal?(node)
+    if node.is_a?(Array)
+      node.each { |n| walk_for_mutation_sensitive_names(n, set) }
+      return
+    end
+
+    if node.is_a?(AST::FuncCall) && node.name.end_with?("!")
+      node.args.each { |arg| collect_identifier_names(arg, set) }
+    elsif node.is_a?(AST::MethodCall) && mutating_method_name?(node.name)
+      collect_identifier_names(node.object, set)
+    end
+
+    return unless node.respond_to?(:each_pair)
+    node.each_pair { |_, v| walk_for_mutation_sensitive_names(v, set) }
+  end
+
+  def collect_identifier_names(node, set)
+    return if terminal?(node)
+    if node.is_a?(Array)
+      node.each { |n| collect_identifier_names(n, set) }
+      return
+    end
+    if node.is_a?(AST::Identifier) && node.respond_to?(:name)
+      set << node.name
+      return
+    end
+    return unless node.respond_to?(:each_pair)
+    node.each_pair { |_, v| collect_identifier_names(v, set) }
+  end
+
+  def mutating_method_name?(name)
+    %w[
+      append clear delete insert pop push remove reserve resize set shift
+      swap truncate unshift
+    ].include?(name.to_s)
+  end
+
   # Run the annotator with FixCollector enabled. Returns
   # [annotated_ast, findings] on success; [nil, []] if anything
   # raised. Errors are swallowed because fmt must remain robust
@@ -95,10 +140,11 @@ module LintFixRewriter
 
   # ---- Rule 1: MUTABLE never reassigned ----
 
-  def mutable_unused_edits(findings, bg_names)
+  def mutable_unused_edits(findings, bg_names, mutation_sensitive_names)
     findings.flat_map do |finding|
       next [] unless mutable_unused_finding?(finding)
-      next [] if mentions_bg_referenced_name?(finding, bg_names)
+      next [] if mentions_name_in_set?(finding, bg_names)
+      next [] if mentions_name_in_set?(finding, mutation_sensitive_names)
       finding.fixes
              .select { |fx| fx.confidence == :auto }
              .flat_map(&:edits)
@@ -112,14 +158,14 @@ module LintFixRewriter
   end
 
   # Pull the binding name out of the finding's message
-  # ("MUTABLE 'name' is never reassigned ...") and check it against
-  # the set of names referenced inside any BG block.
-  def mentions_bg_referenced_name?(finding, bg_names)
-    return false if bg_names.empty?
+  # ("MUTABLE 'name' is never reassigned ...") and check it against a
+  # set of names where dropping MUTABLE would be unsafe.
+  def mentions_name_in_set?(finding, names)
+    return false if names.empty?
     msg = finding.respond_to?(:message) ? finding.message.to_s : ""
     m = msg.match(/MUTABLE '([^']+)'/)
     return false unless m
-    bg_names.include?(m[1])
+    names.include?(m[1])
   end
 
   # Translate a Span/Edit (1-based line/col) into a flat byte-offset

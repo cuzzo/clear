@@ -130,6 +130,24 @@ RSpec.describe Formatter do
     expect(out).to eq("FN f() RETURNS Int64 ->\n  RETURN 0;\nEND\n")
   end
 
+  it "keeps MUTABLE on bindings passed to bang helpers" do
+    src = <<~CLEAR
+      FN appendOne!(MUTABLE xs: Int64[]@list) RETURNS Void ->
+        xs.append(1_i64);
+        RETURN;
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE xs: Int64[]@list = [];
+        appendOne!(xs);
+        RETURN;
+      END
+    CLEAR
+    path = write("bang_mutable.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("MUTABLE xs: Int64[]@list = []")
+  end
+
   it "wraps FN signature when it exceeds 120 chars" do
     long = (1..6).map { |i| "p#{i}: SomeReallyLongTypeName" }.join(", ")
     path = write("l.cht", "FN withLotsOfParams(#{long}) RETURNS Int64 ->\n  RETURN 0;\nEND\n")
