@@ -176,6 +176,8 @@ module NilKill
           NIL_KILL_MIN_CALLS=20              runtime confidence threshold
           NIL_KILL_UNION_POLICY=untyped|any  default: untyped
           NIL_KILL_AUTO_DEFAULTS=1           promote safe nil default rewrites into loop/apply
+          NIL_KILL_PRESSURE_SORT=priority|slots|hotness
+          NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
       TEXT
     end
   end
@@ -186,7 +188,8 @@ module NilKill
     def initialize
       @methods = {}
       @tlets = {}
-      @facts = { "files" => {}, "unsigned_methods" => [], "existing_sigs" => [], "tlet_sites" => [], "dead_nil_checks" => [] }
+      @facts = { "files" => {}, "unsigned_methods" => [], "existing_sigs" => [], "tlet_sites" => [], "dead_nil_checks" => [],
+                 "struct_declarations" => [], "struct_field_static" => [], "tuple_arrays" => [], "hash_shapes" => [] }
       @diagnostics = { "sorbet_errors" => [], "nil_origins" => [] }
       @actions = []
     end
@@ -265,6 +268,14 @@ module NilKill
           rec["classes"] = (rec["classes"] + Array(obs["classes"])).uniq.sort
         end
       end
+      Dir.glob(File.join(RUNTIME_DIR, "structs-*.jsonl")).each do |file|
+        File.foreach(file) do |line|
+          obs = JSON.parse(line)
+          next unless NilKill.target_path?(obs["path"])
+          @store.facts["struct_field_runtime"] ||= []
+          @store.facts["struct_field_runtime"] << obs
+        end
+      end
     end
 
     def index_sources
@@ -275,6 +286,10 @@ module NilKill
         @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] })
         @store.facts["tlet_sites"].concat(idx.tlet_sites)
         @store.facts["dead_nil_checks"].concat(idx.dead_nil_checks)
+        @store.facts["struct_declarations"].concat(idx.struct_declarations)
+        @store.facts["struct_field_static"].concat(idx.struct_field_static)
+        @store.facts["tuple_arrays"].concat(idx.tuple_arrays)
+        @store.facts["hash_shapes"].concat(idx.hash_shapes)
         idx.methods.each do |method|
           rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
           rec["source"] = method
@@ -515,7 +530,7 @@ module NilKill
   end
 
   class SourceIndex
-    attr_reader :methods, :tlet_sites, :dead_nil_checks
+    attr_reader :methods, :tlet_sites, :dead_nil_checks, :struct_declarations, :struct_field_static, :tuple_arrays, :hash_shapes
 
     def initialize(path)
       @path = path
@@ -524,10 +539,17 @@ module NilKill
       @methods = []
       @tlet_sites = []
       @dead_nil_checks = []
+      @struct_declarations = []
+      @struct_field_static = []
+      @tuple_arrays = []
+      @hash_shapes = []
+      @struct_fields_by_name = {}
+      @struct_full_by_name = {}
       @non_nil_locals = Set.new
       @non_nil_method_returns = Set.new
       parsed = Prism.parse_file(path)
       if parsed.success?
+        collect_struct_declarations(parsed.value, [])
         collect_non_nil_method_returns(parsed.value)
         walk(parsed.value, [])
       end
@@ -536,7 +558,8 @@ module NilKill
     def summary
       { "methods" => @methods.size, "unsigned_methods" => @methods.count { |m| !m["has_sig"] },
         "tlet_sites" => @tlet_sites.count { |s| s["tlet"] }, "candidate_tlet_sites" => @tlet_sites.count { |s| !s["tlet"] },
-        "dead_nil_checks" => @dead_nil_checks.size }
+        "dead_nil_checks" => @dead_nil_checks.size, "structs" => @struct_declarations.size,
+        "tuple_arrays" => @tuple_arrays.size, "hash_shapes" => @hash_shapes.size }
     end
 
     def walk(node, scope)
@@ -549,6 +572,13 @@ module NilKill
         scoped_facts(record) { child_walk(node.body, scope) }
       when Prism::CallNode
         inspect_call(node)
+        inspect_struct_constructor(node)
+        child_walk(node, scope)
+      when Prism::ArrayNode
+        inspect_array_literal(node)
+        child_walk(node, scope)
+      when Prism::HashNode
+        inspect_hash_literal(node)
         child_walk(node, scope)
       when Prism::LocalVariableWriteNode
         update_local_fact(node)
@@ -564,6 +594,109 @@ module NilKill
     def child_walk(node, scope)
       return unless node&.respond_to?(:child_nodes)
       node.child_nodes.compact.each { |child| walk(child, scope) }
+    end
+
+    def collect_struct_declarations(node, scope)
+      case node
+      when Prism::ClassNode, Prism::ModuleNode
+        child_scope = scope + [const_name(node.constant_path)]
+        node.child_nodes.compact.each { |child| collect_struct_declarations(child, child_scope) } if node.respond_to?(:child_nodes)
+        return
+      when Prism::ConstantWriteNode
+        if struct_new_call?(node.value)
+          klass = (scope + [node.name.to_s]).join("::")
+          fields = struct_fields(node.value)
+          if fields.any?
+            rec = { "path" => @rel, "line" => node.location.start_line, "class" => klass, "fields" => fields }
+            @struct_declarations << rec
+            @struct_fields_by_name[klass] = fields
+            @struct_full_by_name[klass] = klass
+            short = klass.split("::").last
+            unless @struct_fields_by_name.key?(short)
+              @struct_fields_by_name[short] = fields
+              @struct_full_by_name[short] = klass
+            end
+          end
+        end
+      end
+      node.child_nodes.compact.each { |child| collect_struct_declarations(child, scope) } if node.respond_to?(:child_nodes)
+    end
+
+    def struct_new_call?(node)
+      node.is_a?(Prism::CallNode) &&
+        node.name == :new &&
+        node.receiver.is_a?(Prism::ConstantReadNode) &&
+        node.receiver.name == :Struct
+    end
+
+    def struct_fields(node)
+      (node.arguments&.arguments || []).filter_map do |arg|
+        arg.value.to_s if arg.is_a?(Prism::SymbolNode)
+      end
+    end
+
+    def const_name(node)
+      return "" unless node
+      node.respond_to?(:full_name) ? (node.full_name rescue node.slice) : node.slice
+    end
+
+    def inspect_struct_constructor(node)
+      return unless node.name == :new && node.receiver
+      klass = const_name(node.receiver)
+      fields = @struct_fields_by_name[klass] || @struct_fields_by_name[klass.split("::").last]
+      full_class = @struct_full_by_name[klass] || @struct_full_by_name[klass.split("::").last] || klass
+      return unless fields
+      args = node.arguments&.arguments || []
+      args.each_with_index do |arg, idx|
+        next if idx >= fields.size || arg.is_a?(Prism::KeywordHashNode)
+        @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
+          "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
+      end
+    end
+
+    def inspect_array_literal(node)
+      elements = node.elements || []
+      return if elements.size < 2 || elements.any? { |elem| elem.is_a?(Prism::SplatNode) }
+      types = elements.map { |elem| expression_type(elem) }
+      known = types.compact
+      return if known.size != elements.size || known.uniq.size < 2
+      @tuple_arrays << { "path" => @rel, "line" => node.location.start_line, "size" => elements.size,
+        "types" => types, "confidence" => tuple_confidence(types), "code" => node.slice }
+    end
+
+    def inspect_hash_literal(node)
+      elements = node.elements || []
+      return if elements.empty?
+      keys = []
+      values = []
+      elements.each do |assoc|
+        next unless assoc.respond_to?(:key) && assoc.respond_to?(:value)
+        key = hash_key_name(assoc.key)
+        next unless key
+        keys << key
+        values << expression_type(assoc.value)
+      end
+      return if keys.size < 2 || keys.size != elements.size
+      @hash_shapes << { "path" => @rel, "line" => node.location.start_line, "keys" => keys,
+        "value_types" => values, "code" => node.slice }
+    end
+
+    def hash_key_name(node)
+      case node
+      when Prism::SymbolNode
+        node.respond_to?(:value) ? node.value.to_s : node.slice.delete_prefix(":")
+      when Prism::StringNode
+        node.respond_to?(:unescaped) ? node.unescaped : node.slice.delete_prefix("\"").delete_prefix("'").delete_suffix("\"").delete_suffix("'")
+      else
+        nil
+      end
+    end
+
+    def tuple_confidence(types)
+      constants = types.grep(/\A[A-Z]\w*(?:::[A-Z]\w*)*/)
+      namespaces = constants.filter_map { |type| type.include?("::") ? type.split("::").first : nil }.uniq
+      return "review" if namespaces.size == 1 && constants.size == types.size
+      types.uniq.size == types.size ? "high" : "review"
     end
 
     def collect_non_nil_method_returns(node)
@@ -665,6 +798,17 @@ module NilKill
       type = literal_type(node.value)
       return unless type
       @tlet_sites << { "path" => @rel, "line" => node.location.start_line, "tlet" => false, "name" => node.name.to_s, "candidate_type" => type }
+    end
+
+    def expression_type(node)
+      return nil unless node
+      if node.is_a?(Prism::CallNode) && node.name == :let && node.receiver&.slice == "T"
+        return node.arguments&.arguments&.[](1)&.slice
+      end
+      if node.is_a?(Prism::CallNode) && node.name == :must && node.receiver&.slice == "T"
+        return expression_type(node.arguments&.arguments&.first)
+      end
+      literal_type(node)
     end
 
     def non_nil_literal?(node)
@@ -994,6 +1138,8 @@ module NilKill
         evidence["diagnostics"]["nil_origins"].first(20).each { |o| lines << "- #{o["origin"]}: #{o["count"]}" }
       end
       append_callsite_pressure(lines, actions)
+      append_struct_report(lines, evidence)
+      append_tuple_report(lines, evidence)
       FileUtils.mkdir_p(TMP_DIR)
       File.write(REPORT_PATH, lines.join("\n") + "\n")
       puts File.read(REPORT_PATH)
@@ -1035,6 +1181,107 @@ module NilKill
       lines << "- Return slots: #{format_type_counts(return_counts)}"
       lines << "- Nilable param slots: #{param_counts["nilable"]}"
       lines << "- Nilable return slots: #{return_counts["nilable"]}"
+    end
+
+    def append_struct_report(lines, evidence)
+      facts = evidence["facts"]
+      runtime = Array(facts["struct_field_runtime"])
+      static = Array(facts["struct_field_static"])
+      declarations = Array(facts["struct_declarations"])
+      lines << ""
+      lines << "## Struct Shape Report"
+      lines << "- Struct declarations: #{declarations.size}"
+      lines << "- Runtime-observed struct field slots: #{runtime.map { |r| [r["class"], r["field"]] }.uniq.size}"
+      lines << "- Static constructor field observations: #{static.size}"
+      append_struct_field_candidates(lines, runtime, static)
+      append_hash_shape_candidates(lines, Array(facts["hash_shapes"]))
+    end
+
+    def append_struct_field_candidates(lines, runtime, static)
+      candidates = struct_field_candidates(runtime, static)
+      lines << ""
+      lines << "### Struct Field Type Candidates"
+      if candidates.empty?
+        lines << "- none"
+        return
+      end
+      candidates.first(50).each do |candidate|
+        source = candidate["runtime_calls"].positive? ? "runtime" : "static"
+        parts = ["#{candidate["class"]}.#{candidate["field"]}", candidate["type"], "#{source}"]
+        parts << "#{candidate["runtime_calls"]} call(s)" if candidate["runtime_calls"].positive?
+        parts << "#{candidate["nil_count"]} nil observation(s)" if candidate["nil_count"].positive?
+        lines << "- #{parts.join("; ")}"
+      end
+    end
+
+    def struct_field_candidates(runtime, static)
+      by_slot = Hash.new { |h, k| h[k] = { "class" => k[0], "field" => k[1], "classes" => [], "elem_classes" => [], "runtime_calls" => 0, "static_count" => 0 } }
+      runtime.each do |rec|
+        key = [rec["class"], rec["field"]]
+        slot = by_slot[key]
+        slot["classes"] |= Array(rec["classes"])
+        slot["elem_classes"] |= Array(rec["elem_classes"])
+        slot["runtime_calls"] += rec["calls"].to_i
+      end
+      static.each do |rec|
+        key = [rec["class"], rec["field"]]
+        slot = by_slot[key]
+        slot["classes"] |= [rec["type"]].compact
+        slot["static_count"] += 1
+      end
+      by_slot.values.filter_map do |slot|
+        type = struct_slot_type(slot)
+        next unless type && type != "T.untyped"
+        slot.merge("type" => type, "nil_count" => slot["classes"].count("NilClass"))
+      end.sort_by { |slot| [-slot["runtime_calls"], -slot["static_count"], slot["class"], slot["field"]] }
+    end
+
+    def struct_slot_type(slot)
+      classes = Array(slot["classes"]).compact.reject(&:empty?)
+      if classes == ["Array"] && !slot["elem_classes"].empty?
+        elem = NilKill.sorbet_type(slot["elem_classes"], allow_nilable: true)
+        return elem == "T.untyped" ? "T::Array[T.untyped]" : "T::Array[#{elem}]"
+      end
+      NilKill.sorbet_type(classes, allow_nilable: true)
+    end
+
+    def append_hash_shape_candidates(lines, shapes)
+      grouped = Hash.new { |h, k| h[k] = { "count" => 0, "sites" => [] } }
+      shapes.each do |shape|
+        key = Array(shape["keys"]).sort.join(", ")
+        grouped[key]["count"] += 1
+        grouped[key]["sites"] << "#{shape["path"]}:#{shape["line"]}"
+      end
+      lines << ""
+      lines << "### Hash Shapes That May Want Data/Struct"
+      if grouped.empty?
+        lines << "- none"
+        return
+      end
+      grouped.sort_by { |_keys, data| -data["count"] }.first(30).each do |keys, data|
+        lines << "- {#{keys}} appears #{data["count"]} time(s); first site #{data["sites"].first}"
+      end
+    end
+
+    def append_tuple_report(lines, evidence)
+      tuples = Array(evidence["facts"]["tuple_arrays"])
+      grouped = Hash.new { |h, k| h[k] = { "count" => 0, "sites" => [], "confidence" => "review" } }
+      tuples.each do |tuple|
+        key = Array(tuple["types"]).join(", ")
+        grouped[key]["count"] += 1
+        grouped[key]["sites"] << "#{tuple["path"]}:#{tuple["line"]}"
+        grouped[key]["confidence"] = "high" if tuple["confidence"] == "high"
+      end
+      lines << ""
+      lines << "## Tuple-Like Array Report"
+      lines << "- Tuple-like array literals: #{tuples.size}"
+      if grouped.empty?
+        lines << "- none"
+        return
+      end
+      grouped.sort_by { |_types, data| [-data["count"], data["confidence"] == "high" ? 0 : 1] }.first(50).each do |types, data|
+        lines << "- [#{types}] appears #{data["count"]} time(s), confidence #{data["confidence"]}; first site #{data["sites"].first}"
+      end
     end
 
     def empty_type_counts

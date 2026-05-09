@@ -15,11 +15,12 @@ module NilKillRuntimeTrace
 
   @methods = {}
   @tlets = {}
+  @structs = {}
   @frames = Hash.new { |h, k| h[k] = [] }
   @lock = Mutex.new
 
   class << self
-    attr_reader :methods, :tlets, :frames, :lock
+    attr_reader :methods, :tlets, :structs, :frames, :lock
   end
 
   def self.target_path?(path)
@@ -215,6 +216,75 @@ module NilKillRuntimeTrace
     end
   end
 
+  def self.install_struct_hook
+    return if Struct.singleton_class.method_defined?(:__nil_kill_orig_new)
+    Struct.singleton_class.alias_method(:__nil_kill_orig_new, :new)
+    Struct.singleton_class.define_method(:new) do |*fields, **opts, &blk|
+      loc = caller_locations(1, 1)&.first
+      klass = __nil_kill_orig_new(*fields, **opts, &blk)
+      path = loc && File.expand_path(loc.absolute_path || loc.path, ROOT)
+      if path && NilKillRuntimeTrace.target_path?(path) && klass.is_a?(Class) && klass < Struct
+        klass.instance_variable_set(:@__nil_kill_struct_path, path)
+        klass.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
+        NilKillRuntimeTrace.attach_struct(klass)
+      end
+      klass
+    end
+
+    Module.prepend(Module.new do
+      def const_added(name)
+        super
+        value = const_get(name)
+        NilKillRuntimeTrace.attach_struct(value) if value.is_a?(Class) && value < Struct
+      rescue NameError
+        nil
+      end
+    end)
+  end
+
+  def self.attach_struct(klass)
+    return unless klass.is_a?(Class) && klass < Struct
+    path = klass.instance_variable_get(:@__nil_kill_struct_path)
+    return unless path && target_path?(path)
+    return if klass.instance_variable_get(:@__nil_kill_attached)
+    fields = klass.members
+    return if fields.empty?
+    klass.instance_variable_set(:@__nil_kill_attached, true)
+    klass.prepend(Module.new do
+      define_method(:initialize) do |*args, **kw, &blk|
+        class_name = self.class.name || "AnonymousStruct"
+        args.each_with_index do |arg, idx|
+          field = fields[idx]
+          break unless field
+          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, arg)
+        end
+        kw.each { |field, value| NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value) }
+        super(*args, **kw, &blk)
+      end
+    end)
+  end
+
+  def self.record_struct_field(klass, klass_name, field, value)
+    path = klass.instance_variable_get(:@__nil_kill_struct_path)
+    line = klass.instance_variable_get(:@__nil_kill_struct_line)
+    return unless path && line
+    key = [klass_name, field.to_s, path, line]
+    shape = container_shape(value)
+    @lock.synchronize do
+      rec = (@structs[key] ||= { calls: 0, classes: Set.new, elem_classes: Set.new, key_classes: Set.new, value_classes: Set.new, array_calls: 0, hash_calls: 0 })
+      rec[:calls] += 1
+      rec[:classes] << class_name(value)
+      if shape&.first == :array
+        rec[:array_calls] += 1
+        rec[:elem_classes].merge(shape[1])
+      elsif shape&.first == :hash
+        rec[:hash_calls] += 1
+        rec[:key_classes].merge(shape[1][0])
+        rec[:value_classes].merge(shape[1][1])
+      end
+    end
+  end
+
   def self.dump
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
@@ -245,6 +315,19 @@ module NilKillRuntimeTrace
         file.puts JSON.generate(path: path, line: line, calls: rec[:calls], classes: rec[:classes].to_a.sort)
       end
     end
+    File.open(File.join(OUT_DIR, "structs-#{pid}.jsonl"), "w") do |file|
+      @structs.each do |(klass, field, path, line), rec|
+        file.puts JSON.generate(
+          class: klass, field: field, path: path, line: line, calls: rec[:calls],
+          classes: rec[:classes].to_a.sort,
+          elem_classes: rec[:elem_classes].to_a.sort,
+          key_classes: rec[:key_classes].to_a.sort,
+          value_classes: rec[:value_classes].to_a.sort,
+          array_calls: rec[:array_calls],
+          hash_calls: rec[:hash_calls],
+        )
+      end
+    end
   end
 end
 
@@ -258,6 +341,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
     nil
   end
   NilKillRuntimeTrace.install_tlet_hook
+  NilKillRuntimeTrace.install_struct_hook
   TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
   at_exit { NilKillRuntimeTrace.dump }
 end
