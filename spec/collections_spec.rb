@@ -617,6 +617,80 @@ RSpec.describe SemanticAnnotator do
         expect(val_bind.full_type.optional?).to be true
       end
     end
+
+    # -------------------------------------------------------------------------
+    # `.keys()` and `.values()` return `T[]@list` (ArrayList).
+    #
+    # Regression coverage for a fixed type-system bug. Previously the
+    # stdlib registry typed these as `String[]` / `T[]` (slices) even
+    # though the runtime allocated an owned ArrayList. Assigning to a
+    # `T[]@list` local slipped past the annotator, then Zig codegen
+    # fell over with "expected '*const ArrayListUnmanaged...', found
+    # '*[][]const u8'" inside CheatLib.cleanup.
+    #
+    # Fix: registry now returns `String[]@list` / `T[]@list`, and the
+    # runtime helpers (`mapKeys`, `mapValues`, `numericMapKeys`,
+    # `numericMapValues`) return `std.ArrayListUnmanaged(T)` rather
+    # than slices. Sharded-map `.keys()`/`.values()` already returned
+    # ArrayLists; the asymmetry was the bug.
+    #
+    # The stack machine (`_bc_runner.cht` line 3120) used to work
+    # around this by leaving the local untyped, then iterating by
+    # index. That pattern still works (ArrayList supports `xs[i]` and
+    # `xs.length()`) -- it's just no longer required.
+    # -------------------------------------------------------------------------
+    describe "HashMap.keys() returns String[]@list" do
+      let(:repro_src) { <<~CLEAR }
+        FN main() RETURNS Void ->
+            MUTABLE m: HashMap<Int64> = {};
+            m["a"] = 1_i64;
+            m["b"] = 2_i64;
+            # Direct typed assignment: `.keys()` allocates an owned
+            # ArrayList; the destination is the matching
+            # `String[]@list`. Round-trips cleanly.
+            MUTABLE typed_keys: String[]@list = m.keys();
+            ASSERT typed_keys.length() == 2_i64;
+            RETURN;
+        END
+      CLEAR
+
+      it "annotator accepts assigning .keys() to a String[]@list local" do
+        expect { run(repro_src) }.not_to raise_error
+      end
+
+      it "stamps .keys() with a list-collection type" do
+        ast = run(repro_src)
+        fn = ast.statements.first
+        let_node = fn.body.find { |s|
+          s.respond_to?(:name) && s.name == "typed_keys"
+        }
+        expect(let_node).not_to be_nil
+        expect(let_node.full_type.list_collection?).to be(true),
+          "expected typed_keys to carry list-collection type, got " \
+          "#{let_node.full_type.inspect}"
+      end
+
+      it "iterate-and-append over .keys() result still works" do
+        # The stack machine pattern (_bc_runner.cht:3120). ArrayList
+        # supports `xs[i]` and `.length()`, so the same code that
+        # used to consume a slice continues to work unchanged.
+        iterate_src = <<~CLEAR
+          FN main() RETURNS Void ->
+              MUTABLE m: HashMap<Int64> = {};
+              m["a"] = 1_i64;
+              m["b"] = 2_i64;
+              ks = m.keys();
+              MUTABLE typed_keys: String[]@list = [];
+              FOR ki IN (0_i64 ..< ks.length()) DO
+                  typed_keys.append(COPY ks[ki]);
+              END
+              ASSERT typed_keys.length() == 2_i64;
+              RETURN;
+          END
+        CLEAR
+        expect { run(iterate_src) }.not_to raise_error
+      end
+    end
   end
 
 end

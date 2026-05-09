@@ -175,20 +175,27 @@ pub fn bind(comptime deps: type) type {
         return @intCast(map.count());
     }
 
-    pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![][]const u8 {
-        const result = try allocator.alloc([]const u8, map.count());
+    // Returns an owned ArrayListUnmanaged of the map's keys, allocated
+    // via `allocator`. The CLEAR-side declared return type is
+    // `String[]@list`; that contract requires an ArrayList, not a
+    // raw slice, because the cleanup template at the binding site
+    // unconditionally dispatches via std.ArrayListUnmanaged([]const u8).
+    pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged([]const u8) {
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer list.deinit(allocator);
+        try list.ensureTotalCapacity(allocator, map.count());
         var it = map.keyIterator();
-        var i: usize = 0;
-        while (it.next()) |k| : (i += 1) result[i] = k.*;
-        return result;
+        while (it.next()) |k| list.appendAssumeCapacity(k.*);
+        return list;
     }
 
-    pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) ![]V {
-        const result = try allocator.alloc(V, map.count());
+    pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged(V) {
+        var list: std.ArrayListUnmanaged(V) = .empty;
+        errdefer list.deinit(allocator);
+        try list.ensureTotalCapacity(allocator, map.count());
         var it = map.valueIterator();
-        var i: usize = 0;
-        while (it.next()) |v| : (i += 1) result[i] = v.*;
-        return result;
+        while (it.next()) |v| list.appendAssumeCapacity(v.*);
+        return list;
     }
 
     // Helper: Check if type is ArrayListUnmanaged
@@ -283,20 +290,26 @@ pub fn bind(comptime deps: type) type {
         map.deinit(alloc);
     }
 
-    pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) ![]K {
-        const result = try allocator.alloc(K, map.count());
+    // Mirror mapKeys/mapValues: produce an owned ArrayListUnmanaged
+    // so the caller's `K[]@list` / `V[]@list` cleanup template
+    // (CheatLib.cleanup over std.ArrayListUnmanaged(T)) matches the
+    // actual storage shape.
+    pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(K) {
+        var list: std.ArrayListUnmanaged(K) = .empty;
+        errdefer list.deinit(allocator);
+        try list.ensureTotalCapacity(allocator, map.count());
         var it = map.keyIterator();
-        var i: usize = 0;
-        while (it.next()) |k| : (i += 1) result[i] = k.*;
-        return result;
+        while (it.next()) |k| list.appendAssumeCapacity(k.*);
+        return list;
     }
 
-    pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) ![]V {
-        const result = try allocator.alloc(V, map.count());
+    pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(V) {
+        var list: std.ArrayListUnmanaged(V) = .empty;
+        errdefer list.deinit(allocator);
+        try list.ensureTotalCapacity(allocator, map.count());
         var it = map.valueIterator();
-        var i: usize = 0;
-        while (it.next()) |v| : (i += 1) result[i] = v.*;
-        return result;
+        while (it.next()) |v| list.appendAssumeCapacity(v.*);
+        return list;
     }
 
     pub fn deinitList(comptime ElemT: type, alloc: std.mem.Allocator, heapAlloc: std.mem.Allocator, list: *std.ArrayListUnmanaged(ElemT)) void {

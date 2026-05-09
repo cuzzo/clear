@@ -1227,7 +1227,15 @@ MAP_METHODS = {
     sharded_zig: "try {0}.keys({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
-    return_type: ->(_) { :"String[]" },
+    # `.keys()` allocates an owned ArrayList via the supplied
+    # allocator and transfers ownership to the caller. The declared
+    # return type must reflect that: `String[]@list` (ArrayList),
+    # not `String[]` (slice). Returning a slice would let the
+    # annotator silently accept assignments to a `String[]@list`
+    # local while the cleanup template still expects ArrayList,
+    # producing a Zig type-mismatch in CheatLib.cleanup at the
+    # binding's defer site.
+    return_type: ->(_) { :"String[]@list" },
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
@@ -1260,7 +1268,9 @@ MAP_METHODS = {
     sharded_zig: "try {0}.values({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
-    return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
+    # See the matching note on `keys`: this allocates an owned list,
+    # so the declared type must be `T[]@list`, not the bare slice.
+    return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]@list" },
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
