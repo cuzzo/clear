@@ -702,6 +702,7 @@ pub const Scheduler = struct {
     // Standard-sized stacks are kept in the L1 cache for fast reuse.
     // All other sizes are returned directly to the pool slab.
     fn freeLocalStackMemory(self: *Scheduler, stack: []u8) void {
+        if (fm.debug_stack_origins) fm.forgetStackOrigin(@intFromPtr(stack.ptr));
         if (stack.len == STANDARD_STACK_SIZE and self.stack_cache.items.len < STACK_CACHE_LIMIT) {
             self.stack_cache.append(self.allocator, stack) catch {
                 self.stack_pool.free(stack);
@@ -986,6 +987,12 @@ pub const Scheduler = struct {
                             config.stack_size,
                         );
                         const stack_mem = self.allocStack(effective_size) catch continue;
+                        if (fm.debug_stack_origins) fm.recordStackOrigin(@intFromPtr(stack_mem.ptr), .{
+                            .user_fn = if (msg.user_fn) |f| @intFromPtr(f) else 0,
+                            .return_addr = @returnAddress(),
+                            .size_class = effective_size,
+                            .owner_index = @intCast(self.index),
+                        });
                         const task = blk: {
                             const fiber_ptr = self.allocator.create(Fiber) catch {
                                 self.freeLocalStackMemory(stack_mem);
@@ -1510,6 +1517,68 @@ pub const Scheduler = struct {
     // Helper to get current task
     pub fn getCurrent(self: *Scheduler) *Task {
         return self.current_task.?;
+    }
+
+    /// Test-only single-iteration drain+pop+switchTo+dispatch helper.
+    ///
+    /// Mirrors the subset of `Scheduler.run` that test code that drives
+    /// a scheduler manually (e.g. main-thread polling in a test that
+    /// also spawns worker scheduler threads) typically reimplements.
+    /// Centralizing this prevents bugs where a hand-rolled loop omits
+    /// the `in_inbox` protocol and silently drops wakes, leading to
+    /// parked-forever fibers and leaked Fiber/Task allocations.
+    ///
+    /// Concrete subset of `run()` mirrored here:
+    ///   - drainChannels (pulls in cross-thread Spawn / Resume / RemoteCall)
+    ///   - ready_queue.pop
+    ///   - in_inbox transition IN_QUEUE -> IDLE before switchTo (line 1239
+    ///     of run()); without this, a re-park's submitResume CAS
+    ///     IDLE->IN_QUEUE silently fails and the wake is lost.
+    ///   - .Finished destroy guarded by CAS IDLE -> DESTROYING (line 1283)
+    ///     so a concurrent submitResume that planted IN_QUEUE delegates
+    ///     destruction to the next pop instead of double-destroying.
+    ///   - .Ready re-enqueue guarded by in_inbox == IDLE (line 1314) to
+    ///     avoid duplicate pushes when a concurrent submitResume already
+    ///     queued the task elsewhere.
+    ///
+    /// Returns true if any task was popped (work was done), false if
+    /// idle. Caller is responsible for the outer loop and termination
+    /// condition.
+    ///
+    /// TODO: migrate the following manual polling loops to use this helper:
+    ///   - zig/runtime/steal-hammer-test.zig:189-213 (same broken pattern
+    ///     as stream-test had: missing `in_inbox = IDLE` after pop +
+    ///     missing .Finished CAS guard + missing .Ready in_inbox guard).
+    /// `zig/runtime/stream-test.zig:1170-1192` already uses pollOne.
+    pub fn pollOne(self: *Scheduler) bool {
+        self.drainChannels();
+        const task = self.ready_queue.pop() orelse return false;
+        task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+        self.current_task = task;
+        fc.__current_task_fn = @intFromPtr(task.user_fn);
+        fc.__current_task_size = task.base.size_class;
+        task.base.switchTo(&self.main_ctx);
+        switch (task.status.load(.acquire)) {
+            .Finished => {
+                if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_DESTROYING, .acq_rel, .acquire) == null) {
+                    _ = self.active_tasks.fetchSub(1, .monotonic);
+                    self.releaseTaskEbr(task);
+                    self.freeStack(task.base.stack);
+                    self.allocator.destroy(task.base);
+                    self.task_slab.destroy(task);
+                }
+                // CAS-fail: a concurrent submitResume holds IN_QUEUE.
+                // The next pollOne call will pick up the task with
+                // status still .Finished and the CAS will succeed.
+            },
+            .Ready => {
+                if (task.in_inbox.load(.acquire) == qs.IN_INBOX_IDLE) {
+                    self.enqueueTask(task);
+                }
+            },
+            .Blocked => {},
+        }
+        return true;
     }
 
     // Cooperative yield: switch to the scheduler only if other fibers are ready.

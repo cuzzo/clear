@@ -2838,6 +2838,272 @@ pub fn testStreamCloseErrAtomicCoverage() !void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SplitStream chunk publish-acquire protocol
+//
+// `lib/streams.zig` SplitStream(T) commits a batch of items into a chunk
+// via `chunk.len.store(write_len, .release)` after writing `values[i]`
+// in-place. Consumers see the batch via `chunk.len.load(.acquire)`; the
+// release/acquire pair must establish happens-before so the consumer's
+// reads of `values[i]` observe the producer's writes.
+//
+// Without correct release/acquire pairing, on a weak memory model the
+// consumer can observe `chunk.len = N` but read stale `values[i]`. TSan
+// surfaces this as a data race on real hardware; loom drives every
+// interleaving deterministically under SimAtomic.
+//
+// The scenario stubs the publish protocol directly (PublishChunk struct)
+// rather than instantiating the full SplitStream pipeline, because loom
+// only sees SimAtomic ops — the inner.mutex (pthread) appears as a
+// single critical section to the harness, hiding the publish-acquire
+// race we're trying to verify.
+//
+// Properties verified across all schedules:
+//   1. Once consumer observes `len > 0` via .acquire, every `values[i]`
+//      for i in 0..len equals the producer's write (no torn reads).
+//   2. Producer's release pairs with consumer's acquire — i.e., loom
+//      explores at least one schedule where the consumer races the
+//      publish (otherwise the test is structurally toothless).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PUBLISH_CAP: usize = 4;
+
+const PublishChunk = struct {
+    // values is plain memory; correctness depends on the .release on
+    // `len` synchronizing-with the .acquire on `len`, transitively
+    // making these writes visible to the consumer.
+    values: [PUBLISH_CAP]i64 = [_]i64{0} ** PUBLISH_CAP,
+    len: qs.Atomic(usize) = qs.Atomic(usize).init(0),
+};
+
+var g_publish_chunk: PublishChunk = .{};
+var g_publish_torn: bool = false;
+var g_publish_observed: bool = false;
+
+fn entryPublishProducer() callconv(.c) void {
+    // Mirrors SplitStream.push: write items in-place, then publish the
+    // count atomically with .release.
+    inline for (0..PUBLISH_CAP) |i| {
+        g_publish_chunk.values[i] = @as(i64, @intCast(i + 1));
+    }
+    g_publish_chunk.len.store(PUBLISH_CAP, .release);
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryPublishConsumer() callconv(.c) void {
+    // Mirrors SplitStream.next's cursor read: spin on chunk.len with
+    // .acquire until non-zero, then read values[].
+    var seen_len: usize = 0;
+    while (seen_len == 0) {
+        seen_len = g_publish_chunk.len.load(.acquire);
+        if (seen_len == 0) fc.__fiber.?.yield();
+    }
+    g_publish_observed = true;
+    // Every published value must match the producer's write. A stale
+    // value here means the .release/.acquire chain failed to publish
+    // the prior `values[i]` writes alongside the len update.
+    inline for (0..PUBLISH_CAP) |i| {
+        if (g_publish_chunk.values[i] != @as(i64, @intCast(i + 1))) {
+            g_publish_torn = true;
+        }
+    }
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testStreamChunkPublishAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var torn_count: usize = 0;
+    var observed_count: usize = 0;
+    const total: usize = if (build_options.coverage) 64 else 4096;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        g_publish_chunk = .{};
+        g_publish_torn = false;
+        g_publish_observed = false;
+
+        try h.createThread(0, @intFromPtr(&entryPublishProducer));
+        try h.createThread(1, @intFromPtr(&entryPublishConsumer));
+
+        h.run() catch {};
+
+        if (g_publish_torn) torn_count += 1;
+        if (g_publish_observed) observed_count += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (torn_count > 0) {
+        std.debug.print("\nstream-publish-atomic: {d}/{d} schedules saw torn reads\n", .{ torn_count, total });
+        return error.LoomFailures;
+    }
+    // Structural toothless-test guard: at least half the schedules
+    // should reach the consumer's observation window. If they don't,
+    // the harness isn't actually interleaving producer and consumer
+    // (e.g. the consumer never gets scheduled before the producer
+    // finishes), and the test silently passes without exercising the
+    // race surface.
+    if (observed_count < total / 2) {
+        std.debug.print("\nstream-publish-atomic: only {d}/{d} schedules observed publish — test toothless\n", .{ observed_count, total });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stream(T) SPSC ring head/tail release/acquire protocol
+//
+// `data-structures.zig` Stream(T).Inner uses a fixed-size lock-free ring
+// for the producer/consumer hand-off. The ordering contract:
+//
+//   producer push:        consumer next:
+//   ─────────────────     ─────────────────
+//   read tail .acquire    read head .acquire     ← see other side's index
+//   write buf[h]          read buf[t]            ← non-atomic data
+//   head.store h+1, .release   tail.store t+1, .release ← publish own index
+//
+// Each side's .release on its own index synchronizes-with the other
+// side's .acquire on the same index. Without this pairing, on a weak
+// memory model the consumer can observe head advanced while seeing a
+// stale buf[t], and TSan flags a data race on real hardware.
+//
+// Properties verified across schedules:
+//   1. Consumer never reads a slot whose published value isn't the
+//      producer's most recent write to that slot.
+//   2. FIFO order: item N read by consumer equals N+1 (producer's writes).
+//   3. Toothless-test guard: at least half the schedules race the
+//      head-advance against the consumer's read.
+//
+// Stubs the ring directly rather than driving the full Stream(T) API
+// because the close/setError paths use a spinlock that hides the
+// ring's atomic protocol from loom (the spin-acquire becomes one
+// observed atomic).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RING_CAP: u32 = 4;
+const RING_MASK: u32 = RING_CAP - 1;
+const RING_PUSH: u32 = 2;
+
+const SpscRing = struct {
+    buf: [RING_CAP]i64 = [_]i64{0} ** RING_CAP,
+    head: qs.Atomic(u32) = qs.Atomic(u32).init(0),
+    tail: qs.Atomic(u32) = qs.Atomic(u32).init(0),
+};
+
+var g_ring: SpscRing = .{};
+var g_ring_torn: bool = false;
+var g_ring_consumed: u32 = 0;
+var g_ring_observed_advance: bool = false;
+
+fn entryRingProducer() callconv(.c) void {
+    var i: u32 = 0;
+    while (i < RING_PUSH) : (i += 1) {
+        // Producer's read of consumer's tail. .acquire so we see prior
+        // tail.store(.release) writes (slot reuse on wraparound).
+        const t = g_ring.tail.load(.acquire);
+        const h = g_ring.head.load(.monotonic);
+        // Test sized so we never need to spin for room.
+        if (h -% t >= RING_CAP) {
+            harness.done[0] = true;
+            while (true) fc.__fiber.?.yield();
+        }
+        // Non-atomic data write happens-before the head publish via
+        // the .release store below.
+        g_ring.buf[h & RING_MASK] = @as(i64, @intCast(i + 1));
+        g_ring.head.store(h +% 1, .release);
+    }
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryRingConsumer() callconv(.c) void {
+    while (g_ring_consumed < RING_PUSH) {
+        const t = g_ring.tail.load(.monotonic);
+        const h = g_ring.head.load(.acquire);
+        if (h == t) {
+            fc.__fiber.?.yield();
+            continue;
+        }
+        g_ring_observed_advance = true;
+        // After acquire-load of head saw t < h, the corresponding
+        // buf[t] write must be visible (release/acquire chain).
+        const v = g_ring.buf[t & RING_MASK];
+        const expected = @as(i64, @intCast(g_ring_consumed + 1));
+        if (v != expected) g_ring_torn = true;
+        g_ring.tail.store(t +% 1, .release);
+        g_ring_consumed += 1;
+    }
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testStreamRingHeadTailAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var torn_count: usize = 0;
+    var advance_count: usize = 0;
+    const total: usize = if (build_options.coverage) 64 else 4096;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        g_ring = .{};
+        g_ring_torn = false;
+        g_ring_consumed = 0;
+        g_ring_observed_advance = false;
+
+        try h.createThread(0, @intFromPtr(&entryRingProducer));
+        try h.createThread(1, @intFromPtr(&entryRingConsumer));
+
+        h.run() catch {};
+
+        if (g_ring_torn) torn_count += 1;
+        if (g_ring_observed_advance) advance_count += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (torn_count > 0) {
+        std.debug.print("\nstream-ring-atomic: {d}/{d} schedules saw torn ring reads\n", .{ torn_count, total });
+        return error.LoomFailures;
+    }
+    if (advance_count < total / 2) {
+        std.debug.print("\nstream-ring-atomic: only {d}/{d} schedules raced head advance — test toothless\n", .{ advance_count, total });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Multi-fallible sorted-acquire pattern (emit_sorted_lock_acquires_fallible)
 //
 // Validates the SHAPE the CLEAR transpiler emits for `WITH EXCLUSIVE a,
@@ -3545,6 +3811,119 @@ pub fn testDrainChannelsSpawn() !void {
     const top = sched.ready_queue.top.load(.monotonic);
     const peeked = buf[top & mask].load(.monotonic) orelse return error.ReadyQueuePeekedNull;
     if (peeked.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// in_inbox repeat-cycle invariant (regression test for the SplitStream
+// pubsub-hammer leak found in branch hotfix/tsan-stream-test-leak):
+//
+// A long-lived task that parks and wakes repeatedly must have its
+// in_inbox slot reset IN_QUEUE -> IDLE between cycles, otherwise the
+// SECOND submitResume's CAS (IDLE -> IN_QUEUE) silently fails and the
+// wake is dropped, leaving the task parked forever (Fiber/Task leak).
+//
+// `Scheduler.run` (line 1239) and `Scheduler.pollOne` (the helper test
+// polling loops are required to use) both perform this reset. The bug
+// surfaced when `stream-test.zig`'s manual polling loop reimplemented
+// the dispatch without the reset, breaking ~7% of TSan stream-test
+// runs. This scenario validates the reset is necessary AND sufficient
+// for the repeat-cycle case so the protocol stays welded down.
+//
+// Properties verified:
+//   1. submitResume #1 (after task.status==.Blocked, in_inbox==IDLE)
+//      claims IN_QUEUE.
+//   2. After drain + run-loop pop with in_inbox.store(IDLE), submitResume
+//      #2 also claims IN_QUEUE (i.e. the slot was actually released).
+//   3. status transitions Blocked -> Ready after each drain.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn rcDummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+pub fn testInInboxRepeatCycleInvariant() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        // Drain ready_queue before deinit -- our enqueued stub task has
+        // .base = undefined; deinit walking pending tasks would deref it.
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Pretend we're some other scheduler so submitResume takes the
+    // cross-thread SPSC path (the path stream-test.zig's polling loop
+    // had to manually mirror).
+    var sender_ebr: ebr_mod.EbrContext = .{};
+    var sender_pool = fm.StackPool.init(allocator);
+    var sender_sched = try fp.Scheduler.init(allocator, &sender_ebr, &sender_pool);
+    defer {
+        sender_sched.deinit();
+        sender_pool.deinit();
+        sender_ebr.deinit(allocator);
+    }
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sender_sched;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    var stub_task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&rcDummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+
+    // ── Cycle 1 ──────────────────────────────────────────────────
+    if (stub_task.in_inbox.load(.monotonic) != qs.IN_INBOX_IDLE) {
+        return error.InitialInboxNotIdle;
+    }
+
+    sched.submitResume(&stub_task);
+    if (stub_task.in_inbox.load(.monotonic) != qs.IN_INBOX_IN_QUEUE) {
+        return error.FirstResumeDidNotClaimInbox;
+    }
+
+    sched.drainChannels();
+    if (stub_task.status.load(.monotonic) != .Ready) return error.FirstDrainDidNotSetReady;
+    // status is .Ready, in_inbox is still IN_QUEUE (the run-loop owns
+    // resetting it to IDLE on pop).
+
+    // Mirror Scheduler.run (line 1239) / Scheduler.pollOne: pop and
+    // release the slot. The bug we're testing for is OMITTING this
+    // line.
+    const popped = sched.ready_queue.pop() orelse return error.PopMissingTask;
+    if (popped != &stub_task) return error.PopReturnedWrongTask;
+    popped.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+
+    // ── Cycle 2: re-park then re-wake ────────────────────────────
+    // (In a real fiber, switchTo would have run here, then the fiber
+    // would yield with status=.Blocked. We simulate that directly.)
+    stub_task.status.store(.Blocked, .release);
+
+    sched.submitResume(&stub_task);
+    // THIS IS THE INVARIANT: cycle 2's submitResume must succeed. If
+    // cycle 1's pop forgot to reset in_inbox, this CAS fails silently
+    // and the wake is dropped (the bug we're testing for).
+    if (stub_task.in_inbox.load(.monotonic) != qs.IN_INBOX_IN_QUEUE) {
+        return error.SecondResumeFailedToClaimInbox;
+    }
+
+    sched.drainChannels();
+    if (stub_task.status.load(.monotonic) != .Ready) return error.SecondDrainDidNotSetReady;
+
+    // Cleanup: pop the second cycle's task so deinit sees an empty queue.
+    const popped2 = sched.ready_queue.pop() orelse return error.SecondPopMissingTask;
+    if (popped2 != &stub_task) return error.SecondPopReturnedWrongTask;
+    popped2.in_inbox.store(qs.IN_INBOX_IDLE, .release);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

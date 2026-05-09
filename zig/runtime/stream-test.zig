@@ -1085,23 +1085,50 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     var shutdown = std.atomic.Value(bool).init(false);
     var completed = std.atomic.Value(usize).init(0);
 
+    // Two-phase shutdown barrier (mirrors the canonical fix from
+    // commit 12499259 applied to versioned-fiber-stress-test.zig and
+    // siblings). Workers post-run() fence on `post_run_workers` then
+    // block on `deinit_phase` before invoking their per-thread
+    // sched.deinit. The test body waits for every worker to be at the
+    // fence (proving none is still in handleTaskAfterDispatch's
+    // .Finished -> freeStack -> submitRemoteStackFree path) before
+    // flipping `deinit_phase` and joining. Without this, T_b's push
+    // into T_a's SPSC ring races T_a's `allocator.destroy(ring)` at
+    // scheduler.zig:543 -- a cross-scheduler shutdown UAF that leaks
+    // the stolen-stack's Fiber and surfaces as `(empty stack trace)`
+    // in DebugAllocator's leak report.
+    var post_run_workers = std.atomic.Value(usize).init(0);
+    var deinit_phase = std.atomic.Value(bool).init(false);
+
     const WorkerCtx = struct {
         allocator: std.mem.Allocator,
         global_ctx: *EbrContext,
         stack_pool: *fm.StackPool,
         shutdown: *std.atomic.Value(bool),
+        post_run_workers: *std.atomic.Value(usize),
+        deinit_phase: *std.atomic.Value(bool),
     };
 
     const workerMain = struct {
         fn run(ctx: *WorkerCtx) void {
             var worker_sched = fp.Scheduler.init(ctx.allocator, ctx.global_ctx, ctx.stack_pool) catch return;
-            defer worker_sched.deinit();
             worker_sched.shutdown_on_idle = false;
             worker_sched.global_shutdown = ctx.shutdown;
             fp.active_scheduler = &worker_sched;
             fp.scheduler_running = true;
             worker_sched.run();
             fp.scheduler_running = false;
+
+            // Phase 1: announce we have left run() and will issue no
+            // more cross-scheduler submits.
+            _ = ctx.post_run_workers.fetchAdd(1, .release);
+            // Phase 2: block until every peer has reached the fence.
+            // Past this point no peer is in a submitRemote* path, so
+            // freeing our SPSC channels in worker_sched.deinit is safe.
+            while (!ctx.deinit_phase.load(.acquire)) {
+                compat.sleepNs(std.time.ns_per_ms);
+            }
+            worker_sched.deinit();
         }
     }.run;
 
@@ -1110,6 +1137,8 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         .global_ctx = &global_ctx,
         .stack_pool = &stack_pool,
         .shutdown = &shutdown,
+        .post_run_workers = &post_run_workers,
+        .deinit_phase = &deinit_phase,
     };
 
     var workers: [worker_count]std.Thread = undefined;
@@ -1167,33 +1196,21 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     const expected_completed = subscriber_count + 1;
     const deadline = compat.milliTimestamp() + 15_000;
     while (completed.load(.acquire) < expected_completed and compat.milliTimestamp() < deadline) {
-        sched.drainChannels();
-        if (sched.ready_queue.len() > 0) {
-            const task = sched.ready_queue.pop() orelse continue;
-            sched.current_task = task;
-            fc.__current_task_fn = @intFromPtr(task.user_fn);
-            fc.__current_task_size = task.base.size_class;
-            task.base.switchTo(&sched.main_ctx);
-            switch (task.status.load(.acquire)) {
-                .Finished => {
-                    _ = sched.active_tasks.fetchSub(1, .monotonic);
-                    sched.releaseTaskEbr(task);
-                    sched.freeStack(task.base.stack);
-                    sched.allocator.destroy(task.base);
-                    sched.task_slab.destroy(task);
-                },
-                .Ready => {
-                    sched.ready_queue.push(sched.allocator, task) catch unreachable;
-                },
-                .Blocked => {},
-            }
-        } else {
-            compat.sleepNs(std.time.ns_per_ms);
-        }
+        if (!sched.pollOne()) compat.sleepNs(std.time.ns_per_ms);
     }
 
     shutdown.store(true, .release);
     fp.global_registry.notifyAll();
+
+    // Two-phase shutdown: wait for every worker to be at its post-run
+    // fence (no peer is still in submitRemoteStackFree), then release
+    // the deinit barrier so all workers can free their channels in
+    // parallel without racing each other's submits.
+    while (post_run_workers.load(.acquire) < worker_count) {
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+    deinit_phase.store(true, .release);
+
     for (&workers) |*worker| worker.join();
 
     try std.testing.expectEqual(expected_completed, completed.load(.acquire));
