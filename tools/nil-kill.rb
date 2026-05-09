@@ -278,6 +278,14 @@ module NilKill
           @store.facts["struct_field_runtime"] << obs
         end
       end
+      Dir.glob(File.join(RUNTIME_DIR, "tuples-*.jsonl")).each do |file|
+        File.foreach(file) do |line|
+          obs = JSON.parse(line)
+          next unless NilKill.target_path?(obs["path"])
+          @store.facts["tuple_runtime"] ||= []
+          @store.facts["tuple_runtime"] << obs
+        end
+      end
     end
 
     def index_sources
@@ -729,7 +737,52 @@ module NilKill
       { "path" => @rel, "line" => node.location.start_line, "class" => scope.join("::"),
         "method" => node.name.to_s, "kind" => node.receiver.is_a?(Prism::SelfNode) ? "class" : "instance",
         "has_sig" => !sig.nil?, "sig" => sig, "params" => params(node), "scope" => scope,
-        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => uses_yield?(node.body) }
+        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => uses_yield?(node.body),
+        "protocols" => param_protocols(node) }
+    end
+
+    def param_protocols(node)
+      names = params(node).map { |param| param["name"] }.to_set
+      protocols = names.each_with_object({}) { |name, hash| hash[name] = { "methods" => Set.new, "aliases" => Set.new, "gaps" => Set.new } }
+      collect_protocols(node.body, protocols, names)
+      protocols.transform_values do |data|
+        { "methods" => data["methods"].to_a.sort, "aliases" => data["aliases"].to_a.sort, "gaps" => data["gaps"].to_a.sort }
+      end
+    end
+
+    def collect_protocols(node, protocols, param_names)
+      return unless node
+      if node.is_a?(Prism::CallNode)
+        receiver = node.receiver
+        if receiver.is_a?(Prism::LocalVariableReadNode) && protocols.key?(receiver.name.to_s)
+          protocols[receiver.name.to_s]["methods"] << node.name.to_s
+        end
+        (node.arguments&.arguments || []).each do |arg|
+          if arg.is_a?(Prism::LocalVariableReadNode) && protocols.key?(arg.name.to_s)
+            protocols[arg.name.to_s]["gaps"] << "forwarded to #{node.name} at #{@rel}:#{node.location.start_line}"
+          end
+        end
+      elsif node.is_a?(Prism::LocalVariableWriteNode)
+        source = unwrap_alias_source(node.value)
+        if source && protocols.key?(source)
+          protocols[source]["aliases"] << "#{node.name} at #{@rel}:#{node.location.start_line}"
+        end
+      elsif node.is_a?(Prism::InstanceVariableWriteNode)
+        source = unwrap_alias_source(node.value)
+        protocols[source]["gaps"] << "captured in #{node.name} at #{@rel}:#{node.location.start_line}" if source && protocols.key?(source)
+      end
+      node.child_nodes.compact.each { |child| collect_protocols(child, protocols, param_names) } if node.respond_to?(:child_nodes)
+    end
+
+    def unwrap_alias_source(node)
+      case node
+      when Prism::LocalVariableReadNode
+        node.name.to_s
+      when Prism::CallNode
+        if node.receiver&.slice == "T" && %i[must cast let].include?(node.name)
+          unwrap_alias_source(node.arguments&.arguments&.first)
+        end
+      end
     end
 
     def sig_above(line)
@@ -1193,6 +1246,7 @@ module NilKill
         lookup[[source["path"], source["line"]]] = method
       end
       unused_return_names = unused_return_method_names(evidence)
+      protocol_index = protocol_class_index(evidence)
       param_buckets = Hash.new(0)
       return_buckets = Hash.new(0)
       param_examples = Hash.new { |hash, key| hash[key] = [] }
@@ -1205,7 +1259,10 @@ module NilKill
           classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
           bucket = untyped_bucket_for_classes(classes, rec)
           param_buckets[bucket] += 1
-          param_examples[bucket] << slot_example(method, name, classes, rec) if param_examples[bucket].size < 8
+          if param_examples[bucket].size < 8
+            param_examples[bucket] << slot_example(method, name, classes, rec,
+              protocol_hint: bucket == "runtime union; kept T.untyped by policy" ? protocol_hint(method, name, classes, protocol_index) : nil)
+          end
         end
         ret = extract_return_type(method["sig"].to_s)
         next unless ret == "T.untyped"
@@ -1265,12 +1322,58 @@ module NilKill
       end
     end
 
-    def slot_example(method, slot_name, classes, rec)
+    def slot_example(method, slot_name, classes, rec, protocol_hint: nil)
       observed = Array(classes).compact.uniq.sort
       observed_text = observed.empty? ? "no observed runtime type" : observed.first(8).join(", ")
       observed_text += ", ..." if observed.size > 8
       calls = rec ? rec["calls"].to_i : 0
-      "#{method["path"]}:#{method["line"]} #{method["class"]}##{method["method"]} #{slot_name}; #{calls} call(s); observed #{observed_text}"
+      base = "#{method["path"]}:#{method["line"]} #{method["class"]}##{method["method"]} #{slot_name}; #{calls} call(s); observed #{observed_text}"
+      protocol_hint ? "#{base}; #{protocol_hint}" : base
+    end
+
+    def protocol_hint(method, name, observed_classes, protocol_index)
+      protocol = method.dig("protocols", name) || {}
+      required = Array(protocol["methods"]).reject { |m| ignorable_protocol_method?(m) }.uniq.sort
+      aliases = Array(protocol["aliases"])
+      gaps = Array(protocol["gaps"])
+      parts = []
+      if required.empty?
+        parts << "direct protocol: none observed"
+      else
+        observed = Array(observed_classes).reject { |klass| klass == "NilClass" || klass == "T.untyped" }.to_set
+        candidates = protocol_index.filter_map do |klass, methods|
+          next if observed.include?(klass)
+          klass if required.all? { |method_name| methods.include?(method_name) }
+        end.sort.first(8)
+        parts << "direct protocol ##{required.join(", #")}"
+        parts << "other potential options, not exhaustive: #{candidates.join(", ")}" unless candidates.empty?
+      end
+      parts << "analysis gaps: aliases seen #{aliases.first(4).join(", ")}" unless aliases.empty?
+      parts << "analysis gaps: #{gaps.first(3).join("; ")}" unless gaps.empty?
+      parts.join("; ")
+    end
+
+    def ignorable_protocol_method?(name)
+      %w[
+        nil? class is_a? kind_of? instance_of? object_id respond_to?
+        instance_variable_get instance_variable_set itself tap then yield_self
+      ].include?(name)
+    end
+
+    def protocol_class_index(evidence)
+      index = Hash.new { |h, k| h[k] = Set.new }
+      all_methods = Array(evidence.dig("facts", "existing_sigs")) + Array(evidence.dig("facts", "unsigned_methods"))
+      all_methods.each do |method|
+        next unless method["kind"] == "instance" && !method["class"].to_s.empty?
+        index[method["class"]] << method["method"]
+      end
+      Array(evidence.dig("facts", "struct_declarations")).each do |decl|
+        Array(decl["fields"]).each { |field| index[decl["class"]] << field }
+      end
+      struct_rbi_types.each_key do |klass, field|
+        index[klass] << field
+      end
+      index
     end
 
     def unused_return_method_names(evidence)
@@ -1416,6 +1519,7 @@ module NilKill
 
     def append_tuple_report(lines, evidence)
       tuples = Array(evidence["facts"]["tuple_arrays"])
+      runtime_tuples = Array(evidence["facts"]["tuple_runtime"])
       grouped = Hash.new { |h, k| h[k] = { "count" => 0, "sites" => [], "confidence" => "review" } }
       tuples.each do |tuple|
         key = Array(tuple["types"]).join(", ")
@@ -1426,12 +1530,26 @@ module NilKill
       lines << ""
       lines << "## Tuple-Like Array Report"
       lines << "- Tuple-like array literals: #{tuples.size}"
+      lines << "- Runtime-observed tuple-like array slots: #{runtime_tuples.map { |tuple| [tuple["kind"], tuple["path"], tuple["line"], tuple["slot"]] }.uniq.size}"
+      append_runtime_tuple_list(lines, runtime_tuples)
       if grouped.empty?
         lines << "- none"
         return
       end
       grouped.sort_by { |_types, data| [-data["count"], data["confidence"] == "high" ? 0 : 1] }.first(50).each do |types, data|
         lines << "- [#{types}] appears #{data["count"]} time(s), confidence #{data["confidence"]}; first site #{data["sites"].first}"
+      end
+    end
+
+    def append_runtime_tuple_list(lines, runtime_tuples)
+      lines << ""
+      lines << "### Runtime Tuple-Like Array Slots"
+      if runtime_tuples.empty?
+        lines << "- none"
+        return
+      end
+      runtime_tuples.sort_by { |tuple| [-tuple["calls"].to_i, tuple["path"], tuple["line"].to_i] }.first(30).each do |tuple|
+        lines << "- #{NilKill.rel(tuple["path"])}:#{tuple["line"]} #{tuple["kind"]} #{tuple["slot"]}; [#{Array(tuple["types"]).join(", ")}]; #{tuple["calls"]} call(s)"
       end
     end
 

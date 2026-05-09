@@ -16,11 +16,12 @@ module NilKillRuntimeTrace
   @methods = {}
   @tlets = {}
   @structs = {}
+  @tuples = {}
   @frames = Hash.new { |h, k| h[k] = [] }
   @lock = Mutex.new
 
   class << self
-    attr_reader :methods, :tlets, :structs, :frames, :lock
+    attr_reader :methods, :tlets, :structs, :tuples, :frames, :lock
   end
 
   def self.target_path?(path)
@@ -113,6 +114,7 @@ module NilKillRuntimeTrace
         next unless shape
         if shape[0] == :array
           frame[:param_elem][name.to_s].merge(shape[1])
+          record_tuple("param", tp.path, tp.lineno, name.to_s, value)
         else
           frame[:param_kv][name.to_s][0].merge(shape[1][0])
           frame[:param_kv][name.to_s][1].merge(shape[1][1])
@@ -136,6 +138,7 @@ module NilKillRuntimeTrace
       next unless shape
       if shape[0] == :array
         b[:return_elem].merge(shape[1])
+        record_tuple("return", tp.path, tp.lineno, tp.method_id.to_s, value)
       else
         b[:return_kv][0].merge(shape[1][0])
         b[:return_kv][1].merge(shape[1][1])
@@ -277,12 +280,22 @@ module NilKillRuntimeTrace
       if shape&.first == :array
         rec[:array_calls] += 1
         rec[:elem_classes].merge(shape[1])
+        record_tuple("struct_field", path, line, "#{klass_name}.#{field}", value)
       elsif shape&.first == :hash
         rec[:hash_calls] += 1
         rec[:key_classes].merge(shape[1][0])
         rec[:value_classes].merge(shape[1][1])
       end
     end
+  end
+
+  def self.record_tuple(kind, path, line, slot, value)
+    return unless value.is_a?(Array) && value.size >= 2
+    types = value.first(ELEMENT_SAMPLE).map { |item| class_name(item) }
+    return unless types.size == value.size && types.uniq.size > 1
+    key = [kind, File.expand_path(path, ROOT), line, slot.to_s, value.size, types]
+    rec = (@tuples[key] ||= { calls: 0 })
+    rec[:calls] += 1
   end
 
   def self.dump
@@ -326,6 +339,11 @@ module NilKillRuntimeTrace
           array_calls: rec[:array_calls],
           hash_calls: rec[:hash_calls],
         )
+      end
+    end
+    File.open(File.join(OUT_DIR, "tuples-#{pid}.jsonl"), "w") do |file|
+      @tuples.each do |(kind, path, line, slot, size, types), rec|
+        file.puts JSON.generate(kind: kind, path: path, line: line, slot: slot, size: size, types: types, calls: rec[:calls])
       end
     end
   end
