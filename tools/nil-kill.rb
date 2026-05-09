@@ -1169,6 +1169,7 @@ module NilKill
   class Report
     def run
       evidence = Store.read
+      @evidence = evidence
       actions = evidence["actions"]
       by_conf = actions.group_by { |a| a["confidence"] }
       lines = ["# Nil Kill Report", ""]
@@ -1180,13 +1181,7 @@ module NilKill
       lines << "- Existing/candidate T.let sites: #{evidence["facts"]["tlet_sites"].size}"
       lines << "- Sorbet errors captured: #{evidence["diagnostics"]["sorbet_errors"].size}"
       append_signature_coverage(lines, evidence)
-      [HIGH, REVIEW, GAP].each do |conf|
-        list = by_conf[conf] || []
-        lines << ""
-        lines << "## #{conf} actions (#{list.size})"
-        list.first(50).each { |a| lines << "- #{a["path"]}:#{a["line"]} #{a["kind"]}: #{a["message"]}" }
-        lines << "- ... #{list.size - 50} more" if list.size > 50
-      end
+      append_action_sections(lines, actions, by_conf)
       unless evidence["diagnostics"]["nil_origins"].empty?
         lines << ""
         lines << "## Nil origins"
@@ -1198,6 +1193,150 @@ module NilKill
       FileUtils.mkdir_p(TMP_DIR)
       File.write(REPORT_PATH, lines.join("\n") + "\n")
       puts File.read(REPORT_PATH)
+    end
+
+    def append_action_sections(lines, actions, by_conf)
+      lines << ""
+      append_high_actions(lines, by_conf[HIGH] || [])
+      append_review_actions(lines, by_conf[REVIEW] || [])
+      append_gap_actions(lines, by_conf[GAP] || [])
+      extra_conf = by_conf.keys - [HIGH, REVIEW, GAP]
+      extra_conf.each do |conf|
+        list = by_conf[conf] || []
+        lines << ""
+        lines << "## #{conf} actions (#{list.size})"
+        list.first(50).each { |a| lines << "- #{a["path"]}:#{a["line"]} #{a["kind"]}: #{a["message"]}" }
+        lines << "- ... #{list.size - 50} more" if list.size > 50
+      end
+    end
+
+    def append_high_actions(lines, actions)
+      lines << "## High-Confidence Actions (#{actions.size})"
+      if actions.empty?
+        lines << "- none"
+        return
+      end
+      actions.first(50).each { |action| append_action_detail(lines, action) }
+      lines << "- ... #{actions.size - 50} more" if actions.size > 50
+    end
+
+    def append_action_detail(lines, action)
+      lines << "- #{action["path"]}:#{action["line"]} #{action["kind"]}: #{action["message"]}"
+      method = method_at(action["path"], action["line"])
+      if method
+        lines << "  - method: #{method["class"]}##{method["method"]}"
+        lines << "  - current: #{method["sig"]}" if method["sig"]
+      end
+      proposed = proposed_action_text(action, method)
+      lines << "  - proposed: #{proposed}" if proposed
+      evidence = action_evidence_text(action)
+      lines << "  - evidence: #{evidence}" if evidence && !evidence.empty?
+    end
+
+    def append_review_actions(lines, actions)
+      lines << ""
+      lines << "## Review Actions (#{actions.size})"
+      if actions.empty?
+        lines << "- none"
+        return
+      end
+      groups = [
+        ["Default Replacement Candidates", actions.select { |a| a["kind"] == "replace_nil_with_default" }],
+        ["Nil Source Fixes", actions.select { |a| a["kind"] == "nil_param_observed" }],
+        ["Union / T.any Candidates", actions.select { |a| %w[union_observed bad_input_type_candidate].include?(a["kind"]) }],
+        ["Missing Sigs Needing Manual Review", actions.select { |a| a["kind"] == "add_sig" }],
+        ["Other Review Actions", actions.reject { |a| %w[replace_nil_with_default nil_param_observed union_observed bad_input_type_candidate add_sig].include?(a["kind"]) }],
+      ]
+      groups.each do |title, list|
+        next if list.empty?
+        lines << ""
+        lines << "### #{title} (#{list.size})"
+        list.first(20).each { |action| append_review_action_line(lines, action) }
+        lines << "- ... #{list.size - 20} more" if list.size > 20
+      end
+    end
+
+    def append_review_action_line(lines, action)
+      case action["kind"]
+      when "nil_param_observed"
+        sites = top_action_sites(action)
+        candidate = action.dig("data", "candidate_type")
+        default = default_for_type(candidate)
+        suffix = []
+        suffix << "candidate #{candidate}" if NilKill.useful_type?(candidate)
+        suffix << "auto-default #{default}" if default
+        suffix << "top source #{sites.first}" unless sites.empty?
+        detail = suffix.empty? ? "no non-nil candidate yet" : suffix.join("; ")
+        lines << "- #{action["path"]}:#{action["line"]} #{action.dig("data", "name")}; #{detail}"
+      when "union_observed", "bad_input_type_candidate"
+        classes = Array(action.dig("data", "classes") || action.dig("data", "raised_only_classes")).first(8).join(", ")
+        classes += ", ..." if Array(action.dig("data", "classes") || action.dig("data", "raised_only_classes")).size > 8
+        lines << "- #{action["path"]}:#{action["line"]} #{action.dig("data", "name")}; observed #{classes}; #{top_action_sites(action).first || "no source callsite"}"
+      when "replace_nil_with_default"
+        lines << "- #{action["path"]}:#{action["line"]} replace nil with #{action.dig("data", "default")} for #{action.dig("data", "target_method")}##{action.dig("data", "name")}; #{action.dig("data", "observed_calls")} call(s)"
+      else
+        lines << "- #{action["path"]}:#{action["line"]} #{action["kind"]}: #{action["message"]}"
+      end
+    end
+
+    def append_gap_actions(lines, actions)
+      lines << ""
+      lines << "## Gap Actions (#{actions.size})"
+      if actions.empty?
+        lines << "- none"
+      else
+        actions.first(50).each { |a| lines << "- #{a["path"]}:#{a["line"]} #{a["kind"]}: #{a["message"]}" }
+        lines << "- ... #{actions.size - 50} more" if actions.size > 50
+      end
+    end
+
+    def method_at(path, line)
+      @method_at ||= (Array(@evidence["facts"]["existing_sigs"]) + Array(@evidence["facts"]["unsigned_methods"])).each_with_object({}) do |m, h|
+        h[[m["path"], m["line"]]] = m
+      end
+      @method_at[[path, line]]
+    end
+
+    def default_for_type(type)
+      case type
+      when "Array", /\AT::Array\b/ then "[]"
+      when "Hash", /\AT::Hash\b/ then "{}"
+      when "String" then "\"\""
+      else nil
+      end
+    end
+
+    def proposed_action_text(action, method)
+      case action["kind"]
+      when "fix_sig_return"
+        "change return to #{action.dig("data", "type")}"
+      when "fix_sig_param"
+        "change param #{action.dig("data", "name")} to #{action.dig("data", "type")}"
+      when "narrow_tlet"
+        "change T.let type to #{action.dig("data", "type")}"
+      when "add_tlet"
+        "wrap #{action.dig("data", "name")} in T.let(..., #{action.dig("data", "type")})"
+      when "replace_nil_with_default"
+        "replace nil with #{action.dig("data", "default")}"
+      when "add_sig"
+        action.dig("data", "sig") || (method && "add #{method["sig"]}")
+      end
+    end
+
+    def action_evidence_text(action)
+      data = action["data"] || {}
+      parts = []
+      parts << "#{data["observed_calls"]} observed call(s)" if data["observed_calls"]
+      parts << "observed #{data["type"]}" if data["type"]
+      sites = top_action_sites(action)
+      parts << "top source #{sites.first}" unless sites.empty?
+      parts.join("; ")
+    end
+
+    def top_action_sites(action, limit = 3)
+      (action.dig("data", "callsites") || {}).sort_by { |_site, count| -count.to_i }.first(limit).map do |site, count|
+        "#{site.sub(/:[^:]+\z/, "")} (#{count})"
+      end
     end
 
     def append_callsite_pressure(lines, actions)
@@ -1257,7 +1396,7 @@ module NilKill
           next unless type == "T.untyped"
           classes = Array(rec&.dig("params_ok", name))
           classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
-          bucket = untyped_bucket_for_classes(classes, rec)
+          bucket = untyped_param_bucket(method, name, classes, rec)
           param_buckets[bucket] += 1
           if param_examples[bucket].size < 8
             param_examples[bucket] << slot_example(method, name, classes, rec,
@@ -1288,9 +1427,17 @@ module NilKill
       end
     end
 
-    def untyped_bucket_for_classes(classes, rec)
+    def untyped_param_bucket(method, name, classes, rec)
       classes = Array(classes).compact.uniq
-      return "no runtime evidence" if !rec || rec["calls"].to_i.zero? || classes.empty?
+      return "slot not observed: no matching runtime record" unless rec
+      return "slot not observed: method was not hit" if rec["calls"].to_i.zero?
+      if classes.empty?
+        param = Array(method["params"]).find { |p| p["name"] == name }
+        return "slot not observed: source index did not model this param shape" unless param
+        return "slot not observed: defaultable param not observed" if param["nil_default"]
+        return "slot not observed: block-like param not captured" if method["uses_yield"] && name.match?(/\A(block|blk|visitor|callback)\z/)
+        return "slot not observed: method hit but runtime slot was empty"
+      end
       non_nil = classes.reject { |klass| klass == "NilClass" }
       return "nil only observed" if non_nil.empty?
       return "single observed type; narrow candidate" if non_nil.size == 1
@@ -1302,7 +1449,9 @@ module NilKill
     def untyped_return_bucket(method, rec, unused_return_names)
       return "void candidate; return value appears unused" if unused_return_names.include?(method["method"].to_sym)
       classes = Array(rec&.dig("returns")).compact.uniq
-      return "no runtime evidence" if !rec || rec["calls"].to_i.zero? || classes.empty?
+      return "slot not observed: no matching runtime record" unless rec
+      return "slot not observed: method was not hit" if rec["calls"].to_i.zero?
+      return "slot not observed: method hit but return was not captured" if classes.empty?
       non_nil = classes.reject { |klass| klass == "NilClass" }
       return "nil only observed" if non_nil.empty?
       return "single observed type; narrow candidate" if non_nil.size == 1
@@ -1341,16 +1490,34 @@ module NilKill
         parts << "direct protocol: none observed"
       else
         observed = Array(observed_classes).reject { |klass| klass == "NilClass" || klass == "T.untyped" }.to_set
-        candidates = protocol_index.filter_map do |klass, methods|
-          next if observed.include?(klass)
-          klass if required.all? { |method_name| methods.include?(method_name) }
-        end.sort.first(8)
-        parts << "direct protocol ##{required.join(", #")}"
+        strength = protocol_strength(required)
+        candidates = []
+        unless strength == "weak"
+          candidates = protocol_index.filter_map do |klass, methods|
+            next if observed.include?(klass)
+            klass if required.all? { |method_name| methods.include?(method_name) }
+          end.sort.first(8)
+        end
+        parts << "#{strength} direct protocol ##{required.join(", #")}"
         parts << "other potential options, not exhaustive: #{candidates.join(", ")}" unless candidates.empty?
       end
       parts << "analysis gaps: aliases seen #{aliases.first(4).join(", ")}" unless aliases.empty?
       parts << "analysis gaps: #{gaps.first(3).join("; ")}" unless gaps.empty?
       parts.join("; ")
+    end
+
+    def protocol_strength(methods)
+      useful = Array(methods).reject { |name| generic_protocol_method?(name) }
+      return "strong" if useful.size >= 2
+      return "medium" if useful.size == 1
+      "weak"
+    end
+
+    def generic_protocol_method?(name)
+      %w[
+        [] []= each each_pair each_value map flat_map select reject find detect any? all? none? one?
+        include? key? keys values empty? size length first last to_a to_h to_s inspect hash eql? ==
+      ].include?(name)
     end
 
     def ignorable_protocol_method?(name)
@@ -1408,6 +1575,7 @@ module NilKill
       lines << "- Runtime-observed struct field slots: #{runtime.map { |r| [r["class"], r["field"]] }.uniq.size}"
       lines << "- Static constructor field observations: #{static.size}"
       append_struct_field_coverage(lines, declarations)
+      append_struct_field_breakdown(lines, declarations, runtime, static)
       append_struct_field_candidates(lines, runtime, static)
       append_hash_shape_candidates(lines, Array(facts["hash_shapes"]))
     end
@@ -1427,6 +1595,55 @@ module NilKill
       end
       lines << "- Struct field slots: #{format_type_counts(counts)}, missing #{counts["missing"]}"
       lines << "- Nilable struct field slots: #{counts["nilable"]}"
+    end
+
+    def append_struct_field_breakdown(lines, declarations, runtime, static)
+      rbi_types = struct_rbi_types
+      candidates = struct_field_candidates(runtime, static).each_with_object({}) { |c, h| h[[c["class"], c["field"]]] = c }
+      buckets = Hash.new { |h, k| h[k] = [] }
+      declarations.each do |decl|
+        Array(decl["fields"]).each do |field|
+          key = [decl["class"], field]
+          type = rbi_types[key]
+          candidate = candidates[key]
+          bucket =
+            if type.nil?
+              candidate ? "missing with candidate" : "missing with no candidate"
+            elsif untyped_type?(strip_nilable(type))
+              if candidate&.fetch("runtime_calls", 0).to_i.positive?
+                "untyped with runtime candidate"
+              elsif candidate
+                "untyped with static candidate"
+              else
+                "untyped with no candidate"
+              end
+            elsif weak_type?(strip_nilable(type))
+              "weak collection or union type"
+            elsif nilable_type?(type)
+              "typed but nilable"
+            else
+              "strongly typed"
+            end
+          buckets[bucket] << { "class" => decl["class"], "field" => field, "type" => type, "candidate" => candidate }
+        end
+      end
+      lines << ""
+      lines << "### Struct Field Slot Breakdown"
+      order = ["missing with candidate", "missing with no candidate", "untyped with runtime candidate",
+        "untyped with static candidate", "untyped with no candidate", "weak collection or union type",
+        "typed but nilable", "strongly typed"]
+      order.each do |bucket|
+        list = buckets[bucket]
+        next if list.empty?
+        lines << "- #{bucket}: #{list.size}"
+        list.first(8).each do |item|
+          candidate = item["candidate"]
+          candidate_text = candidate ? " -> #{candidate["type"]}#{candidate["runtime_calls"].to_i.positive? ? " (runtime #{candidate["runtime_calls"]})" : " (static)"}" : ""
+          current = item["type"] ? " current #{item["type"]}" : ""
+          lines << "  - #{item["class"]}.#{item["field"]}#{current}#{candidate_text}"
+        end
+        lines << "  - ... #{list.size - 8} more" if list.size > 8
+      end
     end
 
     def struct_rbi_types
@@ -1647,24 +1864,26 @@ module NilKill
     end
 
     def callsite_pressure(actions, kind)
-      pressure = Hash.new { |h, k| h[k] = { "slots" => Set.new, "calls" => 0 } }
+      pressure = Hash.new { |h, k| h[k] = { "slots" => Set.new, "calls" => 0, "actions" => [] } }
       actions.select { |a| a["kind"] == kind }.each do |action|
         slot = "#{action["path"]}:#{action["line"]}:#{action.dig("data", "name")}"
         (action.dig("data", "callsites") || {}).each do |site, count|
           root = site.sub(/:[^:]+\z/, "")
           pressure[root]["slots"] << slot
           pressure[root]["calls"] += count.to_i
+          pressure[root]["actions"] << action.merge("root_calls" => count.to_i)
         end
       end
       pressure
     end
 
     def merge_pressure(*groups)
-      merged = Hash.new { |h, k| h[k] = { "slots" => Set.new, "calls" => 0 } }
+      merged = Hash.new { |h, k| h[k] = { "slots" => Set.new, "calls" => 0, "actions" => [] } }
       groups.each do |group|
         group.each do |site, data|
           merged[site]["slots"].merge(data["slots"])
           merged[site]["calls"] += data["calls"].to_i
+          merged[site]["actions"].concat(Array(data["actions"]))
         end
       end
       merged
@@ -1680,6 +1899,31 @@ module NilKill
         calls = data["calls"].to_i
         score = pressure_priority(slots, calls)
         lines << "- #{site} priority #{format("%.2f", score)}; affects #{label} in #{slots} signature slot(s), #{calls} observed call(s)"
+        Array(data["actions"]).uniq { |action| [action["kind"], action["path"], action["line"], action.dig("data", "name")] }.first(5).each do |action|
+          lines << "  - #{action["path"]}:#{action["line"]} #{action.dig("data", "name")}#{pressure_action_hint(action)}"
+        end
+      end
+    end
+
+    def pressure_action_hint(action)
+      data = action["data"] || {}
+      case action["kind"]
+      when "nil_param_observed"
+        candidate = data["candidate_type"]
+        default = default_for_type(candidate)
+        parts = []
+        parts << "candidate #{candidate}" if NilKill.useful_type?(candidate)
+        parts << "default #{default}" if default
+        parts.empty? ? "" : " (#{parts.join("; ")})"
+      when "union_observed"
+        classes = Array(data["classes"])
+        text = classes.first(5).join(", ")
+        text += ", ..." if classes.size > 5
+        " (observed #{text})"
+      when "bad_input_type_candidate"
+        " (normal calls suggest #{data["candidate_type"]}; raised-only #{Array(data["raised_only_classes"]).join(", ")})"
+      else
+        ""
       end
     end
 
