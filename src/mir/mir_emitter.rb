@@ -1357,16 +1357,18 @@ class MIREmitter
   def emit_items_access(node)
     inner = emit(node.expr)
     if node.safe
-      # Slice coercion in the else branch: array literals ([N]T) need
-      # `[0..]` to coerce to slice; runtime slices ([]T) are accepted
-      # by `[0..]` too. ArrayList values match the .items branch.
-      # `@constCast` strips the `const` qualifier that arises when the
-      # source is a `const fixed: [N]T = ...` binding (Zig's `const`
-      # bindings produce `*const [N]T` from `[0..]`, which doesn't
-      # coerce to a `[]T` slice param). CLEAR's annotator enforces
-      # immutability at the language level, so the slice contents are
-      # not mutated through a borrow-position param.
-      "(if (@hasField(@TypeOf(#{inner}), \"items\")) #{inner}.items else @constCast(#{inner}[0..]))"
+      # Slice coercion via comptime block:
+      #   ArrayList(T)        -> .items
+      #   *ArrayList(T)       -> .*.items  (deref then .items)
+      #   [N]T / *const [N]T  -> [0..]   (with @constCast to bridge const
+      #                                   fixed-array bindings to mutable
+      #                                   slice params; CLEAR's annotator
+      #                                   guarantees no mutation through
+      #                                   borrow-position params)
+      # The `*ArrayList` arm fires for callees whose caller passed a
+      # `MUTABLE @list` param straight through (e.g. forwarding a
+      # pointer-passed list to a borrow-shape callee).
+      "blk_items: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :blk_items if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
     else
       "#{inner}.items"
     end
