@@ -195,7 +195,18 @@ class ModuleImporter
       if sig.is_a?(FunctionSignature)
         fn_sigs[stmt.name] = sig
       else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
+        # The annotator stamps `full_type` as a `Type` for some imported
+        # defs (cross-file REQUIREd helpers among them). Reconstruct
+        # from the FunctionDef's own param list so call-site routing
+        # decisions that consult `callee_sig.params[idx]` (MUTABLE @list
+        # detection, takes/borrow/etc.) work for cross-file callees too.
+        # Without this, the lowering silently sees an empty param list
+        # and emits the wrong arg shape (e.g. `.items` instead of `&xs`
+        # for a MUTABLE @list parameter).
+        fs = FunctionSignature.new(
+          params: stmt.params || [],
+          return_type: stmt.return_type || :Any
+        )
         fs.needs_rt = stmt.needs_rt
         fs.can_fail = stmt.can_fail
         fs.effects = stmt.effects
