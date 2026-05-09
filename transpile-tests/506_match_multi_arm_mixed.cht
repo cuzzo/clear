@@ -1,0 +1,26 @@
+# Mix of multi-pattern and single-pattern arms in the same MATCH.
+# Single arms keep their existing :value-only shape; multi arms set
+# :extra_values. Both lower correctly side-by-side.
+
+ENUM Color { Red, Green, Blue, Cyan, Magenta, Yellow, Black, White }
+
+FN brightness(c: Color) RETURNS Int64 ->
+  RETURN MATCH c START
+    Color.Red, Color.Green, Color.Blue   -> 1_i64,
+    Color.Cyan                           -> 2_i64,
+    Color.Magenta, Color.Yellow          -> 3_i64,
+    Color.Black                          -> 0_i64,
+    Color.White                          -> 4_i64
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT brightness(Color.Red)     == 1_i64, "Red";
+  ASSERT brightness(Color.Green)   == 1_i64, "Green";
+  ASSERT brightness(Color.Blue)    == 1_i64, "Blue";
+  ASSERT brightness(Color.Cyan)    == 2_i64, "Cyan";
+  ASSERT brightness(Color.Magenta) == 3_i64, "Magenta";
+  ASSERT brightness(Color.Yellow)  == 3_i64, "Yellow";
+  ASSERT brightness(Color.Black)   == 0_i64, "Black";
+  ASSERT brightness(Color.White)   == 4_i64, "White";
+END

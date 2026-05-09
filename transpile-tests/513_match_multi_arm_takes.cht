@@ -1,0 +1,21 @@
+# MATCH TAKES with a multi-pattern arm. The source `r` is owned and
+# the union has heap data per variant; consumption marks the source as
+# moved before payload extraction so cleanup is correct.
+
+UNION Box { Small: Int64, Large: Int64 }
+
+FN sum_all(rs: Box[]) RETURNS Int64 ->
+  MUTABLE total: Int64 = 0_i64;
+  FOR i IN (0_i64 ..< rs.length()) DO
+    PARTIAL MATCH TAKES rs[i] START
+      Box.Small, Box.Large AS n -> total = total + n;,
+      DEFAULT                     -> total = total + 0_i64;
+    END
+  END
+  RETURN total;
+END
+
+FN main() RETURNS Void ->
+  rs: Box[3] = [Box{ Small: 1_i64 }, Box{ Large: 10_i64 }, Box{ Small: 100_i64 }];
+  ASSERT sum_all(rs) == 111_i64, "1 + 10 + 100";
+END

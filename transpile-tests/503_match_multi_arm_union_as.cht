@@ -1,0 +1,20 @@
+# Multi-pattern arm on a UNION with `AS` payload capture.
+# Both Result.Ok and Result.Err carry an Int64 payload, so the
+# annotator accepts the multi-arm AS binding and Zig's same-payload
+# union access aliases work after the tag check.
+
+UNION Result { Ok: Int64, Err: Int64 }
+
+FN extract(r: Result) RETURNS Int64 ->
+  MUTABLE out: Int64 = 0_i64;
+  MATCH r START
+    Result.Ok, Result.Err AS n -> out = n;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT extract(Result{ Ok:  42_i64 }) == 42_i64,  "Ok 42";
+  ASSERT extract(Result{ Err: -1_i64 }) == -1_i64,  "Err -1";
+  ASSERT extract(Result{ Ok:   0_i64 }) ==  0_i64,  "Ok 0";
+END

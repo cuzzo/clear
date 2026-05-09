@@ -1,0 +1,20 @@
+# Multi-pattern arm on a GENERIC union instance. Type-param substitution
+# happens against the head variant's payload; my annotator's
+# payload-equality check operates on the raw schema (pre-substitution).
+# Both Ok and Err carry T which substitutes to Int64 here, so the
+# multi-arm AS binding is accepted and `n` is typed as Int64.
+
+UNION Result<T> { Ok: T, Err: T }
+
+FN unwrap(r: Result<Int64>) RETURNS Int64 ->
+  MUTABLE out: Int64 = 0_i64;
+  MATCH r START
+    Result.Ok, Result.Err AS n -> out = n;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT unwrap(Result<Int64>{ Ok:  17_i64 }) == 17_i64,  "Ok 17";
+  ASSERT unwrap(Result<Int64>{ Err: -3_i64 }) == -3_i64,  "Err -3";
+END

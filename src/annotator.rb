@@ -1645,22 +1645,31 @@ private
           # patterns (tag identifiers), not constructors — they don't need field values.
           @match_pattern_context = true
           visit(c[:value])
+          # Multi-pattern arm: visit + type-check each extra pattern too.
+          c[:extra_values]&.each { |ev| visit(ev) }
           @match_pattern_context = false
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
-          case_t2 = Type.new(c[:value].resolved_type || :Any)
-          # Allow union base type (e.g. :Option) to match a generic instance (e.g. :"Option<Number>")
-          base_match = expr_t2.generic_instance? && expr_t2.generic_base == c[:value].resolved_type
-          # Allow Byte[N] string literals (e.g. "hello") to match a String-typed subject
-          string_match = expr_t2.string? && case_t2.string?
-          unless c[:value].resolved_type == node.expr.resolved_type ||
-                 node.expr.resolved_type == :Any ||
-                 c[:value].resolved_type == :Any ||
-                 base_match ||
-                 string_match
-            error!(node, :MATCH_CASE_TYPE_MISMATCH, case: c[:value].resolved_type, expr: node.expr.resolved_type)
+          # Type-check the head pattern, then each extra. Patterns share
+          # the arm's body so they must all have the same subject type.
+          [c[:value], *(c[:extra_values] || [])].each do |pat|
+            case_t2 = Type.new(pat.resolved_type || :Any)
+            base_match = expr_t2.generic_instance? && expr_t2.generic_base == pat.resolved_type
+            string_match = expr_t2.string? && case_t2.string?
+            unless pat.resolved_type == node.expr.resolved_type ||
+                   node.expr.resolved_type == :Any ||
+                   pat.resolved_type == :Any ||
+                   base_match ||
+                   string_match
+              error!(node, :MATCH_CASE_TYPE_MISMATCH, case: pat.resolved_type, expr: node.expr.resolved_type)
+            end
           end
+          case_t2 = Type.new(c[:value].resolved_type || :Any)
 
-          # Payload capture: `Shape.Circle AS r ->`
+          # Payload capture: `Shape.Circle AS r ->` (or multi-pattern
+          # arm: `R.Ok, R.Other AS r ->`). For multi-arm bindings, every
+          # variant in the arm must produce a payload of the SAME shape
+          # (same payload type, or same inline-struct fields), since one
+          # binding `r` is shared across all patterns in the body.
           if c[:binding]
             if is_enum
               error!(node, :MATCH_ENUM_CAPTURE, binding: c[:binding])
@@ -1669,6 +1678,35 @@ private
                              when AST::GetField   then c[:value].field
                              when AST::MethodCall then c[:value].name
                              end
+              # Verify each extra variant's payload matches the head's.
+              # Apply union_subst before comparing so generic instances
+              # (`Mixed<Int64>` where one variant is `T` and another is
+              # `Int64`) compare equal post-substitution. Variants are
+              # typically stored as Type instances; normalize through
+              # `.resolved` to produce a Symbol that can be compared.
+              normalize_payload = ->(p) {
+                if p.is_a?(Type)
+                  sub = union_subst.any? ? apply_type_subst(p, union_subst) : p
+                  sub.respond_to?(:resolved) ? sub.resolved : sub
+                elsif p.is_a?(Symbol) && union_subst[p]
+                  union_subst[p]
+                else
+                  p
+                end
+              }
+              c[:extra_values]&.each do |ev|
+                ev_name = case ev
+                          when AST::GetField   then ev.field
+                          when AST::MethodCall then ev.name
+                          end
+                next unless ev_name && variant_name
+                head_payload = normalize_payload.call(schema[:variants][variant_name])
+                ev_payload   = normalize_payload.call(schema[:variants][ev_name])
+                if head_payload != ev_payload
+                  error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
+                    head: variant_name, other: ev_name, kind: 'AS', name: c[:binding])
+                end
+              end
               if variant_name
                 raw_payload = schema[:variants][variant_name]
                 if raw_payload.nil?
@@ -1703,11 +1741,35 @@ private
 
           # Union variant destructuring: `Result.Ok{ value, count } ->`
           # Declares each named field as a local binding with the correct type.
+          # For multi-arm `R.A, R.B { x } ->`, every variant must carry
+          # the SAME payload (same inline-struct fields and types) — the
+          # destructured names are shared across all patterns' bodies.
           if c[:destructure] && is_union
             variant_name = case c[:value]
                            when AST::GetField   then c[:value].field
                            when AST::MethodCall then c[:value].name
                            end
+            normalize_payload_d = ->(p) {
+              if p.is_a?(Type)
+                sub = union_subst.any? ? apply_type_subst(p, union_subst) : p
+                sub.respond_to?(:resolved) ? sub.resolved : sub
+              elsif p.is_a?(Symbol) && union_subst[p]
+                union_subst[p]
+              else
+                p
+              end
+            }
+            c[:extra_values]&.each do |ev|
+              ev_name = case ev
+                        when AST::GetField   then ev.field
+                        when AST::MethodCall then ev.name
+                        end
+              next unless ev_name && variant_name
+              if normalize_payload_d.call(schema[:variants][variant_name]) != normalize_payload_d.call(schema[:variants][ev_name])
+                error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
+                  head: variant_name, other: ev_name, kind: 'destructure', name: '{ ... }')
+              end
+            end
             if variant_name
               raw_payload = schema[:variants][variant_name]
               # Resolve the payload's field schema (inline struct or named type)
@@ -1765,6 +1827,28 @@ private
     end
     node.case_drops = all_drops
 
+    # Duplicate-pattern detection (enum/union only). A variant repeated
+    # across arms — or twice in a single multi-pattern arm — would
+    # produce invalid Zig (`.A, .A => ...` or two `.A` prongs); catch
+    # at annotate-time so the error names the user-side mistake.
+    if is_enum || is_union
+      seen = {}
+      node.cases.each do |c|
+        next if c[:kind] == :when || c[:kind] == :struct_pattern
+        [c[:value], *(c[:extra_values] || [])].each do |pat|
+          name = case pat
+                 when AST::GetField   then pat.field
+                 when AST::MethodCall then pat.name
+                 end
+          next unless name
+          if seen[name]
+            error!(node, :MATCH_DUPLICATE_PATTERN, variant: name)
+          end
+          seen[name] = true
+        end
+      end
+    end
+
     # Exhaustiveness check — enforced for plain MATCH (the default).
     # PARTIAL MATCH bypasses these checks and allows DEFAULT, WHEN, and
     # non-enum/union subjects.
@@ -1790,14 +1874,19 @@ private
         error!(node, :MATCH_FORBIDS_WHEN)
       end
 
-      # Every variant must appear exactly once.
+      # Every variant must appear exactly once. Multi-pattern arms
+      # contribute one entry per pattern so they count toward
+      # exhaustiveness like single arms would.
       covered = node.cases.flat_map do |c|
-        variant_name = case c[:value]
-                       when AST::GetField   then c[:value].field
-                       when AST::MethodCall then c[:value].name
-                       else nil
-                       end
-        variant_name ? [variant_name] : []
+        names = []
+        [c[:value], *(c[:extra_values] || [])].each do |pat|
+          name = case pat
+                 when AST::GetField   then pat.field
+                 when AST::MethodCall then pat.name
+                 end
+          names << name if name
+        end
+        names
       end.to_set
 
       all_variants = is_enum ? schema[:variants] : schema[:variants].keys.to_set
@@ -2507,6 +2596,28 @@ private
         end
         record_predicate_call_site!(node)
         return
+      end
+    end
+
+    # Intrinsic method dispatch: prefer a STD_LIB `is_method: true`
+    # overload whose first arg matches the receiver's type over UFCS
+    # resolution. This makes `s.length()` call String's intrinsic
+    # `length` even when the user has defined a free function named
+    # `length` with a different signature — UFCS would otherwise
+    # silently rewrite to `length(s)`, hit the user's function, and
+    # produce a confusing arg-type-mismatch error against the user's
+    # parameter type.
+    intrinsic_defs = STD_LIB[node.name]
+    if intrinsic_defs
+      intrinsic_defs = [intrinsic_defs] if intrinsic_defs.is_a?(Hash)
+      method_overloads = intrinsic_defs.select { |d| d[:is_method] }
+      if method_overloads.any?
+        ufcs_args = [node.object] + node.args
+        if find_matching_intrinsic(method_overloads, ufcs_args)
+          visit_IntrinsicFunc(node, ufcs_args)
+          record_predicate_call_site!(node)
+          return
+        end
       end
     end
 

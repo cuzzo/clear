@@ -1,0 +1,21 @@
+# Multi-pattern arm on STRING subjects. Lowered as if-chain with
+# OR'd strEql() calls.
+
+FN day_kind(s: String) RETURNS String ->
+  MUTABLE out: String = "?";
+  PARTIAL MATCH s START
+    "Mon", "Tue", "Wed", "Thu", "Fri" -> out = "weekday";,
+    "Sat", "Sun"                       -> out = "weekend";,
+    DEFAULT                             -> out = "unknown";
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT day_kind("Mon") == "weekday", "Mon";
+  ASSERT day_kind("Wed") == "weekday", "Wed";
+  ASSERT day_kind("Fri") == "weekday", "Fri";
+  ASSERT day_kind("Sat") == "weekend", "Sat";
+  ASSERT day_kind("Sun") == "weekend", "Sun";
+  ASSERT day_kind("xx")  == "unknown", "default";
+END

@@ -1,0 +1,27 @@
+# Nested MATCH where outer AND inner each use multi-pattern arms.
+# Verifies the parser/annotator/lowering handle nested cases without
+# state leaking across MATCH boundaries.
+
+ENUM Op { Add, Sub, Mul, Div, Mod, Other }
+ENUM Tier { Cheap, Mid, Expensive }
+
+FN tier_of(o: Op) RETURNS Tier ->
+  RETURN PARTIAL MATCH o START
+    Op.Add, Op.Sub             -> Tier.Cheap,
+    Op.Mul, Op.Div, Op.Mod     -> Tier.Mid,
+    DEFAULT                    -> Tier.Expensive
+  END;
+END
+
+FN cost(o: Op) RETURNS Int64 ->
+  RETURN MATCH tier_of(o) START
+    Tier.Cheap, Tier.Mid -> 1_i64,
+    Tier.Expensive       -> 100_i64
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT cost(Op.Add)   == 1_i64,   "Add cheap";
+  ASSERT cost(Op.Mul)   == 1_i64,   "Mul mid";
+  ASSERT cost(Op.Other) == 100_i64, "Other expensive";
+END

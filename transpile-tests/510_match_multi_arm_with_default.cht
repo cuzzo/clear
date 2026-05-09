@@ -1,0 +1,23 @@
+# Multi-pattern arms + DEFAULT in the same union MATCH. The arm-loop
+# in the parser must consume `,` between arms without confusing it
+# with multi-pattern continuation.
+
+UNION Op { Add: Int64, Sub: Int64, Mul: Int64, Div: Int64, Other }
+
+FN classify(o: Op) RETURNS String ->
+  MUTABLE out: String = "?";
+  PARTIAL MATCH o START
+    Op.Add, Op.Sub          -> out = "additive";,
+    Op.Mul, Op.Div          -> out = "multiplicative";,
+    DEFAULT                  -> out = "fallback";
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT classify(Op{ Add: 1_i64 }) == "additive",       "Add";
+  ASSERT classify(Op{ Sub: 2_i64 }) == "additive",       "Sub";
+  ASSERT classify(Op{ Mul: 3_i64 }) == "multiplicative", "Mul";
+  ASSERT classify(Op{ Div: 4_i64 }) == "multiplicative", "Div";
+  ASSERT classify(Op.Other)         == "fallback",       "Other";
+END

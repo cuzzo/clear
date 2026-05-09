@@ -1,0 +1,24 @@
+# Bug fix: AS-bound payload was double-wrapped (`Type.new(Type)`)
+# in the annotator, breaking method dispatch on the binding. Calling
+# a method on `s` reported `Function 's' argument 1 expects Msg, got
+# Int64` because the annotator couldn't resolve the binding's type
+# correctly. Fix: pass the Type through unchanged when raw_payload is
+# already a Type instance.
+
+UNION Box { Small: Int64, Medium: Int64, Large: Int64, None }
+
+FN doubled(b: Box) RETURNS Int64 ->
+  MUTABLE out: Int64 = 0_i64;
+  PARTIAL MATCH b START
+    Box.Small, Box.Medium, Box.Large AS n -> out = n + n;,
+    DEFAULT                                 -> out = -1_i64;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT doubled(Box{ Small:  1_i64 })   == 2_i64,    "Small";
+  ASSERT doubled(Box{ Medium: 50_i64 })  == 100_i64,  "Medium";
+  ASSERT doubled(Box{ Large:  999_i64 }) == 1998_i64, "Large";
+  ASSERT doubled(Box.None)               == -1_i64,   "None";
+END

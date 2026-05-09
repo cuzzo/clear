@@ -640,6 +640,30 @@ class Parser
     current.type == type && (val.nil? || current.value == val)
   end
 
+  # Lookahead: peek `n` tokens past the current cursor and test type/value.
+  sig { params(n: Integer, type: Symbol, val: T.nilable(String)).returns(T::Boolean) }
+  def match_at?(n, type, val=nil)
+    tok = peek_at(n)
+    return false unless tok
+    tok.type == type && (val.nil? || tok.value == val)
+  end
+
+  # Used by `parse_match_*` to decide whether the `,` at `current` is a
+  # multi-pattern-arm continuation (next pattern follows) or an arm
+  # separator. Returns true ONLY when the token AFTER `,` could start
+  # another pattern. Tokens that can ONLY start a NEW arm or end the
+  # current one (`->`, `AS`, `WHEN`, `DEFAULT`, `END`, `EOF`, `{`)
+  # terminate the multi-pattern loop instead.
+  sig { returns(T::Boolean) }
+  def multi_pattern_continues?
+    nxt = peek_at(1)
+    return false unless nxt
+    return false if nxt.type == :ARROW || nxt.type == :EOF
+    return false if nxt.type == :KEYWORD && %w[AS WHEN DEFAULT END].include?(nxt.value)
+    return false if nxt.type == :CHAR && nxt.value == '{'
+    true
+  end
+
   # Match and immediately eat
   sig { params(type: Symbol, value: T.nilable(String)).returns(T.untyped) }
   def match!(type, value=nil)
@@ -2144,8 +2168,18 @@ class Parser
         cases << { kind: :struct_pattern, value: pattern, body: [parse_expression] }
       else
         @suppress_struct_lit = true
-        pattern = parse_expression
+        first_pattern = parse_expression
         @suppress_struct_lit = false
+        # Multi-pattern arm: `Pat1, Pat2, ... [AS x | { dest }] -> body`.
+        # The `,` here is part of the arm; arm-separator `,` is consumed
+        # AFTER the body. AS / { ... } apply to the whole arm.
+        extra_patterns = []
+        while match?(:CHAR, ',') && multi_pattern_continues?
+          consume(:CHAR, ',')
+          @suppress_struct_lit = true
+          extra_patterns << parse_expression
+          @suppress_struct_lit = false
+        end
         binding = nil
         destructure = nil
         if match?(:KEYWORD, 'AS')
@@ -2155,7 +2189,12 @@ class Parser
           destructure = parse_struct_pattern
         end
         consume(:ARROW)
-        cases << { kind: :eq, value: pattern, binding: binding, destructure: destructure, body: [parse_expression] }
+        if extra_patterns.empty?
+          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression] }
+        else
+          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: [parse_expression] }
+        end
       end
       match!(:CHAR, ',')
     end
@@ -2233,8 +2272,19 @@ class Parser
         # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
         # consumed as a constructor — the { starts a destructuring pattern.
         @suppress_struct_lit = true
-        pattern = parse_expression
+        first_pattern = parse_expression
         @suppress_struct_lit = false
+        # Multi-pattern arm: `Pat1, Pat2, Pat3 [AS x | { dest }] -> body`.
+        # The `,` here (before the arrow) signals continuation; arm-
+        # separator `,` is consumed AFTER the body, below. AS / { ... }
+        # apply to the whole arm and bind across every pattern.
+        extra_patterns = []
+        while match?(:CHAR, ',') && multi_pattern_continues?
+          consume(:CHAR, ',')
+          @suppress_struct_lit = true
+          extra_patterns << parse_expression
+          @suppress_struct_lit = false
+        end
         binding = nil
         destructure = nil
         if match?(:KEYWORD, 'AS')
@@ -2246,7 +2296,12 @@ class Parser
         end
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :eq, value: pattern, binding: binding, destructure: destructure, body: body }
+        if extra_patterns.empty?
+          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body }
+        else
+          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: body }
+        end
       end
       match!(:CHAR, ',')  # consume comma separator between cases if present
     end

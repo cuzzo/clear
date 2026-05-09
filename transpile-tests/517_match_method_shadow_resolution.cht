@@ -1,0 +1,29 @@
+# Bug fix: a `.method()` call used to silently UFCS-rewrite to
+# `method(receiver)` and pick a user function with a matching name,
+# even when an intrinsic method on the receiver type would have been
+# the right resolution. The motivating case (multi-arm AS over a
+# String-payload union) hits a separate pre-existing memory-leak in
+# String union payloads that's unrelated to method dispatch; this
+# test exercises the same shadowing path with a plain String binding
+# so the dispatch change is provable in isolation.
+
+UNION Msg { Info: Int64, Silent }
+
+# Intentional shadow: `length` here would clash with String's
+# intrinsic `.length()` method via UFCS without the receiver-first
+# resolution change. The user function takes Msg, not String.
+FN length(m: Msg) RETURNS Int64 ->
+  RETURN -1_i64;
+END
+
+FN main() RETURNS Void ->
+  s = "hello";
+  # Without the fix: `s.length()` UFCSes to `length(s)` which finds
+  # the user function above (taking Msg), and errors with
+  # "Function 's' argument 1 expects Msg, got Byte[5]".
+  ASSERT s.length() == 5_i64, "String intrinsic .length() wins over user shadow";
+
+  # User function still callable directly when explicitly invoked.
+  m = Msg.Silent;
+  ASSERT length(m) == -1_i64, "explicit user fn call is unaffected";
+END

@@ -1,0 +1,22 @@
+# Multi-pattern arm sharing a MATCH with single-pattern arms that have
+# AS bindings. The parser's branch ordering must keep the multi-arm
+# loop from interfering with subsequent single-arm AS bindings.
+
+UNION Tag { A: Int64, B: Int64, C: Int64, Other }
+
+FN value(t: Tag) RETURNS Int64 ->
+  MUTABLE out: Int64 = 0_i64;
+  PARTIAL MATCH t START
+    Tag.A, Tag.B AS n -> out = n;,
+    Tag.C AS m         -> out = m + 1000_i64;,
+    DEFAULT             -> out = -1_i64;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT value(Tag{ A: 5_i64 })  == 5_i64,    "A";
+  ASSERT value(Tag{ B: 6_i64 })  == 6_i64,    "B";
+  ASSERT value(Tag{ C: 7_i64 })  == 1007_i64, "C";
+  ASSERT value(Tag.Other)        == -1_i64,   "default";
+END

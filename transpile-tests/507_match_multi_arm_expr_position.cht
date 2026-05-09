@@ -1,0 +1,20 @@
+# Multi-pattern arm in EXPRESSION position (PARTIAL MATCH on the
+# right-hand side of a binding). Body expressions are bare (no
+# semicolons); arms separated by `,`.
+
+ENUM Day { Mon, Tue, Wed, Thu, Fri, Sat, Sun }
+
+FN kind(d: Day) RETURNS String ->
+  RETURN MATCH d START
+    Day.Mon, Day.Tue, Day.Wed, Day.Thu, Day.Fri -> "weekday",
+    Day.Sat, Day.Sun                            -> "weekend"
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT kind(Day.Mon) == "weekday", "Mon";
+  ASSERT kind(Day.Wed) == "weekday", "Wed";
+  ASSERT kind(Day.Fri) == "weekday", "Fri";
+  ASSERT kind(Day.Sat) == "weekend", "Sat";
+  ASSERT kind(Day.Sun) == "weekend", "Sun";
+END

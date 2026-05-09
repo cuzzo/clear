@@ -1,0 +1,23 @@
+# Multi-pattern arm: enums.
+# `Op.A, Op.B, Op.C -> body` — one shared body for several variants.
+# Lowered to Zig switch with `.A, .B, .C => { ... }` (fall-through).
+
+ENUM Op { Add, Sub, Mul, Div, Mod, Shl, Shr }
+
+FN classify(op: Op) RETURNS Int64 ->
+  RETURN MATCH op START
+    Op.Add, Op.Sub             -> 1_i64,
+    Op.Mul, Op.Div, Op.Mod     -> 2_i64,
+    Op.Shl, Op.Shr             -> 3_i64
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT classify(Op.Add) == 1_i64, "Add -> 1";
+  ASSERT classify(Op.Sub) == 1_i64, "Sub -> 1";
+  ASSERT classify(Op.Mul) == 2_i64, "Mul -> 2";
+  ASSERT classify(Op.Div) == 2_i64, "Div -> 2";
+  ASSERT classify(Op.Mod) == 2_i64, "Mod -> 2";
+  ASSERT classify(Op.Shl) == 3_i64, "Shl -> 3";
+  ASSERT classify(Op.Shr) == 3_i64, "Shr -> 3";
+END

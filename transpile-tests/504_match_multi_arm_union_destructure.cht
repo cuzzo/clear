@@ -1,0 +1,24 @@
+# Multi-pattern arm with `{ field }` destructure. Both inline-struct
+# variants share the same field shape (n: Int64, label: String), so
+# the destructured names are valid for either variant's body.
+
+UNION Tagged {
+  Even { n: Int64, weight: Int64 },
+  Odd  { n: Int64, weight: Int64 },
+  None
+}
+
+FN value_of(t: Tagged) RETURNS Int64 ->
+  MUTABLE out: Int64 = -1_i64;
+  PARTIAL MATCH t START
+    Tagged.Even, Tagged.Odd { n } -> out = n;,
+    DEFAULT -> out = 0_i64;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT value_of(Tagged.Even{ n: 10_i64, weight: 1_i64 }) == 10_i64, "even";
+  ASSERT value_of(Tagged.Odd{  n: 7_i64,  weight: 2_i64 }) == 7_i64,  "odd";
+  ASSERT value_of(Tagged.None)                              == 0_i64, "none";
+END

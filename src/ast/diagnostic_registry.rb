@@ -1157,6 +1157,20 @@ module DiagnosticRegistry
       template: "MATCH destructure: field '%{field}' does not exist on variant %{variant}",
       summary:  "MATCH inline-struct-variant destructure references a field the variant doesn't declare.",
     },
+    MATCH_MULTI_ARM_PAYLOAD_MISMATCH: {
+      severity: :error, category: :type,
+      template: "MATCH multi-pattern arm: variants '%{head}' and '%{other}' have incompatible payloads, so the shared `%{kind} %{name}` cannot bind across both.",
+      summary:  "Multi-pattern MATCH arm with `AS` or `{ destructure }` requires every variant to share the same payload shape.",
+      cause:    "`Pat1, Pat2 AS x -> body` evaluates one body with one binding `x` for whichever variant matched at runtime. CLEAR (and the underlying Zig switch) only allows the shared binding when every variant in the arm carries the SAME payload type — same primitive, same inline-struct fields, or all unit. Variants with diverging payloads can't be unified into one binding without a runtime selector and a synthesized union type.",
+      fix_hint: "Either drop the `AS` / `{ destructure }` (the variants can still share a body without a shared binding), split the arm into separate single-pattern arms each with its own `AS` / destructure, or change the union so the listed variants share a payload type.",
+    },
+    MATCH_DUPLICATE_PATTERN: {
+      severity: :error, category: :type,
+      template: "MATCH variant '%{variant}' is matched more than once. Duplicate patterns produce invalid Zig switch prongs.",
+      summary:  "Each enum / union variant may appear at most once across all MATCH arms (single or multi-pattern).",
+      cause:    "MATCH lowers to a Zig switch (or if-chain). A variant appearing in two arms — or twice in the same multi-pattern arm — would emit `case .A, .A => ...` or two separate `.A` prongs. Zig rejects both as duplicates; the catch in the annotator surfaces the user-side mistake clearly instead of letting it bottom out as a downstream codegen error.",
+      fix_hint: "Remove the redundant pattern. If two arms have different bodies for the same variant, keep the one you want and delete the other; if a multi-pattern arm lists a variant twice, drop the duplicate.",
+    },
 
     # FOR / WHILE / IF / BREAK / CONTINUE / ASSERT
     FOR_RANGE_START_NEEDS_INT64: {

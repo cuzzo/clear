@@ -1,0 +1,21 @@
+# Multi-pattern arm on a UNION (no payload capture). Bodies are shared
+# across all variants in the arm; the if-chain lowering OR's the
+# tag-checks: `tag == .A or tag == .B or tag == .C`.
+
+UNION Status { Pending, Running, Paused, Done, Cancelled, Failed }
+
+FN is_terminal(s: Status) RETURNS Bool ->
+  RETURN PARTIAL MATCH s START
+    Status.Done, Status.Cancelled, Status.Failed -> TRUE,
+    DEFAULT                                       -> FALSE
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT is_terminal(Status.Done)      == TRUE,  "Done";
+  ASSERT is_terminal(Status.Cancelled) == TRUE,  "Cancelled";
+  ASSERT is_terminal(Status.Failed)    == TRUE,  "Failed";
+  ASSERT is_terminal(Status.Pending)   == FALSE, "Pending";
+  ASSERT is_terminal(Status.Running)   == FALSE, "Running";
+  ASSERT is_terminal(Status.Paused)    == FALSE, "Paused";
+END

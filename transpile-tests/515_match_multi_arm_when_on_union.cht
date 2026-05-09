@@ -1,0 +1,23 @@
+# Pre-existing limitation: WHEN guard arm in a UNION-subject MATCH was
+# treated as a variant tag-check by the lowering, producing invalid
+# Zig like `tag == .true`. Multi-arm + WHEN should both work.
+
+UNION Op { Add: Int64, Sub: Int64, Mul: Int64, Div: Int64, Other }
+
+FN classify(o: Op) RETURNS String ->
+  MUTABLE out: String = "?";
+  PARTIAL MATCH o START
+    Op.Add, Op.Sub          -> out = "additive";,
+    Op.Mul, Op.Div          -> out = "multiplicative";,
+    WHEN TRUE                -> out = "fallback";
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT classify(Op{ Add: 1_i64 }) == "additive",       "Add";
+  ASSERT classify(Op{ Sub: 2_i64 }) == "additive",       "Sub";
+  ASSERT classify(Op{ Mul: 3_i64 }) == "multiplicative", "Mul";
+  ASSERT classify(Op{ Div: 4_i64 }) == "multiplicative", "Div";
+  ASSERT classify(Op.Other)         == "fallback",       "Other";
+END

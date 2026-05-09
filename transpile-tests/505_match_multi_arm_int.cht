@@ -1,0 +1,23 @@
+# Multi-pattern arm on integer literals. Lowered to a Zig switch
+# whose prongs are comma-separated literals: `1, 2, 3 => { ... }`.
+
+FN bucket(n: Int64) RETURNS Int64 ->
+  MUTABLE out: Int64 = -1_i64;
+  PARTIAL MATCH n START
+    1_i64, 2_i64, 3_i64       -> out = 100_i64;,
+    4_i64, 5_i64               -> out = 200_i64;,
+    6_i64                      -> out = 300_i64;,
+    DEFAULT                    -> out = 999_i64;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS Void ->
+  ASSERT bucket(1_i64) == 100_i64, "1";
+  ASSERT bucket(2_i64) == 100_i64, "2";
+  ASSERT bucket(3_i64) == 100_i64, "3";
+  ASSERT bucket(4_i64) == 200_i64, "4";
+  ASSERT bucket(5_i64) == 200_i64, "5";
+  ASSERT bucket(6_i64) == 300_i64, "6";
+  ASSERT bucket(99_i64) == 999_i64, "default";
+END
