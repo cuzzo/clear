@@ -820,6 +820,13 @@ pub const ParkingMutex = struct {
         // a scheduler, so getScheduler() never returns null in loom scenarios.
         // Atomic ops here are exercised by parking-lot-hammer-test.zig under TSan.
         if (sched_opt == null) {
+            // HAMMER-WAIT-LOOP-BEGIN: tag=parking-lot.mutex-non-fiber-acquire
+            // What stalls: an OS thread (no scheduler context) tries to
+            // acquire ParkingMutex while another thread holds it.
+            // Yield contract: spin (NF_SPIN_BUDGET) → std.Thread.yield
+            // (NF_YIELD_BUDGET) → futex park. Must not busy-spin past
+            // the yield budget under prolonged contention.
+            //
             // Non-fiber: spin-then-yield-then-futex.
             //
             // For brief CS the spin phase acquires without leaving user
@@ -867,6 +874,7 @@ pub const ParkingMutex = struct {
                 const new_state = cur | STATE_LOCKED;
                 if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) return;
             }
+            // HAMMER-WAIT-LOOP-END: tag=parking-lot.mutex-non-fiber-acquire
         }
         // LOOM-EXCLUDE-END
 

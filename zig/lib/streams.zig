@@ -412,6 +412,17 @@ pub fn SplitStream(
             // calls wakeParkedProducer after advancing seq, allowing
             // releaseConsumedPrefix to free chunks and the producer to
             // push again.
+            // HAMMER-WAIT-LOOP-BEGIN: tag=streams.push-backpressure-park
+            // What stalls: chunk count is at MaxChunks because all
+            // subscribers are slower than the producer (or one subscriber
+            // is the bottleneck — minReadSeqForBackpressure pins
+            // releasable chunks to the slowest non-anchor reader).
+            // Yield contract: park the producer task on the inner
+            // (producer_task + producer_parked=1) under the exclusive
+            // lock, drop the lock, and yield to the scheduler. The
+            // first subscriber to advance past the parked producer's
+            // chunk in next() calls wakeParkedProducer, which clears
+            // producer_parked and resumes the task.
             while (true) {
                 releaseConsumedPrefixForBackpressure(self.inner, self.subscriber_id);
                 if (chunkCount(self.inner) < MaxChunks) break;
@@ -426,6 +437,7 @@ pub fn SplitStream(
                 task.base.yield();
                 self.inner.mutex.lock() catch unreachable;
             }
+            // HAMMER-WAIT-LOOP-END: tag=streams.push-backpressure-park
 
             var tail = self.inner.chunks_tail.load(.acquire);
             if (tail == null or tail.?.write_len == ChunkCap) {

@@ -674,12 +674,21 @@ pub const Scheduler = struct {
             .fsm_ctx_ptr = ptr,
             .fsm_ctx_class = @intFromEnum(class),
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-fsm-ctx-free
+        // What stalls: the owning scheduler's inbound ring is full and
+        // it is not draining fast enough — typically because the owner
+        // is itself blocked in a different wait-loop or running a long
+        // user task without yielding.
+        // Yield contract: drain our own inbound channels (we may be
+        // holding work that, once dispatched, frees the owner) then
+        // unconditionally yield the OS thread.
         while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
             }
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-fsm-ctx-free
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = owner.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) owner.event_fd.notify();
@@ -735,12 +744,20 @@ pub const Scheduler = struct {
             .stack_ptr = @intFromPtr(memory.ptr),
             .stack_len = memory.len,
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-stack-free
+        // What stalls: the owning scheduler's inbound ring is full.
+        // Stack-free messages are unbounded (one per fiber finalize),
+        // so a slow owner can backlog stack returns from a fast worker
+        // pool that's tearing down many fibers.
+        // Yield contract: drain our own inbound channels then
+        // unconditionally yield the OS thread to let the owner drain.
         while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
             }
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-stack-free
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = owner.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) owner.event_fd.notify();
@@ -798,6 +815,13 @@ pub const Scheduler = struct {
             .config_profile_site_id = config.profile_site_id,
             .config_profile_dispatch = config.profile_dispatch,
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-spawn
+        // What stalls: cross-scheduler SPSC ring is full because the
+        // destination scheduler is slow to drain (typically a busy
+        // worker spawning faster than the target can dispatch).
+        // Yield contract: must always fall through to std.Thread.yield
+        // — coopYield is a no-op when no local work exists, which
+        // would otherwise produce a tight CPU spin under TSan.
         // Wait-and-work: if ring is full, drain our own channels + yield
         while (!ring.push(msg)) {
             if (scheduler_running) {
@@ -813,6 +837,7 @@ pub const Scheduler = struct {
             // every atomic is intercepted.
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-spawn
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) self.event_fd.notify();
@@ -840,6 +865,14 @@ pub const Scheduler = struct {
             .tag = .FsmSpawn,
             .fsm_task = fsm_task,
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-fsm-spawn
+        // What stalls: cross-scheduler SPSC ring is full while
+        // submitting an FSM (stackless) task. Pattern is the same as
+        // spsc-submit-spawn but for FSM tasks — common when an FSM
+        // pipeline is producing children faster than downstream stage
+        // can consume.
+        // Yield contract: same as spsc-submit-spawn — always fall
+        // through to std.Thread.yield after the optional coopYield.
         while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
@@ -854,6 +887,7 @@ pub const Scheduler = struct {
             // every atomic is intercepted.
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-fsm-spawn
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) self.event_fd.notify();
@@ -879,6 +913,13 @@ pub const Scheduler = struct {
             .tag = .FsmResume,
             .fsm_task = fsm_task,
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-fsm-resume
+        // What stalls: cross-scheduler SPSC ring is full while waking
+        // a previously-parked FSM. Called by parking-lot unlock when
+        // the waker is an FSM on a different scheduler. Liveness
+        // critical — this is on the wakeup path of a lock release.
+        // Yield contract: same as spsc-submit-spawn — always fall
+        // through to std.Thread.yield after the optional coopYield.
         while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
@@ -893,6 +934,7 @@ pub const Scheduler = struct {
             // every atomic is intercepted.
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-fsm-resume
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) self.event_fd.notify();
@@ -934,6 +976,14 @@ pub const Scheduler = struct {
             .tag = .Resume,
             .task = @ptrCast(task),
         };
+        // HAMMER-WAIT-LOOP-BEGIN: tag=spsc-submit-resume
+        // What stalls: cross-scheduler SPSC ring is full because the
+        // destination scheduler is slow to drainChannels (e.g. heavy
+        // TSan instrumentation, or no other ready work locally).
+        // Yield contract: the loop must always fall through to
+        // std.Thread.yield, even on the scheduler-running branch —
+        // coopYield is a no-op when no local work exists, which would
+        // otherwise produce a tight CPU spin under TSan.
         // Wait-and-work
         while (!ring.push(msg)) {
             if (scheduler_running) {
@@ -949,6 +999,7 @@ pub const Scheduler = struct {
             // every atomic is intercepted.
             std.Thread.yield() catch {};
         }
+        // HAMMER-WAIT-LOOP-END: tag=spsc-submit-resume
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
         if ((old_dirty & bit) == 0) self.event_fd.notify();

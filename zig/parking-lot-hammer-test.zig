@@ -181,6 +181,7 @@ fn workerFn(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
     }
 }
 
+// HAMMER-COVERS: parking-lot.mutex-non-fiber-acquire
 test "VOPR hammer: parking-lot under randomized fiber schedule" {
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
