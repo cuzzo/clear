@@ -211,6 +211,37 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  register-vm-allowlist:
+    name: Register-VM allowlist (transpile-tests via --vm=register)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      # The register VM compiles the runner template (vm.cht) once and
+      # caches it across tests, so warming clear-cache speeds it up
+      # significantly (5-10x). Share the cache key with transpile-tests
+      # since both run the same compile pipeline.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      # Baseline ratchet: the register VM is the primary stress-tester
+      # for the transpiler; new transpiler bugs surface as the test
+      # corpus the VM can run grows. Gate merge on no regression below
+      # the current pass count. Bump --min-pass=N as we land coverage
+      # work that crosses tests fail->pass.
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=175
+
   module-integration:
     name: transpile-tests/module-integration (zig build test)
     runs-on: ubuntu-latest
