@@ -2214,8 +2214,17 @@ class MIRLowering
 
     items_mir = node.items.map { |i| hoist_alloc(lower(i), i) }
 
-    if node.storage == :stack && ti.respond_to?(:fixed?) && ti.fixed?
-      # Stack-allocated fixed array
+    if ti.respond_to?(:fixed?) && ti.fixed? &&
+       (node.storage == :stack || node.storage == :frame)
+      # Raw fixed-size array (`T[N] = [...]`). Always lowers to a Zig
+      # `[N]T{...}` literal regardless of CLEAR's storage classification:
+      # the size > 128 slot threshold in finalize_storage promotes large
+      # fixed-array literals to :frame, but for raw fixed-size arrays
+      # there is no separate frame allocation -- the array data lives in
+      # the function's own stack/frame either way, and Zig handles multi-
+      # KB fixed arrays fine. Falling through to MakeList here would
+      # produce an ArrayList whose Zig type doesn't match the variable's
+      # declared `[N]T`, so the assignment fails to compile.
       elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
       return MIR::ArrayInit.new(elem_zig, node.items.length.to_s, items_mir)
     end
