@@ -239,15 +239,35 @@ test "submitFsmSpawn: 1000 cross-thread submits all land and complete" {
         try t.bind(sched);
     }
 
+    // Drain concurrently with the submitter: with SpscRing(256) and
+    // N=1000 the ring fills before all submits complete, so a
+    // submit-then-join sequence would deadlock (submitter parks in
+    // wait-and-work waiting for ring space; main thread parks in
+    // join() waiting for the submitter — neither side drains).
+    var submitter_done = std.atomic.Value(bool).init(false);
+    const SubmitterCtx = struct {
+        s: *fp.Scheduler,
+        ts: []Tracker,
+        done: *std.atomic.Value(bool),
+    };
+    var sub_ctx = SubmitterCtx{ .s = sched, .ts = trackers, .done = &submitter_done };
     const Submitter = struct {
-        fn go(s: *fp.Scheduler, ts: []Tracker) void {
-            for (ts) |*t| s.submitFsmSpawn(t.task) catch unreachable;
+        fn go(ctx: *SubmitterCtx) void {
+            for (ctx.ts) |*t| ctx.s.submitFsmSpawn(t.task) catch unreachable;
+            ctx.done.store(true, .release);
         }
     };
-    var th = try std.Thread.spawn(.{}, Submitter.go, .{ sched, trackers });
+    var th = try std.Thread.spawn(.{}, Submitter.go, .{&sub_ctx});
+
+    // Drain while submitter is producing so the ring stays below capacity.
+    while (!submitter_done.load(.acquire)) {
+        sched.drainChannels();
+        sched.drainFsmQueue();
+    }
     th.join();
 
-    // Drain channels then FSM queue until quiescent. drainFsmQueue
+    // Final pass: drain anything the submitter pushed after our last
+    // poll, then run any tasks still in the FSM queue. drainFsmQueue
     // processes at most FSM_DRAIN_BATCH (64) tasks per call, so for N
     // tasks we need ~ceil(N/64) passes plus slack.
     var passes: u32 = 0;

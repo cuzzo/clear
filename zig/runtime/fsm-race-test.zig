@@ -152,10 +152,18 @@ test "FSM race: SPSC submitFsmSpawn producer + consumer coordination" {
 
     var prod = try std.Thread.spawn(.{}, Producer.go, .{ &target, workers, &producer_done });
 
-    // Wait until the producer has finished publishing all SPSC messages
-    // before using scheduler idleness as a completion signal. Otherwise
-    // an instrumented/slow schedule can observe producer_done=true while
-    // the target has not yet consumed messages into active_tasks.
+    // Drain concurrently with the producer: with SpscRing(256) and
+    // TOTAL=4000, the ring fills before all submits complete, so a
+    // producer-then-join sequence would deadlock (producer parks in
+    // wait-and-work waiting for ring space; main thread parks in
+    // join() waiting for the producer — neither drains). In
+    // production this never happens because the destination scheduler
+    // is always running its run() loop, which calls drainChannels in
+    // every iteration; the test mimics that by draining here.
+    while (!producer_done.load(.acquire)) {
+        target.drainChannels();
+        target.drainFsmQueue();
+    }
     prod.join();
 
     // Consumer (main thread): drain until every task has actually reached
