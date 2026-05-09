@@ -1183,6 +1183,98 @@ module NilKill
       lines << "- Return slots: #{format_type_counts(return_counts)}"
       lines << "- Nilable param slots: #{param_counts["nilable"]}"
       lines << "- Nilable return slots: #{return_counts["nilable"]}"
+      append_untyped_breakdown(lines, evidence)
+    end
+
+    def append_untyped_breakdown(lines, evidence)
+      method_lookup = evidence["methods"].each_with_object({}) do |method, lookup|
+        source = method["source"]
+        next unless source
+        lookup[[source["path"], source["line"]]] = method
+      end
+      unused_return_names = unused_return_method_names(evidence)
+      param_buckets = Hash.new(0)
+      return_buckets = Hash.new(0)
+      evidence["facts"]["existing_sigs"].each do |method|
+        rec = method_lookup[[method["path"], method["line"]]]
+        extract_param_entries(method["sig"].to_s).each do |name, type|
+          next unless type == "T.untyped"
+          classes = Array(rec&.dig("params_ok", name))
+          classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
+          param_buckets[untyped_bucket_for_classes(classes, rec)] += 1
+        end
+        ret = extract_return_type(method["sig"].to_s)
+        next unless ret == "T.untyped"
+        return_buckets[untyped_return_bucket(method, rec, unused_return_names)] += 1
+      end
+      lines << ""
+      lines << "### Untyped Slot Breakdown"
+      lines << "Param T.untyped buckets:"
+      append_bucket_lines(lines, param_buckets)
+      lines << "Return T.untyped buckets:"
+      append_bucket_lines(lines, return_buckets)
+    end
+
+    def extract_param_entries(sig)
+      params = extract_call_args(sig, "params")
+      return [] unless params
+      split_top_level(params).filter_map do |entry|
+        name, type = entry.split(/:\s*/, 2)
+        next unless name && type
+        [name.strip, type.strip]
+      end
+    end
+
+    def untyped_bucket_for_classes(classes, rec)
+      classes = Array(classes).compact.uniq
+      return "no runtime evidence" if !rec || rec["calls"].to_i.zero? || classes.empty?
+      non_nil = classes.reject { |klass| klass == "NilClass" }
+      return "nil only observed" if non_nil.empty?
+      return "single observed type; narrow candidate" if non_nil.size == 1
+      return "boolean pair; T::Boolean candidate" if non_nil.sort == %w[FalseClass TrueClass]
+      return "runtime union; kept T.untyped by policy" if non_nil.size > 1
+      "unknown"
+    end
+
+    def untyped_return_bucket(method, rec, unused_return_names)
+      return "void candidate; return value appears unused" if unused_return_names.include?(method["method"].to_sym)
+      classes = Array(rec&.dig("returns")).compact.uniq
+      return "no runtime evidence" if !rec || rec["calls"].to_i.zero? || classes.empty?
+      non_nil = classes.reject { |klass| klass == "NilClass" }
+      return "nil only observed" if non_nil.empty?
+      return "single observed type; narrow candidate" if non_nil.size == 1
+      return "boolean pair; T::Boolean candidate" if non_nil.sort == %w[FalseClass TrueClass]
+      return "runtime union; kept T.untyped by policy" if non_nil.size > 1
+      "unknown"
+    end
+
+    def append_bucket_lines(lines, buckets)
+      if buckets.empty?
+        lines << "- none"
+        return
+      end
+      buckets.sort_by { |_, count| -count }.each { |name, count| lines << "- #{name}: #{count}" }
+    end
+
+    def unused_return_method_names(evidence)
+      candidate_names = evidence["facts"]["existing_sigs"].filter_map do |method|
+        method["method"].to_sym if method["sig"].to_s.include?(".returns(T.untyped)")
+      end.to_set
+      return Set.new if candidate_names.empty?
+      used = Set.new
+      NilKill.target_files.each do |path|
+        parsed = Prism.parse_file(path)
+        next unless parsed.success?
+        mark_value_position_calls(parsed.value, nil, candidate_names, used)
+      end
+      candidate_names - used
+    end
+
+    def mark_value_position_calls(node, parent, candidate_names, used)
+      if node.is_a?(Prism::CallNode) && candidate_names.include?(node.name)
+        used << node.name unless parent.is_a?(Prism::StatementsNode) && parent.body.last != node
+      end
+      node.child_nodes.compact.each { |child| mark_value_position_calls(child, node, candidate_names, used) } if node.respond_to?(:child_nodes)
     end
 
     def append_struct_report(lines, evidence)
