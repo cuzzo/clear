@@ -1,12 +1,11 @@
 #!/usr/bin/env ruby
 # MiniVM runner policy:
-# - The primary correctness target is interpreter_test.cht.
-# - The broader transpile-tests runner is historical/aspirational coverage.
+# - The primary correctness target is the bytecode VM against transpile-tests.
+# - Use --vm-coverage for the full supportable-test coverage report.
 
 MINIVM_CLEAR = File.join(__dir__, "clear")
 TRANSPILER = File.join(__dir__, "bc_run.rb")
 TEST_DIR = File.expand_path("../../transpile-tests", __dir__)
-INTERPRETER_TEST = File.join(__dir__, "interpreter_test.cht")
 
 HISTORICAL_KNOWN_PASSING = %w[
   01_stack_alloc
@@ -116,11 +115,6 @@ VM_UNSUPPORTED = {
   "216_loop_carry_nested"        => :slow_stress_test,
   "217_loop_carry_overflow_blocks" => :slow_stress_test,
 }
-
-def run_primary_test
-  system(MINIVM_CLEAR, "test", INTERPRETER_TEST)
-  $?.exitstatus || 1
-end
 
 def run_historical_test(path)
   # Use a short kill-after so infinite-loop tests don't hang the runner.
@@ -249,10 +243,10 @@ end
 def usage
   puts "Usage:"
   puts "  ruby examples/minivm/run_tests.rb"
-  puts "    Runs the primary MiniVM regression target: interpreter_test.cht"
+  puts "    Runs the known-passing transpile-tests through bc_run"
   puts
   puts "  ruby examples/minivm/run_tests.rb --historical"
-  puts "    Runs the broader historical transpile-tests coverage"
+  puts "    Same as the default known-passing transpile-tests run"
   puts
   puts "  ruby examples/minivm/run_tests.rb --all"
   puts "    Runs the historical known-passing list plus additional candidates"
@@ -269,7 +263,8 @@ def usage
 end
 
 if ARGV.empty?
-  exit(run_primary_test)
+  ok = run_historical_suite(HISTORICAL_KNOWN_PASSING, "Known-Passing Transpile Tests")
+  exit(ok ? 0 : 1)
 elsif ARGV[0] == "--historical"
   ok = run_historical_suite(HISTORICAL_KNOWN_PASSING, "Historical Known-Passing Tests")
   exit(ok ? 0 : 1)

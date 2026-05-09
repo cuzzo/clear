@@ -26,24 +26,7 @@ The active execution path is the bytecode compiler + `_bc_runner.cht`.
 All collection types (HashMap, @set, @list) in `_bc_runner.cht` use the native CLEAR
 `CheatLib.*` implementations via the same API surface as user programs.
 
-## Deprecated: S-expression Tree-walker
-
-`scheme_transpiler.rb` and `interpreter.cht` are **deprecated proof-of-concept** artifacts.
-
-The scheme transpiler was an early PoC that walked the CLEAR AST and emitted Scheme-style
-S-expressions, which the tree-walker interpreter in `interpreter.cht` then evaluated. It was
-never a faithful implementation of CLEAR semantics and has been superseded by the bytecode path.
-
-**Do not add features to `scheme_transpiler.rb` or `interpreter.cht`.** Those files are
-kept for reference only.
-
 ## Running Tests
-
-Primary regression check:
-
-```bash
-./examples/minivm/clear test examples/minivm/interpreter_test.cht
-```
 
 Run the VM test suite:
 

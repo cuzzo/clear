@@ -1,8 +1,12 @@
-# CLEAR VM & Gradual Typing (Scheme Backend)
+# CLEAR VM & Gradual Typing (Historical Scheme Backend)
+
+Historical note: this document describes the older Mal/S-expression VM design.
+That interpreter has been restored under `examples/mal`. The active MiniVM work
+lives under `examples/minivm` and uses bytecode/register-machine paths.
 
 ## Overview
 
-CLEAR's primary target is high-performance Zig/Native code. However, for rapid prototyping, scripting, and environments where a full compilation step is undesirable, CLEAR supports a **VM Mode**. This mode lowers CLEAR source to S-expression Scheme and executes it on a specialized interpreter written in CLEAR itself (`examples/scheme/interpreter.cht`).
+CLEAR's primary target is high-performance Zig/Native code. However, for rapid prototyping, scripting, and environments where a full compilation step is undesirable, CLEAR explored a **VM Mode**. This historical mode lowered CLEAR source to S-expression Scheme and executed it on a specialized interpreter written in CLEAR itself (`examples/mal/interpreter.cht`).
 
 ## Why This Matters
 
@@ -65,7 +69,7 @@ The GC vs. arena gap is an implementation detail invisible to the programmer.
 
 ## Current State: The Interpreter
 
-`examples/scheme/interpreter.cht` is a Mal Level 4 implementation (~489 lines) written in CLEAR. It currently supports:
+`examples/mal/interpreter.cht` is a Mal Level 4 implementation written in CLEAR. It supports:
 
 - Lexer/parser for S-expressions
 - `def!`, `let*`, `fn*`, `do`, `if`
@@ -230,7 +234,7 @@ No `CALL_CC`. No `EVAL`. No `MACRO_EXPAND`. The opcode set is closed because the
 **None.** All required compiler features are already implemented. The interpreter should compile and run its 21 tests today. Verify with:
 
 ```bash
-./clear test examples/scheme/interpreter.cht
+./clear test examples/mal/interpreter.cht
 ```
 
 ### Phase 1: Interpreter Maturation (~15-25 commits)
