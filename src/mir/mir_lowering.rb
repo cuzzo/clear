@@ -19,6 +19,7 @@ require_relative "../ast/ast"
 require_relative "../ast/type"
 require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
+require_relative "../backends/pipeline_host"
 require_relative "fsm_lowering"
 require_relative "fsm_transform"
 require_relative "thunk_transform"
@@ -7494,7 +7495,6 @@ class MIRLowering
   sig { returns(PipelineHost) }
   def pipeline_host
     @pipeline_host ||= begin
-      require_relative "../backends/pipeline_host"
       require_relative "mir_emitter"
       emitter = @_emitter || MIREmitter.new
       PipelineHost.new(lowering: self, emitter: emitter)
