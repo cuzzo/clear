@@ -2331,9 +2331,15 @@ class MIRLowering
     # Int -> enum: emit `@enumFromInt(value)` instead of `@as(EnumT, value)`.
     # Modern Zig rejects `@as(EnumT, intExpr)` (type coercion is enum-from-
     # int, which is its own builtin). Detected by checking whether the
-    # target name matches a registered enum schema.
+    # target's underlying type matches a registered enum schema.
+    #
+    # Strip the optional `?` and error-union `!` prefixes from the resolved
+    # name before lookup so `CAST(x AS ?MyEnum)` and `CAST(x AS !MyEnum)`
+    # also route through the builtin -- otherwise the schema lookup misses
+    # and we emit `@as(?MyEnum, intExpr)` which Zig also rejects.
     target_resolved = node.target.is_a?(Type) ? node.target.resolved : node.target
-    if @enum_schemas&.key?(target_resolved)
+    target_base = target_resolved.to_s.sub(/\A[?!]+/, '').to_sym
+    if @enum_schemas&.key?(target_base)
       return MIR::Cast.new(inner, target_type, :enumFromInt)
     end
 
