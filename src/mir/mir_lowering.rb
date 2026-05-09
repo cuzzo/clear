@@ -4294,7 +4294,14 @@ class MIRLowering
       # Merge schemas so downstream code can resolve imported types
       merge_module_schemas!(T.must(mod))
 
-      # Propagate fn_sigs from imported functions
+      # Propagate fn_sigs from imported functions. When `full_type` is
+      # not a FunctionSignature (some annotator paths leave it as a
+      # `Type`), reconstruct from the FunctionDef's own param list so
+      # call-site routing decisions that consult `callee_sig.params[idx]`
+      # (MUTABLE @list detection, takes/borrow, etc.) work for cross-file
+      # callees too. Without this, the lowering silently sees an empty
+      # param list and emits the wrong arg shape (e.g. `.items` instead
+      # of `&xs` for a MUTABLE @list parameter).
       if T.must(mod).ast
         T.must(mod).ast.statements.each do |stmt|
           next unless stmt.is_a?(AST::FunctionDef)
@@ -4302,7 +4309,10 @@ class MIRLowering
           if sig.is_a?(FunctionSignature)
             @fn_sigs[stmt.name] = sig
           else
-            fs = FunctionSignature.new(params: [], return_type: :Any)
+            fs = FunctionSignature.new(
+              params: stmt.params || [],
+              return_type: stmt.return_type || :Any
+            )
             fs.needs_rt = stmt.needs_rt
             fs.can_fail = stmt.can_fail
             @fn_sigs[stmt.name] = fs
