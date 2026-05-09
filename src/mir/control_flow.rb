@@ -1295,7 +1295,7 @@ module LoopFrameAnalysis
 
     local_names = collect_local_names(body)
 
-    # Find frame-allocated local VarDecls. Values that escape into an outer
+    # Find frame-allocated local VarDecls. Strings that escape into an outer
     # container cannot be protected by a per-iteration rewind, since that would
     # invalidate the stored pointer. Promote those declarations to heap instead.
     frame_decls = local_frame_decls(body, local_names)
@@ -1553,12 +1553,12 @@ module LoopFrameAnalysis
     end
   end
 
-  # Promote a frame-allocated declaration whose value escapes this loop.
+  # Promote a frame-allocated string declaration whose value escapes this loop.
   sig { params(decl_node: T.untyped).returns(T.untyped) }
   def self.promote_decl_to_heap!(decl_node)
     decl_ti = Type.from_node(decl_node)
     return unless decl_ti.is_a?(Type)
-    return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
+    return unless decl_ti.string?
 
     decl_ti.provenance = :heap
     decl_node.storage = :heap if decl_node.respond_to?(:storage=)

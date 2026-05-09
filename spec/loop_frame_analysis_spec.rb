@@ -536,7 +536,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("heapAlloc")
+      expect(zig).to include("charAtCodepoint(rt.heapAlloc()")
+      expect(zig).not_to include("saveLoopMark")
     end
 
     it "ForRange emits saveLoopMark + defer restoreLoopMark for loop-local list" do
