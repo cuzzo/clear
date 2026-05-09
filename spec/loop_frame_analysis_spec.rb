@@ -514,6 +514,31 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("restoreLoopMark")
     end
 
+    it "WhileLoop heap-promotes a loop-local string that escapes into an outer list" do
+      src = <<~CLEAR
+        FN isCommand(ch: String) RETURNS Bool ->
+          RETURN ch == ">" || ch == "<";
+        END
+
+        FN commands(program: String) RETURNS !String ->
+          MUTABLE parts: String[]@list = [];
+          MUTABLE i = 0;
+          WHILE i < program.length() DO
+            ch = program.charAt(i);
+            IF isCommand(ch) THEN
+              parts.append(ch);
+            END
+            i += 1;
+          END
+          RETURN parts.join("");
+        END
+      CLEAR
+
+      zig = nil
+      expect { zig = transpile(src) }.not_to raise_error
+      expect(zig).to include("heapAlloc")
+    end
+
     it "ForRange emits saveLoopMark + defer restoreLoopMark for loop-local list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

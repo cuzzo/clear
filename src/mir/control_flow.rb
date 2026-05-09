@@ -1295,10 +1295,14 @@ module LoopFrameAnalysis
 
     local_names = collect_local_names(body)
 
-    # Find frame-allocated local VarDecls that don't escape into outer containers.
-    non_escaping = local_frame_decls(body, local_names).reject do |decl|
+    # Find frame-allocated local VarDecls. Values that escape into an outer
+    # container cannot be protected by a per-iteration rewind, since that would
+    # invalidate the stored pointer. Promote those declarations to heap instead.
+    frame_decls = local_frame_decls(body, local_names)
+    escaping, non_escaping = frame_decls.partition do |decl|
       escapes_to_outer?(decl.name.to_s, body, local_names)
     end
+    escaping.each { |decl| promote_decl_to_heap!(decl) }
 
     loop_node.mark_per_iter = non_escaping.any?
 
@@ -1547,6 +1551,21 @@ module LoopFrameAnalysis
     if decl_node.value.respond_to?(:storage=)
       decl_node.value.storage = :heap
     end
+  end
+
+  # Promote a frame-allocated declaration whose value escapes this loop.
+  sig { params(decl_node: T.untyped).returns(T.untyped) }
+  def self.promote_decl_to_heap!(decl_node)
+    decl_ti = Type.from_node(decl_node)
+    return unless decl_ti.is_a?(Type)
+    return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
+
+    decl_ti.provenance = :heap
+    decl_node.storage = :heap if decl_node.respond_to?(:storage=)
+
+    value = decl_node.respond_to?(:value) ? decl_node.value : nil
+    promote_value_to_heap!(value) if value
+    value.storage = :heap if value && value.respond_to?(:storage=)
   end
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
