@@ -1206,7 +1206,13 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     );
 
     const expected_completed = subscriber_count + 1;
-    const deadline = compat.milliTimestamp() + 15_000;
+    // TSan-instrumented runs are dramatically slower than release because
+    // every atomic op is intercepted. Combined with the small SpscRing
+    // size (which makes producer pushes hit the wait-and-work loop more
+    // often), the 15s release deadline isn't enough — the test is
+    // correct (no races, no deadlock), just slow under instrumentation.
+    const deadline_ms: i64 = if (build_options.tsan or build_options.coverage) 600_000 else 15_000;
+    const deadline = compat.milliTimestamp() + deadline_ms;
     while (completed.load(.acquire) < expected_completed and compat.milliTimestamp() < deadline) {
         if (!sched.pollOne()) compat.sleepNs(std.time.ns_per_ms);
     }

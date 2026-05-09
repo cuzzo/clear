@@ -803,9 +803,15 @@ pub const Scheduler = struct {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
-            } else {
-                std.Thread.yield() catch {};
             }
+            // Fall through to std.Thread.yield even on the scheduler
+            // path: coopYield is a no-op when there's no local work to
+            // dispatch to, leaving the loop tight-spinning on a full
+            // SPSC ring. Yielding the OS thread gives the destination
+            // scheduler CPU to drain its inbound ring. Critical under
+            // TSan, where tight loops cost 50-100x release because
+            // every atomic is intercepted.
+            std.Thread.yield() catch {};
         }
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
@@ -838,9 +844,15 @@ pub const Scheduler = struct {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
-            } else {
-                std.Thread.yield() catch {};
             }
+            // Fall through to std.Thread.yield even on the scheduler
+            // path: coopYield is a no-op when there's no local work to
+            // dispatch to, leaving the loop tight-spinning on a full
+            // SPSC ring. Yielding the OS thread gives the destination
+            // scheduler CPU to drain its inbound ring. Critical under
+            // TSan, where tight loops cost 50-100x release because
+            // every atomic is intercepted.
+            std.Thread.yield() catch {};
         }
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
@@ -871,9 +883,15 @@ pub const Scheduler = struct {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
-            } else {
-                std.Thread.yield() catch {};
             }
+            // Fall through to std.Thread.yield even on the scheduler
+            // path: coopYield is a no-op when there's no local work to
+            // dispatch to, leaving the loop tight-spinning on a full
+            // SPSC ring. Yielding the OS thread gives the destination
+            // scheduler CPU to drain its inbound ring. Critical under
+            // TSan, where tight loops cost 50-100x release because
+            // every atomic is intercepted.
+            std.Thread.yield() catch {};
         }
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);
@@ -921,9 +939,15 @@ pub const Scheduler = struct {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
                 active_scheduler.coopYield();
-            } else {
-                std.Thread.yield() catch {};
             }
+            // Fall through to std.Thread.yield even on the scheduler
+            // path: coopYield is a no-op when there's no local work to
+            // dispatch to, leaving the loop tight-spinning on a full
+            // SPSC ring. Yielding the OS thread gives the destination
+            // scheduler CPU to drain its inbound ring. Critical under
+            // TSan, where tight loops cost 50-100x release because
+            // every atomic is intercepted.
+            std.Thread.yield() catch {};
         }
         const bit = @as(u64, 1) << @intCast(sender_idx);
         const old_dirty = self.dirty_mask.fetchOr(bit, .release);

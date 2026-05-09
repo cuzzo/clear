@@ -129,7 +129,26 @@ pub fn SpscRing(comptime capacity: usize) type {
     };
 }
 
-// Default ring size: 4096 entries.  At ~72 bytes each = ~288KB per ring.
-// With 64 schedulers, each has 63 incoming rings = ~18MB total.
-// Oversized to minimize backpressure events in normal workloads.
-pub const DefaultRing = SpscRing(4096);
+// Default ring size: 256 entries. At ~112 bytes/Message ≈ 28 KB per ring.
+//
+// The previous 4096 (~458 KB/ring) caused massive RSS bloat at high
+// thread counts: with N schedulers each lazily allocating up to N-1
+// inbound rings, worst case was ~470 MB of just-the-rings before any
+// user work. At 32 threads, benchmarks/concurrent/08_pubsub showed
+// 480 MB RSS — 100x what Go (1.8 MB) and Rust (2.5 MB) use for the
+// same workload. Unacceptable.
+//
+// 256 entries is plenty for typical wake/spawn cross-thread traffic;
+// when the ring is full submitResume/submitSpawn/submitFsmResume
+// already wait-and-work (drainChannels + coopYield), so smaller rings
+// produce more cooperative yielding under heavy traffic, not message
+// loss. This costs throughput when contended (especially under TSan
+// where every atomic op is instrumented and the wait-and-work loop
+// runs much more slowly), but RSS bound matters more than throughput
+// for benchmark fairness.
+//
+// FUTURE WORK: replace the spin-loop wait-and-work with a parking
+// mechanism similar to Go/Rust channels (register on a wake list,
+// signal on dequeue). That fixes the throughput cost at small ring
+// sizes without growing the ring.
+pub const DefaultRing = SpscRing(256);
