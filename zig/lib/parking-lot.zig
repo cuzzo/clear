@@ -1192,6 +1192,15 @@ pub const ParkingRwLock = struct {
         // Atomic ops here are exercised by parking-rwlock-fiber-hammer-test.zig
         // under TSan.
         if (sched_opt == null) {
+            // HAMMER-WAIT-LOOP-BEGIN: tag=parking-rwlock.write-non-fiber-acquire
+            // What stalls: an OS thread (no scheduler) tries to acquire
+            // the write side while readers or another writer hold it.
+            // Unlike ParkingMutex's non-fiber path, there is no futex
+            // fallback here — the loop spin-yields indefinitely.
+            // Yield contract: SPIN_BUDGET reads with spinLoopHint, then
+            // std.Thread.yield. Must not exceed the spin budget under
+            // sustained contention before yielding the OS thread.
+            //
             // Non-fiber: test-then-CAS. CAS-spinning bounces the cache line
             // every iteration; reading-then-CAS lets all waiters share the
             // line until exactly one acquires.
@@ -1209,6 +1218,7 @@ pub const ParkingRwLock = struct {
                 if (self.state.cmpxchgWeak(0, WRITE_LOCKED_BIT, .acquire, .monotonic) == null) return;
                 // Lost the race; loop back to read-spin.
             }
+            // HAMMER-WAIT-LOOP-END: tag=parking-rwlock.write-non-fiber-acquire
         }
         // LOOM-EXCLUDE-END
 
@@ -1571,6 +1581,16 @@ pub const ParkingRwLock = struct {
         // Atomic ops here are exercised by parking-rwlock-fiber-hammer-test.zig
         // under TSan.
         if (sched_opt == null) {
+            // HAMMER-WAIT-LOOP-BEGIN: tag=parking-rwlock.read-non-fiber-acquire
+            // What stalls: an OS thread (no scheduler) tries to acquire
+            // a read slot while a writer holds the lock. As with the
+            // write-side non-fiber path, no futex fallback — pure
+            // spin-yield until the writer drops.
+            // Yield contract: SPIN_BUDGET reads with spinLoopHint then
+            // std.Thread.yield. fetchAdd-undo races against concurrent
+            // writers can also force a re-spin; total wait is bounded
+            // only by the writer's hold time + scheduling delay.
+            //
             // Test-then-fetchAdd. fetchAdd thrashes the cache line on every
             // failed attempt (the +1/-1 still touches the line). Read-spin
             // until WRITE_LOCKED is clear, then optimistically fetchAdd.
@@ -1594,6 +1614,7 @@ pub const ParkingRwLock = struct {
                 }
                 _ = self.state.fetchSub(1, .release);
             }
+            // HAMMER-WAIT-LOOP-END: tag=parking-rwlock.read-non-fiber-acquire
         }
         // LOOM-EXCLUDE-END
 

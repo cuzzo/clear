@@ -2669,6 +2669,18 @@ pub const WaitGroup = struct {
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
         if (self.sched.current_task == null) {
+            // HAMMER-WAIT-LOOP-BEGIN: tag=waitgroup.wait-non-fiber
+            // What stalls: a non-fiber caller (typically test code)
+            // waits until counter reaches 0. Each iteration acquires
+            // the metadata spinlock, checks counter, releases, and
+            // yields the OS thread.
+            // Yield contract: spinlock acquire uses Thread.yield (not
+            // spinLoopHint) because done() may be running in a fiber
+            // that yields while holding the lock briefly. After
+            // checking counter and releasing the lock, yield the OS
+            // thread before the next iteration to let the worker
+            // running the fibers make progress.
+            //
             // Non-fiber caller (test code): busy-wait. Acquire the lock for
             // the final check so we synchronize-with done()'s release; this
             // makes it safe to free *self after we return.
@@ -2683,10 +2695,22 @@ pub const WaitGroup = struct {
                 std.Thread.yield() catch {};
             }
             // VOPR-END-RETRY
+            // HAMMER-WAIT-LOOP-END: tag=waitgroup.wait-non-fiber
         }
 
         const task = self.sched.getCurrent();
 
+        // HAMMER-WAIT-LOOP-BEGIN: tag=waitgroup.wait-fiber-park
+        // What stalls: the calling fiber waits for counter to reach 0.
+        // The recheck loop guards against spurious wakes and against
+        // the lockless-fastpath UAF where the wait-side returns and
+        // frees *self while done() is still inside its critical
+        // section.
+        // Yield contract: take the metadata lock (spin-yield until
+        // released by done()), check counter, register self as the
+        // waiting task under the lock, drop the lock, and yield. done()
+        // schedules the waiter when the last decrement crosses 0.
+        //
         // VOPR-START-RETRY: WaitGroup.wait fiber park-then-recheck loop
         while (true) {
             // Always take the lock to check counter — synchronizes with done().
@@ -2709,6 +2733,7 @@ pub const WaitGroup = struct {
             task.status.store(.Ready, .release);
         }
         // VOPR-END-RETRY
+        // HAMMER-WAIT-LOOP-END: tag=waitgroup.wait-fiber-park
     }
 };
 
@@ -2730,6 +2755,17 @@ pub const Semaphore = struct {
     /// Acquire one slot. Blocks the calling fiber if no slots are available.
     /// Only one fiber should call acquire() at a time (the spawner loop).
     pub fn acquire(self: *Semaphore) void {
+        // HAMMER-WAIT-LOOP-BEGIN: tag=semaphore.acquire-park
+        // What stalls: counter is 0 because all slots are held by
+        // other fibers. The CAS-loser fast path falls through to a
+        // park; release() grants the slot directly to the parked task
+        // without re-incrementing counter.
+        // Yield contract: CAS decrement is the fast path (no wait).
+        // When counter==0, register self as the waiting task under
+        // the metadata lock, drop the lock, and yield. release()
+        // wakes the parked task with .schedule, which routes through
+        // submitResume (cross-thread) or the local ready queue.
+        //
         // std.debug.print("ACQUIRE: counter={d}\n", .{self.counter.load(.seq_cst)});
         // VOPR-START-RETRY: Semaphore.acquire CAS-loser + park-recheck loop
         while (true) {
@@ -2765,6 +2801,7 @@ pub const Semaphore = struct {
             return;
         }
         // VOPR-END-RETRY
+        // HAMMER-WAIT-LOOP-END: tag=semaphore.acquire-park
     }
 
     /// Release one slot. Wakes a blocked acquirer if present; otherwise increments counter.

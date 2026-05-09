@@ -521,6 +521,19 @@ pub fn SplitStream(
             if (self.subscriber_id != InvalidSubscriber) {
                 self.inner.subscribers.items[self.subscriber_id].is_reader.store(1, .release);
             }
+            // HAMMER-WAIT-LOOP-BEGIN: tag=streams.next-park
+            // What stalls: a subscriber's cursor has caught up to the
+            // tail of the chunk list and there is no new value yet
+            // (producer slow, or producer is itself parked for
+            // backpressure waiting on a different subscriber).
+            // Yield contract: two-phase. Phase 1 takes lockShared and
+            // either returns a value or detects close/error in O(1).
+            // Phase 2 (no value) upgrades to exclusive lock, registers
+            // the subscriber as parked (record.task / record.parked=1)
+            // under the lock, drops the lock, and yields. The next
+            // push() that publishes a value calls
+            // wakeOneParkedSubscriber to resume one round-robin parked
+            // reader; close()/setError wake all parked subscribers.
             while (true) {
                 // Phase 1: shared read attempt. Multiple subscribers can concurrently
                 // walk chunks and read values; the writer (push/close/setError) takes
@@ -609,6 +622,7 @@ pub fn SplitStream(
                     std.Thread.yield() catch {};
                 }
             }
+            // HAMMER-WAIT-LOOP-END: tag=streams.next-park
         }
 
         pub fn deinit(self: *Self) void {

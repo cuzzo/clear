@@ -755,6 +755,15 @@ pub fn bind(comptime deps: type) type {
             /// Returns error.StreamClosed if the consumer called deinit() early.
             pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.generator-push-park
+                // What stalls: ring buffer is full because the consumer
+                // is slower than the generator. The producer parks and
+                // waits for the consumer to drain at least one slot.
+                // Yield contract: lock-free fast path (CAS-style head
+                // advance) when space exists; on full, take the
+                // metadata lock, register self as producer_task, drop
+                // the lock, yield. The consumer's next() schedules the
+                // producer when it drains the buffer.
                 while (true) {
                     if (inner.closed.load(.acquire)) {
                         cleanup(T, self.alloc, &val);
@@ -798,6 +807,7 @@ pub fn bind(comptime deps: type) type {
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.generator-push-park
             }
 
             /// Generator calls this (via defer) when its body finishes.
@@ -836,6 +846,16 @@ pub fn bind(comptime deps: type) type {
             /// Returns an error if the generator called setError().
             pub fn next(self: *Self) anyerror!?T {
                 const inner = self.inner;
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.generator-next-park
+                // What stalls: ring buffer is empty because the
+                // generator hasn't pushed yet (or has finished and is
+                // closing). The consumer parks and waits for the
+                // generator to push or close.
+                // Yield contract: lock-free fast path when data is
+                // available; on empty, take the metadata lock, register
+                // self as consumer_task, drop the lock, yield. The
+                // producer's push() (or close()) schedules the consumer
+                // when data appears or close is signalled.
                 while (true) {
                     const t = inner.tail.load(.monotonic);
                     const h = inner.head.load(.acquire);
@@ -879,6 +899,7 @@ pub fn bind(comptime deps: type) type {
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.generator-next-park
             }
 
             /// Signal early exit to the generator, wait for it to stop, then free Inner.
@@ -980,6 +1001,15 @@ pub fn bind(comptime deps: type) type {
             pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
 
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.stream-push-park
+                // What stalls: ring buffer is full because the consumer
+                // is slower than the producer. Same producer-park
+                // pattern as ds.generator-push-park, in the Stream
+                // variant (separate type from Generator).
+                // Yield contract: register self as producer_task under
+                // the metadata lock, drop the lock, yield. The
+                // consumer's next() schedules the producer when it
+                // drains the buffer.
                 while (true) {
                     if (inner.closed.load(.acquire)) {
                         cleanup(T, self.alloc, &val);
@@ -1028,6 +1058,7 @@ pub fn bind(comptime deps: type) type {
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.stream-push-park
             }
 
             /// Consumer reads the next value. Lock-free fast path when buffer has data.
@@ -1035,6 +1066,17 @@ pub fn bind(comptime deps: type) type {
             pub fn next(self: *Self) anyerror!T {
                 const inner = self.inner;
 
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.stream-next-park
+                // What stalls: ring buffer is empty and the stream is
+                // open (no close, no error). The consumer parks for
+                // the producer to push or close. This variant errors
+                // on close-with-err and treats close-without-err the
+                // same as a single push (returns from inside the loop).
+                // Yield contract: lock-free fast path when data is
+                // available; on empty, register self as consumer_task
+                // under the metadata lock, drop the lock, yield. The
+                // producer's push() schedules the consumer when data
+                // appears.
                 while (true) {
                     const t = inner.tail.load(.monotonic);
                     const h = inner.head.load(.acquire);
@@ -1081,6 +1123,7 @@ pub fn bind(comptime deps: type) type {
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.stream-next-park
             }
 
             /// Signal EOF to the consumer: no more values will be pushed.
@@ -1106,6 +1149,12 @@ pub fn bind(comptime deps: type) type {
             pub fn nextOrNull(self: *Self) anyerror!?T {
                 const inner = self.inner;
 
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.stream-next-or-null-park
+                // What stalls: ring buffer is empty and the stream is
+                // open. Differs from ds.stream-next-park only in EOF
+                // semantics — returns null on close instead of erroring.
+                // Yield contract: same as ds.stream-next-park. Register
+                // as consumer_task under metadata lock, drop, yield.
                 while (true) {
                     const t = inner.tail.load(.monotonic);
                     const h = inner.head.load(.acquire);
@@ -1153,6 +1202,7 @@ pub fn bind(comptime deps: type) type {
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.stream-next-or-null-park
             }
 
             /// Signal the generator fiber to stop, wait for it to finish, then free Inner.
@@ -1318,6 +1368,16 @@ pub fn bind(comptime deps: type) type {
             pub fn push(self: *Self, val: T) anyerror!void {
                 const inner = self.inner;
                 var blocked_this_call: bool = false;
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.channel-push-park
+                // What stalls: bounded MPMC channel is full because
+                // consumers are slower than producers. Multiple
+                // producers can race here; only one is parked at a
+                // time (single-slot producer wakeup).
+                // Yield contract: take inner.mutex (compat.Mutex,
+                // possibly fiber-aware), check space, register self as
+                // producer_task under the lock, drop the lock, yield.
+                // The first consumer to pop schedules the producer via
+                // wakeProducer.
                 while (true) {
                     inner.mutex.lock();
                     if (inner.closed) {
@@ -1351,6 +1411,7 @@ pub fn bind(comptime deps: type) type {
                         std.Thread.yield() catch {};
                     }
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.channel-push-park
             }
 
             /// Consumer: read the next item. Returns null when the channel is
@@ -1358,6 +1419,17 @@ pub fn bind(comptime deps: type) type {
             /// the channel is still open. Returns an error if setError was called.
             pub fn pop(self: *Self) anyerror!?T {
                 const inner = self.inner;
+                // HAMMER-WAIT-LOOP-BEGIN: tag=ds.channel-pop-park
+                // What stalls: bounded MPMC channel is empty and open.
+                // Consumer registers in a free consumer slot (multiple
+                // consumers can park simultaneously). On close/error,
+                // wakeAllConsumers fires; otherwise wakeOneConsumer
+                // fires per push.
+                // Yield contract: take inner.mutex, check data, find a
+                // free consumer slot (yield + retry if none — slots
+                // can free as other consumers wake), register and
+                // yield. Producer's push() schedules one parked
+                // consumer per pushed value.
                 while (true) {
                     inner.mutex.lock();
                     // Error takes priority: skip buffered items so callers see the
@@ -1401,6 +1473,7 @@ pub fn bind(comptime deps: type) type {
                         std.Thread.yield() catch {};
                     }
                 }
+                // HAMMER-WAIT-LOOP-END: tag=ds.channel-pop-park
             }
 
             /// Signal end-of-stream. Consumers drain remaining items then get null.
