@@ -9,8 +9,6 @@ should_skip_live_data_file() {
     examples/brnfk/brnfk.cht|\
     examples/footguns/06_memory_ordering/main.cht|\
     examples/footguns/07_causal_ordering/main.cht|\
-    examples/footguns/08_buffer_overflow/main.cht|\
-    examples/footguns/12_deadlock/main.cht|\
     examples/mal/interpreter.cht|\
     examples/minivm/_bc_runner.cht|\
     examples/minivm/_scheme_runner.cht|\
