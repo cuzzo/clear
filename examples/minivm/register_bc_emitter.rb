@@ -5925,7 +5925,11 @@ class RegisterBcEmitter
       end
     end
     if @frontend_result.respond_to?(:union_schemas)
-      @frontend_result.union_schemas.each do |name, variants|
+      @frontend_result.union_schemas.each do |name, schema|
+        # schema can be a `Schemas::UnionSchema` (post-Schemas migration)
+        # or a raw Hash on older paths. Normalize to the variants hash
+        # before iterating.
+        variants = schema.respond_to?(:variants) ? schema.variants : schema
         @union_variants[name.to_s] ||= variants.map do |variant_name, type|
           { name: variant_name.to_s, zig_type: type ? type.zig_type : "void" }
         end
