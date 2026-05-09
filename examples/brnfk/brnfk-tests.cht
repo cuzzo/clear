@@ -26,13 +26,34 @@ FN main() RETURNS Void ->
   ASSERT incByte(255) == 0, "+ wraps 255 to 0";
   ASSERT decByte(0) == 255, "- wraps 0 to 255";
   ASSERT byteToString(65) == "A", "byteToString renders printable ASCII";
+  MUTABLE renderBytes: Int64[]@list = [];
+  renderBytes.append(65);
+  renderBytes.append(10);
+  rendered = bytesToString(renderBytes) OR RAISE;
+  ASSERT rendered == "A\n", "bytesToString renders printable bytes";
   ASSERT stringToByte("A") == 65, "stringToByte reads printable ASCII";
   ASSERT stringToByte("\n") == 10, "stringToByte reads newline";
+  inputBytes = stringToBytes("A\n") OR RAISE;
+  ASSERT inputBytes.length() == 2, "stringToBytes returns each byte";
+  ASSERT inputBytes[0] == 65, "stringToBytes keeps printable byte";
+  ASSERT inputBytes[1] == 10, "stringToBytes keeps newline byte";
 
   ASSERT commands("a+b>c[.-],") == "+>[.-],", "parser ignores comments";
 
   ASSERT run("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.", "") == "A", "prints A";
+  rawA = runBytes("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.", "") OR RAISE;
+  ASSERT rawA.length() == 1, "runBytes returns one output byte";
+  ASSERT rawA[0] == 65, "runBytes returns byte value";
   ASSERT run(",.", "Z") == "Z", "echoes one byte";
+  MUTABLE nonPrintableInput: Int64[]@list = [];
+  nonPrintableInput.append(0);
+  nonPrintableInput.append(255);
+  nonPrintableInput.append(10);
+  echoed = runByteInputWithLimits(",>,>,<<.>.>.", nonPrintableInput, 8, 1000) OR RAISE;
+  ASSERT echoed.length() == 3, "byte input echo returns all bytes";
+  ASSERT echoed[0] == 0, "byte input supports NUL";
+  ASSERT echoed[1] == 255, "byte input supports 255";
+  ASSERT echoed[2] == 10, "byte input supports newline";
   ASSERT run("+++++++++++++++++++++++++++++++++,. ", "") == "!", "EOF leaves cell unchanged";
   ASSERT run("+++++[>+++++++++++++<-]>.", "") == "A", "loop multiplies into next cell";
 

@@ -26,6 +26,21 @@ FN byteToString(n: Int64) RETURNS !String ->
   RAISE "brnfk cannot render non-printable byte ${n.toString()} as String";
 END
 
+FN bytesToString(bytes: Int64[]@list) RETURNS !String ->
+  MUTABLE parts: String[]@list = [];
+  parts.reserve(bytes.length());
+  MUTABLE i = 0;
+  WHILE i < bytes.length() DO
+    parts.append(byteToString(bytes[i]));
+    i += 1;
+  END
+  RETURN parts.join("");
+END
+
+FN ownedBytesToString(TAKES bytes: Int64[]@list) RETURNS !String ->
+  RETURN bytesToString(bytes);
+END
+
 FN stringToByte(ch: String) RETURNS !Int64 ->
   IF ch == "\n" THEN
     RETURN 10;
@@ -41,6 +56,28 @@ FN stringToByte(ch: String) RETURNS !Int64 ->
   END
 
   RAISE "brnfk input contains unsupported non-printable character";
+END
+
+FN stringToBytes(s: String) RETURNS !Int64[]@list ->
+  MUTABLE bytes: Int64[]@list = [];
+  bytes.reserve(s.length());
+  MUTABLE i = 0;
+  WHILE i < s.length() DO
+    bytes.append(stringToByte(s.charAt(i)));
+    i += 1;
+  END
+  RETURN bytes;
+END
+
+FN copyBytes(bytes: Int64[]@list) RETURNS !Int64[]@list ->
+  MUTABLE copied: Int64[]@list = [];
+  copied.reserve(bytes.length());
+  MUTABLE i = 0;
+  WHILE i < bytes.length() DO
+    copied.append(bytes[i]);
+    i += 1;
+  END
+  RETURN copied;
 END
 
 FN isCommand(ch: String) RETURNS Bool ->
@@ -114,16 +151,56 @@ FN run(program: String, input: String) RETURNS !String ->
   RETURN runWithLimits(program, input, 30_000, 10_000_000);
 END
 
+FN runBytes(program: String, input: String) RETURNS !Int64[]@list ->
+  RETURN runBytesWithLimits(program, input, 30_000, 10_000_000);
+END
+
 FN runFile(path: String, input: String) RETURNS !String ->
   RETURN runFileWithLimits(path, input, 30_000, 10_000_000);
 END
 
+FN runFileBytes(path: String, input: String) RETURNS !Int64[]@list ->
+  RETURN runFileBytesWithLimits(path, input, 30_000, 10_000_000);
+END
+
 FN runFileWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
+  bytes = runFileBytesWithLimits(path, input, tapeSize, maxSteps) OR RAISE;
+  RETURN ownedBytesToString(GIVE bytes);
+END
+
+FN runFileBytesWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
   program = readFile(path) OR RAISE;
-  RETURN runWithLimits(program, input, tapeSize, maxSteps);
+  RETURN runBytesWithLimits(program, input, tapeSize, maxSteps);
 END
 
 FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
+  bytes = runBytesWithLimits(program, input, tapeSize, maxSteps) OR RAISE;
+  RETURN ownedBytesToString(GIVE bytes);
+END
+
+FN runBytesWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !Int64[]@list ->
+  inputBytes = stringToBytes(input) OR RAISE;
+  RETURN runOwnedByteInputWithLimits(program, GIVE inputBytes, tapeSize, maxSteps);
+END
+
+FN runByteInputWithLimits(
+    program: String,
+    inputBytes: Int64[]@list,
+    tapeSize: Int64,
+    maxSteps: Int64
+)
+RETURNS !Int64[]@list ->
+  ownedInput = copyBytes(inputBytes) OR RAISE;
+  RETURN runOwnedByteInputWithLimits(program, GIVE ownedInput, tapeSize, maxSteps);
+END
+
+FN runOwnedByteInputWithLimits(
+    program: String,
+    TAKES inputBytes: Int64[]@list,
+    tapeSize: Int64,
+    maxSteps: Int64
+)
+RETURNS !Int64[]@list ->
   code = commands(program);
   jumps = makeJumpTable(code);
   MUTABLE tape = makeTape(tapeSize);
@@ -131,7 +208,7 @@ FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int6
   MUTABLE ip = 0;
   MUTABLE inputPos = 0;
   MUTABLE steps = 0;
-  MUTABLE output: String[]@list = [];
+  MUTABLE output: Int64[]@list = [];
 
   WHILE ip < code.length() DO
     IF steps >= maxSteps THEN
@@ -154,10 +231,10 @@ FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int6
     ELSE_IF op == "-" THEN
       tape[pointer] = decByte(tape[pointer]);
     ELSE_IF op == "." THEN
-      output.append(byteToString(tape[pointer]));
+      output.append(tape[pointer]);
     ELSE_IF op == "," THEN
-      IF inputPos < input.length() THEN
-        tape[pointer] = stringToByte(input.charAt(inputPos));
+      IF inputPos < inputBytes.length() THEN
+        tape[pointer] = inputBytes[inputPos];
         inputPos += 1;
       END
     ELSE_IF op == "[" THEN
@@ -174,5 +251,5 @@ FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int6
     steps += 1;
   END
 
-  RETURN output.join("");
+  RETURN output;
 END
