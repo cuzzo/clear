@@ -5617,7 +5617,13 @@ class MIRLowering
     # Zig's stdlib testing helpers so failures get a structured diff
     # instead of a bare `assertion failed` panic. Falls back to
     # CheatLib.assert for non-equality conditions and for `!=`.
-    if (eq_lowering = try_lower_equality_assert(node))
+    #
+    # Skip for the :bc (register VM) target: the bytecode VM cannot
+    # execute raw Zig, so an InlineZig assert helper would leave the
+    # test register-pending forever. The CheatLib.assert fallback path
+    # below evaluates the condition as a normal MIR expression and
+    # routes through the runtime's bool-assert opcode.
+    if @target != :bc && (eq_lowering = try_lower_equality_assert(node))
       return eq_lowering
     end
 
