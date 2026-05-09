@@ -195,6 +195,58 @@ RSpec.describe StackVerifier do
       frames = stub_verifier(output).extract_frame_sizes
       expect(frames.map { |f| f[:name] }).not_to include("some_other_module.foo")
     end
+
+    # Regression: Zig emits a huge-frame prologue for stack frames
+    # >~32 KB -- "mov $IMM,%r10d; sub %r10,%rsp" plus a stack-probe
+    # loop -- because the single-immediate `sub $IMM,%rsp` can't be
+    # combined with the per-page probe LLVM needs to touch the guard
+    # page. The original regex matched only the immediate form, so
+    # any function with a huge frame (e.g. examples/minivm/vm.cht's
+    # runRegisterBytecode! at ~544 KB) was INVISIBLE to the
+    # verifier. Its cost never entered the deepest-path computation,
+    # the main fiber was tier-sized as if the function didn't exist,
+    # and the resulting binary overflowed its fiber stack into
+    # adjacent slab memory, surfacing as
+    # "assertion failed: slab.used_count > 0" at scheduler teardown.
+    it "extracts frame sizes from huge-frame prologue (mov+sub)" do
+      output = <<~OBJ
+        test_bin:     file format elf64-x86-64
+
+        Disassembly of section .text:
+
+        00000000012dd230 <#{PREFIX}.runRegisterBytecode>:
+         12dd230:\t55                   \tpush   %rbp
+         12dd231:\t48 89 e5             \tmov    %rsp,%rbp
+         12dd234:\t41 56                \tpush   %r14
+         12dd23c:\t41 ba 10 80 08 00    \tmov    $0x88010,%r10d
+         12dd242:\t4c 29 d4             \tsub    %r10,%rsp
+         12dd245:\t42 85 a4 14 00 f0 ff \ttest   %esp,-0x1000(%rsp,%r10,1)
+      OBJ
+      frames = stub_verifier(output).extract_frame_sizes
+      huge = frames.find { |f| f[:name] == "runRegisterBytecode" }
+      expect(huge).not_to be_nil
+      expect(huge[:stack_bytes]).to eq(0x88010)
+    end
+
+    it "huge-frame prologue still records ONE entry per function" do
+      output = <<~OBJ
+        test_bin:     file format elf64-x86-64
+
+        Disassembly of section .text:
+
+        00000000012dd230 <#{PREFIX}.bigFn>:
+         12dd23c:\t41 ba 00 00 04 00    \tmov    $0x40000,%r10d
+         12dd242:\t4c 29 d4             \tsub    %r10,%rsp
+        00000000012dd400 <#{PREFIX}.smallFn>:
+         12dd400:\t48 81 ec 80 00 00 00 \tsub    $0x80,%rsp
+      OBJ
+      frames = stub_verifier(output).extract_frame_sizes
+      expect(frames.length).to eq(2)
+      big = frames.find { |f| f[:name] == "bigFn" }
+      small = frames.find { |f| f[:name] == "smallFn" }
+      expect(big[:stack_bytes]).to eq(0x40000)
+      expect(small[:stack_bytes]).to eq(0x80)
+    end
   end
 
   describe "#analyze" do
@@ -414,6 +466,30 @@ RSpec.describe StackVerifier do
 
     it "returns nil when objdump output is empty" do
       expect(stub_verifier("").extract_full_call_graph).to be_nil
+    end
+
+    # Regression: call-graph frame sizes must include huge-frame
+    # callees, otherwise compute_main_optimal_tier under-sizes the
+    # main fiber and the binary overflows its stack into adjacent
+    # slab memory at runtime. Same root cause as the
+    # extract_frame_sizes huge-frame test above.
+    it "captures huge-frame prologue in frame_sizes for callees" do
+      output = <<~OBJ
+        test_bin:     file format elf64-x86-64
+
+        Disassembly of section .text:
+
+        0000000001162520 <#{PREFIX}.clearMain>:
+         1162520:\t48 81 ec 80 00 00 00 \tsub    $0x80,%rsp
+         1162527:\te8 d4 00 00 00       \tcall   12dd230 <#{PREFIX}.runRegisterBytecode>
+
+        00000000012dd230 <#{PREFIX}.runRegisterBytecode>:
+         12dd23c:\t41 ba 10 80 08 00    \tmov    $0x88010,%r10d
+         12dd242:\t4c 29 d4             \tsub    %r10,%rsp
+      OBJ
+      g = stub_verifier(output).extract_full_call_graph
+      runner_addr = g[:fn_addrs]["#{PREFIX}.runRegisterBytecode"]
+      expect(g[:frame_sizes][runner_addr]).to eq(0x88010)
     end
   end
 

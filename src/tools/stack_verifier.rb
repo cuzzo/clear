@@ -40,6 +40,20 @@ class StackVerifier
   end
 
   # Parse objdump output and return per-function stack frame sizes.
+  #
+  # Two prologue shapes:
+  #   1. Small frame: `sub $0xN,%rsp` -- single immediate.
+  #   2. Huge frame (>~32 KB): `mov $0xN,%REG; sub %REG,%rsp` plus a
+  #      stack-probe loop. LLVM/Zig emit this when the single-imm
+  #      sub can't be fused with the per-page guard probe. Without
+  #      handling this case, huge-frame functions are INVISIBLE to
+  #      the verifier and never enter the cost path -- the binary
+  #      ships under-tiered. Track the most recent `mov $imm,%REGd`
+  #      and consume it on `sub %REG,%rsp`.
+  #
+  # This is fundamentally brittle (regex on objdump text). The
+  # architecturally correct path is a Zig-emitted stackmap or DWARF
+  # CFI parse; tracked separately.
   sig { returns(Array) }
   def extract_frame_sizes
     output = objdump_output
@@ -47,17 +61,28 @@ class StackVerifier
 
     results = []
     current_fn = nil
+    pending_mov = nil
 
     output.each_line do |line|
       if line =~ /^[0-9a-f]+\s+<(#{Regexp.escape(@module_prefix)}\..+)>:/
         current_fn = $1
+        pending_mov = nil
       elsif line =~ /^[0-9a-f]+\s+</
         current_fn = nil
+        pending_mov = nil
       elsif current_fn && line =~ /sub\s+\$0x([0-9a-f]+),%rsp/
         bytes = $1.to_i(16)
         clear_name = zig_to_clear_name(current_fn)
         results << { name: clear_name, zig_name: current_fn, stack_bytes: bytes }
         current_fn = nil
+        pending_mov = nil
+      elsif current_fn && line =~ /mov\s+\$0x([0-9a-f]+),%(r\d+)d/
+        pending_mov = { bytes: $1.to_i(16), reg: $2 }
+      elsif current_fn && pending_mov && line =~ /sub\s+%(r\d+),%rsp/ && Regexp.last_match(1) == pending_mov[:reg]
+        clear_name = zig_to_clear_name(current_fn)
+        results << { name: clear_name, zig_name: current_fn, stack_bytes: pending_mov[:bytes] }
+        current_fn = nil
+        pending_mov = nil
       end
     end
 
@@ -231,6 +256,7 @@ class StackVerifier
     current_addr = nil
     current_name = nil
     saw_frame    = false
+    pending_mov  = nil  # huge-frame: see #extract_frame_sizes for shape
 
     output.each_line do |line|
       # Function header: "0000000001162520 <bench.clearMain>:"
@@ -241,6 +267,7 @@ class StackVerifier
         current_addr = addr
         current_name = name
         saw_frame = false
+        pending_mov = nil
         fn_names[addr] = name
         fn_addrs[name] = addr
         call_graph[addr] ||= Set.new
@@ -249,10 +276,17 @@ class StackVerifier
         bg_entries << addr if name =~ /__BgCtx\d+\.run$/
 
       elsif current_addr
-        # Stack frame allocation: "sub $0xNN,%rsp"
+        # Stack frame allocation, small form: "sub $0xNN,%rsp"
         if !saw_frame && line =~ /sub\s+\$0x([0-9a-f]+),%rsp/
           frame_sizes[current_addr] = $1.to_i(16)
           saw_frame = true
+        # Huge-frame prologue: "mov $0xN,%REGd; sub %REG,%rsp"
+        elsif !saw_frame && line =~ /mov\s+\$0x([0-9a-f]+),%(r\d+)d/
+          pending_mov = { bytes: $1.to_i(16), reg: $2 }
+        elsif !saw_frame && pending_mov && line =~ /sub\s+%(r\d+),%rsp/ && Regexp.last_match(1) == pending_mov[:reg]
+          frame_sizes[current_addr] = pending_mov[:bytes]
+          saw_frame = true
+          pending_mov = nil
         end
 
         # Call instruction: "call ADDR <name>"
