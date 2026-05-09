@@ -693,7 +693,20 @@ when 'build'
       src_text = File.read(source)
       tokens = Lexer.new(src_text).tokenize
       ast = Parser.new(tokens, src_text).parse
-      annotator = SemanticAnnotator.new
+      # Pass importer + source_dir so files that REQUIRE other files
+      # (not just `REQUIRE "pkg:..."` which we skip via the guard above)
+      # can be annotated. Without this, the annotator's REQUIRE handler
+      # raises "REQUIRE is only supported when using the Importer" --
+      # the rescue below silently logs `[stack-check] Analysis failed`
+      # and the build proceeds without exact-tier sizing. For files with
+      # large frames (e.g. examples/minivm/vm.cht's runRegisterBytecode!
+      # at ~478 KB), the missing tier upgrade leaves them on the default
+      # 16 KB Standard stack, overflowing into adjacent slab memory
+      # and corrupting fiber slab headers at scheduler shutdown.
+      require_relative 'src/backends/importer'
+      source_dir = File.dirname(File.expand_path(source))
+      importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
+      annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
       annotator.annotate!(ast)
       fn_nodes = annotator.instance_variable_get(:@fn_nodes)
 
