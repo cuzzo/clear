@@ -4009,7 +4009,13 @@ class MIRLowering
     # legacy use_fsm / use_fsm_io / use_fsm_next), B2-WITH
     # accepts :shared (matching legacy use_fsm_with). The outer
     # guard is just `spawn_form == :fsm`.
-    if node.spawn_form == :fsm
+    # Skip the FSM transform for the :bc target. The bytecode VM has no
+    # state-machine runtime; the FSM path consumes the body into Zig text
+    # and leaves run_body=[] which the bc emitter cannot lower. The
+    # legacy stackful-fiber lowering below populates run_body so the bc
+    # emitter has structured MIR to walk -- the BG body executes
+    # synchronously inline in the bc VM (single-threaded, deterministic).
+    if node.spawn_form == :fsm && @target != :bc
       transform_ctx = {
         node: node,
         blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,

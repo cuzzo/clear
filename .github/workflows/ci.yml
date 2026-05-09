@@ -240,7 +240,7 @@ jobs:
       # corpus the VM can run grows. Gate merge on no regression below
       # the current pass count. Bump --min-pass=N as we land coverage
       # work that crosses tests fail->pass.
-      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=189
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=215
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)
