@@ -91,16 +91,16 @@ module MethodAnalysis
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
-    zig = if (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_zig]
+    zig = if (obj_type.sharded? || obj_type.striped?) && defn[:sharded_zig]
       defn[:sharded_zig]
-    elsif obj_type&.numeric_map? && !obj_type&.sharded? && !obj_type&.striped? && defn[:numeric_zig]
+    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && defn[:numeric_zig]
       defn[:numeric_zig]
     else
       defn[:zig]
     end
 
     # Resolve alloc variant for sharded types
-    alloc = if (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_alloc]
+    alloc = if (obj_type.sharded? || obj_type.striped?) && defn[:sharded_alloc]
       defn[:sharded_alloc]
     else
       defn[:alloc]
@@ -160,7 +160,7 @@ module MethodAnalysis
   sig { params(type_info: Type, op: Symbol).returns(T.nilable(Hash)) }
   def resolve_index_op(type_info, op)
     T.bind(self, SemanticAnnotator) rescue nil
-    return nil if type_info&.promise_list?
-    INDEX_OPS.dig(type_info&.dispatch_key, op)
+    return nil if type_info.promise_list?
+    INDEX_OPS.dig(type_info.dispatch_key, op)
   end
 end

@@ -145,10 +145,10 @@ class Formatter::FormatLexer
   sig { params(source: String).void }
   def initialize(source)
     @src = source
-    @s = StringScanner.new(source)
-    @line = 1
-    @col  = 1
-    @out  = []
+    @s = T.let(StringScanner.new(source), StringScanner)
+    @line = T.let(1, Integer)
+    @col  = T.let(1, Integer)
+    @out  = T.let([], T::Array[T.untyped])
   end
 
   sig { returns(T.nilable(Array)) }
@@ -657,7 +657,7 @@ class Formatter::Emitter
     insert_nl(out)
   end
 
-  sig { params(toks: Array, s: Integer, e: Integer).returns(T.untyped) }
+  sig { params(toks: Array, s: Integer, e: Integer).returns(Formatter::FormatLexer::Token) }
   def first_code_at(toks, s, e)
     j = s
     while j < e
@@ -1611,7 +1611,7 @@ class Formatter::Emitter
     out
   end
 
-  sig { params(toks: Array, start: Integer).returns(T.untyped) }
+  sig { params(toks: Array, start: Integer).returns(Integer) }
   def skip_ws_nl(toks, start)
     j = start
     while j < toks.length && [:NL].include?(toks[j].type)
@@ -1728,7 +1728,7 @@ class Formatter::Emitter
       (prev.type == :SYM && [')', ']'].include?(prev.raw))
   end
 
-  sig { params(out: Array).returns(T.untyped) }
+  sig { params(out: Array).returns(Formatter::FormatLexer::Token) }
   def last_nontrivial_in_out(out)
     j = out.length - 1
     while j >= 0
@@ -1862,7 +1862,7 @@ class Formatter::Emitter
     nil
   end
 
-  sig { params(toks: Array, open_idx: Integer, opener: String, closer: String).returns(T.untyped) }
+  sig { params(toks: Array, open_idx: Integer, opener: String, closer: String).returns(Integer) }
   def find_matching_paren_or_brace(toks, open_idx, opener, closer)
     depth = 0
     j = open_idx
@@ -2614,7 +2614,7 @@ class Formatter::Emitter
   # generic span opened just before. Tracks nested `<>` depth. Returns
   # the close index, or nil if anything that disqualifies the span as
   # a generic appears (call/index/struct-lit brackets, `=`, etc).
-  sig { params(line: Array, start_idx: Integer).returns(T.untyped) }
+  sig { params(line: Array, start_idx: Integer).returns(Integer) }
   def find_generic_close_idx(line, start_idx)
     depth = 1
     i = start_idx

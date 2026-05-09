@@ -36,12 +36,12 @@ class PipelineHost
     @emitter = emitter
     @fn_sigs = lowering.fn_sigs
     # Pipeline context state (managed by with_pipeline_context)
-    @soa_rewrite_active = false
-    @soa_each_mode = false
-    @soa_needed_fields = Set.new
-    @mir_mode = false
+    @soa_rewrite_active = T.let(false, T::Boolean)
+    @soa_each_mode = T.let(false, T::Boolean)
+    @soa_needed_fields = T.let(Set.new, Set)
+    @mir_mode = T.let(false, T::Boolean)
     # Named pipeline bindings: "$u" -> "__pipe_u" (persist across stages, cleared per-chain)
-    @named_bindings = {}
+    @named_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
   end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
@@ -468,17 +468,17 @@ class PipelineHost
     # In BC mode the VM has no SoA layout; treat @soa lists as regular lists
     # so the structural ItemsAccess path below applies uniformly.
     bc_mode = @lowering.instance_variable_get(:@target) == :bc
-    if lhs_type&.pool? && lhs_type&.sharded?
+    if lhs_type.pool? && lhs_type.sharded?
       [build_mat_sharded_pool(lhs_type), "pipe_items"]
-    elsif lhs_type&.pool? && lhs_type&.soa? && !bc_mode
+    elsif lhs_type.pool? && lhs_type.soa? && !bc_mode
       [build_mat_soa_pool(lhs_type), "pipe_items"]
-    elsif lhs_type&.pool? && !bc_mode
+    elsif lhs_type.pool? && !bc_mode
       [build_mat_pool(lhs_type), "pipe_items"]
-    elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa? && !bc_mode
+    elsif (lhs_type.list_collection? || lhs_type.fixed_soa?) && lhs_type.soa? && !bc_mode
       [build_mat_soa_list(lhs_type), "pipe_items"]
-    elsif lhs_type&.list_collection? && lhs_type&.sharded? && !bc_mode
+    elsif lhs_type.list_collection? && lhs_type.sharded? && !bc_mode
       [build_mat_sharded_list(lhs_type), "pipe_items"]
-    elsif lhs_type&.set_collection?
+    elsif lhs_type.set_collection?
       [build_mat_set(lhs_type), "pipe_items"]
     else
       # Plain array/list: structural ItemsAccess(safe: true) emits the same

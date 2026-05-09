@@ -231,7 +231,7 @@ module FsmOps
     # with each statement properly terminated. Empty list -> "".
     sig { params(ops: Array).returns(String) }
     def emit_stmts(ops)
-      return "" if ops.nil? || ops.empty?
+      return "" if false || ops.empty?
       ops.map { |op| emit_stmt(op) }.join("\n")
     end
 
@@ -384,7 +384,7 @@ module FsmOps
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
     sig { params(ops: Array).returns(Array) }
     def lower_stmts(ops)
-      return [] if ops.nil? || ops.empty?
+      return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
     end
 

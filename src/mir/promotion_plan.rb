@@ -236,7 +236,7 @@ module PromotionClassifier
 
   sig { params(type: Type).returns(T.untyped) }
   private_class_method def self.elem_zig_type_for(type)
-    elem = type&.element_type
+    elem = type.element_type
     return nil unless elem
     Type.new(elem).zig_type
   rescue

@@ -55,7 +55,7 @@ module FixableHelper
   # Return the name with the smallest Levenshtein distance from `input`
   # over `candidates`, provided it's within `max_distance`. Returns nil
   # when no candidate is close enough (don't suggest wild guesses).
-  sig { params(input: T.untyped, candidates: T.untyped, max_distance: Integer).returns(T.untyped) }
+  sig { params(input: T.untyped, candidates: T.untyped, max_distance: Integer).returns(T.nilable(String)) }
   def closest_name(input, candidates, max_distance: 3)
     T.bind(self, SemanticAnnotator) rescue nil
     best = T.let(nil, T.untyped)
@@ -406,7 +406,7 @@ module FixableHelper
     move:    "was already MOVED",
   }.freeze
 
-  sig { params(action: Symbol).returns(T.untyped) }
+  sig { params(action: Symbol).returns(String) }
   def ownership_active_phrase(action)
     T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_ACTIVE_PHRASES[action] || "already consumed it"
@@ -422,7 +422,7 @@ module FixableHelper
   # error can quote the consumer call (e.g. "process(GIVE msg)"). Falls
   # back to nil when @source_code isn't set (programmatic use of the
   # annotator) or the line is past EOF.
-  sig { params(line_num: Integer).returns(T.untyped) }
+  sig { params(line_num: Integer).returns(T.nilable(String)) }
   def consumer_source_text(line_num)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless @source_code && line_num
@@ -1356,7 +1356,7 @@ module FixableHelper
   sig { params(ops: T::Set[Symbol]).returns(T::Array[Array]) }
   def auto_rank_candidates(ops)
     T.bind(self, SemanticAnnotator) rescue nil
-    return [] if ops.nil? || ops.empty?
+    return [] if false || ops.empty?
 
     # Per-type aggregation across ops.
     agg = {}  # type_sym => { count:, rank_sum:, notes: [] }

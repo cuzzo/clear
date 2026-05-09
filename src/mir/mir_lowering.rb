@@ -47,20 +47,20 @@ class MIRLowering
     @union_schemas = union_schemas || {}
     @fn_sigs = fn_sigs || {}
     @moved_guard_info = moved_guard_info || {}
-    @rt_name = "rt"
+    @rt_name = T.let("rt", String)
     @shard_context = nil  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
-    @emitted_extern_modules = Set.new
-    @block_expr_counter = 0
-    @indirect_fields = {}
+    @emitted_extern_modules = T.let(Set.new, Set)
+    @block_expr_counter = T.let(0, Integer)
+    @indirect_fields = T.let({}, T::Hash[T.untyped, T.untyped])
     @pipeline_fallback = pipeline_fallback
     @pipeline_host = nil
     @importer = importer
     @source_dir = source_dir
-    @emitted_types = Set.new
+    @emitted_types = T.let(Set.new, Set)
     @debug_mode = debug_mode
-    @pending_stmts = []
-    @tmp_counter = 0
-    @current_bindings = {}  # set per-function by lower_function_def from fn.cleanup_bindings
+    @pending_stmts = T.let([], T::Array[T.untyped])
+    @tmp_counter = T.let(0, Integer)
+    @current_bindings = T.let({}, T::Hash[T.untyped, T.untyped])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
   end
 
@@ -2482,7 +2482,7 @@ class MIRLowering
   # Zig expression naming the locked-inner. Identifier → its Zig name (or
   # DO-capture rename). GetField → the chained field path (e.g.
   # `env.vars`), built recursively for nested fields.
-  sig { params(var_node: AST::Identifier, var_name: String).returns(T.untyped) }
+  sig { params(var_node: AST::Identifier, var_name: String).returns(String) }
   def with_cap_zig_target(var_node, var_name)
     if var_node.is_a?(AST::GetField)
       build_field_path_zig(var_node)
@@ -4522,8 +4522,8 @@ class MIRLowering
 
   sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T.nilable(String)) }
   def visible_type_defs(mod, same_dir: false)
-    return nil unless mod&.type_defs && !mod.type_defs.strip.empty?
-    return nil unless mod&.ast
+    return nil unless mod.type_defs && !mod.type_defs.strip.empty?
+    return nil unless mod.ast
 
     visible_names = Set.new
     mod.ast.statements.each do |stmt|
@@ -7403,7 +7403,7 @@ class MIRLowering
 
   sig { params(name: String).returns(T::Boolean) }
   def callee_needs_rt?(name)
-    return true if name.nil? || name.to_s.empty?
+    return true if false || name.to_s.empty?
     sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
     sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
   end
@@ -7455,7 +7455,7 @@ class MIRLowering
 
   sig { params(name: String).returns(T::Boolean) }
   def callee_can_fail?(name)
-    return true if name.nil? || name.to_s.empty?
+    return true if false || name.to_s.empty?
     sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
     sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end

@@ -631,7 +631,7 @@ module EffectTracker
         reason = :no_suspends
       end
 
-      fn_node.fsm_eligible = reason.nil?
+      fn_node.fsm_eligible = false
       fn_node.fsm_ineligible_reason = reason
     end
   end
@@ -982,12 +982,12 @@ module EffectTracker
   sig { params(stmts: Array, loop_node: T.untyped).returns(T.nilable(Array)) }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return if stmts.nil?
+    return if false
     stmts = [stmts] unless stmts.is_a?(Array)
     stmts.each { |s| validate_tight_node!(s, loop_node) }
   end
 
-  sig { params(node: T.untyped, loop_node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, loop_node: AST::WhileLoop).returns(T.untyped) }
   def validate_tight_node!(node, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.nil?

@@ -361,7 +361,7 @@ module WithMatchCheck
   # downstream readers (effect resolution, mir lowering) see concrete
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
-  sig { params(arg: T.untyped).returns(T.untyped) }
+  sig { params(arg: T.untyped).returns(Set) }
   def self.family_of_arg_set(arg)
     sym = arg.symbol
     return Set.new unless sym

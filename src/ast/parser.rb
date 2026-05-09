@@ -17,9 +17,9 @@ class Parser
   include ErrorHelper
   include FixableHelper
 
-  @@stmt_rules = {}
-  @@primary_rules = {}
-  @@suffix_rules = {}
+  @@stmt_rules = T.let({}, T::Hash[T.untyped, T.untyped])
+  @@primary_rules = T.let({}, T::Hash[T.untyped, T.untyped])
+  @@suffix_rules = T.let({}, T::Hash[T.untyped, T.untyped])
 
   sig { params(type: Symbol, value: String, node_class: T.nilable(Class), pattern: T.nilable(Array), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
   def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
@@ -60,7 +60,7 @@ class Parser
   sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.untyped).void }
   def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
-    @pos = 0
+    @pos = T.let(0, Integer)
     @source_code = source_code
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per

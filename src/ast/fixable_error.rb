@@ -140,7 +140,7 @@ module FixCollector
     !@findings.nil?
   end
 
-  sig { params(finding: FixableFinding).returns(T.untyped) }
+  sig { params(finding: FixableFinding).returns(Array) }
   def self.push(finding)
     @findings << finding if @findings
   end

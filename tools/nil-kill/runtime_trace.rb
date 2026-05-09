@@ -1,0 +1,263 @@
+# typed: false
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "set"
+
+module NilKillRuntimeTrace
+  ROOT = File.expand_path("../..", __dir__)
+  OUT_DIR = File.expand_path(File.join(ROOT, "tmp", "nil-kill", "runtime"))
+  TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
+    File.expand_path(path, ROOT)
+  end
+  ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
+
+  @methods = {}
+  @tlets = {}
+  @frames = Hash.new { |h, k| h[k] = [] }
+  @lock = Mutex.new
+
+  class << self
+    attr_reader :methods, :tlets, :frames, :lock
+  end
+
+  def self.target_path?(path)
+    abs = File.expand_path(path.to_s, ROOT)
+    TARGETS.any? { |target| abs == target || abs.start_with?(target + File::SEPARATOR) }
+  end
+
+  def self.class_name(value)
+    return "NilClass" if value.nil?
+    cls = value.class rescue nil
+    return "T.untyped" unless cls
+    cls.name || "T.untyped"
+  end
+
+  def self.container_shape(value)
+    case value
+    when Array, Set
+      [:array, value.first(ELEMENT_SAMPLE).map { |item| class_name(item) }.to_set]
+    when Hash
+      keys = Set.new
+      vals = Set.new
+      value.first(ELEMENT_SAMPLE).each do |key, val|
+        keys << class_name(key)
+        vals << class_name(val)
+      end
+      [:hash, [keys, vals]]
+    end
+  end
+
+  def self.method_owner(defined_class)
+    return nil unless defined_class
+    if defined_class.respond_to?(:singleton_class?) && defined_class.singleton_class?
+      target = defined_class.respond_to?(:attached_object) ? (defined_class.attached_object rescue nil) : nil
+      return [target.name, "class"] if target.is_a?(Module) && target.name
+      nil
+    else
+      defined_class.name && [defined_class.name, "instance"]
+    end
+  end
+
+  def self.bucket(tp)
+    owner = method_owner(tp.defined_class)
+    return nil unless owner
+    key = [owner[0], tp.method_id.to_s, owner[1], File.expand_path(tp.path, ROOT), tp.lineno]
+    @methods[key] ||= {
+      calls: 0,
+      ok_calls: 0,
+      raised_calls: 0,
+      params_by_name: Hash.new { |h, k| h[k] = Set.new },
+      params_ok: Hash.new { |h, k| h[k] = Set.new },
+      params_raised: Hash.new { |h, k| h[k] = Set.new },
+      param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_sites_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_sites_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_elem: Hash.new { |h, k| h[k] = Set.new },
+      param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
+      returns: Set.new,
+      return_elem: Set.new,
+      return_kv: [Set.new, Set.new],
+      raised: Set.new,
+    }
+  end
+
+  def self.record_call(tp)
+    return unless target_path?(tp.path)
+    params = tp.parameters rescue nil
+    return unless params
+    b = bucket(tp)
+    return unless b
+    binding = tp.binding
+    frame = {
+      key: [method_owner(tp.defined_class), tp.method_id.to_s, File.expand_path(tp.path, ROOT)],
+      bucket: b,
+      params: Hash.new { |h, k| h[k] = Set.new },
+      param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_elem: Hash.new { |h, k| h[k] = Set.new },
+      param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
+      callsite: callsite_for(tp),
+    }
+    @lock.synchronize do
+      b[:calls] += 1
+      params.each do |kind, name|
+        next unless name
+        next if %i[rest keyrest block].include?(kind)
+        value = binding.local_variable_get(name) rescue nil
+        cls = class_name(value)
+        frame[:params][name.to_s] << cls
+        frame[:param_sites][name.to_s][site_key(frame[:callsite], cls)] += 1 if frame[:callsite]
+        shape = container_shape(value)
+        next unless shape
+        if shape[0] == :array
+          frame[:param_elem][name.to_s].merge(shape[1])
+        else
+          frame[:param_kv][name.to_s][0].merge(shape[1][0])
+          frame[:param_kv][name.to_s][1].merge(shape[1][1])
+        end
+      end
+      @frames[Thread.current.object_id] << frame
+    end
+  end
+
+  def self.record_return(tp)
+    return unless target_path?(tp.path)
+    frame = pop_frame(tp)
+    b = frame ? frame[:bucket] : bucket(tp)
+    return unless b
+    value = tp.return_value
+    @lock.synchronize do
+      commit_params(b, frame, :ok) if frame
+      b[:ok_calls] += 1
+      b[:returns] << class_name(value)
+      shape = container_shape(value)
+      next unless shape
+      if shape[0] == :array
+        b[:return_elem].merge(shape[1])
+      else
+        b[:return_kv][0].merge(shape[1][0])
+        b[:return_kv][1].merge(shape[1][1])
+      end
+    end
+  end
+
+  def self.record_raise(tp)
+    return unless target_path?(tp.path)
+    frame = pop_frame(tp)
+    b = frame ? frame[:bucket] : bucket(tp)
+    return unless b
+    @lock.synchronize do
+      commit_params(b, frame, :raised) if frame
+      b[:raised_calls] += 1
+      b[:raised] << class_name(tp.raised_exception)
+    end
+  end
+
+  def self.pop_frame(tp)
+    owner = method_owner(tp.defined_class)
+    return nil unless owner
+    expected = [owner, tp.method_id.to_s, File.expand_path(tp.path, ROOT)]
+    stack = @frames[Thread.current.object_id]
+    idx = stack.rindex { |frame| frame[:key] == expected }
+    return nil unless idx
+    stack.delete_at(idx)
+  end
+
+  def self.commit_params(bucket, frame, outcome)
+    frame[:params].each do |name, classes|
+      bucket[:params_by_name][name].merge(classes)
+      target = outcome == :ok ? bucket[:params_ok] : bucket[:params_raised]
+      target[name].merge(classes)
+    end
+    frame[:param_sites].each do |name, sites|
+      sites.each do |site, count|
+        bucket[:param_sites][name][site] += count
+        target = outcome == :ok ? bucket[:param_sites_ok] : bucket[:param_sites_raised]
+        target[name][site] += count
+      end
+    end
+    frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
+    frame[:param_kv].each do |name, kv|
+      bucket[:param_kv][name][0].merge(kv[0])
+      bucket[:param_kv][name][1].merge(kv[1])
+    end
+  end
+
+  def self.callsite_for(tp)
+    caller_locations(2, 30).find do |loc|
+      path = loc.absolute_path || loc.path
+      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+    end
+  end
+
+  def self.site_key(loc, cls)
+    path = File.expand_path(loc.absolute_path || loc.path, ROOT)
+    "#{path}:#{loc.lineno}:#{cls}"
+  end
+
+  def self.install_tlet_hook
+    return unless defined?(T) && T.respond_to?(:let)
+    return if T.singleton_class.method_defined?(:__nil_kill_orig_let)
+    T.singleton_class.alias_method(:__nil_kill_orig_let, :let)
+    T.singleton_class.define_method(:let) do |value, type, **kw|
+      loc = caller_locations(1, 1)&.first
+      if loc && NilKillRuntimeTrace.target_path?(loc.absolute_path || loc.path)
+        path = File.expand_path(loc.absolute_path || loc.path, ROOT)
+        key = [path, loc.lineno]
+        NilKillRuntimeTrace.lock.synchronize do
+          rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: Set.new })
+          rec[:calls] += 1
+          rec[:classes] << NilKillRuntimeTrace.class_name(value)
+        end
+      end
+      T.send(:__nil_kill_orig_let, value, type, **kw)
+    end
+  end
+
+  def self.dump
+    FileUtils.mkdir_p(OUT_DIR)
+    pid = Process.pid
+    File.open(File.join(OUT_DIR, "methods-#{pid}.jsonl"), "w") do |file|
+      @methods.each do |key, rec|
+        file.puts JSON.generate(
+          class: key[0], method: key[1], kind: key[2], path: key[3], line: key[4],
+          calls: rec[:calls],
+          ok_calls: rec[:ok_calls],
+          raised_calls: rec[:raised_calls],
+          params_by_name: rec[:params_by_name].transform_values { |set| set.to_a.sort },
+          params_ok: rec[:params_ok].transform_values { |set| set.to_a.sort },
+          params_raised: rec[:params_raised].transform_values { |set| set.to_a.sort },
+          param_sites: rec[:param_sites].transform_values { |sites| sites.sort.to_h },
+          param_sites_ok: rec[:param_sites_ok].transform_values { |sites| sites.sort.to_h },
+          param_sites_raised: rec[:param_sites_raised].transform_values { |sites| sites.sort.to_h },
+          param_elem: rec[:param_elem].transform_values { |set| set.to_a.sort },
+          param_kv: rec[:param_kv].transform_values { |kv| [kv[0].to_a.sort, kv[1].to_a.sort] },
+          returns: rec[:returns].to_a.sort,
+          return_elem: rec[:return_elem].to_a.sort,
+          return_kv: [rec[:return_kv][0].to_a.sort, rec[:return_kv][1].to_a.sort],
+          raised: rec[:raised].to_a.sort,
+        )
+      end
+    end
+    File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
+      @tlets.each do |(path, line), rec|
+        file.puts JSON.generate(path: path, line: line, calls: rec[:calls], classes: rec[:classes].to_a.sort)
+      end
+    end
+  end
+end
+
+if ENV["NIL_KILL_TRACE"] == "1"
+  TracePoint.new(:call) { |tp| NilKillRuntimeTrace.record_call(tp) }.enable
+  TracePoint.new(:return) { |tp| NilKillRuntimeTrace.record_return(tp) }.enable
+  TracePoint.new(:raise) { |tp| NilKillRuntimeTrace.record_raise(tp) }.enable
+  begin
+    require "sorbet-runtime"
+  rescue LoadError
+    nil
+  end
+  NilKillRuntimeTrace.install_tlet_hook
+  TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
+  at_exit { NilKillRuntimeTrace.dump }
+end

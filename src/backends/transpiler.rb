@@ -149,7 +149,7 @@ class ZigTranspiler
     service: "Huge", unbounded: "Huge"
   }.freeze
 
-  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.untyped).returns(T.untyped) }
+  sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.untyped).returns(String) }
   def main_stack_variant(main_fn, override: nil)
     tier = override&.to_sym || main_fn&.stack_tier || :standard
     MAIN_STACK_VARIANTS.fetch(tier, "Standard")
@@ -263,7 +263,7 @@ end
 
 # --- RUN IT ---
 
-$logger = Logger.new(STDOUT)
+$logger = T.let(Logger.new(STDOUT), Logger)
 $logger.level = Logger::INFO
 $logger.formatter = proc do |severity, datetime, progname, msg|
   "[#{severity}] #{msg}\n"

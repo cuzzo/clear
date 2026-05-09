@@ -47,7 +47,7 @@ class AutoConstraintCollector
     # fn_nodes: { name => AST::FunctionDef }, exactly as the existing
     # annotator's signature-collection pass produces.
     @fn_nodes = fn_nodes
-    @slots = {}
+    @slots = T.let({}, T::Hash[T.untyped, T.untyped])
     # Per-function map of `local_name → slot_id`, threaded through
     # the walk via @local_decls (saved/restored on FunctionDef entry).
     # Lets MUTABLE-local reassignments — `BindExpr(name="x", type=nil)`
@@ -696,7 +696,7 @@ class OperatorEvidenceCollector
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
-    @evidence = Hash.new { |h, k| h[k] = Set.new }
+    @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, Hash)
   end
 
   sig { returns(Hash) }

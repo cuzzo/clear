@@ -30,8 +30,8 @@ class ModuleImporter
   sig { params(base_dir: String, pkg_paths: Hash, use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
     @base_dir     = File.expand_path(base_dir)
-    @module_cache = {}  # abs_path => CompiledModule
-    @compiling    = Set.new  # abs_paths currently being compiled (cycle detection)
+    @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
+    @compiling    = T.let(Set.new, Set)  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
     @pkg_paths    = pkg_paths.transform_keys(&:to_s)
     @stdlib_root  = stdlib_root

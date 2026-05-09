@@ -30,7 +30,7 @@ module LSP
 
     sig { void }
     def initialize
-      @docs = {}
+      @docs = T.let({}, T::Hash[T.untyped, T.untyped])
     end
 
     # didOpen — new document arrives.
@@ -58,7 +58,7 @@ module LSP
       @docs.delete(uri)
     end
 
-    sig { params(uri: String).returns(T.untyped) }
+    sig { params(uri: String).returns(T.nilable(LSP::DocumentStore::Document)) }
     def get(uri)
       @docs[uri]
     end

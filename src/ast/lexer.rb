@@ -36,9 +36,9 @@ class Lexer
 
   sig { params(source: String).void }
   def initialize(source)
-    @s = StringScanner.new(source)
-    @line = 1
-    @column = 1
+    @s = T.let(StringScanner.new(source), StringScanner)
+    @line = T.let(1, Integer)
+    @column = T.let(1, Integer)
     @tokens = []
   end
 
@@ -302,7 +302,7 @@ class Lexer
     advance_pos(@s.matched)
   end
 
-  sig { params(str: String).returns(T.untyped) }
+  sig { params(str: String).returns(Integer) }
   def advance_pos(str)
     return unless str # Guard clause for safety
 

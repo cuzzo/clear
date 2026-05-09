@@ -1,3 +1,5 @@
+require "sorbet-runtime"
+
 require 'zlib'
 require 'stringio'
 
@@ -50,28 +52,33 @@ module Pprof
   # are deduplicated as added; samples are accumulated and serialized
   # at `encode`.
   class Profile
+    extend T::Sig
+
+    sig { void }
     def initialize
-      @strings    = { "" => 0 }      # string_table[0] is required to be empty
-      @functions  = {}               # key: [name, system_name, filename] -> Function
-      @locations  = []
-      @samples    = []
-      @sample_types = []
-      @mappings   = []               # one entry per binary
+      @strings    = T.let({ "" => 0 }, T::Hash[T.untyped, T.untyped])      # string_table[0] is required to be empty
+      @functions  = T.let({}, T::Hash[T.untyped, T.untyped])               # key: [name, system_name, filename] -> Function
+      @locations  = T.let([], T::Array[T.untyped])
+      @samples    = T.let([], T::Array[T.untyped])
+      @sample_types = T.let([], T::Array[T.untyped])
+      @mappings   = T.let([], T::Array[T.untyped])               # one entry per binary
       @period_type  = nil
-      @period       = 0
+      @period       = T.let(0, Integer)
       @time_nanos     = (Time.now.to_f * 1e9).to_i
-      @duration_nanos = 0
+      @duration_nanos = T.let(0, Integer)
       @default_sample_type_idx = nil
-      @next_func_id = 1
-      @next_loc_id  = 1
-      @next_mapping_id = 1
-      @primary_mapping_id = 0
+      @next_func_id = T.let(1, Integer)
+      @next_loc_id  = T.let(1, Integer)
+      @next_mapping_id = T.let(1, Integer)
+      sig { params(s: String).returns(Integer) }
+      @primary_mapping_id = T.let(0, Integer)
     end
 
     attr_writer :time_nanos, :duration_nanos, :period
 
     def intern(s)
       @strings[s.to_s] ||= @strings.size
+    sig { params(type: String, unit: String).returns(Array) }
     end
 
     # Declare a sample value column. `type` is the metric (e.g.
@@ -84,7 +91,7 @@ module Pprof
     # `period` and `period_type` describe the sampling rate (e.g.
     # 1 sample per N events). Optional; pprof shows it in the header.
     def set_period_type(type, unit, period)
-      @period_type = [intern(type), intern(unit)]
+      @period_type = T.let([intern(type), intern(unit)], T::Array[T.untyped])
       @period = period
     end
 
@@ -115,6 +122,7 @@ module Pprof
         has_line_numbers: true,
       }
       @mappings << mapping
+      sig { params(name: String, filename: String, system_name: T.nilable(String), start_line: Integer).returns(Integer) }
       @next_mapping_id += 1
       @primary_mapping_id = mapping[:id] if @primary_mapping_id.zero?
       mapping[:id]
@@ -135,6 +143,7 @@ module Pprof
         start_line: start_line,
       }
       @functions[key] = f
+      sig { params(function_id: Integer, line: Integer, address: Integer).returns(Integer) }
       @next_func_id += 1
       f[:id]
     end
@@ -152,12 +161,14 @@ module Pprof
         line_no: line,
         mapping_id: @primary_mapping_id,
       }
+      sig { params(location_ids: Array, values: Array, labels: Hash).returns(Array) }
       id
     end
 
     # `location_ids` is a stack trace, leaf-first. `values` matches the
     # order/length of `add_sample_type` calls. `labels` is a hash of
     # string key -> string-or-int (str labels are interned; int labels
+    sig { returns(String) }
     # render as numeric).
     def add_sample(location_ids, values, labels = {})
       @samples << { location_ids: location_ids, values: values, labels: labels }
@@ -209,6 +220,7 @@ module Pprof
       io.set_encoding('ASCII-8BIT')
       Zlib::GzipWriter.wrap(io) { |gz| gz.write(encode) }
       io.string
+    sig { params(s: Hash).returns(String) }
     end
 
     def write_gzip(path)
@@ -235,6 +247,7 @@ module Pprof
         case v
         when Integer
           lab += Wire.field_varint(3, v)
+        sig { params(loc: Hash).returns(String) }
         else
           lab += Wire.field_varint(2, intern(v.to_s))
         end
@@ -259,6 +272,7 @@ module Pprof
       buf += Wire.field_varint(3, m[:memory_limit]) if m[:memory_limit].positive?
       buf += Wire.field_varint(4, m[:file_offset]) if m[:file_offset].positive?
       buf += Wire.field_varint(5, m[:filename_idx])
+      sig { params(f: Hash).returns(String) }
       buf += Wire.field_varint(6, m[:build_id_idx]) if m[:build_id_idx].positive?
       buf += Wire.field_varint(7, 1) if m[:has_functions]
       buf += Wire.field_varint(8, 1) if m[:has_filenames]

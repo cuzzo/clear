@@ -26,7 +26,7 @@ class MIRPass
   def initialize(fn_nodes:, schema_lookup:)
     @fn_nodes = fn_nodes
     @schema_lookup = schema_lookup
-    @cleanup_bindings = {}
+    @cleanup_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
   end
 
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
@@ -112,7 +112,7 @@ class MIRPass
   def transform_function!(fn, promo)
     bindings = @cleanup_bindings[fn.name]
     has_bindings = bindings && !bindings.empty?
-    promo = nil if promo&.empty?
+    promo = nil if promo.empty?
 
     fn.has_promotion = true if promo
 
@@ -207,7 +207,7 @@ class MIRPass
         resource_captures = bg.capture_analysis&.resource_captures
         next unless resource_captures&.any?
         resource_captures.each do |name|
-          entry = bindings&.dig(name)
+          entry = bindings.dig(name)
           next unless entry && entry[:needs_cleanup]
           entry[:has_moved_guard] = true
         end
@@ -892,7 +892,7 @@ class MIRPass
   # Map a type to its INDEX_OPS container kind symbol.
   sig { params(type_info: Type).returns(T.nilable(Symbol)) }
   def container_kind(type_info)
-    type_info&.dispatch_key
+    type_info.dispatch_key
   end
 
 

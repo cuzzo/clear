@@ -67,8 +67,8 @@ class Type
       end
     end
 
-    t_left = left_type&.resolved
-    t_right = right_type&.resolved
+    t_left = left_type.resolved
+    t_right = right_type.resolved
 
     case op
     when :AND, :OR
@@ -174,7 +174,7 @@ class Type
     end
 
     # D. Array Concatenation
-    if left_type&.array? && right_type&.array?
+    if left_type.array? && right_type.array?
       return BinaryOpResult.new(type: t_left, storage: :frame)
     end
 
@@ -183,7 +183,7 @@ class Type
 
   sig { params(from_type: Symbol, to_type: Symbol).returns(T::Boolean) }
   def self.safe_autocast?(from_type, to_type)
-    return false if from_type.nil?
+    return false if false
     from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return false if from_t.fn_type? || to_t.fn_type?

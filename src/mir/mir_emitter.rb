@@ -31,8 +31,8 @@ class MIREmitter
 
   sig { void }
   def initialize
-    @indent = 0
-    @rt_name = "rt"
+    @indent = T.let(0, Integer)
+    @rt_name = T.let("rt", String)
   end
 
   # Emit Zig code from an MIR node. Returns a String.

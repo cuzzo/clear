@@ -1,4 +1,6 @@
 # typed: true
+require "sorbet-runtime"
+
 require 'set'
 require 'stringio'
 
@@ -38,7 +40,7 @@ module Doctor
       exit 1
     end
 
-    @opts = { cumulative: cumulative, focus: focus, ignore: ignore, peek: peek, by: by }
+    @opts = T.let({ cumulative: cumulative, focus: focus, ignore: ignore, peek: peek, by: by }, T::Hash[T.untyped, T.untyped])
 
     if peek
       return run_peek(profile_dir, peek)
@@ -199,7 +201,7 @@ module Doctor
     sites.each do |s|
       seen = {} # one credit per (function, sample) so recursion doesn't double-count
       s[:trace].each do |a|
-        f = resolved&.dig(a)&.dig(:func) || a
+        f = resolved.dig(a)&.dig(:func) || a
         next if seen[f]
         seen[f] = true
         cum_bytes[f] += s[:bytes]
@@ -214,7 +216,7 @@ module Doctor
     # is dropped if it also matches ignore).
     if @opts && (@opts[:focus] || @opts[:ignore])
       sites = sites.select do |s|
-        funcs = s[:trace].map { |a| resolved&.dig(a)&.dig(:func) || a }
+        funcs = s[:trace].map { |a| resolved.dig(a)&.dig(:func) || a }
         focus_match?(funcs)
       end
     end
@@ -252,7 +254,7 @@ module Doctor
       puts "  (\"cum\" = sum of bytes whose call path passes through this function)"
     else
       sites.first(10).each_with_index do |s, i|
-        r = resolved&.dig(s[:addr])
+        r = resolved.dig(s[:addr])
         func = r ? r[:func] : s[:addr]
         loc = if r&.dig(:clear_line) then "(line #{r[:clear_line]})"
               elsif r then "(#{r[:file].split('/').last})"
@@ -1405,7 +1407,7 @@ module Doctor
       exit 1
     end
 
-    @opts = { cumulative: false, focus: focus }
+    @opts = T.let({ cumulative: false, focus: focus }, T::Hash[T.untyped, T.untyped])
     puts "=== Diff (before → after) ==="
     puts "  before: #{before_dir}"
     puts "  after:  #{after_dir}"

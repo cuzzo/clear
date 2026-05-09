@@ -27,7 +27,7 @@ class PipelineRewriter
   sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
     @annotator = annotator
-    @var_counter = 0
+    @var_counter = T.let(0, Integer)
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
@@ -272,7 +272,7 @@ class PipelineRewriter
   sig { params(node: AST::BinaryOp).returns(T::Hash[Symbol, T.untyped]) }
   def collect_chain(node)
     stages = []
-    cursor = T.let(node, T.untyped)
+    cursor = T.let(node, AST::BinaryOp)
     terminal = nil
 
     # Identify the terminal operation.

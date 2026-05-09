@@ -131,7 +131,7 @@ module EscapeAnalysis
     return heap_fns.include?(callee_name) if callee_name
 
     if val.is_a?(AST::GetField)
-      root = T.let(val, T.untyped)
+      root = T.let(val, AST::GetField)
       root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
       if root.is_a?(AST::Identifier) && root.symbol
         decl     = root.symbol.reg
@@ -610,7 +610,7 @@ module EscapeAnalysis
     nil
   end
 
-  sig { params(node: T.untyped, var_name: String).returns(T.untyped) }
+  sig { params(node: T.untyped, var_name: String).returns(T.nilable(AST::Identifier)) }
   private_class_method def self.e2_extract_ident(node, var_name)
     case node
     when AST::Identifier

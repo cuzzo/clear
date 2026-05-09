@@ -34,12 +34,12 @@ class BasicBlock
   sig { params(id: Integer).void }
   def initialize(id)
     @id = id
-    @stmts = []
-    @successors = []
-    @predecessors = []
+    @stmts = T.let([], T::Array[T.untyped])
+    @successors = T.let([], T::Array[T.untyped])
+    @predecessors = T.let([], T::Array[T.untyped])
   end
 
-  sig { params(block: BasicBlock).returns(T.untyped) }
+  sig { params(block: BasicBlock).returns(Array) }
   def add_successor(block)
     @successors << block unless @successors.include?(block)
     block.predecessors << self unless block.predecessors.include?(self)
@@ -58,8 +58,8 @@ class FunctionCFG
   sig { params(fn_name: String).void }
   def initialize(fn_name)
     @fn_name = fn_name
-    @blocks = []
-    @block_counter = 0
+    @blocks = T.let([], T::Array[T.untyped])
+    @block_counter = T.let(0, Integer)
     @entry = new_block
     @exit_block = new_block  # virtual exit - all returns target this
   end
@@ -235,11 +235,11 @@ class FunctionCFG
     case node
     when AST::FuncCall
       return true if node.can_fail
-      return true if can_fail_fns&.include?(node.name)
+      return true if can_fail_fns.include?(node.name)
       node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
     when AST::MethodCall
       return true if node.can_fail
-      return true if can_fail_fns&.include?(node.name)
+      return true if can_fail_fns.include?(node.name)
       stmt_can_fail?(node.object, can_fail_fns) ||
         node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
     when AST::StaticCall
@@ -329,9 +329,9 @@ class OwnershipDataflow
     @cfg = cfg
     @fn_node = fn_node
     @schema_lookup = schema_lookup
-    @block_in  = {}  # block.id => { var_name => OwnerEntry }
-    @block_out = {}  # block.id => { var_name => OwnerEntry }
-    @point_states = {} # [block.id, stmt_index] => { var_name => OwnerEntry }
+    @block_in  = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
+    @block_out = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
+    @point_states = T.let({}, T::Hash[T.untyped, T.untyped]) # [block.id, stmt_index] => { var_name => OwnerEntry }
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -990,7 +990,7 @@ class UseAfterMoveChecker
   def initialize(fn_node, dataflow)
     @fn_node = fn_node
     @dataflow = dataflow
-    @errors = []
+    @errors = T.let([], T::Array[T.untyped])
   end
 
   # Run the check. Returns self for chaining.
@@ -1700,8 +1700,8 @@ class BorrowChecker
     @fn_name = fn_node.name
     @fn_node = fn_node
     @schema_lookup = schema_lookup
-    @errors = []
-    @active_borrows = {} # { source_name => [{ kind: :mutable/:immutable }] }
+    @errors = T.let([], T::Array[T.untyped])
+    @active_borrows = T.let({}, T::Hash[T.untyped, T.untyped]) # { source_name => [{ kind: :mutable/:immutable }] }
   end
 
   sig { returns(Array) }
@@ -1712,7 +1712,7 @@ class BorrowChecker
   private
 
   # Extract the root variable name from a capability's var_node.
-  sig { params(var_node: AST::Identifier).returns(T.untyped) }
+  sig { params(var_node: AST::Identifier).returns(String) }
   def cap_source_name(var_node)
     case var_node
     when AST::Identifier then var_node.name.to_s
@@ -1724,7 +1724,7 @@ class BorrowChecker
 
   sig { params(token: Lexer::Token).returns(String) }
   def line_info(token)
-    token&.line ? " (line #{token.line})" : ""
+    token.line ? " (line #{token.line})" : ""
   end
 
   sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }

@@ -36,15 +36,15 @@ class OwnershipGraph
 
   sig { void }
   def initialize
-    @nodes = {}           # path => Node
-    @edges = []           # Array of Edge
-    @edges_by_target = Hash.new { |h, k| h[k] = [] }  # target_path => [Edge]
-    @edges_by_source = Hash.new { |h, k| h[k] = [] }  # source_path => [Edge]
-    @children = Hash.new { |h, k| h[k] = Set.new }    # parent_path => Set of child paths
-    @completed_nodes = {}
+    @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
+    @edges = T.let([], T::Array[T.untyped])           # Array of Edge
+    @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # target_path => [Edge]
+    @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # source_path => [Edge]
+    @children = T.let(Hash.new { |h, k| h[k] = Set.new }, Hash)    # parent_path => Set of child paths
+    @completed_nodes = T.let({}, T::Hash[T.untyped, T.untyped])
   end
 
-  sig { returns(T::Hash[String, OwnershipGraph::Node]) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def nodes
     @nodes.empty? ? @completed_nodes : @nodes
   end
@@ -285,7 +285,7 @@ class OwnershipGraph
   # ── Queries ───────────────────────────────────────────────────────
 
   # Get the node for a path.
-  sig { params(path: T.untyped).returns(T.untyped) }
+  sig { params(path: T.untyped).returns(T.nilable(OwnershipGraph::Node)) }
   def [](path)
     @nodes[path] || @completed_nodes[path]
   end

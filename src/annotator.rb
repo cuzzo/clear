@@ -85,25 +85,25 @@ class SemanticAnnotator
   # When nil, affected helpers fall back to the plain `error!` path.
   attr_accessor :source_code
 
-  sig { params(importer: T.untyped, compiler: T.untyped, source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }
+  sig { params(importer: T.nilable(ModuleImporter), compiler: T.untyped, source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }
   def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
     @importer   = importer || compiler
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
     @strict_test = strict_test
     @source_code = source_code
     # We start with a global scope
-    @scope_stack = [Scope.new]
-    @function_context_stack = [] # Stack of expected return types
-    @loop_depth = 0 # Track if we are inside a loop
-    @conditional_depth = 0 # Track if we are inside an IF branch or MATCH arm
-    @smooth_depth = 0
-    @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
+    @scope_stack = T.let([Scope.new], T::Array[T.untyped])
+    @function_context_stack = T.let([], T::Array[T.untyped]) # Stack of expected return types
+    @loop_depth = T.let(0, Integer) # Track if we are inside a loop
+    @conditional_depth = T.let(0, Integer) # Track if we are inside an IF branch or MATCH arm
+    @smooth_depth = T.let(0, Integer)
+    @match_pattern_context = T.let(false, T::Boolean) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     # Reentrancy analysis
-    @call_graph  = {}  # name => Set of directly-called function names (excluding self-calls)
-    @fn_has_fnptr = {} # name => true if function calls a fn-type variable or lambda
-    @fn_nodes    = {}  # name => FunctionDef node (for error reporting in the post-pass)
+    @call_graph  = T.let({}, T::Hash[T.untyped, T.untyped])  # name => Set of directly-called function names (excluding self-calls)
+    @fn_has_fnptr = T.let({}, T::Hash[T.untyped, T.untyped]) # name => true if function calls a fn-type variable or lambda
+    @fn_nodes    = T.let({}, T::Hash[T.untyped, T.untyped])  # name => FunctionDef node (for error reporting in the post-pass)
     # Performance analysis
-    @fn_raises_directly = {}  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
+    @fn_raises_directly = T.let({}, T::Hash[T.untyped, T.untyped])  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
@@ -114,18 +114,18 @@ class SemanticAnnotator
     # post-pass after @call_graph is complete.
     init_lock_analysis!
     # @pinned escape safety: true when inside a @pinned BG block.
-    @current_bg_pinned = false
+    @current_bg_pinned = T.let(false, T::Boolean)
     # P1.7: WITH validations on parameter bindings are deferred to a
     # post-annotation pass so EscapeAnalysis.propagate_caller_sync! has a
     # chance to populate sync from callers' arg bindings first. Each entry:
     # { node:, var_node:, capability:, kind: :exclusive | :write_locked_read }
-    @deferred_with_validations = []
-    @predicate_call_sites = []
+    @deferred_with_validations = T.let([], T::Array[T.untyped])
+    @predicate_call_sites = T.let([], T::Array[T.untyped])
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
     @og = OwnershipGraph.new
-    @og_scope_depth = 0
+    @og_scope_depth = T.let(0, Integer)
     effects_init!
     capability_audit_init!
     setup_builtins
@@ -3484,7 +3484,7 @@ private
 
   sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).returns(T.untyped) }
   def validate_assignment_type(node, target_type, value_type)
-    return if target_type.nil? || value_type.nil? || target_type == :Any || value_type == :Any
+    return if target_type.nil? || false || target_type == :Any || value_type == :Any
     return if target_type == :NIL # Allow narrowing from initial NIL
     return if target_type == value_type
 
@@ -3815,7 +3815,7 @@ private
       end
       reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
-      owned = T.let(ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}"), T.untyped)
+      owned = T.let(ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}"), T.nilable(AST::CopyNode))
       if owned
         node.fields[variant_name] = owned
         val_node = owned
@@ -5202,7 +5202,7 @@ private
   # passing, etc.) are handled elsewhere.
   sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).returns(T.untyped) }
   def reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
-    root = T.let(field_node, T.untyped)
+    root = T.let(field_node, AST::GetField)
     root = root.target while root.respond_to?(:target) && !root.is_a?(AST::Identifier)
     return unless root.is_a?(AST::Identifier)
     sym = root.symbol

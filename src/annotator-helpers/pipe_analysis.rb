@@ -1394,7 +1394,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(expr: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.untyped).returns(Float) }
   def numeric_literal_value(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     if expr.is_a?(AST::Literal)
@@ -1649,7 +1649,7 @@ module PipeAnalysis
   # CONCURRENT SELECT/WHERE on ~T[] (dynamic stream) or ~T[INF] (InfStream).
   # Uses BoundedChannel for SPMC back pressure: feeder reads source, workers compete.
   # Produces a materialized list (not another stream) regardless of source kind.
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(Integer) }
   def analyze_concurrent_stream_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.type_info

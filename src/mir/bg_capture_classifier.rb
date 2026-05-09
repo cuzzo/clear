@@ -134,7 +134,7 @@ module BgCaptureClassifier
   # no live scope -- only @fn_nodes). The capture's nominal type comes
   # from the snapshot; sync/storage come from the live entry (post
   # propagate_caller_sync!).
-  sig { params(type_obj: Type, sym: SymbolEntry).returns(T.untyped) }
+  sig { params(type_obj: Type, sym: SymbolEntry).returns(Type) }
   def self.resolve_capture_type(type_obj, sym)
     return nil unless type_obj
     base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)

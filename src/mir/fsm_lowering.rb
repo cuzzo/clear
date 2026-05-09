@@ -222,7 +222,7 @@ module FsmLowering
   sig { params(mir_list: Array).returns(String) }
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
-    return "" if mir_list.nil? || mir_list.empty?
+    return "" if false || mir_list.empty?
     @_emitter ||= begin
       require_relative "mir_emitter"
       MIREmitter.new

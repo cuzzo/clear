@@ -24,26 +24,26 @@ module LSP
     # `debounce_ms` is configurable so specs can drive the debounce
     # path without sleeping for half a second; production runs at the
     # default 500.
-    sig { params(stdin: T.untyped, stdout: T.untyped, log_level: Symbol, debounce_ms: Integer).void }
+    sig { params(stdin: StringIO, stdout: StringIO, log_level: Symbol, debounce_ms: Integer).void }
     def initialize(stdin: $stdin, stdout: $stdout, log_level: :info, debounce_ms: 500)
       @stdin            = stdin
       @stdout           = stdout
       @stdout.sync      = true
-      @logger           = Logger.new(level: log_level)
-      @initialized      = false
-      @shutdown_requested = false
-      @docs             = DocumentStore.new
+      @logger           = T.let(Logger.new(level: log_level), Logger)
+      @initialized      = T.let(false, T::Boolean)
+      @shutdown_requested = T.let(false, T::Boolean)
+      @docs             = T.let(DocumentStore.new, DocumentStore)
       # FixCollector is module-global; serialise analyses across
       # whatever threads might trigger them.
-      @analyze_mutex    = Mutex.new
+      @analyze_mutex    = T.let(Mutex.new, Mutex)
       # Stdout writes happen from the main loop AND from timer
       # threads — guard frame integrity.
-      @output_mutex     = Mutex.new
+      @output_mutex     = T.let(Mutex.new, Mutex)
       # Debounce machinery for didChange. One pending timer per uri;
       # rapid edits cancel the prior timer.
       @debounce_ms      = debounce_ms
-      @timers           = {}
-      @timer_mutex      = Mutex.new
+      @timers           = T.let({}, T::Hash[T.untyped, T.untyped])
+      @timer_mutex      = T.let(Mutex.new, Mutex)
     end
 
     # Main loop. Runs until `exit` notification or stdin EOF.
@@ -122,7 +122,7 @@ module LSP
       send_message(jsonrpc: "2.0", id: id, error: { code: code, message: message })
     end
 
-    sig { params(msg: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+    sig { params(msg: T::Hash[Symbol, T.untyped]).returns(StringIO) }
     def send_message(msg)
       @logger.debug("→ #{msg[:method] || (msg[:result] ? "result(id=#{msg[:id]})" : "error(id=#{msg[:id]})")}")
       @output_mutex.synchronize do
