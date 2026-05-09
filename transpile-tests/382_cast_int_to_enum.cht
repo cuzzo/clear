@@ -1,0 +1,34 @@
+# Test: CAST(intExpr AS EnumT) and CAST(intExpr AS ?EnumT).
+#
+# Modern Zig rejects `@as(EnumT, intExpr)` -- enum-from-int is its
+# own dedicated builtin (`@enumFromInt`). The previous cast lowering
+# blindly emitted `@as(target_t, inner)` for every CAST, including
+# enum targets, producing "expected EnumT, found i64" at compile.
+#
+# Fix: detect enum targets via @enum_schemas and lower as
+# `MIR::Cast(:enumFromInt)`. The emitter wraps with `@as(EnumT, ...)`
+# so the result type is known in any expression position.
+#
+# Wrapped enum types -- `?EnumT` and `!EnumT` -- need the same
+# treatment. The check strips leading `?` / `!` from the resolved
+# target name before the schema lookup.
+
+ENUM Color { Red, Green, Blue }
+
+FN main() RETURNS Void ->
+    raw: Int64 = 1_i64;
+
+    bare: Color = CAST(raw AS Color);
+    ASSERT bare == Color.Green, "bare enum decoded";
+
+    optional: ?Color = CAST(raw AS ?Color);
+    ASSERT optional == Color.Green, "optional enum decoded";
+
+    zero: Color = CAST(0_i64 AS Color);
+    ASSERT zero == Color.Red, "zero -> Red";
+
+    two: Color = CAST(2_i64 AS Color);
+    ASSERT two == Color.Blue, "two -> Blue";
+
+    RETURN;
+END

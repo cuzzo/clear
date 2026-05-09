@@ -1921,7 +1921,8 @@ pub const CheatLib = struct {
     // Join: List -> String (technically an array function)
     pub fn join(allocator: std.mem.Allocator, list: anytype, delimiter: []const u8) ![]const u8 {
         Runtime.profileAlloc(0); // size unknown until join completes
-        const items = if (@hasField(@TypeOf(list), "items")) list.items else list;
+        const c = if (@typeInfo(@TypeOf(list)) == .pointer and @typeInfo(@TypeOf(list)).pointer.size == .one) list.* else list;
+        const items = if (@hasField(@TypeOf(c), "items")) c.items else c;
         return std.mem.join(allocator, delimiter, items);
     }
 
