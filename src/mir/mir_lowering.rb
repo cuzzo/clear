@@ -6307,6 +6307,24 @@ class MIRLowering
     end
 
     receiver_type = Type.new(ti)
+
+    # Raw fixed-size arrays (`Int64[N]`): emit native Zig indexed assignment.
+    # The CheatLib.setAt template takes `container: anytype` and copies the
+    # array by value -- the helper sees a const local and `container[i] = v`
+    # fails. Mirrors direct_index_get's read path for the same shape.
+    #
+    # The `!collection?` guard excludes `T[N]@list`, `T[N]@pool`, `T[N]@set`,
+    # which all happen to be `fixed?` (they declare capacity at the array
+    # shape) but use registry-driven indexed access. Only raw `T[N]`
+    # without a collection annotation falls through to native assignment.
+    if receiver_type.fixed? && !receiver_type.string? && !receiver_type.collection?
+      target = lower(target_node)
+      idx = lower(node.name.index)
+      val = lower(node.value)
+      cast_idx = MIR::Cast.new(idx, "usize", :intCast)
+      return MIR::Set.new(MIR::IndexGet.new(target, cast_idx), val)
+    end
+
     rt_name = @rt_name
 
     # Resolve INDEX_OPS :set entry via dispatch_key
