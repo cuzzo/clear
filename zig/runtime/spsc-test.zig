@@ -318,15 +318,16 @@ test "DefaultRing: basic push/pop" {
     try std.testing.expect(msg.trampoline_addr == 42);
 }
 
-test "DefaultRing: fill to capacity (4096)" {
+test "DefaultRing: fill to capacity" {
     var ring = spsc.DefaultRing{};
-    for (0..4096) |i| {
+    const cap = spsc.DefaultRing.capacity;
+    for (0..cap) |i| {
         try std.testing.expect(ring.push(.{ .tag = .Spawn, .trampoline_addr = i }));
     }
     try std.testing.expect(!ring.push(.{ .tag = .Spawn })); // full
-    try std.testing.expect(ring.len() == 4096);
+    try std.testing.expect(ring.len() == cap);
 
-    for (0..4096) |i| {
+    for (0..cap) |i| {
         try std.testing.expect(ring.pop().?.trampoline_addr == i);
     }
     try std.testing.expect(ring.isEmpty());
@@ -376,15 +377,14 @@ test "size 2 ring works correctly" {
 // ========================================================================
 
 test "pop and peek do not use excessive stack (regression: 288KB frame)" {
-    // The DefaultRing buffer is ~295KB. Before the fix, pop() copied the
-    // entire buffer to the stack via `self.buffer[idx]`. With the fix,
-    // `(&self.buffer)[idx]` accesses via pointer — no copy.
+    // Original regression: at SpscRing(4096) the DefaultRing buffer was
+    // ~295KB, and pop()/peek() copied the entire buffer to the stack via
+    // `self.buffer[idx]`. The fix uses `(&self.buffer)[idx]` to access
+    // via pointer — no copy.
     //
-    // This test verifies pop/peek work correctly on a DefaultRing (4096
-    // capacity). If they still copy the buffer, this test would overflow
-    // the default 16MB test thread stack on recursive calls, or the
-    // compiler would emit a ~295KB frame (detectable via objdump).
-    // The functional correctness here serves as a regression guard.
+    // DefaultRing has since shrunk (see spsc.zig comment) but the
+    // pointer-access pattern is still load-bearing: any future capacity
+    // bump must not regress to value-copy semantics.
     const ring = try std.testing.allocator.create(spsc.DefaultRing);
     defer std.testing.allocator.destroy(ring);
     ring.* = .{};

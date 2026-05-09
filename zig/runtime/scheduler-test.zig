@@ -23,6 +23,8 @@ const Scheduler = fp.Scheduler;
 const SpscMessage = fp.SpscMessage;
 const SmartEventFd = fp.SmartEventFd;
 
+const spsc = @import("spsc.zig");
+
 const rt_profile = @import("runtime.zig");
 
 test "migrated stack free routes back to owning scheduler" {
@@ -243,7 +245,7 @@ fn drainRemoteFreeAfterStart(args: *RemoteFreeDrainArgs) void {
 fn fillRemoteFsmCtxFreeRing(owner: *Scheduler, sender_idx: usize) !void {
     const ring = try owner.ensureChannel(sender_idx);
     var i: usize = 0;
-    while (i < 4096) : (i += 1) {
+    while (i < spsc.DefaultRing.capacity) : (i += 1) {
         const task = try owner.allocFsmTask(&dummyFsmResume);
         const ctx = try owner.allocFsmCtx(Scheduler.FsmCtx128, task);
         task.ctx = ctx;

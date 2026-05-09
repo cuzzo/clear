@@ -69,18 +69,24 @@ pub const Message = struct {
 /// SPSC ring buffer.  Fixed capacity, power-of-two size.
 /// Producer calls push(), consumer calls pop().
 /// Both are wait-free.
-pub fn SpscRing(comptime capacity: usize) type {
+pub fn SpscRing(comptime ring_capacity: usize) type {
     comptime {
         // Must be power of two for mask trick
-        if (capacity == 0 or (capacity & (capacity - 1)) != 0)
+        if (ring_capacity == 0 or (ring_capacity & (ring_capacity - 1)) != 0)
             @compileError("SpscRing capacity must be a power of two");
     }
 
     return struct {
         const Self = @This();
-        const mask = capacity - 1;
+        const mask = ring_capacity - 1;
 
-        buffer: [capacity]Message = undefined,
+        /// Compile-time capacity (number of slots). Tests reference this
+        /// to size fill/drain loops generically — never hardcode the
+        /// numeric value, since DefaultRing's capacity is tuned for RSS
+        /// and changes break any test pinned to a specific value.
+        pub const capacity: usize = ring_capacity;
+
+        buffer: [ring_capacity]Message = undefined,
         /// Written by producer, read by consumer.
         head: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
         /// Written by consumer, read by producer.
