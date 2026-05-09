@@ -32,7 +32,7 @@ class OwnershipGraph
   #   :borrows     — immutable borrow (y borrows x)
   #   :borrows_mut — mutable borrow (y mutably borrows x)
 
-  attr_reader :nodes, :edges
+  attr_reader :edges
 
   sig { void }
   def initialize
@@ -41,6 +41,17 @@ class OwnershipGraph
     @edges_by_target = Hash.new { |h, k| h[k] = [] }  # target_path => [Edge]
     @edges_by_source = Hash.new { |h, k| h[k] = [] }  # source_path => [Edge]
     @children = Hash.new { |h, k| h[k] = Set.new }    # parent_path => Set of child paths
+    @completed_nodes = {}
+  end
+
+  sig { returns(T::Hash[String, OwnershipGraph::Node]) }
+  def nodes
+    @nodes.empty? ? @completed_nodes : @nodes
+  end
+
+  sig { void }
+  def clear_completed_snapshot!
+    @completed_nodes = {}
   end
 
   # ── Edge index helpers ────────────────────────────────────────────
@@ -150,11 +161,12 @@ class OwnershipGraph
     to_cleanup
   end
 
-  sig { params(scope_depth: Integer).returns(Integer) }
-  def prune_scope!(scope_depth)
+  sig { params(scope_depth: Integer, archive: T::Boolean).returns(Integer) }
+  def prune_scope!(scope_depth, archive: false)
     paths = @nodes.select { |_path, node| node.scope_depth >= scope_depth }.keys
     return 0 if paths.empty?
 
+    @completed_nodes = paths.to_h { |path| [path, @nodes[path]] } if archive
     path_set = paths.to_set
     paths.each { |path| @nodes.delete(path) }
     @edges.select { |edge| path_set.include?(edge.from) || path_set.include?(edge.to) }.each { |edge| remove_edge(edge) }
@@ -275,7 +287,7 @@ class OwnershipGraph
   # Get the node for a path.
   sig { params(path: T.untyped).returns(T.untyped) }
   def [](path)
-    @nodes[path]
+    @nodes[path] || @completed_nodes[path]
   end
 
   # All paths that are children of the given path.

@@ -75,7 +75,7 @@ module FunctionAnalysis
       visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
 
       finalize_scope(node)
-      og_pop_scope
+      og_pop_scope(archive: true)
     end
 
     # 3. Routine Epilogue (Process Returns)

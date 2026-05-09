@@ -6857,10 +6857,13 @@ private
   sig { params(name: String).returns(T::Array[String]) }
   def og_drop(name)      = @og.drop(name)
   sig { returns(Integer) }
-  def og_push_scope      = (@og_scope_depth += 1)
-  sig { returns(Integer) }
-  def og_pop_scope
-    @og.prune_scope!(@og_scope_depth)
+  def og_push_scope
+    @og.clear_completed_snapshot! if @og_scope_depth.zero?
+    @og_scope_depth += 1
+  end
+  sig { params(archive: T::Boolean).returns(Integer) }
+  def og_pop_scope(archive: false)
+    @og.prune_scope!(@og_scope_depth, archive: archive)
     @og_scope_depth -= 1
   end
 
