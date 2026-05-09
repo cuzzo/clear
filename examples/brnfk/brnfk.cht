@@ -23,7 +23,7 @@ FN byteToString(n: Int64) RETURNS !String ->
   IF n >= 32 && n <= 126 THEN
     RETURN "" + printableAscii().charAt(n - 32);
   END
-  RAISE "brnfk cannot render non-printable ASCII byte ${n.toString()}";
+  RAISE "brnfk cannot render non-printable byte ${n.toString()} as String";
 END
 
 FN stringToByte(ch: String) RETURNS !Int64 ->
@@ -112,6 +112,15 @@ END
 
 FN run(program: String, input: String) RETURNS !String ->
   RETURN runWithLimits(program, input, 30_000, 10_000_000);
+END
+
+FN runFile(path: String, input: String) RETURNS !String ->
+  RETURN runFileWithLimits(path, input, 30_000, 10_000_000);
+END
+
+FN runFileWithLimits(path: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
+  program = readFile(path) OR RAISE;
+  RETURN runWithLimits(program, input, tapeSize, maxSteps);
 END
 
 FN runWithLimits(program: String, input: String, tapeSize: Int64, maxSteps: Int64) RETURNS !String ->
