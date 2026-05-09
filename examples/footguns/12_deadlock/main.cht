@@ -74,7 +74,7 @@ STRUCT Account {
 # -------------------------------------------------------------------------
 # CORRECT: Resolve promises before acquiring locks
 # -------------------------------------------------------------------------
-FN correct_next_before_lock() RETURNS Void ->
+FN correct_next_before_lock() RETURNS !Void ->
   s = State{ value: 0 } @locked;
 
   producer = BG {
@@ -94,18 +94,18 @@ END
 # -------------------------------------------------------------------------
 # CORRECT: Pass already-locked value to helpers (avoid re-entrancy)
 # -------------------------------------------------------------------------
-FN update_value(inner: State) RETURNS Void ->
-  # Receives the already-unlocked struct value — no lock needed.
-  inner.value = 2;
+FN updated_value(inner: State) RETURNS Int64 ->
+  # Receives the already-locked struct value — no lock needed.
+  RETURN 2;
 END
 
-FN correct_no_reentrant() RETURNS Void ->
+FN correct_no_reentrant() RETURNS !Void ->
   s = State{ value: 0 } @locked;
 
   t = BG {
     WITH EXCLUSIVE s AS inner {
       inner.value = 1;
-      update_value(inner);  # pass the value, not the lock
+      inner.value = updated_value(inner);  # pass the value, not the lock
     }
   };
 
@@ -119,12 +119,12 @@ END
 # -------------------------------------------------------------------------
 # CORRECT: Sequential locks — never hold two at once
 # -------------------------------------------------------------------------
-FN sequential_transfer() RETURNS Void ->
+FN sequential_transfer() RETURNS !Void ->
   a = Account{ balance: 100 } @locked;
   b = Account{ balance: 200 } @locked;
 
   t = BG {
-    amount = 0;
+    MUTABLE amount = 0;
     WITH EXCLUSIVE a AS ra {
       amount = ra.balance / 2;
       ra.balance = ra.balance - amount;
@@ -143,13 +143,13 @@ END
 
 FN main() RETURNS Void ->
   print("--- correct: NEXT before lock ---");
-  correct_next_before_lock();
+  correct_next_before_lock() OR RAISE;
 
   print("--- correct: no re-entrancy ---");
-  correct_no_reentrant();
+  correct_no_reentrant() OR RAISE;
 
   print("--- correct: sequential locks ---");
-  sequential_transfer();
+  sequential_transfer() OR RAISE;
 END
 
 # Summary:

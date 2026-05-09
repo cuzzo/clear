@@ -18,7 +18,7 @@ STRUCT ByteBuffer {
   data: Int64[]
 }
 
-FN safe_access() RETURNS Void ->
+FN safe_access() RETURNS !Void ->
   MUTABLE buf: Int64[] = [0, 0, 0, 0];
   # 4-element list
 
@@ -36,7 +36,7 @@ FN safe_access() RETURNS Void ->
   print("buf[3]=" + buf[3].toString());
 END
 
-FN off_by_one() RETURNS Void ->
+FN off_by_one() RETURNS !Void ->
   arr: Int64[] = [0, 1, 2, 3, 4, 5, 6, 7];
   # 8 elements (indices 0-7)
 
@@ -49,8 +49,8 @@ FN off_by_one() RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-  safe_access();
-  off_by_one();
+  safe_access() OR RAISE;
+  off_by_one() OR RAISE;
 END
 
 # Summary:
