@@ -1,0 +1,38 @@
+REQUIRE "grid.cht";
+REQUIRE "gui.cht";
+
+FN parseCell(line: String) RETURNS !Cell ->
+  parts = line.split(",");
+  x = (parts[0].toNumber() OR 0.0).toInt();
+  y = (parts[1].toNumber() OR 0.0).toInt();
+  RETURN Cell{ x: x, y: y };
+END
+
+FN readGrid(path: String) RETURNS !Cell[]@list ->
+  raw = readFile(path) OR RAISE;
+  lines = raw.split("\n");
+  MUTABLE cells: Cell[]@list = [];
+  MUTABLE i = 0;
+  WHILE i < lines.length() DO
+    line = lines[i].trim();
+    IF line.any?() THEN
+      cells.append(parseCell(line));
+    END
+    i += 1;
+  END
+  RETURN cells;
+END
+
+FN runLife(path: String, generations: Int64) RETURNS !Void ->
+  MUTABLE cells = readGrid(path);
+  MUTABLE generation = 0;
+  WHILE generation < generations && cells.any?() DO
+    render(cells);
+    cells = advance(cells);
+    generation += 1;
+  END
+END
+
+FN main() RETURNS Void ->
+  runLife("examples/game-of-life/ruby/glider.dat", 4) OR RAISE;
+END
