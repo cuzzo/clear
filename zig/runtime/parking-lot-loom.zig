@@ -3463,6 +3463,91 @@ pub fn testCrossSchedulerResumeFlow() !void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// S25: drainChannels Spawn-message processing (lines 1013, 1015, 1028, 1048)
+//
+// Promise(T).spawn() in the failing versioned-fiber-stress-test path
+// flows through CheatHeader.spawnBest -> Scheduler.submitSpawn ->
+// drainChannels' .Spawn case on the target scheduler. drainChannels
+// allocates a fresh Task slot from task_slab, bumps its generation
+// (load + store), publishes status=.Ready, and increments active_tasks.
+// None of those four atomics had any Loom hits before this scenario.
+//
+// Setup: push a single Spawn message into sched_b's channel via the
+// public ensureChannel + ring.push seam (mirrors testRemoteCallCompletion).
+// drainChannels then walks the .Spawn arm and exercises every atomic on
+// the path. trampoline_addr / user_fn must be non-null but are never
+// invoked (we don't run the resulting Task), so a dummy fn pointer is fine.
+//
+// Cleanup: the new Task is now sitting in ready_queue. We pop it, free
+// its real fiber stack and Task slab slot before scheduler deinit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn s25DummyTrampoline() callconv(.c) void {}
+
+pub fn testDrainChannelsSpawn() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        // drainChannels allocated a real Task + Fiber + stack via the
+        // .Spawn arm. We never ran the fiber, so undo all three before
+        // the scheduler tears down. Failing to free here leaks under
+        // DebugAllocator and crashes scheduler.deinit walking dangling
+        // tasks.
+        if (sched.ready_queue.pop()) |task| {
+            sched.freeStack(task.base.stack);
+            sched.allocator.destroy(task.base);
+            sched.task_slab.destroy(task);
+        }
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Use sender_idx 0 to stay symmetric with testRemoteCallCompletion;
+    // the dirty_mask bit set below mirrors what submitSpawn would have
+    // done from a remote scheduler.
+    const ring = try sched.ensureChannel(0);
+    const msg = fp.SpscMessage{
+        .tag = .Spawn,
+        .trampoline_addr = @intFromPtr(&s25DummyTrampoline),
+        .user_fn = @ptrCast(&s25DummyFn),
+        .args = null,
+        .config_stack_size = @intFromEnum(fc.StackSize.Standard),
+        .config_pinned = false,
+        .config_timeout_ms = 0,
+        .config_profile_site_id = 0,
+        .config_profile_dispatch = 0,
+    };
+    if (!ring.push(msg)) return error.RingPushFailed;
+    _ = sched.dirty_mask.fetchOr(@as(u64, 1), .release);
+
+    const before_active = sched.active_tasks.load(.monotonic);
+    const ready_before = sched.ready_queue.len();
+
+    sched.drainChannels();
+
+    // Invariants:
+    //   1. active_tasks bumped by exactly 1 (line 1048).
+    //   2. ready_queue grew by exactly 1.
+    //   3. The new task's status is .Ready (line 1028).
+    //   4. dirty_mask cleared by the swap-to-zero at top of drainChannels.
+    if (sched.active_tasks.load(.monotonic) != before_active + 1) return error.ActiveTasksNotBumped;
+    if (sched.ready_queue.len() != ready_before + 1) return error.ReadyQueueNotEnqueued;
+    if (sched.dirty_mask.load(.monotonic) != 0) return error.DirtyMaskNotCleared;
+
+    // Peek (without popping) to assert status; the deferred cleanup
+    // pops to free.
+    const buf = sched.ready_queue.getBuffer();
+    const mask = sched.ready_queue.getMask();
+    const top = sched.ready_queue.top.load(.monotonic);
+    const peeked = buf[top & mask].load(.monotonic) orelse return error.ReadyQueuePeekedNull;
+    if (peeked.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // S2: coopYield wake path (line 1631)
 //
 // Scheduler.coopYield checks hasWork() and, if true, marks the running
@@ -3716,6 +3801,531 @@ pub fn testWaitGroupDoneSpinlock() !void {
     // Second done: counter was 1, prev=1 -> last-decrement branch
     // (lines 2760-2765 + 2765 release).
     wg.done();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S27: handleTaskAfterDispatch on a .Finished task — exercises the
+//      production cleanup path that runs every time a BG fiber exits.
+//      Hits scheduler.zig L1268 (in_inbox CAS to DESTROYING success
+//      branch), L1277 (active_tasks.fetchSub), and the cleanup chain
+//      (releaseTaskEbr, freeStack, allocator.destroy(fiber),
+//      task_slab.destroy(task)).
+//
+// run() formerly inlined this 60-line switch; commit "extract
+// handleTaskAfterDispatch seam" hoists it into a public method so
+// the production line numbers are reachable from a focused test
+// instead of requiring a full sched.run() driver. vopr-loom's
+// scenarioUafFinishVsSubmitResume covers the *race shape* but doesn't
+// execute scheduler.zig:1268 — kcov reports it as 0-hit. This test
+// closes that script-level gap.
+//
+// Single-fiber, no Loom interleaving: the cleanup path frees the task
+// + fiber + stack, so concurrent access from a second fiber would be
+// UAF. The race surface is the in_inbox state machine, already
+// covered by vopr-loom Scenario 14.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn s27DummyTrampoline() callconv(.c) void {}
+
+pub fn testHandleTaskAfterDispatchFinished() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Build a real Task that the cleanup path can actually free.
+    // Mirrors the allocation pattern in scheduler.zig drainChannels
+    // .Spawn arm (lines 988-1015). Use .Large to match the TSan
+    // floor in control-plane.recommendSize — direct Fiber.init
+    // bypasses that floor, so callers must opt in explicitly to
+    // avoid stomping shadow memory under TSan instrumentation
+    // (see commit eb8fff55).
+    const stack_mem = try sched.allocStack(.Large);
+    const fiber_ptr = try allocator.create(Fiber);
+    fiber_ptr.* = Fiber.initWithOwner(stack_mem, @intFromPtr(&s27DummyTrampoline), .Large, &sched);
+    const task = try sched.task_slab.create();
+    task.* = Task{
+        .base = fiber_ptr,
+        .user_fn = @ptrCast(&s25DummyFn),
+    };
+    task.status.store(.Finished, .release);
+    task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+
+    // Pre-load active_tasks so the fetchSub in handleTaskAfterDispatch
+    // hits the expected starting count (mirrors what submitSpawn /
+    // drainChannels Spawn would have set).
+    _ = sched.active_tasks.fetchAdd(1, .monotonic);
+    const before_active = sched.active_tasks.load(.monotonic);
+
+    // PRODUCTION PATH UNDER TEST: this is the run() loop's
+    // post-switchTo dispatch. With status=.Finished and in_inbox=IDLE,
+    // the CAS at L1268 succeeds, fetchSub at L1277 fires, the lock-
+    // waiters scan walks empty, releaseTaskEbr runs, and the fiber+
+    // task+stack are freed.
+    sched.handleTaskAfterDispatch(task);
+
+    // Invariants after cleanup:
+    //   1. active_tasks decremented by exactly 1.
+    //   2. in_inbox is now DESTROYING (post-CAS, pre-free observation
+    //      — the field's bytes may persist in the slab freelist).
+    //   3. The task pointer is no longer valid; we don't touch it.
+    if (sched.active_tasks.load(.monotonic) != before_active - 1) return error.ActiveTasksNotDecremented;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S28: handleTaskAfterDispatch on a .Ready task — exercises the THREE
+//      sub-paths of the .Ready branch in run()'s post-dispatch logic:
+//
+//        (a) in_inbox != IDLE  -> skip enqueue (concurrent submitResume
+//                                  already claimed the slot)
+//        (b) in_inbox == IDLE, co_yielded == true  -> yield_queue (FIFO,
+//                                                       cooperative
+//                                                       fairness)
+//        (c) in_inbox == IDLE, co_yielded == false -> ready_queue (LIFO,
+//                                                       Chase-Lev)
+//
+// Hits scheduler.zig L1416 (in_inbox.load(.acquire), 0 Loom hits before
+// this test). The .Ready branch fires on every cooperative yield in
+// the failing versioned-fiber-stress-test (rt.checkYield() every 4096
+// reader iterations -> coopYield -> task.status = .Ready + co_yielded
+// = true -> task.base.yield() -> harness sees status=.Ready -> this
+// branch). The (a) sub-path is the duplicate-enqueue guard that
+// prevents a same-tick concurrent submitResume from racing the
+// post-yield re-enqueue.
+//
+// Asserts:
+//   - (a) leaves both queues unchanged AND co_yielded preserved
+//   - (b) appends to yield_queue exactly once AND clears co_yielded
+//   - (c) pushes onto ready_queue exactly once
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testHandleTaskAfterDispatchReady() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        // Drain ready_queue / yield_queue: stub tasks have .base = undefined
+        // so scheduler.deinit walking them would dereference garbage.
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.yield_queue.clearRetainingCapacity();
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // ── (c) co_yielded == false → ready_queue ──────────────────────────────
+    var t_ready: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+    t_ready.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+    t_ready.co_yielded = false;
+
+    const ready_before = sched.ready_queue.len();
+    const yield_before = sched.yield_queue.items.len;
+    sched.handleTaskAfterDispatch(&t_ready);
+    if (sched.ready_queue.len() != ready_before + 1) return error.ReadyQueueNotEnqueued;
+    if (sched.yield_queue.items.len != yield_before) return error.YieldQueueUnexpectedlyChanged;
+
+    // ── (b) co_yielded == true → yield_queue, co_yielded cleared ───────────
+    var t_coop: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+    t_coop.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+    t_coop.co_yielded = true;
+
+    const ready_b = sched.ready_queue.len();
+    const yield_b = sched.yield_queue.items.len;
+    sched.handleTaskAfterDispatch(&t_coop);
+    if (sched.yield_queue.items.len != yield_b + 1) return error.YieldQueueNotAppended;
+    if (sched.ready_queue.len() != ready_b) return error.ReadyQueueUnexpectedlyChanged;
+    if (t_coop.co_yielded) return error.CoYieldedNotCleared;
+
+    // ── (a) in_inbox != IDLE → skip both queues, co_yielded preserved ──────
+    var t_busy: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+    t_busy.in_inbox.store(qs.IN_INBOX_IN_QUEUE, .release);
+    t_busy.co_yielded = true;
+
+    const ready_c = sched.ready_queue.len();
+    const yield_c = sched.yield_queue.items.len;
+    sched.handleTaskAfterDispatch(&t_busy);
+    if (sched.ready_queue.len() != ready_c) return error.ReadyQueueUnexpectedlyEnqueued;
+    if (sched.yield_queue.items.len != yield_c) return error.YieldQueueUnexpectedlyAppended;
+    // co_yielded must NOT be cleared here — only path (b) clears it.
+    if (!t_busy.co_yielded) return error.CoYieldedClearedOnGuardedPath;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S29: cross-scheduler submitSpawn — exercises L810 (`dirty_mask.fetchOr`)
+//      and the eventfd notify gate. The failing versioned-fiber-stress-test
+//      walks this every BG-fiber spawn via spawnBest -> submitSpawn on
+//      the least-loaded peer scheduler. testCrossSchedulerResumeFlow
+//      already covers the Resume side of the same submit machinery
+//      (L928); this is the symmetric Spawn side that S25 only
+//      exercises after the message reaches drainChannels (i.e., S25
+//      pushes via ring.push() directly, bypassing submitSpawn's
+//      dirty_mask.fetchOr).
+//
+// Asserts: after submitSpawn, dirty_mask bit for sender_idx is set and
+// the SPSC ring contains exactly one Spawn-tagged message.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testCrossSchedulerSubmitSpawn() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched_a;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    // Cross-scheduler: sender = sched_a, target = sched_b. submitSpawn
+    // pushes to sched_b's channel from sched_a, fires dirty_mask.fetchOr
+    // (L810), and notifies the eventfd. We don't run the spawned fiber,
+    // so trampoline/user_fn are dummies that never execute.
+    try sched_b.submitSpawn(
+        @intFromPtr(&s25DummyFn),
+        @ptrCast(&s25DummyFn),
+        null,
+        .{},
+    );
+
+    if (sched_b.dirty_mask.load(.monotonic) == 0) return error.DirtyMaskBitNotSet;
+
+    // Verify the message landed in the channel for sched_a.index. Use
+    // ensureChannel to look up; a Spawn message must be at the head.
+    const ring = try sched_b.ensureChannel(sched_a.index);
+    const peeked = ring.peek() orelse return error.RingEmpty;
+    if (peeked.tag != .Spawn) return error.WrongMessageTag;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S30: cross-scheduler submitFsmSpawn — symmetric to S29 but for FSM
+//      tasks. Hits L845 (`dirty_mask.fetchOr` in submitFsmSpawn slow
+//      path). On the failing test's bug path, this fires whenever a
+//      BG-FSM fiber is enqueued cross-scheduler (CheatLib's spawnFsmBest).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testCrossSchedulerSubmitFsmSpawn() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched_a;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    var stub_fsm: fsm_mod.FsmTask = .{ .resume_fn = &fsmS6NoopResume };
+
+    // Slow path (cross-scheduler): self != active_scheduler, so the
+    // same-scheduler fast path at L824 is bypassed and submitFsmSpawn
+    // pushes to the SPSC ring + sets dirty_mask via fetchOr (L845).
+    try sched_b.submitFsmSpawn(&stub_fsm);
+
+    if (sched_b.dirty_mask.load(.monotonic) == 0) return error.DirtyMaskBitNotSet;
+
+    const ring = try sched_b.ensureChannel(sched_a.index);
+    const peeked = ring.peek() orelse return error.RingEmpty;
+    if (peeked.tag != .FsmSpawn) return error.WrongMessageTag;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S31: FSM enqueue + drain accounting — exercises:
+//   - Scheduler.enqueueFsm:  active_tasks.fetchAdd(1)            (L1543)
+//   - Scheduler.drainFsmQueue .Done branch: active_tasks.fetchSub(1) (L1579)
+//
+// Both atomics had 0 Loom hits before this scenario. The failing
+// versioned-fiber-stress-test path uses BG-FSM fibers via spawnFsmBest
+// — every spawn hits enqueueFsm (same-scheduler fast path) and every
+// fiber completion eventually drains via drainFsmQueue's .Done arm.
+//
+// Asserts: enqueue bumps active_tasks by 1; drain returns it to the
+// starting value (i.e., the task is properly accounted for through its
+// full lifecycle).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testEnqueueFsmActiveTasksAccounting() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Real slab allocation: drainFsmQueue's .Done arm calls
+    // fsm_task_slab.destroy(task) at end-of-life. A stack-local
+    // FsmTask would crash there (slab.destroy on a non-slab pointer).
+    const fsm_task = try sched.fsm_task_slab.create();
+    fsm_task.* = .{ .resume_fn = &fsmS6NoopResume };
+    // owner_scheduler = null so .Done teardown uses `self` (sched) for
+    // the slab return; otherwise drainFsmQueue would route a remote
+    // FsmCtxFree we don't need to model here.
+
+    const before_active = sched.active_tasks.load(.monotonic);
+
+    // L1543: enqueueFsm fires active_tasks.fetchAdd(1).
+    sched.enqueueFsm(fsm_task);
+
+    if (sched.active_tasks.load(.monotonic) != before_active + 1) return error.EnqueueDidNotBumpActiveTasks;
+    if (sched.fsm_ready_queue.len() != 1) return error.FsmNotEnqueued;
+
+    // drainFsmQueue's .Done arm pops the task, dispatches once
+    // (fsmS6NoopResume returns .Done immediately), fires
+    // active_tasks.fetchSub(1) (L1579), then slab.destroy(task).
+    sched.drainFsmQueue();
+
+    if (sched.active_tasks.load(.monotonic) != before_active) return error.DrainDidNotDecrementActiveTasks;
+    if (sched.fsm_ready_queue.len() != 0) return error.FsmQueueNotDrained;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S32: cross-scheduler freeStack -> submitRemoteStackFree -> drainChannels
+//      RemoteStackFree -> freeLocalStackMemory.
+//
+// On the failing test's bug path: spawnBest distributes BG fibers
+// across schedulers; under work-stealing a fiber may finish on a
+// non-owner scheduler. handleTaskAfterDispatch's .Finished branch
+// (S27) calls freeStack(task.base.stack) which routes through
+// submitRemoteStackFree when stack.owner != current scheduler. That
+// path hits L744 (`owner.dirty_mask.fetchOr`) — currently 0 Loom hits.
+//
+// This test allocates on sched_a, frees from sched_b, and verifies
+// the message-driven cross-scheduler return: dirty_mask bit set,
+// RemoteStackFree message in ring, and after drain the memory is
+// returned to sched_a's pool (so a subsequent allocStack on sched_a
+// can reuse it without growing the slab).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testCrossSchedulerFreeStack() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr_a: ebr_mod.EbrContext = .{};
+    var stack_pool_a = fm.StackPool.init(allocator);
+    var sched_a = try fp.Scheduler.init(allocator, &ebr_a, &stack_pool_a);
+    defer {
+        sched_a.deinit();
+        stack_pool_a.deinit();
+        ebr_a.deinit(allocator);
+    }
+
+    var ebr_b: ebr_mod.EbrContext = .{};
+    var stack_pool_b = fm.StackPool.init(allocator);
+    var sched_b = try fp.Scheduler.init(allocator, &ebr_b, &stack_pool_b);
+    defer {
+        sched_b.deinit();
+        stack_pool_b.deinit();
+        ebr_b.deinit(allocator);
+    }
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched_b;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    // Allocate on sched_a so stack.owner = &sched_a.
+    const memory = try sched_a.allocStack(.Large);
+    const stack = fc.Stack{ .memory = memory, .owner = @ptrCast(&sched_a) };
+
+    // Free on sched_b: owner != self path -> submitRemoteStackFree
+    // -> dirty_mask.fetchOr (L744).
+    sched_b.freeStack(stack);
+
+    if (sched_a.dirty_mask.load(.monotonic) == 0) return error.DirtyMaskBitNotSet;
+
+    const ring = try sched_a.ensureChannel(sched_b.index);
+    const peeked = ring.peek() orelse return error.RingEmpty;
+    if (peeked.tag != .RemoteStackFree) return error.WrongMessageTag;
+
+    // Drain on sched_a: RemoteStackFree arm of drainChannels frees the
+    // memory back to the pool. Pool internals don't expose a
+    // public "is this slot free" check, but draining ensures we
+    // don't leak the message OR the memory across test cleanup.
+    sched_a.drainChannels();
+
+    if (sched_a.dirty_mask.load(.monotonic) != 0) return error.DirtyMaskNotCleared;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S33: wakeTaskFromIo — exercises the .Blocked -> .Ready CAS at L1919
+//      that processCqes uses to wake fibers parked on read/write/recv/
+//      send/accept/connect (covered by S33A) AND the no-op path when
+//      the task is already .Ready (S33B). Currently 0 Loom hits.
+//
+// On the failing test's bug path: any IO operation parks the fiber
+// (status=.Blocked) and the io_uring CQE wakes it through this CAS.
+// Cross-scheduler eventfd notifies (the bench-17 wake mechanism) also
+// route through processCqes -> wakeTaskFromIo for the eventfd reader
+// fiber.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testWakeTaskFromIoBlockedToReady() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Case A: task is .Blocked -> CAS succeeds, status -> .Ready,
+    // enqueued onto ready_queue.
+    var t_blocked: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Blocked),
+    };
+
+    const ready_before = sched.ready_queue.len();
+    sched.wakeTaskFromIo(&t_blocked);
+    if (t_blocked.status.load(.monotonic) != .Ready) return error.StatusNotReady;
+    if (sched.ready_queue.len() != ready_before + 1) return error.NotEnqueued;
+
+    // Case B: task is already .Ready -> CAS fails (expected != actual),
+    // wakeTaskFromIo no-ops. ready_queue unchanged.
+    var t_ready: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+
+    const ready_before2 = sched.ready_queue.len();
+    sched.wakeTaskFromIo(&t_ready);
+    if (sched.ready_queue.len() != ready_before2) return error.UnexpectedlyEnqueued;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S34: pinTask + pinFsmTask SUCCESS paths — slab-allocated tasks pinned
+//      from a registered scheduler. Hits scheduler.zig L2361 (Task post-
+//      pin generation.load) and L2416 (FsmTask equivalent), both 0
+//      Loom hits before this scenario.
+//
+// The existing testRegistryCrossIterPinPaths covers the no-op /
+// not-found arms by passing synthetic stubs (refFromPtr returns null,
+// so the post-pin gen.load never fires). This complements that with
+// the success path: a real task in the slab gets pinned and the
+// generation snapshot is captured at L2361/L2416.
+//
+// Why bug-relevant: detectCycle (parking-lot deadlock detection)
+// walks lock-waiter chains and uses pinTask/pinFsmTask to keep slab
+// memory alive across the walk. The failing versioned-fiber-stress-
+// test triggers detectCycle whenever a deadlock-suspect chain forms
+// (e.g., during cross-scheduler EBR + lock contention). The captured
+// generation is what guards against slot-reuse UAF along the walk.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn testPinTaskSuccessPath() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        fp.global_registry.unregister(@as(std.Thread.Id, @intCast(101)));
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+    try fp.global_registry.register(allocator, @as(std.Thread.Id, @intCast(101)), &sched);
+
+    // Allocate a Task in sched.task_slab so refFromPtr can resolve it.
+    const task = try sched.task_slab.create();
+    task.* = Task{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+    };
+    defer sched.task_slab.destroy(task);
+
+    // Bump generation so the post-pin load returns something
+    // distinguishable from the slab's default (0). The unpin will
+    // implicitly verify the gen captured by the pin matches reality.
+    task.generation.store(7, .release);
+
+    const pin = fp.pinTask(task) orelse return error.PinFailed;
+    if (pin.allocator == null) return error.UnexpectedNoOpPin;
+    if (pin.gen != 7) return error.GenerationMismatch;
+    fp.unpinTask(pin);
+
+    // FSM equivalent.
+    const fsm_task = try sched.fsm_task_slab.create();
+    fsm_task.* = .{ .resume_fn = &fsmS6NoopResume };
+    defer sched.fsm_task_slab.destroy(fsm_task);
+    fsm_task.generation.store(11, .release);
+
+    const fpin = fp.pinFsmTask(fsm_task) orelse return error.FsmPinFailed;
+    if (fpin.allocator == null) return error.UnexpectedFsmNoOpPin;
+    if (fpin.gen != 11) return error.FsmGenerationMismatch;
+    fp.unpinFsmTask(fpin);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
