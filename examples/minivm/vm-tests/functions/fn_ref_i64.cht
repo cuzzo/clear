@@ -1,0 +1,8 @@
+FN double(n: Int64) RETURNS Int64 ->
+    RETURN n * 2_i64;
+END
+
+FN main() RETURNS Int64 ->
+    f: FN(Int64) -> Int64 = double;
+    RETURN f(6_i64);
+END

@@ -1,0 +1,15 @@
+STRUCT Acc { a: Int64, b: Int64 }
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE acc = Acc{ a: 1_i64, b: 2_i64 };
+    FOR i IN (0_i64 ..< 200000_i64) DO
+        acc.a = acc.a + i;
+        acc.b = acc.b + acc.a;
+    END
+    total = acc.a + acc.b;
+    totalMs = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

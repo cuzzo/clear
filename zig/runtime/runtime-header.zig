@@ -775,6 +775,17 @@ pub const CheatLib = struct {
         return @intCast(std.unicode.utf8CountCodepoints(str) catch str.len);
     }
 
+    // O(1) byte-level access. Returns the i-th byte as i64 (matches CLEAR's
+    // Int64 numeric type), or 0 for out-of-bounds / negative index. Used by
+    // the register VM bytecode parser; does NOT raise on out-of-range.
+    pub fn byteAt(str: []const u8, index: anytype) i64 {
+        const idx = @as(i64, @intCast(index));
+        if (idx < 0) return 0;
+        const i: usize = @intCast(idx);
+        if (i >= str.len) return 0;
+        return @intCast(str[i]);
+    }
+
     // UTF-8 codepoint access: returns the i-th codepoint as a multi-byte slice.
     // O(n) per call — iterates from the start. Returns "" on out-of-bounds or invalid UTF-8.
     pub fn charAtCodepoint(alloc: std.mem.Allocator, str: []const u8, index: anytype) ![]const u8 {

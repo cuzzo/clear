@@ -1,0 +1,16 @@
+FN main() RETURNS Void ->
+    line = "SET:12345:payload";
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 50000_i64) DO
+        IF startsWith?(line, "SET:") THEN
+            IF contains?(line, "payload") THEN
+                total = total + substr(line, 4_i64, 5_i64).length();
+            END
+        END
+    END
+    totalMs = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

@@ -1,0 +1,12 @@
+FN main() RETURNS Int64 ->
+    MUTABLE m: HashMap<Int64> = {};
+    m["a"] = 10_i64;
+    m["b"] = 20_i64;
+    IF m.contains?("a") THEN
+        IF m.contains?("z") THEN
+            RETURN 0_i64;
+        END
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

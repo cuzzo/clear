@@ -1,0 +1,11 @@
+FN inc(x: Int64) RETURNS Int64 ->
+    RETURN x + 1_i64;
+END
+
+FN twice(x: Int64) RETURNS Int64 ->
+    RETURN inc(inc(x));
+END
+
+FN main() RETURNS Int64 ->
+    RETURN twice(40_i64);
+END

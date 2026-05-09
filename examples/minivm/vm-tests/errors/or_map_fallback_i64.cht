@@ -1,0 +1,4 @@
+FN main() RETURNS Int64 ->
+    m: HashMap<Int64> = {};
+    RETURN m["missing"] OR 99_i64;
+END

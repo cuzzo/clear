@@ -1,0 +1,6 @@
+FN main() RETURNS Int64 ->
+    MUTABLE m: HashMap<Int64> = {};
+    m["a"] = 10_i64;
+    m["b"] = 20_i64;
+    RETURN m.length();
+END

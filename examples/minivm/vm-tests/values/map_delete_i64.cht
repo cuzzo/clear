@@ -1,0 +1,10 @@
+FN main() RETURNS Int64 ->
+    MUTABLE m: HashMap<Int64> = {};
+    m["a"] = 10_i64;
+    m["b"] = 20_i64;
+    m.delete("a");
+    IF m.contains?("a") THEN
+        RETURN 0_i64;
+    END
+    RETURN m.length();
+END

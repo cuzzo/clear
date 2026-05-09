@@ -1,0 +1,10 @@
+FN fib(n: Int64) RETURNS Int64 EFFECTS REENTRANT ->
+    IF n <= 1_i64 THEN
+        RETURN n;
+    END
+    RETURN fib(n - 1_i64) + fib(n - 2_i64);
+END
+
+FN main() RETURNS Int64 ->
+    RETURN fib(21_i64);
+END

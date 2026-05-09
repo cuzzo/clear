@@ -1,0 +1,7 @@
+instructions:
+0000 LOAD_CONST_F64    0 ; F:42.9
+0002 F_TO_VAL
+0003 NATIVE_CALL       44 1
+0006 HALT
+consts:
+F:42.9

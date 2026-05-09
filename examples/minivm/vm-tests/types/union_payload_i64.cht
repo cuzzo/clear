@@ -1,0 +1,9 @@
+UNION MaybeI64 { None, Some: Int64 }
+
+FN main() RETURNS Int64 ->
+    v: MaybeI64 = MaybeI64{ Some: 42_i64 };
+    PARTIAL MATCH v START
+        MaybeI64.Some AS n -> RETURN n;,
+        DEFAULT -> RETURN 0_i64;
+    END
+END

@@ -1,0 +1,16 @@
+register instructions:
+0000 SCONST s0 0 ; S:5:clear
+0003 SCONST s1 1 ; S:2:zz
+0006 NCALL ret=i64 r0 startsWith? argc=2 s0 s1
+0015 ICONST r1 2 ; I:0
+0018 JIEQF r0 r1 27
+0022 ICONST r0 3 ; I:1
+0025 IRET r0
+0027 ICONST r0 2 ; I:0
+0030 IRET r0
+0032 HALT
+consts:
+S:5:clear
+S:2:zz
+I:0
+I:1

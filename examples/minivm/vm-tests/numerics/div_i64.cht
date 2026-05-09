@@ -1,0 +1,3 @@
+FN main() RETURNS Int64 ->
+    RETURN (17_i64 / 5_i64) + 2_i64;
+END

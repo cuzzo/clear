@@ -1,0 +1,15 @@
+ENUM Mode { Read, Write, Close }
+
+FN echoMode(m: Mode) RETURNS Mode ->
+    RETURN m;
+END
+
+FN main() RETURNS Int64 ->
+    m: Mode = Mode.Write;
+    out = echoMode(m);
+    PARTIAL MATCH out START
+        Mode.Read -> RETURN 1_i64;,
+        Mode.Write -> RETURN 2_i64;,
+        DEFAULT -> RETURN 3_i64;
+    END
+END

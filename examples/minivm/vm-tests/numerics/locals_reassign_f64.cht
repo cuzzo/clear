@@ -1,0 +1,5 @@
+FN main() RETURNS Float64 ->
+    MUTABLE x: Float64 = 1.25;
+    x = x + 2.5;
+    RETURN x * 2.0;
+END

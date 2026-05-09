@@ -1,0 +1,11 @@
+register instructions:
+0000 SCONST s0 0 ; S:11:register-vm
+0003 ICONST r0 1 ; I:0
+0006 ICONST r1 2 ; I:8
+0009 NCALL ret=string s0 substr argc=3 s0 r0 r1
+0020 SRET s0
+0022 HALT
+consts:
+S:11:register-vm
+I:0
+I:8

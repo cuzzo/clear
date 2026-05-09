@@ -1,0 +1,4 @@
+FN main() RETURNS Int64 ->
+    nums: Int64[] = [1_i64, 2_i64, 3_i64];
+    RETURN nums[0_i64] + nums[1_i64] + nums[2_i64];
+END

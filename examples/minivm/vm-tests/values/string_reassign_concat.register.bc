@@ -1,0 +1,12 @@
+register instructions:
+0000 SCONST s0 0 ; S:0:
+0003 SCONST s1 1 ; S:4:SET=
+0006 SCONCAT s0 s0 s1
+0010 SCONST s1 2 ; S:2:1;
+0013 SCONCAT s0 s0 s1
+0017 SRET s0
+0019 HALT
+consts:
+S:0:
+S:4:SET=
+S:2:1;

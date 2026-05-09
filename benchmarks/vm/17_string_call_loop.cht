@@ -1,0 +1,30 @@
+FN pickLabel(i: Int64) RETURNS String ->
+    r = i MOD 4_i64;
+    IF r == 0_i64 THEN RETURN "alpha"; END
+    IF r == 1_i64 THEN RETURN "beta"; END
+    IF r == 2_i64 THEN RETURN "gamma"; END
+    RETURN "delta";
+END
+
+FN labelScore(label: String) RETURNS Int64 ->
+    IF label == "alpha" THEN RETURN 11_i64; END
+    IF label == "beta" THEN RETURN 17_i64; END
+    IF label == "gamma" THEN RETURN 23_i64; END
+    RETURN 31_i64;
+END
+
+FN nestedScore(i: Int64) RETURNS Int64 ->
+    RETURN labelScore(pickLabel(i));
+END
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 120000_i64) DO
+        total = total + nestedScore(i);
+    END
+    elapsed = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

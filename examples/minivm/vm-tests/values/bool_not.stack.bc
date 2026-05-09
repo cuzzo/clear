@@ -1,0 +1,17 @@
+instructions:
+0000 LOAD_CONST        0 ; S:5:clear
+0002 LOAD_CONST        1 ; S:2:zz
+0004 NATIVE_CALL       38 2
+0007 NOT
+0008 JUMP_IF_FALSE     14
+0010 LOAD_CONST_I64    2 ; I:1
+0012 I_TO_VAL
+0013 POP
+0014 LOAD_CONST_I64    3 ; I:0
+0016 I_TO_VAL
+0017 HALT
+consts:
+S:5:clear
+S:2:zz
+I:1
+I:0

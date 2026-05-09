@@ -1,0 +1,36 @@
+instructions:
+0000 LOAD_CONST        0 ; S:4:42.5
+0002 NATIVE_CALL       103 1
+0005 STORE_NAME        1
+0007 NOT
+0008 NOT
+0009 JUMP_IF_FALSE     15
+0011 LOAD_NAME         2
+0013 JUMP              18
+0015 LOAD_CONST_F64    3 ; F:0.0
+0017 F_TO_VAL
+0018 STORE_SLOT        0
+0020 LOAD_CONST        4 ; S:4:nope
+0022 NATIVE_CALL       103 1
+0025 STORE_NAME        5
+0027 NOT
+0028 NOT
+0029 JUMP_IF_FALSE     35
+0031 LOAD_NAME         6
+0033 JUMP              38
+0035 LOAD_CONST_F64    7 ; F:1.5
+0037 F_TO_VAL
+0038 STORE_SLOT        1
+0040 LOAD_SLOT         0
+0042 LOAD_SLOT         1
+0044 ADD
+0045 HALT
+consts:
+S:4:42.5
+SYM:__orelse_0
+SYM:__orelse_0
+F:0.0
+S:4:nope
+SYM:__orelse_20
+SYM:__orelse_20
+F:1.5

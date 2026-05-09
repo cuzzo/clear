@@ -1,0 +1,12 @@
+instructions:
+0000 LOAD_CONST_I64    0 ; I:7
+0002 STORE_ISLOT       0
+0004 LOAD_CONST        1 ; S:5:x is
+0006 LOAD_ISLOT        0
+0008 I_TO_VAL
+0009 NATIVE_CALL       30 1
+0012 CONCAT
+0013 HALT
+consts:
+I:7
+S:5:x is

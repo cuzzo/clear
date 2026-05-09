@@ -1,0 +1,9 @@
+FN main() RETURNS Int64 ->
+    MUTABLE i = 0_i64;
+    MUTABLE total = 0_i64;
+    WHILE i < 3_i64 DO
+        total = total + i;
+        i = i + 1_i64;
+    END
+    RETURN total;
+END

@@ -1,0 +1,13 @@
+FN main() RETURNS Int64 ->
+    t = timestampMs();
+    r = random();
+    i = randomInt(1_i64);
+    IF t > 0_i64 THEN
+        IF r >= 0.0 THEN
+            IF i == 0_i64 THEN
+                RETURN 1_i64;
+            END
+        END
+    END
+    RETURN 0_i64;
+END

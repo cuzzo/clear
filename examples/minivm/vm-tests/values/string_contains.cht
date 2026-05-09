@@ -1,0 +1,10 @@
+FN main() RETURNS Int64 ->
+    s = "clear bytecode";
+    IF contains?(s, "byte") THEN
+        IF contains?(s, "ruby") THEN
+            RETURN 0_i64;
+        END
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

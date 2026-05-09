@@ -1,5 +1,37 @@
 # Register VM Design
 
+## Semantic Invariants
+
+The register VM is a bytecode execution mode for CLEAR programs, not a second
+implementation of CLEAR's runtime libraries.
+
+The register VM may choose efficient layouts for VM internals:
+
+- scalar register files (`iregs`, `fregs`) should be dense typed arrays
+- call frames may be represented as base offsets, frame-size tables, and return slots
+- guest structs/unions may use fixed-layout VM records or typed field slots
+- bytecode constants, labels, dispatch metadata, and VM object tables may use whatever
+  representation is fastest and simplest for the VM
+
+Those choices are VM implementation details. A guest `STRUCT` is not a `HashMap`; it should
+not be forced through a map representation just for uniformity.
+
+Guest CLEAR runtime values must remain faithful to compiled CLEAR:
+
+- a guest `HashMap<...>` must use CLEAR HashMap semantics, not a custom faster map that
+  hides allocator/key/overwrite/promotion behavior
+- a guest `[]@list`, `[]@pool`, `@set`, string, owned value, or promoted value must preserve
+  the same lifetime, allocator, cleanup, and copy/move behavior as native compiled CLEAR
+- capability-bearing values (`@shared`, `@local`, `@locked`, `@writeLocked`, etc.) must
+  preserve the same synchronization and ownership behavior
+- concurrency constructs (`BG`, `DO`, `CONCURRENT`, `NEXT`, streams, `WITH`) must lower to
+  and execute through the same actual runtime constructs used by compiled CLEAR
+
+When the register VM cannot faithfully implement a guest CLEAR runtime construct yet, the
+emitter/runner should report the case as pending or `NOT_SUPPORTED`. It should not use a
+benchmark-specific shadow implementation that produces the right answer while bypassing the
+runtime contract being tested.
+
 ## Current Architecture (Stack VM)
 
 The stack VM uses three stacks (Value, i64, f64) and slot arrays for locals.
@@ -47,6 +79,41 @@ exec!() register dispatch loop
 ```
 
 All passes are Ruby. The VM (interpreter.cht) only sees physical register opcodes.
+
+### Current Pipeline Hook
+
+`register_bc_emitter.rb` still emits a simple infinite-register instruction stream directly.
+Before returning bytecode, it now passes the emitted ops through `register_pipeline.rb`:
+
+```
+raw ops
+    |
+    v
+Program.decode       -- instruction boundaries, arities, branch successors
+    |
+    v
+Optimizer            -- currently no-op; home for peephole/fusion/DCE
+    |
+    v
+AllocatorRewriter    -- currently no-op; home for liveness + register reuse/spills
+    |
+    v
+Program#to_ops
+```
+
+This is intentionally a no-op for behavior today. The immediate value is that opcode
+layout, instruction width decoding, branch successor discovery, and pass ordering now
+live in one place.
+
+Do not implement real allocation until the supported opcode surface is a little more
+stable or until register pressure shows up in benchmarks. When allocation starts, keep
+the first pass conservative: liveness-driven register reuse within each frame, preserving
+all current opcode encodings and only rewriting register operands.
+
+Direct threading should build from `Program#direct_thread_labels` and `successor_ips`.
+The first direct-threaded backend should be a generated CLEAR runner shape, not a change
+to bytecode semantics: each decoded instruction gets a stable label (`op_<ip>`), and
+branches map to labels instead of re-entering the opcode dispatch table.
 
 ## Pass 1: Virtual Register Emission
 
@@ -139,9 +206,9 @@ Value argument list), so there are no save/restore complications.
 ### Register File
 
 ```clear
-MUTABLE iregs: Int64[] = [];      # 64 i64 registers
-MUTABLE fregs: Float64[] = [];    # 64 f64 registers
-MUTABLE regs: Value[]@list = List[];  # 64 Value registers
+MUTABLE iregs: Int64[] = [];      -- 64 i64 registers
+MUTABLE fregs: Float64[] = [];    -- 64 f64 registers
+MUTABLE regs: Value[]@list = List[];  -- 64 Value registers
 FOR ri IN (0_i64 ..< 64) DO iregs.append(0_i64); END
 FOR ri IN (0_i64 ..< 64) DO fregs.append(0.0); END
 FOR ri IN (0_i64 ..< 64) DO regs.append(Value.Nil); END

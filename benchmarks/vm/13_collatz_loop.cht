@@ -1,0 +1,26 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE totalSteps: Int64 = 0_i64;
+    MUTABLE checksum: Int64 = 0_i64;
+    MUTABLE seed: Int64 = 1_i64;
+    WHILE seed <= 2000_i64 DO
+        MUTABLE n: Int64 = seed;
+        MUTABLE steps: Int64 = 0_i64;
+        WHILE n != 1_i64 DO
+            IF (n MOD 2_i64) == 0_i64 THEN
+                n = n / 2_i64;
+            ELSE
+                n = (n * 3_i64) + 1_i64;
+            END
+            steps = steps + 1_i64;
+        END
+        totalSteps = totalSteps + steps;
+        checksum = checksum + (steps * seed);
+        seed = seed + 1_i64;
+    END
+    elapsed = timestampMs() - t0;
+    print("steps = ${totalSteps.toString()}");
+    print("checksum = ${checksum.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

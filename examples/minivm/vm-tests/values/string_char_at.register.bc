@@ -1,0 +1,9 @@
+register instructions:
+0000 SCONST s0 0 ; S:5:clear
+0003 ICONST r0 1 ; I:2
+0006 NCALL ret=string s0 charAt argc=2 s0 r0
+0015 SRET s0
+0017 HALT
+consts:
+S:5:clear
+I:2

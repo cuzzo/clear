@@ -1,0 +1,4 @@
+FN main() RETURNS String ->
+    x: Int64 = 7;
+    RETURN "x is " + x.toString();
+END

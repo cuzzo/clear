@@ -1,0 +1,3 @@
+FN main() RETURNS Int64 ->
+    RETURN (1_i64 + 2_i64) * 3_i64 - 4_i64;
+END

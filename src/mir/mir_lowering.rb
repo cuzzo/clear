@@ -526,15 +526,35 @@ class MIRLowering
       # Inject source map comment for this user-visible statement.
       # Placed after pending (hoisted synthetic temps have no user source line).
       line = s.token&.line
+      col  = s.token&.column
       result << MIR::Comment.new("CLR:#{line}") if line
       # lower_var_decl may return [AllocMark, Let, Cleanup] when the binding needs cleanup.
       if mir.is_a?(Array)
-        result.concat(mir.compact)
+        mir.compact.each do |m|
+          stamp_source_line!(m, line, col)
+          result << m
+        end
       else
+        stamp_source_line!(mir, line, col)
         result << mir
       end
     }
     result
+  end
+
+  # Stamps `MIR::Stmt#source_line` (and `source_column`) from the
+  # originating AST node's token. Used by the register VM emitter for
+  # per-statement crash-message attribution and per-instruction
+  # debugger position lookup. Lifting this from the per-stmt comment
+  # injection in lower_body keeps it as the single source of truth so
+  # cleanup defers, hoist temps, and other synthesized statements all
+  # inherit their parent statement's position. No-op when `line` is
+  # nil (synthesized fragments may have no AST origin).
+  def stamp_source_line!(node, line, column = nil)
+    return unless line
+    return unless node.respond_to?(:source_line=)
+    node.source_line ||= line
+    node.source_column ||= column if node.respond_to?(:source_column=) && column
   end
 
   # Like lower_body, but the last user-visible statement becomes break :label expr

@@ -1,0 +1,9 @@
+FN main() RETURNS String ->
+    result = "done";
+    MUTABLE i: Int64 = 0;
+    WHILE i < 3 DO
+        junk = "tmp" + i.toString();
+        i += 1;
+    END
+    RETURN result;
+END

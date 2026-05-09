@@ -1,0 +1,25 @@
+# VM benchmark corpus for the register target.
+#
+# These are benchmark-shaped CLEAR programs, not transpile-test assertions.
+# The benchmark harness records unsupported register cases as pending while
+# the language surface is being implemented.
+benchmarks/vm/01_fib.cht
+benchmarks/vm/02_loop_sum.cht
+benchmarks/vm/03_hashmap.cht
+benchmarks/vm/04_list_sum.cht
+benchmarks/vm/05_call_loop.cht
+benchmarks/vm/06_float_loop.cht
+benchmarks/vm/07_string_scan.cht
+benchmarks/vm/08_branch_loop.cht
+benchmarks/vm/09_struct_loop.cht
+benchmarks/vm/10_match_loop.cht
+benchmarks/vm/11_union_match_loop.cht
+benchmarks/vm/12_float_list_loop.cht
+benchmarks/vm/13_collatz_loop.cht
+benchmarks/vm/14_short_circuit_loop.cht
+benchmarks/vm/15_break_continue_loop.cht
+benchmarks/vm/16_numeric_map_mutation.cht
+benchmarks/vm/17_string_call_loop.cht
+benchmarks/vm/18_union_struct_payload_loop.cht
+benchmarks/vm/19_value_map_loop.cht
+benchmarks/vm/20_value_list_iteration.cht

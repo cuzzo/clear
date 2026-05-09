@@ -1,0 +1,34 @@
+STRUCT Point { x: Int64, y: Int64 }
+STRUCT Box { p: Point, weight: Int64 }
+UNION Item { Boxed: Box, Raw: Int64, Empty }
+
+FN makeItem(i: Int64) RETURNS Item ->
+    r = i MOD 3_i64;
+    IF r == 0_i64 THEN
+        RETURN Item{ Boxed: Box{ p: Point{ x: i, y: i * 2_i64 }, weight: i MOD 7_i64 } };
+    ELSE_IF r == 1_i64 THEN
+        RETURN Item{ Raw: i * 5_i64 };
+    END
+    RETURN Item.Empty;
+END
+
+FN scoreItem(item: Item) RETURNS Int64 ->
+    MATCH item START
+        Item.Boxed AS box -> RETURN box.p.x + box.p.y + box.weight;,
+        Item.Raw AS n -> RETURN n - 3_i64;,
+        Item.Empty -> RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 100000_i64) DO
+        total = total + scoreItem(makeItem(i));
+    END
+    elapsed = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

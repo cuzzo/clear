@@ -1,0 +1,25 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    MUTABLE seen: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 300000_i64) DO
+        IF i > 123456_i64 THEN
+            BREAK;
+        END
+        IF (i MOD 17_i64) == 0_i64 THEN
+            CONTINUE;
+        END
+        seen = seen + 1_i64;
+        IF (i MOD 5_i64) == 0_i64 THEN
+            total = total + (i * 2_i64);
+        ELSE
+            total = total + i;
+        END
+    END
+    score = total + (seen * 11_i64);
+    elapsed = timestampMs() - t0;
+    print("seen = ${seen.toString()}");
+    print("score = ${score.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

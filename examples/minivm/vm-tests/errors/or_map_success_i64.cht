@@ -1,0 +1,5 @@
+FN main() RETURNS Int64 ->
+    MUTABLE m: HashMap<Int64> = {};
+    m["x"] = 5_i64;
+    RETURN m["x"] OR 99_i64;
+END

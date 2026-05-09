@@ -1,0 +1,12 @@
+register instructions:
+0000 MNEW m0
+0002 ICONST r0 1 ; I:42
+0005 MPUTI m0 0 r0
+0009 ICONST r0 2 ; I:0
+0012 MGETI r0 m0 0 r0
+0017 IRET r0
+0019 HALT
+consts:
+S:6:answer
+I:42
+I:0

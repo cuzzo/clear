@@ -1,0 +1,7 @@
+FN fail!() RETURNS !Int64 ->
+    RAISE "bad";
+END
+
+FN main() RETURNS Int64 ->
+    RETURN fail!() OR 42_i64;
+END

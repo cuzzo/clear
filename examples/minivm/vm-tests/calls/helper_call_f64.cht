@@ -1,0 +1,7 @@
+FN avg(a: Float64, b: Float64) RETURNS Float64 ->
+    RETURN (a + b) / 2.0;
+END
+
+FN main() RETURNS Float64 ->
+    RETURN avg(1.0, 4.0);
+END

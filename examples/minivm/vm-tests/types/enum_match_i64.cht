@@ -1,0 +1,9 @@
+ENUM Color { Red, Blue }
+
+FN main() RETURNS Int64 ->
+    c = Color.Red;
+    PARTIAL MATCH c START
+        Color.Red -> RETURN 1_i64;,
+        DEFAULT -> RETURN 2_i64;
+    END
+END
