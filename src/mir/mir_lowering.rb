@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # src/mir_lowering.rb - Lowers annotated AST (post-MIRPass) into MIR tree
 #
 # Pipeline: Parse -> Annotate -> MIRPass -> Lower -> Emit
@@ -37,26 +37,26 @@ class MIRLowering
   attr_reader :fn_sigs
   attr_accessor :shard_context
 
-  sig { params(struct_schemas: T::Hash[Symbol, T.untyped], enum_schemas: T::Hash[Symbol, Array], union_schemas: T::Hash[Symbol, T.untyped], fn_sigs: T::Hash[String, T.untyped], moved_guard_info: T::Hash[String, Hash], pipeline_fallback: T.nilable(Proc), importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
+  sig { params(struct_schemas: T::Hash[Symbol, T.untyped], enum_schemas: T::Hash[Symbol, T::Array[T.untyped]], union_schemas: T::Hash[Symbol, T.untyped], fn_sigs: T::Hash[T.untyped, T.untyped], moved_guard_info: T::Hash[String, T::Hash[T.untyped, T.untyped]], pipeline_fallback: T.nilable(Proc), importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
                  pipeline_fallback: nil, importer: nil, source_dir: nil,
                  debug_mode: false, target: :zig)
-    @struct_schemas = struct_schemas || {}
-    @enum_schemas = enum_schemas || {}
-    @union_schemas = union_schemas || {}
-    @fn_sigs = fn_sigs || {}
-    @moved_guard_info = moved_guard_info || {}
+    @struct_schemas = T.let(struct_schemas || {}, T::Hash[Symbol, T.untyped])
+    @enum_schemas = T.let(enum_schemas || {}, T::Hash[Symbol, T::Array[T.untyped]])
+    @union_schemas = T.let(union_schemas || {}, T::Hash[Symbol, T.untyped])
+    @fn_sigs = T.let(fn_sigs || {}, T::Hash[T.untyped, T.untyped])
+    @moved_guard_info = T.let(moved_guard_info || {}, T::Hash[String, T::Hash[T.untyped, T.untyped]])
     @rt_name = T.let("rt", String)
-    @shard_context = nil  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
-    @emitted_extern_modules = T.let(Set.new, Set)
+    @shard_context = T.let(nil, T.untyped)  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
+    @emitted_extern_modules = T.let(Set.new, T::Set[T.untyped])
     @block_expr_counter = T.let(0, Integer)
     @indirect_fields = T.let({}, T::Hash[T.untyped, T.untyped])
     @pipeline_fallback = pipeline_fallback
-    @pipeline_host = nil
-    @importer = importer
-    @source_dir = source_dir
-    @emitted_types = T.let(Set.new, Set)
+    @pipeline_host = T.let(nil, T.nilable(PipelineHost))
+    @importer = T.let(importer, T.nilable(ModuleImporter))
+    @source_dir = T.let(source_dir, T.nilable(String))
+    @emitted_types = T.let(Set.new, T::Set[T.untyped])
     @debug_mode = debug_mode
     @pending_stmts = T.let([], T::Array[T.untyped])
     @tmp_counter = T.let(0, Integer)
@@ -65,14 +65,37 @@ class MIRLowering
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @current_fn_snapshot_types = T.let(nil, T.nilable(Set))
+    @current_fn_snapshot_types = T.let(nil, T.nilable(T::Set[T.untyped]))
     @atomic_emit_raw = T.let(false, T::Boolean)
+    @used_sharded_map = T.let(false, T::Boolean)
+    @current_fn_has_rt = T.let(false, T::Boolean)
+    @current_fn_tail_call = T.let(false, T::Boolean)
+    @current_fn_zig_name = T.let(nil, T.nilable(String))
+    @current_fn_return_payload_zig = T.let(nil, T.nilable(String))
+    @current_fn_has_catch = T.let(false, T::Boolean)
+    @current_fn_collection_params = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_fn_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_fn_mutable_scalar_params = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_bg_pointer_captures = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_fiber_capture_symbols = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @do_capture_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @locked_unwrap_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @rc_unwrap_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @safe_nav_counter = T.let(0, Integer)
+    @extern_counter = T.let(0, Integer)
+    @lambda_counter = T.let(0, Integer)
+    @do_block_counter = T.let(0, Integer)
+    @bg_block_counter = T.let(0, Integer)
+    @stream_gen_counter = T.let(0, Integer)
+    @loop_mark_counter = T.let(0, Integer)
+    @for_counter = T.let(0, Integer)
+    @_emitter = T.let(nil, T.nilable(MIREmitter))
   end
 
   # Flush and return all pending hoisted Let statements accumulated since the
   # last flush. Called by lower_body before appending the main statement so
   # hoisted Lets precede the statement that uses them.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def flush_pending
     stmts = @pending_stmts
     @pending_stmts = []
@@ -86,10 +109,11 @@ class MIRLowering
   # @pending_stmts. Used at "lazy" positions (orelse fallback, fiber body)
   # so that allocations done while lowering a may-not-execute sub-expression
   # only execute when the sub-expression actually runs.
-  def lower_scoped
+  sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def lower_scoped(&blk)
     prev = @pending_stmts
     @pending_stmts = []
-    result = yield
+    result = blk.call
     scoped = @pending_stmts
     @pending_stmts = prev
     return result if scoped.empty?
@@ -235,7 +259,7 @@ class MIRLowering
 
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def hoist_cleanup_entry(mir, ast_node)
     case mir
     when MIR::DupeSlice, MIR::ConcatStr
@@ -440,7 +464,7 @@ class MIRLowering
   # Lower a body (array of statements) into an array of MIR nodes.
   # Flushes @pending_stmts before each statement so hoisted Lets (from
   # hoist_alloc calls inside lower()) precede the statement that uses them.
-  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
   def lower_body(stmts)
     return [] unless stmts
     result = []
@@ -472,7 +496,7 @@ class MIRLowering
 
   # Like lower_body, but the last user-visible statement becomes break :label expr
   # instead of a regular statement. Used for IF/MATCH expression branches.
-  sig { params(stmts: Array, label: String).returns(Array) }
+  sig { params(stmts: T::Array[T.untyped], label: String).returns(T::Array[T.untyped]) }
   def lower_body_with_break(stmts, label)
     return [] unless stmts && !stmts.empty?
 
@@ -495,7 +519,7 @@ class MIRLowering
   # Lower a full program into MIR::Program with standard imports + footer.
   sig { params(node: AST::Program, use_c_allocator: T::Boolean, needs_safety: T::Boolean, use_debug_allocator: T::Boolean).returns(T.nilable(MIR::Program)) }
   def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
-    @use_debug_allocator = use_debug_allocator
+    @use_debug_allocator = T.let(use_debug_allocator, T.nilable(T::Boolean))
     items = []
 
     # Auto-detect needs_safety from @nonReentrant functions
@@ -537,7 +561,7 @@ class MIRLowering
   # No standard imports or runtime footer -- the importing file provides those.
   #
   # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
-  sig { params(node: AST::Program).returns(T::Hash[Symbol, Array]) }
+  sig { params(node: AST::Program).returns(T::Hash[Symbol, T::Array[T.untyped]]) }
   def lower_module(node)
     type_items = []
     fn_items = []
@@ -1007,7 +1031,7 @@ class MIRLowering
   # Module roots that resolve as Zig MODULES (not relative .zig files):
   # - std, builtin: Zig stdlib
   # - cheat_runtime: CLEAR runtime, wired via build.zig as a module
-  EXTERN_MODULE_ROOTS = %w[std builtin cheat_runtime].to_set.freeze
+  EXTERN_MODULE_ROOTS = T.let(%w[std builtin cheat_runtime].to_set.freeze, T::Set[String])
 
   sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
   def lower_extern_fn(node)
@@ -1074,8 +1098,8 @@ class MIRLowering
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
-    @current_fn_zig_name = zig_safe_name(node.name)
-    @current_fn_return_payload_zig = final_type.sub(/\Aanyerror!/, "").sub(/\A!/, "")
+    @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
+    @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
@@ -1108,7 +1132,7 @@ class MIRLowering
                                     (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
       !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
     }.map { |p| p[:name] }.to_set
-    @current_fn_mutable_scalar_params = mutable_scalar_params
+    @current_fn_mutable_scalar_params = T.let(mutable_scalar_params, T.nilable(T::Set[T.untyped]))
 
     # Collection params: already passed by pointer, skip & at recursive
     # call sites. Includes `MUTABLE xs: T[]@list` -- those are passed
@@ -1415,7 +1439,7 @@ class MIRLowering
   # Build the inner function for a POST-having FunctionDef. Holds the
   # original body verbatim. Marked :private so callers go through the
   # outer wrapper (which validates).
-  sig { params(node: AST::FunctionDef, params_mir: Array, return_type_str: String, prologue: Array, body_mir: Array, comptime_params: Array).returns(MIR::FnDef) }
+  sig { params(node: AST::FunctionDef, params_mir: T::Array[T.untyped], return_type_str: String, prologue: T::Array[T.untyped], body_mir: T::Array[T.untyped], comptime_params: T::Array[T.untyped]).returns(MIR::FnDef) }
   def build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params)
     inner_name = "__#{zig_safe_name(node.name)}_post_body"
     MIR::FnDef.new(inner_name, params_mir, return_type_str,
@@ -1425,7 +1449,7 @@ class MIRLowering
   # Build the outer wrapper for a POST-having FunctionDef. Calls the
   # inner, captures the result, evaluates each POST predicate inside a
   # debug-mode `if` block, panics on violation, returns the result.
-  sig { params(node: AST::FunctionDef, params_mir: Array, return_type_str: String, fn_needs_rt: T::Boolean, vis: Symbol, comptime_params: Array).returns(MIR::FnDef) }
+  sig { params(node: AST::FunctionDef, params_mir: T::Array[T.untyped], return_type_str: String, fn_needs_rt: T::Boolean, vis: Symbol, comptime_params: T::Array[T.untyped]).returns(MIR::FnDef) }
   def build_post_outer_fn(node, params_mir, return_type_str, fn_needs_rt, vis, comptime_params)
     inner_name = "__#{zig_safe_name(node.name)}_post_body"
     # The outer wrapper sees parameters under their Zig-level names —
@@ -1514,7 +1538,7 @@ class MIRLowering
   # Returns [zig_string, clause_bodies] where clause_bodies is an array of
   # MIR stmt arrays (one per clause + optional default). Using lower_body
   # ensures flush_pending is called per statement so hoisted Lets stay in scope.
-  sig { params(node: AST::FunctionDef, fn_can_fail: T::Boolean).returns(Array) }
+  sig { params(node: AST::FunctionDef, fn_can_fail: T::Boolean).returns(T::Array[T.untyped]) }
   def build_catch_clauses(node, fn_can_fail)
     rt_name = @rt_name
     clause_bodies = []
@@ -1592,7 +1616,7 @@ class MIRLowering
   # Extract error-path reassignment metadata from catch clauses (INV-9).
   # Returns [{ name:, alloc:, line: }] for each reassignment to an existing
   # binding inside a catch body. Used by MIRChecker to verify allocator consistency.
-  sig { params(node: AST::FunctionDef).returns(Array) }
+  sig { params(node: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def collect_catch_reassigns(node)
     reassigns = []
     catch_bodies = []
@@ -1605,7 +1629,7 @@ class MIRLowering
     reassigns
   end
 
-  sig { params(stmts: Array, reassigns: Array).returns(T.nilable(Array)) }
+  sig { params(stmts: T::Array[T.untyped], reassigns: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def walk_catch_body_for_reassigns(stmts, reassigns)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
@@ -1630,6 +1654,7 @@ class MIRLowering
     end
   end
 
+  sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     return nil unless expr
     ti = expr.type_info rescue nil
@@ -1834,6 +1859,7 @@ class MIRLowering
 
   # Safe navigation for method calls: expr?.method(args)
   # Wraps the call in (if (expr) |_snav_N| call_with_N_as_receiver else null).
+  sig { params(node: T.untyped).returns(MIR::IfOptional) }
   def lower_safe_nav_method_call(node)
     @safe_nav_counter = (@safe_nav_counter || 0) + 1
     snav_var = "_snav_#{@safe_nav_counter}"
@@ -2003,7 +2029,7 @@ class MIRLowering
     build_extern_trampoline_call(node)
   end
 
-  sig { params(node: AST::MethodCall).returns(MIR::InlineZig) }
+  sig { params(node: AST::MethodCall).returns(T.any(MIR::InlineZig, MIR::MethodCall)) }
   def lower_extern_method(node)
     return lower_extern_direct_method(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
     build_extern_trampoline_method(node)
@@ -2025,6 +2051,7 @@ class MIRLowering
     MIR::Call.new("#{mod_prefix}#{node.name}", args, false)
   end
 
+  sig { params(node: T.untyped).returns(MIR::MethodCall) }
   def lower_extern_direct_method(node)
     obj = lower(node.object)
     args = node.args.map { |a| lower(a) }
@@ -2131,7 +2158,7 @@ class MIRLowering
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: Array, arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String)).returns(MIR::InlineZig) }
+  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String)).returns(MIR::InlineZig) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
     ret_t = return_type.is_a?(Type) ? return_type : Type.new(return_type || :Void)
     can_fail = ret_t.error_union?
@@ -2268,7 +2295,7 @@ class MIRLowering
         return MIR::MakeList.new("__bc_stream__", items_mir_bc, :frame)
       end
 
-      @stream_lit_counter ||= 0
+      @stream_lit_counter ||= T.let(0, T.nilable(Integer))
       s_id = @stream_lit_counter
       @stream_lit_counter += 1
 
@@ -2510,12 +2537,14 @@ class MIRLowering
   # field), else the bare value. The same fn body then works for both
   # `Locked(T)` and `Arc(Locked(T))` callers without runtime overhead.
   # Mutable parameters arrive as `*T`, so probe and deref through `*`.
+  sig { params(zig_var: T.untyped).returns(String) }
   def comptime_arc_unwrap_expr(zig_var)
     "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
   end
 
   # Recursively build the Zig string for a (possibly nested) field path.
   # Stops at the root Identifier; intermediate GetFields chain via `.`.
+  sig { params(node: T.untyped).returns(T.untyped) }
   def build_field_path_zig(node)
     case node
     when AST::Identifier
@@ -3248,7 +3277,7 @@ class MIRLowering
     end
   end
 
-  sig { params(node: AST::WithBlock).returns(T.nilable(T.any(Array, T::Array[T.untyped]))) }
+  sig { params(node: AST::WithBlock).returns(T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))) }
   def guard_fail_flow_body(node)
     clause = node.lock_error_clause
     return [] unless clause && (clause[:matched_types] || []).include?(:GuardFail)
@@ -3276,7 +3305,7 @@ class MIRLowering
   # predicate is false, sets PreconditionFail on the runtime context
   # and returns the CheatError sentinel. Fail-fast: the first failing
   # PRE returns; later PREs are not evaluated.
-  sig { params(node: AST::FunctionDef).returns(Array) }
+  sig { params(node: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def lower_pre_clauses(node)
     pre_clauses = node.respond_to?(:pre_clauses) ? (node.pre_clauses || []) : []
     return [] if pre_clauses.empty?
@@ -3327,7 +3356,7 @@ class MIRLowering
     out
   end
 
-  sig { params(node: AST::WithBlock, body_mir: Array, with_label: T.nilable(String)).returns(Array) }
+  sig { params(node: AST::WithBlock, body_mir: T::Array[T.untyped], with_label: T.nilable(String)).returns(T::Array[T.untyped]) }
   def wrap_body_with_guard(node, body_mir, with_label)
     guard_cond = combined_guard_cond(node)
     return body_mir unless guard_cond
@@ -3346,7 +3375,7 @@ class MIRLowering
            .reduce { |acc, e| MIR::BinOp.new("and", acc, e) }
   end
 
-  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(Array)) }
+  sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(T::Array[T.untyped])) }
   def guard_fail_body(node, with_label)
     clause = node.lock_error_clause
     return nil unless clause && (clause[:matched_types] || []).include?(:GuardFail)
@@ -3483,7 +3512,7 @@ class MIRLowering
   # in its own labeled block today, so collisions are impossible in
   # practice, but the suffix makes the property defensible against
   # future lowering changes.
-  sig { params(fallible_caps: T::Array[Hash], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[Hash]) }
+  sig { params(fallible_caps: T::Array[T::Hash[T.untyped, T.untyped]], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     suffix = with_node ? "_#{with_node.object_id.abs}" : ""
     fallible_caps.each_with_index.map do |cap, i|
@@ -3522,7 +3551,7 @@ class MIRLowering
   #   - const alias = __guardN.get() aliases
   # Uses panic-variant acquire methods (acquire / read / write); no
   # ON-clause handling. The fallible-variant emitter sits beside this.
-  sig { params(fallible_caps: Array, with_node: T.nilable(AST::WithBlock)).returns(String) }
+  sig { params(fallible_caps: T::Array[T.untyped], with_node: T.nilable(AST::WithBlock)).returns(String) }
   def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
     n = fallible_caps.length
     entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
@@ -3579,7 +3608,7 @@ class MIRLowering
   # safe no-ops on the failure path. The on-success path leaves all
   # __heldN flags true; the WITH body runs with all locks held; defers
   # release on scope exit as usual.
-  sig { params(fallible_caps: Array, clause: Hash, with_label: T.nilable(T.any(NilClass, String)), with_node: AST::WithBlock).returns(String) }
+  sig { params(fallible_caps: T::Array[T.untyped], clause: T::Hash[T.untyped, T.untyped], with_label: T.nilable(T.any(NilClass, String)), with_node: AST::WithBlock).returns(String) }
   def emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, with_node)
     n = fallible_caps.length
     entries = build_sorted_acquire_entries(fallible_caps, fallible: true, with_node: with_node)
@@ -4164,8 +4193,8 @@ class MIRLowering
     if @target == :bc
       prev_stream_local = @current_stream_local
       prev_stream_is_inf = @current_stream_is_inf
-      @current_stream_local = local_stream
-      @current_stream_is_inf = is_inf
+      @current_stream_local = T.let(local_stream, T.nilable(String))
+      @current_stream_is_inf = T.let(is_inf, T.nilable(T::Boolean))
       run_body = node.body.map { |expr| lower(expr) }
       @current_stream_local = prev_stream_local
       @current_stream_is_inf = prev_stream_is_inf
@@ -4212,8 +4241,8 @@ class MIRLowering
     # Save/restore stream context for YieldExpr
     prev_stream_local = @current_stream_local
     prev_stream_is_inf = @current_stream_is_inf
-    @current_stream_local = local_stream
-    @current_stream_is_inf = is_inf
+    @current_stream_local = T.let(local_stream, T.nilable(String))
+    @current_stream_is_inf = T.let(is_inf, T.nilable(T::Boolean))
 
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = T.let(nil, T.untyped)
@@ -4579,7 +4608,7 @@ class MIRLowering
     result.join
   end
 
-  sig { params(source: String, names: Set).returns(String) }
+  sig { params(source: String, names: T::Set[T.untyped]).returns(String) }
   def filter_zig_blocks(source, names)
     lines = source.lines
     result = []
@@ -4613,14 +4642,14 @@ class MIRLowering
   # Helpers for concurrent blocks
   # ================================================================
 
-  STACK_SIZE_ZIG_VARIANT = {
+  STACK_SIZE_ZIG_VARIANT = T.let({
     nil       => "Standard",
     :micro    => "Micro", :standard => "Standard", :large => "Large", :xl => "Xl",
     "micro"   => "Micro", "standard" => "Standard", "large" => "Large", "xl" => "Xl",
     :service  => "Huge",
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
-  TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
+  TIER_RANK = T.let({ "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze, T::Hash[T.untyped, T.untyped])
 
   sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
   def task_config_zig(stack_size, computed_tier)
@@ -4681,7 +4710,7 @@ class MIRLowering
     "// CLEAR_PROFILE_TASK_SITE id=#{site_id} kind=BG line=#{line} column=#{col} dispatch=#{dispatch} form=#{form}"
   end
 
-  sig { params(node: T.untyped, id: Integer, prefix: String).returns(Array) }
+  sig { params(node: T.untyped, id: Integer, prefix: String).returns(T::Array[T.untyped]) }
   def fiber_string_promotes(node, id, prefix)
     promotes = node.capture_string_dupes || Set.new
     names = {}
@@ -4997,7 +5026,7 @@ class MIRLowering
   # access on a known union (e.g. `Status.Active` -> [:Status, "Active"]),
   # otherwise nil. Used by lower_binary_op to lower
   # `union_value == Type.Variant` to std.meta.activeTag.
-  sig { params(node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def unit_variant_access(node)
     return nil unless node.is_a?(AST::GetField)
     return nil unless node.target.is_a?(AST::Identifier)
@@ -5735,7 +5764,7 @@ class MIRLowering
   # Type info comes from the annotator's stamps; if neither operand
   # has resolved type info we fall back to expectEqualDeep, which
   # works on any equatable value.
-  sig { params(left: T.untyped, right: T.untyped).returns(Array) }
+  sig { params(left: T.untyped, right: T.untyped).returns(T::Array[T.untyped]) }
   def pick_equality_helper(left, right)
     lt = type_info_for(left)
     rt = type_info_for(right)
@@ -6280,7 +6309,7 @@ class MIRLowering
     end
   end
 
-  sig { params(binding_entry: T.nilable(Hash), init: T.untyped).returns(T::Boolean) }
+  sig { params(binding_entry: T.nilable(T::Hash[T.untyped, T.untyped]), init: T.untyped).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
     return false unless binding_entry && binding_entry[:needs_cleanup] == false
     return false unless binding_entry[:alloc] == :heap || binding_entry[:alloc] == :cleanup
@@ -6896,7 +6925,7 @@ class MIRLowering
 
   # Returns true when the last reachable statement in a loop body is an
   # unconditional exit (break/continue/return), making any trailing code unreachable.
-  sig { params(body: Array).returns(T::Boolean) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
   def loop_body_exits?(body)
     return false unless body.is_a?(Array) && !body.empty?
     body.last.is_a?(MIR::BreakStmt) || body.last.is_a?(MIR::ContinueStmt) || body.last.is_a?(MIR::ReturnStmt)
@@ -7416,7 +7445,7 @@ class MIRLowering
   # Lower a StructPattern into (conditions, binding_stmts).
   # conditions: Array of Zig boolean fragments ("subject.x == 10")
   # binding_stmts: Array of MIR nodes (const decls for :bind fields)
-  sig { params(subject: MIR::Ident, pat: AST::StructPattern).returns(Array) }
+  sig { params(subject: MIR::Ident, pat: AST::StructPattern).returns(T::Array[T.untyped]) }
   def lower_struct_pattern(subject, pat)
     conditions = []
     bindings = []
@@ -7465,7 +7494,7 @@ class MIRLowering
     sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end
 
-  sig { params(nodes: Array).returns(T::Set[String]) }
+  sig { params(nodes: T::Array[T.untyped]).returns(T::Set[String]) }
   def collect_identifier_names(nodes)
     names = Set.new
     traverse = T.let(nil, T.untyped)
@@ -7487,7 +7516,7 @@ class MIRLowering
   # This is a temporary bridge -- ideally all expressions stay as MIR nodes.
   # Emit a builtin operation from BUILTIN_OPS registry as MIR::InlineZig
   # with stdlib_def attached so the MIR checker can verify ownership.
-  sig { params(name: Symbol, args: Array).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
+  sig { params(name: Symbol, args: T::Array[T.untyped]).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
   def emit_builtin(name, args)
     entry = BUILTIN_OPS[name]
     raise "emit_builtin: unknown builtin :#{name}" unless entry
@@ -7605,7 +7634,7 @@ class MIRLowering
 
   # Emit a list of MIR statements as Zig body text, adding semicolons
   # to expression nodes used as statements. Mirrors MIREmitter#emit_body.
-  sig { params(mir_nodes: Array, indent: String).returns(String) }
+  sig { params(mir_nodes: T::Array[T.untyped], indent: String).returns(String) }
   def emit_stmts_zig(mir_nodes, indent: "")
     mir_nodes.filter_map { |s|
       code = emit_expr(s)
@@ -7721,10 +7750,16 @@ class MIRLowering
   # Lazy-create PipelineHost for complex pipeline operator dispatch.
   sig { returns(PipelineHost) }
   def pipeline_host
-    @pipeline_host ||= begin
+    cached = @pipeline_host
+    return cached if cached
+
+    @pipeline_host = PipelineHost.new(
+      lowering: self,
+      emitter: begin
       require_relative "mir_emitter"
-      emitter = @_emitter || MIREmitter.new
-      PipelineHost.new(lowering: self, emitter: emitter)
-    end
+        @_emitter || MIREmitter.new
+      end
+    )
+    @pipeline_host
   end
 end
