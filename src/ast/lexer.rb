@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require 'strscan'
@@ -10,7 +10,7 @@ class Lexer
   Token = Struct.new(:type, :value, :line, :column)
 
   # We use a hash for O(1) lookups
-  KEYWORDS = %w[
+  KEYWORDS = T.let(%w[
       MUTABLE
       FN METHOD RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END
@@ -32,7 +32,7 @@ class Lexer
       TIGHT
       TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE
       PENDING BEFORE AFTER LET TAGS
-    ].to_set
+    ].to_set, T::Set[String])
 
   sig { params(source: String).void }
   def initialize(source)
@@ -42,7 +42,7 @@ class Lexer
     @tokens = T.let([], T::Array[Token])
   end
 
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T::Array[Token]) }
   def tokenize
     until @s.eos?
       # 1. Snapshot start column before scanning
@@ -239,8 +239,8 @@ class Lexer
         expr_source = extract_balanced_brace_content
         sub_lexer = Lexer.new(expr_source)
         sub_tokens = sub_lexer.tokenize
-        T.must(sub_tokens).pop if T.must(sub_tokens).last.type == :EOF
-        @tokens.concat(T.must(sub_tokens))
+        sub_tokens.pop if T.must(sub_tokens.last).type == :EOF
+        @tokens.concat(sub_tokens)
 
         # 5. Inject closer tokens: ) +
         @tokens << Token.new(:CHAR, ')', @line, @column)
@@ -318,7 +318,7 @@ class Lexer
 
   # Closed set of numeric type suffixes. Matches a word boundary so the
   # suffix can't absorb a following identifier.
-  NUMERIC_SUFFIX_RE = /i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze
+  NUMERIC_SUFFIX_RE = T.let(/i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze, Regexp)
 
   # Strip digit-group separators (underscores) from a numeric literal's
   # matched text. Removes the trailing `_<suffix>` (passed in) first so
@@ -330,7 +330,7 @@ class Lexer
     body.tr('_', '')
   end
 
-  INT_SUFFIX_RANGES = {
+  INT_SUFFIX_RANGES = T.let({
     'u8'  => 0..255,
     'i8'  => -128..127,
     'i16' => -32_768..32_767,
@@ -339,7 +339,7 @@ class Lexer
     'u32' => 0..4_294_967_295,
     'i64' => -9_223_372_036_854_775_808..9_223_372_036_854_775_807,
     'u64' => 0..((2**64) - 1),
-  }.freeze
+  }.freeze, T::Hash[String, T::Range[Integer]])
 
   sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)

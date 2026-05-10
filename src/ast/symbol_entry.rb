@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Typed scope entry for Scope.locals.
 # Each entry tracks a variable/function binding with its type, storage, and metadata.
 # Back-references its owning Scope via `scope` for state operations.
@@ -113,7 +113,7 @@ class SymbolEntry
     @lifetime == :current_scope
   end
 
-  sig { params(value: T::Boolean).returns(T.nilable(Symbol)) }
+  sig { params(value: T::Boolean).void }
   def non_escaping=(value)
     if value
       @lifetime = :current_scope
@@ -132,7 +132,7 @@ class SymbolEntry
   #                                 stands in as the source; declaring
   #                                 scope is the limit)
   #   { sources: [...] } -> the source list verbatim
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def lifetime_sources
     case @lifetime
     when nil           then []
@@ -146,7 +146,7 @@ class SymbolEntry
   # empty Array of source SymbolEntries. Empty / nil input returns nil
   # (unconstrained), so callers can pass through the result of
   # collecting captured bindings without a guard.
-  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(Hash)) }
+  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def self.tied_lifetime(sources)
     return nil if sources.nil? || sources.empty?
     { sources: sources.uniq }
@@ -169,6 +169,19 @@ class SymbolEntry
     @invalid_reason = invalid_reason
     @resource = resource
     @close_zig = close_zig
-    @lifetime = nil
+    @lifetime = T.let(nil, T.untyped)
+    @borrowed_alias = T.let(nil, T.nilable(T::Boolean))
+    @sync_families = T.let(nil, T.untyped)
+    @mutable_ref_target = T.let(nil, T.nilable(T::Boolean))
+    @poly_borrow_target = T.let(nil, T.nilable(T::Boolean))
+    @mutated = T.let(nil, T.nilable(T::Boolean))
+    @read = T.let(nil, T.nilable(T::Boolean))
+    @scope = T.let(nil, T.untyped)
+    @scope_depth = T.let(nil, T.nilable(Integer))
+    @ownership_kind = T.let(nil, T.nilable(Symbol))
+    @takes = T.let(nil, T.nilable(T::Boolean))
+    @is_param = T.let(nil, T.nilable(T::Boolean))
+    @param_decl_token = T.let(nil, T.untyped)
+    @link_source = T.let(nil, T.nilable(Symbol))
   end
 end

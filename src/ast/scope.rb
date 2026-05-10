@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require "set"
@@ -16,11 +16,11 @@ class Scope
     @locals = T.let({}, T::Hash[T.untyped, T.untyped])
     @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
     @types = T.let({}, T::Hash[T.untyped, T.untyped])
-    @owned_names = T.let(Set.new, Set)  # Variables declared in THIS scope (not inherited from parent)
+    @owned_names = T.let(Set.new, T::Set[T.untyped])  # Variables declared in THIS scope (not inherited from parent)
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: Set, _borrowed_paths: Array, sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
+  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[T.untyped], _borrowed_paths: T::Array[T.untyped], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
@@ -74,7 +74,7 @@ class Scope
   # rationale and alternative options (B: shared boxed entries, C:
   # split scope-local vs global fields). Option A (this contract +
   # helper) is the current choice.
-  sig { params(original: Scope).returns(T::Hash[Symbol, Hash]) }
+  sig { params(original: Scope).void }
   def initialize_copy(original)
     super
 
@@ -226,6 +226,7 @@ class Scope
     @locals[name] = local
   end
 
+  sig { params(node: T.untyped).returns(T::Array[Symbol]) }
   def get_path_to_root(node)
     path = []
     curr = T.let(node, T.untyped)
@@ -258,15 +259,24 @@ end
 module ScopeHelper
     extend T::Sig
 
+  # @scope_stack is initialized by the host class. Access it through this
+  # private helper so Sorbet strict mode can verify the element type without
+  # requiring a T.let declaration inside a module (which has no initialize).
+  sig { returns(T::Array[Scope]) }
+  def scope_stack
+    T.cast(T.unsafe(self).instance_variable_get(:@scope_stack), T::Array[Scope])
+  end
+  private :scope_stack
+
   sig { returns(Scope) }
   def current_scope
-    @scope_stack.last
+    T.must(scope_stack.last)
   end
 
   sig { params(name: String).returns(T.nilable(Scope)) }
   def lookup_scope_for(name)
     # Search from Top (last) to Bottom (first)
-    @scope_stack.reverse_each do |scope|
+    scope_stack.reverse_each do |scope|
       return scope if scope.resolve_type(name) != :Any || scope.locals.key?(name)
     end
     nil
@@ -292,7 +302,7 @@ module ScopeHelper
     # For generic instances like :"Pair<Number>", look up the base type ":Pair"
     base_name = name.to_s.sub(/<.*>$/, '').to_sym
     # Search from Top (newest) to Bottom (global)
-    @scope_stack.reverse_each do |scope|
+    scope_stack.reverse_each do |scope|
       schema = scope.resolve_type_definition(base_name)
       return schema if schema
     end
@@ -301,26 +311,27 @@ module ScopeHelper
 
   # Every type name visible from the current scope (struct, enum, union,
   # generic). Used by typo-suggestion fixes that need a candidate set.
-  sig { returns(Array) }
+  sig { returns(T::Array[String]) }
   def all_known_type_names
     names = []
-    @scope_stack.each do |scope|
+    scope_stack.each do |scope|
       types = scope.instance_variable_get(:@types)
       names.concat(types.keys.map(&:to_s)) if types
     end
     names.uniq
   end
 
-  def with_new_scope(scope = nil)
+  sig { params(scope: T.nilable(Scope), blk: T.untyped).returns(T.nilable(Scope)) }
+  def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Atomics M2.6: stamp depth on the freshly pushed scope so
     # `Scope#declare` can stamp `entry.scope_depth` for lifetime
     # comparisons. Root scope keeps depth 0; each `with_new_scope`
     # nest increases the depth by one.
-    new_scope.depth = @scope_stack.size
-    @scope_stack.push(new_scope)
-    yield
-    @scope_stack.pop
+    new_scope.depth = scope_stack.size
+    scope_stack.push(new_scope)
+    blk.call
+    scope_stack.pop
   end
 
 end
