@@ -33,6 +33,8 @@
  - [x] Design by Contract v1: `WITH GURADED x ... AS y { } ON GuardFail`, `PRE { }` and `POST { }` *RUNTIME* 
  - [x] Typed Holes
  - [ ] LEND keyword (attach lifetimes to functions / execution boundaries you LEND to)
+ - [ ] Examples: mal v5, brnfk, are we fast yet, 1brc, NN
+ - [ ] Typed Transpiler: ~90% of slots & returns, in prep for self-hosting, to test-bed plans for Property Based Testing 
  - [ ] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
  - [ ] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
  - [ ] Formal Verification for Gated Acccess, Execution Boundary Crossing, Escape Analysis
