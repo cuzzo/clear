@@ -58,7 +58,7 @@ module BgCaptureClassifier
   # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
   # or ConcurrentOp -- all use the same analysis machinery and now
   # share strategy classification.
-  sig { params(a: CapabilityHelper::CaptureAnalysis, live_param_syms: T::Hash[String, SymbolEntry], schema_lookup: T.nilable(Proc)).returns(T.untyped) }
+  sig { params(a: CapabilityHelper::CaptureAnalysis, live_param_syms: T::Hash[String, SymbolEntry], schema_lookup: T.nilable(Proc)).returns(T.nilable(Hash)) }
   def self.classify_one!(a, live_param_syms = {}, schema_lookup: nil)
     return unless a && a.captures
     # Refresh capture_symbols against the live function-param entries
