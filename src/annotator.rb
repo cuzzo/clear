@@ -6474,26 +6474,48 @@ private
     }.compact
   end
 
+  # ── Capability declarative axis (default-deny) ────────────────────────────
+  # Per-sigil declaration of "is this storage/sync layer ESCAPE-SAFE
+  # for BG capture?" Adding a new sigil without explicitly listing it
+  # here defaults to "lifetime-bound" — the safe direction. The whole
+  # set is small and finite, so an exhaustive declaration is feasible
+  # AND the omission of a new sigil produces a compile-time
+  # over-rejection instead of a silent UAF.
+
+  # `sync` values that DON'T wrap the underlying data in a
+  # reference-bound layer. :raw / :symbol are pure data-access modes
+  # (not locks), so they don't bind the capture's lifetime.
+  SYNC_DOES_NOT_BIND_CAPTURE = T.let(Set[:raw, :symbol].freeze, T.untyped)
+
+  # `storage` values whose memory has its own lifetime mechanism
+  # independent of the declaring scope. `:shared` means Arc — own
+  # refcount; capture clones the Arc and stays alive. `:heap` is
+  # explicitly heap-allocated; lifetime decided at allocation site.
+  STORAGE_OUTLIVES_DECLARING_SCOPE = T.let(Set[:shared, :heap].freeze, T.untyped)
+
   # Default-deny inverse of the old explicit-include-list. A capture is
-  # INDEPENDENT (free to outlive its source) only via one of these
-  # explicit escape hatches; everything else binds the BG handle's
-  # lifetime by default. New storage/sync/layout combinations land
-  # here as compile-time RETURN-rejections, not silent UAFs.
+  # INDEPENDENT (free to outlive its source) only via one of the
+  # explicit escape hatches encoded above; everything else binds the
+  # BG handle's lifetime by default. New storage/sync/layout
+  # combinations land here as compile-time RETURN-rejections, not
+  # silent UAFs.
   sig { params(info: T.untyped).returns(T::Boolean) }
   def bg_capture_independent?(info)
-    # Arc without inner sync — refcounted, escapable.
-    return true if info.storage == :shared && info.sync.nil?
+    # Arc-only (Group 1: @shared without inner sync) — refcounted, escapable.
+    return true if STORAGE_OUTLIVES_DECLARING_SCOPE.include?(info.storage) && info.sync.nil?
     # @indirect:atomic — heap-pinned AtomicPtr cell with own lifetime
     # mechanism (M3.5 promotion).
     return true if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
-    # Any sync wrapper (atomic / locked / write_locked / local) makes
-    # the binding captured by reference — lifetime-bound, regardless
-    # of inner type. The :raw / :symbol modes are data-access only,
-    # not locks, so they're not bound.
-    return false if info.sync && info.sync != :raw && info.sync != :symbol
-    # Rc storage: bound to declaring scope.
+    # Any sync wrapper (Group 1 sync sigils — atomic, locked,
+    # write_locked, local, versioned, always_mutable) captures the
+    # binding by reference into the fiber frame; lifetime-bound
+    # regardless of inner type. Excluded: pure data-access modes
+    # listed in SYNC_DOES_NOT_BIND_CAPTURE.
+    return false if info.sync && !SYNC_DOES_NOT_BIND_CAPTURE.include?(info.sync)
+    # Rc storage: bound to declaring scope (refcount-shared but
+    # captures borrow without bumping the count).
     return false if info.storage == :multiowned
-    # No sync wrapper, no refcount: the TYPE's inherent escape class
+    # No sync wrapper, no Rc: the TYPE's inherent escape class
     # decides. :value / :slice_rodata = value-copy = escapable.
     # Authoritative source: Type#escape_class.
     ti = info.respond_to?(:type) ? info.type : nil
