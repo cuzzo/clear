@@ -1319,6 +1319,38 @@ class Type
     false
   end
 
+  # BG/DO/CONCURRENT capture by-value: capturing a value of this type
+  # into a fiber frame produces an INDEPENDENT instance — the outer
+  # binding's death does not invalidate the capture.
+  #
+  # Like `implicitly_copyable?` but excludes user structs: even an
+  # all-Copy struct is captured BY REFERENCE into the fiber frame
+  # (the BG holds a pointer back to the outer struct's storage), so
+  # outer-binding death = pointer-into-freed-memory. Used by the
+  # annotator's BG-handle lifetime stamper to decide whether a capture
+  # contributes to the handle's tied-lifetime source list.
+  sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(T::Boolean) }
+  def bg_capture_is_value_copy?(lookup_arg = nil, &lookup_block)
+    return true if primitive?
+    return true if generic_instance? && generic_base == :Id
+    return true if string? && rodata?
+    return true if array? && !list_collection? && !pool? && !set_collection? && !string?
+    if lookup_arg || lookup_block
+      resolver = lookup_arg || lookup_block
+      schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
+      if schema.nil? && generic_instance?
+        schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
+      end
+      return true if schema.is_a?(Hash) && schema[:kind] == :enum
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        return !has_heap
+      end
+      # Structs (no :kind) deliberately fall through to false — captured by ref.
+    end
+    false
+  end
+
   # Implicitly copyable: used for branch merge and loop checks.
   # Same as copyable? but excludes user structs — structs need explicit COPY.
   # Primitives, strings, slices, enums, and unions are implicitly copyable.

@@ -6393,12 +6393,17 @@ private
   end
 
   # Walk an expression tree to find every BgBlock / BgStreamBlock and
-  # union their lifetime-bound capture sources. Handles direct
-  # `bg = BG{...}` plus structural escapes — `h = Holder{ bg: BG{...} }`,
-  # etc. — by recursing into struct literals. Without this, a BG buried
-  # inside a struct literal escapes its captures' scope when the
-  # surrounding binding is RETURNed (real UAF, fuzz finding
-  # `lifetimed_return` store_in_field cell).
+  # union their lifetime-bound capture sources. Without this, a BG
+  # buried inside a container literal escapes its captures' scope
+  # when the surrounding binding is RETURNed / stored / passed (real
+  # UAF, fuzz finding `lifetimed_return` store_in_field cell).
+  #
+  # Recurses through every container shape that can hold a BG handle
+  # by-value: struct literals, list/map literals, union variants,
+  # and the transparent COPY/MOVE/Cast wrappers that surface during
+  # annotation. Anything else (FuncCall, MethodCall, Identifier, ...)
+  # is opaque — its lifetime flows through the call's return type or
+  # the symbol's `lifetime` field, not through expression-tree walk.
   sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
   def collect_bg_sources_in_expr(expr)
     return [] if expr.nil?
@@ -6406,10 +6411,14 @@ private
     when AST::BgBlock, AST::BgStreamBlock
       analysis = expr.respond_to?(:capture_analysis) ? expr.capture_analysis : nil
       analysis && analysis.respond_to?(:capture_symbols) ? bg_lifetime_sources(analysis) : []
-    when AST::StructLit
-      out = []
-      expr.fields.each_value { |v| out.concat(collect_bg_sources_in_expr(v)) }
-      out
+    when AST::StructLit, AST::UnionVariantLit
+      expr.fields.each_value.flat_map { |v| collect_bg_sources_in_expr(v) }
+    when AST::ListLit
+      (expr.items || []).flat_map { |v| collect_bg_sources_in_expr(v) }
+    when AST::HashLit
+      (expr.pairs || []).flat_map { |(k, v)| collect_bg_sources_in_expr(k) + collect_bg_sources_in_expr(v) }
+    when AST::CopyNode, AST::MoveNode, AST::Cast
+      collect_bg_sources_in_expr(expr.value)
     else
       []
     end
@@ -6443,7 +6452,7 @@ private
       bound = true if (info.storage == :stack || info.storage == :frame) &&
                       info.sync.nil? &&
                       info.respond_to?(:type) && info.type &&
-                      !type_is_pure_value_copy?(info.type)
+                      !value_copy_capture?(info.type)
       bound = false if info.storage == :shared && !info.sync
       bound = false if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
       sources << info if bound
@@ -6451,17 +6460,15 @@ private
     sources
   end
 
-  # A type is "pure value copy" when capturing it into a BG frame
-  # produces an independent value (no pointer back to the source).
-  # Today: register-width primitives (Int64, Float64, Bool, etc.)
-  # and Id<T> handles. Structs — even all-Copy ones — are captured
-  # by reference, so they are NOT pure value copies.
+  # Thin wrapper that hands the annotator's schema-lookup closure to
+  # `Type#bg_capture_is_value_copy?`. The Type predicate needs schema
+  # access to resolve enum / union-without-heap / all-Copy struct
+  # cases via lookup_type_schema; structs are always rejected (ref
+  # capture into the fiber frame, even if every field is Copy).
   sig { params(t: T.untyped).returns(T::Boolean) }
-  def type_is_pure_value_copy?(t)
+  def value_copy_capture?(t)
     ti = t.is_a?(Type) ? t : Type.new(t)
-    return true if ti.primitive?
-    return true if ti.respond_to?(:generic_instance?) && ti.generic_instance? && ti.generic_base == :Id
-    false
+    ti.bg_capture_is_value_copy? { |name| lookup_type_schema(name) rescue nil }
   end
 
   # Atomics M2.4 / M2.5: produce the list of dotted-path lifetime

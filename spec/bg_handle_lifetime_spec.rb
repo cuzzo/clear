@@ -204,6 +204,28 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
     end
   end
 
+  describe "BG buried in union variant literal" do
+    # Without recursing into union variant fields the BG handle escapes
+    # silently when wrapped in a union (same UAF class as the StructLit
+    # case). `Wrap.Single{ handle: BG{...} }` is the AST::UnionVariantLit
+    # shape that this case must cover.
+    it "`Wrap.Single{ handle: BG{...} }` ties w's lifetime to the captures" do
+      ast = annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        UNION Wrap { Single { handle: ~Int64 } }
+        FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 0_i64 } @local;
+          w = Wrap.Single{ handle: BG { c.value; } };
+          RETURN;
+        END
+      CLEAR
+      sym = find_binding_symbol(main_fn(ast), "w")
+      expect(sym.lifetime).to be_a(Hash)
+      counter_sym = find_binding_symbol(main_fn(ast), "c")
+      expect(sym.lifetime_sources).to include(counter_sym)
+    end
+  end
+
   describe "no captures" do
     it "BG with pure-compute body gets nil lifetime (no constraint)" do
       ast = annotate(<<~CLEAR)
