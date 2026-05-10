@@ -30,7 +30,7 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(body: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
@@ -117,7 +117,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: Array, block: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, block: T.untyped).returns(T.nilable(Array)) }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis

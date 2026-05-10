@@ -620,7 +620,7 @@ class MIRChecker
   # Post-lowering check: walks the MIR tree looking for loops that contain
   # frame AllocMarks or InlineZig with frame allocs but lack mark_per_iter.
   # Without per-iteration rewind, frame arena grows unboundedly across iterations.
-  sig { params(body: Array).returns(T.untyped) }
+  sig { params(body: Array).returns(T.nilable(Array)) }
   def verify_frame_rewind!(body)
     return unless body.is_a?(Array)
     check_loop_rewind!(body)

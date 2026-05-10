@@ -1571,7 +1571,7 @@ module LoopFrameAnalysis
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
   # nested loops and function definitions.
-  sig { params(body: Array, block: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, block: T.untyped).returns(T.nilable(Array)) }
   def self.scan_direct(body, &block)
     return unless body.is_a?(Array)
     body.each do |s|
@@ -1599,7 +1599,7 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
-  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.untyped) }
+  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.nilable(Array)) }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     return unless nodes
     nodes = [nodes] unless nodes.is_a?(Array)
@@ -1624,7 +1624,7 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: Array, fn_nodes: T::Hash[String, T.untyped]).returns(Array) }
+  sig { params(body: Array, fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(Array)) }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context

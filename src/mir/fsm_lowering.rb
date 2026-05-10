@@ -164,7 +164,7 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(step: T::Hash[Symbol, T.untyped]).returns(T.nilable(Array)) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step[:expr])
@@ -319,7 +319,7 @@ module FsmLowering
   #   :goto_post  -> fail-step segment Gotos to the post-WITH
   #                  segment. Body is empty for :pass, the user
   #                  block for :block.
-  sig { params(clause: T::Hash[Symbol, T.untyped], ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: Set, bg_rt: String, rt_name: String).returns(T.untyped) }
+  sig { params(clause: T::Hash[Symbol, T.untyped], ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: Set, bg_rt: String, rt_name: String).returns(T.nilable(Hash)) }
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
                                     capture_map:, pointer_captures:, bg_rt:,
                                     rt_name:)

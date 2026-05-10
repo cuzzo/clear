@@ -1600,7 +1600,7 @@ class MIRLowering
     reassigns
   end
 
-  sig { params(stmts: Array, reassigns: Array).returns(T.untyped) }
+  sig { params(stmts: Array, reassigns: Array).returns(T.nilable(Array)) }
   def walk_catch_body_for_reassigns(stmts, reassigns)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|

@@ -97,7 +97,7 @@ module AST
     ERROR_TYPES.dig(sym, :zig_name)
   end
 
-  sig { params(sym: Symbol).returns(T.untyped) }
+  sig { params(sym: Symbol).returns(T.nilable(Integer)) }
   def self.id_of_type(sym)
     ERROR_TYPES.dig(sym, :id)
   end

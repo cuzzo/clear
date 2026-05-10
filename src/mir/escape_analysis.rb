@@ -433,7 +433,7 @@ module EscapeAnalysis
   # nested in expressions (VarDecl/BindExpr/Assignment values, ReturnNode
   # values, struct/list/hash literal fields, control-flow conditions). Used
   # by Condition 8.
-  sig { params(body: Array, blk: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, blk: T.untyped).returns(T.nilable(Array)) }
   private_class_method def self.e2_walk_calls(body, &blk)
     AST.walk_body(body) { |stmt| e2_walk_calls_in_expr(stmt, &blk) }
   end

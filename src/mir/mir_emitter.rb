@@ -1319,7 +1319,7 @@ class MIREmitter
     end
   end
 
-  sig { params(node: MIR::TypeSentinel).returns(T.untyped) }
+  sig { params(node: MIR::TypeSentinel).returns(T.nilable(String)) }
   def emit_type_sentinel(node)
     t = node.zig_type.to_s
     case node.extreme

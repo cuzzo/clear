@@ -1113,7 +1113,7 @@ module EffectTracker
 
   # Scan a function body for direct failure sources (Raise/OrRaise nodes).
   # Does not descend into nested FunctionDef nodes.
-  sig { params(body: Array).returns(T.untyped) }
+  sig { params(body: Array).returns(T.nilable(T::Boolean)) }
   def scan_for_raises(body)
     T.bind(self, SemanticAnnotator) rescue nil
     found = T.let([false], T::Array[T::Boolean])

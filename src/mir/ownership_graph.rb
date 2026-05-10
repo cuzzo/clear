@@ -300,7 +300,7 @@ class OwnershipGraph
 
   private
 
-  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.untyped) }
+  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(Set)) }
   def invalidate(path, move_source = nil)
     node = @nodes[path]
     return unless node

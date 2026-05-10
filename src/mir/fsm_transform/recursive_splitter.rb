@@ -92,7 +92,7 @@ module FsmTransform
       # Synthetic ctx field decls produced by control-flow-form
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
-      sig { params(decl: String).returns(T.untyped) }
+      sig { params(decl: String).returns(T.nilable(Array)) }
       def add_synthetic_field(decl)
         T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)

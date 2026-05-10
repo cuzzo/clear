@@ -214,7 +214,7 @@ class Scope
 
   # Returns the new SymbolEntry on success, nil if the binding wasn't found
   # in the cap's old_scope (caller is responsible for emitting a diagnostic).
-  sig { params(capability: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(capability: T::Hash[Symbol, T.untyped]).returns(T.nilable(SymbolEntry)) }
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
     local = capability[:old_scope].locals[name]

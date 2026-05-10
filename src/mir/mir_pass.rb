@@ -533,12 +533,12 @@ class MIRPass
 
   # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.
   # Sets yield_node.yield_dupe = true; the lowerer then wraps the push arg in a heap dupe.
-  sig { params(stream_node: AST::BgStreamBlock).returns(Array) }
+  sig { params(stream_node: AST::BgStreamBlock).returns(T.nilable(Array)) }
   def annotate_yield_string_dupes!(stream_node)
     walk_stream_yields(stream_node.body)
   end
 
-  sig { params(stmts: Array).returns(T.untyped) }
+  sig { params(stmts: Array).returns(T.nilable(Array)) }
   def walk_stream_yields(stmts)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
@@ -881,7 +881,7 @@ class MIRPass
   end
 
   # Resolve the INDEX_OPS :set entry for a container type.
-  sig { params(type_info: T.nilable(T.any(FalseClass, Type))).returns(T.untyped) }
+  sig { params(type_info: T.nilable(T.any(FalseClass, Type))).returns(T.nilable(Hash)) }
   def resolve_container_set_op(type_info)
     return nil unless type_info
     kind = container_kind(type_info)

@@ -96,7 +96,7 @@ module CapabilityHelper
     nil
   end
 
-  sig { params(var_node: AST::Identifier).returns(T.untyped) }
+  sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
   def cap_var_storage(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
