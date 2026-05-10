@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require 'set'
 
@@ -63,14 +63,14 @@ module EffectTracker
   SUSPENDS             = :SUSPENDS
   SUSPENDS_CONDITIONAL = :SUSPENDS_CONDITIONAL
   SUSPENDS_LOOP        = :SUSPENDS_LOOP
-  SUSPENDS_FAMILY      = [SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP].freeze
+  SUSPENDS_FAMILY      = T.let([SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP].freeze, T::Array[Symbol])
 
-  ALL_EFFECTS = [
+  ALL_EFFECTS = T.let([
     HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN,
     YIELD, IO,
     SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP,
     CONTENTION, CONTENTION_MAYBE, BLOCKING_MAYBE,
-  ].freeze
+  ].freeze, T::Array[Symbol])
 
   # Display format: :SUSPENDS_LOOP -> "SUSPENDS:LOOP".
   sig { params(effect: Symbol).returns(String) }
@@ -85,28 +85,29 @@ module EffectTracker
 
   # --- Phase 1: Direct collection ---
 
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def effects_init!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_direct_effects = {}   # fn_name => Set of direct effect symbols
+    @fn_direct_effects = T.let({}, T.untyped)   # fn_name => Set of direct effect symbols
     # Per-caller map of callee => worst-case call-site context
     # {loop: bool, cond: bool}. Populated by record_call_site during body
     # scanning. Used by compute_effects! to promote SUSPENDS → SUSPENDS_LOOP
     # or SUSPENDS_CONDITIONAL when the call site sits in that context.
-    @call_site_context = Hash.new { |h, k| h[k] = {} }
+    @call_site_context = T.let(Hash.new { |h, k| h[k] = {} }, T.untyped)
     # Atomics M1.6.5: per-(caller, callee) list of arg-family sets, one
     # entry per call site. Used by compute_effects! to resolve callee
     # ?-form effects (CONTENTION_MAYBE / BLOCKING_MAYBE) into concrete
     # CONTENTION / BLOCKING (or to drop them) based on what families the
     # caller actually passes. Each entry is an Array<Set<Symbol>> matching
     # the call's positional args.
-    @call_site_arg_families = Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }
+    @call_site_arg_families = T.let(Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }, T.untyped)
   end
 
   # Called at the start of visit_FunctionDef to prepare a fresh effect set.
-  sig { params(fn_name: String).returns(Set) }
+  sig { params(fn_name: String).returns(T::Set[T.untyped]) }
   def effects_begin_function(fn_name)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @fn_direct_effects[fn_name] = Set.new
   end
 
@@ -116,6 +117,9 @@ module EffectTracker
   sig { params(effect: Symbol).returns(NilClass) }
   def record_effect(effect)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.untyped)
+    @snapshot_txn_violations = T.let(@snapshot_txn_violations, T.untyped)
     return unless current_fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)
@@ -148,20 +152,23 @@ module EffectTracker
   sig { returns(Integer) }
   def current_loop_depth
     T.bind(self, SemanticAnnotator) rescue nil
+    @loop_depth = T.let(@loop_depth, T.untyped)
     current_fn_ctx&.loop_depth || @loop_depth || 0
   end
 
   sig { returns(Integer) }
   def current_conditional_depth
     T.bind(self, SemanticAnnotator) rescue nil
+    @conditional_depth = T.let(@conditional_depth, T.untyped)
     current_fn_ctx&.conditional_depth || @conditional_depth || 0
   end
 
   # Record a call site's context so transitive propagation can promote the
   # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
-  sig { params(callee_name: String).returns(T.nilable(Hash)) }
+  sig { params(callee_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_site_context = T.let(@call_site_context, T.untyped)
     return unless current_fn_ctx&.name
     caller_name = current_fn_ctx.name
     in_loop = current_loop_depth > 0
@@ -179,9 +186,10 @@ module EffectTracker
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
   # families are concrete, or keeps them MAYBE when polymorphism propagates.
-  sig { params(callee_name: String, arg_family_sets: T::Array[Set]).returns(T.nilable(Array)) }
+  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
     return unless current_fn_ctx&.name
     @call_site_arg_families[current_fn_ctx.name][callee_name] << arg_family_sets
   end
@@ -194,9 +202,13 @@ module EffectTracker
   # SUSPENDS-family effects promote based on call-site context: if foo
   # calls bar inside a loop, foo inherits SUSPENDS_LOOP regardless of
   # bar's own variant. Non-SUSPENDS effects inherit verbatim.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_effects!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
+    @call_site_context = T.let(@call_site_context, T.untyped)
     # Seed from direct effects.
     resolved = {}
     @fn_direct_effects.each { |name, effs| resolved[name] = effs.dup }
@@ -265,6 +277,7 @@ module EffectTracker
   sig { params(callee_set: T::Set[Symbol], caller_name: String, callee_name: String).returns(T::Set[Symbol]) }
   def resolve_maybe_effects(callee_set, caller_name, callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
     has_block_maybe = callee_set.include?(BLOCKING_MAYBE)
     has_cont_maybe  = callee_set.include?(CONTENTION_MAYBE)
     return callee_set unless has_block_maybe || has_cont_maybe
@@ -347,9 +360,13 @@ module EffectTracker
   # Post-pass: compute needs_rt for every function.
   # A function needs rt if it uses the frame arena, calls a fn pointer, or any
   # transitive callee needs rt. main always needs rt (entry point).
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
+    @fn_has_fnptr = T.let(@fn_has_fnptr, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
       raw = fn_node.full_type.is_a?(Type) ? fn_node.full_type.raw : fn_node.full_type
@@ -409,9 +426,12 @@ module EffectTracker
   # fn pointer call, @nonReentrant StackGuard try) or any transitive callee can fail.
   # main always can_fail (entry point). Callees not in @fn_nodes (stdlib/extern)
   # are excluded from propagation — they don't use CLEAR's error union convention.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_can_fail!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     can_fail = {}
     @fn_nodes.each do |name, _|
       can_fail[name] = @fn_raises_directly[name] == true || name == "main"
@@ -459,9 +479,10 @@ module EffectTracker
   #   - constructor / destructor / methods auto-synthesized for unions:
   #     their signatures are stamped by the annotator; user code can't
   #     change them.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     # Post-#335: the rule is implemented but currently a NO-OP (off
     # behind FALLIBLE_RETURNS_ENFORCE = true). Flipping it to true
     # turns each "fn can fail but doesn't declare !T" into a hard
@@ -554,6 +575,9 @@ module EffectTracker
   sig { params(name: String).returns(String) }
   def fallibility_hint_for(name)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return "raises directly via RAISE" if @fn_raises_directly[name]
     callees = @call_graph[name] || []
     fallible_callee = callees.find { |c| @fn_nodes[c]&.can_fail }
@@ -564,9 +588,10 @@ module EffectTracker
   # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
   # Any named function referenced as a value must adopt the rt-bearing calling
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
-  sig { params(program_node: AST::Program).returns(Array) }
+  sig { params(program_node: AST::Program).returns(T::Array[T.untyped]) }
   def mark_fn_value_references!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
@@ -616,9 +641,10 @@ module EffectTracker
   # BLOCKING (lock wait) is no longer disqualifying: ParkingMutex and
   # ParkingRwLock both support FSM waiters in the runtime.
   # LOOP_UNBOUND is not disqualifying: SUSPENDS_LOOP is designed for it.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_fsm_eligibility!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @fn_nodes.each do |_name, fn_node|
       effs = fn_node.effects || Set.new
 
@@ -648,9 +674,10 @@ module EffectTracker
   #
   # Stores fn.fsm_suspend_points as an Array of { id:, kind:, node: }.
   # Does not descend into nested FunctionDef bodies.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def enumerate_fsm_suspend_points!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @fn_nodes.each do |_name, fn_node|
       next unless fn_node.fsm_eligible
       points = []
@@ -659,7 +686,7 @@ module EffectTracker
     end
   end
 
-  sig { params(node: T.untyped, fn_node: T.untyped, points: T::Array[Hash]).returns(T.untyped) }
+  sig { params(node: T.untyped, fn_node: T.untyped, points: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
   def scan_suspend_points(node, fn_node, points)
     T.bind(self, SemanticAnnotator) rescue nil
     case node
@@ -709,6 +736,7 @@ module EffectTracker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def func_call_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return true if node.matched_stdlib_def && node.matched_stdlib_def[:suspends]
     return false if node.respond_to?(:fn_var_call) && node.fn_var_call
     callee = @fn_nodes[node.name]
@@ -728,7 +756,7 @@ module EffectTracker
   #
   # A BG is :stackful iff any transitive callee is REENTRANT or EXTERN, or
   # the body directly calls a fn-variable / fn-pointer (opaque call graph).
-  sig { params(program_node: AST::Program).returns(Array) }
+  sig { params(program_node: AST::Program).returns(T::Array[T.untyped]) }
   def classify_bg_spawn_form!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
     traverse = T.let(nil, T.untyped)
@@ -763,6 +791,8 @@ module EffectTracker
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(T::Array[T.nilable(Symbol)]) }
   def bg_spawn_form_for(callee_names, has_fnptr)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     return [:stackful, :fn_pointer] if has_fnptr
     visited = Set.new
     queue = callee_names.to_a.dup
@@ -784,7 +814,7 @@ module EffectTracker
 
   # Walk a BG body and collect its suspend points using the same rules as
   # enumerate_fsm_suspend_points!, but anchored to the BgBlock scope.
-  sig { params(bg_node: T.untyped).returns(T::Array[Hash]) }
+  sig { params(bg_node: T.untyped).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
   def collect_bg_suspend_points(bg_node)
     T.bind(self, SemanticAnnotator) rescue nil
     points = []
@@ -804,7 +834,7 @@ module EffectTracker
   #   :xl       (256 KB) - recursive + heap-heavy
   #   :service  (2 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
   #
-  STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze
+  STACK_TIER_BUDGET = T.let({ micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze, T::Hash[Symbol, Integer])
 
   # Recursion co-op yield budget: matches the runtime's YIELD_BUDGET
   # constant in zig/runtime/runtime.zig. The compiler injects
@@ -833,6 +863,8 @@ module EffectTracker
   sig { returns(NilClass) }
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
     #   :reentrant            unbounded -> :service (OS thread)
@@ -886,7 +918,7 @@ module EffectTracker
       end
 
       # Promote tier if stack-local variables alone exceed the tier budget.
-      budget = STACK_TIER_BUDGET[tier]
+      budget = T.must(STACK_TIER_BUDGET[tier])
       while stack_bytes > budget / 2 && tier != :xl
         tier = case tier
                when :micro    then :standard
@@ -894,7 +926,7 @@ module EffectTracker
                when :large    then :xl
                else :xl
                end
-        budget = STACK_TIER_BUDGET[tier]
+        budget = T.must(STACK_TIER_BUDGET[tier])
       end
 
       fn_node.stack_tier = tier
@@ -927,6 +959,7 @@ module EffectTracker
   sig { params(start: String).returns(T::Boolean) }
   def mutually_recursive_in_call_graph?(start)
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_graph = T.let(@call_graph, T.untyped)
     (@call_graph[start] || Set.new).any? do |callee|
       next false if callee == start
       reachable_in_call_graph?(callee, start)
@@ -936,6 +969,7 @@ module EffectTracker
   sig { params(from_name: String, target: String).returns(T::Boolean) }
   def reachable_in_call_graph?(from_name, target)
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_graph = T.let(@call_graph, T.untyped)
     visited = Set.new
     queue = [from_name]
     until queue.empty?
@@ -950,11 +984,13 @@ module EffectTracker
 
   # Compute the maximum stack tier needed by a set of function names,
   # following the call graph transitively. :unbounded propagates.
-  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3, service: 4, unbounded: 5 }.freeze
+  TIER_ORDER = T.let({ micro: 0, standard: 1, large: 2, xl: 3, service: 4, unbounded: 5 }.freeze, T::Hash[Symbol, Integer])
 
   sig { params(fn_names: T::Set[String]).returns(Symbol) }
   def max_tier_for_calls(fn_names)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     visited = Set.new
     max = T.let(:micro, Symbol)
     queue = fn_names.to_a.dup
@@ -979,7 +1015,7 @@ module EffectTracker
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
   # calls to @reentrant or EXTERN FN functions. Stops at FunctionDef boundaries.
-  sig { params(stmts: Array, loop_node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(stmts: T::Array[T.untyped], loop_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if false
@@ -990,6 +1026,7 @@ module EffectTracker
   sig { params(node: T.untyped, loop_node: AST::WhileLoop).returns(T.untyped) }
   def validate_tight_node!(node, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return if node.nil?
     case node
     when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -1029,7 +1066,7 @@ module EffectTracker
   #
   # Does NOT descend into nested FunctionDef bodies (none exist in practice in CLEAR —
   # all functions are top-level — but guarded for safety).
-  sig { params(node: Array).returns(Array) }
+  sig { params(node: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def scan_for_calls(node)
     T.bind(self, SemanticAnnotator) rescue nil
     calls    = Set.new
@@ -1067,9 +1104,12 @@ module EffectTracker
   # Post-pass: detect indirect mutual recursion in the call graph.
   # DFS reachability: for each function F, walk F's callees transitively
   # and report an error if F is reachable from itself.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
+    @call_graph = T.let(@call_graph, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @call_graph.each_key do |fn_name|
       node = @fn_nodes[fn_name]
       next if node.nil?
@@ -1113,7 +1153,7 @@ module EffectTracker
 
   # Scan a function body for direct failure sources (Raise/OrRaise nodes).
   # Does not descend into nested FunctionDef nodes.
-  sig { params(body: Array).returns(T.nilable(T::Boolean)) }
+  sig { params(body: T::Array[T.untyped]).returns(T.nilable(T::Boolean)) }
   def scan_for_raises(body)
     T.bind(self, SemanticAnnotator) rescue nil
     found = T.let([false], T::Array[T::Boolean])

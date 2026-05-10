@@ -31,7 +31,7 @@ module TestLowering
   # synthesized MIR::TestDef body. Allocates a fresh DebugAllocator,
   # EBR context, and Runtime so each Zig `test "..."` block runs in
   # isolation.
-  TEST_PREAMBLE = <<~ZIG.chomp
+  TEST_PREAMBLE = T.let((<<~ZIG).chomp, String)
     var da = std.heap.DebugAllocator(.{}){};
         defer _ = da.deinit();
         const allocator = da.allocator();
@@ -42,7 +42,7 @@ module TestLowering
         rt.wireAllocator();
   ZIG
 
-  sig { params(node: AST::TestBlock).returns(Array) }
+  sig { params(node: AST::TestBlock).returns(T::Array[T.untyped]) }
   def lower_test_block(node)
     T.bind(self, MIRLowering) rescue nil
     ctx = TestBlockCtx.new(node, self)
@@ -61,7 +61,7 @@ module TestLowering
   # BEFORE ALL hooks, then each TEST THAT, then benchmarks, then
   # AFTER ALL hooks). Mutates @active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
-  sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: Array).returns(T::Array[Array]) }
+  sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
   def lower_when_block(when_block, ctx, tests)
     T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
@@ -177,12 +177,14 @@ module TestLowering
 
   # Scope @current_bindings to the cleanup-classifier's synthetic FN
   # wrapper for the duration of the block. Restored unconditionally.
-  def with_test_that_bindings(test_that)
+  sig { params(test_that: AST::TestThat, blk: T.untyped).returns(T.untyped) }
+  def with_test_that_bindings(test_that, &blk)
     T.bind(self, MIRLowering) rescue nil
+    @current_bindings = T.let(@current_bindings, T.untyped)
     prev = @current_bindings
     synth_fn = test_that.respond_to?(:synthetic_fn) ? test_that.synthetic_fn : nil
     @current_bindings = (synth_fn&.cleanup_bindings) || {}
-    yield
+    blk.call
   ensure
     @current_bindings = prev
   end
@@ -199,14 +201,18 @@ module TestLowering
 
     sig { params(test_block: AST::TestBlock, lowering: MIRLowering).void }
     def initialize(test_block, lowering)
-      @test_block = test_block
-      @test_name  = test_block.name
+      @test_block = T.let(test_block, AST::TestBlock)
+      @test_name  = T.let(test_block.name, String)
       @lowering   = lowering
-      @setup_mir  = lowering.lower_body(test_block.setup)
-      @test_before_each_mir =
-        (test_block.before_each || []).map { |b| lowering.lower_body(b) }
-      @test_after_each_mir =
-        (test_block.after_each || []).map { |b| lowering.lower_body(b) }
+      @setup_mir  = T.let(lowering.lower_body(test_block.setup), T.nilable(T::Array[T.untyped]))
+      @test_before_each_mir = T.let(
+        (test_block.before_each || []).map { |b| lowering.lower_body(b) },
+        T::Array[T.untyped],
+      )
+      @test_after_each_mir = T.let(
+        (test_block.after_each || []).map { |b| lowering.lower_body(b) },
+        T::Array[T.untyped],
+      )
     end
 
     # Build a fresh InlineZig preamble (allocator + Runtime + EBR
@@ -226,7 +232,7 @@ module TestLowering
     # WHEN-level. Each ALL hook gets its own runtime (no shared
     # state with TEST THATs in v1 — file-scope-var promotion is a
     # deferred follow-up).
-    sig { params(bodies: T.nilable(T::Array[Array]), name_kind: String, desc_prefix: String, tests: Array).returns(T::Array[Array]) }
+    sig { params(bodies: T.nilable(T::Array[T::Array[T.untyped]]), name_kind: String, desc_prefix: String, tests: T::Array[T.untyped]).returns(T::Array[T::Array[T.untyped]]) }
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
       (bodies || []).each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
@@ -263,7 +269,7 @@ module TestLowering
   # insertion order preserves declaration order for the surviving
   # entries: outer LETs occupy their original indices unless replaced
   # by an inner LET, which then takes the outer's slot.
-  sig { params(lets: T.nilable(Array), base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
+  sig { params(lets: T.nilable(T::Array[T.untyped]), base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
   def build_let_ast_map(lets, base: {})
     T.bind(self, MIRLowering) rescue []
     out = base.dup
@@ -277,7 +283,7 @@ module TestLowering
   # RHS expressions depend on. Returns the names in source-declaration
   # order so the emitted Zig declarations resolve cleanly
   # (later LETs may reference earlier ones).
-  sig { params(let_ast_map: T::Hash[String, T.untyped], ast_subtrees: Array).returns(T::Array[String]) }
+  sig { params(let_ast_map: T::Hash[String, T.untyped], ast_subtrees: T::Array[T.untyped]).returns(T::Array[String]) }
   def compute_used_let_names(let_ast_map, ast_subtrees)
     T.bind(self, MIRLowering) rescue nil
     return [] if let_ast_map.empty?
@@ -326,22 +332,23 @@ module TestLowering
   sig { params(node: AST::AssertRaises).returns(MIR::InlineZig) }
   def lower_assert_raises(node)
     T.bind(self, MIRLowering) rescue nil
+    @rt_name = T.let(@rt_name, T.untyped)
     rt_name = @rt_name
     kind = node.kind
     # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
     expr_zig = emit_expr(lower(node.expression))
     error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
-    ar_code = <<~ZIG.chomp
-      {
-          if (#{expr_zig}) |_| {
-              @panic("ASSERT_RAISES: expected #{kind} error but none raised");
-          } else |_| {
-              if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {
-                  @panic("ASSERT_RAISES: expected #{kind} error, got different kind");
-              }
-          }
-      }
-    ZIG
+    ar_code = [
+      "{",
+      "    if (#{expr_zig}) |_| {",
+      "        @panic(\"ASSERT_RAISES: expected #{kind} error but none raised\");",
+      "    } else |_| {",
+      "        if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {",
+      "            @panic(\"ASSERT_RAISES: expected #{kind} error, got different kind\");",
+      "        }",
+      "    }",
+      "}",
+    ].join("\n")
     iz = MIR::InlineZig.new(ar_code, "assert_raises")
     iz.stdlib_def = { allocates: false, borrows: :all }
     iz
@@ -353,9 +360,10 @@ module TestLowering
   # -- no InlineZig escape hatch -- so the checker can see what's going
   # on. Locals that would otherwise become "unused" after stub
   # replacement get an explicit MIR::Suppress (`_ = &name;`).
-  sig { params(fn_name: String, receiver: T.untyped, args: Array).returns(T.untyped) }
+  sig { params(fn_name: String, receiver: T.untyped, args: T::Array[T.untyped]).returns(T.untyped) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
+    @rt_name = T.let(@rt_name, T.untyped)
     stub_info = (@active_stubs || {})[fn_name]
     return nil unless stub_info
 
@@ -363,7 +371,7 @@ module TestLowering
     suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
     suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
 
-    @stub_label_counter ||= 0
+    @stub_label_counter ||= T.let(0, T.nilable(Integer))
     @stub_label_counter += 1
     counter = @stub_label_counter
 
@@ -411,6 +419,8 @@ module TestLowering
   sig { params(node: AST::Literal).returns(T::Array[String]) }
   def stub_local_idents(node)
     T.bind(self, MIRLowering) rescue nil
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     return [] unless node.is_a?(AST::Identifier)
     name = node.name
     return [] unless name.is_a?(String)
@@ -426,7 +436,7 @@ module TestLowering
     T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name
     stub_var = "__stub_#{fn_name}"
-    @active_stubs ||= {}
+    @active_stubs ||= T.let({}, T.nilable(T::Hash[T.untyped, T.untyped]))
 
     case node.kind
     when :returns
