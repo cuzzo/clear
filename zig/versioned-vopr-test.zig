@@ -5,6 +5,7 @@ pub const SimClock = @import("runtime/testing/vopr-clock.zig").SimClock;
 pub const SimRandom = @import("runtime/testing/vopr-random.zig").SimRandom;
 pub const SimAtomic = @import("runtime/vopr-atomic.zig").SimAtomic;
 pub const SimRing = @import("runtime/vopr-ring.zig").SimRing;
+pub const CLEAR_MVCC_MAX_INNER_RETRIES_MULTI: usize = 2;
 
 const vv = @import("runtime/versioned-vopr.zig");
 const gate = @import("runtime/vopr-gate.zig");
@@ -17,8 +18,10 @@ const Test = struct {
 const tests = [_]Test{
     .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",         .func = &gate.assertGapBActive },
     .{ .name = "mvcc-vopr: update retry-body fires under SimAtomic fault injection",   .func = &vv.testMvccRetryBodyUnderFault },
+    .{ .name = "mvcc-vopr: updateFlow retry-body fires under SimAtomic fault injection", .func = &vv.testMvccUpdateFlowRetryBodyUnderFault },
     .{ .name = "mvcc-vopr: update tag-spin retry body fires under load-tag injection", .func = &vv.testMvccTagSpinRetryBody },
     .{ .name = "mvcc-vopr: update bounded-retry exhaustion at 100% fault",              .func = &vv.testMvccRetryExhaustionUnderFault },
+    .{ .name = "mvcc-vopr: updateMulti tagged contention rolls back and retries",       .func = &vv.testMvccUpdateMultiTaggedContentionRetry },
     .{ .name = "mvcc-vopr: 200 seeds x 200 steps each, no UAF, no leak, no torn read", .func = &vv.testManySeedsShortSteps },
     .{ .name = "mvcc-vopr: 50 seeds x 1000 steps each (longer sequences)",             .func = &vv.testFewSeedsLongSteps },
     .{ .name = "mvcc-vopr: reproducibility -- seed 42 produces identical state",       .func = &vv.testReproducibility },

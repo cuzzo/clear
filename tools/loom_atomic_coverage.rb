@@ -265,7 +265,7 @@ module LoomAtomicCoverage
       end
     end.parse!(argv)
 
-    repo_root = File.expand_path("../..", __dir__)
+    repo_root = File.expand_path("..", __dir__)
     coverage_path = File.expand_path(opts[:coverage], repo_root)
     scope_dirs = opts[:scope].split(",").map(&:strip).reject(&:empty?)
 

@@ -25,6 +25,14 @@ const build_options = @import("build_options");
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 
+const FlowKind = enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit };
+const Flow = struct { kind: FlowKind = .cont_commit };
+
+fn flowIncrement(p: *i64, flow: *Flow) void {
+    p.* += 1;
+    flow.kind = .cont_commit;
+}
+
 const OpKind = enum {
     Read,
     ReadHold,
@@ -205,6 +213,54 @@ pub fn testUpdateRetryBodyUnderFault() !void {
     var g = cell.read(ebr);
     defer g.release();
     if (g.get().* != 16) return error.UpdateValueWrong;
+}
+
+/// Same fault-injection contract as testUpdateRetryBodyUnderFault, but
+/// through updateFlow's separate retry loop. This catches regressions
+/// where generated flow-control mutation paths stop honoring CAS-loser
+/// retry behavior even though plain update() still works.
+pub fn testUpdateFlowRetryBodyUnderFault() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var ebr = try allocator.create(ThreadLocalEbr);
+    ebr.* = ThreadLocalEbr{ .context = &ctx };
+    try ctx.register(allocator, ebr);
+
+    var cell = try atomic_ptr.AtomicPtr(i64).init(allocator, 0);
+    defer {
+        cell.deinit(ebr, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            ebr.reclaimLocal(allocator);
+        }
+        ctx.unregister(ebr);
+        ebr.deinit(allocator);
+        allocator.destroy(ebr);
+    }
+
+    sim_atomic.seedFault(0xF10CF10C);
+    sim_atomic.inject_cas_fault = true;
+    sim_atomic.inject_cas_fault_rate = 5000;
+
+    const synthetic_before = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+
+    var i: i64 = 0;
+    while (i < 16) : (i += 1) {
+        var flow = Flow{};
+        try cell.updateFlow(ebr, allocator, flowIncrement, .{&flow});
+        if (flow.kind != .cont_commit) return error.FlowKindUnexpected;
+    }
+
+    const synthetic_after = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+    if (synthetic_after == synthetic_before) return error.NoFaultInjected;
+
+    var g = cell.read(ebr);
+    defer g.release();
+    if (g.get().* != 16) return error.UpdateFlowValueWrong;
 }
 
 /// Drives the AtomicPtr.update bounded-retry-exhaustion contract:

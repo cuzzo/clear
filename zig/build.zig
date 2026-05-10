@@ -185,6 +185,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "cleanup-test.zig", .tsan = true },
         .{ .path = "control-plane-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "control-plane-test.zig", .tsan = true },
+        .{ .path = "data-structures-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "epoll-oneshot-test.zig", .tsan = true },
         .{ .path = "epoll-steal-test.zig", .tsan = true },
         .{ .path = "ffi-concurrency-test.zig", .tsan = true },

@@ -25,6 +25,7 @@ const pl = @import("../lib/parking-lot.zig");
 const streams = @import("../lib/streams.zig");
 const fsm_mod = @import("fsm.zig");
 const build_options = @import("build_options");
+const sim_atomic = @import("vopr-atomic.zig");
 
 // Minimal binding for data-structures.zig — the loom test only touches
 // Stream(T).Inner fields; the bound deps are unused on the closed/err
@@ -89,6 +90,10 @@ fn splitStreamDummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
 var g_split_park_subscriber: *LoomSplitStream = undefined;
 var g_split_park_woke: bool = false;
 var g_split_park_err: ?anyerror = null;
+var g_scheduler_primitive_wg: *fp.WaitGroup = undefined;
+var g_scheduler_primitive_sem: *fp.Semaphore = undefined;
+var g_scheduler_primitive_wg_woke: bool = false;
+var g_scheduler_primitive_sem_acquired: bool = false;
 
 fn entrySplitStreamParkedSubscriber() callconv(.c) void {
     const next = g_split_park_subscriber.next() catch |err| {
@@ -100,6 +105,18 @@ fn entrySplitStreamParkedSubscriber() callconv(.c) void {
     } else {
         g_split_park_woke = true;
     }
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryWaitGroupParkedFiber() callconv(.c) void {
+    g_scheduler_primitive_wg.wait();
+    g_scheduler_primitive_wg_woke = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entrySemaphoreParkedFiber() callconv(.c) void {
+    g_scheduler_primitive_sem.acquire();
+    g_scheduler_primitive_sem_acquired = true;
     while (true) fc.__fiber.?.yield();
 }
 
@@ -3188,7 +3205,6 @@ pub fn testSplitStreamProductionLifecycle() !void {
 
 pub fn testSplitStreamParkedSubscriberCloseWake() !void {
     const allocator = std.heap.c_allocator;
-    const sim_atomic = @import("vopr-atomic.zig");
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);
@@ -5226,6 +5242,65 @@ pub fn testWaitGroupWaitNonFiber() !void {
     wg.wait();
 }
 
+pub fn testWaitGroupWaitFiberParkResume() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    const stack = try allocator.alloc(u8, STACK_SIZE);
+    defer allocator.free(stack);
+    var fiber = Fiber.init(stack, @intFromPtr(&entryWaitGroupParkedFiber), .Large);
+    var task: Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+
+    var wg = fp.WaitGroup.init(&sched);
+    wg.add(1);
+    g_scheduler_primitive_wg = &wg;
+    g_scheduler_primitive_wg_woke = false;
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    const prev_disable = sim_atomic.disable_fiber_yield_point;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sim_atomic.disable_fiber_yield_point = true;
+    defer {
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        sim_atomic.disable_fiber_yield_point = prev_disable;
+        sched.current_task = null;
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    sched.current_task = &task;
+    fiber.switchTo(&sched.main_ctx);
+    if (task.status.load(.acquire) != .Blocked) return error.WaitGroupFiberDidNotPark;
+    if (wg.waiting_task != &task) return error.WaitGroupWaiterNotRegistered;
+    if (g_scheduler_primitive_wg_woke) return error.WaitGroupWokeEarly;
+
+    wg.done();
+    if (wg.waiting_task != null) return error.WaitGroupWaiterNotCleared;
+    if (task.status.load(.acquire) != .Ready) return error.WaitGroupDoneDidNotWake;
+
+    sched.current_task = &task;
+    fiber.switchTo(&sched.main_ctx);
+    if (!g_scheduler_primitive_wg_woke) return error.WaitGroupFiberDidNotResume;
+}
+
 pub fn testSemaphoreFastPath() !void {
     const allocator = std.heap.c_allocator;
 
@@ -5293,6 +5368,65 @@ pub fn testSemaphoreReleaseWithWaiter() !void {
     if (sem.waiting_task != null) return error.WaitingTaskNotCleared;
     // counter must NOT have been incremented (slot granted directly).
     if (sem.counter.load(.seq_cst) != 0) return error.CounterIncrementedOnDirectGrant;
+}
+
+pub fn testSemaphoreAcquireFiberParkResume() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    const stack = try allocator.alloc(u8, STACK_SIZE);
+    defer allocator.free(stack);
+    var fiber = Fiber.init(stack, @intFromPtr(&entrySemaphoreParkedFiber), .Large);
+    var task: Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&s25DummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+    };
+
+    var sem = fp.Semaphore.init(0, &sched);
+    g_scheduler_primitive_sem = &sem;
+    g_scheduler_primitive_sem_acquired = false;
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    const prev_disable = sim_atomic.disable_fiber_yield_point;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sim_atomic.disable_fiber_yield_point = true;
+    defer {
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        sim_atomic.disable_fiber_yield_point = prev_disable;
+        sched.current_task = null;
+        fp.active_scheduler = prev_active;
+        fp.scheduler_running = prev_running;
+    }
+
+    sched.current_task = &task;
+    fiber.switchTo(&sched.main_ctx);
+    if (task.status.load(.acquire) != .Blocked) return error.SemaphoreFiberDidNotPark;
+    if (sem.waiting_task != &task) return error.SemaphoreWaiterNotRegistered;
+    if (g_scheduler_primitive_sem_acquired) return error.SemaphoreAcquiredEarly;
+
+    sem.release();
+    if (sem.waiting_task != null) return error.SemaphoreWaiterNotCleared;
+    if (sem.counter.load(.seq_cst) != 0) return error.SemaphoreDirectGrantIncrementedCounter;
+    if (task.status.load(.acquire) != .Ready) return error.SemaphoreReleaseDidNotWake;
+
+    sched.current_task = &task;
+    fiber.switchTo(&sched.main_ctx);
+    if (!g_scheduler_primitive_sem_acquired) return error.SemaphoreFiberDidNotResume;
 }
 
 // N1 batch 2: io_uring submit functions. Each parks a task by storing

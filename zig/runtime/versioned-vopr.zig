@@ -45,6 +45,19 @@ const build_options = @import("build_options");
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 
+const FlowKind = enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit };
+const Flow = struct { kind: FlowKind = .cont_commit };
+
+fn flowIncrement(p: *i64, flow: *Flow) void {
+    p.* += 1;
+    flow.kind = .cont_commit;
+}
+
+fn writePair(views: anytype, a: i64, b: i64) !void {
+    views[0].* = a;
+    views[1].* = b;
+}
+
 const OpKind = enum {
     Read,           // read + immediate release
     ReadHold,       // read but defer release to a later step
@@ -222,6 +235,51 @@ pub fn testMvccRetryBodyUnderFault() !void {
     if (g.get().* != 16) return error.MvccUpdateValueWrong;
 }
 
+/// Same CAS-loser retry contract as testMvccRetryBodyUnderFault, but
+/// through updateFlow's generated-control-flow mutation surface.
+pub fn testMvccUpdateFlowRetryBodyUnderFault() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 0);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.seedFault(0xBEEFF10C);
+    sim_atomic.inject_cas_fault = true;
+    sim_atomic.inject_cas_fault_rate = 5000;
+
+    const synthetic_before = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+
+    var i: i64 = 0;
+    while (i < 16) : (i += 1) {
+        var flow = Flow{};
+        try s.updateFlow(&rt, allocator, flowIncrement, .{&flow});
+        if (flow.kind != .cont_commit) return error.FlowKindUnexpected;
+    }
+
+    const synthetic_after = sim_atomic.sim_cmpxchg_synthetic_fault_count;
+    if (synthetic_after == synthetic_before) return error.NoFaultInjected;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 16) return error.MvccUpdateFlowValueWrong;
+}
+
 /// Drives Versioned.update's tag-spin retry body at versioned.zig:315.
 /// The path fires when an updateMulti has tagged this cell's ptr
 /// (low-bit set); update spins reloading until the tag is cleared.
@@ -320,6 +378,50 @@ pub fn testMvccRetryExhaustionUnderFault() !void {
     var g = s.read(&rt);
     defer g.release();
     if (g.get().* != 0) return error.CellMutatedDespiteAllFaults;
+}
+
+/// Forces updateMulti's per-cell tagged-pointer spin to exhaust once,
+/// roll back any partial acquisition, retry the outer transaction, and
+/// finally commit both cells. This is the VOPR-side model of another
+/// multi-cell txn temporarily owning a tag.
+pub fn testMvccUpdateMultiTaggedContentionRetry() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var a = try versioned.Versioned(i64).init(allocator, 1);
+    var b = try versioned.Versioned(i64).init(allocator, 2);
+    defer {
+        a.deinit(&rt, allocator) catch unreachable;
+        b.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    sim_atomic.resetFault();
+    sim_atomic.inject_load_tagged_count_remaining = 2;
+    const tagged_before = sim_atomic.sim_load_synthetic_tag_count;
+
+    try versioned.updateMulti(.{ &a, &b }, &rt, allocator, writePair, .{ @as(i64, 10), @as(i64, 20) });
+
+    if (sim_atomic.sim_load_synthetic_tag_count == tagged_before) return error.NoTagInjected;
+
+    var ga = a.read(&rt);
+    defer ga.release();
+    var gb = b.read(&rt);
+    defer gb.release();
+    if (ga.get().* != 10) return error.FirstCellWrong;
+    if (gb.get().* != 20) return error.SecondCellWrong;
 }
 
 pub fn testManySeedsShortSteps() !void {
