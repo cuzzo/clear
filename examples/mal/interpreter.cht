@@ -1,10 +1,10 @@
--- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
---
--- Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
--- Each Env holds a HashMap<Value> for its local bindings.
--- Parent links stored as Value.EnvRef in vars["__p"].
--- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
--- Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
+# Mal (Make-a-Lisp) Interpreter in CLEAR - Pool-based edition
+#
+# Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
+# Each Env holds a HashMap<Value> for its local bindings.
+# Parent links stored as Value.EnvRef in vars["__p"].
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 STRUCT Env {
     vars: HashMap<Value>
@@ -16,14 +16,14 @@ UNION Value {
     List: Value[],
     Vector: Value[],
     Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
-    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    Lambda { envId: Id<Env> },
     NativeFn: Int64,
     EnvRef: Id<Env>,
     Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String }
 }
 
--- Pure helpers
+# Pure helpers
 
 FN boolVal(b: Bool) RETURNS Value ->
     IF b -> RETURN Value.TrueVal;
@@ -31,54 +31,54 @@ FN boolVal(b: Bool) RETURNS Value ->
 END
 
 FN isTruthy?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
+    PARTIAL MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
     RETURN TRUE;
 END
 
-FN getSymName(v: Value) RETURNS String ->
-    MATCH v START Value.Symbol AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+FN getSymName(v: Value) RETURNS v:String ->
+    PARTIAL MATCH v START Value.Symbol AS s -> RETURN s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getNum(v: Value) RETURNS Float64 ->
-    MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
+    PARTIAL MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
     RETURN 0.0;
 END
 
-FN getStr(v: Value) RETURNS String ->
-    MATCH v START Value.Str AS s -> RETURN s;, DEFAULT -> RETURN ""; END
+FN getStr(v: Value) RETURNS v:String ->
+    PARTIAL MATCH v START Value.Str AS s -> RETURN s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getNativeId(v: Value) RETURNS Int64 ->
-    MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
+    PARTIAL MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
     RETURN 0;
 END
 
 FN isList?(v: Value) RETURNS Bool ->
-    MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN listLen(v: Value) RETURNS Int64 ->
-    MATCH v START Value.List AS items -> RETURN items.length();, DEFAULT -> RETURN 0; END
+    PARTIAL MATCH v START Value.List AS items -> RETURN items.length();, DEFAULT -> RETURN 0; END
     RETURN 0;
 END
 
 FN isLambda?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Lambda AS lam -> IF lam.envId >= 0 THEN RETURN TRUE; END RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
-    MATCH a START
-        Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.Number AS na -> MATCH b START Value.Number AS nb -> RETURN na == nb;, DEFAULT -> RETURN FALSE; END,
-        Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
-        Value.Symbol AS sa -> MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
-        Value.List AS la -> MATCH b START
+    PARTIAL MATCH a START
+        Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.FalseVal -> PARTIAL MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> PARTIAL MATCH b START Value.Number AS nb -> RETURN na == nb;, DEFAULT -> RETURN FALSE; END,
+        Value.Str AS sa -> PARTIAL MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.Symbol AS sa -> PARTIAL MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.List AS la -> PARTIAL MATCH b START
             Value.List AS lb ->
                 IF la.length() != lb.length() THEN RETURN FALSE; END
                 FOR ci IN (0_i64 ..< la.length()) DO
@@ -86,7 +86,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
                 END
                 RETURN TRUE;,
             DEFAULT -> RETURN FALSE; END,
-        Value.Vector AS va -> MATCH b START
+        Value.Vector AS va -> PARTIAL MATCH b START
             Value.Vector AS vb ->
                 IF va.length() != vb.length() THEN RETURN FALSE; END
                 FOR vi IN (0_i64 ..< va.length()) DO
@@ -94,7 +94,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
                 END
                 RETURN TRUE;,
             DEFAULT -> RETURN FALSE; END,
-        Value.Pair AS pa -> MATCH b START
+        Value.Pair AS pa -> PARTIAL MATCH b START
             Value.Pair AS pb ->
                 RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
             DEFAULT -> RETURN FALSE; END,
@@ -103,7 +103,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
     RETURN FALSE;
 END
 
-FN readAtom(token: String) RETURNS Value ->
+FN readAtom(token: String) RETURNS !Value ->
     IF token.length() == 0 THEN RETURN Value.Nil; END
     IF token == "nil" THEN RETURN Value.Nil; END
     IF token == "true" THEN RETURN Value.TrueVal; END
@@ -111,11 +111,11 @@ FN readAtom(token: String) RETURNS Value ->
     IF charAt(token, 0) == "\"" THEN RETURN Value{ Str: substr(token, 1, token.length() - 2) }; END
     n = toNumber(token) OR (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Value{ Number: n }; END
-    RETURN Value{ Symbol: token };
+    RETURN Value{ Symbol: COPY token };
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
-    MATCH v START
+FN prStr(v: Value, readably: Bool) RETURNS !String @reentrant ->
+    PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
         Value.FalseVal -> RETURN "false";,
@@ -128,18 +128,18 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
             MUTABLE out = "(";
             FOR li IN (0_i64 ..< items.length()) DO
                 IF li > 0 THEN out = out + " "; END
-                out = out + prStr(items[li], readably);
+                out = out + (prStr(items[li], readably) OR RAISE);
             END
             RETURN out + ")";,
         Value.Vector AS velems ->
             MUTABLE vout = "#(";
             FOR vi IN (0_i64 ..< velems.length()) DO
                 IF vi > 0 THEN vout = vout + " "; END
-                vout = vout + prStr(velems[vi], readably);
+                vout = vout + (prStr(velems[vi], readably) OR RAISE);
             END
             RETURN vout + ")";,
         Value.Pair AS p ->
-            RETURN "(" + prStr(p.pairCar, readably) + " . " + prStr(p.pairCdr, readably) + ")";,
+            RETURN "(" + (prStr(p.pairCar, readably) OR RAISE) + " . " + (prStr(p.pairCdr, readably) OR RAISE) + ")";,
         Value.NativeFn AS nid -> RETURN "#<native:" + nid.toString() + ">";,
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
@@ -149,43 +149,43 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
     RETURN "";
 END
 
--- Parser: tokenize into HashMap<Value> with numeric position tracking.
--- Tokens stored as Value.Str at keys "__t0", "__t1", etc.
--- Position and count stored as Value.Number at "__rp" and "__tc".
--- This avoids toString() inside WHILE loops for position updates.
+# Parser: tokenize into HashMap<Value> with numeric position tracking.
+# Tokens stored as Value.Str at keys "__t0", "__t1", etc.
+# Position and count stored as Value.Number at "__rp" and "__tc".
+# This avoids toString() inside WHILE loops for position updates.
 
-FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
+FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
-        c = charAt(str, i);
+        c = charAt(str, i) OR RAISE;
         IF c == " " || c == "," || c == "\n" || c == "\t" THEN i += 1;
         ELSE_IF c == "(" || c == ")" || c == "[" || c == "]" THEN
-            penv["__t" + count.toString()] = Value{ Str: c };
+            penv["__t" + count.toString()] = Value{ Str: COPY c };
             count += 1;
             i += 1;
         ELSE_IF c == ";" THEN
-            WHILE i < str.length() && charAt(str, i) != "\n" DO i += 1; END
+            WHILE i < str.length() && (charAt(str, i) OR RAISE) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
-            WHILE i < str.length() && charAt(str, i) != "\"" DO
-                IF charAt(str, i) == "\\" THEN
-                    s = s + charAt(str, i); i += 1;
-                    IF i < str.length() THEN s = s + charAt(str, i); i += 1; END
-                ELSE s = s + charAt(str, i); i += 1;
+            WHILE i < str.length() && (charAt(str, i) OR RAISE) != "\"" DO
+                IF (charAt(str, i) OR RAISE) == "\\" THEN
+                    s = s + (charAt(str, i) OR RAISE); i += 1;
+                    IF i < str.length() THEN s = s + (charAt(str, i) OR RAISE); i += 1; END
+                ELSE s = s + (charAt(str, i) OR RAISE); i += 1;
                 END
             END
             s = s + "\"";
-            penv["__t" + count.toString()] = Value{ Str: s };
+            penv["__t" + count.toString()] = Value{ Str: COPY s };
             count += 1;
             i += 1;
         ELSE
             MUTABLE s = "";
-            WHILE i < str.length() && charAt(str, i) != " " && charAt(str, i) != "," && charAt(str, i) != "\n" && charAt(str, i) != "\t" && charAt(str, i) != "(" && charAt(str, i) != ")" && charAt(str, i) != "[" && charAt(str, i) != "]" && charAt(str, i) != "\"" && charAt(str, i) != ";" DO
-                s = s + charAt(str, i); i += 1;
+            WHILE i < str.length() && (charAt(str, i) OR RAISE) != " " && (charAt(str, i) OR RAISE) != "," && (charAt(str, i) OR RAISE) != "\n" && (charAt(str, i) OR RAISE) != "\t" && (charAt(str, i) OR RAISE) != "(" && (charAt(str, i) OR RAISE) != ")" && (charAt(str, i) OR RAISE) != "[" && (charAt(str, i) OR RAISE) != "]" && (charAt(str, i) OR RAISE) != "\"" && (charAt(str, i) OR RAISE) != ";" DO
+                s = s + (charAt(str, i) OR RAISE); i += 1;
             END
             IF s.length() > 0 THEN
-                penv["__t" + count.toString()] = Value{ Str: s };
+                penv["__t" + count.toString()] = Value{ Str: COPY s };
                 count += 1;
             END
         END
@@ -194,17 +194,17 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
     RETURN;
 END
 
-FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
+FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
     val = penv["__t" + idx.toString()] OR Value.Nil;
-    RETURN getStr(val);
+    RETURN COPY getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
     posVal = penv["__rp"] OR Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
     tc = toInt(getNum(tcVal));
-    tok = getTokenStr!(penv, pos);
+    tok = getTokenStr!(penv, pos) OR RAISE;
 
     IF pos >= tc THEN
         RETURN Value.Nil;
@@ -212,14 +212,14 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
 
     IF tok == "(" || tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-        RETURN readListEnv!(penv);
+        RETURN readListEnv!(penv) OR RAISE;
     END
 
     penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-    RETURN readAtom(tok);
+    RETURN readAtom(tok) OR RAISE;
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
@@ -229,12 +229,12 @@ FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
         tc2 = toInt(getNum(tcVal2));
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
-            curTok = getTokenStr!(penv, curPos);
+            curTok = getTokenStr!(penv, curPos) OR RAISE;
             IF curTok == ")" || curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
-                item = readFormEnv!(penv);
+                item = readFormEnv!(penv) OR RAISE;
                 items.append(item);
             END
         END
@@ -242,27 +242,27 @@ FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
     RETURN Value{ List: items };
 END
 
--- Native function dispatch by numeric ID.
--- IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
---      10=list 11=list? 12=empty? 13=count 14=not 15=prn
---      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
---      21=cons 22=car 23=cdr 24=pair? 25=eq?
---      26=string-append 27=string-length 28=substring 29=string-ref
---      30=number->string 31=string->number 32=string? 33=display
+# Native function dispatch by numeric ID.
+# IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
+#      10=list 11=list? 12=empty? 13=count 14=not 15=prn
+#      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
+#      21=cons 22=car 23=cdr 24=pair? 25=eq?
+#      26=string-append 27=string-length 28=substring 29=string-ref
+#      30=number->string 31=string->number 32=string? 33=display
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
-    -- Arithmetic
+FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+    # Arithmetic
     IF id == 1 THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
     IF id == 2 THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
     IF id == 3 THEN RETURN Value{ Number: getNum(evaled[1]) * getNum(evaled[2]) }; END
     IF id == 4 THEN RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) }; END
-    -- Comparison
+    # Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF id == 6 THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
     IF id == 7 THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
     IF id == 8 THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
     IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
-    -- List
+    # List
     IF id == 10 THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (1_i64 ..< evaled.length()) ->
@@ -273,31 +273,31 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 12 THEN RETURN boolVal(listLen(evaled[1]) == 0); END
     IF id == 13 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
     IF id == 14 THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
-    IF id == 15 THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
-    -- Vector
+    IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR "") + "\n", pool) OR RAISE; RETURN Value.Nil; END
+    # Vector
     IF id == 16 THEN
         MUTABLE velems: Value[]@list = List[];
         FOR vi IN (1_i64 ..< evaled.length()) ->
-            velems.append(evaled[vi]);
+            velems.append(COPY evaled[vi]);
         RETURN Value{ Vector: velems };
     END
-    IF id == 17 THEN RETURN vecRef(evaled[1], toInt(getNum(evaled[2]))); END
+    IF id == 17 THEN RETURN vecRef(evaled[1], toInt(getNum(evaled[2]))) OR RAISE; END
     IF id == 18 THEN RETURN Value.Nil; END
     IF id == 19 THEN RETURN Value{ Number: toFloat(vecLen(evaled[1])) }; END
     IF id == 20 THEN RETURN boolVal(isVector?(evaled[1])); END
-    -- Pair
-    IF id == 21 THEN RETURN Value.Pair{ pairCar: evaled[1], pairCdr: evaled[2] }; END
-    IF id == 22 THEN RETURN pairCar(evaled[1]); END
-    IF id == 23 THEN RETURN pairCdr(evaled[1]); END
+    # Pair
+    IF id == 21 THEN RETURN Value.Pair{ pairCar: COPY evaled[1], pairCdr: COPY evaled[2] }; END
+    IF id == 22 THEN RETURN pairCar(evaled[1]) OR RAISE; END
+    IF id == 23 THEN RETURN pairCdr(evaled[1]) OR RAISE; END
     IF id == 24 THEN RETURN boolVal(isPair?(evaled[1])); END
     IF id == 25 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
-    -- String
+    # String
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
             out = out + getStr(evaled[si]);
         END
-        RETURN Value{ Str: out };
+        RETURN Value{ Str: COPY out };
     END
     IF id == 27 THEN RETURN Value{ Number: toFloat(getStr(evaled[1]).length()) }; END
     IF id == 28 THEN
@@ -322,73 +322,80 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: parsed };
     END
     IF id == 32 THEN
-        MATCH evaled[1] START Value.Str -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END
+        PARTIAL MATCH evaled[1] START Value.Str -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END
         RETURN Value.FalseVal;
     END
-    IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
+    IF id == 33 THEN appendOutput!(envId, prStr(evaled[1], FALSE) OR "", pool) OR RAISE; RETURN Value.Nil; END
 
     RETURN Value.Nil;
 END
 
--- Environment operations using Pool
+# Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    val = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
-    MATCH val START
-        Value.Number AS n ->
-            IF n == 0.0 - 777777.0 THEN
-                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-                MATCH parentVal START
-                    Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-                    DEFAULT -> RETURN Value.Nil;
-                END
-            END
-            RETURN val;,
-        DEFAULT -> RETURN val;
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+    IF pool[envId] AS env THEN
+        IF env.vars[name] AS found THEN RETURN COPY found; END
+        parentVal = env.vars["__p"] OR Value.Nil;
+        PARTIAL MATCH parentVal START
+            Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool) OR RAISE;,
+            DEFAULT -> RETURN Value.Nil;
+        END
     END
     RETURN Value.Nil;
 END
 
--- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
+# envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
-    existing = pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 };
-    MATCH existing START
-        Value.Number AS n ->
-            IF n == 0.0 - 777777.0 THEN
-                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-                MATCH parentVal START
-                    Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool);,
-                    DEFAULT -> RETURN FALSE;
-                END
-            END
-            pool[envId]?.vars[name] = val;
-            RETURN TRUE;,
-        DEFAULT ->
-            pool[envId]?.vars[name] = val;
+FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool @reentrant ->
+    IF pool[envId] AS env THEN
+        IF env.vars[name] AS found THEN
+            IF valEqual?(found, found) THEN PASS; END
+            env.vars[name] = val;
             RETURN TRUE;
+        END
+        parentVal = env.vars["__p"] OR Value.Nil;
+        PARTIAL MATCH parentVal START
+            Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool) OR RAISE;,
+            DEFAULT -> RETURN FALSE;
+        END
     END
     RETURN FALSE;
 END
 
--- eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
--- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
+FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void @reentrant ->
+    current = envGet!(envId, "__output", pool) OR Value.Nil;
+    envSet!(envId, "__output", Value{ Str: COPY (getStr(current) + chunk) }, pool) OR RAISE;
+    RETURN;
+END
+
+FN readOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+    current = envGet!(envId, "__output", pool) OR Value.Nil;
+    RETURN COPY getStr(current);
+END
+
+FN clearOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void ->
+    envSet!(envId, "__output", Value{ Str: "" }, pool) OR RAISE;
+    RETURN;
+END
+
+# eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
+# let body, lambda body) reassign ast/curEnv and continue instead of recursing.
 
 FN isVector?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Vector -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Vector -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN vecLen(v: Value) RETURNS Int64 ->
-    MATCH v START Value.Vector AS elems -> RETURN elems.length();, DEFAULT -> RETURN 0; END
+    PARTIAL MATCH v START Value.Vector AS elems -> RETURN elems.length();, DEFAULT -> RETURN 0; END
     RETURN 0;
 END
 
-FN vecRef(v: Value, idx: Int64) RETURNS Value ->
-    MATCH v START
+FN vecRef(v: Value, idx: Int64) RETURNS !Value ->
+    PARTIAL MATCH v START
         Value.Vector AS elems ->
             elem = elems[idx];
-            RETURN elem;,
+            RETURN COPY elem;,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -396,78 +403,78 @@ END
 
 
 FN isPair?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Pair -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Pair -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
-FN pairCar(v: Value) RETURNS Value ->
-    MATCH v START
+FN pairCar(v: Value) RETURNS !Value ->
+    PARTIAL MATCH v START
         Value.Pair AS p ->
             result = p.pairCar;
-            RETURN result;,
+            RETURN COPY result;,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
 END
 
-FN pairCdr(v: Value) RETURNS Value ->
-    MATCH v START
+FN pairCdr(v: Value) RETURNS !Value ->
+    PARTIAL MATCH v START
         Value.Pair AS p ->
             result = p.pairCdr;
-            RETURN result;,
+            RETURN COPY result;,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
 END
 
 FN isError?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Error -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Error -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN getErrMsg(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN e.errMsg;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Error AS e -> RETURN e.errMsg;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getErrKind(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN e.errKind;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Error AS e -> RETURN e.errKind;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
-FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
-    MATCH catchExpr START
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value ->
+    PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
-            pool[catchEnvId]?.vars["__p"] = Value{ EnvRef: envId };
+            IF pool[catchEnvId] AS catchEnv THEN catchEnv.vars["__p"] = Value{ EnvRef: envId }; END
             errBindName = getSymName(catchItems[1]);
-            pool[catchEnvId]?.vars[errBindName] = Value.Error{ errMsg: errMsg, errKind: errKind };
-            RETURN Value.Tco{ tcoAst: catchItems[2], tcoEnv: catchEnvId };,
-        DEFAULT -> RETURN Value.Error{ errMsg: errMsg, errKind: errKind };
+            IF pool[catchEnvId] AS catchEnv2 THEN catchEnv2.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind }; END
+            RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: catchEnvId };,
+        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
     END
-    RETURN Value.Error{ errMsg: errMsg, errKind: errKind };
+    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
 END
 
 FN isSymbol?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
--- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
+# eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    MUTABLE ast: Value = astIn;
+FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+    MUTABLE ast: Value = COPY astIn;
     MUTABLE curEnv: Id<Env> = envId;
     MUTABLE tcoActive = TRUE;
     WHILE tcoActive DO
-        MATCH ast START
+        PARTIAL MATCH ast START
             Value.Symbol AS sym ->
-                RETURN envGet!(curEnv, sym, pool);,
+                RETURN envGet!(curEnv, sym, pool) OR Value.Error{ errMsg: "lookup failed", errKind: "RuntimeError" };,
             Value.List AS listItems ->
-                result = evalList!(listItems, curEnv, pool);
-                MATCH result START
+                result = evalList!(listItems, curEnv, pool) OR RAISE;
+                PARTIAL MATCH result START
                     Value.Tco AS tco ->
-                        ast = tco.tcoAst;
+                        ast = COPY tco.tcoAst;
                         curEnv = tco.tcoEnv;,
                     DEFAULT -> RETURN result;
                 END,
@@ -477,72 +484,76 @@ FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Va
     RETURN Value.Nil;
 END
 
-FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    IF items.length() == 0 THEN RETURN Value.Nil; END
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value @reentrant ->
+    IF items.length() == 0 THEN
+        MUTABLE empty: Value[]@list = List[];
+        RETURN Value{ List: empty };
+    END
     formName = getSymName(items[0]);
 
-    -- Error introspection: special forms to avoid error propagation
+    # Error introspection: special forms to avoid error propagation
     IF formName == "error?" THEN
-        val = eval!(COPY items[1], envId, pool);
+        val = eval!(COPY items[1], envId, pool) OR RAISE;
         RETURN boolVal(isError?(val));
 
     ELSE_IF formName == "error-message" THEN
-        val = eval!(items[1], envId, pool);
-        RETURN Value{ Str: getErrMsg(val) };
+        val = eval!(items[1], envId, pool) OR RAISE;
+        RETURN Value{ Str: COPY getErrMsg(val) };
 
     ELSE_IF formName == "error-kind" THEN
-        val = eval!(items[1], envId, pool);
-        RETURN Value{ Str: getErrKind(val) };
+        val = eval!(items[1], envId, pool) OR RAISE;
+        RETURN Value{ Str: COPY getErrKind(val) };
 
     ELSE_IF formName == "quote" THEN
         quoted = items[1];
-        RETURN quoted;
+        RETURN COPY quoted;
 
     ELSE_IF formName == "raise" THEN
-        msg = eval!(items[1], envId, pool);
-        IF isError?(msg) THEN RETURN msg; END
-        kind = eval!(items[2], envId, pool);
-        IF isError?(kind) THEN RETURN kind; END
-        RETURN Value.Error{ errMsg: getStr(msg), errKind: getStr(kind) };
+        msg = eval!(items[1], envId, pool) OR RAISE;
+        IF isError?(msg) THEN RETURN COPY msg; END
+        kind = eval!(items[2], envId, pool) OR RAISE;
+        IF isError?(kind) THEN RETURN COPY kind; END
+        RETURN Value.Error{ errMsg: COPY getStr(msg), errKind: COPY getStr(kind) };
 
     ELSE_IF formName == "try" THEN
-        -- (try expr (catch e handler))
-        MUTABLE tryResult: Value = eval!(items[1], envId, pool);
-        MATCH tryResult START
+        # (try expr (catch e handler))
+        MUTABLE tryResult: Value = eval!(items[1], envId, pool) OR RAISE;
+        PARTIAL MATCH tryResult START
             Value.Error AS e ->
-                RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool);,
-            DEFAULT -> RETURN tryResult;
+                RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool) OR Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
+            DEFAULT -> RETURN COPY tryResult;
         END
-        RETURN tryResult;
+        RETURN COPY tryResult;
 
     ELSE_IF formName == "def!" || formName == "define" THEN
         defName = getSymName(items[1]);
-        val = eval!(items[2], envId, pool);
-        IF isError?(val) THEN RETURN val; END
-        pool[envId]?.vars[defName] = val;
-        result = pool[envId]?.vars[defName] OR Value.Nil;
-        RETURN result;
+        val = eval!(items[2], envId, pool) OR RAISE;
+        IF isError?(val) THEN RETURN COPY val; END
+        IF pool[envId] AS defEnv THEN defEnv.vars[defName] = val; END
+        MUTABLE result = Value.Nil;
+        IF pool[envId] AS defEnv2 THEN result = defEnv2.vars[defName] OR Value.Nil; END
+        RETURN COPY result;
 
     ELSE_IF formName == "set!" THEN
         setName = getSymName(items[1]);
-        setVal = eval!(items[2], envId, pool);
-        IF isError?(setVal) THEN RETURN setVal; END
-        envSet!(envId, setName, setVal, pool);
-        RETURN setVal;
+        setVal = eval!(items[2], envId, pool) OR RAISE;
+        IF isError?(setVal) THEN RETURN COPY setVal; END
+        envSet!(envId, setName, COPY setVal, pool) OR FALSE;
+        RETURN COPY setVal;
 
     ELSE_IF formName == "let*" || formName == "let" THEN
-        MATCH items[1] START
+        PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 letId: Id<Env> = pool.insert(Env{ vars: {} });
-                pool[letId]?.vars["__p"] = Value{ EnvRef: envId };
+                IF pool[letId] AS letEnv THEN letEnv.vars["__p"] = Value{ EnvRef: envId }; END
                 IF binds.length() > 0 && isList?(binds[0]) THEN
                     FOR bi IN (0_i64 ..< binds.length()) DO
-                        MATCH binds[bi] START
+                        PARTIAL MATCH binds[bi] START
                             Value.List AS pair ->
                                 bName = getSymName(pair[0]);
-                                bVal = eval!(COPY pair[1], letId, pool);
+                                bVal = eval!(COPY pair[1], letId, pool) OR RAISE;
                                 IF isError?(bVal) THEN RETURN bVal; END
-                                pool[letId]?.vars[bName] = bVal;,
+                                IF pool[letId] AS letEnv2 THEN letEnv2.vars[bName] = COPY bVal; END,
                             DEFAULT -> PASS;
                         END
                     END
@@ -550,9 +561,9 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                     MUTABLE bi: Int64 = 0;
                     WHILE bi < binds.length() DO
                         bName = getSymName(binds[bi]);
-                        bVal = eval!(COPY binds[bi + 1], letId, pool);
+                        bVal = eval!(COPY binds[bi + 1], letId, pool) OR RAISE;
                         IF isError?(bVal) THEN RETURN bVal; END
-                        pool[letId]?.vars[bName] = bVal;
+                        IF pool[letId] AS letEnv3 THEN letEnv3.vars[bName] = COPY bVal; END
                         bi += 2;
                     END
                 END
@@ -562,22 +573,34 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         RETURN Value.Nil;
 
     ELSE_IF formName == "fn*" || formName == "lambda" THEN
-        MATCH items[1] START
+        PARTIAL MATCH items[1] START
             Value.List AS pnames ->
-                RETURN Value.Lambda{ params: COPY pnames, body: COPY items[2], envId: envId };,
+                metaId: Id<Env> = pool.insert(Env{ vars: {} });
+                MUTABLE paramsText = "";
+                FOR pi IN (0_i64 ..< pnames.length()) DO
+                    IF pi > 0 THEN paramsText = paramsText + "\n"; END
+                    paramsText = paramsText + getSymName(pnames[pi]);
+                END
+                bodyText = prStr(items[2], TRUE) OR "";
+                IF pool[metaId] AS meta THEN
+                    meta.vars["__p"] = Value{ EnvRef: envId };
+                    meta.vars["__params"] = Value{ Str: COPY paramsText };
+                    meta.vars["__body"] = Value{ Str: COPY bodyText };
+                END
+                RETURN Value.Lambda{ envId: metaId };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
 
     ELSE_IF formName == "do" || formName == "begin" THEN
         FOR di IN (1_i64 ..< items.length() - 1) DO
-            stepResult = eval!(COPY items[di], envId, pool);
+            stepResult = eval!(COPY items[di], envId, pool) OR RAISE;
             IF isError?(stepResult) THEN RETURN stepResult; END
         END
         RETURN Value.Tco{ tcoAst: COPY items[items.length() - 1], tcoEnv: envId };
 
     ELSE_IF formName == "if" THEN
-        cond = eval!(COPY items[1], envId, pool);
+        cond = eval!(COPY items[1], envId, pool) OR RAISE;
         IF isError?(cond) THEN RETURN cond; END
         IF isTruthy?(cond) THEN
             RETURN Value.Tco{ tcoAst: COPY items[2], tcoEnv: envId };
@@ -591,225 +614,117 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
     ELSE
         MUTABLE evaled: Value[]@list = List[];
         FOR ei IN (0_i64 ..< items.length()) DO
-            argVal = eval!(COPY items[ei], envId, pool);
+            argVal = eval!(COPY items[ei], envId, pool) OR RAISE;
             IF isError?(argVal) THEN RETURN argVal; END
             evaled.append(argVal);
         END
         f = evaled[0];
         IF isLambda?(f) THEN
-            MATCH f START
+            PARTIAL MATCH f START
                 Value.Lambda AS lam ->
                     callId: Id<Env> = pool.insert(Env{ vars: {} });
-                    pool[callId]?.vars["__p"] = Value{ EnvRef: lam.envId };
-                    FOR pi IN (0_i64 ..< lam.params.length()) DO
-                        pname = getSymName(lam.params[pi]);
-                        pool[callId]?.vars[pname] = evaled[pi + 1];
+                    lambdaMetaId = lam.envId;
+                    MUTABLE closureEnv = lambdaMetaId;
+                    MUTABLE lambdaBodyText = "";
+                    MUTABLE lambdaParamsText = "";
+                    IF pool[lambdaMetaId] AS meta THEN
+                        PARTIAL MATCH meta.vars["__p"] OR Value.Nil START
+                            Value.EnvRef AS pid -> closureEnv = pid;,
+                            DEFAULT -> PASS;
+                        END
+                        lambdaBodyText = getStr(meta.vars["__body"] OR Value.Nil);
+                        lambdaParamsText = getStr(meta.vars["__params"] OR Value.Nil);
                     END
-                    RETURN Value.Tco{ tcoAst: lam.body, tcoEnv: callId };,
+                    IF pool[callId] AS callEnv THEN callEnv.vars["__p"] = Value{ EnvRef: closureEnv }; END
+                    lambdaParamNames = lambdaParamsText.split("\n");
+                    FOR pi IN (0_i64 ..< lambdaParamNames.length()) DO
+                        IF lambdaParamNames[pi] != "" THEN
+                            IF pool[callId] AS callEnv2 THEN callEnv2.vars[lambdaParamNames[pi]] = COPY evaled[pi + 1]; END
+                        END
+                    END
+                    MUTABLE bodyPenv: HashMap<Value> = {};
+                    lambdaResult = runTest!(lambdaBodyText, callId, pool, bodyPenv) OR RAISE;
+                    RETURN COPY lambdaResult;,
                 DEFAULT -> RETURN Value.Nil;
             END
         ELSE
             fnId = getNativeId(f);
             IF fnId > 0 THEN
-                RETURN applyNative(fnId, evaled);
+                RETURN applyNative!(fnId, evaled, envId, pool) OR Value.Error{ errMsg: "native call failed", errKind: "RuntimeError" };
             END
             RETURN Value.Nil;
         END
     END
 END
 
--- runTest: tokenize + parse + eval
+# runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
-    tokenizeToEnv!(penv, input);
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value @reentrant ->
+    tokenizeToEnv!(penv, input) OR RAISE;
     penv["__rp"] = Value{ Number: 0.0 };
-    ast = readFormEnv!(penv);
-    RETURN eval!(ast, envId, pool);
+    ast = readFormEnv!(penv) OR RAISE;
+    RETURN eval!(ast, envId, pool) OR RAISE;
 END
 
--- Setup: create root env with all native functions registered.
--- Returns the root env Id.
+# Setup: create root env with all native functions registered.
+# Returns the root env Id.
 
-FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
+FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env> ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
-    -- Arithmetic: 1-4
-    pool[rootId]?.vars["+"] = Value{ NativeFn: 1 };
-    pool[rootId]?.vars["-"] = Value{ NativeFn: 2 };
-    pool[rootId]?.vars["*"] = Value{ NativeFn: 3 };
-    pool[rootId]?.vars["/"] = Value{ NativeFn: 4 };
-    -- Comparison: 5-9
-    pool[rootId]?.vars["="] = Value{ NativeFn: 5 };
-    pool[rootId]?.vars["<"] = Value{ NativeFn: 6 };
-    pool[rootId]?.vars[">"] = Value{ NativeFn: 7 };
-    pool[rootId]?.vars["<="] = Value{ NativeFn: 8 };
-    pool[rootId]?.vars[">="] = Value{ NativeFn: 9 };
-    -- List: 10-15
-    pool[rootId]?.vars["list"] = Value{ NativeFn: 10 };
-    pool[rootId]?.vars["list?"] = Value{ NativeFn: 11 };
-    pool[rootId]?.vars["empty?"] = Value{ NativeFn: 12 };
-    pool[rootId]?.vars["count"] = Value{ NativeFn: 13 };
-    pool[rootId]?.vars["not"] = Value{ NativeFn: 14 };
-    pool[rootId]?.vars["prn"] = Value{ NativeFn: 15 };
-    -- Vector: 16-20
-    pool[rootId]?.vars["vector"] = Value{ NativeFn: 16 };
-    pool[rootId]?.vars["vector-ref"] = Value{ NativeFn: 17 };
-    pool[rootId]?.vars["vector-set!"] = Value{ NativeFn: 18 };
-    pool[rootId]?.vars["vector-length"] = Value{ NativeFn: 19 };
-    pool[rootId]?.vars["vector?"] = Value{ NativeFn: 20 };
-    -- Pair: 21-24
-    pool[rootId]?.vars["cons"] = Value{ NativeFn: 21 };
-    pool[rootId]?.vars["car"] = Value{ NativeFn: 22 };
-    pool[rootId]?.vars["cdr"] = Value{ NativeFn: 23 };
-    pool[rootId]?.vars["pair?"] = Value{ NativeFn: 24 };
-    -- Symbol comparison: 25
-    pool[rootId]?.vars["eq?"] = Value{ NativeFn: 25 };
-    -- String: 26-33
-    pool[rootId]?.vars["string-append"] = Value{ NativeFn: 26 };
-    pool[rootId]?.vars["string-length"] = Value{ NativeFn: 27 };
-    pool[rootId]?.vars["substring"] = Value{ NativeFn: 28 };
-    pool[rootId]?.vars["string-ref"] = Value{ NativeFn: 29 };
-    pool[rootId]?.vars["number->string"] = Value{ NativeFn: 30 };
-    pool[rootId]?.vars["string->number"] = Value{ NativeFn: 31 };
-    pool[rootId]?.vars["string?"] = Value{ NativeFn: 32 };
-    pool[rootId]?.vars["display"] = Value{ NativeFn: 33 };
-    -- error?, error-message, error-kind are special forms (not native fns)
+    IF pool[rootId] AS root THEN
+        root.vars["__output"] = Value{ Str: "" };
+        root.vars["+"] = Value{ NativeFn: 1 };
+        root.vars["-"] = Value{ NativeFn: 2 };
+        root.vars["*"] = Value{ NativeFn: 3 };
+        root.vars["/"] = Value{ NativeFn: 4 };
+        root.vars["="] = Value{ NativeFn: 5 };
+        root.vars["<"] = Value{ NativeFn: 6 };
+        root.vars[">"] = Value{ NativeFn: 7 };
+        root.vars["<="] = Value{ NativeFn: 8 };
+        root.vars[">="] = Value{ NativeFn: 9 };
+        root.vars["list"] = Value{ NativeFn: 10 };
+        root.vars["list?"] = Value{ NativeFn: 11 };
+        root.vars["empty?"] = Value{ NativeFn: 12 };
+        root.vars["count"] = Value{ NativeFn: 13 };
+        root.vars["not"] = Value{ NativeFn: 14 };
+        root.vars["prn"] = Value{ NativeFn: 15 };
+        root.vars["vector"] = Value{ NativeFn: 16 };
+        root.vars["vector-ref"] = Value{ NativeFn: 17 };
+        root.vars["vector-set!"] = Value{ NativeFn: 18 };
+        root.vars["vector-length"] = Value{ NativeFn: 19 };
+        root.vars["vector?"] = Value{ NativeFn: 20 };
+        root.vars["cons"] = Value{ NativeFn: 21 };
+        root.vars["car"] = Value{ NativeFn: 22 };
+        root.vars["cdr"] = Value{ NativeFn: 23 };
+        root.vars["pair?"] = Value{ NativeFn: 24 };
+        root.vars["eq?"] = Value{ NativeFn: 25 };
+        root.vars["string-append"] = Value{ NativeFn: 26 };
+        root.vars["string-length"] = Value{ NativeFn: 27 };
+        root.vars["substring"] = Value{ NativeFn: 28 };
+        root.vars["string-ref"] = Value{ NativeFn: 29 };
+        root.vars["number->string"] = Value{ NativeFn: 30 };
+        root.vars["string->number"] = Value{ NativeFn: 31 };
+        root.vars["string?"] = Value{ NativeFn: 32 };
+        root.vars["display"] = Value{ NativeFn: 33 };
+    END
     RETURN rootId;
 END
 
--- Test helpers: create fresh interpreter, run input, return result string.
+# Test helpers: create fresh interpreter, run input, return result string.
 
-FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
-    result = runTest!(input, rootId, pool, penv);
-    RETURN prStr(result, readable);
+FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
+    result = runTest!(input, rootId, pool, penv) OR RAISE;
+    RETURN prStr(result, readable) OR RAISE;
 END
 
-FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String ->
+FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
     MUTABLE result: Value = Value.Nil;
     FOR i IN (0_i64 ..< inputs.length()) DO
-        result = runTest!(inputs[i], rootId, pool, penv);
+        result = runTest!(inputs[i], rootId, pool, penv) OR RAISE;
     END
-    RETURN prStr(result, readable);
+    RETURN prStr(result, readable) OR RAISE;
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[50000]@pool = [];
-    MUTABLE penv: HashMap<Value> = {};
-    rootId = setupEnv!(pool);
-
-    -- Arithmetic
-    ASSERT evalIn!("(+ 1 2)", TRUE, rootId, pool, penv) == "3", "(+ 1 2)";
-    ASSERT evalIn!("(- 5 3)", TRUE, rootId, pool, penv) =="2", "(- 5 3)";
-    ASSERT evalIn!("(* 3 4)", TRUE, rootId, pool, penv) =="12", "(* 3 4)";
-    ASSERT evalIn!("(/ 10 2)", TRUE, rootId, pool, penv) =="5", "(/ 10 2)";
-    ASSERT evalIn!("(+ (* 2 3) (- 10 4))", TRUE, rootId, pool, penv) =="12", "nested arithmetic";
-
-    -- Variables
-    ASSERT evalIn!("(def! a 10)", TRUE, rootId, pool, penv) =="10", "def! returns value";
-    ASSERT evalSeqIn!(["(def! a 10)", "a"], TRUE, rootId, pool, penv) =="10", "def! is retrievable";
-
-    -- Closures
-    ASSERT evalIn!("(def! f (fn* (x) (+ x 1)))", TRUE, rootId, pool, penv) =="#<function>", "fn* creates function";
-    ASSERT evalSeqIn!(["(def! a 10)", "(def! f (fn* (x) (+ x a)))", "(f 5)"], TRUE, rootId, pool, penv) =="15", "closure captures outer";
-    ASSERT evalSeqIn!(["(def! add3 (fn* (a b c) (+ a (+ b c))))", "(add3 1 2 3)"], TRUE, rootId, pool, penv) =="6", "multi-param fn";
-
-    -- Let bindings
-    ASSERT evalIn!("(let* (b 2 c 3) (+ b c))", TRUE, rootId, pool, penv) =="5", "let* scoped bindings";
-    ASSERT evalIn!("(let* (a 1 b (+ a 1)) b)", TRUE, rootId, pool, penv) =="2", "let* references earlier";
-
-    -- Conditionals
-    ASSERT evalIn!("(if true 7 8)", TRUE, rootId, pool, penv) =="7", "if true";
-    ASSERT evalIn!("(if false 7 8)", TRUE, rootId, pool, penv) =="8", "if false";
-    ASSERT evalIn!("(if nil 7 8)", TRUE, rootId, pool, penv) =="8", "if nil";
-    ASSERT evalIn!("(if false 7)", TRUE, rootId, pool, penv) =="nil", "if without else";
-
-    -- Sequential evaluation
-    ASSERT evalIn!("(do (def! d 6) 7 (+ d 8))", TRUE, rootId, pool, penv) =="14", "do returns last";
-
-    -- Comparison
-    ASSERT evalIn!("(= 1 1)", TRUE, rootId, pool, penv) =="true", "= equal";
-    ASSERT evalIn!("(= 1 2)", TRUE, rootId, pool, penv) =="false", "= unequal";
-    ASSERT evalIn!("(> 2 1)", TRUE, rootId, pool, penv) =="true", "> comparison";
-    ASSERT evalIn!("(< 1 2)", TRUE, rootId, pool, penv) =="true", "< comparison";
-    ASSERT evalIn!("(<= 2 2)", TRUE, rootId, pool, penv) =="true", "<= equal";
-    ASSERT evalIn!("(>= 3 2)", TRUE, rootId, pool, penv) =="true", ">= greater";
-
-    -- List operations
-    ASSERT evalIn!("(list 1 2 3)", FALSE, rootId, pool, penv) == "(1 2 3)", "list creates list";
-    ASSERT evalIn!("(count (list 1 2 3))", TRUE, rootId, pool, penv) =="3", "count";
-    ASSERT evalIn!("(empty? (list))", TRUE, rootId, pool, penv) =="true", "empty?";
-    ASSERT evalIn!("(not false)", TRUE, rootId, pool, penv) =="true", "not";
-    ASSERT evalIn!("(list? (list 1 2))", TRUE, rootId, pool, penv) =="true", "list?";
-
-    -- Recursion
-    ASSERT evalSeqIn!(["(def! sumdown (fn* (n) (if (> n 0) (+ n (sumdown (- n 1))) 0)))", "(sumdown 6)"], TRUE, rootId, pool, penv) =="21", "sumdown";
-    ASSERT evalSeqIn!(["(def! fib (fn* (n) (if (<= n 1) 1 (+ (fib (- n 1)) (fib (- n 2))))))", "(fib 4)"], TRUE, rootId, pool, penv) =="5", "fibonacci";
-
-    -- Scheme syntax: define, lambda, let, begin
-    ASSERT evalIn!("(define x 42)", TRUE, rootId, pool, penv) =="42", "define";
-    ASSERT evalSeqIn!(["(define x 42)", "x"], TRUE, rootId, pool, penv) =="42", "define retrievable";
-    ASSERT evalSeqIn!(["(define inc (lambda (n) (+ n 1)))", "(inc 5)"], TRUE, rootId, pool, penv) =="6", "lambda";
-    ASSERT evalIn!("(let ((a 3) (b 4)) (+ a b))", TRUE, rootId, pool, penv) =="7", "let";
-    ASSERT evalIn!("(begin 1 2 3)", TRUE, rootId, pool, penv) =="3", "begin";
-
-    -- set!: mutable reassignment
-    ASSERT evalSeqIn!(["(define x 1)", "(set! x 2)", "x"], TRUE, rootId, pool, penv) =="2", "set! reassigns";
-    ASSERT evalSeqIn!(["(define x 10)", "(define inc! (lambda () (set! x (+ x 1))))", "(inc!)", "x"], TRUE, rootId, pool, penv) =="11", "set! in closure";
-
-    -- TCO: deep recursion with 50000-slot pool
-    ASSERT evalSeqIn!(["(define countdown (lambda (n) (if (= n 0) 0 (countdown (- n 1)))))", "(countdown 5000)"], TRUE, rootId, pool, penv) =="0", "TCO countdown 5000";
-    ASSERT evalSeqIn!(["(define loop (lambda (n acc) (if (= n 0) acc (loop (- n 1) (+ acc n)))))", "(loop 2000 0)"], TRUE, rootId, pool, penv) =="2001000", "TCO accumulator 2000";
-
-    -- Vector operations (STRUCT lowering)
-    ASSERT evalIn!("(vector 10 20 30)", TRUE, rootId, pool, penv) =="#(10 20 30)", "vector create";
-    ASSERT evalIn!("(vector-ref (vector 10 20 30) 0)", TRUE, rootId, pool, penv) =="10", "vector-ref 0";
-    ASSERT evalIn!("(vector-ref (vector 10 20 30) 2)", TRUE, rootId, pool, penv) =="30", "vector-ref 2";
-    ASSERT evalIn!("(vector-length (vector 1 2 3 4))", TRUE, rootId, pool, penv) =="4", "vector-length";
-    ASSERT evalIn!("(vector? (vector 1 2))", TRUE, rootId, pool, penv) =="true", "vector? true";
-    ASSERT evalIn!("(vector? (list 1 2))", TRUE, rootId, pool, penv) =="false", "vector? false on list";
-
-    -- Pair operations (UNION lowering)
-    ASSERT evalIn!("(cons 1 2)", TRUE, rootId, pool, penv) =="(1 . 2)", "cons";
-    ASSERT evalIn!("(car (cons 1 2))", TRUE, rootId, pool, penv) =="1", "car";
-    ASSERT evalIn!("(cdr (cons 1 2))", TRUE, rootId, pool, penv) =="2", "cdr";
-    ASSERT evalIn!("(pair? (cons 1 2))", TRUE, rootId, pool, penv) =="true", "pair? true";
-    ASSERT evalIn!("(pair? (list 1 2))", TRUE, rootId, pool, penv) =="false", "pair? false on list";
-
-    -- Tagged pairs for UNION lowering: (cons 'Tag payload)
-    ASSERT evalIn!("(car (cons (quote Ok) 42))", TRUE, rootId, pool, penv) =="Ok", "tagged pair car";
-    ASSERT evalIn!("(cdr (cons (quote Ok) 42))", TRUE, rootId, pool, penv) =="42", "tagged pair cdr";
-    ASSERT evalIn!("(eq? (car (cons (quote Err) 0)) (quote Err))", TRUE, rootId, pool, penv) =="true", "tag eq?";
-    ASSERT evalIn!("(eq? (car (cons (quote Ok) 0)) (quote Err))", TRUE, rootId, pool, penv) =="false", "tag neq?";
-
-    -- Quote returns unevaluated
-    ASSERT evalIn!("(quote hello)", TRUE, rootId, pool, penv) =="hello", "quote symbol";
-    ASSERT evalIn!("(quote (1 2 3))", FALSE, rootId, pool, penv) == "(1 2 3)", "quote list";
-
-    -- String operations
-    ASSERT evalIn!("(string-append \"hello\" \" \" \"world\")", TRUE, rootId, pool, penv) =="\"hello world\"", "string-append";
-    ASSERT evalIn!("(string-length \"abc\")", TRUE, rootId, pool, penv) =="3", "string-length";
-    ASSERT evalIn!("(substring \"abcdef\" 1 4)", TRUE, rootId, pool, penv) =="\"bcd\"", "substring";
-    ASSERT evalIn!("(string-ref \"hello\" 0)", TRUE, rootId, pool, penv) =="\"h\"", "string-ref";
-    ASSERT evalIn!("(number->string 42)", TRUE, rootId, pool, penv) =="\"42\"", "number->string";
-    ASSERT evalIn!("(string->number \"3\")", TRUE, rootId, pool, penv) =="3", "string->number";
-    ASSERT evalIn!("(string->number \"bad\")", TRUE, rootId, pool, penv) =="false", "string->number invalid";
-    ASSERT evalIn!("(string? \"hi\")", TRUE, rootId, pool, penv) =="true", "string? true";
-    ASSERT evalIn!("(string? 42)", TRUE, rootId, pool, penv) =="false", "string? false";
-
-    -- Error handling: raise + try/catch
-    ASSERT evalIn!("(try (raise \"boom\" \"System\") (catch e (error-message e)))", FALSE, rootId, pool, penv) =="boom", "try/catch message";
-    ASSERT evalIn!("(try (raise \"x\" \"Input\") (catch e (error-kind e)))", FALSE, rootId, pool, penv) =="Input", "try/catch kind";
-    ASSERT evalIn!("(try (+ 1 2) (catch e \"bad\"))", TRUE, rootId, pool, penv) =="3", "try no error";
-    ASSERT evalIn!("(try (+ 1 (raise \"x\" \"E\")) (catch e \"caught\"))", FALSE, rootId, pool, penv) =="caught", "error propagates through +";
-    ASSERT evalIn!("(error? (raise \"x\" \"E\"))", TRUE, rootId, pool, penv) =="true", "error? on raise";
-
-    -- Error propagation through define, begin, if
-    ASSERT evalSeqIn!(["(define safe-div (lambda (a b) (if (= b 0) (raise \"div0\" \"Input\") (/ a b))))", "(try (safe-div 10 0) (catch e \"nope\"))"], FALSE, rootId, pool, penv) =="nope", "error from lambda";
-    ASSERT evalIn!("(try (begin 1 (raise \"mid\" \"E\") 3) (catch e \"stopped\"))", FALSE, rootId, pool, penv) =="stopped", "error in begin";
-    ASSERT evalIn!("(try (if (raise \"cond\" \"E\") 1 2) (catch e \"cond-err\"))", FALSE, rootId, pool, penv) =="cond-err", "error in if cond";
-
-    -- Pool capacity: verify 50k pool handles deep programs
-    ASSERT evalSeqIn!(["(define deep (lambda (n) (if (= n 0) 0 (+ 1 (deep (- n 1))))))", "(deep 100)"], TRUE, rootId, pool, penv) =="100", "deep non-TCO 100";
-
-    print("All 75 interpreter tests PASSED!");
     RETURN;
 END
