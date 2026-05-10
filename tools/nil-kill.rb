@@ -1173,8 +1173,10 @@ module NilKill
           next false unless action["confidence"] == HIGH
           next false if @skipped.include?(fingerprint(action))
           next false if permanently_skipped?(action)
-          # A4: block remove_dead_safe_nav actions whose receiver might be nil
-          next false if action["kind"] == "remove_dead_safe_nav" && @z3_solver && !@z3_solver.provably_dead_safe_nav?(action)
+          # A4: block nil-check removal actions whose receiver might actually be nil
+          if @z3_solver && (action["kind"] == "remove_dead_safe_nav" || action["kind"] == "replace_dead_nil_check")
+            next false unless @z3_solver.provably_dead_safe_nav?(action)
+          end
           true
         end
         high = high_actions.size

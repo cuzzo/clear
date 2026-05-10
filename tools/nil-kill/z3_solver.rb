@@ -106,8 +106,10 @@ module NilKill
       new_actions
     end
 
-    # A4: Returns true if the safe-nav IS provably dead (allow the action).
+    # A4: Returns true if the receiver IS provably non-nil (allow the action).
     # Returns false if the receiver might be nil (block the action).
+    # Covers both remove_dead_safe_nav ("foo&.bar") and
+    # replace_dead_nil_check ("foo.nil?") action kinds.
     # Scans the method scope for nil assignments or nilable-return assignments
     # to the receiver variable. Conservative: returns true (allow) when the
     # receiver is complex or the analysis is inconclusive.
@@ -115,8 +117,14 @@ module NilKill
       code = action.dig("data", "code")
       return true unless code
 
-      # Extract bare receiver: "resolved&.dig(a)" -> "resolved"
-      receiver = code.split("&.").first.strip
+      # Extract bare receiver depending on action kind:
+      #   remove_dead_safe_nav : "resolved&.dig(a)" -> "resolved"
+      #   replace_dead_nil_check: "reason.nil?"     -> "reason"
+      receiver = if action["kind"] == "replace_dead_nil_check"
+        code.sub(/\.nil\?\z/, "").strip
+      else
+        code.split("&.").first.strip
+      end
       # Skip complex receivers like "foo.bar&.baz" -- can't trace easily
       return true if receiver.include?(".") || receiver.include?("(")
 
