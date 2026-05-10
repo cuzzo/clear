@@ -13,11 +13,11 @@ class Scope
 
   sig { void }
   def initialize
-    @locals = T.let({}, T::Hash[T.untyped, T.untyped])
-    @dependencies = T.let({}, T::Hash[T.untyped, T.untyped])
-    @types = T.let({}, T::Hash[T.untyped, T.untyped])
-    @owned_names = T.let(Set.new, Set)  # Variables declared in THIS scope (not inherited from parent)
-    @depth = T.let(0, Integer)
+    @locals = {}
+    @dependencies = {}
+    @types = {}
+    @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
+    @depth = 0
   end
 
   sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: Set, _borrowed_paths: Array, sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }

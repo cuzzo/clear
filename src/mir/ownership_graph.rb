@@ -37,7 +37,7 @@ class OwnershipGraph
   sig { void }
   def initialize
     @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
-    @edges = T.let([], T::Array[T.untyped])           # Array of Edge
+    @edges = []           # Array of Edge
     @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # target_path => [Edge]
     @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # source_path => [Edge]
     @children = T.let(Hash.new { |h, k| h[k] = Set.new }, Hash)    # parent_path => Set of child paths

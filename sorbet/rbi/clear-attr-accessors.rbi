@@ -8,14 +8,10 @@
 # Struct fields, not `attr_accessor`/`attr_reader`/`attr_writer`
 # declarations inside the do-block. Without this shim, every file
 # that flips to `# typed: true` and reads such an attribute trips a
-# `Method does not exist` error. This file declares T.untyped sigs
-# so the per-file typing rollout can proceed.
+# `Method does not exist` error.
 #
-# As the Self-host preparation tracker (TODO.md) advances, individual
-# T.untyped sigs are tightened to real types (Symbol for identifiers
-# per task #1, etc.). When all attrs are typed, this shim can be
-# deleted and replaced by inline T::Sig declarations on the classes
-# themselves.
+# Where a matching T.let declaration exists in initialize, the sig is
+# typed. Otherwise it falls back to T.untyped.
 
 class AST::Assignment
   sig { returns(T.untyped) }
@@ -451,6 +447,13 @@ class AST::FunctionDef
   def uses_rt=(value); end
 end
 
+class AST::GetField
+  sig { returns(T.untyped) }
+  def is_assignment_lhs; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def is_assignment_lhs=(value); end
+end
+
 class AST::Identifier
   sig { returns(T.untyped) }
   def atomic_borrow; end
@@ -734,17 +737,17 @@ class BasicBlock
   def id; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def id=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def predecessors; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def predecessors=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def stmts; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def stmts=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def successors; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def successors=(value); end
 end
 
@@ -881,14 +884,14 @@ class BindExpr
 end
 
 class BorrowChecker
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def errors; end
 end
 
 class Builder
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def segments; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def synthetic_fields; end
 end
 
@@ -934,6 +937,13 @@ end
 class EffectSet
   sig { returns(T.untyped) }
   def effects; end
+end
+
+class EnumSchema
+  sig { returns(T.untyped) }
+  def variants; end
+  sig { returns(T.untyped) }
+  def visibility; end
 end
 
 class ExternFnDecl
@@ -1014,16 +1024,16 @@ class ForRange
 end
 
 class FsmTransform::Builder
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def segments; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def synthetic_fields; end
 end
 
 class FsmTransform::RecursiveSplitter::Builder
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def segments; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def synthetic_fields; end
 end
 
@@ -1071,7 +1081,7 @@ class FuncCall
 end
 
 class FunctionCFG
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def blocks; end
   sig { returns(T.untyped) }
   def entry; end
@@ -1082,49 +1092,49 @@ class FunctionCFG
 end
 
 class FunctionContext
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def alloc_count; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def alloc_count=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def conditional_depth; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def conditional_depth=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def frame_count; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def frame_count=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def heap_count; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def heap_count=(value); end
   sig { returns(T.untyped) }
   def lifetime; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def lifetime=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def loop_depth; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def loop_depth=(value); end
   sig { returns(T.untyped) }
   def name; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def name=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def needs_rt; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def needs_rt=(value); end
   sig { returns(T.untyped) }
   def return_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def return_type=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def returns; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def returns=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def stack_vars_bytes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def stack_vars_bytes=(value); end
   sig { returns(T.untyped) }
   def type_params; end
@@ -1374,6 +1384,13 @@ class FunctionSignature
   def zig_pattern=(value); end
 end
 
+class GetField
+  sig { returns(T.untyped) }
+  def is_assignment_lhs; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def is_assignment_lhs=(value); end
+end
+
 class Identifier
   sig { returns(T.untyped) }
   def atomic_borrow; end
@@ -1419,14 +1436,14 @@ class MIR::FieldDef
 end
 
 class MIRChecker
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def errors; end
 end
 
 class MIREmitter
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def rt_name; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: String).returns(String) }
   def rt_name=(value); end
 end
 
@@ -1440,7 +1457,7 @@ class MIRLowering
 end
 
 class MIRPass
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def cleanup_bindings; end
 end
 
@@ -1495,19 +1512,17 @@ class MethodCall
 end
 
 class OwnershipDataflow
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def block_in; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def block_out; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def point_states; end
 end
 
 class OwnershipGraph
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def edges; end
-  sig { returns(T.untyped) }
-  def nodes; end
 end
 
 class PipelineHost
@@ -1515,6 +1530,24 @@ class PipelineHost
   def fn_sigs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fn_sigs=(value); end
+end
+
+class Pprof::Profile
+  sig { params(value: Integer).returns(Integer) }
+  def duration_nanos=(value); end
+  sig { params(value: Integer).returns(Integer) }
+  def period=(value); end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def time_nanos=(value); end
+end
+
+class Profile
+  sig { params(value: Integer).returns(Integer) }
+  def duration_nanos=(value); end
+  sig { params(value: Integer).returns(Integer) }
+  def period=(value); end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def time_nanos=(value); end
 end
 
 class Program
@@ -1525,10 +1558,27 @@ class Program
 end
 
 class RecursiveSplitter::Builder
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def segments; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def synthetic_fields; end
+end
+
+class ResourceSchema
+  sig { returns(T.untyped) }
+  def as_type; end
+  sig { returns(T.untyped) }
+  def close_zig; end
+  sig { returns(T.untyped) }
+  def extern_module; end
+  sig { returns(T.untyped) }
+  def fields; end
+  sig { returns(T.untyped) }
+  def static_methods; end
+  sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def visibility; end
 end
 
 class ReturnNode
@@ -1546,29 +1596,81 @@ class ReturnNode
   def ret_field_promote_data=(value); end
 end
 
+class Schemas::EnumSchema
+  sig { returns(T.untyped) }
+  def variants; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
+class Schemas::ResourceSchema
+  sig { returns(T.untyped) }
+  def as_type; end
+  sig { returns(T.untyped) }
+  def close_zig; end
+  sig { returns(T.untyped) }
+  def extern_module; end
+  sig { returns(T.untyped) }
+  def fields; end
+  sig { returns(T.untyped) }
+  def static_methods; end
+  sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
+class Schemas::StructSchema
+  sig { returns(T.untyped) }
+  def as_type; end
+  sig { returns(T.untyped) }
+  def borrowed_fields; end
+  sig { returns(T.untyped) }
+  def extern_module; end
+  sig { returns(T.untyped) }
+  def field_defaults; end
+  sig { returns(T.untyped) }
+  def fields; end
+  sig { returns(T.untyped) }
+  def methods; end
+  sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
+class Schemas::UnionSchema
+  sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def variants; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
 class Scope
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def dependencies; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
   def dependencies=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Integer) }
   def depth; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Integer).returns(Integer) }
   def depth=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def locals; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
   def locals=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Set) }
   def owned_names; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: Set).returns(Set) }
   def owned_names=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def types; end
 end
 
 class SemanticAnnotator
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def scope_stack; end
   sig { returns(T.untyped) }
   def source_code; end
@@ -1617,6 +1719,25 @@ class StructLit
   def field_tokens=(value); end
 end
 
+class StructSchema
+  sig { returns(T.untyped) }
+  def as_type; end
+  sig { returns(T.untyped) }
+  def borrowed_fields; end
+  sig { returns(T.untyped) }
+  def extern_module; end
+  sig { returns(T.untyped) }
+  def field_defaults; end
+  sig { returns(T.untyped) }
+  def fields; end
+  sig { returns(T.untyped) }
+  def methods; end
+  sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
 class SymbolEntry
   sig { returns(T.untyped) }
   def borrowed_alias; end
@@ -1642,9 +1763,9 @@ class SymbolEntry
   def layout; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def layout=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))) }
   def lifetime; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))).returns(T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))) }
   def lifetime=(value); end
   sig { returns(T.untyped) }
   def link_source; end
@@ -1654,6 +1775,10 @@ class SymbolEntry
   def mutable; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutable=(value); end
+  sig { returns(T.untyped) }
+  def mutable_ref_target; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mutable_ref_target=(value); end
   sig { returns(T.untyped) }
   def mutated; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1805,9 +1930,9 @@ class Type
   def elem_sync=(value); end
   sig { returns(T.untyped) }
   def generic_args; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Boolean) }
   def is_observable; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def is_observable=(value); end
   sig { params(value: T.untyped).returns(T.untyped) }
   def is_resource=(value); end
@@ -1833,17 +1958,17 @@ class Type
   def observable_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def observable_token=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def ownership; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership=(value); end
   sig { returns(T.untyped) }
   def polymorphic_shared; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def polymorphic_shared=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def provenance=(value); end
   sig { returns(T.untyped) }
   def raw; end
@@ -1872,8 +1997,17 @@ class UnionDef
   def type_params=(value); end
 end
 
-class UseAfterMoveChecker
+class UnionSchema
   sig { returns(T.untyped) }
+  def type_params; end
+  sig { returns(T.untyped) }
+  def variants; end
+  sig { returns(T.untyped) }
+  def visibility; end
+end
+
+class UseAfterMoveChecker
+  sig { returns(T::Array[T.untyped]) }
   def errors; end
 end
 

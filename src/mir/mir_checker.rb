@@ -78,7 +78,7 @@ class MIRChecker
   sig { params(fn_name: T.untyped).void }
   def initialize(fn_name: nil)
     @fn_name = fn_name
-    @errors = T.let([], T::Array[T.untyped])
+    @errors = []
   end
 
   # strict: true enables the UNHOISTED_ALLOC check.

@@ -18,13 +18,13 @@ class FunctionContext
     @return_type = return_type
     @lifetime = lifetime
     @type_params = type_params
-    @frame_count = T.let(0, Integer)
-    @heap_count = T.let(0, Integer)
-    @alloc_count = T.let(0, Integer)
-    @needs_rt = T.let(false, T::Boolean)
-    @loop_depth = T.let(0, Integer)
-    @conditional_depth = T.let(0, Integer)
-    @returns = T.let([], T::Array[T.untyped])
-    @stack_vars_bytes = T.let(0, Integer)
+    @frame_count = 0
+    @heap_count = 0
+    @alloc_count = 0
+    @needs_rt = false
+    @loop_depth = 0
+    @conditional_depth = 0
+    @returns = []
+    @stack_vars_bytes = 0
   end
 end
