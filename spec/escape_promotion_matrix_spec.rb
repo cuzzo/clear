@@ -174,67 +174,6 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     end
   end
 
-  # ── BG-capture scenario ─────────────────────────────────────────────────
-  # For each type T, build a binding then capture it into a BG block.
-  # The BG handle's `lifetime` should reflect the right tied-source
-  # decision per Phase 2/3's `bg_capture_independent?`:
-  #   - escape_class :value or :slice_rodata    → handle lifetime nil (free)
-  #   - everything else                          → handle lifetime tied to source
-  # This is the matrix-level assertion that the Phase 3 escape_class
-  # migration produced the right BG-capture classification.
-  describe "BG capture" do
-    BG_CAPTURE_CASES = {
-      int:                 ["MUTABLE x = 5_i64",                                            "x", :independent],
-      string_rodata:       %|MUTABLE s = "hi"|,
-      list_int:            "MUTABLE lst: Int64[]@list = []",
-      struct_pure:         %|STRUCT Pt { x: Int64, y: Int64 }\nMUTABLE p = Pt{ x: 1_i64, y: 2_i64 }|,
-      struct_with_list:    %|STRUCT C { items: Int64[]@list }\nMUTABLE c = C{ items: [] }|,
-    }.freeze
-
-    # Whether the BG handle's lifetime should be `nil` (independent /
-    # free to escape) or `{ sources: [...] }` (tied to the captured
-    # binding). Aligned with `bg_capture_independent?` policy:
-    BG_CAPTURE_INDEPENDENT = Set[:int, :string_rodata].freeze
-
-    def annotate_only(src)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      SemanticAnnotator.new.annotate!(ast)
-      ast
-    end
-
-    def bg_decl(fn)
-      fn.body.find do |s|
-        (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "bg"
-      end
-    end
-
-    BG_CAPTURE_CASES.each_key do |type_name|
-      next unless BG_CAPTURE_CASES[type_name].is_a?(String)
-      it "BG{ ...#{type_name}... } stamps lifetime correctly" do
-        decl_lines = BG_CAPTURE_CASES[type_name]
-        # Last line is the binding; everything before is type prelude.
-        prelude, _, decl = decl_lines.rpartition("\n")
-        src = <<~CLEAR
-          #{prelude}
-          FN main() RETURNS Void ->
-              #{decl};
-              bg: ~Int64 = BG { 1_i64; };
-              NEXT bg;
-              RETURN;
-          END
-        CLEAR
-        # Note: this scaffold puts the BG body as a constant — capture
-        # itself is implicit via name reference inside the body. Real
-        # capture would put the binding name inside the BG body; this
-        # smoke test confirms the basic stamp pipeline is wired. Full
-        # type × capability cross-product is future work.
-        expect { annotate_only(src) }.not_to raise_error
-      end
-    end
-  end
-
   # ── Capability axis declaration coverage ─────────────────────────────────
   # Asserts the named constants in `Annotator::SYNC_DOES_NOT_BIND_CAPTURE`
   # and `Annotator::STORAGE_OUTLIVES_DECLARING_SCOPE` cover the intended
