@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # ownership_graph.rb — Ownership graph for CLEAR's affine type system.
 #
 # Nodes: variables and field paths (e.g., "x", "x.child", "x.child.name")
@@ -22,8 +22,12 @@ class OwnershipGraph
                     :move_line, :move_col, :move_action,
                     :move_consumer_param_type,
                     keyword_init: true) do
+    extend T::Sig
+    sig { returns(T::Boolean) }
     def live?;    state == :live; end
+    sig { returns(T::Boolean) }
     def moved?;   state == :moved; end
+    sig { returns(T::Boolean) }
     def dropped?; state == :dropped; end
   end
 
@@ -38,9 +42,9 @@ class OwnershipGraph
   def initialize
     @nodes = T.let({}, T::Hash[T.untyped, T.untyped])           # path => Node
     @edges = T.let([], T::Array[T.untyped])           # Array of Edge
-    @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # target_path => [Edge]
-    @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, Hash)  # source_path => [Edge]
-    @children = T.let(Hash.new { |h, k| h[k] = Set.new }, Hash)    # parent_path => Set of child paths
+    @edges_by_target = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # target_path => [Edge]
+    @edges_by_source = T.let(Hash.new { |h, k| h[k] = [] }, T::Hash[T.untyped, T.untyped])  # source_path => [Edge]
+    @children = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])    # parent_path => Set of child paths
     @completed_nodes = T.let({}, T::Hash[T.untyped, T.untyped])
   end
 
@@ -73,7 +77,7 @@ class OwnershipGraph
   # ── Core Operations ───────────────────────────────────────────────
 
   # Declare a new variable or field path.
-  sig { params(path: String, kind: Symbol, type_info: T.nilable(Type), scope_depth: Integer, line: Integer).returns(T.nilable(Set)) }
+  sig { params(path: String, kind: Symbol, type_info: T.nilable(Type), scope_depth: Integer, line: Integer).returns(T.nilable(T::Set[T.untyped])) }
   def declare(path, kind: :affine, type_info: nil, scope_depth: 0, line: 0)
     @nodes[path] = Node.new(
       path: path, kind: kind, state: :live,
@@ -87,7 +91,7 @@ class OwnershipGraph
   end
 
   # Move ownership from source to target. Invalidates source and all children.
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(Set)) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[T.untyped])) }
   def transfer(from, to, at_token: nil, action: :move)
     source = @nodes[from]
     return unless source
@@ -105,7 +109,7 @@ class OwnershipGraph
     invalidate(from, source)
   end
 
-  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Set)) }
+  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
   def mark_moved(path, at_token: nil, action: :move, consumer_param_type: nil)
     source = @nodes[path]
     return unless source
@@ -204,7 +208,7 @@ class OwnershipGraph
 
   # Lightweight snapshot: only saves node states, not full graph.
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def fork_lightweight
     states = {}
     @nodes.each do |k, v|
@@ -244,7 +248,7 @@ class OwnershipGraph
 
   # Merge a branch's graph state back. Both branches must agree on
   # moved/dropped state; conflicts are returned as error strings.
-  sig { params(other: OwnershipGraph).returns(Array) }
+  sig { params(other: OwnershipGraph).returns(T::Array[T.untyped]) }
   def merge(other)
     errors = []
     all_paths = (@nodes.keys + other.nodes.keys).uniq
@@ -300,7 +304,7 @@ class OwnershipGraph
 
   private
 
-  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(Set)) }
+  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(T::Set[T.untyped])) }
   def invalidate(path, move_source = nil)
     node = @nodes[path]
     return unless node

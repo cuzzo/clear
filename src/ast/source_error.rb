@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative 'diagnostic_registry'
@@ -9,7 +9,7 @@ module ErrorDefinitions
   # Symbol code to `error!` continue to look up the same templates.
   # Layer 3 will refactor the ~470 ad-hoc string sites to use registry
   # codes too; until then both paths work.
-  MESSAGES = DiagnosticRegistry::DIAGNOSTICS.transform_values { |e| e[:template] }.freeze
+  MESSAGES = T.let(DiagnosticRegistry::DIAGNOSTICS.transform_values { |e| e[:template] }.freeze, T::Hash[Symbol, String])
 end
 
 module ErrorHelper
@@ -54,7 +54,7 @@ module ErrorHelper
     # 3. Raise the specific error class
     err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
 
-    raise err_class.new(token, message, @source_code)
+    raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
   end
 
   # Try the hash form first when applicable; fall back to positional;
@@ -88,7 +88,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
-  sig { params(node_or_token: T.untyped, message: String).returns(Array) }
+  sig { params(node_or_token: T.untyped, message: String).returns(T::Array[T.untyped]) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -117,7 +117,8 @@ module ErrorHelper
   # `node.full_type` and cascades on nil). The finding is still
   # captured; the annotator then raises so the collector gets a clean
   # snapshot of what was diagnosed before the cascade would start.
-  def fixable!(node_or_token, message:, category:, level: :warning, fixes:, raise_in_collector: false)
+  sig { params(node_or_token: T.untyped, message: String, category: Symbol, fixes: T::Array[Fix], level: Symbol, raise_in_collector: T.untyped).returns(T.untyped) }
+  def fixable!(node_or_token, message:, category:, fixes:, level: :warning, raise_in_collector: false)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
     # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
@@ -132,7 +133,7 @@ module ErrorHelper
       FixCollector.push(finding)
       return unless raise_in_collector
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, message, @source_code)
+      raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
     end
 
     case level
@@ -142,7 +143,7 @@ module ErrorHelper
       $stderr.puts "#{tag} #{message}#{loc}"
     when :error
       err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      raise err_class.new(token, message, @source_code)
+      raise err_class.new(token, message, T.cast(T.unsafe(self).instance_variable_get(:@source_code), T.nilable(String)))
     end
   end
 end
@@ -161,6 +162,7 @@ class SourceError < StandardError
   end
 
   # Child classes override this for the header title
+  sig { returns(String) }
   def error_type; "Error"; end
 
   private

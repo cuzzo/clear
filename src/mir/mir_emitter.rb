@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # src/mir_emitter.rb -- MIR -> Zig template engine.
 #
 # CONTRACT: This file is a pure template engine. Each MIR node type maps to
@@ -33,6 +33,8 @@ class MIREmitter
   def initialize
     @indent = T.let(0, Integer)
     @rt_name = T.let("rt", String)
+    @flow_alias_zig = T.let(nil, T.nilable(String))
+    @if_bind_counter = T.let(nil, T.nilable(Integer))
   end
 
   # Emit Zig code from an MIR node. Returns a String.
@@ -233,6 +235,7 @@ class MIREmitter
   # a RawBc into a Zig-producing step, fall back to the :zig field of the
   # registry entry so emission completes. Registry entries that reach Zig
   # without :zig set is a bug in the migration — raise loudly.
+  sig { params(node: T.untyped).returns(String) }
   def emit_raw_bc_as_zig(node)
     entry = node.stdlib_def
     raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry[:zig]
@@ -354,7 +357,7 @@ class MIREmitter
     result
   end
 
-  sig { params(stmts: Array, return_kind: Symbol).returns(String) }
+  sig { params(stmts: T::Array[T.untyped], return_kind: Symbol).returns(String) }
   def emit_body_flow(stmts, return_kind)
     return "" unless stmts
     stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
@@ -383,7 +386,7 @@ class MIREmitter
     end
   end
 
-  sig { params(stmts: Array).returns(T::Boolean) }
+  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
   def flow_body_terminates?(stmts)
     return false unless stmts && !stmts.empty?
     last = stmts.last
@@ -1347,6 +1350,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: T.untyped).returns(String) }
   def emit_has_field(node)
     "@hasField(@TypeOf(#{emit(node.expr)}), \"#{node.field}\")"
   end
@@ -1381,7 +1385,7 @@ class MIREmitter
 
   # --- Helpers ---
 
-  sig { params(stmts: Array).returns(String) }
+  sig { params(stmts: T::Array[T.untyped]).returns(String) }
   def emit_body(stmts)
     return "" unless stmts
     stmts.filter_map { |s|
