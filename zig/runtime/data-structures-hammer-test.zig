@@ -39,6 +39,9 @@ fn runInScheduler(comptime MainCtx: type, ctx: *MainCtx) !void {
         .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
+    if (comptime @hasDecl(MainCtx, "cleanup")) {
+        ctx.cleanup();
+    }
 }
 
 fn streamProducerParked(comptime S: type, stream: S) bool {
@@ -55,13 +58,18 @@ fn streamConsumerParked(comptime S: type, stream: S) bool {
     return parked;
 }
 
+fn installStreamScheduler(comptime S: type, stream: S, sched: *fp.Scheduler) void {
+    stream.inner.sched = sched;
+    stream.inner.wg.sched = sched;
+}
+
 const LegacyStreamNextCtx = struct {
     stream: CheatLib.Stream(i64),
     value: i64 = -1,
     done: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     fn installScheduler(self: *@This(), sched: *fp.Scheduler) void {
-        self.stream.inner.sched = sched;
+        installStreamScheduler(CheatLib.Stream(i64), self.stream, sched);
     }
 
     fn consumer(_: *Runtime, raw: ?*anyopaque) anyerror!void {
@@ -88,6 +96,10 @@ const LegacyStreamNextCtx = struct {
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&consumer)), self, .{ .stack_size = .Large });
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&producer)), self, .{ .stack_size = .Large });
     }
+
+    fn cleanup(self: *@This()) void {
+        self.stream.deinit();
+    }
 };
 
 // HAMMER-COVERS: ds.generator-next-park
@@ -96,7 +108,6 @@ test "Hammer: legacy Stream next parks on empty and wakes with pushed value" {
     try runInScheduler(LegacyStreamNextCtx, &ctx);
     try std.testing.expectEqual(@as(usize, 2), ctx.done.load(.acquire));
     try std.testing.expectEqual(@as(i64, 42), ctx.value);
-    ctx.stream.deinit();
 }
 
 const LegacyStreamPushCtx = struct {
@@ -106,7 +117,7 @@ const LegacyStreamPushCtx = struct {
     done: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     fn installScheduler(self: *@This(), sched: *fp.Scheduler) void {
-        self.stream.inner.sched = sched;
+        installStreamScheduler(CheatLib.Stream(i64), self.stream, sched);
     }
 
     fn producer(_: *Runtime, raw: ?*anyopaque) anyerror!void {
@@ -137,6 +148,10 @@ const LegacyStreamPushCtx = struct {
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&consumer)), self, .{ .stack_size = .Large });
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&producer)), self, .{ .stack_size = .Large });
     }
+
+    fn cleanup(self: *@This()) void {
+        self.stream.deinit();
+    }
 };
 
 // HAMMER-COVERS: ds.generator-push-park
@@ -146,7 +161,6 @@ test "Hammer: legacy Stream push parks on full ring and consumer drains every va
     try std.testing.expectEqual(@as(usize, 2), ctx.done.load(.acquire));
     try std.testing.expectEqual(@as(usize, 65), ctx.count);
     try std.testing.expectEqual(@as(i64, 2080), ctx.sum);
-    ctx.stream.deinit();
 }
 
 const InfNextCtx = struct {
@@ -155,7 +169,7 @@ const InfNextCtx = struct {
     done: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     fn installScheduler(self: *@This(), sched: *fp.Scheduler) void {
-        self.stream.inner.sched = sched;
+        installStreamScheduler(CheatLib.InfStream(i64), self.stream, sched);
     }
 
     fn consumer(_: *Runtime, raw: ?*anyopaque) anyerror!void {
@@ -182,6 +196,10 @@ const InfNextCtx = struct {
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&consumer)), self, .{ .stack_size = .Large });
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&producer)), self, .{ .stack_size = .Large });
     }
+
+    fn cleanup(self: *@This()) void {
+        self.stream.deinit();
+    }
 };
 
 // HAMMER-COVERS: ds.stream-next-park
@@ -190,7 +208,6 @@ test "Hammer: InfStream next parks on empty and wakes with pushed value" {
     try runInScheduler(InfNextCtx, &ctx);
     try std.testing.expectEqual(@as(usize, 2), ctx.done.load(.acquire));
     try std.testing.expectEqual(@as(i64, 7), ctx.value);
-    ctx.stream.deinit();
 }
 
 const InfNextOrNullCtx = struct {
@@ -200,7 +217,7 @@ const InfNextOrNullCtx = struct {
     done: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     fn installScheduler(self: *@This(), sched: *fp.Scheduler) void {
-        self.stream.inner.sched = sched;
+        installStreamScheduler(CheatLib.InfStream(i64), self.stream, sched);
     }
 
     fn consumer(_: *Runtime, raw: ?*anyopaque) anyerror!void {
@@ -228,6 +245,10 @@ const InfNextOrNullCtx = struct {
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&consumer)), self, .{ .stack_size = .Large });
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&producer)), self, .{ .stack_size = .Large });
     }
+
+    fn cleanup(self: *@This()) void {
+        self.stream.deinit();
+    }
 };
 
 // HAMMER-COVERS: ds.stream-next-or-null-park
@@ -237,7 +258,6 @@ test "Hammer: InfStream nextOrNull parks on empty, receives value, then observes
     try std.testing.expectEqual(@as(usize, 2), ctx.done.load(.acquire));
     try std.testing.expectEqual(@as(?i64, 11), ctx.value);
     try std.testing.expect(ctx.eof);
-    ctx.stream.deinit();
 }
 
 const InfPushCtx = struct {
@@ -247,7 +267,7 @@ const InfPushCtx = struct {
     done: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     fn installScheduler(self: *@This(), sched: *fp.Scheduler) void {
-        self.stream.inner.sched = sched;
+        installStreamScheduler(CheatLib.InfStream(i64), self.stream, sched);
     }
 
     fn producer(_: *Runtime, raw: ?*anyopaque) anyerror!void {
@@ -278,6 +298,10 @@ const InfPushCtx = struct {
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&consumer)), self, .{ .stack_size = .Large });
         try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&producer)), self, .{ .stack_size = .Large });
     }
+
+    fn cleanup(self: *@This()) void {
+        self.stream.deinit();
+    }
 };
 
 // HAMMER-COVERS: ds.stream-push-park
@@ -287,7 +311,6 @@ test "Hammer: InfStream push parks on full ring and consumer drains every value"
     try std.testing.expectEqual(@as(usize, 2), ctx.done.load(.acquire));
     try std.testing.expectEqual(@as(usize, 65), ctx.count);
     try std.testing.expectEqual(@as(i64, 2080), ctx.sum);
-    ctx.stream.deinit();
 }
 
 fn channelProducerParked(comptime C: type, channel: C) bool {
