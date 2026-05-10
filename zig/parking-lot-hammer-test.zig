@@ -37,6 +37,96 @@ const build_options = @import("build_options");
 const ParkingMutex = pl.ParkingMutex;
 const ParkingRwLock = pl.ParkingRwLock;
 
+const NonFiberRwState = struct {
+    lock: *ParkingRwLock,
+    started: *std.atomic.Value(bool),
+    entered: *std.atomic.Value(bool),
+    observed: *std.atomic.Value(u64),
+};
+
+fn waitForStarted(flag: *std.atomic.Value(bool)) !void {
+    for (0..10_000) |_| {
+        if (flag.load(.acquire)) return;
+        std.Thread.yield() catch {};
+    }
+    return error.WaiterDidNotStart;
+}
+
+fn proveNotEntered(flag: *std.atomic.Value(bool)) !void {
+    for (0..1_000) |_| {
+        try std.testing.expect(!flag.load(.acquire));
+        std.Thread.yield() catch {};
+    }
+}
+
+fn rwWriteWaiter(state: *NonFiberRwState) void {
+    state.started.store(true, .release);
+    state.lock.lock() catch return;
+    state.observed.store(0x7777, .release);
+    state.entered.store(true, .release);
+    state.lock.unlock();
+}
+
+fn rwReadWaiter(state: *NonFiberRwState) void {
+    state.started.store(true, .release);
+    state.lock.lockShared() catch return;
+    state.observed.store(0x8888, .release);
+    state.entered.store(true, .release);
+    state.lock.unlockShared();
+}
+
+// HAMMER-COVERS: parking-rwlock.write-non-fiber-acquire
+test "Hammer: ParkingRwLock non-fiber writer yields until readers release" {
+    var rw = ParkingRwLock{};
+    var started = std.atomic.Value(bool).init(false);
+    var entered = std.atomic.Value(bool).init(false);
+    var observed = std.atomic.Value(u64).init(0);
+
+    try rw.lockShared();
+    var state = NonFiberRwState{
+        .lock = &rw,
+        .started = &started,
+        .entered = &entered,
+        .observed = &observed,
+    };
+    const waiter = try std.Thread.spawn(.{}, rwWriteWaiter, .{&state});
+    try waitForStarted(&started);
+    try proveNotEntered(&entered);
+
+    rw.unlockShared();
+    waiter.join();
+
+    try std.testing.expect(entered.load(.acquire));
+    try std.testing.expectEqual(@as(u64, 0x7777), observed.load(.acquire));
+    try std.testing.expect(!rw.isWriteLocked());
+}
+
+// HAMMER-COVERS: parking-rwlock.read-non-fiber-acquire
+test "Hammer: ParkingRwLock non-fiber reader yields until writer releases" {
+    var rw = ParkingRwLock{};
+    var started = std.atomic.Value(bool).init(false);
+    var entered = std.atomic.Value(bool).init(false);
+    var observed = std.atomic.Value(u64).init(0);
+
+    try rw.lock();
+    var state = NonFiberRwState{
+        .lock = &rw,
+        .started = &started,
+        .entered = &entered,
+        .observed = &observed,
+    };
+    const waiter = try std.Thread.spawn(.{}, rwReadWaiter, .{&state});
+    try waitForStarted(&started);
+    try proveNotEntered(&entered);
+
+    rw.unlock();
+    waiter.join();
+
+    try std.testing.expect(entered.load(.acquire));
+    try std.testing.expectEqual(@as(u64, 0x8888), observed.load(.acquire));
+    try std.testing.expect(!rw.isWriteLocked());
+}
+
 // How often each fiber probes detection integrity (once every N iterations).
 const DETECTION_PROBE_EVERY: u32 = 200;
 

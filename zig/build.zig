@@ -227,6 +227,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "runtime-isolation-test.zig", .tsan = true },
         .{ .path = "scheduler-test.zig", .tsan = true },
         .{ .path = "scheduler-direct-test.zig", .tsan = true },
+        .{ .path = "scheduler-primitives-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "semaphore-test.zig", .tsan = true },
         .{ .path = "sharded-list-test.zig", .tsan = true },
         .{ .path = "sharded-pool-test.zig", .tsan = true },
