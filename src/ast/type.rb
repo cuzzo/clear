@@ -205,7 +205,7 @@ class Type
     @is_map            = T.let(false, T::Boolean)
     @is_optional       = T.let(false, T::Boolean)
     @is_tense          = T.let(false, T::Boolean)
-    @is_observable     = false
+    @is_observable     = T.let(false, T::Boolean)
     @is_auto           = T.let(false, T::Boolean)
     @is_error_union    = T.let(false, T::Boolean)
     @is_generic_instance = T.let(false, T::Boolean)
@@ -1611,7 +1611,7 @@ class Type
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
   end
 
-  sig { params(value: Symbol).returns(Symbol) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership=(value)
     @zig_type_cache = nil
     @ownership = value

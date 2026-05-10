@@ -54,8 +54,8 @@ module FsmTransform
       sig { void }
       def initialize
         T.bind(self, T.untyped) rescue nil
-        @segments = []
-        @synthetic_fields = []
+        @segments = T.let([], T::Array[T.untyped])
+        @synthetic_fields = T.let([], T::Array[T.untyped])
         @alias_overrides_for = T.let({}, T::Hash[T.untyped, T.untyped])
         @current_alias_overrides = nil
       end

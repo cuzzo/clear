@@ -92,7 +92,7 @@ class SemanticAnnotator
     @strict_test = strict_test
     @source_code = source_code
     # We start with a global scope
-    @scope_stack = [Scope.new]
+    @scope_stack = T.let([Scope.new], T::Array[T.untyped])
     @function_context_stack = T.let([], T::Array[T.untyped]) # Stack of expected return types
     @loop_depth = T.let(0, Integer) # Track if we are inside a loop
     @conditional_depth = T.let(0, Integer) # Track if we are inside an IF branch or MATCH arm

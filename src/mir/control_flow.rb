@@ -34,12 +34,12 @@ class BasicBlock
   sig { params(id: Integer).void }
   def initialize(id)
     @id = id
-    @stmts = []
-    @successors = []
-    @predecessors = []
+    @stmts = T.let([], T::Array[T.untyped])
+    @successors = T.let([], T::Array[T.untyped])
+    @predecessors = T.let([], T::Array[T.untyped])
   end
 
-  sig { params(block: BasicBlock).returns(Array) }
+  sig { params(block: BasicBlock).void }
   def add_successor(block)
     @successors << block unless @successors.include?(block)
     block.predecessors << self unless block.predecessors.include?(self)
@@ -58,7 +58,7 @@ class FunctionCFG
   sig { params(fn_name: String).void }
   def initialize(fn_name)
     @fn_name = fn_name
-    @blocks = []
+    @blocks = T.let([], T::Array[T.untyped])
     @block_counter = T.let(0, Integer)
     @entry = new_block
     @exit_block = new_block  # virtual exit - all returns target this
@@ -329,9 +329,9 @@ class OwnershipDataflow
     @cfg = cfg
     @fn_node = fn_node
     @schema_lookup = schema_lookup
-    @block_in  = {}  # block.id => { var_name => OwnerEntry }
-    @block_out = {}  # block.id => { var_name => OwnerEntry }
-    @point_states = {} # [block.id, stmt_index] => { var_name => OwnerEntry }
+    @block_in  = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
+    @block_out = T.let({}, T::Hash[T.untyped, T.untyped])  # block.id => { var_name => OwnerEntry }
+    @point_states = T.let({}, T::Hash[T.untyped, T.untyped]) # [block.id, stmt_index] => { var_name => OwnerEntry }
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -502,7 +502,7 @@ class OwnershipDataflow
     return {} if preds.empty?
 
     result = dup_state(@block_out[preds.first.id])
-    preds[1..].each do |pred|
+    preds.drop(1).each do |pred|
       pred_out = @block_out[pred.id]
       all_vars = (result.keys | pred_out.keys)
       merged = {}
@@ -990,7 +990,7 @@ class UseAfterMoveChecker
   def initialize(fn_node, dataflow)
     @fn_node = fn_node
     @dataflow = dataflow
-    @errors = []
+    @errors = T.let([], T::Array[T.untyped])
   end
 
   # Run the check. Returns self for chaining.
@@ -1700,7 +1700,7 @@ class BorrowChecker
     @fn_name = fn_node.name
     @fn_node = fn_node
     @schema_lookup = schema_lookup
-    @errors = []
+    @errors = T.let([], T::Array[T.untyped])
     @active_borrows = T.let({}, T::Hash[T.untyped, T.untyped]) # { source_name => [{ kind: :mutable/:immutable }] }
   end
 
