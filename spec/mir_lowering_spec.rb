@@ -1306,8 +1306,12 @@ RSpec.describe MIRLowering do
       fn = make_fn("inc", params: params, body: [body_stmt])
       result = lowering.lower(fn)
       zig = emit(result)
-      expect(zig).to include("_m_count: i64")
-      expect(zig).to include("var count = _m_count;")
+      # Mutable scalar params are passed by pointer so the callee can update
+      # the caller's binding (ce525d5a). The shadow unpacks on entry and
+      # writes back on exit via a defer.
+      expect(zig).to include("_m_count: *i64")
+      expect(zig).to include("var count = _m_count.*;")
+      expect(zig).to include("_m_count.* = count;")
     end
   end
 

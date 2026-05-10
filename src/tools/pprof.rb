@@ -1,3 +1,4 @@
+# typed: false
 require "sorbet-runtime"
 
 require 'zlib'
@@ -70,20 +71,20 @@ module Pprof
       @next_func_id = T.let(1, Integer)
       @next_loc_id  = T.let(1, Integer)
       @next_mapping_id = T.let(1, Integer)
-      sig { params(s: String).returns(Integer) }
       @primary_mapping_id = T.let(0, Integer)
     end
 
     attr_writer :time_nanos, :duration_nanos, :period
 
+    sig { params(s: String).returns(Integer) }
     def intern(s)
       @strings[s.to_s] ||= @strings.size
-    sig { params(type: String, unit: String).returns(Array) }
     end
 
     # Declare a sample value column. `type` is the metric (e.g.
     # `"alloc_space"`); `unit` is the unit (`"bytes"`, `"count"`,
     # `"nanoseconds"`). The column index matches the order of calls.
+    sig { params(type: String, unit: String).returns(T.untyped) }
     def add_sample_type(type, unit)
       @sample_types << [intern(type), intern(unit)]
     end
@@ -122,7 +123,6 @@ module Pprof
         has_line_numbers: true,
       }
       @mappings << mapping
-      sig { params(name: String, filename: String, system_name: T.nilable(String), start_line: Integer).returns(Integer) }
       @next_mapping_id += 1
       @primary_mapping_id = mapping[:id] if @primary_mapping_id.zero?
       mapping[:id]
@@ -130,6 +130,7 @@ module Pprof
 
     # Returns the function id (1-based). Identical (name, system_name,
     # filename) tuples are deduplicated.
+    sig { params(name: String, filename: String, system_name: T.nilable(String), start_line: Integer).returns(Integer) }
     def add_function(name:, filename: "", system_name: nil, start_line: 0)
       sys = system_name || name
       key = [name, sys, filename]
@@ -143,7 +144,6 @@ module Pprof
         start_line: start_line,
       }
       @functions[key] = f
-      sig { params(function_id: Integer, line: Integer, address: Integer).returns(Integer) }
       @next_func_id += 1
       f[:id]
     end
@@ -151,6 +151,7 @@ module Pprof
     # Returns the location id (1-based). One Line entry per call.
     # Defaults to the primary Mapping (the binary this profile is for)
     # so symbol metadata propagates without per-Location plumbing.
+    sig { params(function_id: Integer, line: Integer, address: Integer).returns(Integer) }
     def add_location(function_id:, line: 0, address: 0)
       id = @next_loc_id
       @next_loc_id += 1
@@ -161,15 +162,14 @@ module Pprof
         line_no: line,
         mapping_id: @primary_mapping_id,
       }
-      sig { params(location_ids: Array, values: Array, labels: Hash).returns(Array) }
       id
     end
 
     # `location_ids` is a stack trace, leaf-first. `values` matches the
     # order/length of `add_sample_type` calls. `labels` is a hash of
     # string key -> string-or-int (str labels are interned; int labels
-    sig { returns(String) }
     # render as numeric).
+    sig { params(location_ids: Array, values: Array, labels: Hash).returns(T.untyped) }
     def add_sample(location_ids, values, labels = {})
       @samples << { location_ids: location_ids, values: values, labels: labels }
     end
@@ -220,7 +220,6 @@ module Pprof
       io.set_encoding('ASCII-8BIT')
       Zlib::GzipWriter.wrap(io) { |gz| gz.write(encode) }
       io.string
-    sig { params(s: Hash).returns(String) }
     end
 
     def write_gzip(path)
@@ -229,6 +228,7 @@ module Pprof
 
     private
 
+    sig { params(s: Hash).returns(String) }
     def encode_sample(s)
       buf = String.new(encoding: 'ASCII-8BIT')
       # field 1: location_id (repeated uint64) — packed for compactness
@@ -247,7 +247,6 @@ module Pprof
         case v
         when Integer
           lab += Wire.field_varint(3, v)
-        sig { params(loc: Hash).returns(String) }
         else
           lab += Wire.field_varint(2, intern(v.to_s))
         end
@@ -256,6 +255,7 @@ module Pprof
       buf
     end
 
+    sig { params(loc: Hash).returns(String) }
     def encode_location(loc)
       sub = Wire.field_varint(1, loc[:id])
       sub += Wire.field_varint(2, loc[:mapping_id]) if loc[:mapping_id].to_i.positive?
@@ -272,7 +272,6 @@ module Pprof
       buf += Wire.field_varint(3, m[:memory_limit]) if m[:memory_limit].positive?
       buf += Wire.field_varint(4, m[:file_offset]) if m[:file_offset].positive?
       buf += Wire.field_varint(5, m[:filename_idx])
-      sig { params(f: Hash).returns(String) }
       buf += Wire.field_varint(6, m[:build_id_idx]) if m[:build_id_idx].positive?
       buf += Wire.field_varint(7, 1) if m[:has_functions]
       buf += Wire.field_varint(8, 1) if m[:has_filenames]
@@ -281,6 +280,7 @@ module Pprof
       buf
     end
 
+    sig { params(f: Hash).returns(String) }
     def encode_function(f)
       Wire.field_varint(1, f[:id]) +
         Wire.field_varint(2, f[:name_idx]) +

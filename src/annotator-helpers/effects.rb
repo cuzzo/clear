@@ -631,7 +631,7 @@ module EffectTracker
         reason = :no_suspends
       end
 
-      fn_node.fsm_eligible = false
+      fn_node.fsm_eligible = reason.nil?
       fn_node.fsm_ineligible_reason = reason
     end
   end
