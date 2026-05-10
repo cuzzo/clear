@@ -3374,7 +3374,7 @@ private
       fix = build_declare_mutable_fix(var_name, scope)
       if fix
         fixable!(node,
-          message: DiagnosticRegistry.format(:ASSIGN_VAR_IMMUTABLE, name: var_name),
+          message: T.must(DiagnosticRegistry.format(:ASSIGN_VAR_IMMUTABLE, name: var_name)),
           category: :ownership,
           level: :error,
           fixes: [fix])

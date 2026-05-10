@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 module LSP
@@ -7,18 +7,19 @@ module LSP
   class Logger
       extend T::Sig
 
-    LEVELS = { debug: 0, info: 1, warn: 2, error: 3 }.freeze
+    LEVELS = T.let({ debug: 0, info: 1, warn: 2, error: 3 }.freeze, T::Hash[Symbol, Integer])
 
     sig { params(level: Symbol, io: IO).void }
     def initialize(level: :info, io: $stderr)
-      @level = LEVELS.fetch(level)
-      @io    = io
+      @level = T.let(LEVELS.fetch(level), Integer)
+      @io    = T.let(io, IO)
     end
 
     sig { params(msg: String).returns(T.untyped) }
     def debug(msg); log(:debug, msg); end
     sig { params(msg: String).returns(T.untyped) }
     def info(msg);  log(:info,  msg); end
+    sig { params(msg: String).returns(T.untyped) }
     def warn(msg);  log(:warn,  msg); end
     sig { params(msg: String).returns(IO) }
     def error(msg); T.must(log(:error, msg)); end

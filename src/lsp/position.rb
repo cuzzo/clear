@@ -1,4 +1,5 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 module LSP
   # Converts CLEAR's 1-based (line, column, length) tokens to LSP's
   # 0-based (line, character) positions. The two coordinate systems
@@ -15,6 +16,7 @@ module LSP
   # tokens (used by Diagnostics) and `range_for_span(span, source)` for
   # Edits (used by CodeActions).
   module Position
+    extend T::Sig
     module_function
 
     # Convert a CLEAR token + length into an LSP `Range` hash.
@@ -22,6 +24,7 @@ module LSP
     # column calculation). When `source` is nil or the line is pure
     # ASCII, this falls through to the fast byte-equals-character
     # path.
+    sig { params(token: T.untyped, length: Integer, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
     def range_for(token, length, source = nil)
       line = token.line - 1
       col_start_byte = token.column - 1
@@ -40,6 +43,7 @@ module LSP
     # Convert a Span (file/line/col/length, with possibly multi-line
     # extent) into an LSP `Range`. CLEAR Spans currently always live
     # on a single line; if that changes, the helper extends naturally.
+    sig { params(span: T.untyped, source: T.nilable(String)).returns(T::Hash[Symbol, T.untyped]) }
     def range_for_span(span, source = nil)
       start_line = span.line - 1
       end_line   = span.end_line - 1
@@ -63,6 +67,7 @@ module LSP
     end
 
     # Test whether an LSP position falls within an LSP range.
+    sig { params(position: T::Hash[T.untyped, T.untyped], range: T::Hash[T.untyped, T.untyped]).returns(T::Boolean) }
     def position_in_range?(position, range)
       pl, pc = position[:line] || position["line"], position[:character] || position["character"]
       sl, sc = range[:start][:line], range[:start][:character]
@@ -78,17 +83,19 @@ module LSP
     # Return the substring of `source` for the given 0-based line, or
     # nil if out of bounds. We split lazily to keep large documents
     # cheap for single-token lookups.
+    sig { params(source: T.nilable(String), line_idx: Integer).returns(T.nilable(String)) }
     def line_at(source, line_idx)
       return nil unless source
       lines = source.lines
       return nil if line_idx < 0 || line_idx >= lines.size
-      lines[line_idx].chomp
+      T.must(lines[line_idx]).chomp
     end
 
     # Given a line of text and a byte offset, return the UTF-16 code
     # unit count from the start of the line. ASCII-only lines short-
     # circuit to the byte count. For multi-byte source, walk the line's
     # codepoints and sum their UTF-16 widths.
+    sig { params(line_text: T.nilable(String), byte_offset: Integer).returns(Integer) }
     def byte_to_utf16(line_text, byte_offset)
       return byte_offset if line_text.nil? || line_text.ascii_only?
 

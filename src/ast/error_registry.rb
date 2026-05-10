@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 module AST
@@ -22,7 +22,7 @@ module AST
   # runtime.zig stores ErrorContext.error_name as plain u32; dispatch in
   # generated user code compares to @intFromEnum(ErrorName.<Sym>).
 
-  ERROR_KINDS = %i[Transient Input System NotFound Permission Canceled].freeze
+  ERROR_KINDS = T.let(%i[Transient Input System NotFound Permission Canceled].freeze, T::Array[Symbol])
 
   # Stable stdlib-type IDs. runtime.zig's zigErrorToName hardcodes these
   # when mapping a Zig error (`error.LockTimeout`, etc) to a u32
@@ -56,7 +56,7 @@ module AST
   #     first_site: <Token|nil>,  # for collision diagnostics
   #   }
   # Not thread-safe; the compiler is single-threaded per-program.
-  ERROR_TYPES = {
+  ERROR_TYPES = T.let({
     LockTimeout:         { kind: :Transient, zig_name: "LockTimeout",         id: ERROR_NAME_LOCK_TIMEOUT,         first_site: nil },
     LockCycle:           { kind: :Transient, zig_name: "LockCycle",           id: ERROR_NAME_LOCK_CYCLE,           first_site: nil },
     Deadlock:            { kind: :System,    zig_name: "Deadlock",            id: ERROR_NAME_DEADLOCK,             first_site: nil },
@@ -66,15 +66,19 @@ module AST
     AtomicConflict:      { kind: :Transient, zig_name: "AtomicConflict",      id: ERROR_NAME_ATOMIC_CONFLICT,      first_site: nil },
     GuardFail:           { kind: :Transient, zig_name: "GuardFail",           id: ERROR_NAME_GUARD_FAIL,           first_site: nil },
     PreconditionFail:  { kind: :Input,     zig_name: "PreconditionFail",  id: ERROR_NAME_PRECONDITION_FAIL,  first_site: nil },
-  }
+  }, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   # Counter for the next user-type id. Reset on a per-program basis via
   # reset_user_types! (called at the start of each SemanticAnnotator run
   # so parallel rspec runs don't bleed state).
-  @next_user_id = ERROR_NAME_USER_FIRST
-  @stdlib_frozen = ERROR_TYPES.keys.to_set
+  @next_user_id = T.let(ERROR_NAME_USER_FIRST, Integer)
+  @stdlib_frozen = T.let(ERROR_TYPES.keys.to_set, T::Set[Symbol])
   class << self
-    attr_reader :next_user_id, :stdlib_frozen
+    extend T::Sig
+    sig { returns(Integer) }
+    attr_reader :next_user_id
+    sig { returns(T::Set[Symbol]) }
+    attr_reader :stdlib_frozen
   end
 
   sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
@@ -84,7 +88,7 @@ module AST
 
   sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
   def self.error_type?(sym)
-    ERROR_TYPES.key?(sym)
+    sym ? ERROR_TYPES.key?(sym) : false
   end
 
   sig { params(sym: Symbol).returns(T.nilable(Symbol)) }
@@ -111,7 +115,7 @@ module AST
   # Returns [existed?, conflict?]. conflict is a Hash
   #   { existing_kind:, given_kind:, first_site:, is_stdlib: }
   # or nil when registration succeeded (or was a no-op re-use).
-  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.untyped).returns(Array) }
+  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.untyped).returns(T::Array[T.untyped]) }
   def self.register_type!(type_sym, kind_sym, site_token: nil)
     entry = ERROR_TYPES[type_sym]
     if entry.nil?
@@ -149,7 +153,7 @@ module AST
   # the `pub const ErrorName = enum(u32) { ... };` header at the top
   # of the generated Zig program. Sorted by id so the emitted enum is
   # deterministic across runs.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def self.enum_entries
     [[:None, ERROR_NAME_NONE]] + ERROR_TYPES.map { |sym, meta| [sym, meta[:id]] }.sort_by(&:last)
   end

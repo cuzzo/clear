@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Single source of truth for compiler-emitted diagnostics.
 #
 # Before this file existed, `MESSAGES` (in source_error.rb) held just
@@ -42,10 +42,11 @@
 # becomes more useful without further plumbing.
 
 module DiagnosticRegistry
-  CATEGORIES = %i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze
-  SEVERITIES = %i[error warning hint info].freeze
+  extend T::Sig
+  CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
+  SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
-  DIAGNOSTICS = {
+  DIAGNOSTICS = T.let({
     # ===================================================================
     # PARSER (syntax)
     # ===================================================================
@@ -2501,18 +2502,21 @@ module DiagnosticRegistry
       cause: "Capabilities.validate! rejected the binding's capability stack — either an unsupported sigil combination (`@local:atomic`), a capability on an incompatible type (capability on a primitive), or a missing required capability.",
       fix_hint: "Read the message for the specific rejection. Common fixes: drop a contradictory sigil, wrap a primitive in a struct, add a missing wrapper (`@shared` for cross-fiber sharing).",
     },
-  }.freeze
+  }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   module_function
 
+  sig { params(code: Symbol).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
   def lookup(code)
     DIAGNOSTICS[code]
   end
 
+  sig { params(code: Symbol).returns(T::Boolean) }
   def known?(code)
     DIAGNOSTICS.key?(code)
   end
 
+  sig { returns(T::Array[Symbol]) }
   def codes
     DIAGNOSTICS.keys
   end
@@ -2521,6 +2525,7 @@ module DiagnosticRegistry
   # feature whose triggering visitor isn't implemented yet. Audit
   # tooling skips these — we can't write a bad/good example for an
   # unimplemented compiler check.
+  sig { params(code: Symbol).returns(T::Boolean) }
   def pending?(code)
     entry = DIAGNOSTICS[code]
     !entry.nil? && entry[:pending] == true
@@ -2529,6 +2534,7 @@ module DiagnosticRegistry
   # Format a registered code's template against `args`. Returns nil
   # when the code isn't known. The caller decides what to do with
   # nil — the legacy helper raises an internal-compiler-error there.
+  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
   def format(code, args = [], **kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
@@ -2545,8 +2551,9 @@ module DiagnosticRegistry
   # Self-check: every entry is well-formed. Returns an array of
   # error strings; empty == registry is consistent. Run by the
   # spec to make sure new entries don't drift.
+  sig { returns(T::Array[String]) }
   def validate
-    issues = []
+    issues = T.let([], T::Array[String])
     DIAGNOSTICS.each do |code, entry|
       issues << "#{code}: missing :severity"  unless SEVERITIES.include?(entry[:severity])
       issues << "#{code}: missing :category"  unless CATEGORIES.include?(entry[:category])

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # frozen_string_literal: true
 
 require "sorbet-runtime"
@@ -33,12 +33,12 @@ class EffectSet
   # readability. The legacy spellings (`contention?`, `blocking?`)
   # are accepted as aliases for backward compatibility but are not
   # produced by the inferer anymore.
-  KNOWN = %i[
+  KNOWN = T.let(%i[
     yield alloc_heap io fail
     contention blocking
     contends_maybe blocks_maybe
     contention? blocking?
-  ].to_set.freeze
+  ].to_set.freeze, T::Set[Symbol])
 
   attr_reader :effects
 
@@ -50,10 +50,12 @@ class EffectSet
         raise ArgumentError, "Unknown effect: #{e.inspect}. Valid: #{KNOWN.to_a}"
       end
     end
-    @effects = eff.freeze
+    @effects = T.let(eff.freeze, T::Set[Symbol])
   end
 
+  sig { returns(EffectSet) }
   def self.empty
+    @empty = T.let(@empty, T.nilable(EffectSet))
     @empty ||= new
   end
 
@@ -62,6 +64,7 @@ class EffectSet
     @effects.include?(effect)
   end
 
+  sig { returns(T::Boolean) }
   def empty?
     @effects.empty?
   end
@@ -77,23 +80,25 @@ class EffectSet
   end
   alias eql? ==
 
+  sig { returns(Integer) }
   def hash
     @effects.hash
   end
 
   # Human-readable summary used by the formatter (P4.2). Effects are
   # rendered in a stable order so signatures are deterministic.
-  EFFECT_ORDER = %i[
+  EFFECT_ORDER = T.let(%i[
     yield alloc_heap io fail
     contention contends_maybe contention?
     blocking blocks_maybe blocking?
-  ].freeze
+  ].freeze, T::Array[Symbol])
 
-  sig { returns(Array) }
+  sig { returns(T::Array[Symbol]) }
   def to_a
     EFFECT_ORDER.select { |e| @effects.include?(e) }
   end
 
+  sig { returns(String) }
   def to_s
     "EffectSet(#{to_a.join(', ')})"
   end

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Infrastructure for `clear fix` (Phase A).
 #
 # A FixableFinding is a compiler-produced diagnostic with one or more
@@ -39,9 +39,12 @@ class Span
   # single-line span these equal `line` / `col + length`. For multi-line
   # replacements (e.g., inserting a block), callers can subclass or pass
   # a separate end position.
+  sig { returns(Integer) }
   def end_line; @line; end
+  sig { returns(Integer) }
   def end_col;  @col + @length; end
 
+  sig { returns(T::Hash[Symbol, T.untyped]) }
   def to_h
     { file: @file, line: @line, col: @col, length: @length,
       end_line: end_line, end_col: end_col }
@@ -67,14 +70,14 @@ class Fix
 
   attr_reader :description, :confidence, :edits
 
-  sig { params(description: String, edits: Array, confidence: Symbol).void }
+  sig { params(description: String, edits: T::Array[Edit], confidence: Symbol).void }
   def initialize(description:, edits:, confidence: :interactive)
     unless CONFIDENCES.include?(confidence)
       raise ArgumentError, "Fix.confidence must be one of #{CONFIDENCES}, got #{confidence.inspect}"
     end
     @description = description
-    @confidence = confidence
-    @edits = Array(edits)
+    @confidence = T.let(confidence, Symbol)
+    @edits = T.let(Array(edits), T::Array[Edit])
     raise ArgumentError, "Fix needs at least one edit" if @edits.empty?
   end
 end
@@ -100,7 +103,7 @@ class FixableFinding
     @message = message
     @token = token
     @category = category
-    @fixes = Array(fixes)
+    @fixes = T.let(Array(fixes), T::Array[Fix])
     # An empty `fixes` is permitted for diagnostic-only findings (e.g.
     # gradual-typing's ambiguity / unresolved-Auto reports — see
     # docs/agents/gradual-typing.md §4.3 / §6). The CLI's `clear fix`
@@ -128,7 +131,7 @@ module FixCollector
 
   @findings = T.let(nil, T.nilable(T::Array[FixableFinding]))
 
-  sig { returns(Array) }
+  sig { returns(T::Array[FixableFinding]) }
   def self.enable!
     @findings = []
   end
@@ -148,17 +151,19 @@ module FixCollector
     @findings << finding if @findings
   end
 
-  sig { returns(Array) }
+  sig { returns(T::Array[FixableFinding]) }
   def self.drain
     out = @findings || []
     @findings = [] if @findings
     out
   end
 
+  sig { returns(T::Boolean) }
   def self.has_fatal?
-    @findings && @findings.any?(&:fatal?)
+    !@findings.nil? && @findings.any?(&:fatal?)
   end
 
+  sig { returns(Integer) }
   def self.fatal_count
     @findings ? @findings.count(&:fatal?) : 0
   end

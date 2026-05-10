@@ -612,7 +612,7 @@ module FixableHelper
     kw = { index: arg_idx, param: param_name, actual: arg_node.name }
     return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
     fixable!(arg_node,
-      message: DiagnosticRegistry.format(:IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw),
+      message: T.must(DiagnosticRegistry.format(:IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw)),
       category: :ownership,
       level: :error,
       fixes: [fix],
@@ -629,7 +629,7 @@ module FixableHelper
     fix = build_declare_mutable_fix(var_name, scope)
     return error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name) unless fix
     fixable!(assignment_node,
-      message: DiagnosticRegistry.format(:ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name),
+      message: T.must(DiagnosticRegistry.format(:ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name)),
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -646,7 +646,7 @@ module FixableHelper
     kw = { name: var_name, field: field_name }
     return error!(assignment_node, :IMMUTABLE_FIELD_ASSIGNMENT, **kw) unless fix
     fixable!(assignment_node,
-      message: DiagnosticRegistry.format(:IMMUTABLE_FIELD_ASSIGNMENT, **kw),
+      message: T.must(DiagnosticRegistry.format(:IMMUTABLE_FIELD_ASSIGNMENT, **kw)),
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -679,7 +679,7 @@ module FixableHelper
     end
     return error!(fn_node, code, name: fn_node.name, hint: hint) unless fix
     fixable!(fn_node,
-      message: DiagnosticRegistry.format(code, name: fn_node.name, hint: hint),
+      message: T.must(DiagnosticRegistry.format(code, name: fn_node.name, hint: hint)),
       category: :reentrance,
       level: :error,
       fixes: [fix])
@@ -694,7 +694,7 @@ module FixableHelper
     fix = build_declare_mutable_fix(cap_name, owner_scope)
     return error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name),
+      message: T.must(DiagnosticRegistry.format(:CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name)),
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -721,7 +721,7 @@ module FixableHelper
     end
     return error!(fn_node, :AMBIGUOUS_RETURN, types: found_returns) unless fix
     fixable!(fn_node,
-      message: DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: found_returns),
+      message: T.must(DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: found_returns)),
       category: :type,
       level: :error,
       fixes: [fix])
@@ -748,7 +748,7 @@ module FixableHelper
     end
     return error!(match_node, code, **kwargs) unless fix
     fixable!(match_node,
-      message: DiagnosticRegistry.format(code, **kwargs),
+      message: T.must(DiagnosticRegistry.format(code, **kwargs)),
       category: :type,
       level: :error,
       fixes: [fix])
@@ -776,7 +776,7 @@ module FixableHelper
     kw = { type: node.full_type }
     return error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw),
+      message: T.must(DiagnosticRegistry.format(:RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw)),
       category: :lifetime,
       level: :error,
       fixes: [fix])
@@ -824,7 +824,7 @@ module FixableHelper
     end
     return error!(node, code, **kw) if fixes.empty?
     fixable!(node,
-      message: DiagnosticRegistry.format(code, **kw),
+      message: T.must(DiagnosticRegistry.format(code, **kw)),
       category: :capability,
       level: :error,
       fixes: fixes,
@@ -858,7 +858,7 @@ module FixableHelper
       edits: edits
     )
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_GUARD_ALL_BINDINGS_NEED_AS),
+      message: T.must(DiagnosticRegistry.format(:WITH_GUARD_ALL_BINDINGS_NEED_AS)),
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -907,7 +907,7 @@ module FixableHelper
       edits: edits
     )
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_GUARD_MUTABLE_MUTATED, **kw),
+      message: T.must(DiagnosticRegistry.format(:WITH_GUARD_MUTABLE_MUTATED, **kw)),
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -936,7 +936,7 @@ module FixableHelper
     end
     return error!(node, :WITH_READ_NEEDS_WRITE_LOCK, name: name) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_READ_NEEDS_WRITE_LOCK, name: name),
+      message: T.must(DiagnosticRegistry.format(:WITH_READ_NEEDS_WRITE_LOCK, name: name)),
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -965,7 +965,7 @@ module FixableHelper
     end
     return error!(node, :WITH_CANNOT_INFER_CAP, name: name) if fixes.empty?
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_CANNOT_INFER_CAP, name: name),
+      message: T.must(DiagnosticRegistry.format(:WITH_CANNOT_INFER_CAP, name: name)),
       category: :capability,
       level: :error,
       fixes: fixes,
@@ -1005,7 +1005,7 @@ module FixableHelper
     kw = { name: name, got: got }
     return error!(node, :WITH_MATERIALIZED_NEEDS_TENSE, **kw) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_MATERIALIZED_NEEDS_TENSE, **kw),
+      message: T.must(DiagnosticRegistry.format(:WITH_MATERIALIZED_NEEDS_TENSE, **kw)),
       category: :capability,
       level: :error,
       fixes: [fix],
@@ -1023,7 +1023,7 @@ module FixableHelper
     fix = build_declare_mutable_fix(name, scope)
     return error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: name) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:WITH_RESTRICT_NEEDS_MUTABLE, name: name),
+      message: T.must(DiagnosticRegistry.format(:WITH_RESTRICT_NEEDS_MUTABLE, name: name)),
       category: :capability,
       level: :error,
       fixes: [fix])
@@ -1052,7 +1052,7 @@ module FixableHelper
     end
     return error!(fn_node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name) unless fix
     fixable!(fn_node,
-      message: DiagnosticRegistry.format(:STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name),
+      message: T.must(DiagnosticRegistry.format(:STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name)),
       category: :lint,
       level: :error,
       fixes: [fix])
@@ -1078,7 +1078,7 @@ module FixableHelper
     end
     return error!(node, :CAN_SMASH_NOT_SUPPORTED) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:CAN_SMASH_NOT_SUPPORTED),
+      message: T.must(DiagnosticRegistry.format(:CAN_SMASH_NOT_SUPPORTED)),
       category: :reentrance,
       level: :error,
       fixes: [fix])
@@ -1098,7 +1098,7 @@ module FixableHelper
     fix = build_cast_wrap_fix(value, target_type)
     return error!(node, :TYPE_MISMATCH_ASSIGN, **kw) unless fix
     fixable!(node,
-      message: DiagnosticRegistry.format(:TYPE_MISMATCH_ASSIGN, **kw),
+      message: T.must(DiagnosticRegistry.format(:TYPE_MISMATCH_ASSIGN, **kw)),
       category: :type,
       level: :error,
       fixes: [fix])
@@ -1234,7 +1234,7 @@ module FixableHelper
     end
     return error!(node, code, **kw) if fixes.empty?
     fixable!(node,
-      message: DiagnosticRegistry.format(code, **kw),
+      message: T.must(DiagnosticRegistry.format(code, **kw)),
       category: :capability,
       level: :error,
       fixes: fixes,

@@ -1096,7 +1096,7 @@ module EffectTracker
               )]
             )
             fixable!(node,
-              message: DiagnosticRegistry.format(:REENTRANCY_MUTUAL_CYCLE, name: fn_name),
+              message: T.must(DiagnosticRegistry.format(:REENTRANCY_MUTUAL_CYCLE, name: fn_name)),
               category: :reentrance,
               level: :error,
               fixes: [fix])

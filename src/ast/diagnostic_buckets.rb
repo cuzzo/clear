@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require_relative "diagnostic_registry"
 
@@ -27,7 +27,7 @@ module DiagnosticBuckets
   extend T::Sig
   module_function
 
-  BUCKETS = [
+  BUCKETS = T.let([
     # ============================================================
     # :type — 191 codes / 20 buckets
     # ============================================================
@@ -494,7 +494,7 @@ module DiagnosticBuckets
         CAPABILITY_INVALID WITH_CAP_BINDING_LOST
       ],
     },
-  ].freeze
+  ].freeze, T::Array[T::Hash[Symbol, T.untyped]])
 
   # All codes referenced by any bucket — used by the audit to confirm
   # bucket assignments are exhaustive for their category.
