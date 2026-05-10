@@ -22,11 +22,43 @@ UAF / double-free (at runtime via `std.testing.allocator`).
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
 
+## Mutant Harness
+
+`tools/fuzz/mutants/run.rb` is a manual-only safety check for the fuzz suite
+itself. It deliberately applies a small patch that disables one ownership rule,
+runs the relevant fuzz templates before and after the patch, then reports
+whether the mutated compiler produced new failures relative to baseline.
+
+This is intentionally not a default CI job: it is slower than normal fuzz
+generation and mutates the working tree while it runs. The runner checks that
+the patch applies, refuses to touch target files that already have local edits,
+and reverses the patch before exiting. Use `--allow-dirty` only when you
+intentionally want to test a mutant against WIP.
+
+    # List available mutants
+    ruby tools/fuzz/mutants/run.rb --list
+
+    # Check patch applicability without running fuzz
+    ruby tools/fuzz/mutants/run.rb --mutant allow_with_alias_return --dry-run
+
+    # Run a single mutant
+    ruby tools/fuzz/mutants/run.rb --mutant allow_with_alias_return --out /tmp/clear-fuzz-mutants
+
+    # Run against WIP that touches mutant target files
+    ruby tools/fuzz/mutants/run.rb --mutant allow_with_alias_return --allow-dirty
+
+Each run writes baseline and mutated fuzz logs under the chosen output
+directory. A mutant is useful when it is "killed": the mutated run produces the
+configured failure delta over the baseline run.
+
 ## Layout
 
     tools/fuzz/
       run.rb            # driver
       generator.rb      # template registry + tuple iteration
+      surface_registry.rb
+      coverage.rb
+      mutants/          # manual targeted safety mutants
       templates/*.rb    # one file per template
     transpile-tests/fuzz/
       fuzz_<name>_<hash>.cht   # generated programs (gitignored)
