@@ -91,7 +91,7 @@ class Parser
 
   private
 
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def peek
     @tokens[@pos + 1] || Lexer::Token.new(:EOF, "", current.line, current.column)
   end
@@ -519,14 +519,14 @@ class Parser
   ## END PATTERN DSL
 
 
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def current
-    @tokens[@pos]
+    T.must(@tokens[@pos])
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(Lexer::Token) }
   def previous
-    @tokens[@pos-1]
+    T.must(@tokens[@pos-1])
   end
 
   # Consume a numeric literal (either :NUMBER float or :INT64 integer).
@@ -1608,7 +1608,7 @@ class Parser
   end
 
   # Legacy thin wrapper: callers that only need families.
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def parse_requires_family
     res = parse_requires_family_or_reentrance
     error!(current, :EXPECTED_CAP_FAMILY) unless T.must(res)[:family]

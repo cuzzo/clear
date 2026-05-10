@@ -258,7 +258,7 @@ end
 module ScopeHelper
     extend T::Sig
 
-  sig { returns(T.untyped) }
+  sig { returns(Scope) }
   def current_scope
     @scope_stack.last
   end

@@ -938,7 +938,7 @@ module NilKill
       when "fix_sig_return"
         sig_idx = find_sig_idx(lines, idx)
         return false unless sig_idx
-        return !!lines[sig_idx].sub!(/\.returns\(T\.untyped\)/, ".returns(#{action["data"]["type"]})")
+        return !!lines[sig_idx].sub!(/(\.?)returns\(T\.untyped\)/, "\\1returns(#{action["data"]["type"]})")
       when "narrow_tlet"
         return !!lines[idx].sub!(/T\.let\((.*),\s*T\.untyped\)/, "T.let(\\1, #{action["data"]["type"]})")
       when "add_tlet"

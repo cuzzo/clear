@@ -925,6 +925,7 @@ module FunctionAnalysis
         owner_scope = lookup_scope_for(cap_name)
         if owner_scope.nil?
            error!(node, :CAPTURE_UNDEFINED_VAR, name: cap_name)
+           next
         end
       else
         # Local capture
