@@ -30,7 +30,7 @@ class ZigTranspiler
 
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
 
-  sig { params(importer: T.untyped, source_dir: T.untyped).void }
+  sig { params(importer: T.nilable(ModuleImporter), source_dir: T.nilable(String)).void }
   def initialize(importer: nil, source_dir: nil)
     @importer   = importer
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
@@ -54,7 +54,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.untyped, main_tier: T.untyped, default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(Hash), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
@@ -64,7 +64,7 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.untyped, main_tier: T.untyped, default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(Hash), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode

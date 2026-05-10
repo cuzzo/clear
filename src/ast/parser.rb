@@ -57,7 +57,7 @@ class Parser
     @@suffix_rules[[type, value]] = block
   end
 
-  sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.untyped).void }
+  sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.nilable(T::Boolean)).void }
   def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
     @pos = T.let(0, Integer)
