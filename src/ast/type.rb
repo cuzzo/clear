@@ -268,14 +268,6 @@ class Type
     # Only overwrite when explicitly requested so the copy-constructor
     # path (`Type.new(other_type)`) preserves auto-ness from `other`.
     @is_auto = true if auto
-
-    # Authoritative escape classification — derived once from final
-    # type state. Single-source-of-truth replacement for the
-    # explicit-include-list anti-pattern in `needs_escape_promotion?`
-    # and friends. Default `:by_ref` (most-restrictive) so any
-    # un-classified shape compile-fails at copy/escape sites instead
-    # of silently UAFing.
-    derive_escape_class!
   end
 
   # Stable enum of how a value's storage flows through escape paths.
@@ -283,6 +275,15 @@ class Type
   #   - "is BG capture an independent instance?"  (`bg_capture_is_value_copy?`)
   #   - "does escape require heap-dupe?"          (`needs_escape_promotion?`)
   #   - "can implicit Copy in branch merge?"      (`implicitly_copyable?` — modulo schema)
+  #
+  # IMPORTANT: computed lazily, NOT cached at construction. Type's
+  # capability fields (@collection, @sync, @ownership, @provenance) are
+  # often set AFTER the constructor returns — by the annotator, by
+  # post-construction setters, by `dup`+mutate idioms in the
+  # capability-helper code. Caching at construction time stales the
+  # answer for any Type whose capabilities are filled in later (e.g.
+  # `String[]@list` parses as raw `:String[]` with `@collection=nil`
+  # and only acquires `@collection=:list` after parse_raw_input).
   ESCAPE_CLASSES = %i[
     value          primitives, Id<T>, fixed value arrays — bag-of-bits
     slice_rodata   string literals — slice header into static memory
@@ -292,27 +293,16 @@ class Type
     sync_wrapped   any_sync — locked / write_locked / atomic over a payload
   ].each_slice(2).map(&:first).freeze
 
-  attr_reader :escape_class
-
-  sig { void }
-  private def derive_escape_class!
-    @escape_class = if primitive?
-                      :value
-                    elsif generic_instance? && generic_base == :Id
-                      :value
-                    elsif any_rc?
-                      :refcounted
-                    elsif any_sync?
-                      :sync_wrapped
-                    elsif string?
-                      rodata? ? :slice_rodata : :slice_managed
-                    elsif list_collection? || set_collection? || pool? || map?
-                      :slice_managed
-                    elsif array? && !string?
-                      :value
-                    else
-                      :by_ref
-                    end
+  sig { returns(Symbol) }
+  def escape_class
+    return :value          if primitive?
+    return :value          if generic_instance? && generic_base == :Id
+    return :refcounted     if any_rc?
+    return :sync_wrapped   if any_sync?
+    return (rodata? ? :slice_rodata : :slice_managed) if string?
+    return :slice_managed  if list_collection? || set_collection? || pool? || map?
+    return :value          if array? && !string?
+    :by_ref
   end
 
   # -----------------------------------------------

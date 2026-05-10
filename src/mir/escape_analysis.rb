@@ -519,19 +519,17 @@ module EscapeAnalysis
         next unless bind.name.is_a?(String) && !local_names.include?(bind.name)
         ti = bind.type_info rescue nil
         next unless ti.is_a?(Type)
-        # Authoritative source: only allocator-backed types
-        # (`escape_class == :slice_managed`) can be victim of the loop
-        # mark/rewind UAF. Replaces the explicit-include-list
-        # `string? || list_collection? || set_collection? || pool? ||
-        # (map? && !numeric_map?)` with the `escape_class` lookup +
-        # legacy numeric-map carve-out (AutoHashMapUnmanaged is pure
-        # arena-allocated; the carve-out is preserved for behavior
-        # parity, candidate for follow-up audit).
-        next unless ti.escape_class == :slice_managed
+        # Outer-binding reassign in a mark_per_iter loop. Strings need
+        # promotion regardless of initial provenance (a `last: String = ""`
+        # outer var with rodata provenance still gets re-bound to a
+        # frame concat result — Cond 5 promotes `last` to heap).
+        # Allocator-backed containers (escape_class :slice_managed)
+        # need promotion too, except numeric_map (AutoHashMapUnmanaged
+        # is pure arena-allocated; legacy carve-out preserved).
         if ti.string?
           carry_names << bind.name
           LoopFrameAnalysis.promote_value_to_heap!(bind.value)
-        elsif !ti.numeric_map?
+        elsif ti.escape_class == :slice_managed && !ti.numeric_map?
           # Local allocator-backed container (list/set/map/pool) assigned to an outer variable.
           # When the loop rewinds the frame between iterations, the local's backing
           # buffer is freed but the outer variable still holds it → use-after-free.
