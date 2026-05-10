@@ -197,6 +197,18 @@ class Type
 
   sig { params(raw_input: T.untyped, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.untyped, observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
+    @provenance        = T.let(nil, T.nilable(Symbol))
+    @ownership         = T.let(nil, T.nilable(Symbol))
+    @location          = T.let(nil, T.nilable(Symbol))
+    @key_type_raw      = T.let(nil, T.nilable(Symbol))
+    @is_array          = T.let(false, T::Boolean)
+    @is_map            = T.let(false, T::Boolean)
+    @is_optional       = T.let(false, T::Boolean)
+    @is_tense          = T.let(false, T::Boolean)
+    @is_observable     = T.let(false, T::Boolean)
+    @is_auto           = T.let(false, T::Boolean)
+    @is_error_union    = T.let(false, T::Boolean)
+    @is_generic_instance = T.let(false, T::Boolean)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -694,7 +706,7 @@ class Type
   # Backed by AutoHashMapUnmanaged — no key duplication, pure arena-allocated.
   sig { returns(T::Boolean) }
   def numeric_map?
-    @is_map && @key_type_raw && @key_type_raw != :String
+    !!(@is_map && @key_type_raw && @key_type_raw != :String)
   end
 
   sig { returns(Type) }
