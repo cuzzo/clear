@@ -179,7 +179,7 @@ module EffectTracker
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
   # families are concrete, or keeps them MAYBE when polymorphism propagates.
-  sig { params(callee_name: String, arg_family_sets: T::Array[Set]).returns(T.untyped) }
+  sig { params(callee_name: String, arg_family_sets: T::Array[Set]).returns(T.nilable(Array)) }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless current_fn_ctx&.name

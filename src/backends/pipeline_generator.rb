@@ -2268,7 +2268,7 @@ module PipelineGenerator
     ZIG
   end
 
-  sig { params(kind: Symbol, id: Integer).returns(T.untyped) }
+  sig { params(kind: Symbol, id: Integer).returns(T.nilable(String)) }
   def combine_body_inline(kind, id)
     T.bind(self, T.untyped) rescue nil
     p = "__ccr#{id}_p"

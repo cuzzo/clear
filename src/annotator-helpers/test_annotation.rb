@@ -67,7 +67,7 @@ module TestAnnotation
   # bodies, AFTER EACH bodies, sibling LETs, and every TEST THAT
   # body inside the enclosing block. Lowering injects the actual
   # variable declarations at the top of each test body.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def visit_test_lets(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:lets)
@@ -88,7 +88,7 @@ module TestAnnotation
   # ALL bodies become standalone Zig test blocks but still need to be
   # annotated against the enclosing scope so type errors surface at
   # compile time.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def visit_test_hook_bodies(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:before_each)

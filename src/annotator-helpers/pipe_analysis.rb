@@ -1318,7 +1318,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
   def analyze_shard_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_op = node.right  # ShardOp node

@@ -145,7 +145,7 @@ class AutoConstraintCollector
 
   # Param Auto ← call-site arg type. The arg AST node is the
   # constraint source; the unifier reads its eventual type_info.
-  sig { params(call_node: AST::FuncCall).returns(T.untyped) }
+  sig { params(call_node: AST::FuncCall).returns(T.nilable(Array)) }
   def record_call_site(call_node)
     callee = @fn_nodes[call_node.name]
     return unless callee
