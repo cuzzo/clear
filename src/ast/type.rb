@@ -842,10 +842,16 @@ class Type
   # before escaping its scope (return, BG capture, etc.).
   # Covers: @list (frame-backed buffer), string HashMap (frame-backed keys/buckets),
   # and strings ([]const u8 slices pointing into the frame arena).
+  #
+  # Authoritative source: `escape_class`. A `:slice_managed` type's
+  # backing buffer dies with the declaring frame, so escape-via-RETURN /
+  # struct-field / etc. requires heap-promotion. `:by_ref` types whose
+  # FIELDS are `:slice_managed` need promotion too — that requires a
+  # schema lookup; see `cleanup_allocator` callers / Phase 3 follow-up.
   sig { returns(T::Boolean) }
   def needs_escape_promotion?
     return false if sharded?  # sharded collections are always heap-backed
-    list_collection? || (map? && !numeric_map?) || string?
+    escape_class == :slice_managed
   end
 
   RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
@@ -1376,23 +1382,25 @@ class Type
   # contributes to the handle's tied-lifetime source list.
   sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(T::Boolean) }
   def bg_capture_is_value_copy?(lookup_arg = nil, &lookup_block)
-    return true if primitive?
-    return true if generic_instance? && generic_base == :Id
-    return true if string? && rodata?
-    return true if array? && !list_collection? && !pool? && !set_collection? && !string?
-    if lookup_arg || lookup_block
-      resolver = lookup_arg || lookup_block
-      schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
-      if schema.nil? && generic_instance?
-        schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
-      end
-      return true if schema.is_a?(Hash) && schema[:kind] == :enum
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        return !has_heap
-      end
-      # Structs (no :kind) deliberately fall through to false — captured by ref.
+    # Type-inherent classes that always-copy: primitives, Id<T>, rodata
+    # string slices, fixed value arrays.
+    return true if escape_class == :value || escape_class == :slice_rodata
+    # Schema-aware refinement: at the Type level, enums and
+    # unions-without-heap-variants land in :by_ref because Type can't
+    # see schema; given a resolver they classify as value-copy.
+    return false unless escape_class == :by_ref
+    return false unless lookup_arg || lookup_block
+    resolver = lookup_arg || lookup_block
+    schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
+    if schema.nil? && generic_instance?
+      schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
     end
+    return true if schema.is_a?(Hash) && schema[:kind] == :enum
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      return !has_heap
+    end
+    # Structs (no :kind) deliberately fall through to false — captured by ref.
     false
   end
 

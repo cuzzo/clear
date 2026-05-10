@@ -6437,27 +6437,36 @@ private
   # source binding's death = pointer-into-freed-memory.
   sig { params(analysis: CapabilityHelper::CaptureAnalysis).returns(T::Array[SymbolEntry]) }
   def bg_lifetime_sources(analysis)
-    sources = []
-    (analysis.capture_symbols || {}).each_value do |info|
-      next if info.nil?
-      bound = false
-      bound = true if info.sync == :atomic
-      bound = true if info.sync == :locked || info.sync == :write_locked
-      bound = true if info.storage == :multiowned
-      bound = true if info.sync == :local
-      # Frame/stack-allocated locals (plain `@local` or unannotated
-      # struct/collection bindings) are captured by reference into the
-      # BG's fiber frame. They die with the source's scope. This was
-      # the missing case behind the lifetimed_return fuzz UAFs.
-      bound = true if (info.storage == :stack || info.storage == :frame) &&
-                      info.sync.nil? &&
-                      info.respond_to?(:type) && info.type &&
-                      !value_copy_capture?(info.type)
-      bound = false if info.storage == :shared && !info.sync
-      bound = false if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
-      sources << info if bound
-    end
-    sources
+    (analysis.capture_symbols || {}).each_value.reject { |info|
+      info && bg_capture_independent?(info)
+    }.compact
+  end
+
+  # Default-deny inverse of the old explicit-include-list. A capture is
+  # INDEPENDENT (free to outlive its source) only via one of these
+  # explicit escape hatches; everything else binds the BG handle's
+  # lifetime by default. New storage/sync/layout combinations land
+  # here as compile-time RETURN-rejections, not silent UAFs.
+  sig { params(info: T.untyped).returns(T::Boolean) }
+  def bg_capture_independent?(info)
+    # Arc without inner sync — refcounted, escapable.
+    return true if info.storage == :shared && info.sync.nil?
+    # @indirect:atomic — heap-pinned AtomicPtr cell with own lifetime
+    # mechanism (M3.5 promotion).
+    return true if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
+    # Any sync wrapper (atomic / locked / write_locked / local) makes
+    # the binding captured by reference — lifetime-bound, regardless
+    # of inner type. The :raw / :symbol modes are data-access only,
+    # not locks, so they're not bound.
+    return false if info.sync && info.sync != :raw && info.sync != :symbol
+    # Rc storage: bound to declaring scope.
+    return false if info.storage == :multiowned
+    # No sync wrapper, no refcount: the TYPE's inherent escape class
+    # decides. :value / :slice_rodata = value-copy = escapable.
+    # Authoritative source: Type#escape_class.
+    ti = info.respond_to?(:type) ? info.type : nil
+    return false unless ti
+    value_copy_capture?(ti)
   end
 
   # Thin wrapper that hands the annotator's schema-lookup closure to
