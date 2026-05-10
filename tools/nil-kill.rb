@@ -561,10 +561,12 @@ module NilKill
       @struct_full_by_name = {}
       @non_nil_locals = Set.new
       @non_nil_method_returns = Set.new
+      @ivar_tlet_names = Set.new
       parsed = Prism.parse_file(path)
       if parsed.success?
         collect_struct_declarations(parsed.value, [])
         collect_non_nil_method_returns(parsed.value)
+        collect_ivar_tlet_names(parsed.value)
         walk(parsed.value, [])
       end
     end
@@ -720,6 +722,14 @@ module NilKill
       types.uniq.size == types.size ? "high" : "review"
     end
 
+    def collect_ivar_tlet_names(node)
+      if node.is_a?(Prism::InstanceVariableWriteNode)
+        val = node.value
+        @ivar_tlet_names.add(node.name.to_s) if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
+      end
+      node.child_nodes.compact.each { |child| collect_ivar_tlet_names(child) } if node.respond_to?(:child_nodes)
+    end
+
     def collect_non_nil_method_returns(node)
       if node.is_a?(Prism::DefNode)
         sig = sig_above(node.location.start_line)
@@ -860,7 +870,11 @@ module NilKill
     end
 
     def inspect_variable_write(node)
-      return if node.value.is_a?(Prism::CallNode) && node.value.name == :let && node.value.receiver&.slice == "T"
+      if node.value.is_a?(Prism::CallNode) && node.value.name == :let && node.value.receiver&.slice == "T"
+        @ivar_tlet_names.add(node.name.to_s)
+        return
+      end
+      return if @ivar_tlet_names.include?(node.name.to_s)
       type = literal_type(node.value)
       return unless type
       @tlet_sites << { "path" => @rel, "line" => node.location.start_line, "tlet" => false, "name" => node.name.to_s, "candidate_type" => type }
@@ -1141,8 +1155,8 @@ module NilKill
     def apply_verified(actions)
       return 0 if actions.empty?
       snapshot = snapshot_files(actions)
-      Apply.new([]).apply_actions(actions)
-      return actions.size if verify
+      changed = Apply.new([]).apply_actions(actions)
+      return changed if verify
 
       restore_files(snapshot)
       if actions.size == 1
