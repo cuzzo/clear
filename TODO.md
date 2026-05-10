@@ -17,6 +17,7 @@
  - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [x] Continuous Integration
  - [x] Syntax maturity cleanup / sweep
+ - [ ] Comment Cleansing
 
 ## v0.1 (Target = May 30)
 
@@ -37,7 +38,7 @@
  - [ ] Typed Transpiler: ~90% of slots & returns, in prep for self-hosting, to test-bed plans for Property Based Testing 
  - [ ] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
  - [ ] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
- - [ ] Formal Verification for Gated Acccess, Execution Boundary Crossing, Escape Analysis
+ - [ ] Formal Verification for Gated Acccess, Execution Boundary Crossing, Escape Analysis, FSM Transformation
 
 Milestone: A working CLEAR VM with debugger & time travel, that supports a decent chunk of the language (including concurrency).
 
