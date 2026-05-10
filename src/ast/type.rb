@@ -324,14 +324,14 @@ class Type
   # answer for any Type whose capabilities are filled in later (e.g.
   # `String[]@list` parses as raw `:String[]` with `@collection=nil`
   # and only acquires `@collection=:list` after parse_raw_input).
-  ESCAPE_CLASSES = %i[
+  ESCAPE_CLASSES = T.let(%i[
     value          primitives, Id<T>, fixed value arrays — bag-of-bits
     slice_rodata   string literals — slice header into static memory
     slice_managed  frame/heap strings, lists, sets, pools, maps — slice into allocator
     by_ref         user structs, unions, enums, @indirect — captured by pointer
     refcounted     any_rc — Arc / Rc with own lifetime mechanism
     sync_wrapped   any_sync — locked / write_locked / atomic over a payload
-  ].each_slice(2).map(&:first).freeze
+  ].each_slice(2).map(&:first).freeze, T::Array[T.nilable(Symbol)])
 
   sig { returns(Symbol) }
   def escape_class
