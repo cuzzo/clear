@@ -6392,36 +6392,68 @@ private
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
   end
 
+  # AST node types that DON'T propagate a BG handle's tied lifetime
+  # to their enclosing expression. Their own lifetime semantics are
+  # determined by the symbol / return-type the node resolves to, not
+  # by walking into their sub-expressions:
+  #
+  #   - Identifier / Literal — terminal values; lifetime via symbol.
+  #   - FuncCall / MethodCall — return type carries lifetime; args are
+  #     argument-position, not return-position.
+  #   - GetField / GetIndex — lifetime via root identifier's symbol.
+  #   - BinaryOp / UnaryOp — produce primitives; never embed a BG.
+  #
+  # Default-deny inverse: every OTHER AST node-with-sub-expressions is
+  # walked by reflection. New container shapes (TupleLit, future
+  # collection literals, transparent wrappers) recurse for free
+  # without code changes.
+  BG_SOURCE_OPAQUE_AST_NODES = T.let(Set[
+    AST::Identifier, AST::Literal,
+    AST::FuncCall,   AST::MethodCall,
+    AST::GetField,   AST::GetIndex,
+    AST::BinaryOp,   AST::UnaryOp,
+  ].freeze, T.untyped)
+
   # Walk an expression tree to find every BgBlock / BgStreamBlock and
-  # union their lifetime-bound capture sources. Without this, a BG
-  # buried inside a container literal escapes its captures' scope
+  # union their lifetime-bound capture sources. Without this walk, a
+  # BG buried inside a container literal escapes its captures' scope
   # when the surrounding binding is RETURNed / stored / passed (real
   # UAF, fuzz finding `lifetimed_return` store_in_field cell).
   #
-  # Recurses through every container shape that can hold a BG handle
-  # by-value: struct literals, list/map literals, union variants,
-  # and the transparent COPY/MOVE/Cast wrappers that surface during
-  # annotation. Anything else (FuncCall, MethodCall, Identifier, ...)
-  # is opaque — its lifetime flows through the call's return type or
-  # the symbol's `lifetime` field, not through expression-tree walk.
+  # Default-recurse: every AST node-with-sub-expressions is walked
+  # generically via Struct.members. Opt-OUT only for the small finite
+  # set of AST classes whose lifetime is determined by symbol /
+  # return-type rather than by sub-expression containment (see
+  # BG_SOURCE_OPAQUE_AST_NODES). New AST container types added later
+  # propagate for free; missing-recursion bugs surface as compile-time
+  # over-rejection rather than silent UAF.
   sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
   def collect_bg_sources_in_expr(expr)
     return [] if expr.nil?
-    case expr
-    when AST::BgBlock, AST::BgStreamBlock
-      analysis = expr.respond_to?(:capture_analysis) ? expr.capture_analysis : nil
-      analysis && analysis.respond_to?(:capture_symbols) ? bg_lifetime_sources(analysis) : []
-    when AST::StructLit, AST::UnionVariantLit
-      expr.fields.each_value.flat_map { |v| collect_bg_sources_in_expr(v) }
-    when AST::ListLit
-      (expr.items || []).flat_map { |v| collect_bg_sources_in_expr(v) }
-    when AST::HashLit
-      (expr.pairs || []).flat_map { |(k, v)| collect_bg_sources_in_expr(k) + collect_bg_sources_in_expr(v) }
-    when AST::CopyNode, AST::MoveNode, AST::Cast
-      collect_bg_sources_in_expr(expr.value)
-    else
-      []
+    return bg_sources_for_block(expr) if expr.is_a?(AST::BgBlock) || expr.is_a?(AST::BgStreamBlock)
+    return [] if BG_SOURCE_OPAQUE_AST_NODES.include?(expr.class)
+    return [] unless expr.is_a?(Struct)
+    expr.members.flat_map do |m|
+      v = expr[m]
+      collect_bg_sources_walk(v)
     end
+  end
+
+  sig { params(v: T.untyped).returns(T::Array[SymbolEntry]) }
+  def collect_bg_sources_walk(v)
+    case v
+    when Array then v.flat_map { |x| collect_bg_sources_walk(x) }
+    when Hash  then v.values.flat_map { |x| collect_bg_sources_walk(x) }
+    when Struct then collect_bg_sources_in_expr(v)
+    else []
+    end
+  end
+
+  sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
+  def bg_sources_for_block(expr)
+    analysis = expr.respond_to?(:capture_analysis) ? expr.capture_analysis : nil
+    return [] unless analysis && analysis.respond_to?(:capture_symbols)
+    bg_lifetime_sources(analysis)
   end
 
   # Walk the capture-analysis SymbolEntries and pick the ones whose
