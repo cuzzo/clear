@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Structured representation of a function's external interface.
 # Replaces the plain Hash that was previously used for function signatures.
 #
@@ -62,7 +62,7 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[Hash], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(Array), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, T.untyped]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(Array), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
+  sig { params(params: T::Array[T::Hash[T.untyped, T.untyped]], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[T.untyped]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, T.untyped]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
   def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
@@ -82,6 +82,13 @@ class FunctionSignature
     @owner_type_params = owner_type_params
     @intrinsic = intrinsic
     @zig_pattern = zig_pattern
+    @needs_rt          = T.let(nil, T.untyped)
+    @can_fail          = T.let(nil, T.untyped)
+    @return_provenance = T.let(nil, T.untyped)
+    @effects           = T.let(nil, T.untyped)
+    @return_strategy   = T.let(nil, T.untyped)
+    @stack_tier        = T.let(nil, T.untyped)
+    @requires          = T.let(nil, T.untyped)
   end
 
   sig { returns(FunctionSignature) }

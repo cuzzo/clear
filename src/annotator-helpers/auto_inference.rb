@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # Auto inference — Pass B (constraint collection).
 #
@@ -61,7 +61,7 @@ class AutoConstraintCollector
   # Walk the program. Populates @slots with one entry per Auto slot
   # and accumulates source-node lists. Returns @slots so callers can
   # inspect / pass directly to the unifier.
-  sig { params(program_node: AST::Program).returns(T::Hash[Array, AutoConstraintCollector::Slot]) }
+  sig { params(program_node: AST::Program).returns(T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot]) }
   def collect!(program_node)
     register_signature_slots
     walk(program_node, current_fn: nil)
@@ -73,7 +73,7 @@ class AutoConstraintCollector
   # Phase 1: scan every FunctionDef in @fn_nodes and register slots
   # for each Auto-typed param / return. Locals are registered lazily
   # during the walk because they live inside bodies.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def register_signature_slots
     @fn_nodes.each do |name, fn|
       (fn.params || []).each_with_index do |param, i|
@@ -131,7 +131,7 @@ class AutoConstraintCollector
 
   # Per-node-type constraint recording. Each branch corresponds to
   # one of the constraint sources from §4.1 of the spec.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).returns(T.nilable(T::Array[T.untyped])) }
   def record_constraint(node, current_fn)
     case node
     when AST::FuncCall
@@ -145,7 +145,7 @@ class AutoConstraintCollector
 
   # Param Auto ← call-site arg type. The arg AST node is the
   # constraint source; the unifier reads its eventual type_info.
-  sig { params(call_node: AST::FuncCall).returns(T.nilable(Array)) }
+  sig { params(call_node: AST::FuncCall).returns(T.nilable(T::Array[T.untyped])) }
   def record_call_site(call_node)
     callee = @fn_nodes[call_node.name]
     return unless callee
@@ -161,7 +161,7 @@ class AutoConstraintCollector
   # Return Auto ← RETURN expr type. Only attaches the source when
   # the enclosing function actually has an Auto return — a RETURN
   # inside a non-Auto-return function is a regular type-checked stmt.
-  sig { params(return_node: AST::ReturnNode, current_fn: AST::FunctionDef).returns(T.nilable(Array)) }
+  sig { params(return_node: AST::ReturnNode, current_fn: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
   def record_return(return_node, current_fn)
     return unless current_fn && auto?(current_fn.return_type)
     return unless return_node.value
@@ -184,7 +184,7 @@ class AutoConstraintCollector
   #      type=nil, value=new_val)` for this. Attach the new value
   #      as another constraint source on the SAME slot — ambiguity
   #      flows out of the unifier when types disagree.
-  sig { params(decl_node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(decl_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def record_local(decl_node)
     if auto?(decl_node.type)
       # M2.2 — empty `[]` / `{}` initializer: register shape-tagged
@@ -226,7 +226,7 @@ class AutoConstraintCollector
   #   - scalar slot: append the whole RHS node.
   #   - :list_element: append each list literal item as evidence.
   #   - map shape: append each pair's key/value to the matching slots.
-  sig { params(entry: T.untyped, rhs: T.untyped).returns(T.nilable(Array)) }
+  sig { params(entry: T.untyped, rhs: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def record_reassignment_sources(entry, rhs)
     return unless rhs
 
@@ -349,7 +349,7 @@ class AutoUnifier
   # and `sources` to attribute each observation to its callsite.
   Ambiguity  = Struct.new(:slot, :observed_types, :sources, keyword_init: true)
 
-  sig { params(slots: T::Hash[Array, AutoConstraintCollector::Slot], type_of: T.nilable(Proc)).void }
+  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], type_of: T.nilable(Proc)).void }
   def initialize(slots, type_of: nil)
     @slots = slots
     # `type_of` lets callers plug in a custom source-type resolver.
@@ -358,9 +358,9 @@ class AutoUnifier
     # validation). When integrated into the pipeline (M1.7), the
     # tolerant body-pass populates type_info on each constraint
     # source before this unifier runs.
-    @type_of = type_of || ->(node) {
+    @type_of = T.let(type_of || ->(node) {
       node.respond_to?(:type_info) ? node.type_info : nil
-    }
+    }, T.untyped)
   end
 
   sig { returns(AutoUnifier::Result) }
@@ -418,7 +418,7 @@ class AutoUnifier
   # `HashMap<Byte[1], V>` (unfit for use). The user almost always
   # means `String` when they pass / store a string literal; widening
   # converts the diagnostic to the type they actually want.
-  sig { params(slot: AutoConstraintCollector::Slot).returns(Array) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T::Array[T.untyped]) }
   def collect_observed_types(slot)
     seen = []
     slot.sources.each do |source|
@@ -495,7 +495,7 @@ class AutoUnifier
   # decl. Returns the list of decl_nodes whose stamping is
   # incomplete (only one half resolved) — the caller emits per-slot
   # unresolved findings for those.
-  sig { params(resolved_slots: T::Hash[Array, AutoUnifier::Resolution]).returns(T::Hash[Integer, Hash]) }
+  sig { params(resolved_slots: T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]).returns(T::Hash[Integer, T::Hash[T.untyped, T.untyped]]) }
   def stamp_map_pairs!(resolved_slots)
     by_decl = Hash.new { |h, k| h[k] = {} }
     resolved_slots.each_value do |resolution|
@@ -533,13 +533,13 @@ end
 class ShapeEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[Array, AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
+  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
   end
 
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @slots
@@ -550,7 +550,7 @@ class ShapeEvidenceCollector
   # Build a per-function map from binding-name to the slot triple
   # `{ list: slot, key: slot, value: slot }`. Only includes shape
   # slots whose decl_node lives inside this function body.
-  sig { params(fn: AST::FunctionDef).returns(T.nilable(Array)) }
+  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
   def collect_in_function(fn)
     name_map = build_name_map(fn)
     return if name_map.empty?
@@ -558,7 +558,7 @@ class ShapeEvidenceCollector
   end
 
   # Walk body for shape-bearing decls and map their name → shape slots.
-  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, Hash]) }
+  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Hash[T.untyped, T.untyped]]) }
   def build_name_map(fn)
     map = {}
     walk_for_shape_decls(fn.body) do |decl|
@@ -592,7 +592,7 @@ class ShapeEvidenceCollector
   end
 
   # Walk the body and record evidence into shape slots.
-  sig { params(node: T.untyped, name_map: T::Hash[String, Hash]).returns(T.untyped) }
+  sig { params(node: T.untyped, name_map: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
   def walk(node, name_map)
     return if node.nil?
     case node
@@ -618,7 +618,7 @@ class ShapeEvidenceCollector
 
   # Detect `x.append(e)` / `x.insert(e)` / `x.put(k, v)` and record
   # the corresponding evidence onto the shape slots for `x`.
-  sig { params(call: AST::MethodCall, name_map: Hash).returns(T.nilable(Array)) }
+  sig { params(call: AST::MethodCall, name_map: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def record_method_call(call, name_map)
     target = call.object
     return unless target.is_a?(AST::Identifier)
@@ -645,7 +645,7 @@ class ShapeEvidenceCollector
   # Append (k, v) to the matching map sub-slots when the slot map
   # carries both halves. No-op for non-map shapes — keeps
   # method-call dispatch noise out of the call sites.
-  sig { params(slots: Hash, args: Array).returns(T.nilable(Array)) }
+  sig { params(slots: T::Hash[T.untyped, T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def record_map_pair_evidence(slots, args)
     return unless slots[:key] && slots[:value]
     slots[:key].sources << args[0]
@@ -654,7 +654,7 @@ class ShapeEvidenceCollector
 
   # Detect `x[i] = v`. For list shape: v is element evidence. For
   # map shape: i is key, v is value.
-  sig { params(assign: AST::Assignment, name_map: Hash).returns(T.nilable(Array)) }
+  sig { params(assign: AST::Assignment, name_map: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def record_index_assign(assign, name_map)
     target = assign.name
     return unless target.is_a?(AST::GetIndex)
@@ -692,14 +692,14 @@ end
 class OperatorEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[Array, AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
+  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
-    @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, Hash)
+    @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])
   end
 
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @evidence
@@ -707,7 +707,7 @@ class OperatorEvidenceCollector
 
   private
 
-  sig { params(fn: AST::FunctionDef).returns(Array) }
+  sig { params(fn: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def collect_in_function(fn)
     name_to_slot = build_name_map(fn)
     walk_binops(fn.body, name_to_slot, fn)
@@ -717,7 +717,7 @@ class OperatorEvidenceCollector
   # Auto-typed params (registered by AutoConstraintCollector under
   # [:param, fn_name, i]) and Auto-typed locals (registered under
   # [:local, decl_node.object_id]).
-  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, Array]) }
+  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Array[T.untyped]]) }
   def build_name_map(fn)
     map = {}
     (fn.params || []).each_with_index do |param, i|
@@ -755,7 +755,7 @@ class OperatorEvidenceCollector
   # Walk for BinaryOp expressions; record `op` per slot whose
   # binding appears as an Identifier operand. Returns also recorded
   # for return-Auto when the RETURN value is a BinaryOp.
-  sig { params(node: T.untyped, name_to_slot: T::Hash[String, Array], fn: AST::FunctionDef).returns(T.untyped) }
+  sig { params(node: T.untyped, name_to_slot: T::Hash[String, T::Array[T.untyped]], fn: AST::FunctionDef).returns(T.untyped) }
   def walk_binops(node, name_to_slot, fn)
     return if node.nil?
     case node
@@ -782,7 +782,7 @@ class OperatorEvidenceCollector
     end
   end
 
-  sig { params(binop: AST::BinaryOp, name_to_slot: T::Hash[String, Array]).returns(Array) }
+  sig { params(binop: AST::BinaryOp, name_to_slot: T::Hash[String, T::Array[T.untyped]]).returns(T::Array[T.untyped]) }
   def record_binop(binop, name_to_slot)
     [binop.left, binop.right].each do |operand|
       next unless operand.is_a?(AST::Identifier)

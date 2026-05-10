@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # TestLowering — MIR-side handling of CLEAR's test grammar.
 #

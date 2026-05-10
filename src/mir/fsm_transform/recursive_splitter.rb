@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform/recursive_splitter.rb -- recursive segment-graph
 # splitter for FSM-eligible BG bodies.
 #
