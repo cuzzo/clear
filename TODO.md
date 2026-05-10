@@ -1,6 +1,6 @@
 # CLEAR TODO
 
-## v0.1 (Target = May 5)
+## v0.1-pre (Target = May 10)
 
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [x] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
@@ -16,11 +16,9 @@
  - [x] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
  - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [x] Continuous Integration
- - [ ] Syntax maturity cleanup / sweep
+ - [x] Syntax maturity cleanup / sweep
 
-Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
-
-## v0.1.5 (Target = May 30)
+## v0.1 (Target = May 30)
 
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Finite State Machines
@@ -30,15 +28,20 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [x] Atomics
  - [x] True Synchronization Polymorphism
- - [ ] COPY/CLONE/SPLIT overloading (via SHARE - in progress)
- - [ ] True Polymorphic return
- - [ ] Design by Contract v1: `WITH GURADED x ... AS y { } ON GuardFail`
+ - [x] COPY/CLONE/SPLIT overloading (via SHARE - in progress)
+ - [x] True Polymorphic return
+ - [x] Design by Contract v1: `WITH GURADED x ... AS y { } ON GuardFail`, `PRE { }` and `POST { }` *RUNTIME* 
+ - [x] Typed Holes
+ - [ ] LEND keyword (attach lifetimes to functions / execution boundaries you LEND to)
+ - [ ] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
+ - [ ] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
+ - [ ] Formal Verification for Gated Acccess, Execution Boundary Crossing, Escape Analysis
+
+Milestone: A working CLEAR VM with debugger & time travel, that supports a decent chunk of the language (including concurrency).
 
  ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
- - [ ] Typed Holes
- - [ ] Design by Contract v2: PRE { } and POST { } conditions
- - [ ] LEND keyword (attach lifetimes to functions / execution boundaries you LEND to)
+ - [ ] Design by Contract v2: PRE { } Comptime
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
