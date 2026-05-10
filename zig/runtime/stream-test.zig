@@ -685,6 +685,7 @@ const SplitParallelSubscriberState = struct {
     stream: CheatLib.SplitStream(i64),
     total: i64 = 0,
     count: usize = 0,
+    ready: *std.atomic.Value(usize),
     completed: *std.atomic.Value(usize),
 };
 
@@ -692,6 +693,7 @@ fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*SplitParallelSubscriberState, @ptrCast(@alignCast(raw_args.?)));
     defer state.stream.deinit();
 
+    _ = state.ready.fetchAdd(1, .acq_rel);
     var total: i64 = 0;
     var count: usize = 0;
     while (true) {
@@ -1090,6 +1092,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     var stack_pool = fm.StackPool.init(allocator);
     defer stack_pool.deinit();
     var shutdown = std.atomic.Value(bool).init(false);
+    var ready = std.atomic.Value(usize).init(0);
     var completed = std.atomic.Value(usize).init(0);
 
     // Two-phase shutdown barrier (mirrors the canonical fix from
@@ -1184,9 +1187,9 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     };
 
     var subscribers: [subscriber_count]SplitParallelSubscriberState = undefined;
-    subscribers[0] = .{ .stream = seed_stream, .completed = &completed };
+    subscribers[0] = .{ .stream = seed_stream, .ready = &ready, .completed = &completed };
     for (1..subscriber_count) |i| {
-        subscribers[i] = .{ .stream = subscribers[0].stream.retain(), .completed = &completed };
+        subscribers[i] = .{ .stream = subscribers[0].stream.retain(), .ready = &ready, .completed = &completed };
     }
 
     for (&subscribers) |*subscriber| {
@@ -1197,6 +1200,12 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
             .{ .stack_size = .Large },
         );
     }
+
+    const ready_deadline = compat.milliTimestamp() + 15_000;
+    while (ready.load(.acquire) < subscriber_count and compat.milliTimestamp() < ready_deadline) {
+        if (!sched.pollOne()) compat.sleepNs(std.time.ns_per_ms);
+    }
+    try std.testing.expectEqual(@as(usize, subscriber_count), ready.load(.acquire));
 
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
