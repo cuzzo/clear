@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "./ast"
@@ -20,8 +20,9 @@ class Parser
   @@stmt_rules = T.let({}, T::Hash[T.untyped, T.untyped])
   @@primary_rules = T.let({}, T::Hash[T.untyped, T.untyped])
   @@suffix_rules = T.let({}, T::Hash[T.untyped, T.untyped])
+  @gradual_mode = T.let(false, T.nilable(T::Boolean))
 
-  sig { params(type: Symbol, value: String, node_class: T.nilable(Class), pattern: T.nilable(Array), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
+  sig { params(type: Symbol, value: String, node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
   def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
     if pattern
       # If pattern provided, create a block that runs the engine
@@ -37,7 +38,7 @@ class Parser
     end
   end
 
-  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(Class), pattern: T.nilable(Array), block: T.untyped).returns(Proc) }
+  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(T::Class[T.anything]), pattern: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(Proc) }
   def self.primary(type, value=nil, node_class = nil, pattern = nil,  &block)
     if pattern
       # If pattern provided, create a block that runs the engine
@@ -72,18 +73,28 @@ class Parser
     # per-instance by passing the kwarg explicitly. Without gradual
     # mode, omitted annotations behave exactly as before this feature
     # landed.
-    @gradual = gradual.nil? ? self.class.gradual_mode : gradual
+    @gradual = T.let(gradual.nil? ? self.class.gradual_mode : gradual, T::Boolean)
   end
 
   class << self
+    extend T::Sig
+
     # Process-global gradual-mode flag. Set by `clear --gradual` at
     # build start; read by Parser.new instances that don't pass an
     # explicit gradual: kwarg. This matches how the existing CLI
     # threads compile-time choices (--optimized, --tsan, etc.) — one
     # build, one mode.
-    attr_accessor :gradual_mode
+    sig { returns(T::Boolean) }
+    def gradual_mode
+      T.must(@gradual_mode)
+    end
+
+    sig { params(value: T::Boolean).returns(T::Boolean) }
+    def gradual_mode=(value)
+      @gradual_mode = T.let(value, T.nilable(T::Boolean))
+      value
+    end
   end
-  self.gradual_mode = false
 
   sig { returns(T.nilable(AST::Program)) }
   def parse
@@ -348,7 +359,7 @@ class Parser
   # `:always_mutable`) -- mixing locks with a lock-free path is a type error.
   # Enforced by parse_cap_join's one-per-dimension rule plus annotator-side
   # combo validation.
-  CAP_SIGIL_ATTRS = {
+  CAP_SIGIL_ATTRS = T.let({
     '@multiowned'     => { dim: :ownership, val: :multiowned  },
     '@shared'         => { dim: :ownership, val: :shared      },
     '@locked'         => { dim: :sync,      val: :locked      },
@@ -358,7 +369,7 @@ class Parser
     '@atomic'         => { dim: :sync,      val: :atomic      },
     '@indirect'       => { dim: :layout,    val: :indirect    },
     '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
     T.bind(self, Parser) rescue nil
@@ -437,7 +448,7 @@ class Parser
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
     T.bind(self, Parser) rescue nil
-    if !@suppress_struct_lit && lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
+    if !T.unsafe(self).instance_variable_get(:@suppress_struct_lit) && lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
         lhs.target.name[0] =~ /[A-Z]/
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
@@ -460,7 +471,7 @@ class Parser
   end
 
   ## START PATTERN DSL
-  sig { params(pattern: Array).returns(T.nilable(Array)) }
+  sig { params(pattern: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def process_pattern(pattern)
     captures = []
 
@@ -601,6 +612,7 @@ class Parser
   # Insert `<expected>` at the end of the previous source line (right
   # after its last non-whitespace character, so canonical formatting is
   # preserved). Works uniformly for `;`, `THEN`, `DO`, `->`.
+  sig { params(prev_tok: Lexer::Token, next_tok: Lexer::Token, expected_value: String).returns(T.untyped) }
   def emit_syntax_insert_end_of_line!(prev_tok, next_tok, expected_value)
     line_text  = @source_code.lines[prev_tok.line - 1] || ''
     insert_col = line_text.rstrip.length + 1
@@ -623,6 +635,7 @@ class Parser
   # Insert `<expected>` just before the unexpected token (same-line
   # missing-keyword shape, e.g., `IF x RETURN 1` needs `THEN` before
   # `RETURN`).
+  sig { params(token: Lexer::Token, expected_value: String).returns(T.untyped) }
   def emit_syntax_insert_before_token!(token, expected_value)
     fix = Fix.new(
       description: "Insert `#{expected_value}` before '#{token.value}' at line #{token.line}.",
@@ -805,6 +818,7 @@ class Parser
     AST::ReturnNode.new(ret_token, value)
   end
 
+  sig { returns(AST::ThrowNode) }
   def parse_exit()
     exit_token = consume(:KEYWORD)
     context_expr = nil
@@ -815,6 +829,7 @@ class Parser
     AST::ThrowNode.new(exit_token, context_expr)
   end
 
+  sig { returns(AST::DieNode) }
   def parse_die()
     die_token = consume(:KEYWORD)
     context_expr = nil
@@ -829,7 +844,7 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_argument_list()
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
@@ -1546,15 +1561,15 @@ class Parser
   #     field access -- no lock, no Arc unwrap, no snapshot. Lets a
   #     single transaction fn accept every supported binding kind.
   #   - ACTOR / LOCK_FREE are out of scope for this milestone.
-  REQUIRES_VALID_FAMILIES = %w[LOCKED SNAPSHOTTED VERSIONED ATOMIC LOCAL ACTOR LOCK_FREE].to_set.freeze
+  REQUIRES_VALID_FAMILIES = T.let(%w[LOCKED SNAPSHOTTED VERSIONED ATOMIC LOCAL ACTOR LOCK_FREE].to_set.freeze, T::Set[String])
   # Reentrancy constraints (Thunk Phase 1.2) live alongside capability
   # families in the same `REQUIRES` grammar slot. The parse_requires_clause
   # parser routes them into the NON_REENTRANT-only `requires_clauses` hash
   # (returned via @last_requires_clauses) so they don't pollute the
   # capability-family `requires` hash.
-  REQUIRES_REENTRANCE_KINDS = %w[NON_REENTRANT].to_set.freeze
+  REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_requires_clause
     requires_hash = {}
     @last_requires_clauses = {}
@@ -1589,7 +1604,7 @@ class Parser
   # Returns { family: Symbol } or { reentrance: Symbol } based on the
   # token. Family kinds go into the capability `requires` hash; reentrance
   # kinds are forwarded into `requires_clauses`.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
     if REQUIRES_VALID_FAMILIES.include?(T.must(tok).value)
@@ -1664,7 +1679,7 @@ class Parser
   # THUNK, TAIL_CALL) parse as TYPE_IDs matched by value -- they are not
   # added to the lexer KEYWORD set because the only context they appear in
   # is right after the EFFECTS keyword.
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
@@ -1740,7 +1755,7 @@ class Parser
     [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
   end
 
-  sig { params(stop_words: T::Array[String]).returns(T.nilable(Array)) }
+  sig { params(stop_words: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def parse_block_body(stop_words = ['END'])
     stmts = []
     types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
@@ -1964,7 +1979,7 @@ class Parser
 
   # Sentinel returned by a suffix rule to signal "this suffix does not apply
   # to the current lhs — stop processing without consuming any tokens."
-  SUFFIX_DECLINE = Object.new.freeze
+  SUFFIX_DECLINE = T.let(Object.new.freeze, Object)
 
   sig { params(lhs: T.untyped).returns(T.untyped) }
   def parse_suffixes(lhs)
@@ -2064,7 +2079,7 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
-  sig { params(if_token: Lexer::Token, bindings: T::Array[Hash]).returns(AST::IfBind) }
+  sig { params(if_token: Lexer::Token, bindings: T::Array[T::Hash[T.untyped, T.untyped]]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
@@ -2081,7 +2096,7 @@ class Parser
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
   # Returns nil if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
@@ -2103,6 +2118,7 @@ class Parser
   end
 
   # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
+  sig { params(node: T.untyped, if_token: Lexer::Token).void }
   def validate_no_bare_bind!(node, if_token)
     return unless node.is_a?(AST::BinaryOp)
     if node.op == :BIND_VAR && !node.paren_bind
@@ -2352,7 +2368,7 @@ class Parser
     AST::StructPattern.new(tok, fields, partial)
   end
 
-  ERROR_KINDS = AST::ERROR_KINDS.map(&:to_s).freeze
+  ERROR_KINDS = T.let(AST::ERROR_KINDS.map(&:to_s).freeze, T::Array[String])
 
   # RAISE grammar (unified error system):
   #   RAISE                            -- System kind, no type, no msg
@@ -2370,7 +2386,7 @@ class Parser
   # registered (type, kind) entry.
   # Parse a single CATCH item: a bare TYPE_ID that's either a kind (if
   # in ERROR_KINDS) or a type. Returns { form:, name:, token: }.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def parse_catch_item
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
@@ -2379,7 +2395,7 @@ class Parser
 
   # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
   # STRING literal (message). Returns { form:, value:, token: }.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_catch_filter
     if match?(:TYPE_ID)
       tok = consume(:TYPE_ID)
@@ -2468,12 +2484,12 @@ class Parser
     AST::WhileLoop.new(tok, condition, body)
   end
 
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_stmts_until_end
     parse_block_body(['END'])
   end
 
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
@@ -3116,6 +3132,7 @@ class Parser
   # Parses an optional `:sharded(N)` or `:soa` suffix after @pool or @list.
   # Returns { shard_count:, soa: } hash with parsed values.
   # Raises a ParserError if the syntax is malformed or N < 2.
+  sig { params(cap_tok: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
   def parse_collection_modifiers!(cap_tok)
     result = T.let({ shard_count: nil, soa: false }, T::Hash[Symbol, T.untyped])
     return result unless match?(:CHAR, ':')
@@ -3147,7 +3164,7 @@ class Parser
   # Returns nil if no capability token is present, or a Hash:
   #   { ownership:, sync:, collection:, is_soa:, is_indirect:, shard_count: }
   # No semantic validation — just token consumption and duplicate detection.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_capabilities
     return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
 
@@ -3533,7 +3550,7 @@ class Parser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3593,7 +3610,7 @@ class Parser
   #   RETRY(N) THEN <action>                  -- sugar for ON Transient
   # Returns a Hash { selectors:, kinds:, types:, action:, retries:, ... } or nil.
   # Selector validation (existence, retry-is-Transient) runs in the annotator.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_lock_error_clause
     if match?(:KEYWORD, 'ON')
       consume(:KEYWORD, 'ON')
@@ -3630,7 +3647,7 @@ class Parser
   # selector; anything else is a type selector. Types are enum values
   # (no `:` prefix) per the unified error-system design; the 6 kind
   # names are effectively reserved.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_error_selectors
     selectors = [parse_error_selector]
     while match!(:CHAR, ',')
@@ -3639,7 +3656,7 @@ class Parser
     selectors
   end
 
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def parse_error_selector
     unless match?(:TYPE_ID)
       error!(current, :EXPECTED_ERROR_SELECTOR)
@@ -3650,7 +3667,7 @@ class Parser
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       { action: :raise, token: previous }
@@ -3681,7 +3698,7 @@ class Parser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
-  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T.nilable(Array)) }
+  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3757,7 +3774,7 @@ class Parser
   # Branch-prefix sigils for DO blocks.
   # Each maps to the attribute(s) it sets on the branch hash.
   # After `:` the next word is also looked up here (with `@` prepended if absent).
-  DO_BRANCH_SIGILS = {
+  DO_BRANCH_SIGILS = T.let({
     '@micro'    => { stack_size: :micro    },
     '@stack'    => { stack_size: :stack    },
     '@standard' => { stack_size: :standard },
@@ -3767,10 +3784,10 @@ class Parser
     '@pinned'   => { pinned: true          },
     '@parallel' => { parallel: true        },
     '@canSmash' => { can_smash: true       },
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   # Sigils valid at the start of a BG body (stack size + pinned).
-  BG_SIGILS = {
+  BG_SIGILS = T.let({
     '@micro'    => { stack_size: :micro    },
     '@stack'    => { stack_size: :stack    },
     '@standard' => { stack_size: :standard },
@@ -3781,13 +3798,13 @@ class Parser
     '@parallel' => { parallel: true        },
     '@arena'    => { pinned: true, arena: true },
     '@canSmash' => { can_smash: true       },
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   # Parses an optional `@size_sigil(:cap_sigil)* ->` prefix from a DO branch.
   # Returns { pinned: Bool, stack_size: Symbol|nil }.
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_branch_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3858,7 +3875,7 @@ class Parser
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
   # Returns { ..., stack_size_token: } where stack_size_token is the
   # token of the FIRST sigil that contributed a stack_size (or nil).
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def parse_bg_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3929,7 +3946,7 @@ class Parser
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
-  sig { returns(T.nilable(Array)) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)
@@ -4010,11 +4027,12 @@ class Parser
     AST::NextExpr.new(tok, expr)
   end
 
-  def parse_comma_seq(type, open, close)
+  sig { params(type: Symbol, open: T.nilable(String), close: T.nilable(String), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def parse_comma_seq(type, open, close, &blk)
     start_token = consume(type, open)
     items = []
     until match?(:CHAR, close)
-      items << yield
+      items << blk.call
       match!(:CHAR, ',')
     end
     consume(:CHAR, close)
@@ -4107,7 +4125,7 @@ class Parser
   # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
   # statement array. The kind sequence (BEFORE/AFTER + EACH/ALL) is
   # already validated by test_hook_match? at the call site.
-  sig { params(first: String, second: String).returns(Array) }
+  sig { params(first: String, second: String).returns(T::Array[T.untyped]) }
   def parse_test_hook(first, second)
     consume(:KEYWORD, first)
     consume(:KEYWORD, second)
@@ -4188,7 +4206,7 @@ class Parser
   # clause is absent. Names are validated to be VAR_IDs (snake_case)
   # so `--tag slow` filtering can match unambiguously; allowing
   # arbitrary strings would invite typo-mismatches that pass silently.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def parse_when_tags
     return [] unless match!(:KEYWORD, 'TAGS')
     consume(:CHAR, '[')
