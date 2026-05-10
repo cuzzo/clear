@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "../ast/type"
@@ -205,14 +205,14 @@ module PromotionClassifier
     end
   end
 
-  sig { params(body: Array).returns(Array) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   private_class_method def self.collect_returns(body)
     returns = []
     AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
   end
 
-  sig { params(ret_type: Type, schema_lookup: Proc, handled_fields: T::Set[String]).returns(Array) }
+  sig { params(ret_type: Type, schema_lookup: Proc, handled_fields: T::Set[String]).returns(T::Array[T.untyped]) }
   private_class_method def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
     resolved = ret_type.resolved
     schema = schema_lookup.call(resolved) rescue nil
@@ -243,6 +243,7 @@ module PromotionClassifier
     elem.to_s
   end
 
+  sig { params(node: T.untyped).returns(T::Set[T.untyped]) }
   private_class_method def self.referenced_vars(node)
     vars = Set.new
     return vars unless node
@@ -286,7 +287,7 @@ module CleanupClassifier
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   # @return [Hash] { var_name => entry_hash } or empty hash
-  sig { params(fn_node: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(fn_node: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def self.classify(fn_node, fn_nodes:, schema_lookup:)
     return {} unless fn_node.body
 
@@ -311,7 +312,7 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment nodes directly with { zig_type:, alloc: }.
-  sig { params(body: Array, bindings: T::Hash[String, Hash], schema_lookup: T.nilable(Proc)).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]], schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Array[T.untyped])) }
   def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
@@ -373,7 +374,7 @@ module CleanupClassifier
     promoted
   end
 
-  sig { params(body: Array, promoted: T::Set[String]).returns(T::Boolean) }
+  sig { params(body: T::Array[T.untyped], promoted: T::Set[String]).returns(T::Boolean) }
   private_class_method def self.body_calls_promoted?(body, promoted)
     found = T.let(false, T::Boolean)
     AST.walk_body(body) do |node|
@@ -386,7 +387,7 @@ module CleanupClassifier
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
-  sig { params(body: Array, promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(Array) }
+  sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T::Array[T.untyped]) }
   private_class_method def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
@@ -411,7 +412,7 @@ module CleanupClassifier
   # Walk BgBlock bodies found in expression positions within a statement list.
   # Only handles BgBlock (outer consumer fiber), not BgStreamBlock (generator
   # fiber bodies have special YIELD handling and no heap-cleanup variables).
-  sig { params(body: T.nilable(Array), promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(Array)) }
+  sig { params(body: T.nilable(T::Array[T.untyped]), promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.walk_expression_bg_bodies(body, promoted_fns, schema_lookup, bindings)
     return unless body.is_a?(Array)
     body.each do |stmt|
@@ -438,7 +439,7 @@ module CleanupClassifier
 
   # Extract BgBlock bodies from expression-position BG blocks in a statement.
   # Returns [] if none; only BgBlock (not BgStreamBlock).
-  sig { params(stmt: T.untyped).returns(T::Array[Array]) }
+  sig { params(stmt: T.untyped).returns(T::Array[T::Array[T.untyped]]) }
   private_class_method def self.bg_bodies_from_expr(stmt)
     result = []
     case stmt
@@ -471,7 +472,7 @@ module CleanupClassifier
   #   3. via_pointer: true        — needs_pointer_passing? types (HashMap,
   #                                  Pool) arrive at the callee already as
   #                                  *T; cleanup must NOT re-apply &.
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(T::Array[Hash])) }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
     (fn_node.params || []).select { |p| p[:takes] }.each do |p|
       ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
@@ -491,7 +492,7 @@ module CleanupClassifier
   # Build the base cleanup entry for a TAKES param of type ti. Defers to the
   # same per-kind helpers locals use (classify_collection, etc.) so adding a
   # new collection kind requires updating ONE dispatch site, not two.
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.takes_param_base_entry(ti, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
 
@@ -520,7 +521,7 @@ module CleanupClassifier
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  sig { params(body: Array, schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
@@ -585,7 +586,7 @@ module CleanupClassifier
   # Only MethodCall/FuncCall results are considered: variable/field access is a
   # borrow and the original binding retains cleanup responsibility.
   # RESOLVE is handled separately (rcRelease in lower_while_bind).
-  sig { params(body: Array, promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.walk_while_bind_bindings(body, promoted_fns, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::WhileBindLoop)
@@ -609,7 +610,7 @@ module CleanupClassifier
   end
 
   # Classify IF bind captures that come from ownership-transferring calls.
-  sig { params(body: Array, promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.walk_if_bind_bindings(body, promoted_fns, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::IfBind)
@@ -640,7 +641,7 @@ module CleanupClassifier
   # cleanup entry hash or nil. Order matters: earlier categories take
   # priority (e.g. resource before collection, RC before sync).
 
-  sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.container_borrow
@@ -673,7 +674,7 @@ module CleanupClassifier
   # Routing here avoids the misnomer and the unused entry fields.
   # Fires BEFORE classify_rc_or_link so atomic-ptr beats the
   # generic shared-Arc path.
-  sig { params(ti: Type).returns(T.nilable(Hash)) }
+  sig { params(ti: Type).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_atomic_ptr(ti)
     return nil unless ti.respond_to?(:atomic?) && ti.atomic?
     return nil unless ti.respond_to?(:indirect?) && ti.indirect?
@@ -688,7 +689,7 @@ module CleanupClassifier
       has_moved_guard: has_moved_guard, **extra }
   end
 
-  sig { params(_ti: Type, node: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(_ti: Type, node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_resource(_ti, node)
     return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
     entry(:resource, resource_close_zig: node.resource_close_zig)
@@ -705,7 +706,7 @@ module CleanupClassifier
   # and calls it before freeing self -- one cleanup recipe handles all
   # terminal shapes. No moved guard: NEXT/COLLECT only read the inner
   # value; the heap pointer always belongs to the binding.
-  sig { params(ti: Type).returns(T.nilable(Hash)) }
+  sig { params(ti: Type).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_observable(ti)
     return nil unless ti.tense_observable?
     return nil if ti.promise_list?
@@ -715,19 +716,19 @@ module CleanupClassifier
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
   # deinit() sets closed=true and wakes the generator so it exits cleanly.
   # No moved guard: streams are not linearly-affine (requires_move? = false).
-  sig { params(ti: Type).returns(T.nilable(Hash)) }
+  sig { params(ti: Type).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_frozen(ti)
     return nil unless ti.frozen?
     entry(:frozen, alloc: :heap, has_moved_guard: false)
   end
 
-  sig { params(ti: Type).returns(T.nilable(Hash)) }
+  sig { params(ti: Type).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_inf_stream(ti)
     return nil unless ti.inf_stream?
     entry(:inf_stream, has_moved_guard: false)
   end
 
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_collection(ti, schema_lookup)
     # Group 1 / Group 2 separation: when a collection is wrapped with
     # Arc/Rc ownership, the cleanup is `arcRelease` / `rcRelease` — which
@@ -751,7 +752,7 @@ module CleanupClassifier
     nil
   end
 
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
     # `node` is the originating AST node for the binding being classified.
     # For VarDecl/BindExpr this is the declaration (which has a `.value`
@@ -769,7 +770,7 @@ module CleanupClassifier
     entry(:array_with_struct_strings, alloc: :cleanup)
   end
 
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_rc_or_link(ti, schema_lookup)
     return nil unless ti.any_rc? || ti.link?
 
@@ -803,7 +804,7 @@ module CleanupClassifier
     end
   end
 
-  sig { params(ti: Type, sync: T.nilable(Symbol)).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, sync: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_sync(ti, sync = nil)
     return entry(:locked) if sync == :locked
     return entry(:write_locked) if sync == :write_locked
@@ -812,7 +813,7 @@ module CleanupClassifier
     nil
   end
 
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
     return nil unless ti.heap_provenance?
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
@@ -848,7 +849,7 @@ module CleanupClassifier
   #
   # This makes the choice based solely on node.storage, so MIRPass upgrades do
   # NOT need to mutate type_info.provenance for struct variables.
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup, sync = nil)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
@@ -874,7 +875,7 @@ module CleanupClassifier
     entry(:heap_struct_plain)
   end
 
-  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(Hash)) }
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   private_class_method def self.classify_struct_cleanup_fields(ti, node, schema_lookup)
     schema = schema_lookup.call(ti.resolved) rescue nil
     return nil unless (schema = Schemas.as_struct_schema(schema))

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform/segments.rb -- Segment splitter.
 #
 # Walks the BG body AST and produces a segment graph cut at suspend
@@ -34,17 +34,20 @@
 
 module FsmTransform
   module Segments
-    T.bind(self, T.untyped) rescue nil
-    T.bind(self, T.untyped) rescue nil
-    Done         = Struct.new(:_) { def kind; :done; end }
+    extend T::Sig
+    Done         = Struct.new(:_) do
+      extend T::Sig
+      sig { returns(Symbol) }
+      def kind; :done; end
+    end
     IoSuspend    = Struct.new(:call_node, :stdlib_def, :result_var, :next_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :io; end
     end
     NextSuspend  = Struct.new(:promise_ast, :result_var, :next_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :next; end
     end
     # LockSuspend: ONE cap's lock-acquire suspend.
@@ -73,23 +76,23 @@ module FsmTransform
     # that explicitly unlocks every cap.
     LockSuspend  = Struct.new(:with_node, :cap, :prior_caps,
                               :post_acquire_idx, :next_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :lock; end
     end
     LoopBack     = Struct.new(:target_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :loop_back; end
     end
     Goto         = Struct.new(:target_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :goto; end
     end
     CondBranch   = Struct.new(:cond_ast, :then_index, :else_index) do
-      T.bind(self, T.untyped) rescue nil
-      T.bind(self, T.untyped) rescue nil
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :cond_branch; end
     end
 
@@ -110,6 +113,7 @@ module FsmTransform
     #
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
+    sig { params(body: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
@@ -154,6 +158,7 @@ module FsmTransform
     #   2  loop_pre         -- NextSuspend / IoSuspend -> 3
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
+    sig { params(body: T.untyped).returns(T.untyped) }
     def split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
@@ -222,11 +227,13 @@ module FsmTransform
 
     # Stage 1 punt: anything outside top-level linear stmts +
     # top-level suspends is not yet handled.
+    sig { params(body: T.untyped).returns(T::Boolean) }
     def contains_unsupported_shape?(body)
       T.bind(self, T.untyped) rescue nil
       body.any? { |stmt| stmt_unsupported?(stmt) }
     end
 
+    sig { params(stmt: T.untyped).returns(T::Boolean) }
     def stmt_unsupported?(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
@@ -253,6 +260,7 @@ module FsmTransform
     # Recursive scan for any suspend anywhere in a subtree --
     # used to reject control-flow constructs that contain
     # suspends (Stage 1 punts those to the legacy emitters).
+    sig { params(stmts: T.untyped).returns(T::Boolean) }
     def contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
@@ -276,6 +284,7 @@ module FsmTransform
 
     # Identify the suspend tail (if any) that this top-level stmt
     # represents. Returns one of IoSuspend / NextSuspend / nil.
+    sig { params(stmt: T.untyped).returns(T.untyped) }
     def classify_suspend(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
@@ -311,12 +320,14 @@ module FsmTransform
     # An IO suspend is a stdlib call with both :suspends and
     # :fsm_setup metadata -- the FSM template tells us how to set
     # up the suspend.
+    sig { params(call_node: T.untyped).returns(T::Boolean) }
     def io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
       !!(md && md[:suspends] && md[:fsm_setup])
     end
 
+    sig { params(expr: T.untyped).returns(T::Boolean) }
     def suspending_call?(expr)
       T.bind(self, T.untyped) rescue nil
       (expr.is_a?(AST::FuncCall) || expr.is_a?(AST::MethodCall)) &&
@@ -340,6 +351,7 @@ module FsmTransform
     #     (suspending pipeline as the value of a bind)
     #   - Multi-stage chains where the suspend isn't at the LHS-most
     #     position
+    sig { params(body: T.untyped).returns(T.untyped) }
     def rewrite_pipeline_io(body)
       T.bind(self, T.untyped) rescue nil
       return body unless body.is_a?(Array)

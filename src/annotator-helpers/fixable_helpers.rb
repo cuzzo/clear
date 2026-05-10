@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # FixableHelper — emission helpers for FixableError findings.
 #
@@ -97,7 +97,7 @@ module FixableHelper
   #   message     — user-facing error message when no fix is applicable
   #   fix_label   — short description of what the replacement represents
   #                 (e.g. "closest known kind", "closest registered type")
-  sig { params(token: Lexer::Token, name: T.untyped, candidates: Array, message: String, fix_label: String).returns(NilClass) }
+  sig { params(token: Lexer::Token, name: T.untyped, candidates: T::Array[T.untyped], message: String, fix_label: String).returns(NilClass) }
   def emit_registry_mismatch!(token, name, candidates, message, fix_label)
     T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
@@ -135,7 +135,7 @@ module FixableHelper
   #                 would have set); the finding is captured and THEN
   #                 the annotator raises. Pass `false` at sites where
   #                 the enclosing visitor can cleanly bail out.
-  sig { params(token: T.untyped, name: String, candidates: Array, message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
+  sig { params(token: T.untyped, name: String, candidates: T::Array[T.untyped], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -167,10 +167,11 @@ module FixableHelper
   # reads `@token.type == :EOF` — doesn't NPE when the anchor flows
   # through to the legacy error path in non-collector mode.
   AnchorToken = Struct.new(:line, :column) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def type; :ANCHOR; end
-      T.bind(self, SemanticAnnotator) rescue nil
+    sig { returns(NilClass) }
     def value; nil; end
-      T.bind(self, SemanticAnnotator) rescue nil
   end
 
   sig { params(line: Integer, col: Integer).returns(FixableHelper::AnchorToken) }
@@ -243,6 +244,7 @@ module FixableHelper
   sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(NilClass) }
   def emit_use_of_moved_error!(use_node, og_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     name = use_node.name.to_s
     unless og_node && og_node.move_line && og_node.move_col
       msg = "USE AFTER MOVE: You can't use `#{name}`."
@@ -365,7 +367,7 @@ module FixableHelper
   # Sub-path use after the path's owner was consumed elsewhere. Uses
   # passive voice ("was already TAKEN / GIVEN") because the subject of
   # the sentence is the owner — what HAPPENED to it — not the consumer.
-  sig { params(node: AST::GetField, path: Array, og_node: T.nilable(OwnershipGraph::Node)).returns(NilClass) }
+  sig { params(node: AST::GetField, path: T::Array[T.untyped], og_node: T.nilable(OwnershipGraph::Node)).returns(NilClass) }
   def emit_use_of_moved_path_error!(node, path, og_node = nil)
     T.bind(self, SemanticAnnotator) rescue nil
     path_str = path.map(&:to_s).join('.')
@@ -381,7 +383,7 @@ module FixableHelper
 
   # Active form: subject is the consumer (e.g. "`process(GIVE msg)`
   # already GAVE it away"). Used when we can quote the consumer site.
-  OWNERSHIP_ACTIVE_PHRASES = {
+  OWNERSHIP_ACTIVE_PHRASES = T.let({
     give:    "already GAVE it away",
     takes:   "already TOOK it away",
     return:  "already RETURNED it",
@@ -390,12 +392,12 @@ module FixableHelper
     collect: "already COLLECTED it",
     capture: "already captured it",
     move:    "already MOVED it",
-  }.freeze
+  }.freeze, T::Hash[Symbol, String])
 
   # Passive form: subject is the value (e.g. "its owner `b` was
   # already TAKEN away"). Used by USE_OF_MOVED_PATH where we name the
   # path's owner rather than the consumer.
-  OWNERSHIP_PASSIVE_PHRASES = {
+  OWNERSHIP_PASSIVE_PHRASES = T.let({
     give:    "was already GIVEN away",
     takes:   "was already TAKEN away",
     return:  "was already RETURNED",
@@ -404,7 +406,7 @@ module FixableHelper
     collect: "was already COLLECTED",
     capture: "was already captured",
     move:    "was already MOVED",
-  }.freeze
+  }.freeze, T::Hash[Symbol, String])
 
   sig { params(action: Symbol).returns(String) }
   def ownership_active_phrase(action)
@@ -425,6 +427,7 @@ module FixableHelper
   sig { params(line_num: Integer).returns(T.nilable(String)) }
   def consumer_source_text(line_num)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     return nil unless @source_code && line_num
     line = @source_code.lines[line_num - 1]
     return nil unless line
@@ -440,12 +443,12 @@ module FixableHelper
   # 1000`) fall through to the legacy error path — locating the
   # annotation token from the literal's context is non-trivial and
   # deferred.
-  INT_SUFFIXES = {
+  INT_SUFFIXES = T.let({
     Int8: 'i8', Byte: 'u8',
     Int16: 'i16', UInt16: 'u16',
     Int32: 'i32', UInt32: 'u32',
     Int64: 'i64', UInt64: 'u64',
-  }.freeze
+  }.freeze, T::Hash[Symbol, String])
 
   # Order smallest-first so `find` picks the tightest fit.
   SIGNED_ORDER    = [:Int8,  :Int16,  :Int32,  :Int64 ].freeze
@@ -465,6 +468,7 @@ module FixableHelper
   sig { params(node: T.untyped, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
   def emit_int_overflow_error!(node, val, target_type, min, max)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     overflow_kw = { val: val, type: target_type, min: min, max: max }
     msg = "Integer literal (#{val}) overflows #{target_type} (range #{min}..#{max})"
     tok = node.token
@@ -520,6 +524,7 @@ module FixableHelper
     error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw)
   end
 
+  sig { params(node: T.untyped, msg: String, tok: T.untyped, suffix_col: Integer, old_suffix: String, new_suffix: String, val: Integer).returns(T.untyped) }
   def emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = Fix.new(
@@ -704,7 +709,7 @@ module FixableHelper
   # `RETURNS` annotation. :auto fix inserts `RETURNS :Any ` immediately
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
-  sig { params(fn_node: AST::FunctionDef, found_returns: Array).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef, found_returns: T::Array[T.untyped]).returns(T.untyped) }
   def emit_ambiguous_return_error!(fn_node, found_returns)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
@@ -797,8 +802,10 @@ module FixableHelper
   # - The enclosing function may need `RETURNS !T` (the WITH acquire
   #   can fail). The user's next compile catches that with its own
   #   fixable error.
+  sig { params(node: T.untyped, code: Symbol, name: T.untyped, field: T.untyped, cap: T.untyped, perm: T.untyped).returns(T.untyped) }
   def emit_cap_field_needs_with!(node, code, name:, field:, cap:, perm:)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     kw = { name: name, field: field, cap: cap }
     fixes = []
     if @source_code && node.respond_to?(:token) && node.token
@@ -837,6 +844,7 @@ module FixableHelper
   # the var's own name with `_v` appended (matches the convention used
   # by emit_cap_field_needs_with!). Falls back to plain `error!`
   # when no var token is locatable.
+  sig { params(node: T.untyped, missing_caps: T.untyped).returns(T.untyped) }
   def emit_with_guard_all_bindings_need_as!(node, missing_caps)
     T.bind(self, SemanticAnnotator) rescue nil
     edits = []
@@ -871,8 +879,10 @@ module FixableHelper
   # The actual mutation site stays in place — the user reviews and
   # decides whether dropping MUTABLE is the right call (vs removing
   # the mutation, vs moving it outside the guarded WITH).
+  sig { params(node: T.untyped, names: T.untyped, verb: T.untyped).returns(T.untyped) }
   def emit_with_guard_mutable_mutated!(node, names, verb)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     src = @source_code
     edits = []
     if src && node.respond_to?(:token) && node.token
@@ -921,6 +931,7 @@ module FixableHelper
   # - x has no sync (plain or otherwise) -> :auto fix inserts
   #   `@writeLocked` at the declaration.
   # Falls back to plain `error!` when no fix is locatable.
+  sig { params(node: T.untyped, name: T.untyped, var_node: T.untyped).returns(T.untyped) }
   def emit_with_read_needs_write_lock!(node, name, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     syn = cap_var_sync(var_node)
@@ -948,6 +959,7 @@ module FixableHelper
   # (multiowned / shared / locked / writeLocked). Each is shown with
   # a one-line semantic difference. Falls through to plain `error!`
   # when no fixes are locatable.
+  sig { params(node: T.untyped, name: T.untyped).returns(T.untyped) }
   def emit_with_cannot_infer_cap!(node, name)
     T.bind(self, SemanticAnnotator) rescue nil
     candidates = [
@@ -977,8 +989,10 @@ module FixableHelper
   # declaration line. Only handles single-line decls with a `: T`
   # annotation — bare-inferred declarations fall back to plain
   # `error!`.
+  sig { params(node: T.untyped, name: String, got: T.untyped).returns(T.untyped) }
   def emit_with_materialized_needs_tense!(node, name, got)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     src = @source_code
@@ -1112,7 +1126,9 @@ module FixableHelper
   # suffixed numbers. Scan the source line forward from tok.column
   # to recover the true span. Falls back to `tok.value.to_s.length`
   # when @source_code is unavailable.
+  sig { params(tok: T.untyped).returns(Integer) }
   def literal_source_length(tok)
+    @source_code = T.let(@source_code, T.untyped)
     return tok.value.to_s.length unless @source_code
     line = @source_code.lines[tok.line - 1]
     return tok.value.to_s.length unless line
@@ -1176,8 +1192,10 @@ module FixableHelper
   #  - the binding has no scope-local decl (param / field / global)
   #  - the decl line has no `;` (multi-line value expression)
   #  - the sigil is already present (idempotency — would be a no-op)
+  sig { params(name: T.untyped, sigil: T.untyped, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
   def build_decl_cap_insert_fix(name, sigil, description: nil, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
@@ -1202,8 +1220,10 @@ module FixableHelper
 
   # Shared helper — replace an existing sigil on the declaration line.
   # Returns nil when the old sigil isn't found on the line.
+  sig { params(name: T.untyped, old_sigil: T.untyped, new_sigil: String, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
   def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description: nil, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
+    @source_code = T.let(@source_code, T.untyped)
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
@@ -1227,6 +1247,7 @@ module FixableHelper
   # generated per candidate via `build_decl_cap_insert_fix`. Falls
   # back to plain `error!` (registry-formatted) when no candidate
   # is locatable (e.g. WITH target is a GetField / param).
+  sig { params(node: T.untyped, name: T.untyped, code: Symbol, candidates: T::Array[T.untyped], confidence: Symbol, kw: T.untyped).returns(T.untyped) }
   def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
     T.bind(self, SemanticAnnotator) rescue nil
     fixes = candidates.filter_map do |c|
@@ -1330,7 +1351,7 @@ module FixableHelper
   # When multiple operators apply to the same slot, the candidate
   # set is the INTERSECTION across ops; ranking is by lowest sum of
   # per-op indices (most-default-across-the-board wins).
-  AUTO_OP_CANDIDATES = {
+  AUTO_OP_CANDIDATES = T.let({
     ADD:        { default: :Int64,   alts: [:Float64, :String] },
     SUB:        { default: :Int64,   alts: [:Float64] },
     MUL:        { default: :Int64,   alts: [:Float64] },
@@ -1345,7 +1366,7 @@ module FixableHelper
     GTE:        { default: :Int64,   alts: [:Float64, :String] },
     AND:        { default: :Bool,    alts: [] },
     OR:         { default: :Bool,    alts: [] },
-  }.freeze
+  }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   # Rank candidate concrete types from a Set<op_symbol> per the
   # AUTO_OP_CANDIDATES table. Returns [[type_sym, note_or_nil], ...]
@@ -1353,7 +1374,7 @@ module FixableHelper
   #   1. Type appears in EVERY observed op's candidate list (intersection).
   #   2. Sum of per-op rank (default = 0, first alt = 1, ...) ascending.
   # Notes carried through from any op that has a note for that type.
-  sig { params(ops: T::Set[Symbol]).returns(T::Array[Array]) }
+  sig { params(ops: T::Set[Symbol]).returns(T::Array[T::Array[T.untyped]]) }
   def auto_rank_candidates(ops)
     T.bind(self, SemanticAnnotator) rescue nil
     return [] if false || ops.empty?
@@ -1409,7 +1430,7 @@ module FixableHelper
   # Build the diagnostic body listing the operator hints + ranked
   # candidates. Used by both the unresolved and ambiguity finding
   # builders when op_evidence is present.
-  sig { params(ops: Set, candidates: Array).returns(String) }
+  sig { params(ops: T::Set[T.untyped], candidates: T::Array[T.untyped]).returns(String) }
   def build_auto_op_evidence_block(ops, candidates)
     T.bind(self, SemanticAnnotator) rescue nil
     return "" if candidates.empty?
@@ -1489,7 +1510,7 @@ module FixableHelper
   # replaces the literal `Auto` keyword span with `type_str`. Empty
   # array if `auto_tok` is nil (implicit-Auto under `--gradual` —
   # there's no token span to edit).
-  sig { params(auto_tok: T.nilable(Lexer::Token), type_str: String).returns(Array) }
+  sig { params(auto_tok: T.nilable(Lexer::Token), type_str: String).returns(T::Array[T.untyped]) }
   def build_auto_replace_fixes(auto_tok, type_str)
     T.bind(self, SemanticAnnotator) rescue nil
     return [] unless auto_tok
@@ -1513,7 +1534,7 @@ module FixableHelper
   # operator-derived candidates on top: when the body uses the
   # binding in operator expressions, those operators' default types
   # are offered as :interactive Fixes.
-  sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: Hash).returns(T.untyped) }
+  sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
   def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     slot = ambiguity.slot
@@ -1546,7 +1567,7 @@ module FixableHelper
   # specify a concrete type. M2.1: when the body uses the binding in
   # operator expressions, ranked candidate types per the
   # AUTO_OP_CANDIDATES table are offered as :interactive Fixes.
-  sig { params(slot: AutoConstraintCollector::Slot, op_evidence: Hash).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
   def emit_auto_unresolved_finding!(slot, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     label = auto_slot_label(slot)
@@ -1577,7 +1598,7 @@ module FixableHelper
 
   # Reverse-lookup helper: given a Slot struct, return its hash key
   # in the slots map (matches the IDs AutoConstraintCollector uses).
-  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(Array)) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(T::Array[T.untyped])) }
   def slot_id_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     case slot.kind
@@ -1652,7 +1673,7 @@ module FixableHelper
     slot.auto_token
   end
 
-  sig { params(label: String, observed_strs: Array, slot: AutoConstraintCollector::Slot).returns(String) }
+  sig { params(label: String, observed_strs: T::Array[T.untyped], slot: AutoConstraintCollector::Slot).returns(String) }
   def build_auto_ambiguity_message(label, observed_strs, slot)
     T.bind(self, SemanticAnnotator) rescue nil
     types_list = observed_strs.join(', ')
