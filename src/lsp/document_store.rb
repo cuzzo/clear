@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 module LSP
@@ -19,12 +19,17 @@ module LSP
       extend T::Sig
 
     Document = Struct.new(:uri, :text, :version, keyword_init: true) do
+      extend T::Sig
       # Cached findings + the version they reflect. Hover and
       # codeAction read these without re-analysing. Set by the Server
       # after each `analyze_and_publish` pass.
-      def cached_findings;          @cached_findings; end
+      sig { returns(T.untyped) }
+      def cached_findings;          @cached_findings = T.let(@cached_findings, T.untyped); end
+      sig { params(value: T.untyped).returns(T.untyped) }
       def cached_findings=(value);  @cached_findings = value; end
-      def cached_version;           @cached_version; end
+      sig { returns(T.nilable(Integer)) }
+      def cached_version;           @cached_version = T.let(@cached_version, T.nilable(Integer)); end
+      sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
       def cached_version=(value);   @cached_version = value; end
     end
 
@@ -63,17 +68,17 @@ module LSP
       @docs[uri]
     end
 
-    sig { params(uri: String).returns(String) }
+    sig { params(uri: String).returns(T.nilable(String)) }
     def text(uri)
       @docs[uri]&.text
     end
 
-    sig { params(uri: String).returns(Integer) }
+    sig { params(uri: String).returns(T.nilable(Integer)) }
     def version(uri)
       @docs[uri]&.version
     end
 
-    sig { params(block: T.untyped).returns(Hash) }
+    sig { params(block: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def each(&block)
       @docs.each_value(&block)
     end

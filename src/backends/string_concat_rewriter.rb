@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
@@ -16,7 +16,7 @@ require_relative "../ast/type"
 class StringConcatRewriter
     extend T::Sig
 
-  sig { params(ast: AST::Program).returns(Array) }
+  sig { params(ast: AST::Program).returns(T::Array[T.untyped]) }
   def rewrite!(ast)
     ast.statements.each { |stmt| rewrite_in_node!(stmt) }
   end
@@ -82,7 +82,7 @@ class StringConcatRewriter
   end
 
   # Flatten chained string + into a flat list of parts.
-  sig { params(node: T.untyped).returns(Array) }
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
   def collect_parts(node)
     if node.is_a?(AST::StringConcat)
       node.parts

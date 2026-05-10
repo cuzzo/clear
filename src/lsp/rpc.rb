@@ -1,5 +1,6 @@
-# typed: true
+# typed: strict
 require "json"
+require "sorbet-runtime"
 
 module LSP
   # JSON-RPC framing for LSP. The protocol wraps every message in a
@@ -16,6 +17,7 @@ module LSP
   # No other output may go to stdout. Logging goes to stderr (the LSP
   # convention; corruption of the stdout frame disconnects the client).
   module RPC
+    extend T::Sig
     # Raised when the framing is malformed (missing Content-Length,
     # truncated body, non-JSON payload). The server treats these as
     # fatal — there's no way to recover an out-of-sync stream.
@@ -26,6 +28,7 @@ module LSP
     # Read the next LSP message from `io`. Returns the parsed Hash, or
     # nil at EOF (clean shutdown). Raises FramingError on malformed
     # frames.
+    sig { params(io: T.untyped).returns(T.nilable(T::Hash[String, T.untyped])) }
     def read_message(io)
       T.bind(self, T.untyped) rescue nil
       headers = read_headers(io)
@@ -46,6 +49,7 @@ module LSP
     end
 
     # Write `msg` (a Hash) as an LSP frame to `io`.
+    sig { params(io: T.untyped, msg: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
     def write_message(io, msg)
       T.bind(self, T.untyped) rescue nil
       body = JSON.generate(msg)
@@ -58,6 +62,7 @@ module LSP
     # Read header lines from `io` until a blank line. Returns a Hash
     # of lowercased header names → values, or nil at EOF before any
     # header line was read.
+    sig { params(io: T.untyped).returns(T.nilable(T::Hash[String, String])) }
     def read_headers(io)
       T.bind(self, T.untyped) rescue nil
       headers = {}
@@ -69,8 +74,10 @@ module LSP
         line = line.chomp
         break if line.empty?
         first = false
-        name, value = line.split(":", 2)
-        raise FramingError, "malformed header: #{line.inspect}" if value.nil?
+        parts = line.split(":", 2)
+        name = parts[0]
+        value = parts[1]
+        raise FramingError, "malformed header: #{line.inspect}" if value.nil? || name.nil?
         headers[name.strip.downcase] = value.strip
       end
       headers

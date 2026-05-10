@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_ops.rb -- Structured MIR operations for FSM stdlib templates.
 #
 # Replaces the Zig-text :fsm_setup / :fsm_finish_block /
@@ -68,12 +68,12 @@ module FsmOps
   # of that field (matching how the emitter actually renders it).
   IoSubmit = Struct.new(:verb, :waiter, :extra_args)
 
-  IO_SUBMIT_VERBS = {
+  IO_SUBMIT_VERBS = T.let({
     read:  "submitReadForFsm",
     write: "submitWriteForFsm",
     recv:  "submitRecvForFsm",
     send:  "submitSendForFsm",
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   # if (ctx.<field>.<sub> < 0) return <return_fn>(<return_args>);
   # Models the io_uring CQE error-propagation idiom. Specialized
@@ -147,9 +147,9 @@ module FsmOps
     def err_defer_free_field(field);         ErrDeferFreeField.new(field); end
     sig { params(field: String).returns(FsmOps::DeferFreeField) }
     def defer_free_field(field);             DeferFreeField.new(field); end
-    sig { params(fn: String, args: Array, is_try: T::Boolean).returns(FsmOps::StmtCall) }
+    sig { params(fn: String, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::StmtCall) }
     def stmt_call(fn, args, is_try: false);  StmtCall.new(fn, args, is_try); end
-    sig { params(verb: Symbol, waiter: String, extra_args: Array).returns(FsmOps::IoSubmit) }
+    sig { params(verb: Symbol, waiter: String, extra_args: T::Array[T.untyped]).returns(FsmOps::IoSubmit) }
     def io_submit(verb, waiter, extra_args)
       # Accept a bare string for caller convenience and lift it to a
       # StateField op so the walker / emitter both see structure.
@@ -175,7 +175,7 @@ module FsmOps
     def lit(zig);                            ZigLit.new(zig); end
     sig { params(zig_type: String, expr: T.untyped).returns(FsmOps::IntCast) }
     def intcast(zig_type, expr);             IntCast.new(zig_type, expr); end
-    sig { params(fn: String, args: Array, is_try: T::Boolean).returns(FsmOps::CallExpr) }
+    sig { params(fn: String, args: T::Array[T.untyped], is_try: T::Boolean).returns(FsmOps::CallExpr) }
     def call(fn, args, is_try: false);       CallExpr.new(fn, args, is_try); end
     sig { params(elem_type: String, count: FsmOps::LocalRef).returns(FsmOps::AllocExpr) }
     def alloc_expr(elem_type, count);        AllocExpr.new(elem_type, count); end
@@ -196,6 +196,8 @@ module FsmOps
   #   init_zig  String — Zig initializer, e.g. "-1" or "undefined"
   # =====================================================================
   StateFieldDecl = Struct.new(:name, :zig_type, :init_zig) do
+    extend T::Sig
+    sig { returns(String) }
     def render
       "#{name}: #{zig_type} = #{init_zig},"
     end
@@ -229,7 +231,7 @@ module FsmOps
 
     # Render a list of statement ops into newline-joined Zig text
     # with each statement properly terminated. Empty list -> "".
-    sig { params(ops: Array).returns(String) }
+    sig { params(ops: T::Array[T.untyped]).returns(String) }
     def emit_stmts(ops)
       return "" if false || ops.empty?
       ops.map { |op| emit_stmt(op) }.join("\n")
@@ -316,7 +318,7 @@ module FsmOps
 
     private
 
-    sig { params(args: Array).returns(String) }
+    sig { params(args: T::Array[T.untyped]).returns(String) }
     def emit_args(args)
       (args || []).map { |a| emit_expr(a) }.join(", ")
     end
@@ -374,7 +376,7 @@ module FsmOps
   class Lowerer
       extend T::Sig
 
-    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: Array).void }
+    sig { params(ctx_id: Integer, bg_rt: String, arg_mirs: T::Array[T.untyped]).void }
     def initialize(ctx_id:, bg_rt:, arg_mirs:)
       @ctx_id = ctx_id
       @bg_rt = bg_rt
@@ -382,7 +384,7 @@ module FsmOps
     end
 
     # Lower a list of FsmOps statement nodes -> [MIR::Stmt].
-    sig { params(ops: Array).returns(Array) }
+    sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
     def lower_stmts(ops)
       return [] if false || ops.empty?
       ops.map { |op| lower_stmt(op) }
@@ -537,7 +539,7 @@ module FsmOps
   # The lowering composes these per step to populate FsmStructure
   # without a textual scan of the rendered Zig.
 
-  sig { params(ops_or_expr: Array).returns(Array) }
+  sig { params(ops_or_expr: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def self.referenced_state_fields(ops_or_expr)
     out = []
     walk(ops_or_expr) do |node|
@@ -546,7 +548,7 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: Array).returns(Array) }
+  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def self.alloc_state_fields(ops)
     out = []
     Array(ops).each do |op|
@@ -557,7 +559,7 @@ module FsmOps
     out.uniq
   end
 
-  sig { params(ops: Array).returns(Array) }
+  sig { params(ops: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def self.free_state_fields(ops)
     out = []
     Array(ops).each do |op|

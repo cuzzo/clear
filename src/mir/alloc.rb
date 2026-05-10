@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # alloc.rb — Frame arena helpers for CLEAR.
 #
 # Provides storage-tier finalization and resource-close resolution.
@@ -15,7 +15,7 @@ module AllocHelper
   sig { params(node: T.untyped, storage: Symbol).returns(Symbol) }
   def downgrade_frame_to_stack(node, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    return storage unless storage == :frame && (current_fn_ctx&.loop_depth || @loop_depth) > 0
+    return storage unless storage == :frame && (current_fn_ctx&.loop_depth || T.cast(T.unsafe(self).instance_variable_get(:@loop_depth), T.nilable(Integer))) .to_i > 0
     return storage unless node.value.is_a?(AST::StructLit)
 
     node.type_info.provenance = nil  # nil = stack, no allocation needed
@@ -41,7 +41,7 @@ module AllocHelper
   # Resolve resource cleanup for pools, streams, resources, and structs with resource fields.
   # Returns [is_resource, resource_close_zig].
   # Delegates to Type#resolve_resource_close for type-specific logic.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(Array) }
+  sig { params(node: T.untyped, final_type: T.untyped).returns(T::Array[T.untyped]) }
   def resolve_resource_close(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     ft_obj = node.type_info

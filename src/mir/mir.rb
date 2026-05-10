@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # src/mir.rb - Comprehensive MIR (Mid-level IR) for CLEAR -> Zig compilation
 #
 # Every program construct is represented as an MIR node. The emitter
@@ -23,6 +23,7 @@ module MIR
   module Emittable
       extend T::Sig
 
+    sig { returns(TrueClass) }
     def mir?; true; end
     sig { returns(T::Boolean) }
     def stmt?; false; end
@@ -68,7 +69,9 @@ module MIR
                      :can_fail,       # bool: emit !RetType vs RetType
                      :comptime_params # ["comptime T: type", ...]
                     ) do
+    extend T::Sig
     include Stmt
+    sig { returns(TrueClass) }
     def has_own_frame? = true
   end
 
@@ -326,7 +329,9 @@ module MIR
   #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
   #   nil = unaudited (legacy; to be eliminated)
   RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in expression position too
   end
 
@@ -343,7 +348,9 @@ module MIR
   #   and for FSM Phase B1 (pure-compute, no suspend) where there's
   #   only one logical step.
   BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -355,7 +362,9 @@ module MIR
   # for the producer body (YieldExpr is already rewritten to MIR::StreamYield
   # by lower_yield).
   StreamSpawn = Struct.new(:captures, :body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -469,7 +478,9 @@ module MIR
     :ctx_struct,          # MIR::FsmCtxStruct
     :spawn_setup,         # MIR::FsmSpawnSetup
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -478,7 +489,9 @@ module MIR
   # `value` is pushed into the channel; producer fiber blocks until the
   # consumer's STREAM_NEXT empties the slot.
   StreamYield = Struct.new(:value) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -491,7 +504,9 @@ module MIR
     :ctx_struct,          # MIR::FsmB1CtxStruct
     :spawn_setup,         # MIR::FsmSpawnSetup (same as IO)
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -525,7 +540,9 @@ module MIR
     :ctx_struct,          # MIR::FsmGenericCtxStruct
     :spawn_setup,         # MIR::FsmSpawnSetup (shared)
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 
@@ -762,6 +779,8 @@ module MIR
     :wait_step,         # state to enter when re-entered after wake
     :error_step,        # state to enter on .Error
   ) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :lock_try; end
   end
 
@@ -776,6 +795,8 @@ module MIR
     :ok_step,
     :error_step,
   ) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :woken_check; end
   end
 
@@ -791,6 +812,8 @@ module MIR
     :retry_step,        # state to retry from (the lock-try step)
     :fail_step,         # state to run the error_arm body in
   ) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :retry_or_error; end
   end
 
@@ -800,18 +823,28 @@ module MIR
   #   inner.wg.done();
   #   alloc.destroy(ctx);
   #   return .{ .Done = {} };
-  FsmTailDone = Struct.new(:_) { def kind; :done; end }
+  FsmTailDone = Struct.new(:_) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def kind; :done; end
+  end
 
   # Pure transition (no yield).
   #   step = next_step;
   #   continue :__sw;
-  FsmTailJump = Struct.new(:next_step) { def kind; :jump; end }
+  FsmTailJump = Struct.new(:next_step) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def kind; :jump; end
+  end
 
   # Set step + return YieldReason. Used by the IO-template shape and
   # any tail that ALWAYS yields without conditional registration.
   #   step = next_step;
   #   return .{ .<reason> = {} };
   FsmTailYield = Struct.new(:next_step, :yield_reason) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :yield; end
   end
 
@@ -830,6 +863,8 @@ module MIR
     :register_zig,
     :yield_reason,
   ) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :register_yield; end
   end
 
@@ -837,6 +872,8 @@ module MIR
   #   if (<cond_zig>) { step = then_step; continue; }
   #   step = else_step; continue;
   FsmTailCondJump = Struct.new(:cond_zig, :then_step, :else_step) do
+    extend T::Sig
+    sig { returns(Symbol) }
     def kind; :cond_jump; end
   end
 
@@ -1153,7 +1190,9 @@ module MIR
   # alias_zig   : Zig identifier for the user's alias (e.g. "view")
   # guard_var   : internal Zig name for the Guard local
   SnapshotRead = Struct.new(:cell_unwrap, :rt, :alias_zig, :guard_var, :body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1183,7 +1222,9 @@ module MIR
     :cell_unwrap, :rt, :alloc, :alias_zig, :bare_t_zig,
     :body, :conflict_action, :retries, :with_label, :is_atomic_ptr
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1203,7 +1244,9 @@ module MIR
     :cells_tuple, :rt, :alloc, :alias_decls,
     :body, :conflict_action, :retries, :with_label
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1228,14 +1271,18 @@ module MIR
   PolymorphicMutate = Struct.new(
     :cell_zig, :rt, :alias_zig, :bare_t_zig, :body
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   PolymorphicMutateFlow = Struct.new(
     :cell_zig, :rt, :alias_zig, :bare_t_zig, :ret_zig, :body, :guard_cond, :guard_fail_body
   ) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1247,7 +1294,9 @@ module MIR
   # cell_zig : Zig expression for the bound variable (param shape preserved)
   # arms     : Array of { family:, probe:, prelude_zig:, body: [MIR stmts] }
   WithMatchDispatch = Struct.new(:cell_zig, :arms) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1257,32 +1306,42 @@ module MIR
 
   # Marks an allocation point. Subsumes old MIR::Alloc.
   AllocMark = Struct.new(:name, :alloc, :type_info) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   # Marks function exit with escaped vars. Subsumes old MIR::Return.
   ReturnMark = Struct.new(:escaped_vars) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   # Marks an owned binding whose local cleanup is intentionally absent because
   # ownership transfers out of the current scope (TAKES arg, return, container).
   TransferMark = Struct.new(:name, :target) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   # Marks reassignment needing pre-cleanup. Subsumes old MIR::ReassignCleanup.
   ReassignMark = Struct.new(:name, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
   # Marks field overwrite needing pre-cleanup. Subsumes old MIR::FieldCleanup.
   FieldCleanupMark = Struct.new(:target_name, :field, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def stmt?; true; end
   end
 
@@ -1552,7 +1611,9 @@ module MIR
   # sink:        sink descriptor (Phase 4+)
   # sink_alloc:  :frame/:heap for sink output (Phase 4+)
   Pipeline = Struct.new(:ast_node, :inner, :source_type, :stages, :sink, :sink_alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in both expression and statement position
   end
 
@@ -1630,7 +1691,9 @@ module MIR
   # come from a registry entry whose ownership effects are declared in
   # stdlib_def, making INV-5 enforceable uniformly.
   RawBc = Struct.new(:template, :args, :stdlib_def) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in expression position too
   end
 
@@ -1672,7 +1735,9 @@ module MIR
   ShardedMapPut = Struct.new(:target, :key, :value, :shard_idx, :shard_key,
                               :map_kind, :stdlib_def, :key_zig, :val_zig,
                               :resolved_allocs, :template_kind) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Boolean) }
     def expr?; true; end
   end
 

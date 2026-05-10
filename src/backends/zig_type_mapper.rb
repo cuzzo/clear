@@ -1,10 +1,10 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 module ZigTypeMapper
     extend T::Sig
 
-  ZIG_OPS = {
+  ZIG_OPS = T.let({
     :ADD => "+",
     :SUB => "-",
     :MUL => "*",
@@ -28,7 +28,7 @@ module ZigTypeMapper
 
     # Special AST nodes you might map to operators
     #:OR_RESCUE   => "orelse"
-  }
+  }, T::Hash[Symbol, String])
 
   ZIG_PRIMITIVES = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"]
 

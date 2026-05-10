@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # stack_verifier.rb - Post-build stack frame size verification.
 #
 # Parses objdump output to extract actual stack frame sizes for CLEAR functions.
