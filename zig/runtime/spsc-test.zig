@@ -258,6 +258,75 @@ test "concurrent SPSC: multiple rounds of fill/drain" {
     try std.testing.expect(total_consumed == ROUNDS * BATCH);
 }
 
+test "concurrent guarded push: multiple producers one consumer" {
+    const PRODUCERS = 4;
+    const PER_PRODUCER = 10_000;
+    var ring = spsc.SpscRing(64){};
+    var done_count = std.atomic.Value(usize).init(0);
+    var consumer_count: u64 = 0;
+    var consumer_sum: u64 = 0;
+
+    const consumer = try std.Thread.spawn(.{}, struct {
+        fn run(
+            r: *spsc.SpscRing(64),
+            done: *std.atomic.Value(usize),
+            count: *u64,
+            sum: *u64,
+        ) void {
+            while (true) {
+                if (r.pop()) |msg| {
+                    count.* += 1;
+                    sum.* += msg.trampoline_addr;
+                } else if (done.load(.acquire) == PRODUCERS) {
+                    while (r.pop()) |msg| {
+                        count.* += 1;
+                        sum.* += msg.trampoline_addr;
+                    }
+                    break;
+                } else {
+                    std.Thread.yield() catch {};
+                }
+            }
+        }
+    }.run, .{ &ring, &done_count, &consumer_count, &consumer_sum });
+
+    const ProducerCtx = struct {
+        ring: *spsc.SpscRing(64),
+        done: *std.atomic.Value(usize),
+        base: usize,
+
+        fn run(ctx: *@This()) void {
+            for (0..PER_PRODUCER) |i| {
+                const val = ctx.base + i + 1;
+                while (!ctx.ring.push(.{ .tag = .Spawn, .trampoline_addr = val })) {
+                    std.Thread.yield() catch {};
+                }
+            }
+            _ = ctx.done.fetchAdd(1, .release);
+        }
+    };
+
+    var producer_ctxs: [PRODUCERS]ProducerCtx = undefined;
+    var producers: [PRODUCERS]std.Thread = undefined;
+    var expected_sum: u64 = 0;
+    for (&producer_ctxs, 0..) |*ctx, producer_idx| {
+        const base = producer_idx * PER_PRODUCER;
+        ctx.* = .{
+            .ring = &ring,
+            .done = &done_count,
+            .base = base,
+        };
+        for (0..PER_PRODUCER) |i| expected_sum += base + i + 1;
+        producers[producer_idx] = try std.Thread.spawn(.{}, ProducerCtx.run, .{ctx});
+    }
+
+    for (&producers) |*producer| producer.join();
+    consumer.join();
+
+    try std.testing.expectEqual(@as(u64, PRODUCERS * PER_PRODUCER), consumer_count);
+    try std.testing.expectEqual(expected_sum, consumer_sum);
+}
+
 // ========================================================================
 // 3. STRESS TEST — high contention, verify no data corruption
 // ========================================================================

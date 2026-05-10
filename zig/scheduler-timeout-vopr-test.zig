@@ -40,6 +40,8 @@ const tests = [_]Test{
     .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",                      .func = &gate.assertGapBActive },
     .{ .name = "compat.nanoTimestamp + Timer track SimClock virtual time",                           .func = &stv.testCompatTimerSimClock },
     .{ .name = "Runtime.checkpoint deadline fires under SimClock advance",                           .func = &stv.testRuntimeCheckpointTimeout },
+    .{ .name = "WaitGroup/Semaphore scheduler primitives: register, wait, acquire, release",         .func = &stv.testWaitGroupSemaphoreSchedulerPrimitives },
+    .{ .name = "WaitGroup/Semaphore fiber park/resume paths",                                        .func = &stv.testWaitGroupSemaphoreFiberParkResume },
     // WaitGroup / Semaphore swap-spinlock fault scenarios dropped:
     // routing WaitGroup/Semaphore counter+lock through the comptime
     // Atomic alias destabilized stream-test's TSan SplitStream

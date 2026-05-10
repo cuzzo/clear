@@ -41,6 +41,22 @@ fn dummyFsmResume(_: *fsm_mod.FsmTask) fsm_mod.YieldReason {
 }
 
 var lock_sentinel: u8 = 0;
+var g_wg_vopr: *fp.WaitGroup = undefined;
+var g_sem_vopr: *fp.Semaphore = undefined;
+var g_wg_vopr_woke: bool = false;
+var g_sem_vopr_acquired: bool = false;
+
+fn waitGroupFiberEntry() callconv(.c) void {
+    g_wg_vopr.wait();
+    g_wg_vopr_woke = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn semaphoreFiberEntry() callconv(.c) void {
+    g_sem_vopr.acquire();
+    g_sem_vopr_acquired = true;
+    while (true) fc.__fiber.?.yield();
+}
 
 /// SimClock-active liveness check. If `compat.milliTimestamp()`
 /// returns SimClock's virtual time, advancing the clock by 1234ms
@@ -204,6 +220,145 @@ pub fn testRuntimeCheckpointTimeout() !void {
     if (rt.checkpoint()) |_| {
         return error.TimeoutDidNotFire;
     } else |err| if (err != error.Timeout) return err;
+}
+
+pub fn testWaitGroupSemaphoreSchedulerPrimitives() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        const final_b = sched.ready_queue.bottom.load(.monotonic);
+        sched.ready_queue.top.store(final_b, .monotonic);
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var wg_fsm = fp.WaitGroup.init(&sched);
+    wg_fsm.add(1);
+    var fsm_task: fsm_mod.FsmTask = .{ .resume_fn = &dummyFsmResume };
+    if (!wg_fsm.registerFsmWaiter(&fsm_task)) return error.FsmWaiterNotRegistered;
+    if (wg_fsm.waiting_fsm != &fsm_task) return error.WrongFsmWaiter;
+    wg_fsm.done();
+    if (wg_fsm.waiting_fsm != null) return error.FsmWaiterNotCleared;
+
+    var wg_non_fiber = fp.WaitGroup.init(&sched);
+    wg_non_fiber.wait();
+
+    const fiber_stack = try allocator.alloc(u8, FIBER_HARNESS_STACK_SIZE);
+    defer allocator.free(fiber_stack);
+    var fiber = fc.Fiber.init(fiber_stack, @intFromPtr(&sleepMinimalEntry), .Large);
+    var task: qs.Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&dummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+
+    const prev_task = sched.current_task;
+    sched.current_task = &task;
+    defer sched.current_task = prev_task;
+
+    var wg_fiber = fp.WaitGroup.init(&sched);
+    wg_fiber.wait();
+
+    var sem = fp.Semaphore.init(1, &sched);
+    sem.acquire();
+    if (sem.counter.load(.seq_cst) != 0) return error.SemaphoreAcquireFailed;
+    sem.release();
+    if (sem.counter.load(.seq_cst) != 1) return error.SemaphoreReleaseFailed;
+}
+
+pub fn testWaitGroupSemaphoreFiberParkResume() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const wg_stack = try allocator.alloc(u8, FIBER_HARNESS_STACK_SIZE);
+    const sem_stack = try allocator.alloc(u8, FIBER_HARNESS_STACK_SIZE);
+    var wg_fiber = fc.Fiber.init(wg_stack, @intFromPtr(&waitGroupFiberEntry), .Large);
+    var sem_fiber = fc.Fiber.init(sem_stack, @intFromPtr(&semaphoreFiberEntry), .Large);
+    var wg_task: qs.Task = .{
+        .base = &wg_fiber,
+        .user_fn = @ptrCast(&dummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+    var sem_task: qs.Task = .{
+        .base = &sem_fiber,
+        .user_fn = @ptrCast(&dummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+
+    var wg = fp.WaitGroup.init(&sched);
+    wg.add(1);
+    var sem = fp.Semaphore.init(0, &sched);
+    g_wg_vopr = &wg;
+    g_sem_vopr = &sem;
+    g_wg_vopr_woke = false;
+    g_sem_vopr_acquired = false;
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sim_atomic.disable_fiber_yield_point = true;
+
+    var test_err: ?anyerror = null;
+
+    sched.current_task = &wg_task;
+    wg_fiber.switchTo(&sched.main_ctx);
+    if (wg_task.status.load(.acquire) != .Blocked) test_err = error.WaitGroupFiberDidNotPark;
+    if (test_err == null and wg.waiting_task != &wg_task) test_err = error.WaitGroupWaiterNotRegistered;
+    if (test_err == null and g_wg_vopr_woke) test_err = error.WaitGroupFiberWokeEarly;
+
+    if (test_err == null) {
+        wg.done();
+        if (wg_task.status.load(.acquire) != .Ready) test_err = error.WaitGroupDoneDidNotWake;
+    }
+    if (test_err == null) {
+        sched.current_task = &wg_task;
+        wg_fiber.switchTo(&sched.main_ctx);
+        if (!g_wg_vopr_woke) test_err = error.WaitGroupFiberDidNotResume;
+    }
+
+    if (test_err == null) {
+        sched.current_task = &sem_task;
+        sem_fiber.switchTo(&sched.main_ctx);
+        if (sem_task.status.load(.acquire) != .Blocked) test_err = error.SemaphoreFiberDidNotPark;
+        if (sem.waiting_task != &sem_task) test_err = error.SemaphoreWaiterNotRegistered;
+        if (g_sem_vopr_acquired) test_err = error.SemaphoreFiberAcquiredEarly;
+    }
+    if (test_err == null) {
+        sem.release();
+        if (sem_task.status.load(.acquire) != .Ready) test_err = error.SemaphoreReleaseDidNotWake;
+    }
+    if (test_err == null) {
+        sched.current_task = &sem_task;
+        sem_fiber.switchTo(&sched.main_ctx);
+        if (!g_sem_vopr_acquired) test_err = error.SemaphoreFiberDidNotResume;
+    }
+
+    clearFiberTLS();
+    sim_atomic.disable_fiber_yield_point = false;
+    sched.current_task = null;
+    fp.active_scheduler = prev_active;
+    fp.scheduler_running = prev_running;
+    g_wg_vopr = undefined;
+    g_sem_vopr = undefined;
+
+    const final_b = sched.ready_queue.bottom.load(.monotonic);
+    sched.ready_queue.top.store(final_b, .monotonic);
+
+    allocator.free(wg_stack);
+    allocator.free(sem_stack);
+    sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (test_err) |err| return err;
 }
 
 // testWaitGroupSpinlockUnderFault and testSemaphoreSpinlockUnderFault

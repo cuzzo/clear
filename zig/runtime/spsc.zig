@@ -12,6 +12,11 @@
 
 const std = @import("std");
 
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 pub const MessageTag = enum(u8) {
     Spawn,
     Resume,
@@ -66,9 +71,13 @@ pub const Message = struct {
     fsm_ctx_class: u8 = 0,
 };
 
-/// SPSC ring buffer.  Fixed capacity, power-of-two size.
-/// Producer calls push(), consumer calls pop().
-/// Both are wait-free.
+/// SPSC ring buffer. Fixed capacity, power-of-two size.
+///
+/// Scheduler routing is intended to give each ring exactly one producer
+/// and one consumer. In practice, shutdown/test paths can temporarily
+/// route more than one producer through the same sender index. Serialize
+/// push() so that accidental multi-producer use remains memory-safe; the
+/// consumer side stays lock-free.
 pub fn SpscRing(comptime ring_capacity: usize) type {
     comptime {
         // Must be power of two for mask trick
@@ -87,13 +96,19 @@ pub fn SpscRing(comptime ring_capacity: usize) type {
         pub const capacity: usize = ring_capacity;
 
         buffer: [ring_capacity]Message = undefined,
+        push_lock: Atomic(u8) = Atomic(u8).init(0),
         /// Written by producer, read by consumer.
-        head: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        head: Atomic(usize) = Atomic(usize).init(0),
         /// Written by consumer, read by producer.
-        tail: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        tail: Atomic(usize) = Atomic(usize).init(0),
 
         /// Producer: push a message. Returns false if full.
         pub fn push(self: *Self, msg: Message) bool {
+            while (self.push_lock.swap(1, .acquire) == 1) {
+                std.Thread.yield() catch {};
+            }
+            defer self.push_lock.store(0, .release);
+
             const h = self.head.load(.monotonic);
             const t = self.tail.load(.acquire);
             if (h -% t >= capacity) return false; // full

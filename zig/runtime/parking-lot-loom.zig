@@ -22,6 +22,7 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const ebr_mod = @import("../lib/ebr.zig");
 const pl = @import("../lib/parking-lot.zig");
+const streams = @import("../lib/streams.zig");
 const fsm_mod = @import("fsm.zig");
 const build_options = @import("build_options");
 
@@ -61,6 +62,8 @@ const Fiber = fc.Fiber;
 const Context = fc.Context;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
+const LoomSplitStream = streams.SplitStream(i64, fp.WaitGroup, cloneI64, cleanupI64);
+const SPLIT_STREAM_FIBER_STACK = 64 * 1024;
 
 const MAX_THREADS = 4;
 const STACK_SIZE = 64 * 1024;
@@ -73,6 +76,31 @@ fn fuzzSeedCount(default_seeds: usize) usize {
     const raw = std.c.getenv("LOOM_FUZZ_SEEDS") orelse return default_seeds;
     const s = std.mem.span(raw);
     return std.fmt.parseInt(usize, s, 10) catch default_seeds;
+}
+
+fn cloneI64(_: std.mem.Allocator, value: i64) anyerror!i64 {
+    return value;
+}
+
+fn cleanupI64(_: std.mem.Allocator, _: *i64) void {}
+
+fn splitStreamDummyFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+var g_split_park_subscriber: *LoomSplitStream = undefined;
+var g_split_park_woke: bool = false;
+var g_split_park_err: ?anyerror = null;
+
+fn entrySplitStreamParkedSubscriber() callconv(.c) void {
+    const next = g_split_park_subscriber.next() catch |err| {
+        g_split_park_err = err;
+        while (true) fc.__fiber.?.yield();
+    };
+    if (next != null) {
+        g_split_park_err = error.ExpectedClosedSplitStream;
+    } else {
+        g_split_park_woke = true;
+    }
+    while (true) fc.__fiber.?.yield();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3075,6 +3103,155 @@ pub fn testStreamChunkPublishAtomicCoverage() !void {
         std.debug.print("\nstream-publish-atomic: only {d}/{d} schedules observed publish — test toothless\n", .{ observed_count, total });
         return error.LoomFailures;
     }
+}
+
+pub fn testSplitStreamProductionLifecycle() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var producer = try LoomSplitStream.spawnNew(allocator, &sched);
+    var subscriber = producer.retain();
+    defer subscriber.deinit();
+    defer producer.deinit();
+
+    var expected_sum: i64 = 0;
+    for (0..300) |i| {
+        const value: i64 = @intCast(i + 1);
+        expected_sum += value;
+        try producer.push(value);
+    }
+    producer.close();
+
+    var producer_sum: i64 = 0;
+    var producer_count: usize = 0;
+    while (try producer.next()) |value| {
+        producer_sum += value;
+        producer_count += 1;
+    }
+    if (producer_count != 300) return error.ProducerReaderMissedItems;
+    if (producer_sum != expected_sum) return error.ProducerReaderBadSum;
+
+    var subscriber_sum: i64 = 0;
+    var subscriber_count: usize = 0;
+    while (try subscriber.next()) |value| {
+        subscriber_sum += value;
+        subscriber_count += 1;
+    }
+    if (subscriber_count != 300) return error.SubscriberMissedItems;
+    if (subscriber_sum != expected_sum) return error.SubscriberBadSum;
+
+    var err_stream = try LoomSplitStream.spawnNew(allocator, &sched);
+    defer err_stream.deinit();
+    err_stream.setError(error.SplitStreamInjected);
+    if (err_stream.next()) |_| {
+        return error.ExpectedSplitStreamError;
+    } else |err| if (err != error.SplitStreamInjected) {
+        return err;
+    }
+
+    var reuse_stream = try LoomSplitStream.spawnNew(allocator, &sched);
+    var dropped_subscriber = reuse_stream.retain();
+    dropped_subscriber.deinit();
+    var reused_subscriber = reuse_stream.retain();
+    defer reused_subscriber.deinit();
+    defer reuse_stream.deinit();
+    reuse_stream.close();
+    if (try reused_subscriber.next() != null) return error.ReusedSubscriberReadClosedStream;
+
+    var release_stream = try LoomSplitStream.spawnNew(allocator, &sched);
+    var release_subscriber = release_stream.retain();
+    defer release_subscriber.deinit();
+    defer release_stream.deinit();
+
+    for (0..256) |i| {
+        try release_stream.push(@intCast(i + 1));
+    }
+    for (0..256) |i| {
+        const value = (try release_subscriber.next()) orelse return error.ReleaseSubscriberMissingItem;
+        if (value != @as(i64, @intCast(i + 1))) return error.ReleaseSubscriberWrongItem;
+    }
+
+    try release_stream.push(257);
+    release_stream.close();
+    const tail_value = (try release_subscriber.next()) orelse return error.ReleaseSubscriberMissingTail;
+    if (tail_value != 257) return error.ReleaseSubscriberWrongTail;
+    if (try release_subscriber.next() != null) return error.ReleaseSubscriberExpectedClose;
+}
+
+pub fn testSplitStreamParkedSubscriberCloseWake() !void {
+    const allocator = std.heap.c_allocator;
+    const sim_atomic = @import("vopr-atomic.zig");
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var producer = try LoomSplitStream.spawnNew(allocator, &sched);
+    var subscriber = producer.retain();
+    g_split_park_subscriber = &subscriber;
+    g_split_park_woke = false;
+    g_split_park_err = null;
+
+    const stack_mem = try allocator.alloc(u8, SPLIT_STREAM_FIBER_STACK);
+    var fiber = fc.Fiber.init(stack_mem, @intFromPtr(&entrySplitStreamParkedSubscriber), .Large);
+    var task: qs.Task = .{
+        .base = &fiber,
+        .user_fn = @ptrCast(&splitStreamDummyFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+    };
+
+    const prev_active = fp.active_scheduler;
+    const prev_running = fp.scheduler_running;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sched.current_task = &task;
+    sim_atomic.disable_fiber_yield_point = true;
+
+    var test_err: ?anyerror = null;
+
+    fiber.switchTo(&sched.main_ctx);
+    if (task.status.load(.acquire) != .Blocked) test_err = error.SubscriberDidNotPark;
+    if (g_split_park_woke) test_err = error.SubscriberWokeBeforeClose;
+
+    if (test_err == null) {
+        producer.close();
+        if (task.status.load(.acquire) != .Ready) test_err = error.CloseDidNotWakeSubscriber;
+    }
+
+    if (test_err == null) {
+        fiber.switchTo(&sched.main_ctx);
+        if (!g_split_park_woke) test_err = error.SubscriberDidNotObserveClose;
+        if (g_split_park_err) |err| test_err = err;
+    }
+
+    fc.__fiber = null;
+    fc.__fiber_parent_ctx = null;
+    fc.__fiber_stack_limit = null;
+    sim_atomic.disable_fiber_yield_point = false;
+    sched.current_task = null;
+    fp.active_scheduler = prev_active;
+    fp.scheduler_running = prev_running;
+    g_split_park_subscriber = undefined;
+
+    const final_b = sched.ready_queue.bottom.load(.monotonic);
+    sched.ready_queue.top.store(final_b, .monotonic);
+
+    subscriber.deinit();
+    producer.deinit();
+    allocator.free(stack_mem);
+    sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (test_err) |err| return err;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

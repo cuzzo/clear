@@ -54,6 +54,8 @@ const tests = [_]Test{
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
     .{ .name = "split-stream err-set-atomic: producer/consumer handshake on err_set + non-atomic err (4096 schedules)", .func = &ploom.testSplitStreamErrSetAtomicCoverage },
     .{ .name = "stream publish-acquire-atomic: SplitStream chunk.len release/acquire vs values[] (4096 schedules)", .func = &ploom.testStreamChunkPublishAtomicCoverage },
+    .{ .name = "split-stream production lifecycle: retain, publish, close, error, deinit", .func = &ploom.testSplitStreamProductionLifecycle },
+    .{ .name = "split-stream production park/wake: empty next parks, close resumes null", .func = &ploom.testSplitStreamParkedSubscriberCloseWake },
     .{ .name = "stream ring-atomic: Stream(T) SPSC head/tail release/acquire vs buf[] (4096 schedules)",            .func = &ploom.testStreamRingHeadTailAtomicCoverage },
     .{ .name = "multi-fallible sorted-acquire: 2-fiber address-ordered held-bitmap (500 seeds)",      .func = &ploom.testMultiFallibleSortedAcquire },
     .{ .name = "tryLock + presetLocked: happy + contended single-thread paths",                       .func = &ploom.testTryLockHappyAndContended },
