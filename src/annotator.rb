@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "ast/source_error"
@@ -61,18 +61,19 @@ class SemanticAnnotator
   # function context (or the global fallback when outside a function).
   # Used to tag SUSPENDS effects recorded inside IF branches / MATCH arms
   # as SUSPENDS:CONDITIONAL.
-  def with_conditional_context
+  sig { params(blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_conditional_context(&blk)
     if current_fn_ctx
       current_fn_ctx.conditional_depth += 1
       begin
-        yield
+        blk.call
       ensure
         current_fn_ctx.conditional_depth -= 1
       end
     else
       @conditional_depth += 1
       begin
-        yield
+        blk.call
       ensure
         @conditional_depth -= 1
       end
@@ -87,8 +88,8 @@ class SemanticAnnotator
 
   sig { params(importer: T.nilable(ModuleImporter), compiler: T.nilable(ModuleImporter), source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }
   def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
-    @importer   = importer || compiler
-    @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
+    @importer   = T.let(importer || compiler, T.nilable(ModuleImporter))
+    @source_dir = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
     @strict_test = strict_test
     @source_code = source_code
     # We start with a global scope
@@ -107,12 +108,14 @@ class SemanticAnnotator
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
-    @pipeline_accessed_fields = T.let(nil, T.nilable(Set))
+    @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_predicate_context = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @capability_audit = T.let({}, T::Hash[T.untyped, T.untyped])
     @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
     @call_site_context = T.let(nil, T.untyped)
     @call_site_arg_families = T.let(nil, T.untyped)
+    @in_auto_locked_assign = T.let(nil, T.nilable(String))
+    @with_block_depth = T.let(0, Integer)
 
     # Phase 2 lock analysis storage (keyed by fn name). Hooked in
     # visit_WithBlock / user-fn-call visitors; cycle-checked as a
@@ -127,7 +130,7 @@ class SemanticAnnotator
     @deferred_with_validations = T.let([], T::Array[T.untyped])
     @predicate_call_sites = T.let([], T::Array[T.untyped])
     # Tracks remaining statements in current body for forward reference analysis
-    @stmts_after = nil
+    @stmts_after = T.let(nil, T.nilable(T::Array[T.untyped]))
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
     @og = T.let(OwnershipGraph.new, T.untyped)
     @og_scope_depth = T.let(0, Integer)
@@ -140,13 +143,13 @@ class SemanticAnnotator
     setup_builtins
   end
 
-  sig { params(node: AST::Program).returns(T.nilable(Hash)) }
+  sig { params(node: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def annotate!(node)
     # Reset user-registered error types so state from prior runs (rspec
     # parallel, multi-program test harness) doesn't leak in. Stdlib
     # types are preserved.
     AST.reset_user_types!
-    @program = node  # #327: WithMatchCheck reads node.sync_policy below.
+    @program = T.let(node, T.nilable(AST::Program))  # #327: WithMatchCheck reads node.sync_policy below.
     visit(node)
     # Auto / gradual-typing inference (gradual-typing.md M1.7).
     # After the body walk has populated `type_info` on every
@@ -272,7 +275,7 @@ private
   # both resolved → `HashMap<K,V>`). Groups by decl_node so map
   # pairs produce a single binding-level message instead of two
   # confusing per-sub-slot ones.
-  sig { params(resolved_slots: T::Hash[Array, AutoUnifier::Resolution]).returns(T::Hash[Array, AutoUnifier::Resolution]) }
+  sig { params(resolved_slots: T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]).returns(T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]) }
   def emit_auto_shape_resolved_findings!(resolved_slots)
     seen = {}
     resolved_slots.each_value do |resolution|
@@ -314,7 +317,7 @@ private
   # P1.7: replay each deferred WITH-on-param check now that caller-sync
   # propagation has had a chance to populate entry.sync. If a param's sync
   # is still nil, fire the original eager error.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def flush_deferred_with_validations!
     @deferred_with_validations.each do |d|
       var_node = d[:var_node]
@@ -332,7 +335,7 @@ private
     @deferred_with_validations.clear
   end
 
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def setup_builtins
     STD_LIB.each do |name, config|
       current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
@@ -394,7 +397,7 @@ private
   end
 
   # Cached outer scope variable set - avoids O(n) flat_map per loop
-  sig { returns(Set) }
+  sig { returns(T::Set[T.untyped]) }
   def outer_scope_vars
     @scope_stack.flat_map { |s| s.locals.keys }.to_set
   end
@@ -569,17 +572,19 @@ private
     end
   end
 
-  sig { params(node: AST::RequireNode).returns(T.nilable(Hash)) }
+  sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def visit_RequireNode(node)
     unless @importer
       error!(node, :REQUIRE_NEEDS_IMPORTER, hint: "Pass importer: and source_dir: to SemanticAnnotator.new.")
     end
 
+    importer = T.must(@importer)
     mod = if node.kind == :package
-      @importer.compile_package(node.path, caller_dir: @source_dir)
+      importer.compile_package(node.path, caller_dir: @source_dir)
     else
-      @importer.compile_file(node.path, caller_dir: @source_dir)
+      importer.compile_file(node.path, caller_dir: @source_dir)
     end
+    mod = T.must(mod)
     node.full_type = :Void
 
     # Packages are always external — only :pub symbols are importable.
@@ -927,7 +932,7 @@ private
   # CATCH Type clauses resolve regardless of source order. OR EXIT
   # counts too because it can introduce new types that only the
   # CATCH for a particular call needs to see.
-  sig { params(program_node: AST::Program).returns(T.nilable(Array)) }
+  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
   def seed_error_types_from_raises!(program_node)
     seed_body = lambda do |stmts|
       AST.walk_body(stmts) do |n|
@@ -958,7 +963,7 @@ private
   # The baked-in default applied when the user writes no SYNC POLICY.
   # Synthesized as a hash matching the parser's lock_error_clause
   # shape so the resolver can use it interchangeably.
-  sig { returns(Array) }
+  sig { returns(T::Array[T.untyped]) }
   def baked_in_default_sync_policy
     [
       { selectors: [{ form: :type, name: :LockTimeout, token: nil }],
@@ -974,7 +979,7 @@ private
   # require an `FN main` when one is present, validate the body, and
   # stamp `program_node.sync_policy` with the resolved handlers (the
   # user's if present, else the baked-in default).
-  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[Hash])) }
+  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def validate_and_resolve_sync_policy!(program_node)
     decls = program_node.statements.select { |s| s.is_a?(AST::SyncPolicyDecl) }
 
@@ -1058,7 +1063,7 @@ private
   # inner call's collapsed_errors reflects `a`'s narrower constraint
   # ({:MvccConflict}, NOT the full {:MvccConflict, :AtomicConflict}).
   # Concrete bindings narrow further to a single axis.
-  sig { params(sig: FunctionSignature, args: Array).returns(T::Set[Symbol]) }
+  sig { params(sig: FunctionSignature, args: T::Array[T.untyped]).returns(T::Set[Symbol]) }
   def collapse_errors_for_call(sig, args)
     require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
     collapsed = Set.new
@@ -1105,7 +1110,7 @@ private
   # silently skip the node. The action bodies for `:block`-action
   # handlers (`ON X -> { stmts }`) ARE visited here so types in
   # those bodies get annotated.
-  sig { params(node: AST::SyncPolicyDecl).returns(Array) }
+  sig { params(node: AST::SyncPolicyDecl).returns(T::Array[T.untyped]) }
   def visit_SyncPolicyDecl(node)
     (node.handlers || []).each do |clause|
       case clause[:action]
@@ -1131,7 +1136,7 @@ private
   #   (filters empty OR any filter_type matches OR any filter_message
   #    matches). No cross-constraint between items and filters — a
   #   mixed `CATCH Kind, Type` simply ORs the two checks.
-  sig { params(clause: T::Hash[Symbol, Array]).returns(T.nilable(Array)) }
+  sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
   def resolve_catch_clause!(clause)
     kinds = []
     types = []
@@ -1184,7 +1189,7 @@ private
   end
 
   # Collect input types from pipeline |> steps that can fail.
-  sig { params(body: Array, types: Set).returns(Array) }
+  sig { params(body: T::Array[T.untyped], types: T::Set[T.untyped]).returns(T::Array[T.untyped]) }
   def collect_pipe_input_types(body, types)
     body.each do |stmt|
       walk_ast(stmt) do |node|
@@ -1215,12 +1220,12 @@ private
   # Visit a statement body while tracking remaining siblings in @stmts_after.
   # This lets visit_MatchStatement check whether the match subject is used
   # after the match (to avoid incorrect auto-TAKES consumption).
-  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
   def visit_stmts(stmts)
     return unless stmts.is_a?(Array)
     saved = @stmts_after
     stmts.each_with_index do |stmt, i|
-      @stmts_after = stmts[(i + 1)..]
+      @stmts_after = T.let(stmts[(i + 1)..], T.nilable(T::Array[T.untyped]))
       visit(stmt)
     end
     @stmts_after = saved
@@ -1318,7 +1323,7 @@ private
   #
   # @param branches [Array<Proc>] Procs that execute branch logic
   # @return [Array<Array<Hash>>] Array of drops for each branch
-  sig { params(branches: T::Array[Proc], merge_to_parent: T::Boolean).returns(T.nilable(T::Array[T.nilable(Array)])) }
+  sig { params(branches: T::Array[Proc], merge_to_parent: T::Boolean).returns(T.nilable(T::Array[T.nilable(T::Array[T.untyped])])) }
   def analyze_control_flow_branches(branches, merge_to_parent: true)
     og_snapshot = @og&.fork_lightweight
     og_branch_snapshots = []
@@ -1477,7 +1482,7 @@ private
 
   # Type-checks a struct destructuring pattern against the match subject type.
   # Verifies field names exist and value types match the struct schema.
-  sig { params(match_node: AST::MatchStatement, pat: AST::StructPattern).returns(T.nilable(T::Array[Hash])) }
+  sig { params(match_node: AST::MatchStatement, pat: AST::StructPattern).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def annotate_struct_pattern!(match_node, pat)
     expr_type = match_node.expr.resolved_type
     primitives = [:Float64, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
@@ -2158,6 +2163,7 @@ private
   # visit_SmashStmt, visit_ProfileStmt, visit_StubDecl) are mixed in
   # from annotator-helpers/test_annotation.rb.
 
+  sig { params(node: AST::DieNode).returns(Symbol) }
   def visit_DieNode(node)
      # Usually takes an integer status code
      visit(node.status) if node.status
@@ -2434,7 +2440,7 @@ private
     (explicit + inferred).uniq
   end
 
-  sig { params(type: T.untyped, out: T::Array[String], explicit: Array).returns(T.untyped) }
+  sig { params(type: T.untyped, out: T::Array[String], explicit: T::Array[T.untyped]).returns(T.untyped) }
   def collect_implicit_type_params(type, out, explicit)
     return unless type.is_a?(Type)
     name = type.resolved.to_s
@@ -2516,7 +2522,7 @@ private
     end
   end
 
-  sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def visit_FuncCall(node)
     # Mark struct literal args as call arguments so ensure_owned_value!
     # skips CopyNode wrapping for rodata strings. The struct is a temporary
@@ -2582,7 +2588,7 @@ private
     end
   end
 
-  sig { params(node: AST::MethodCall).returns(T.nilable(Hash)) }
+  sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def visit_MethodCall(node)
     visit(node.object)
     node.args.each { |arg| visit(arg) }
@@ -2662,7 +2668,7 @@ private
   #
   # @param node [AST::FuncCall, AST::MethodCall] The call node
   # @param args [Array] The arguments (includes receiver for method calls - UFCS)
-  sig { params(node: T.untyped, args: Array).returns(T.nilable(Type)) }
+  sig { params(node: T.untyped, args: T::Array[T.untyped]).returns(T.nilable(Type)) }
   def visit_IntrinsicFunc(node, args)
     definitions = STD_LIB[node.name]
     definitions = [definitions] if definitions.is_a?(Hash)
@@ -2839,7 +2845,7 @@ private
     pipe.full_type = node.type
   end
 
-  sig { params(node: T.untyped, mutable_flag: T::Boolean).returns(T.nilable(Hash)) }
+  sig { params(node: T.untyped, mutable_flag: T::Boolean).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def finalize_decl_node!(node, mutable_flag)
     verify_unrestricted!(node)
     handle_assign_move(node)
@@ -3044,7 +3050,7 @@ private
   # If x is not yet in scope → immutable declaration (like old VAR x = val).
   # If x is in scope and mutable → assignment (like old SET x = val).
   # If x is in scope and immutable → error.
-  sig { params(node: AST::BindExpr).returns(T.nilable(Hash)) }
+  sig { params(node: AST::BindExpr).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def visit_BindExpr(node)
     # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
@@ -3508,6 +3514,7 @@ private
   # INVALIDATION LOGIC (The "Dependencies" feature)
   # ==========================================
 
+  sig { params(node: AST::Cast).returns(Symbol) }
   def visit_Cast(node)
     visit(node.value) # Resolve 'json' -> :HashMap
 
@@ -4086,6 +4093,7 @@ private
       end
   end
 
+  sig { params(node: AST::DefaultLit).returns(Symbol) }
   def visit_DefaultLit(node)
     # Resolved type is set by declare_and_verify_params / visit_StructLit context.
     # Standalone DEFAULT is not valid; callers validate the context.
@@ -4128,6 +4136,7 @@ private
     end
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(SymbolEntry)) }
   def visit_Placeholder(node)
     # Just resolve it like an identifier
     visit_Identifier(AST::Identifier.new(node.token, "_"))
@@ -4289,6 +4298,7 @@ private
     node.full_type = :Void
   end
 
+  sig { params(node: AST::OrBreak).returns(Symbol) }
   def visit_OrBreak(node)
     node.full_type = :Void
   end
@@ -4415,7 +4425,7 @@ private
     node.full_type = ti
   end
 
-  sig { params(node: AST::MoveNode).returns(T.nilable(Set)) }
+  sig { params(node: AST::MoveNode).returns(T.nilable(T::Set[T.untyped])) }
   def visit_MoveNode(node)
     visit(node.value)
 
@@ -4542,7 +4552,7 @@ private
   end
 
   # Infer return type for list.remove(i) — returns the element type.
-  sig { params(args: Array, node: AST::MethodCall).returns(Symbol) }
+  sig { params(args: T::Array[T.untyped], node: AST::MethodCall).returns(Symbol) }
   def infer_element_type(args, node)
     receiver = args.first
     ti = receiver&.type_info
@@ -4550,7 +4560,7 @@ private
   end
 
   # Infer return type for list.pop() — returns ?T (optional element type).
-  sig { params(args: Array, node: T.untyped).returns(Symbol) }
+  sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Symbol) }
   def infer_optional_element_type(args, node)
     receiver = args.first
     ti = receiver&.type_info
@@ -4608,6 +4618,7 @@ private
     node.storage   = :frozen
   end
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def visit_Give(node)
     visit(node.value)
 
@@ -4628,6 +4639,7 @@ private
     node.full_type = node.value.resolved_type
   end
 
+  sig { params(node: AST::Copy).returns(T.untyped) }
   def visit_Copy(node)
     visit(node.value)
 
@@ -5019,7 +5031,7 @@ private
   # check.
   SNAPSHOT_POSSIBLE_TYPES = %i[MvccConflict AtomicConflict].freeze
 
-  sig { params(nodes: Array).returns(T.nilable(T::Array[String])) }
+  sig { params(nodes: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
   def retryable_with_fallible_sources(nodes)
     sources = []
     visit_fallible = T.let(nil, T.untyped)
@@ -5082,14 +5094,14 @@ private
     is_param && !has_req
   end
 
-  sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T.any(Array, T::Array[T.untyped]))).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))).returns(T.untyped) }
   def retryable_with_fallible_body_error!(node, with_name, sources)
     detail = T.must(sources).first(3).join(", ")
     detail += ", ..." if T.must(sources).length > 3
     error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
   end
 
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[Hash]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
     is_snapshot_txn = node.snapshot_mode == :transaction
@@ -5321,7 +5333,7 @@ private
   #     MvccConflict` -- but for now no handler is permitted).
   # Read-mode SNAPSHOT MATCH (no MUTABLE) skips this entirely --
   # read paths can't fail, so neither arm needs / accepts a handler.
-  sig { params(node: AST::WithBlock).returns(T.nilable(Array)) }
+  sig { params(node: AST::WithBlock).returns(T.nilable(T::Array[T.untyped])) }
   def validate_snapshot_match_arms!(node)
     (node.arms || []).each do |arm|
       clauses = arm[:lock_error_clauses] || []
@@ -5456,7 +5468,7 @@ private
     # The stream element type T is inferred from YIELD expression types.
     prev_stream_ctx  = @current_stream_context
     prev_yield_types = @stream_yield_types
-    @current_stream_context = node
+    @current_stream_context = T.let(node, T.nilable(AST::BgStreamBlock))
     @stream_yield_types = []
 
     visit_stmts(node.body)
@@ -5492,7 +5504,7 @@ private
 
   # Returns true if any YieldExpr in the stream body yields a frame-allocated string.
   # Stops recursion at nested BgStreamBlock boundaries.
-  sig { params(stmts: Array).returns(T::Boolean) }
+  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
   def stream_body_yields_frame_string?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |stmt|
@@ -5762,7 +5774,7 @@ private
 
   # Collect all identifier names referenced (directly) in an AST subtree.
   # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
-  sig { params(nodes: Array).returns(T::Set[String]) }
+  sig { params(nodes: T::Array[T.untyped]).returns(T::Set[String]) }
   def collect_body_identifier_names(nodes)
     names = Set.new
     traverse = T.let(nil, T.untyped)
@@ -5948,7 +5960,7 @@ private
   # Returns the Type of the last value-producing expression in a branch body,
   # or nil if the branch doesn't end with a usable expression.
   # Used to determine whether an IF/MATCH node can be promoted to expression mode.
-  sig { params(branch: T.nilable(Array)).returns(T.nilable(Type)) }
+  sig { params(branch: T.nilable(T::Array[T.untyped])).returns(T.nilable(Type)) }
   def expr_result_type(branch)
     return nil if branch.nil? || branch.empty?
     last = branch.last
@@ -6056,7 +6068,7 @@ private
     match_node.full_type = (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type
   end
 
-  sig { params(node: T.untyped, branch: T.nilable(Symbol)).returns(T.nilable(Hash)) }
+  sig { params(node: T.untyped, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def finalize_scope(node, branch: nil)
     drops = []
     current_scope.locals.each do |name, info|
@@ -6128,7 +6140,7 @@ private
     end
   end
 
-  sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[Hash]) }
+  sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
   def collect_scope_drops(node: nil)
     drops = []
     current_scope.locals.each do |name, info|
@@ -6327,6 +6339,7 @@ private
   # lifetime, returns nil immediately. The check fires only for
   # actually-tied bindings (atomic-captured BG handles today,
   # multi-source returns and similar in M2.9+).
+  sig { params(val_node: T.untyped, dest_depth: T.untyped).returns(T.nilable(String)) }
   def lifetime_violation_for_store(val_node, dest_depth)
     sources = lifetime_sources_for_value(val_node)
     return nil if sources.empty?
@@ -6396,7 +6409,7 @@ private
   #   - Captures whose binding has no SymbolEntry on capture_symbols
   #     (e.g. observable view aliases); those are already errored at
   #     visit_BgBlock via has_non_escaping_capture.
-  sig { params(decl_node: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(decl_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def stamp_bg_handle_lifetime!(decl_node)
     sources = collect_bg_sources_in_expr(decl_node.value).uniq
     return if sources.empty?
@@ -6554,7 +6567,7 @@ private
   # match — wildcard accepts anything (with a warning at the
   # declaration), nil means the function isn't declared as returning
   # a borrow.
-  sig { params(func_node: AST::FunctionDef).returns(Array) }
+  sig { params(func_node: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def get_lifetime_paths(func_node)
     rl = func_node.return_lifetime
     return [] if rl.nil?
@@ -6614,7 +6627,7 @@ private
   # AST::FuncCall, then collecting every RETURN whose value IS a self-
   # call (those are the "blessed" tail calls). Error on each self-call
   # that isn't blessed. Recurses through IF / WHILE / FOR / WITH bodies.
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Array)) }
+  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
   def validate_tail_call!(fn_node)
     fn_name = fn_node.name
     all_self_calls = collect_self_calls(fn_node.body, fn_name)
@@ -6642,7 +6655,7 @@ private
   # Recursively walk an AST subtree collecting every AST::FuncCall whose
   # name matches `fn_name`. Args are also visited (so nested self-calls
   # inside outer-call arguments are found and flagged).
-  sig { params(node: T.untyped, fn_name: String, out: Array).returns(Array) }
+  sig { params(node: T.untyped, fn_name: String, out: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def collect_self_calls(node, fn_name, out = [])
     return out if node.nil?
     case node
@@ -6658,7 +6671,7 @@ private
   end
 
   # Recursively walk an AST subtree collecting every AST::ReturnNode.
-  sig { params(node: T.untyped, out: Array).returns(Array) }
+  sig { params(node: T.untyped, out: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def collect_returns(node, out = [])
     return out if node.nil?
     case node
@@ -6673,6 +6686,7 @@ private
     out
   end
 
+  sig { params(node: T.untyped, fn_name: T.untyped).returns(T::Boolean) }
   def contains_self_call?(node, fn_name)
     return false unless node
     return true if node.is_a?(AST::FuncCall) && node.name == fn_name
@@ -6686,7 +6700,7 @@ private
   # Walk the AST to find BG/DO blocks and assign computed stack tiers
   # based on the functions they call (transitively via call graph).
 
-  sig { params(program_node: AST::Program).returns(T.nilable(Array)) }
+  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
   def assign_fiber_stack_tiers!(program_node)
     traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
@@ -6697,7 +6711,7 @@ private
       when Hash
         n.each_value { |v| traverse.call(v) }
       when AST::BgBlock
-        calls = T.let(scan_for_calls(n.body).first, Set)
+        calls = T.let(scan_for_calls(n.body).first, T::Set[T.untyped])
         raw = T.let(max_tier_for_calls(calls), Symbol)
         n.computed_stack_tier = (raw == :unbounded) ? :service : raw
         validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
@@ -6784,9 +6798,9 @@ private
   sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_plain_reentrant_callee(call_names)
     visited = Set.new
-    queue = call_names.to_a.dup
+    queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
-      name = queue.shift
+      name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
       fn = @fn_nodes[name]
@@ -6800,12 +6814,12 @@ private
   # `:reentrant_max_depth` AND is in a non-trivial SCC (mutually
   # recursive). Such fns force the spawn site to :service via
   # compute_stack_tiers!'s :unbounded fallback.
-  sig { params(call_names: Set).returns(T.untyped) }
+  sig { params(call_names: T::Set[T.untyped]).returns(T.untyped) }
   def find_mutual_max_depth_callee(call_names)
     visited = Set.new
-    queue = call_names.to_a.dup
+    queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
-      name = queue.shift
+      name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
       fn = @fn_nodes[name]
@@ -6861,11 +6875,12 @@ private
   end
 
   # Find the first :unbounded callee in the call chain (for error messages).
+  sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_unbounded_callee(call_names)
-    visited = Set.new
-    queue = call_names.to_a.dup
+    visited = T.let(Set.new, T::Set[String])
+    queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
-      name = queue.shift
+      name = T.must(queue.shift)
       next if visited.include?(name)
       visited << name
       return name if @fn_nodes[name]&.stack_tier == :unbounded
@@ -6920,9 +6935,9 @@ private
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(Set) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T::Set[T.untyped]) }
   def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
-  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Set)) }
+  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
   def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
 
   sig { params(node: T.untyped).returns(T::Boolean) }
