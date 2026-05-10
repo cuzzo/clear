@@ -1,7 +1,9 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 require_relative "./ast"
 
 module OpCodes
+  extend T::Sig
   # Parameter Types
   T_REG_W = :reg_w  # Register Write (Target) - e.g. "R0"
   T_REG_R = :reg_r  # Register Read (Target)  - e.g. "R0"
@@ -11,7 +13,7 @@ module OpCodes
   T_UINT  = :uint   # Raw Integer             - e.g. 25 - Jump Target
   T_REST  = :rest   # Remaining raw args      - e.g. like splatting, for native_call
 
-  DEFINITIONS = {
+  DEFINITIONS = T.let({
     # OPCODE      # PARAMS
     LOADK:        [T_REG_W, T_CONST],
     MOVE:         [T_REG_W, T_REG_R],
@@ -58,7 +60,7 @@ module OpCodes
     ADD_INT64:    [T_REG_W, T_REG_R, T_REG_R],
     CONCAT_STR:   [T_REG_W, T_REG_R, T_REG_R],
     CONCAT_ARR:   [T_REG_W, T_REG_R, T_REG_R],
-  }
+  }, T::Hash[Symbol, T::Array[Symbol]])
 
   AST::OP_CODE_SENDABLE_SYMS.keys.each do |op|
     DEFINITIONS[op] = [T_REG_W, T_REG_R, T_REG_R]

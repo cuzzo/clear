@@ -1,4 +1,5 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 require_relative "position"
 require_relative "diagnostics"
 require_relative "../ast/diagnostic_registry"
@@ -21,10 +22,12 @@ module LSP
   # symbol at the cursor) is a follow-up; the registry path covers
   # the highest-value case first.
   module Hover
+    extend T::Sig
     module_function
 
     # Build a hover response for the document at `position`. Returns
     # nil when no diagnostic overlaps the cursor.
+    sig { params(document: T.untyped, position: T.untyped).returns(T.untyped) }
     def render(document, position)
       return nil unless document
       result = document.cached_findings
@@ -56,6 +59,7 @@ module LSP
     # findings to position their edit) make hover effectively
     # invisible — the user would have to pinpoint the cursor on the
     # exact token to see anything.
+    sig { params(result: T.untyped, position: T.untyped, source: T.untyped).returns(T.untyped) }
     def find_overlapping(result, position, source)
       candidates = result.findings.dup
       candidates << result.fatal_error if result.fatal?
@@ -83,6 +87,7 @@ module LSP
       same_line.min_by { |_, dist| dist }.first
     end
 
+    sig { params(diag: T.untyped, entry: T.untyped, example: T.untyped).returns(String) }
     def build_markdown(diag, entry, example)
       lines = []
       lines << header_line(diag, entry)
@@ -123,6 +128,7 @@ module LSP
       lines.join("\n")
     end
 
+    sig { params(diag: T.untyped, entry: T.untyped).returns(String) }
     def header_line(diag, entry)
       severity = severity_label(diag[:severity])
       code     = diag[:code]
@@ -135,13 +141,14 @@ module LSP
       end
     end
 
-    SEVERITY_LABELS = {
+    SEVERITY_LABELS = T.let({
       Diagnostics::SEVERITY_ERROR   => "error",
       Diagnostics::SEVERITY_WARNING => "warning",
       Diagnostics::SEVERITY_INFO    => "info",
       Diagnostics::SEVERITY_HINT    => "hint",
-    }.freeze
+    }.freeze, T::Hash[Integer, String])
 
+    sig { params(severity: T.untyped).returns(String) }
     def severity_label(severity)
       SEVERITY_LABELS.fetch(severity, "error")
     end

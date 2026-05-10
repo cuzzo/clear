@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # thunk_transform/emit.rb -- Zig codegen for the simple-recurrence
 # THUNK shape detected by Phase 4c.
 #
@@ -56,26 +56,29 @@
 # `assert_non_fallible_ret!` guard at the entry of `emit_trampoline`
 # fails loudly if the invariant is ever violated.
 
+require "sorbet-runtime"
 require_relative "segments"
 
 module ThunkTransform
   module Emit
+    extend T::Sig
     module_function
 
     # Map normalized op codes (from AST::OP_TO_OP_CODE) to Zig
     # operators. Phase 4c restricts to these four; Phase 4f-g may
     # widen if user demand emerges.
-    OP_TO_ZIG = {
+    OP_TO_ZIG = T.let({
       ADD: "+",
       SUB: "-",
       MUL: "*",
       DIV: "/",
-    }.freeze
+    }.freeze, T::Hash[Symbol, String])
 
     # Synthesize the trampoline body Zig for a function whose
     # AST::FunctionDef has a thunk_plan (set by Phase 4c detection).
     # Returns a String -- inserted into the function via a single
     # MIR::RawZig node.
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def emit_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       plan = fn_node.thunk_plan
@@ -160,6 +163,7 @@ module ThunkTransform
 
     # Lines that handle "frame finished -- return or pop to parent".
     # Same shape for both base case and combine branches.
+    sig { params(_ret_zig: T.untyped).returns(String) }
     def return_or_pop_lines(_ret_zig)
       T.bind(self, T.untyped) rescue nil
       <<~ZIG.chomp
@@ -176,18 +180,21 @@ module ThunkTransform
     # Lower an AST expression to Zig text via the surrounding
     # MIRLowering (mirrors fsm_transform/recursive_splitter.rb's
     # pattern).
+    sig { params(ast_expr: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def render_expr(ast_expr, lowering)
       T.bind(self, T.untyped) rescue nil
       mir = lowering.lower(ast_expr)
       lowering.send(:emit_expr, mir)
     end
 
+    sig { params(param: T.untyped, _lowering: T.untyped).returns(T.untyped) }
     def param_zig_type(param, _lowering)
       T.bind(self, T.untyped) rescue nil
       type = param[:type]
       type.respond_to?(:zig_type) ? type.zig_type : type.to_s
     end
 
+    sig { params(fn_node: T.untyped, _lowering: T.untyped).returns(T.untyped) }
     def ret_zig_type(fn_node, _lowering)
       T.bind(self, T.untyped) rescue nil
       rt = fn_node.return_type
@@ -208,6 +215,7 @@ module ThunkTransform
     # an `errdefer` chain-walk in the emitted body is the surgical
     # fix; this guard fails loudly so the extension can't ship the
     # leak silently.
+    sig { params(fn_node: T.untyped, ret_zig: T.untyped).returns(T.untyped) }
     def assert_non_fallible_ret!(fn_node, ret_zig)
       T.bind(self, T.untyped) rescue nil
       return unless ret_zig.start_with?("!")
@@ -225,6 +233,7 @@ module ThunkTransform
     # outer fn parameters. The render_expr path emits parameter
     # identifiers as their bare Zig names; we substitute them here
     # via a word-boundary regex sweep.
+    sig { params(zig_text: T.untyped, fn_node: T.untyped).returns(T.untyped) }
     def qualify_params(zig_text, fn_node)
       T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
@@ -261,6 +270,7 @@ module ThunkTransform
     # Each cycle member emits its own trampoline (same union layout,
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def emit_mutual_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       mtp = fn_node.mutual_thunk_plan
@@ -303,6 +313,7 @@ module ThunkTransform
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
+    sig { params(cf: T.untyped, _mtp: T.untyped, ret_zig: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def emit_mutual_arm(cf, _mtp, ret_zig, lowering)
       T.bind(self, T.untyped) rescue nil
       own_plan = cf.mutual_thunk_plan.own_plan
@@ -337,6 +348,7 @@ module ThunkTransform
       ZIG
     end
 
+    sig { params(cf: T.untyped, name: T.untyped).returns(T.untyped) }
     def find_cycle_member(cf, name)
       T.bind(self, T.untyped) rescue nil
       cf.mutual_thunk_plan.cycle_fns.find { |x| x.name == name } or
@@ -345,6 +357,7 @@ module ThunkTransform
 
     # Mutual variant: bare param refs become `f.<name>` (the switch
     # capture binds the active variant's payload to `f`).
+    sig { params(zig_text: T.untyped, cf: T.untyped).returns(T.untyped) }
     def qualify_with_f(zig_text, cf)
       T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
@@ -357,6 +370,7 @@ module ThunkTransform
 
     # Phase 4d's stub for the legacy entry; kept so future wider-
     # shape passes have a consistent name.
+    sig { params(segments: T.untyped, liveness: T.untyped, lowering: T.untyped, ctx: T.untyped).returns(T.untyped) }
     def build(segments, liveness, lowering, ctx)
       T.bind(self, T.untyped) rescue nil
       _ = segments

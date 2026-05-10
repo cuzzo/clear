@@ -1,4 +1,5 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 # thunk_transform/segments.rb -- Tail variants for the THUNK CPS
 # segment graph.
 #
@@ -35,14 +36,20 @@ module ThunkTransform
     Segment = Struct.new(:index, :stmts, :tail)
 
     Done        = Struct.new(:value) do
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :done; end
     end
 
     Goto        = Struct.new(:target_index) do
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :goto; end
     end
 
     CondBranch  = Struct.new(:cond_zig, :then_index, :else_index) do
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :cond_branch; end
     end
 
@@ -52,6 +59,8 @@ module ThunkTransform
     # trampoline replaces the frame in place) but kept for shape
     # consistency with the splitter; expansion ignores it.
     RecurseTail = Struct.new(:args_zig, :next_index) do
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :recurse_tail; end
     end
 
@@ -62,6 +71,8 @@ module ThunkTransform
     # `bind_var` is the local name the child's return value binds
     # into (e.g. `tmp` in `tmp = factorial(n - 1); RETURN n * tmp;`).
     RecurseStep = Struct.new(:args_zig, :pending_op_id, :bind_var, :next_index) do
+      extend T::Sig
+      sig { returns(Symbol) }
       def kind; :recurse_step; end
     end
   end

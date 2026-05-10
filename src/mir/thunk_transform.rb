@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # thunk_transform.rb -- CPS transform for `EFFECTS REENTRANT:THUNK`
 # functions.
 #
@@ -43,11 +43,13 @@
 #   Phase 4f: mutual recursion via tagged-union frames
 #   Phase 4g: stack-sizing rule + verification
 
+require "sorbet-runtime"
 require_relative "thunk_transform/segments"
 require_relative "thunk_transform/recursive_splitter"
 require_relative "thunk_transform/emit"
 
 module ThunkTransform
+  extend T::Sig
   module_function
 
   # Public entry. Given a `:reentrant_thunk` FunctionDef plus the
@@ -58,6 +60,7 @@ module ThunkTransform
   #
   # As stages land, the nil-returning path shrinks until it
   # disappears.
+  sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
   def transform(fn_node, lowering)
     return nil if fn_node.reentrance_kind != :reentrant_thunk
 

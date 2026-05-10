@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # thunk_transform/recursive_splitter.rb -- AST -> segment graph
 # splitter for `:reentrant_thunk` function bodies.
 #
@@ -31,10 +31,12 @@
 # 4d-e will widen the recognized shapes (multiple recursive calls,
 # arbitrary control flow with recursion, etc.).
 
+require "sorbet-runtime"
 require_relative "segments"
 
 module ThunkTransform
   module RecursiveSplitter
+    extend T::Sig
     # A detected simple-recurrence shape. Consumed by Phase 4d's
     # Zig emitter.
     Plan = Struct.new(
@@ -83,6 +85,7 @@ module ThunkTransform
     # When the shape matches but codegen isn't yet wired, the
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
+    sig { params(body: T.untyped, fn_name: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def split(body, fn_name, lowering)
       T.bind(self, T.untyped) rescue nil
       _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
@@ -129,6 +132,7 @@ module ThunkTransform
     # variant in place). Returns nil if the body has any non-tail
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
+    sig { params(body: T.untyped, fn_name: T.untyped, partner_names: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def split_mutual(body, fn_name, partner_names, lowering)
       T.bind(self, T.untyped) rescue nil
       _ = lowering
@@ -161,6 +165,7 @@ module ThunkTransform
     # An IF base case for the mutual shape: `IF <cond> -> RETURN <expr>;`
     # where neither cond nor expr contains ANY call to a cycle member
     # (self or partner). The cycle set includes the current fn name.
+    sig { params(stmt: T.untyped, cycle_names: T.untyped).returns(T.untyped) }
     def match_mutual_base_case(stmt, cycle_names)
       T.bind(self, T.untyped) rescue nil
       return nil unless stmt.is_a?(AST::IfStatement)
@@ -176,6 +181,7 @@ module ThunkTransform
 
     # `partner_fn(args...)` directly (not nested), where partner_fn is
     # one of the named partners. Returns { name:, args: } or nil.
+    sig { params(node: T.untyped, partner_names: T.untyped).returns(T.untyped) }
     def match_tail_mutual_call(node, partner_names)
       T.bind(self, T.untyped) rescue nil
       return nil unless node.is_a?(AST::FuncCall)
@@ -185,6 +191,7 @@ module ThunkTransform
     end
 
     # Like contains_self_call? but for a SET of fn names.
+    sig { params(node: T.untyped, names_set: T.untyped).returns(T::Boolean) }
     def contains_any_call?(node, names_set)
       T.bind(self, T.untyped) rescue nil
       return false if node.nil?
@@ -204,6 +211,7 @@ module ThunkTransform
     # cond nor expr contains a self-call. Both the shorthand and
     # block IF forms parse to AST::IfStatement; the body is a
     # single-element list with the RETURN.
+    sig { params(stmt: T.untyped, fn_name: T.untyped).returns(T.untyped) }
     def match_base_case(stmt, fn_name)
       T.bind(self, T.untyped) rescue nil
       return nil unless stmt.is_a?(AST::IfStatement)
@@ -226,6 +234,7 @@ module ThunkTransform
     # remember the surface character.
     SUPPORTED_OPS = [:ADD, :SUB, :MUL, :DIV].freeze
 
+    sig { params(expr: T.untyped, fn_name: T.untyped).returns(T.untyped) }
     def match_recursive_combine(expr, fn_name)
       T.bind(self, T.untyped) rescue nil
       return nil unless expr.is_a?(AST::BinaryOp)
@@ -245,6 +254,7 @@ module ThunkTransform
 
     # If `node` is exactly `fn_name(args...)`, return its args.
     # Returns nil otherwise (including for nested self-calls).
+    sig { params(node: T.untyped, fn_name: T.untyped).returns(T.untyped) }
     def direct_self_call(node, fn_name)
       T.bind(self, T.untyped) rescue nil
       return nil unless node.is_a?(AST::FuncCall) && node.name == fn_name
@@ -253,6 +263,7 @@ module ThunkTransform
 
     # Recursive subtree walk: returns true iff any AST::FuncCall
     # whose name == fn_name appears anywhere under `node`.
+    sig { params(node: T.untyped, fn_name: T.untyped).returns(T::Boolean) }
     def contains_self_call?(node, fn_name)
       T.bind(self, T.untyped) rescue nil
       return false if node.nil?

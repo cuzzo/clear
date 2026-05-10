@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # frozen_string_literal: true
 
 # CaptureStrategy -- classifies how a BG (and other fiber-like) capture
@@ -44,7 +44,10 @@ module CaptureStrategy
   # transfer; the fiber sees a value equal to but independent of the
   # outer binding.
   ByValue = Struct.new(:zig_type, :ctx_init_name) do
+    extend T::Sig
+    sig { returns(T::Array[T.untyped]) }
     def marker_plan = []
+    sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
   end
 
@@ -54,7 +57,10 @@ module CaptureStrategy
   # retain/release machinery. No new markers required beyond the
   # existing RC discipline.
   RcClone = Struct.new(:zig_type, :ctx_init_name) do
+    extend T::Sig
+    sig { returns(T::Array[T.untyped]) }
     def marker_plan = []
+    sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
   end
 
@@ -63,10 +69,13 @@ module CaptureStrategy
   # untouched. Emits a new AllocMark inside the BG body and pairs it
   # with a fiber-scope Cleanup. INV #1 / INV #2 verify the pair.
   FreshHeapCopy = Struct.new(:zig_type, :ctx_init_name, :alloc_sym) do
+    extend T::Sig
+    sig { returns(T::Array[T.untyped]) }
     def marker_plan
       [ [:alloc_mark, ctx_init_name, alloc_sym],
         [:cleanup,    ctx_init_name, alloc_sym] ]
     end
+    sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = true
   end
 
@@ -77,9 +86,12 @@ module CaptureStrategy
   # must be guarded (defer if (!x_moved) cleanup(x)), and the ctx's
   # cleanup path takes over on fiber exit.
   MoveInto = Struct.new(:zig_type, :ctx_init_name, :source_name) do
+    extend T::Sig
+    sig { returns(T::Array[T.untyped]) }
     def marker_plan
       [ [:move_mark, source_name] ]
     end
+    sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = true
   end
 
@@ -89,7 +101,10 @@ module CaptureStrategy
   # CLEAR-level error with a source span, so the user sees their own
   # code, not a Zig type error later.
   Refuse = Struct.new(:reason, :owner_name) do
+    extend T::Sig
+    sig { returns(T::Array[T.untyped]) }
     def marker_plan = []
+    sig { returns(T::Boolean) }
     def needs_capture_site_annotation? = false
   end
 
@@ -101,9 +116,13 @@ module CaptureStrategy
   # copied_names  : Set<String>   -- names the user wrapped in COPY at BG site
   # moved_names   : Set<String>   -- names the user wrapped in GIVE at BG site
   CaptureSiteInfo = Struct.new(:copied_names, :moved_names) do
+    extend T::Sig
+    sig { params(name: String).returns(T::Boolean) }
     def copied?(name) = copied_names&.include?(name) || false
+    sig { params(name: String).returns(T::Boolean) }
     def moved?(name)  = moved_names&.include?(name)  || false
 
+    sig { returns(CaptureStrategy::CaptureSiteInfo) }
     def self.empty
       new(Set.new, Set.new)
     end

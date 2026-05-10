@@ -1,4 +1,5 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 require_relative "position"
 require_relative "../ast/diagnostic_registry"
 
@@ -14,20 +15,21 @@ module LSP
   # synthetic errors (ParserError / unrecoverable CompilerError), we
   # leave `code` nil and just surface the message.
   module Diagnostics
+    extend T::Sig
     # LSP DiagnosticSeverity values.
     SEVERITY_ERROR   = 1
     SEVERITY_WARNING = 2
     SEVERITY_INFO    = 3
     SEVERITY_HINT    = 4
 
-    SEVERITY_FOR_LEVEL = {
+    SEVERITY_FOR_LEVEL = T.let({
       error:   SEVERITY_ERROR,
       warning: SEVERITY_WARNING,
       info:    SEVERITY_INFO,
       hint:    SEVERITY_HINT,
-    }.freeze
+    }.freeze, T::Hash[Symbol, Integer])
 
-    SOURCE_NAME = "clear".freeze
+    SOURCE_NAME = T.let("clear".freeze, String)
 
     module_function
 
@@ -35,6 +37,7 @@ module LSP
     # LSP Diagnostic hash. `source_text` is optional — when provided,
     # we compute exact UTF-16 column offsets for tokens that span
     # multi-byte characters.
+    sig { params(finding: T.untyped, source_text: T.untyped).returns(T.untyped) }
     def from_finding(finding, source_text = nil)
       tok    = finding.token
       length = token_length(tok, source_text)
@@ -51,6 +54,7 @@ module LSP
 
     # Convert a list of findings + an optional fatal error into the
     # array of Diagnostics for a single document.
+    sig { params(result: T.untyped, source_text: T.untyped).returns(T.untyped) }
     def from_result(result, source_text = nil)
       diags = result.findings.map { |f| from_finding(f, source_text) }
       diags << from_finding(result.fatal_error, source_text) if result.fatal?
@@ -65,6 +69,7 @@ module LSP
     # prefix, or a type suffix). When `source_text` is provided, scan
     # the source line at tok.column to recover the true byte span;
     # otherwise fall back to a quote-aware heuristic.
+    sig { params(tok: T.untyped, source_text: T.untyped).returns(T.untyped) }
     def token_length(tok, source_text = nil)
       val = tok.respond_to?(:value) ? tok.value : nil
       if source_text && tok.respond_to?(:line) && tok.line && tok.respond_to?(:column) && tok.column
@@ -83,6 +88,7 @@ module LSP
     # Scan a source slice (starting at the token's column) for the
     # token's textual span. Returns nil when the slice doesn't begin
     # with a recognizable literal — caller falls back.
+    sig { params(rest: T.untyped).returns(T.untyped) }
     def literal_span_in(rest)
       return nil if rest.nil? || rest.empty?
       if rest.start_with?('"""')
@@ -103,6 +109,7 @@ module LSP
       m ? m[0].length : nil
     end
 
+    sig { params(val: T.untyped).returns(T.untyped) }
     def fallback_token_length(val)
       case val
       when String
@@ -124,6 +131,7 @@ module LSP
     # start with "Cannot read field '"), so a prefix-only match would
     # mis-stamp; full-template matching disambiguates on the trailing
     # literal segments.
+    sig { params(finding: T.untyped).returns(T.untyped) }
     def code_for(finding)
       msg = finding.message.to_s
       return nil if msg.empty?
@@ -146,7 +154,9 @@ module LSP
     # before anchoring — emitters sometimes drop the template's final
     # `.` (e.g. "Undefined variable '%{name}'." -> message ends in
     # `'doesNotExist'`).
+    sig { params(template: T.untyped).returns(Regexp) }
     def template_regex(template)
+      @template_regex_cache = T.let(@template_regex_cache, T.nilable(T::Hash[String, Regexp]))
       @template_regex_cache ||= {}
       @template_regex_cache[template] ||= begin
         parts = template.split(/(%\{[^}]+\})/)
