@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "mir"
@@ -78,6 +78,8 @@ module FiberCtxBuilder
   # has_fresh_heap_copy? : true if any spec carries dupe_decl_zig (callsite must emit
   #                        the pre-spawn decls and inject the body cleanups)
   Result = Struct.new(:specs, :capture_map, :capture_symbols) do
+    extend T::Sig
+    sig { returns(T::Boolean) }
     def has_fresh_heap_copy?
       specs.any? { |s| s.dupe_decl_zig }
     end

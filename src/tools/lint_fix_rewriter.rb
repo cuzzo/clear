@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # LintFixRewriter — source-level pre-pass for `clear fmt` that applies
 # stylistic auto-fixes detectable only via real semantic analysis:
 #

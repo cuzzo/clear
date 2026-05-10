@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require_relative "migration_suggester_helpers"
 
 # AtomicPtr M3.15: static eligibility detector for the

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # MultiStatementLinter — emits a `clear fix` warning when a single
 # source line contains more than one statement (multiple `;`-
 # terminated statements at depth 0).

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require_relative "../ast/lexer"
 require_relative "../ast/parser"
 require_relative "../annotator"
