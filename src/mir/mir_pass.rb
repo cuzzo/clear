@@ -27,6 +27,7 @@ class MIRPass
     @fn_nodes = fn_nodes
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
+    @fn_has_catch = T.let(false, T::Boolean)
   end
 
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.

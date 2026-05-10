@@ -169,5 +169,6 @@ class SymbolEntry
     @invalid_reason = invalid_reason
     @resource = resource
     @close_zig = close_zig
+    @lifetime = T.let(nil, T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped])))
   end
 end

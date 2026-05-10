@@ -62,6 +62,11 @@ class MIRLowering
     @tmp_counter = T.let(0, Integer)
     @current_bindings = T.let({}, T::Hash[T.untyped, T.untyped])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
+    @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @current_fn_snapshot_types = T.let(nil, T.nilable(Set))
+    @atomic_emit_raw = T.let(false, T::Boolean)
   end
 
   # Flush and return all pending hoisted Let statements accumulated since the
@@ -6204,7 +6209,7 @@ class MIRLowering
     end
     if has_mir_drop && @fn_alloc_marked_names
       @fn_alloc_marked_names[safe_name] = true
-      @decl_zig_name_map[node.object_id] = safe_name
+      T.must(@decl_zig_name_map)[node.object_id] = safe_name
       # Name-keyed view used by AST markers lowered later (see
       # @fn_name_rename_map init comment). Overwrites when the same name
       # is re-declared in a sibling branch — lowering order matches the

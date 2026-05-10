@@ -42,6 +42,7 @@ class PipelineHost
     @mir_mode = T.let(false, T::Boolean)
     # Named pipeline bindings: "$u" -> "__pipe_u" (persist across stages, cleared per-chain)
     @named_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
+    @join_param_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
   end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
