@@ -2759,7 +2759,10 @@ private
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
     # Atomics M2.3: tie BG-handle lifetimes (see visit_BindExpr).
-    stamp_bg_handle_lifetime!(node) if node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)
+    # Walks the value to find BG blocks anywhere — direct, or buried
+    # in struct literals — so a tied lifetime propagates through
+    # structural construction.
+    stamp_bg_handle_lifetime!(node)
   end
 
   # Shared declaration body used by visit_VarDecl and the declaration path of
@@ -3059,7 +3062,8 @@ private
       # and lifetime-bounded borrows it captures. The handle cannot
       # outlive the shortest-lived source. M2.5's escape checker reads
       # `symbol.lifetime` to validate RETURN / store / queue-push sites.
-      stamp_bg_handle_lifetime!(node) if node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)
+      # Walks struct literals to handle `h = Holder{ bg: BG{...} }`.
+      stamp_bg_handle_lifetime!(node)
 
     elsif scope.is_immutable?(node.name)
       emit_immutable_assignment_error!(node, scope)
@@ -6381,15 +6385,34 @@ private
   #     visit_BgBlock via has_non_escaping_capture.
   sig { params(decl_node: T.untyped).returns(T.nilable(Hash)) }
   def stamp_bg_handle_lifetime!(decl_node)
-    bg = decl_node.value
-    return unless bg.respond_to?(:capture_analysis)
-    analysis = bg.capture_analysis
-    return unless analysis && analysis.respond_to?(:capture_symbols)
-    sources = bg_lifetime_sources(analysis)
+    sources = collect_bg_sources_in_expr(decl_node.value).uniq
     return if sources.empty?
     sym = decl_node.symbol
     return unless sym
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
+  end
+
+  # Walk an expression tree to find every BgBlock / BgStreamBlock and
+  # union their lifetime-bound capture sources. Handles direct
+  # `bg = BG{...}` plus structural escapes — `h = Holder{ bg: BG{...} }`,
+  # etc. — by recursing into struct literals. Without this, a BG buried
+  # inside a struct literal escapes its captures' scope when the
+  # surrounding binding is RETURNed (real UAF, fuzz finding
+  # `lifetimed_return` store_in_field cell).
+  sig { params(expr: T.untyped).returns(T::Array[SymbolEntry]) }
+  def collect_bg_sources_in_expr(expr)
+    return [] if expr.nil?
+    case expr
+    when AST::BgBlock, AST::BgStreamBlock
+      analysis = expr.respond_to?(:capture_analysis) ? expr.capture_analysis : nil
+      analysis && analysis.respond_to?(:capture_symbols) ? bg_lifetime_sources(analysis) : []
+    when AST::StructLit
+      out = []
+      expr.fields.each_value { |v| out.concat(collect_bg_sources_in_expr(v)) }
+      out
+    else
+      []
+    end
   end
 
   # Walk the capture-analysis SymbolEntries and pick the ones whose

@@ -177,6 +177,33 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
     end
   end
 
+  describe "BG buried in struct literal" do
+    # Real fuzz finding (`tools/fuzz/run.rb --matrix --templates
+    # lifetimed_return`, store_in_field cell): a BG block embedded
+    # inside a struct literal field must propagate its tied lifetime
+    # to the surrounding binding. Otherwise `RETURN h` (where h's bg
+    # field captures a function-local source) escapes the source's
+    # scope unrejected — confirmed UAF (assertion read garbage from
+    # freed Counter.value).
+    it "h = Holder{ bg: BG { @local }} ties h's lifetime to the BG's captures" do
+      ast = annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        STRUCT Holder { bg: ~Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 0_i64 } @local;
+          h = Holder{ bg: BG { c.value; } };
+          r: Int64 = NEXT h.bg;
+          RETURN;
+        END
+      CLEAR
+      sym = find_binding_symbol(main_fn(ast), "h")
+      expect(sym.lifetime).to be_a(Hash)
+      expect(sym.lifetime[:sources].size).to eq(1)
+      counter_sym = find_binding_symbol(main_fn(ast), "c")
+      expect(sym.lifetime_sources).to include(counter_sym)
+    end
+  end
+
   describe "no captures" do
     it "BG with pure-compute body gets nil lifetime (no constraint)" do
       ast = annotate(<<~CLEAR)
