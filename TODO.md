@@ -65,6 +65,7 @@ Milestone: *Basic* SQL/CLEAR database
  - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
  - [ ] Generic Observables
+ - [ ] Gradual / Hidden syncing in --gradual / --vm / --easy mode.
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
  - [ ] Shared Actors as an ownership capability (not distributed, that comes v0.4 -> these are MSFT Orleans style)
