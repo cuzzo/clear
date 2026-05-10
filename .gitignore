@@ -125,6 +125,10 @@ transpile-tests/[0-9]*
 !transpile-tests/[0-9]*.cht.disabled
 !transpile-tests/[0-9]*/
 
+# Generated fuzz programs (see tools/fuzz/). Promoted regressions move into
+# transpile-tests/ proper; the fuzz/ dir holds only ephemeral output.
+transpile-tests/fuzz/*.cht
+
 # Catch-all
 **/*.profile/
 **/.zig-cache/
