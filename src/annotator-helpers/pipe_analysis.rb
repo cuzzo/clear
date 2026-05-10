@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../ast/type"
@@ -13,7 +13,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def visit_Smooth(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @smooth_depth += 1
+    @smooth_depth = T.let((@smooth_depth || 0) + 1, T.nilable(Integer))
     # Logic: x |> f  -> f(x)
 
     # 1. Visit the Left (Input) FIRST
@@ -31,7 +31,7 @@ module PipeAnalysis
       node.full_type = :Any
     end
 
-    @smooth_depth -= 1
+    @smooth_depth = T.let((@smooth_depth || 0) - 1, T.nilable(Integer))
   end
 
   private
@@ -130,6 +130,7 @@ module PipeAnalysis
   sig { returns(T.nilable(T::Boolean)) }
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[T.untyped, T.untyped]))
     fn = @fn_nodes&.dig(current_fn_ctx&.name)
     fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
   end
@@ -370,15 +371,15 @@ module PipeAnalysis
   end
 
   # Time string format: '500ms', '1s', '2min', '1h'
-  BATCH_WINDOW_TIME_RE = /\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.freeze
-  BATCH_WINDOW_TIME_NS = { 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze
+  BATCH_WINDOW_TIME_RE = T.let(/\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.freeze, Regexp)
+  BATCH_WINDOW_TIME_NS = T.let({ 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze, T::Hash[String, Integer])
 
   sig { params(str: String).returns(T.nilable(Integer)) }
   def parse_batch_window_time_ns(str)
     T.bind(self, SemanticAnnotator) rescue nil
     m = BATCH_WINDOW_TIME_RE.match(str)
     return nil unless m
-    (m[1].to_f * BATCH_WINDOW_TIME_NS[m[2]]).to_i
+    (m[1].to_f * T.must(BATCH_WINDOW_TIME_NS[T.must(m[2])])).to_i
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -1115,6 +1116,7 @@ module PipeAnalysis
   # Pre-scan: check if the EACH body references any @sharded map variable
   # by scanning for identifiers that are in scope as @sharded (without :locked).
   # This runs BEFORE visiting the body, so we only check unvisited AST.
+  sig { params(conc: T.untyped, sharded_names: T.untyped).returns(T.untyped) }
   def emit_multi_map_warning(conc, sharded_names)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|
@@ -1133,7 +1135,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: Set).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: T.untyped, names: T::Set[T.untyped]).returns(T.nilable(T::Array[Symbol])) }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.is_a?(AST::Locatable)
@@ -1156,6 +1158,7 @@ module PipeAnalysis
     end
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def pre_scan_node_for_sharded(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless node.is_a?(AST::Locatable)
@@ -1182,6 +1185,7 @@ module PipeAnalysis
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
   # Accepts range inputs (unlike analyze_each_op which requires collections).
   # Visits the body, then extracts the key expression and sets shard_context.
+  sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: T.untyped).returns(T.untyped) }
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.type_info
@@ -1214,6 +1218,7 @@ module PipeAnalysis
   # Walks the body AST looking for map[key_expr] patterns where map is @sharded.
   # If found, sets shard_context on the ConcurrentOp so the transpiler emits
   # routed sharding instead of the normal worker pool.
+  sig { params(smooth_node: T.untyped, conc: T.untyped).returns(T.untyped) }
   def auto_detect_sharded_access(smooth_node, conc)
     T.bind(self, SemanticAnnotator) rescue nil
     each_op = conc.op
@@ -1263,6 +1268,7 @@ module PipeAnalysis
   end
 
   # Recursively walk AST nodes to find GetIndex on @sharded maps.
+  sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
   def walk_for_sharded_access(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     nodes.each do |node|
@@ -1296,6 +1302,7 @@ module PipeAnalysis
   end
 
   # Find GetIndex on @sharded maps in expression context (reads)
+  sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     nodes.each do |node|
@@ -1770,6 +1777,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp, item_type: T.untyped).returns(T.nilable(T::Array[String])) }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, SemanticAnnotator) rescue nil
+    @pipeline_accessed_fields = T.let(@pipeline_accessed_fields, T.nilable(T::Set[String]))
     return unless @pipeline_accessed_fields
     accessed = @pipeline_accessed_fields
     return if accessed.empty?
@@ -1789,12 +1797,13 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  def with_soa_tracking(node, item_type)
+  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
-    @pipeline_accessed_fields = Set.new
+    @pipeline_accessed_fields = T.let(Set.new, T.nilable(T::Set[String]))
     yield
     check_soa_opportunity!(node, item_type)
   ensure
-    @pipeline_accessed_fields = nil
+    @pipeline_accessed_fields = T.let(nil, T.nilable(T::Set[String]))
   end
 end

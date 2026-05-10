@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require_relative "../ast/ast"
 
@@ -102,7 +102,7 @@ module FunctionAnalysis
     return_type
   end
 
-  sig { params(params: T::Array[Hash], return_type: Symbol).returns(FunctionSignature) }
+  sig { params(params: T::Array[T.untyped], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
@@ -123,13 +123,14 @@ module FunctionAnalysis
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
   # heap_promoted_call flags.
-  sig { params(node: T.untyped, args: Array).returns(T.nilable(Symbol)) }
+  sig { params(node: T.untyped, args: T::Array[T.untyped]).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, SemanticAnnotator) rescue nil
     func_name = node.name
 
     scope = lookup_scope_for(func_name)
     unless scope
+      @fn_nodes = T.let(@fn_nodes, T.untyped)
       emit_typo_suggestion!(
         node.token, func_name, @fn_nodes.keys,
         "Undefined function '#{func_name}'",
@@ -626,7 +627,7 @@ module FunctionAnalysis
     type.is_a?(Type) && type.sync == :atomic && type.primitive?
   end
 
-  sig { params(node: T.untyped, atomic_args: Array).returns(T.nilable(T::Array[String])) }
+  sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, SemanticAnnotator) rescue nil
     unique_args = atomic_args.compact
@@ -647,6 +648,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
 
+    @og = T.let(@og, T.untyped)
     if param[:mutable] && !@og.can_write?(arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
@@ -727,7 +729,7 @@ module FunctionAnalysis
   # mixed declaration is ambiguous in a way the lifetime checker
   # can't model. Force the user to split into separate fns or pick
   # one family.
-  sig { params(node: AST::FunctionDef, sources: Array).returns(T.nilable(Array)) }
+  sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
@@ -785,7 +787,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.params.each do |param|
@@ -907,7 +909,7 @@ module FunctionAnalysis
   end
 
   # Cannot be part of declare, needs to happen in outer-scope
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def verify_captures!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.captures.nil? || node.captures.empty?
@@ -947,7 +949,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def declare_captures(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if node.captures.nil? || node.captures.empty?
@@ -965,7 +967,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped, found_returns: T::Array[Hash], declared_return: T.nilable(Type)).returns(T.untyped) }
+  sig { params(node: T.untyped, found_returns: T::Array[T.untyped], declared_return: T.nilable(Type)).returns(T.untyped) }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
     if found_returns.size > 1
@@ -1095,9 +1097,9 @@ module FunctionAnalysis
   # Add new entries here when std_lib.rb introduces a new "this overload
   # doesn't make sense for type-shape X" guard. Each predicate receives
   # the receiver's resolved Type; returning true rejects the call.
-  REJECT_TYPE_PREDICATES = {
+  REJECT_TYPE_PREDICATES = T.let({
     unsigned_integer: ->(t) { t.respond_to?(:unsigned_integer?) && t.unsigned_integer? },
-  }.freeze
+  }.freeze, T::Hash[Symbol, Proc])
 
   sig { params(arg: T.untyped, kind: Symbol).returns(T::Boolean) }
   def reject_arg_type_matches?(arg, kind)
@@ -1109,7 +1111,7 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[Hash], args: Array).returns(T.nilable(Hash)) }
+  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
     definitions.find do |config|
@@ -1140,7 +1142,7 @@ module FunctionAnalysis
   end
 
   # Formats intrinsic args for error messages
-  sig { params(args: Array).returns(String) }
+  sig { params(args: T::Array[T.untyped]).returns(String) }
   def format_intrinsic_args(args)
     T.bind(self, SemanticAnnotator) rescue nil
     return "(varargs)" if args == :Varargs
