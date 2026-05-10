@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform.rb -- Universal CPS transform for FSM-eligible BG bodies.
 #
 # Per CLAUDE.md Invariant 13, FSM emission is ONE general transform.
@@ -35,6 +35,7 @@ require_relative "fsm_transform/suspend_resolvers"
 require_relative "fsm_transform/emit"
 
 module FsmTransform
+  extend T::Sig
   module_function
 
   # Public entry. Given a BG block and the surrounding lowering
@@ -53,6 +54,7 @@ module FsmTransform
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
+  sig { params(bg_block: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.untyped) }
   def transform(bg_block, ctx, lowering)
     T.bind(self, T.untyped) rescue nil
     suspend_points = bg_block.fsm_suspend_points || []
@@ -128,6 +130,7 @@ module FsmTransform
   # promotes all of them to ctx fields so reads/writes across
   # segment boundaries resolve via the capture_map. Returns
   # `[{ name:, zig_type: }, ...]` (deduped on name).
+  sig { params(stmts: T.untyped).returns(T::Array[T.untyped]) }
   def collect_body_locals(stmts)
     T.bind(self, T.untyped) rescue nil
     out = []
@@ -205,6 +208,7 @@ module FsmTransform
   # Falling back to "promote everything" guarantees correctness;
   # purely linear bodies skip this and let Liveness over-promote
   # nothing.
+  sig { params(stmts: T.untyped).returns(T::Boolean) }
   def body_needs_conservative?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
@@ -226,6 +230,7 @@ module FsmTransform
     end
   end
 
+  sig { params(stmts: T.untyped).returns(T::Boolean) }
   def contains_suspend_anywhere?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
@@ -246,6 +251,7 @@ module FsmTransform
   # already added to the ctx by the suspend descriptor's
   # ctx_field_decls. Used by collect_body_locals to avoid
   # double-declaring the result var.
+  sig { params(value: T.untyped).returns(T::Boolean) }
   def suspend_value?(value)
     T.bind(self, T.untyped) rescue nil
     return true if value.is_a?(AST::NextExpr)
@@ -254,6 +260,7 @@ module FsmTransform
     !!(md && md[:suspends] && md[:fsm_setup])
   end
 
+  sig { params(name: T.untyped, type_obj: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def local_entry(name, type_obj)
     T.bind(self, T.untyped) rescue nil
     return nil if name.nil?

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # src/escape_analysis.rb - Single pre-pass escape analysis for CLEAR compiler.
 #
 # Determines which declarations require heap allocation before CleanupClassifier
@@ -80,16 +80,16 @@ module EscapeAnalysis
   # @param heap_fns       [Set]   function names with heap return_provenance (from E1)
   # @param promotion_plans [Hash] name -> PromotionClassifier plan hash
   # @return [Set<String>] BG-upgraded variable names (for insert_bg_escape_promote! filtering)
-  sig { params(fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String], promotion_plans: T::Hash[String, Hash]).returns(T::Set[String]) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String], promotion_plans: T::Hash[String, T.untyped]).returns(T::Set[String]) }
   def self.analyze!(fn_nodes, heap_fns:, promotion_plans: {})
     all_bg_upgraded = Set.new
 
     fn_nodes.each do |name, fn|
       next unless fn&.body
       plan   = promotion_plans[name]
-      result = per_fn_scan!(fn, heap_fns, T.must(plan), fn_nodes)
+      result = per_fn_scan!(fn, heap_fns, plan, fn_nodes)
 
-      all_bg_upgraded.merge(T.must(result[:bg_upgraded]))
+      all_bg_upgraded.merge(result[:bg_upgraded])
 
       # Stamp carry-return metadata so mark_heap_carry_call_sites! can run after.
       if result[:carry_return_vars]&.any?
@@ -100,7 +100,7 @@ module EscapeAnalysis
       # Remove always-escaped vars from promotion plan — no runtime MIR::Promote needed.
       if result[:always_escaped]&.any? && plan.is_a?(Hash) && plan[:var_promotes]
         escaped = result[:always_escaped]
-        plan[:var_promotes] = plan[:var_promotes].reject { |vp| T.must(escaped).include?(vp[:var]) }
+        plan[:var_promotes] = plan[:var_promotes].reject { |vp| escaped.include?(vp[:var]) }
       end
     end
 
@@ -159,7 +159,7 @@ module EscapeAnalysis
 
   # ── E2 private helpers ───────────────────────────────────────────────────
 
-  sig { params(fn: AST::FunctionDef, heap_fns: T::Set[String], plan: T::Hash[Symbol, T.untyped], fn_nodes: T::Hash[String, T.untyped]).returns(T::Hash[Symbol, Set]) }
+  sig { params(fn: AST::FunctionDef, heap_fns: T::Set[String], plan: T::Hash[Symbol, T.untyped], fn_nodes: T::Hash[String, T.untyped]).returns(T::Hash[Symbol, T.untyped]) }
   private_class_method def self.per_fn_scan!(fn, heap_fns, plan, fn_nodes = {})
     bg_upgraded    = Set.new
     always_escaped = Set.new
@@ -422,7 +422,7 @@ module EscapeAnalysis
   end
 
   # Collect all ReturnNode descendants in body.
-  sig { params(body: Array).returns(Array) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   private_class_method def self.e2_collect_returns(body)
     nodes = []
     AST.walk_body(body) { |n| nodes << n if n.is_a?(AST::ReturnNode) }
@@ -433,7 +433,7 @@ module EscapeAnalysis
   # nested in expressions (VarDecl/BindExpr/Assignment values, ReturnNode
   # values, struct/list/hash literal fields, control-flow conditions). Used
   # by Condition 8.
-  sig { params(body: Array, blk: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], blk: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.e2_walk_calls(body, &blk)
     AST.walk_body(body) { |stmt| e2_walk_calls_in_expr(stmt, &blk) }
   end
@@ -600,7 +600,7 @@ module EscapeAnalysis
   end
 
   # Find the first Identifier matching var_name across all return node values.
-  sig { params(return_nodes: Array, var_name: String).returns(T.untyped) }
+  sig { params(return_nodes: T::Array[T.untyped], var_name: String).returns(T.untyped) }
   private_class_method def self.e2_find_return_ident(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value
@@ -631,7 +631,7 @@ module EscapeAnalysis
   end
 
   # Also stamp the SymbolEntry (scope entry) reached via the return identifier.
-  sig { params(return_nodes: Array, var_name: String).returns(Array) }
+  sig { params(return_nodes: T::Array[T.untyped], var_name: String).returns(T::Array[T.untyped]) }
   private_class_method def self.e2_stamp_symbol_via_return_ident!(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value
@@ -766,7 +766,7 @@ module EscapeAnalysis
 
   # Walk every Locatable descendant (incl. expression sub-trees), record
   # FuncCalls.
-  sig { params(body: Array, callsites: T::Hash[String, Array]).returns(T.untyped) }
+  sig { params(body: T::Array[T.untyped], callsites: T::Hash[String, T::Array[T.untyped]]).returns(T.untyped) }
   private_class_method def self.collect_callsites_deep(body, callsites)
     stack = body.is_a?(Array) ? body.dup : [body]
     until stack.empty?
@@ -789,7 +789,7 @@ module EscapeAnalysis
 
   # Most-general unifier: returns the single non-nil value when every
   # callsite's arg projects to the same value, else nil.
-  sig { params(sites: T::Array[Hash], idx: Integer, project: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(sites: T::Array[T::Hash[T.untyped, T.untyped]], idx: Integer, project: T.untyped).returns(T.nilable(Symbol)) }
   private_class_method def self.unify_caller_attr(sites, idx, &project)
     observed = sites.map do |site|
       arg = site[:args][idx]
@@ -840,7 +840,7 @@ module EscapeAnalysis
   # Replaces MIRPass#mark_heap_carry_call_sites!
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
-  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(Hash)) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def self.tag_carry_call_sites!(fn_nodes)
     carry_fns = fn_nodes.each_with_object(Set.new) do |(_, fn), s|
       s << fn.name.to_s if fn.respond_to?(:heap_carry_return) && fn.heap_carry_return
@@ -870,7 +870,7 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(body: Array, var_name: String).returns(T.untyped) }
+  sig { params(body: T::Array[T.untyped], var_name: String).returns(T.untyped) }
   private_class_method def self.e3_find_decl(body, var_name)
     return nil unless body
     body.each do |node|
@@ -882,7 +882,7 @@ module EscapeAnalysis
     nil
   end
 
-  sig { params(stmt: T.untyped).returns(Array) }
+  sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
   private_class_method def self.e3_top_level_exprs(stmt)
     case stmt
     when AST::VarDecl, AST::BindExpr then [stmt.value]
@@ -897,7 +897,7 @@ module EscapeAnalysis
     end.compact
   end
 
-  sig { params(node: T.untyped, carry_fns: T::Set[String]).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped, carry_fns: T::Set[String]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.e3_mark_carry_expr!(node, carry_fns)
     return unless node
     case node

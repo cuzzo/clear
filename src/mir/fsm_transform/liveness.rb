@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform/liveness.rb -- live-variable analysis across
 # segment boundaries.
 #
@@ -24,14 +24,18 @@
 
 module FsmTransform
   module Liveness
-    Result = Struct.new(:cross_segment_vars)
+    Result = Struct.new(:cross_segment_vars) do
+      extend T::Sig
+    end
 
+    extend T::Sig
     module_function
 
     # Returns a Result. ctx provides captured-name set + any
     # already-known state field names that must be excluded
     # (captures aren't local-defined in the body; suspend-stash
     # fields are added by the emitter, not the body).
+    sig { params(segments: T.untyped, ctx: T.untyped).returns(T.untyped) }
     def analyze(segments, ctx)
       capture_names = (ctx[:captured] || {}).keys.to_set
 
@@ -112,6 +116,7 @@ module FsmTransform
     # tail edges (i.e. members of a non-trivial strongly-connected
     # component, or have a self-loop). Used to widen the live-set
     # for back-edge cases like B2-LOOP's cond+loop_pre+loop_post.
+    sig { params(segments: T.untyped).returns(T.untyped) }
     def compute_cyclic_segments(segments)
       adj = {}
       segments.each { |seg| adj[seg.index] = tail_targets(seg) }
@@ -135,6 +140,7 @@ module FsmTransform
     # Targets a segment's tail can transition to (for cycle
     # detection). Linear suspends implicitly fall through to
     # seg.index + 1.
+    sig { params(seg: T.untyped).returns(T::Array[T.untyped]) }
     def tail_targets(seg)
       case seg.tail
       when Segments::Done                          then []
@@ -165,6 +171,7 @@ module FsmTransform
     # inside the body and stash into ctx.sp; subsequent steps
     # reference ctx.sp, not the original identifiers, so no extra
     # tail reads are recorded here.
+    sig { params(seg: T.untyped, uses_by_seg: T.untyped).returns(T.untyped) }
     def collect_tail_uses(seg, uses_by_seg)
       tail = seg.tail
       case tail
@@ -185,6 +192,7 @@ module FsmTransform
     # Type resolution mirrors the legacy collect_fsm_promoted_locals
     # fallback chain so consumers (FSM ctx-field decl emission)
     # always have a usable type.
+    sig { params(stmt: T.untyped, into: T.untyped).returns(T.untyped) }
     def collect_defs(stmt, into)
       case stmt
       when AST::VarDecl, AST::BindExpr
@@ -205,6 +213,7 @@ module FsmTransform
       end
     end
 
+    sig { params(stmt: T.untyped).returns(T.untyped) }
     def stmt_decl_type(stmt)
       candidates = []
       candidates << stmt.full_type
@@ -215,6 +224,7 @@ module FsmTransform
     end
 
     # Collect identifier reads anywhere in stmt's expressions.
+    sig { params(stmt: T.untyped, into: T.untyped).returns(T.untyped) }
     def collect_uses(stmt, into)
       walk_idents(stmt) { |name| into << name }
     end
@@ -224,6 +234,7 @@ module FsmTransform
     # under the AST module -- avoids descending into Type objects
     # or other unrelated Struct-shaped values that happen to
     # respond to each_pair.
+    sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
     def walk_idents(node, &block)
       return if node.nil?
       if node.is_a?(Array)

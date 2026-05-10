@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # P2.4 / P2.5 / P2.6: validation of REQUIRES + WITH MATCH at the function
 # level + call-site family check.
@@ -25,7 +25,7 @@ module WithMatchCheck
   # admits more than one axis -- the WITH body must lower via comptime
   # `@hasDecl` dispatch in that case (#328 lowering). Per design doc,
   # LOCKED and SNAPSHOTTED are poly; VERSIONED and ATOMIC are mono.
-  FAMILY_AXES = {
+  FAMILY_AXES = T.let({
     LOCKED:      Set[:locked, :write_locked].freeze,
     SNAPSHOTTED: Set[:versioned, :atomic].freeze,
     VERSIONED:   Set[:versioned].freeze,
@@ -39,7 +39,7 @@ module WithMatchCheck
     LOCAL:       Set[:local, :multiowned, :plain].freeze,
     ACTOR:       Set[:actor].freeze,
     LOCK_FREE:   Set[:lock_free].freeze,
-  }.freeze
+  }.freeze, T::Hash[Symbol, T::Set[Symbol]])
 
   sig { params(family_set: T.nilable(T::Set[Symbol])).returns(T::Set[Symbol]) }
   def self.admissible_axes(family_set)
@@ -51,7 +51,7 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[Hash])).returns(T.nilable(Array)) }
+  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
@@ -200,7 +200,7 @@ module WithMatchCheck
   # The check only runs for plain WITH (skipped for WITH MATCH, VIEW,
   # MATERIALIZED VIEW, SNAPSHOT — those have their own dispatch shapes;
   # WITH MATCH itself is being phased out in #332 in favor of POLYMORPHIC).
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, Set], fn: AST::FunctionDef, error_handler: Proc).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], fn: AST::FunctionDef, error_handler: Proc).returns(T.untyped) }
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
     return if node.view_kind || node.snapshot_mode
@@ -244,7 +244,7 @@ module WithMatchCheck
   # @param fn [AST::FunctionDef]
   # @param sig_lookup [Proc] name → FunctionSignature (or nil)
   # @param error_handler [Proc] (node, msg) → raises CompilerError
-  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).returns(T.nilable(Array)) }
+  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).returns(T.nilable(T::Array[T.untyped])) }
   def self.check_call_sites!(fn, sig_lookup, error_handler)
     return unless fn.respond_to?(:body) && fn.body
 
@@ -311,9 +311,9 @@ module WithMatchCheck
   # VERSIONED = MVCC Versioned(T) -- the lock-free snapshot path.
   # ATOMIC    = single-cell Atomic(T) -- the lock-free single-cell path.
   # ACTOR / LOCK_FREE remain reserved for future phases.
-  LOCKED_SYNCS    = %i[locked write_locked always_mutable].to_set.freeze
-  VERSIONED_SYNCS = %i[versioned].to_set.freeze
-  ATOMIC_SYNCS    = %i[atomic].to_set.freeze
+  LOCKED_SYNCS    = T.let(%i[locked write_locked always_mutable].to_set.freeze, T::Set[Symbol])
+  VERSIONED_SYNCS = T.let(%i[versioned].to_set.freeze, T::Set[Symbol])
+  ATOMIC_SYNCS    = T.let(%i[atomic].to_set.freeze, T::Set[Symbol])
 
   sig { params(arg: T.untyped).returns(T.nilable(Symbol)) }
   def self.family_of_arg(arg)
@@ -361,7 +361,7 @@ module WithMatchCheck
   # downstream readers (effect resolution, mir lowering) see concrete
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
-  sig { params(arg: T.untyped).returns(Set) }
+  sig { params(arg: T.untyped).returns(T::Set[T.untyped]) }
   def self.family_of_arg_set(arg)
     sym = arg.symbol
     return Set.new unless sym
@@ -376,7 +376,7 @@ module WithMatchCheck
     fam ? Set[fam] : Set.new
   end
 
-  sig { params(family_set: Set).returns(Set) }
+  sig { params(family_set: T::Set[T.untyped]).returns(T::Set[T.untyped]) }
   def self.expand_snapshotted(family_set)
     return family_set unless family_set.include?(:SNAPSHOTTED)
     out = family_set - [:SNAPSHOTTED]
@@ -388,12 +388,12 @@ module WithMatchCheck
   # Each axis can surface a fixed set of errors at the WITH boundary.
   # Used by the polymorphic-warning surface (errors_for_polymorphic_with)
   # and by future call-site error collapsing (#329).
-  AXIS_ERRORS = {
+  AXIS_ERRORS = T.let({
     locked:        Set[:LockTimeout].freeze,
     write_locked:  Set[:LockTimeout].freeze,
     versioned:     Set[:MvccConflict].freeze,
     atomic:        Set[:AtomicConflict].freeze,
-  }.freeze
+  }.freeze, T::Hash[Symbol, T::Set[Symbol]])
 
   # Compute the union of errors that COULD fire from a polymorphic WITH
   # given the binding's REQUIRES disjunction. Deadlock/LockCycle are
@@ -416,7 +416,7 @@ module WithMatchCheck
   # remainder is empty and no warning fires. The check exists so a
   # user-written partial-coverage scenario (or a future strict-mode
   # build) surfaces unhandled polymorphic errors at the WITH site.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, Set], policy_handlers: T::Array[Hash], warn_handler: Proc).returns(T.nilable(Set)) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], policy_handlers: T::Array[T.untyped], warn_handler: Proc).returns(T.nilable(T::Set[T.untyped])) }
   def self.warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                               policy_handlers, warn_handler)
     return unless warn_handler && node.polymorphic
@@ -440,7 +440,7 @@ module WithMatchCheck
   # array of `{ form: :type | :kind, name: Symbol }` entries; type
   # selectors contribute their literal name, kind selectors expand
   # via AST.types_for_kind.
-  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[Hash])).returns(T::Set[Symbol]) }
+  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[T.untyped])).returns(T::Set[Symbol]) }
   def self.handled_error_set(node, policy_handlers)
     handled = Set.new
     [node.lock_error_clause, *(policy_handlers || [])].compact.each do |clause|
@@ -461,7 +461,7 @@ module WithMatchCheck
   # FuncCall is the LHS of a BinaryOp). AST.walk_body only iterates
   # statement-level nodes; we need the expression sub-tree too for
   # the universal-poly auto-borrow stamp.
-  sig { params(body: Array).returns(Array) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def self.deep_funcalls(body)
     out = []
     stack = body.is_a?(Array) ? body.dup : [body]

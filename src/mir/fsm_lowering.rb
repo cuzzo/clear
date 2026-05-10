@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require_relative '../ast/type'
 require_relative 'fsm_ops'
@@ -85,7 +85,7 @@ module FsmLowering
   # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
   # below renders the same MIR to Zig text via MIREmitter. The
   # recursive emit path uses emit_step_stmts.
-  sig { params(stmts: Array, no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(Array) }
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T::Array[T.untyped]) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
     T.bind(self, MIRLowering) rescue {}
     flat_steps = []
@@ -164,7 +164,7 @@ module FsmLowering
   # (pending hoists + the wrapped main statement). Returns nil
   # when the underlying lowering fails (e.g. the AST node has no
   # MIR equivalent yet).
-  sig { params(step: T::Hash[Symbol, T.untyped]).returns(T.nilable(Array)) }
+  sig { params(step: T::Hash[Symbol, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def lower_one_step_to_mir(step)
     T.bind(self, MIRLowering) rescue nil
     mir = lower(step[:expr])
@@ -209,7 +209,7 @@ module FsmLowering
   # no_result: true, or a [pre, result] tuple otherwise (where
   # `result` is the trailing `__ctx.inner.result = <expr>;`
   # assignment ready for splicing into the dispatch).
-  sig { params(stmts: Array, no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T.untyped) }
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T.untyped) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
     T.bind(self, MIRLowering) rescue {}
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id, exit_promote: exit_promote)
@@ -219,15 +219,17 @@ module FsmLowering
       [render_mir_list(result[0]), render_mir_list(result[1])]
     end
   end
-  sig { params(mir_list: Array).returns(String) }
+  sig { params(mir_list: T::Array[T.untyped]).returns(String) }
   def render_mir_list(mir_list)
     T.bind(self, MIRLowering) rescue nil
     return "" if false || mir_list.empty?
+    @_emitter = T.let(@_emitter, T.nilable(MIREmitter))
     @_emitter ||= begin
       require_relative "mir_emitter"
       MIREmitter.new
     end
-    @_emitter.rt_name = @rt_name
+    @rt_name = T.let(@rt_name, T.nilable(String))
+    @_emitter.rt_name = @rt_name || "rt"
     # `lower_var_decl` may return an Array of MIR nodes (e.g.
     # [AllocMark, Let, Cleanup]) for cleanup-needing bindings. After
     # the FreshHeapCopy capture wiring on master's BG path, this also
@@ -245,7 +247,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: T::Hash[Symbol, T.untyped], with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(Hash)) }
+  sig { params(cap: T::Hash[Symbol, T.untyped], with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||
@@ -319,7 +321,7 @@ module FsmLowering
   #   :goto_post  -> fail-step segment Gotos to the post-WITH
   #                  segment. Body is empty for :pass, the user
   #                  block for :block.
-  sig { params(clause: T::Hash[Symbol, T.untyped], ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: Set, bg_rt: String, rt_name: String).returns(T.nilable(Hash)) }
+  sig { params(clause: T::Hash[Symbol, T.untyped], ctx_id: Integer, with_node: AST::WithBlock, capture_map: T::Hash[String, String], pointer_captures: T::Set[T.untyped], bg_rt: String, rt_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def emit_fsm_lock_error_arm_split(clause:, ctx_id:, with_node:,
                                     capture_map:, pointer_captures:, bg_rt:,
                                     rt_name:)
@@ -345,8 +347,10 @@ module FsmLowering
     when :pass
       { body_zig: "", exit_kind: :goto_post }
     when :block
+      @current_bg_pointer_captures = T.let(@current_bg_pointer_captures, T.nilable(T::Set[T.untyped]))
       prev_bg_ptr_caps = @current_bg_pointer_captures
       @current_bg_pointer_captures = pointer_captures
+      @pending_stmts = T.let(@pending_stmts, T.nilable(T::Array[T.untyped]))
       prev_fiber_pending = @pending_stmts
       @pending_stmts = []
       block_code = with_fiber_capture_map(capture_map, rt_override: bg_rt) do
