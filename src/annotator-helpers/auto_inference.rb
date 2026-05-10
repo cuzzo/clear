@@ -654,7 +654,7 @@ class ShapeEvidenceCollector
 
   # Detect `x[i] = v`. For list shape: v is element evidence. For
   # map shape: i is key, v is value.
-  sig { params(assign: AST::Assignment, name_map: Hash).returns(T.untyped) }
+  sig { params(assign: AST::Assignment, name_map: Hash).returns(T.nilable(Array)) }
   def record_index_assign(assign, name_map)
     target = assign.name
     return unless target.is_a?(AST::GetIndex)

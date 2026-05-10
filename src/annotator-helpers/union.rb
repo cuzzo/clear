@@ -102,7 +102,7 @@ module UnionAnalysis
     if schema[:kind] == :enum
       unless schema[:variants].include?(node.field)
         emit_variant_typo!(
-          variant_anchor_from_getfield(node), node.field, schema[:variants],
+          T.must(variant_anchor_from_getfield(node)), node.field, schema[:variants],
           "Type Error: Enum '#{type_name}' has no variant '#{node.field}'.",
           "variant of enum #{type_name}",
           cascade: true
@@ -116,7 +116,7 @@ module UnionAnalysis
     if schema[:kind] == :union
       unless schema[:variants].key?(node.field)
         emit_variant_typo!(
-          variant_anchor_from_getfield(node), node.field, schema[:variants].keys,
+          T.must(variant_anchor_from_getfield(node)), node.field, schema[:variants].keys,
           "Type Error: Union '#{type_name}' has no variant '#{node.field}'.",
           "variant of union #{type_name}",
           cascade: true
@@ -148,7 +148,7 @@ module UnionAnalysis
     end
     unless T.must(schema)[:variants].key?(node.variant_name)
       emit_variant_typo!(
-        variant_anchor_from_unionlit(node, node.variant_name),
+        T.must(variant_anchor_from_unionlit(node, node.variant_name)),
         node.variant_name, T.must(schema)[:variants].keys,
         "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
         "variant of union #{node.union_name}",

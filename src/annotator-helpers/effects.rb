@@ -113,7 +113,7 @@ module EffectTracker
   # Record a direct effect for the function currently being analyzed.
   # For SUSPENDS specifically, promote based on current loop/conditional
   # context so the recorded effect reflects where the suspension occurs.
-  sig { params(effect: Symbol).returns(T.untyped) }
+  sig { params(effect: Symbol).returns(NilClass) }
   def record_effect(effect)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless current_fn_ctx&.name
@@ -830,7 +830,7 @@ module EffectTracker
     end
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(NilClass) }
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
     # Phase 1: assign base tier per function from its own effects.

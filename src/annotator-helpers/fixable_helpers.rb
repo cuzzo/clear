@@ -97,7 +97,7 @@ module FixableHelper
   #   message     — user-facing error message when no fix is applicable
   #   fix_label   — short description of what the replacement represents
   #                 (e.g. "closest known kind", "closest registered type")
-  sig { params(token: Lexer::Token, name: T.untyped, candidates: Array, message: String, fix_label: String).returns(T.untyped) }
+  sig { params(token: Lexer::Token, name: T.untyped, candidates: Array, message: String, fix_label: String).returns(NilClass) }
   def emit_registry_mismatch!(token, name, candidates, message, fix_label)
     T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
@@ -135,7 +135,7 @@ module FixableHelper
   #                 would have set); the finding is captured and THEN
   #                 the annotator raises. Pass `false` at sites where
   #                 the enclosing visitor can cleanly bail out.
-  sig { params(token: T.untyped, name: String, candidates: Array, message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(T.untyped) }
+  sig { params(token: T.untyped, name: String, candidates: Array, message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -181,7 +181,7 @@ module FixableHelper
 
   # Given a Type.Variant style GetField, compute the token line/col of
   # the variant name (right after `target.` — length of target + 1).
-  sig { params(getfield_node: AST::GetField).returns(T.untyped) }
+  sig { params(getfield_node: AST::GetField).returns(T.nilable(FixableHelper::AnchorToken)) }
   def variant_anchor_from_getfield(getfield_node)
     T.bind(self, SemanticAnnotator) rescue nil
     tgt = getfield_node.target
@@ -192,7 +192,7 @@ module FixableHelper
   # For a UnionVariantLit `Union.Variant{...}`, the node's token is the
   # opening `{` — the variant name ends right before it, so the name's
   # start column is `token.column - variant_name.length`.
-  sig { params(node: T.any(AST::StructLit, AST::UnionVariantLit), variant_name: String).returns(T.untyped) }
+  sig { params(node: T.any(AST::StructLit, AST::UnionVariantLit), variant_name: String).returns(T.nilable(FixableHelper::AnchorToken)) }
   def variant_anchor_from_unionlit(node, variant_name)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless node.token
@@ -202,7 +202,7 @@ module FixableHelper
   # Typo-suggestion wrapper that takes an (line, col, name, length)
   # instead of a Token. Used by migrations whose error token comes
   # from a synthesized anchor.
-  sig { params(anchor: FixableHelper::AnchorToken, name: String, candidates: T.untyped, message: String, fix_label: String, cascade: T::Boolean).returns(T.untyped) }
+  sig { params(anchor: FixableHelper::AnchorToken, name: String, candidates: T.untyped, message: String, fix_label: String, cascade: T::Boolean).returns(NilClass) }
   def emit_variant_typo!(anchor, name, candidates, message, fix_label,
                          cascade: false)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -240,7 +240,7 @@ module FixableHelper
   # When the move site isn't tracked (e.g., branch-merge paths, BG
   # captures), fall through to the plain `error!` so the legacy
   # diagnostic still surfaces.
-  sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(T.untyped) }
+  sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(NilClass) }
   def emit_use_of_moved_error!(use_node, og_node)
     T.bind(self, SemanticAnnotator) rescue nil
     name = use_node.name.to_s
@@ -352,7 +352,7 @@ module FixableHelper
   # Loop-body use of a value that was moved on a prior iteration. The
   # coda "Values can only be TAKEN once; subsequent iterations have
   # nothing left to GIVE" is the canonical phrasing per WALKTHROUGH.md.
-  sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::Node), code: Symbol).returns(T.untyped) }
+  sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::Node), code: Symbol).returns(NilClass) }
   def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
     T.bind(self, SemanticAnnotator) rescue nil
     consumer = og_node && og_node.move_line ? consumer_source_text(og_node.move_line) : nil
@@ -365,7 +365,7 @@ module FixableHelper
   # Sub-path use after the path's owner was consumed elsewhere. Uses
   # passive voice ("was already TAKEN / GIVEN") because the subject of
   # the sentence is the owner — what HAPPENED to it — not the consumer.
-  sig { params(node: AST::GetField, path: Array, og_node: T.nilable(OwnershipGraph::Node)).returns(T.untyped) }
+  sig { params(node: AST::GetField, path: Array, og_node: T.nilable(OwnershipGraph::Node)).returns(NilClass) }
   def emit_use_of_moved_path_error!(node, path, og_node = nil)
     T.bind(self, SemanticAnnotator) rescue nil
     path_str = path.map(&:to_s).join('.')
@@ -412,7 +412,7 @@ module FixableHelper
     OWNERSHIP_ACTIVE_PHRASES[action] || "already consumed it"
   end
 
-  sig { params(action: Symbol).returns(T.untyped) }
+  sig { params(action: Symbol).returns(String) }
   def ownership_passive_phrase(action)
     T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_PASSIVE_PHRASES[action] || "was already consumed"
@@ -1061,7 +1061,7 @@ module FixableHelper
   # Reentrance: `@canSmash` on BG/DO is recognized but not yet
   # implemented. :auto fix replaces the prefix sigil with `@service`
   # (OS-thread spawn — supported today, same compile-time guarantee).
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(NilClass) }
   def emit_can_smash_unsupported_error!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = nil

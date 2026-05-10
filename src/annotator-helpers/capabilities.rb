@@ -53,7 +53,7 @@ module Capabilities
     errors
   end
 
-  sig { params(node: T.untyped, type: Type, error_handler: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, type: Type, error_handler: T.untyped).returns(NilClass) }
   def self.validate!(node, type, &error_handler)
     errs = errors_for(type)
     return if errs.empty?
@@ -287,7 +287,7 @@ module CapabilityHelper
   # :interactive fix proposes adding `@observable` at the source's
   # declaration -- skipped here because the declaration may be in
   # another module / file; `clear fix` will surface only the :auto fix.
-  sig { params(node: AST::WithBlock, var_node: AST::Identifier, var_type: Type).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, var_node: AST::Identifier, var_type: Type).returns(NilClass) }
   def emit_view_not_observable_finding!(node, var_node, var_type)
     T.bind(self, SemanticAnnotator) rescue nil
     name = var_node.respond_to?(:name) ? var_node.name : var_node.find
@@ -318,7 +318,7 @@ module CapabilityHelper
   # predicate may reference only its own alias) and FN PRE (where the
   # predicate may reference only function parameters). Branches on the
   # active context's :kind so each surface gets its own diagnostic.
-  sig { params(node: AST::Identifier).returns(T.untyped) }
+  sig { params(node: AST::Identifier).returns(NilClass) }
   def predicate_identifier_allowed!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     ctx = @current_predicate_context
@@ -610,7 +610,7 @@ module CapabilityHelper
   # the annotator's existing `mark_var_mutated` calls (assignment, field/
   # index store, mutating method dispatch, RESTRICT borrow) have stamped
   # the alias's SymbolEntry. Lookup-only — no AST re-walking.
-  sig { params(node: AST::WithBlock).returns(T.untyped) }
+  sig { params(node: AST::WithBlock).returns(NilClass) }
   def validate_with_guard_no_body_mutation!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     caps = node.capabilities || []
