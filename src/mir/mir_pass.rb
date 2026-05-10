@@ -822,7 +822,7 @@ class MIRPass
     src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry[:needs_cleanup]
   end
 
-  sig { params(stmt: T.untyped, bindings: T.nilable(T::Hash[String, Hash])).returns(T.untyped) }
+  sig { params(stmt: T.untyped, bindings: T.nilable(T::Hash[String, Hash])).returns(T.nilable(Array)) }
   def stamp_while_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::WhileBindLoop)
     entry = T.must(bindings)[stmt.binding_name.to_s]
@@ -834,7 +834,7 @@ class MIRPass
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
   end
 
-  sig { params(stmt: T.untyped, bindings: T.nilable(T::Hash[String, Hash])).returns(T.untyped) }
+  sig { params(stmt: T.untyped, bindings: T.nilable(T::Hash[String, Hash])).returns(T.nilable(Array)) }
   def stamp_if_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []

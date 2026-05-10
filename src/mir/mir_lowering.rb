@@ -6275,7 +6275,7 @@ class MIRLowering
     end
   end
 
-  sig { params(binding_entry: T.untyped, init: T.untyped).returns(T::Boolean) }
+  sig { params(binding_entry: T.nilable(Hash), init: T.untyped).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
     return false unless binding_entry && binding_entry[:needs_cleanup] == false
     return false unless binding_entry[:alloc] == :heap || binding_entry[:alloc] == :cleanup

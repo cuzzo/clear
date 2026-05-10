@@ -1804,7 +1804,7 @@ class PipelineHost
     return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
 
     stages = []
-    cursor = T.let(node, T.untyped)
+    cursor = T.let(node, AST::BinaryOp)
     while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
       rhs = cursor.right
       if rhs.is_a?(AST::SelectOp)   || rhs.is_a?(AST::WhereOp)     ||
@@ -2129,7 +2129,7 @@ class PipelineHost
     elem_zig = elem_t.zig_type
 
     initial_capture = "__each_item"
-    item_var    = T.let(initial_capture, T.untyped)
+    item_var    = T.let(initial_capture, String)
     item_counter = 0
     item_used   = T.let(false, T::Boolean)
     outer_stmts = []

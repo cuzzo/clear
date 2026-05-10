@@ -78,7 +78,7 @@ module Schemas
       extend T::Sig
 
     attr_reader :fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: Hash, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: Hash, visibility: Symbol, extern_module: T.nilable(String), as_type: T.untyped).void }
+    sig { params(fields: Hash, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: Hash, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
     def initialize(fields: {}, field_defaults: nil, borrowed_fields: nil, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = fields
       @field_defaults = field_defaults

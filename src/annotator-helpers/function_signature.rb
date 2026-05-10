@@ -29,7 +29,7 @@ class FunctionSignature
   # checks survive cross-module flow.
   attr_accessor :requires
 
-  sig { params(fn: T.untyped).returns(FunctionSignature) }
+  sig { params(fn: AST::FunctionDef).returns(FunctionSignature) }
   def self.from_function_def(fn)
     raw_sig = fn.full_type
     raw_sig = raw_sig.raw if raw_sig.is_a?(Type) && raw_sig.raw.is_a?(FunctionSignature)

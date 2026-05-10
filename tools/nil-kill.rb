@@ -934,22 +934,22 @@ module NilKill
         sig_idx = find_sig_idx(lines, idx)
         return false unless sig_idx
         name = Regexp.escape(action["data"]["name"])
-        lines[sig_idx] = lines[sig_idx].sub(/\b#{name}:\s*T\.untyped\b/, "#{action["data"]["name"]}: #{action["data"]["type"]}")
+        return !!lines[sig_idx].sub!(/\b#{name}:\s*T\.untyped\b/, "#{action["data"]["name"]}: #{action["data"]["type"]}")
       when "fix_sig_return"
         sig_idx = find_sig_idx(lines, idx)
         return false unless sig_idx
-        lines[sig_idx] = lines[sig_idx].sub(/\.returns\(T\.untyped\)/, ".returns(#{action["data"]["type"]})")
+        return !!lines[sig_idx].sub!(/\.returns\(T\.untyped\)/, ".returns(#{action["data"]["type"]})")
       when "narrow_tlet"
-        lines[idx] = lines[idx].sub(/T\.let\((.*),\s*T\.untyped\)/, "T.let(\\1, #{action["data"]["type"]})")
+        return !!lines[idx].sub!(/T\.let\((.*),\s*T\.untyped\)/, "T.let(\\1, #{action["data"]["type"]})")
       when "add_tlet"
         name = Regexp.escape(action["data"]["name"])
-        lines[idx] = lines[idx].sub(/(#{name}\s*=\s*)(.+?)(\s*(?:#.*)?\n)\z/, "\\1T.let(\\2, #{action["data"]["type"]})\\3")
+        return !!lines[idx].sub!(/(#{name}\s*=\s*)(.+?)(\s*(?:#.*)?\n)\z/, "\\1T.let(\\2, #{action["data"]["type"]})\\3")
       when "remove_dead_safe_nav"
         code = action.dig("data", "code")
         if code && lines[idx].include?(code)
-          lines[idx] = lines[idx].sub(code, code.gsub("&.", "."))
+          return !!lines[idx].sub!(code, code.gsub("&.", "."))
         else
-          lines[idx] = lines[idx].gsub("&.", ".")
+          return !!lines[idx].gsub!("&.", ".")
         end
       when "replace_dead_nil_check"
         code = action.dig("data", "code")

@@ -1204,7 +1204,7 @@ module PipelineGenerator
   # CONCURRENT modifier: parallel SELECT, WHERE, EACH
   # =========================================================
 
-  sig { params(smooth_node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(smooth_node: AST::BinaryOp).returns(String) }
   def transpile_concurrent(smooth_node)
     T.bind(self, T.untyped) rescue nil
     lhs     = smooth_node.left
