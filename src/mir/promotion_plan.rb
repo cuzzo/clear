@@ -234,7 +234,7 @@ module PromotionClassifier
     Type.new(name).zig_type
   end
 
-  sig { params(type: Type).returns(T.untyped) }
+  sig { params(type: Type).returns(T.nilable(String)) }
   private_class_method def self.elem_zig_type_for(type)
     elem = type.element_type
     return nil unless elem
@@ -311,7 +311,7 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment nodes directly with { zig_type:, alloc: }.
-  sig { params(body: Array, bindings: T::Hash[String, Hash], schema_lookup: T.nilable(Proc)).returns(T.untyped) }
+  sig { params(body: Array, bindings: T::Hash[String, Hash], schema_lookup: T.nilable(Proc)).returns(T.nilable(Array)) }
   def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
@@ -520,7 +520,7 @@ module CleanupClassifier
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  sig { params(body: Array, schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.untyped) }
+  sig { params(body: Array, schema_lookup: Proc, bindings: T::Hash[String, Hash]).returns(T.nilable(Array)) }
   private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)

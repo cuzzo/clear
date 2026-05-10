@@ -1399,7 +1399,7 @@ module LoopFrameAnalysis
   # Identity check via `ident.symbol.reg` (set by the annotator) is the
   # authoritative locality answer — no need to re-derive it from string-name
   # matching against a recomputed local_names set.
-  sig { params(body: Array).returns(T.untyped) }
+  sig { params(body: Array).returns(T.nilable(Array)) }
   def self.promote_outer_mutations!(body)
     # Pre-collect the declaration AST nodes that live anywhere within this
     # loop's subtree. AST.walk_body is the existing deep walker; we only
@@ -1477,7 +1477,7 @@ module LoopFrameAnalysis
   # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
   # toString, etc.). The MIR cleanup-before-reassign uses the field's declared
   # allocator (heap), so the new value must also be heap to avoid a mismatch.
-  sig { params(body: Array, local_names: T::Set[String]).returns(T.untyped) }
+  sig { params(body: Array, local_names: T::Set[String]).returns(T.nilable(Array)) }
   def self.promote_outer_field_assigns!(body, local_names)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::Assignment)

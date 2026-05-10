@@ -623,7 +623,7 @@ module EscapeAnalysis
   end
 
   # Set both storage and provenance to :heap on a declaration node.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   private_class_method def self.e2_stamp_full!(node)
     node.storage = :heap if node.respond_to?(:storage=)
     ti = node.type_info rescue nil
@@ -644,7 +644,7 @@ module EscapeAnalysis
   end
 
   # Extract the root Identifier from a field/index chain (for assign_escape LHS).
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(AST::Identifier)) }
   private_class_method def self.e2_root_ident(node)
     case node
     when AST::GetField, AST::GetIndex then e2_root_ident(node.target)
