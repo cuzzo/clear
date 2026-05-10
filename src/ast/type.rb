@@ -268,6 +268,51 @@ class Type
     # Only overwrite when explicitly requested so the copy-constructor
     # path (`Type.new(other_type)`) preserves auto-ness from `other`.
     @is_auto = true if auto
+
+    # Authoritative escape classification — derived once from final
+    # type state. Single-source-of-truth replacement for the
+    # explicit-include-list anti-pattern in `needs_escape_promotion?`
+    # and friends. Default `:by_ref` (most-restrictive) so any
+    # un-classified shape compile-fails at copy/escape sites instead
+    # of silently UAFing.
+    derive_escape_class!
+  end
+
+  # Stable enum of how a value's storage flows through escape paths.
+  # Each case answers ALL of:
+  #   - "is BG capture an independent instance?"  (`bg_capture_is_value_copy?`)
+  #   - "does escape require heap-dupe?"          (`needs_escape_promotion?`)
+  #   - "can implicit Copy in branch merge?"      (`implicitly_copyable?` — modulo schema)
+  ESCAPE_CLASSES = %i[
+    value          primitives, Id<T>, fixed value arrays — bag-of-bits
+    slice_rodata   string literals — slice header into static memory
+    slice_managed  frame/heap strings, lists, sets, pools, maps — slice into allocator
+    by_ref         user structs, unions, enums, @indirect — captured by pointer
+    refcounted     any_rc — Arc / Rc with own lifetime mechanism
+    sync_wrapped   any_sync — locked / write_locked / atomic over a payload
+  ].each_slice(2).map(&:first).freeze
+
+  attr_reader :escape_class
+
+  sig { void }
+  private def derive_escape_class!
+    @escape_class = if primitive?
+                      :value
+                    elsif generic_instance? && generic_base == :Id
+                      :value
+                    elsif any_rc?
+                      :refcounted
+                    elsif any_sync?
+                      :sync_wrapped
+                    elsif string?
+                      rodata? ? :slice_rodata : :slice_managed
+                    elsif list_collection? || set_collection? || pool? || map?
+                      :slice_managed
+                    elsif array? && !string?
+                      :value
+                    else
+                      :by_ref
+                    end
   end
 
   # -----------------------------------------------
