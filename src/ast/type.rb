@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "../annotator-helpers/function_signature"
@@ -197,8 +197,36 @@ class Type
 
   sig { params(raw_input: T.untyped, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.nilable(Integer), observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
-    @provenance        = nil
-    @ownership         = nil
+    @raw                = T.let(nil, T.untyped)
+    @name               = T.let(nil, T.untyped)
+    @generic_args       = T.let(nil, T.untyped)
+    @capacity           = T.let(nil, T.untyped)
+    @provenance         = T.let(nil, T.untyped)
+    @ownership          = T.let(nil, T.untyped)
+    @sync               = T.let(nil, T.untyped)
+    @layout             = T.let(nil, T.untyped)
+    @lock_rank          = T.let(nil, T.untyped)
+    @collection         = T.let(nil, T.untyped)
+    @shard_count        = T.let(nil, T.untyped)
+    @soa                = T.let(nil, T.untyped)
+    @elem_ownership     = T.let(nil, T.untyped)
+    @elem_sync          = T.let(nil, T.untyped)
+    @link_source        = T.let(nil, T.untyped)
+    @is_resource        = T.let(nil, T.untyped)
+    @observable_terminal = T.let(nil, T.untyped)
+    @observable_token   = T.let(nil, T.untyped)
+    @auto_token          = T.let(nil, T.untyped)
+    @polymorphic_shared = T.let(nil, T.untyped)
+    @payload_type_raw   = T.let(nil, T.untyped)
+    @wrapped_type_raw   = T.let(nil, T.untyped)
+    @element_type_raw   = T.let(nil, T.untyped)
+    @value_type_raw     = T.let(nil, T.untyped)
+    @generic_base_raw   = T.let(nil, T.untyped)
+    @generic_args_raw   = T.let(nil, T.untyped)
+    @generic_args_obj   = T.let(nil, T.untyped)
+    @resolved_cache     = T.let(nil, T.untyped)
+    @tense_type_raw     = T.let(nil, T.untyped)
+    @zig_type_cache     = T.let(nil, T.untyped)
     @location          = T.let(nil, T.nilable(Symbol))
     @key_type_raw      = T.let(nil, T.nilable(Symbol))
     @is_array          = T.let(false, T::Boolean)
@@ -421,19 +449,19 @@ class Type
   # ----------------------------------------------
   SIGNED_INT_TYPES   = [:Int8, :Int16, :Int32, :Int64].freeze
   UNSIGNED_INT_TYPES = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].freeze
-  INT_TYPES          = (SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze
+  INT_TYPES          = T.let((SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze, T::Array[Symbol])
   FLOAT_TYPES        = [:Float32, :Float64].freeze
-  NUMERIC_TYPES      = (INT_TYPES + FLOAT_TYPES).freeze
+  NUMERIC_TYPES      = T.let((INT_TYPES + FLOAT_TYPES).freeze, T::Array[Symbol])
 
-  INT_TYPE_MAX = {
+  INT_TYPE_MAX = T.let({
     Byte: 255, UInt8: 255, UInt16: 65_535, UInt32: 4_294_967_295,
     UInt64: (2**64) - 1,
     Int8: 127, Int16: 32_767, Int32: 2_147_483_647, Int64: 9_223_372_036_854_775_807,
-  }.freeze
-  INT_TYPE_MIN = {
+  }.freeze, T::Hash[T.untyped, T.untyped])
+  INT_TYPE_MIN = T.let({
     Byte: 0, UInt8: 0, UInt16: 0, UInt32: 0, UInt64: 0,
     Int8: -128, Int16: -32_768, Int32: -2_147_483_648, Int64: -9_223_372_036_854_775_808,
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   sig { returns(T::Boolean) }
   def numeric?
@@ -445,6 +473,7 @@ class Type
     INT_TYPES.include?(resolved)
   end
 
+  sig { returns(T::Boolean) }
   def signed_integer?
     SIGNED_INT_TYPES.include?(resolved)
   end
@@ -572,6 +601,7 @@ class Type
   end
 
   # location is provenance (kept as alias for backward-compat callers).
+  sig { returns(T.untyped) }
   def location
     @provenance
   end
@@ -856,11 +886,11 @@ class Type
     escape_class == :slice_managed
   end
 
-  RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
+  RESOURCE_TYPES = T.let(Set[:File, :TCPClient, :TCPServer].freeze, T::Set[Symbol])
 
   # Canonical mapping from CLEAR type symbols to Zig type strings.
   # User-defined types (structs, enums, unions) pass through as-is.
-  ZIG_TYPE_MAP = {
+  ZIG_TYPE_MAP = T.let({
     Float64:   "f64",
     Int64:     "i64",
     String:    "[]const u8",
@@ -880,7 +910,7 @@ class Type
     File:      "CheatLib.File",
     TCPServer: "i32",
     TCPClient: "i32",
-  }.freeze
+  }.freeze, T::Hash[T.untyped, T.untyped])
 
   # True when this type is a resource (File, TCPClient, TCPServer, etc.)
   # Checks the explicit flag (set by annotator after resolve_resource_close)
@@ -899,7 +929,7 @@ class Type
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
-  sig { params(schema_lookup: T.nilable(Proc)).returns(Array) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Array[T.untyped]) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
     return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
@@ -965,7 +995,7 @@ class Type
   sig { returns(T.untyped) }
   def value_type
     return nil unless map?
-    @value_type_obj ||= Type.new(@value_type_raw || :Any)
+    @value_type_obj ||= T.let(Type.new(@value_type_raw || :Any), T.nilable(Type))
   end
 
   # Generic struct instance: Pair<Number>, Map<String, Number>
@@ -1001,7 +1031,7 @@ class Type
   sig { returns(T.untyped) }
   def wrapped_type
     return nil unless optional?
-    @wrapped_type_obj ||= Type.new(@wrapped_type_raw || :Any)
+    @wrapped_type_obj ||= T.let(Type.new(@wrapped_type_raw || :Any), T.nilable(Type))
   end
 
   # Error union types: !T (Zig-style error returns)
@@ -1013,7 +1043,7 @@ class Type
   sig { returns(T.untyped) }
   def payload_type
     return nil unless error_union?
-    @payload_type_obj ||= Type.new(@payload_type_raw || :Any)
+    @payload_type_obj ||= T.let(Type.new(@payload_type_raw || :Any), T.nilable(Type))
   end
 
   # Tense (Promise) types: ~T — a background task that will produce T
@@ -1068,9 +1098,9 @@ class Type
   # class references resolve at first-call time, after src/ast/ast.rb
   # has finished loading. type.rb is required from inside ast.rb, so
   # AST::SumOp is not yet defined while type.rb's class body evaluates.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def self.observable_terminals
-    @observable_terminals ||= {
+    @observable_terminals ||= T.let({
       sum: {
         wrapper:   ->(t) { "ObservableSum(#{t.zig_type})" },
         ast_class: AST::SumOp,
@@ -1134,7 +1164,7 @@ class Type
           end
         },
       },
-    }.freeze
+    }.freeze, T.nilable(T::Hash[T.untyped, T.untyped]))
   end
 
   # Backwards-compat shim: pre-A3 callers indexed `OBSERVABLE_WRAPPERS[sym]`
@@ -1142,9 +1172,9 @@ class Type
   # (and the existing observable_wrapper_zig method) can continue to
   # work without rewriting. Lazy via class method for the same load-order
   # reason as observable_terminals.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def self.observable_wrappers
-    @observable_wrappers ||= observable_terminals.transform_values { |e| e[:wrapper] }.freeze
+    T.must(@observable_wrappers = T.let(observable_terminals.transform_values { |e| e[:wrapper] }.freeze, T.nilable(T::Hash[T.untyped, T.untyped])))
   end
   sig { params(tense_type: Type).returns(String) }
   def observable_wrapper_zig(tense_type)
@@ -1186,7 +1216,7 @@ class Type
   sig { returns(T.untyped) }
   def tense_type
     return nil unless future?
-    @tense_type_obj ||= Type.new(@tense_type_raw || :Void)
+    @tense_type_obj ||= T.let(Type.new(@tense_type_raw || :Void), T.nilable(Type))
   end
 
   # Finite dynamic stream: ~T[].
@@ -1294,12 +1324,12 @@ class Type
   def element_type
     return nil unless array?
     # Uses the capture from parse_raw_input, ensuring "Number[3]" becomes "Float64"
-    @element_type_obj ||= begin
+    @element_type_obj ||= T.let(begin
       t = Type.new(@element_type_raw || :Any)
       t.ownership = @elem_ownership if @elem_ownership
       t.sync = @elem_sync if @elem_sync
       t
-    end
+    end, T.nilable(Type))
   end
 
   sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(Integer) }
@@ -1685,28 +1715,30 @@ class Type
 
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
-  def schema_struct_any?(schema)
+  sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  def schema_struct_any?(schema, &blk)
     fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
     fields.any? { |k, v|
       next false if k.is_a?(Symbol)
       ft = v.is_a?(Hash) ? v[:type] : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
-      yield t
+      blk.call(t)
     }
   end
 
   # True if any non-Hash union variant in schema satisfies the block (block receives Type).
   # Skips nil and Hash variants (inline_struct/indirect); caller handles those via
   # Type.variant_has_heap? when needed.
-  def schema_union_any?(schema)
+  sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
+  def schema_union_any?(schema, &blk)
     variants = schema.is_a?(Schemas::UnionSchema) ? schema.variants : (schema[:variants] || {})
     variants.any? { |_, vt|
       next false unless vt
       next false if vt.is_a?(Hash)
       t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
       next false unless t
-      (yield t) rescue false
+      (blk.call(t)) rescue false
     }
   end
 
@@ -1933,7 +1965,7 @@ class Type
     @resolved_cache = @raw.to_sym
   end
 
-  sig { params(str: String).returns(Array) }
+  sig { params(str: String).returns(T::Array[T.untyped]) }
   def strip_capability_suffix(str)
     return [str, nil, nil] unless str.include?("@")
 
