@@ -238,6 +238,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "spsc-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "spsc-test.zig", .tsan = true },
         .{ .path = "steal-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "stream-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "stream-test.zig", .tsan = true },
         .{ .path = "observable-test.zig", .tsan = true },
         .{ .path = "tcp-fairness-test.zig", .tsan = true },
