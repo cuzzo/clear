@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # src/compiler_frontend.rb - Shared compilation front-end
 #
 # Extracts the common pipeline shared by transpile(), transpile_mir(),
@@ -38,7 +38,7 @@ class CompilerFrontend
   sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false)
     tokens = Lexer.new(cheat_code).tokenize
-    ast    = Parser.new(T.must(tokens), cheat_code).parse
+    ast    = Parser.new(tokens, cheat_code).parse
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
@@ -105,7 +105,7 @@ class CompilerFrontend
   # wrapper never reaches code generation -- it only carries enough
   # shape for the analysis passes to walk the body as if it were a
   # real `FN __test_X() RETURNS Void -> ... END`.
-  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, T.untyped]).returns(Array) }
+  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, T.untyped]).returns(T::Array[T.untyped]) }
   def self.synthesize_test_body_wrappers!(ast, fn_nodes)
     counter = 0
     ast.statements.each do |stmt|

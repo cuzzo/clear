@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require_relative "../backends/transpiler"  # loads Lexer, Parser, SemanticAnnotator, FixCollector
 
 module LSP
@@ -15,6 +15,7 @@ module LSP
   # `Analyzer.run` calls behind a mutex so concurrent analyses don't
   # interleave their findings.
   module Analyzer
+    extend T::Sig
     # Pseudo-token shape used when we can't extract a real token from
     # a raised CompilerError/ParserError (synthetic frontend errors,
     # EOF errors, etc.). Exposes the fields Diagnostics expects.
@@ -22,6 +23,8 @@ module LSP
 
     # Result of one analysis pass.
     Result = Struct.new(:findings, :fatal_error, keyword_init: true) do
+      extend T::Sig
+      sig { returns(T::Boolean) }
       def fatal?; !fatal_error.nil?; end
     end
 
@@ -31,13 +34,14 @@ module LSP
     # Result with the FixCollector findings and an optional
     # `fatal_error` (a synthetic FixableFinding) if the parser or
     # annotator raised.
+    sig { params(source: String).returns(T.untyped) }
     def run(source)
       FixCollector.enable!
       findings = []
       fatal = nil
       begin
         tokens    = Lexer.new(source).tokenize
-        ast       = Parser.new(T.must(tokens), source).parse
+        ast       = Parser.new(tokens, source).parse
         annotator = SemanticAnnotator.new
         annotator.source_code = source
         annotator.annotate!(T.must(ast))
@@ -66,9 +70,15 @@ module LSP
     # converter can treat both uniformly. Has the same surface
     # (level, message, token, category, fixes).
     SyntheticFinding = Struct.new(:level, :message, :token, :category, :fixes, keyword_init: true) do
-      def fatal?; @level == :error; end
+      extend T::Sig
+      sig { returns(T::Boolean) }
+      def fatal?
+        @level = T.let(@level, T.untyped)
+        @level == :error
+      end
     end
 
+    sig { params(err: T.untyped).returns(T.untyped) }
     def synthetic_finding_from(err)
       tok = err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
       SyntheticFinding.new(

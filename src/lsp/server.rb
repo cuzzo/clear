@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require "stringio"
 
@@ -71,7 +71,7 @@ module LSP
     # Production never needs this — the LSP runs forever and exits
     # via `exit` notification — but tests use it to step past the
     # debounce window deterministically.
-    sig { returns(Array) }
+    sig { returns(T::Array[T.untyped]) }
     def flush_pending!
       threads = T.let(nil, T.nilable(T::Array[Thread]))
       @timer_mutex.synchronize { threads = @timers.values.dup }
@@ -138,7 +138,7 @@ module LSP
     # `textDocumentSync: 1` = Full sync. The client sends the entire
     # buffer on every `didChange`. Simpler than incremental sync;
     # CLEAR files are small enough that the cost is negligible.
-    sig { params(_params: Hash).returns(Hash) }
+    sig { params(_params: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
     def handle_initialize(_params)
       {
         capabilities: {
@@ -155,7 +155,7 @@ module LSP
       }
     end
 
-    sig { params(_params: Hash).returns(NilClass) }
+    sig { params(_params: T::Hash[T.untyped, T.untyped]).returns(NilClass) }
     def handle_initialized(_params)
       @initialized = true
       @logger.info("initialization complete")
@@ -165,7 +165,7 @@ module LSP
     # `shutdown` request — client asks the server to wind down. We
     # acknowledge with a null result; the server keeps running until
     # the subsequent `exit` notification.
-    sig { params(_params: Hash).returns(NilClass) }
+    sig { params(_params: T::Hash[T.untyped, T.untyped]).returns(NilClass) }
     def handle_shutdown(_params)
       @shutdown_requested = true
       @logger.info("shutdown requested")
@@ -184,7 +184,7 @@ module LSP
 
     # `textDocument/didOpen` — the client just opened a buffer. Cache
     # it and run a first pass.
-    sig { params(params: Hash).returns(T.nilable(IO)) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(IO)) }
     def handle_did_open(params)
       td  = params["textDocument"]
       uri = td["uri"]
@@ -199,7 +199,7 @@ module LSP
     # sends the entire new text in `contentChanges[0].text`. We
     # debounce the analysis so a flurry of keystrokes only triggers
     # one full re-parse after the user pauses.
-    sig { params(params: Hash).returns(T.nilable(Thread)) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(Thread)) }
     def handle_did_change(params)
       td  = params["textDocument"]
       uri = td["uri"]
@@ -214,7 +214,7 @@ module LSP
 
     # `textDocument/didSave` — re-analyze immediately (save is an
     # explicit user action; no need to debounce).
-    sig { params(params: Hash).returns(T.untyped) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
     def handle_did_save(params)
       uri = params["textDocument"]["uri"]
       @logger.debug("didSave #{uri}")
@@ -224,7 +224,7 @@ module LSP
 
     # `textDocument/didClose` — drop the document and clear any
     # pending diagnostics on the client.
-    sig { params(params: Hash).returns(T.untyped) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
     def handle_did_close(params)
       uri = params["textDocument"]["uri"]
       cancel_timer(uri)
@@ -236,7 +236,7 @@ module LSP
     # `textDocument/codeAction` — return the FixableFinding fixes
     # that overlap the requested range as LSP CodeActions. No new
     # analysis runs; we read from cached findings.
-    sig { params(params: Hash).returns(Array) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T::Array[T.untyped]) }
     def handle_code_action(params)
       uri = params["textDocument"]["uri"]
       range = params["range"]
@@ -250,7 +250,7 @@ module LSP
     # an active diagnostic, render the registry entry + spec example
     # as markdown. Returns nil to dismiss the hover popup when there's
     # nothing relevant.
-    sig { params(params: Hash).returns(T.nilable(Hash)) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
     def handle_hover(params)
       uri = params["textDocument"]["uri"]
       pos = params["position"]
@@ -278,7 +278,7 @@ module LSP
     end
 
     # Send a `textDocument/publishDiagnostics` notification.
-    sig { params(uri: String, diagnostics: Array).returns(T.untyped) }
+    sig { params(uri: String, diagnostics: T::Array[T.untyped]).returns(T.untyped) }
     def publish_diagnostics(uri, diagnostics)
       send_message(
         jsonrpc: "2.0",

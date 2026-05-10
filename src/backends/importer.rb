@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require "set"
@@ -25,15 +25,15 @@ class ModuleImporter
   # and are auto-resolvable as `REQUIRE "pkg:<name>"` without an explicit
   # --pkg flag. Computed from this file's location: src/backends/importer.rb
   # → ../../stdlib relative to __FILE__.
-  STDLIB_ROOT = File.expand_path('../../stdlib', __dir__)
+  STDLIB_ROOT = T.let(File.expand_path('../../stdlib', __dir__), String)
 
-  sig { params(base_dir: String, pkg_paths: Hash, use_mir: T::Boolean, stdlib_root: String).void }
+  sig { params(base_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
-    @base_dir     = File.expand_path(base_dir)
+    @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
-    @compiling    = T.let(Set.new, Set)  # abs_paths currently being compiled (cycle detection)
+    @compiling    = T.let(Set.new, T::Set[T.untyped])  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
-    @pkg_paths    = pkg_paths.transform_keys(&:to_s)
+    @pkg_paths    = T.let(pkg_paths.transform_keys(&:to_s), T::Hash[T.untyped, T.untyped])
     @stdlib_root  = stdlib_root
   end
 
@@ -105,7 +105,7 @@ class ModuleImporter
     Parser.gradual_mode = false
     begin
       tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(T.must(tokens), source).parse
+      ast    = Parser.new(tokens, source).parse
     ensure
       Parser.gradual_mode = saved_gradual
     end
@@ -128,7 +128,7 @@ class ModuleImporter
   # (gradual-typing.md §7). The importer rejects with a diagnostic
   # that points the user at running `clear fix --apply` on the
   # imported module before re-importing.
-  sig { params(ast: AST::Program, abs_path: String).returns(T.nilable(Array)) }
+  sig { params(ast: AST::Program, abs_path: String).returns(T.nilable(T::Array[T.untyped])) }
   def reject_auto_in_public_signatures!(ast, abs_path)
     rel_path = File.basename(abs_path)
     ast.statements.each do |stmt|
@@ -225,7 +225,7 @@ class ModuleImporter
     )
   end
 
-  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
