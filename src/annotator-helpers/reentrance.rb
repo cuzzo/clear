@@ -112,7 +112,7 @@ module ReentranceBridge
   #   variants `:NOT_LOGICAL` / `:MAX_DEPTH(N)` change the return
   #   type and need user judgment about gas budgets, so we don't
   #   force them via auto-fix).
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).returns(NilClass) }
   def offer_plain_reentrant_variant_fix!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrance_kind == :reentrant
@@ -154,7 +154,7 @@ module ReentranceBridge
   # propagate) the failure explicitly. Errors raised:
   #   :NOT_LOGICAL  -> System UnexpectedRecursion (StackGuard)
   #   :MAX_DEPTH(N) -> System MaxDepthExceeded    (depth counter)
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).returns(NilClass) }
   def validate_not_logical_return!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless [:reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)

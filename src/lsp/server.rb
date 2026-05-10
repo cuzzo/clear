@@ -112,12 +112,12 @@ module LSP
       end
     end
 
-    sig { params(id: Integer, result: T.untyped).returns(T.untyped) }
+    sig { params(id: Integer, result: T.untyped).returns(StringIO) }
     def respond(id, result)
       send_message(jsonrpc: "2.0", id: id, result: result)
     end
 
-    sig { params(id: Integer, code: Integer, message: String).returns(T.untyped) }
+    sig { params(id: Integer, code: Integer, message: String).returns(StringIO) }
     def respond_error(id, code, message)
       send_message(jsonrpc: "2.0", id: id, error: { code: code, message: message })
     end

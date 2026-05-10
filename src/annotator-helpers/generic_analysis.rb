@@ -285,7 +285,7 @@ module GenericAnalysis
     subst
   end
 
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(T.untyped) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     shared_args = T.let([], T::Array[T.untyped])
@@ -519,7 +519,7 @@ module GenericAnalysis
   # ==========================================
 
   # Validate stream type annotations on variable declarations.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(NilClass) }
   def validate_stream_type!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type.is_a?(Type) && node.type.future?

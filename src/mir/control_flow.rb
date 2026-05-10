@@ -1179,7 +1179,7 @@ class UseAfterMoveChecker
     end
   end
 
-  sig { params(node: AST::ShareNode, state: Hash).returns(T.untyped) }
+  sig { params(node: AST::ShareNode, state: Hash).returns(T.nilable(Array)) }
   def check_share_reads(node, state)
     source = node.value
     if source.is_a?(AST::CopyNode)

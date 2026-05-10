@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "remove_dead_safe_nav",
+    "path": "src/tools/doctor.rb",
+    "code": "resolved&.dig",
+    "note": "resolved is nil when no binary/addr2line is available; corpus never exercises that path"
+  },
+  {
+    "kind": "replace_nil_with_default",
+    "path": "src/annotator-helpers/effects.rb",
+    "code": "reason.nil?",
+    "note": "boolean expression — reason.nil? is not a nil-with-default pattern; the result is assigned to fsm_eligible"
+  }
+]

@@ -1122,6 +1122,8 @@ module NilKill
   end
 
   class Loop
+    SKIP_FILE = File.join(ROOT, "tools", "nil-kill-skip.json")
+
     def initialize(argv)
       if argv.delete("--defaults")
         ENV["NIL_KILL_AUTO_DEFAULTS"] = "1"
@@ -1130,6 +1132,22 @@ module NilKill
       @verify_cmd = sep ? argv[(sep + 1)..] : []
       @max_iters = ENV.fetch("NIL_KILL_MAX_ITERS", "10").to_i
       @skipped = Set.new
+      @permanent_skip = load_permanent_skip
+    end
+
+    def load_permanent_skip
+      return [] unless File.file?(SKIP_FILE)
+      JSON.parse(File.read(SKIP_FILE))
+    rescue JSON::ParserError
+      []
+    end
+
+    def permanently_skipped?(action)
+      @permanent_skip.any? do |entry|
+        action["kind"] == entry["kind"] &&
+          action["path"] == entry["path"] &&
+          (entry["code"].nil? || action.dig("data", "code")&.include?(entry["code"]))
+      end
     end
 
     def run
@@ -1140,7 +1158,7 @@ module NilKill
         puts "nil-kill loop iteration #{iter}"
         Infer.new([]).run
         evidence = Store.read
-        high_actions = evidence["actions"].select { |action| action["confidence"] == HIGH && !@skipped.include?(fingerprint(action)) }
+        high_actions = evidence["actions"].select { |action| action["confidence"] == HIGH && !@skipped.include?(fingerprint(action)) && !permanently_skipped?(action) }
         high = high_actions.size
         puts "high-confidence actions: #{high}"
         break if high.zero?

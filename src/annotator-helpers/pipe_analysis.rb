@@ -1590,7 +1590,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_concurrent_bounded_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.type_info
@@ -1730,7 +1730,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: AST::BinaryOp, op_name: String, allow_range: T::Boolean, allow_stream: T::Boolean).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp, op_name: String, allow_range: T::Boolean, allow_stream: T::Boolean).returns(NilClass) }
   def require_array_input!(node, op_name, allow_range: false, allow_stream: false)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.type_info

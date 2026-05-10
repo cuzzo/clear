@@ -451,7 +451,7 @@ module FixableHelper
   SIGNED_ORDER    = [:Int8,  :Int16,  :Int32,  :Int64 ].freeze
   UNSIGNED_ORDER  = [:Byte,  :UInt16, :UInt32, :UInt64].freeze
 
-  sig { params(val: Integer).returns(T.untyped) }
+  sig { params(val: Integer).returns(T.nilable(Symbol)) }
   def smallest_fitting_int_type(val)
     T.bind(self, SemanticAnnotator) rescue nil
     order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
@@ -462,7 +462,7 @@ module FixableHelper
     end
   end
 
-  sig { params(node: T.untyped, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(T.untyped) }
+  sig { params(node: T.untyped, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
   def emit_int_overflow_error!(node, val, target_type, min, max)
     T.bind(self, SemanticAnnotator) rescue nil
     overflow_kw = { val: val, type: target_type, min: min, max: max }
@@ -543,7 +543,7 @@ module FixableHelper
   # declaration's source line and emit an :auto fix that removes it
   # (plus one adjacent space). Falls back to a plain stderr note when
   # source isn't available or the text isn't found on the line.
-  sig { params(info: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(info: T::Hash[Symbol, T.untyped]).returns(NilClass) }
   def emit_local_never_shared_finding!(info)
     T.bind(self, SemanticAnnotator) rescue nil
     name = info[:var]
@@ -590,7 +590,7 @@ module FixableHelper
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration and inserts `MUTABLE ` at its
   # column.
-  sig { params(node: AST::BindExpr, scope: Scope).returns(T.untyped) }
+  sig { params(node: AST::BindExpr, scope: Scope).returns(NilClass) }
   def emit_immutable_assignment_error!(node, scope)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(node.name, scope)
@@ -605,7 +605,7 @@ module FixableHelper
   # Ownership: `Argument i ('param') is MUTABLE, but you passed
   # immutable variable 'x'`. Same fix shape as the assignment case —
   # declare the passed variable MUTABLE at its binding site.
-  sig { params(arg_node: AST::Identifier, scope: Scope, arg_idx: Integer, param_name: String).returns(T.untyped) }
+  sig { params(arg_node: AST::Identifier, scope: Scope, arg_idx: Integer, param_name: String).returns(NilClass) }
   def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(arg_node.name, scope)
@@ -623,7 +623,7 @@ module FixableHelper
   # Same fix shape: insert MUTABLE at the binding's declaration. The
   # error code is named `_LIST` for historical reasons but the same
   # site fires for HashMap and any other indexable container.
-  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String).returns(T.untyped) }
+  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String).returns(NilClass) }
   def emit_immutable_index_assignment_error!(assignment_node, scope, var_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
@@ -639,7 +639,7 @@ module FixableHelper
   # variant; the fix is the same MUTABLE insertion. `field_name` is
   # the specific field being assigned (`b.x = ...` -> "x"), used to
   # produce a more pointed error message via IMMUTABLE_FIELD_ASSIGNMENT.
-  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String, field_name: String).returns(T.untyped) }
+  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String, field_name: String).returns(NilClass) }
   def emit_immutable_field_assignment_error!(assignment_node, scope, var_name, field_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
@@ -662,7 +662,7 @@ module FixableHelper
   # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
   # the human-readable migration text appended to the error template.
-  sig { params(fn_node: AST::FunctionDef, code: Symbol, hint: String).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef, code: Symbol, hint: String).returns(NilClass) }
   def emit_reentrant_error!(fn_node, code, hint:)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
@@ -688,7 +688,7 @@ module FixableHelper
   # Capture: USE(MUTABLE x) where x is an immutable binding. :auto
   # fix inserts MUTABLE at the captured binding's declaration. Same
   # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
-  sig { params(node: AST::FunctionDef, cap_name: String, owner_scope: Scope).returns(T.untyped) }
+  sig { params(node: AST::FunctionDef, cap_name: String, owner_scope: Scope).returns(NilClass) }
   def emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(cap_name, owner_scope)
@@ -1388,7 +1388,7 @@ module FixableHelper
   # Returns nil when the slot has no Auto token to replace (implicit
   # Auto under --gradual; for those the diagnostic still surfaces the
   # candidates as text but no auto-applicable fix).
-  sig { params(slot: AutoConstraintCollector::Slot, type_sym: Symbol, note: T.nilable(String), position: Integer).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot, type_sym: Symbol, note: T.nilable(String), position: Integer).returns(T.nilable(Fix)) }
   def build_auto_candidate_fix(slot, type_sym, note, position)
     T.bind(self, SemanticAnnotator) rescue ""
     auto_tok = auto_token_for(slot)
@@ -1577,7 +1577,7 @@ module FixableHelper
 
   # Reverse-lookup helper: given a Slot struct, return its hash key
   # in the slots map (matches the IDs AutoConstraintCollector uses).
-  sig { params(slot: AutoConstraintCollector::Slot).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(Array)) }
   def slot_id_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     case slot.kind
