@@ -235,6 +235,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "slab-alloc-test.zig", .tsan = true },
         .{ .path = "spsc-ring-test.zig", .tsan = true },
         .{ .path = "spsc-scheduler-test.zig", .tsan = true },
+        .{ .path = "spsc-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "spsc-test.zig", .tsan = true },
         .{ .path = "steal-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "stream-test.zig", .tsan = true },

@@ -104,9 +104,15 @@ pub fn SpscRing(comptime ring_capacity: usize) type {
 
         /// Producer: push a message. Returns false if full.
         pub fn push(self: *Self, msg: Message) bool {
+            // HAMMER-WAIT-LOOP-BEGIN: tag=spsc.push-lock
+            // Stalls when more than one producer thread concurrently enters
+            // push() for the same scheduler ring. Yield contract: contenders
+            // must yield the OS thread instead of busy-spinning under TSan /
+            // hammer contention.
             while (self.push_lock.swap(1, .acquire) == 1) {
                 std.Thread.yield() catch {};
             }
+            // HAMMER-WAIT-LOOP-END: tag=spsc.push-lock
             defer self.push_lock.store(0, .release);
 
             const h = self.head.load(.monotonic);
