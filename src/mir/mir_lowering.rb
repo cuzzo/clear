@@ -3623,6 +3623,23 @@ class MIRLowering
       ctx_var = "__do#{id}_ctx#{i}"
       analysis = branch[:capture_analysis]
       pinned = branch[:pinned]
+      if analysis
+        AST.each_capture_analysis(branch[:body]) do |nested|
+          next if nested.equal?(analysis)
+          analysis.captures ||= {}
+          analysis.capture_symbols ||= {}
+          analysis.close_patterns ||= {}
+          analysis.pointer_captures ||= Set.new
+          analysis.string_captures ||= Set.new
+          analysis.resource_captures ||= Set.new
+          analysis.captures.merge!(nested.captures || {}) { |_k, old, _new| old }
+          analysis.capture_symbols.merge!(nested.capture_symbols || {}) { |_k, old, _new| old }
+          analysis.close_patterns.merge!(nested.close_patterns || {}) { |_k, old, _new| old }
+          analysis.pointer_captures.merge(nested.pointer_captures || Set.new)
+          analysis.string_captures.merge(nested.string_captures || Set.new)
+          analysis.resource_captures.merge(nested.resource_captures || Set.new)
+        end
+      end
 
       # Capture handling delegated to FiberCtxBuilder -- same builder
       # BG/BG STREAM/CONCURRENT use. DO branches need no string promotes
@@ -3639,11 +3656,32 @@ class MIRLowering
       body_code = with_fiber_capture_map(caps.capture_map,
                                          capture_symbols: caps.capture_symbols,
                                          rt_override: "__rt") do
-        body_stmts = branch[:body].map { |e| lower(e) }
+        pairs = branch[:body].flat_map { |e|
+          mir = lower(e)
+          nodes = mir.is_a?(Array) ? mir.compact : [mir]
+          nodes.map { |m| [e, m] }
+        }
+        body_stmts = pairs.map(&:last)
         branch_mir = body_stmts
-        body_stmts.map { |mir|
+        pairs.filter_map { |expr, mir|
           code = emit_expr(mir)
-          code = T.must(code) + ";" unless T.must(code).strip.end_with?(";") || T.must(code).strip.end_with?("}")
+          next nil if code.nil? || code.empty?
+          code = if T.must(code).strip.match?(/\A__bg\d+:/)
+            @tmp_counter += 1
+            discard_name = "__discard_bg_#{@tmp_counter}"
+            "const #{discard_name} = #{code};\n        _ = try #{discard_name}.next();"
+          elsif T.must(code).strip.end_with?(";")
+            code
+          elsif T.must(code).strip.end_with?("}")
+            expr_type = expr.full_type || :Void
+            is_void_expr = expr_type.nil? || expr_type == :Void ||
+              (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+            is_void_expr = false if mir.is_a?(MIR::BgBlock)
+            is_void_expr = false if T.must(code).strip.match?(/\A__bg\d+:/)
+            is_void_expr ? code : "_ = #{code};"
+          else
+            T.must(code) + ";"
+          end
           code
         }.join("\n        ")
       end
@@ -3723,11 +3761,13 @@ class MIRLowering
     # site-specific control fields (Promise.inner / alloc) and the
     # body access prefix (__ctx_<id> for BG) are added here.
     bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
+    outer_capture_map = @do_capture_map || {}
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "__ctx_#{id}",
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
-                                 fresh_heap_id: id)
+                                 fresh_heap_id: id,
+                                 source_overrides: outer_capture_map)
 
     # If this BG sits inside an outer fiber/FSM whose capture_map
     # rewrites the surrounding scope's identifiers (e.g. an outer
@@ -3737,7 +3777,6 @@ class MIRLowering
     # in scope at the spawn site, only the rewritten one is.
     # Promoted strings and FreshHeapCopy dupes already point to a
     # local generated above the spawn, so they don't need rewriting.
-    outer_capture_map = @do_capture_map || {}
     capture_fields = caps.specs.map { |s|
       ftype = if s.dupe_decl_zig || promoted_names[s.name] || outer_capture_map[s.name].nil?
                 s.field_type_zig
@@ -4096,10 +4135,14 @@ class MIRLowering
     body_code = with_fiber_capture_map(caps.capture_map,
                                        capture_symbols: caps.capture_symbols,
                                        rt_override: "__rt") do
-      body_mir = node.body.map { |expr| lower(expr) }
+      body_mir = node.body.flat_map { |expr|
+        mir = lower(expr)
+        mir.is_a?(Array) ? mir.compact : [mir]
+      }
       stream_run_body = body_mir
-      body_mir.map { |mir|
+      body_mir.filter_map { |mir|
         code = emit_expr(mir)
+        next nil if code.nil? || code.empty?
         code = T.must(code) + ";" unless T.must(code).strip.end_with?(";") || T.must(code).strip.end_with?("}")
         code
       }.join("\n            ")
@@ -5685,6 +5728,8 @@ class MIRLowering
 
     if ti && @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :union, alloc)
+    elsif ti&.any_sync?
+      MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     elsif ti&.string?
       MIR::DeepCopy.new(source, nil, nil, :string, alloc)
     elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
@@ -5956,7 +6001,9 @@ class MIRLowering
     # via alloc_for_node(node) which reads the storage set by escape analysis.
     decl_name = node.name.to_s
     binding_entry = @current_bindings[decl_name]
-    has_mir_drop = binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]
+    copy_decl_needs_drop = node.value.is_a?(AST::CopyNode) && (ft.any_sync? || ft.string?)
+    has_mir_drop = (binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]) ||
+                   copy_decl_needs_drop
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
@@ -6101,7 +6148,20 @@ class MIRLowering
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
     if has_mir_drop
-      drop_entry = binding_entry.dup
+      drop_entry = if binding_entry
+        binding_entry.dup
+      elsif ft.string?
+        { kind: :heap_string, alloc: decl_alloc, has_moved_guard: false }
+      else
+        kind = case ft.sync
+               when :locked then :locked
+               when :write_locked then :write_locked
+               when :versioned then :versioned
+               when :always_mutable then :always_mutable
+               else :heap_struct
+               end
+        { kind: kind, alloc: decl_alloc, has_moved_guard: false }
+      end
       build_drop_entry!(drop_entry, T.must(node.type_info), node)
       # Escape-analysis heap stamp takes precedence.
       # Same-name collision fix: if cleanup_bindings says :heap but this declaration's
@@ -6112,15 +6172,15 @@ class MIRLowering
       ft = node.type_info ? (Type.new(node.type_info) rescue nil) : nil
       node_alloc = if node.respond_to?(:storage) && node.storage == :heap
         :heap
-      elsif binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft&.needs_heap_backing?
+      elsif binding_entry && binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft&.needs_heap_backing?
         alloc_for_node(node)
       else
-        binding_entry[:alloc]
+        binding_entry&.dig(:alloc) || decl_alloc
       end
       # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
       # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
       # because both AllocMark and Cleanup end up self-consistent at :frame.
-      if binding_entry[:alloc] == :cleanup && node_alloc != :cleanup
+      if binding_entry && binding_entry[:alloc] == :cleanup && node_alloc != :cleanup
         raise "BUG in lower_var_decl: lowering downgraded :cleanup to " \
               ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
       end

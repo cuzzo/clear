@@ -43,18 +43,14 @@ PHASE_B_VALUE_FOR_SYNC = {
 # Findings encoded as expectations:
 #   - (DO + @local + :borrow + non-Copy): USE AFTER MOVE — both DO branches
 #     capture val and capture-of-non-Copy is a move.
-#   - (DO + @local + any other combo): Zig-level "val not accessible from
-#     inner function" — DO branches lower to inner Zig fns that don't close
-#     over enclosing locals. DO is meant for @shared+sync state.
+#   - (DO + @local + string): non-Copy strings still cannot be implicitly
+#     shared across both DO branches.
 COPY_VALUES = [:int]
 CONSUMERS.each do |c|
   VALUES_PHASE_A.each do |v|
     LOCAL_MOVES.each do |m|
       cell = { consumer: c, ownership: :local, sync: :none, move: m, value: v }
-      cell[:expected] = :compile_error if c == :do
-      # Copied stream-setup strings currently leak when the BG STREAM is
-      # torn down; reserve this cell until setup cleanup is explicit.
-      cell[:expected] = :in_dev if c == :bg_stream && m == :copy && v == :string
+      cell[:expected] = :compile_error if c == :do && v == :string
       STREAM_BOUNDARY_CELLS << cell
     end
   end
@@ -63,33 +59,17 @@ end
 # Phase B — @shared with each of 4 sync strategies.
 #
 # Findings (from running the matrix on the current tree):
-#   - DO + @shared currently fails like DO + @local: branches don't capture
-#     outer-scope @shared bindings via the implicit-borrow path. Existing
-#     test corpus uses DO with state declared INSIDE each branch. Marked
-#     :compile_error.
 #   - CLONE on a sync-wrapped value errors with "CLONE is only supported on
 #     @split streams, @shared promises, and owned shared handles, got
 #     'Int64'/'Counter'". Atomic primitives are bare (no Arc), and CLONE
 #     on a `@locked` struct doesn't traverse through the capability to
 #     find the inner Arc. Marked :compile_error for now; revisit when
 #     CLONE learns to look through sync wrappers.
-#   - (non-DO) + :atomic + any move: BG body capture of `Int64 @shared:atomic`
-#     yields a `*AtomicInt(i64)` pointer instead of auto-loading. Test 339
-#     works around this by passing the binding to a function with REQUIRES c:
-#     ATOMIC. Direct read inside BG body unsupported today. Left as :pass
-#     so the matrix continues to report MIR-FAIL until it's fixed — these
-#     6 failing cells are the outstanding work.
-#   - (BG, :versioned, :copy, :struct) — single edge case currently fails.
-#     Left as :pass so it stays visible.
 CONSUMERS.each do |c|
   PHASE_B_VALUE_FOR_SYNC.each do |sync, value|
     SHARED_MOVES.each do |m|
       cell = { consumer: c, ownership: :shared, sync: sync, move: m, value: value }
-      cell[:expected] = :compile_error if c == :do                   # DO + @shared
       cell[:expected] = :compile_error if m == :clone                # CLONE constraint
-      # COPY of lock/versioned wrappers needs dedicated semantics. A naive
-      # value copy leaves cleanup with the wrong wrapper shape.
-      cell[:expected] = :in_dev if m == :copy && [:locked, :write_locked, :versioned].include?(sync)
       STREAM_BOUNDARY_CELLS << cell
     end
   end

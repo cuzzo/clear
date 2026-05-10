@@ -54,9 +54,11 @@ module FsmLowering
     out = code.dup
     promoted_names.each do |name|
       esc = Regexp.escape(name)
-      out = out.gsub(/(^|\n)(\s*)(?:const|var)\s+#{esc}\s*(?::\s*[^=]+)?=\s*/) do
+      local_name = "#{esc}(?:_L\\d+)?"
+      out = out.gsub(/(^|\n)(\s*)(?:const|var)\s+#{local_name}\s*(?::\s*[^=]+)?=\s*/) do
         "#{$1}#{$2}#{ctx_var}.#{name} = "
       end
+      out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
       out = out.gsub(/\s*_\s*=\s*&?#{esc}\s*;/, "")
     end
     out

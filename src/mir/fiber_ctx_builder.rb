@@ -102,9 +102,9 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String]).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
-                 fresh_heap_alloc: nil, fresh_heap_id: 0)
+                 fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {})
     captured = analysis&.captures || {}
     strategies = analysis&.strategies || {}
     pointer_captures = analysis&.pointer_captures || Set.new
@@ -115,13 +115,14 @@ module FiberCtxBuilder
                         MIR::Ident.new(promoted_names[name]), nil, nil)
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
+        source_ref = source_overrides[name] || name
         dupe_decl =
-          "const #{dupe_var} = try CheatLib.dupeValue(@TypeOf(#{name}), #{name}, #{fresh_heap_alloc});\n" \
+          "const #{dupe_var} = try CheatLib.dupeValue(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});\n" \
           "        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});"
         body_cleanup =
           "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
-        CaptureSpec.new(name, "@TypeOf(#{name})", dupe_var,
+        CaptureSpec.new(name, "@TypeOf(#{source_ref})", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
       elsif pointer_captures.include?(name)
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).

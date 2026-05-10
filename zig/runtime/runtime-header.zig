@@ -2811,6 +2811,27 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Heap-allocated sync wrappers created by COPY need top-level
+        // pointer cleanup. The generic struct-field pointer cleanup below
+        // only fires when the pointer is stored inside another value.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            if (ti != .pointer or ti.pointer.size != .one) break :blk false;
+            const child = ti.pointer.child;
+            if (@typeInfo(child) != .@"struct") break :blk false;
+            break :blk isLockWrapper(child) or isVersionedWrapper(child);
+        }) {
+            const ChildT = @typeInfo(T).pointer.child;
+            if (comptime isVersionedWrapper(ChildT)) {
+                ptr.*.deinitSync(alloc);
+            } else {
+                const DataT = @TypeOf(ptr.*.data);
+                if (comptime needsCleanup(DataT)) cleanup(DataT, alloc, &ptr.*.data);
+            }
+            alloc.destroy(ptr.*);
+            return;
+        }
+
         // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
         if (comptime refInnerType(T) != null) {
             releaseOne(T, alloc, ptr.*);
@@ -3100,6 +3121,20 @@ pub const CheatLib = struct {
             return new_ptr;
         }
 
+        if (comptime isLockWrapper(T)) {
+            const DataT = @TypeOf(value.data);
+            return T.init(try dupeValue(DataT, value.data, alloc));
+        }
+
+        if (comptime isVersionedWrapper(T)) {
+            const InnerT = T.Inner;
+            const raw = value.ptr.load(.acquire);
+            const current: *const InnerT = @ptrFromInt(raw & ~@as(usize, 1));
+            var inner = try dupeValue(InnerT, current.*, alloc);
+            errdefer if (comptime needsCleanup(InnerT)) cleanup(InnerT, alloc, &inner);
+            return try T.init(alloc, inner);
+        }
+
         if (info == .@"struct" and !@hasDecl(T, "deinit")) {
             var result = value;
             inline for (info.@"struct".fields) |field| {
@@ -3136,6 +3171,20 @@ pub const CheatLib = struct {
         }
 
         return value;
+    }
+
+    fn isLockWrapper(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasDecl(T, "init") and @hasField(T, "data") and
+            (@hasField(T, "mutex") or @hasField(T, "rw"));
+    }
+
+    fn isVersionedWrapper(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasDecl(T, "init") and @hasDecl(T, "Inner") and @hasDecl(T, "deinitSync") and
+            @hasField(T, "ptr") and !@hasDecl(T, "compareAndPublish");
     }
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
