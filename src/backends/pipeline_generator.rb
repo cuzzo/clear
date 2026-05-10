@@ -42,7 +42,7 @@ module PipelineGenerator
   # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
   # Any keyword argument overrides the corresponding state for the block's duration.
   def with_pipeline_context(placeholder: nil, acc: nil, soa: :inherit, shard_map: nil, shard_idx: nil, shard_key: nil, shard_hash: nil)
-    T.bind(self, T.untyped) rescue nil
+    T.bind(self, T.untyped) rescue ""
     prev_placeholder = @placeholder_name
     prev_acc         = @acc_placeholder
     prev_shard_map   = @shard_direct_map
@@ -90,7 +90,7 @@ module PipelineGenerator
   # buffer before iteration so all pipeline ops work correctly.
   # For @list:sharded(N): flattens all shard slices into a frame buffer.
   def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil, force_aos: false)
-    T.bind(self, T.untyped) rescue nil
+    T.bind(self, T.untyped) rescue ""
     my_label = next_pipe_label
     list_code = visit(list_node)  # may recurse for chained pipelines
     @current_pipe_label = my_label  # restore after inner pipeline may have changed it

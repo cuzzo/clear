@@ -107,7 +107,12 @@ class SemanticAnnotator
     # Capability audit — tracks declarations and usage to detect over-engineering.
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
-    @pipeline_accessed_fields = nil
+    @pipeline_accessed_fields = T.let(nil, T.nilable(Set))
+    @current_predicate_context = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @capability_audit = T.let({}, T::Hash[T.untyped, T.untyped])
+    @fn_direct_effects = T.let({}, T::Hash[T.untyped, T.untyped])
+    @call_site_context = T.let(nil, T.untyped)
+    @call_site_arg_families = T.let(nil, T.untyped)
 
     # Phase 2 lock analysis storage (keyed by fn name). Hooked in
     # visit_WithBlock / user-fn-call visitors; cycle-checked as a

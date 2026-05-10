@@ -55,7 +55,7 @@ class AutoConstraintCollector
     # slot. Without this, only the initializer would constrain the
     # slot and re-binding ambiguity (`MUTABLE x: Auto = 0_i64; x =
     # "hello";`) would slip through unification.
-    @local_decls = nil
+    @local_decls = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
   end
 
   # Walk the program. Populates @slots with one entry per Auto slot

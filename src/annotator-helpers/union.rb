@@ -139,7 +139,7 @@ module UnionAnalysis
   # Returns the variant data hash on success.
   sig { params(node: AST::UnionVariantLit, schema: T.nilable(Hash)).returns(T.nilable(Hash)) }
   def validate_union_schema!(node, schema)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, SemanticAnnotator) rescue {}
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end

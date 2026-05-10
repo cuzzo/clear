@@ -62,6 +62,9 @@ class Parser
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
+    @last_indirect_consumed = T.let(false, T::Boolean)
+    @last_requires_clauses = T.let({}, T::Hash[T.untyped, T.untyped])
+    @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
     # parameters / return types parse as implicit Auto (per
     # docs/agents/gradual-typing.md §3.3). Defaults to the global

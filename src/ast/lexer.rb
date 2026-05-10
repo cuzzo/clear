@@ -39,7 +39,7 @@ class Lexer
     @s = T.let(StringScanner.new(source), StringScanner)
     @line = T.let(1, Integer)
     @column = T.let(1, Integer)
-    @tokens = []
+    @tokens = T.let([], T::Array[Token])
   end
 
   sig { returns(T.nilable(Array)) }
@@ -240,7 +240,7 @@ class Lexer
         sub_lexer = Lexer.new(expr_source)
         sub_tokens = sub_lexer.tokenize
         T.must(sub_tokens).pop if T.must(sub_tokens).last.type == :EOF
-        @tokens.concat(sub_tokens)
+        @tokens.concat(T.must(sub_tokens))
 
         # 5. Inject closer tokens: ) +
         @tokens << Token.new(:CHAR, ')', @line, @column)

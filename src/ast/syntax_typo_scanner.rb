@@ -120,7 +120,7 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: Integer, col: Integer, rule: Hash).returns(Array) }
+  sig { params(line: Integer, col: Integer, rule: Hash).returns(T.nilable(T::Array[FixableFinding])) }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: "Replace `#{rule[:match]}` with `#{rule[:replace]}` — #{rule[:label]}.",

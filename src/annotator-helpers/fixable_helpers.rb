@@ -1390,7 +1390,7 @@ module FixableHelper
   # candidates as text but no auto-applicable fix).
   sig { params(slot: AutoConstraintCollector::Slot, type_sym: Symbol, note: T.nilable(String), position: Integer).returns(T.untyped) }
   def build_auto_candidate_fix(slot, type_sym, note, position)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, SemanticAnnotator) rescue ""
     auto_tok = auto_token_for(slot)
     return nil unless auto_tok
     type_str = type_sym.to_s

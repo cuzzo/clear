@@ -87,7 +87,7 @@ module FsmLowering
   # recursive emit path uses emit_step_stmts.
   sig { params(stmts: Array, no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(Array) }
   def lower_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
-    T.bind(self, MIRLowering) rescue nil
+    T.bind(self, MIRLowering) rescue {}
     flat_steps = []
     stmts.each do |stmt|
       if stmt.is_a?(AST::ThenChain)
@@ -211,7 +211,7 @@ module FsmLowering
   # assignment ready for splicing into the dispatch).
   sig { params(stmts: Array, no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T.untyped) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
-    T.bind(self, MIRLowering) rescue nil
+    T.bind(self, MIRLowering) rescue {}
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id, exit_promote: exit_promote)
     if no_result
       render_mir_list(result)

@@ -325,7 +325,7 @@ module EffectTracker
   # SUSPENDS promotion based on the call site's loop/cond bits.
   sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: T.nilable(T::Hash[Symbol, T.untyped])).returns(T::Set[Symbol]) }
   def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, SemanticAnnotator) rescue {}
     in_loop = site_ctx && site_ctx[:loop]
     in_cond = site_ctx && site_ctx[:cond]
     callee_set.each do |eff|

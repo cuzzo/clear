@@ -172,7 +172,7 @@ module LockHelper
   # the same suppression effect on the cycle graph.
   sig { params(fn_name: String, cap: T::Hash[Symbol, T.untyped], held_stack: T::Array[Hash], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.untyped) }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, SemanticAnnotator) rescue {}
     t = lock_identity_of(cap)
     return unless t
     @lock_direct_acquires[fn_name] << t

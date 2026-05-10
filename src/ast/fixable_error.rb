@@ -61,11 +61,14 @@ class Edit
 end
 
 class Fix
+  extend T::Sig
+
   CONFIDENCES = [:auto, :interactive].freeze
 
   attr_reader :description, :confidence, :edits
 
-  def initialize(description:, confidence: :interactive, edits:)
+  sig { params(description: String, edits: Array, confidence: Symbol).void }
+  def initialize(description:, edits:, confidence: :interactive)
     unless CONFIDENCES.include?(confidence)
       raise ArgumentError, "Fix.confidence must be one of #{CONFIDENCES}, got #{confidence.inspect}"
     end
@@ -123,7 +126,7 @@ end
 module FixCollector
     extend T::Sig
 
-  @findings = nil
+  @findings = T.let(nil, T.nilable(T::Array[FixableFinding]))
 
   sig { returns(Array) }
   def self.enable!
@@ -140,7 +143,7 @@ module FixCollector
     !@findings.nil?
   end
 
-  sig { params(finding: FixableFinding).returns(Array) }
+  sig { params(finding: FixableFinding).returns(T.nilable(T::Array[FixableFinding])) }
   def self.push(finding)
     @findings << finding if @findings
   end

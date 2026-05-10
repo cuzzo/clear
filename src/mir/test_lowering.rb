@@ -252,7 +252,7 @@ module TestLowering
   # Returns an empty string when there are no tags.
   sig { params(tags: T.nilable(T::Array[String])).returns(String) }
   def format_tag_suffix(tags)
-    T.bind(self, MIRLowering) rescue nil
+    T.bind(self, MIRLowering) rescue []
     return "" unless tags && !tags.empty?
     " " + tags.map { |t| "##{t}" }.join(" ")
   end
@@ -265,7 +265,7 @@ module TestLowering
   # by an inner LET, which then takes the outer's slot.
   sig { params(lets: T.nilable(Array), base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
   def build_let_ast_map(lets, base: {})
-    T.bind(self, MIRLowering) rescue nil
+    T.bind(self, MIRLowering) rescue []
     out = base.dup
     (lets || []).each { |let_node| out[let_node.name] = let_node }
     out
