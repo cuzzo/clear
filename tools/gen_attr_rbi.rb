@@ -108,9 +108,34 @@ Dir.glob('src/**/*.rb').sort.each do |f|
   class_walk.(parsed.value, [])
 end
 
+# Preserve typed sigs from the existing RBI for attrs whose T.let has been
+# stripped. When a T.let is removed from source, ivar_types loses the type,
+# but the checked-in RBI still has it. We use the existing RBI as a fallback
+# so re-running the generator is idempotent after stripping.
+rbi_preserved = Hash.new { |h, k| h[k] = {} }
+rbi_path = File.join(File.dirname(__dir__), "sorbet", "rbi", "clear-attr-accessors.rbi")
+if File.exist?(rbi_path)
+  current_class = nil
+  pending_return = nil
+  File.readlines(rbi_path).each do |line|
+    if line =~ /^class (\S+)/
+      current_class = $1
+      pending_return = nil
+    elsif current_class && line =~ /sig \{ returns\((.+?)\) \}/
+      pending_return = $1 unless $1 == "T.untyped"
+    elsif current_class && pending_return && line =~ /\s+def (\w+); end/
+      rbi_preserved[current_class][$1] = pending_return
+      pending_return = nil
+    else
+      pending_return = nil unless line.strip.empty?
+    end
+  end
+end
+
 total = declared.values.map(&:uniq).map(&:size).sum
 typed_count = ivar_types.values.sum(&:size)
-warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches"
+preserved_count = rbi_preserved.values.sum(&:size)
+warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches, #{preserved_count} preserved from existing RBI"
 
 puts <<~HDR
   # typed: true
@@ -135,7 +160,7 @@ declared.keys.sort.each do |cls|
   next if attrs.empty?
   puts "class #{cls}"
   attrs.each do |kind, name|
-    type_str = ivar_types.dig(cls, name.to_s) || "T.untyped"
+    type_str = ivar_types.dig(cls, name.to_s) || rbi_preserved.dig(cls, name.to_s) || "T.untyped"
     if kind == :attr_reader || kind == :attr_accessor
       puts "  sig { returns(#{type_str}) }"
       puts "  def #{name}; end"

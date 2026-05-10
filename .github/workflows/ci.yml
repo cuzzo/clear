@@ -53,6 +53,11 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - name: Verify clear-attr-accessors.rbi is up to date
+        run: |
+          bundle exec ruby tools/gen_attr_rbi.rb > /tmp/rbi-check.rbi 2>/dev/null
+          diff sorbet/rbi/clear-attr-accessors.rbi /tmp/rbi-check.rbi \
+            || (echo "RBI is stale. Run: bundle exec ruby tools/gen_attr_rbi.rb > sorbet/rbi/clear-attr-accessors.rbi" && exit 1)
       - run: bundle exec srb tc
         env:
           SRB_YES: "1"
