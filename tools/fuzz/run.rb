@@ -13,7 +13,10 @@
 require 'optparse'
 require 'fileutils'
 require 'digest'
+require 'etc'
+require 'open3'
 require_relative 'generator'
+require_relative '../../transpile-tests/gen'
 
 LITEDB_ROOT = File.expand_path('../..', __dir__)
 
@@ -25,6 +28,7 @@ opts = {
   generate_only: false,
   clean: false,
   templates: nil,
+  shard: nil,
 }
 
 OptionParser.new do |o|
@@ -36,6 +40,11 @@ OptionParser.new do |o|
   o.on('--generate-only')       { opts[:generate_only] = true }
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
+  o.on('--shard I/N') do |v|
+    idx, total = v.split('/', 2).map(&:to_i)
+    abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total > 0 && idx && idx >= 0 && idx < total
+    opts[:shard] = [idx, total]
+  end
   o.on('-h', '--help')          { puts o; exit 0 }
 end.parse!
 
@@ -51,6 +60,10 @@ gen = FuzzGenerator.new(seed: opts[:seed])
 tuples = opts[:mode] == :matrix ? gen.full_matrix : gen.sample(opts[:count])
 if opts[:templates]
   tuples = tuples.select { |t| opts[:templates].include?(t[:template]) }
+end
+if opts[:shard]
+  idx, total = opts[:shard]
+  tuples = tuples.each_with_index.select { |_tuple, i| (i % total) == idx }.map(&:first)
 end
 
 emitted = []   # array of { path:, expected: }
@@ -75,9 +88,143 @@ if opts[:generate_only]
 end
 
 # ── Runner ──────────────────────────────────────────────────────────────
-# Bundled runner: build one zig/all-fuzz.zig, run zig test once. Mirrors
-# transpile-tests/gen.rb's bulk pattern. Per-file mode invokes ./clear test
-# per program — slower but isolates failures cleanly.
+# Positive cells are bundled into one Zig test file, mirroring
+# transpile-tests/gen.rb. Negative cells run in parallel through
+# `clear build --no-stack-check`, which catches parser/compiler/MIR/Zig
+# compile-time rejections without running runtime tests.
+
+def zig_exe
+  [
+    File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
+    File.join(LITEDB_ROOT, 'zig', 'zig-new', 'zig'),
+    File.join(LITEDB_ROOT, 'zig', 'zig', 'zig'),
+    `which zig 2>/dev/null`.strip
+  ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+end
+
+def ensure_symlink(link_path, target_path)
+  if File.symlink?(link_path)
+    return if File.readlink(link_path) == target_path
+    File.delete(link_path)
+  elsif File.exist?(link_path)
+    FileUtils.rm_rf(link_path)
+  end
+  File.symlink(target_path, link_path)
+end
+
+def run_pass_bundle(entries, out_dir)
+  return [[], [], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  build_dir = File.join(out_dir, ".bundle-#{$$}")
+  FileUtils.rm_rf(build_dir)
+  FileUtils.mkdir_p(build_dir)
+  ensure_symlink(File.join(build_dir, 'runtime'), File.join(LITEDB_ROOT, 'zig', 'runtime'))
+  ensure_symlink(File.join(build_dir, 'lib'), File.join(LITEDB_ROOT, 'zig', 'lib'))
+  ensure_symlink(File.join(build_dir, 'experimental'), File.join(LITEDB_ROOT, 'zig', 'experimental'))
+
+  zig_path = File.join(build_dir, 'all-fuzz.zig')
+  generator = TestGenerator.new
+  failed_transpile = []
+
+  File.open(zig_path, 'w') do |f|
+    frame_debug = ENV['CLEAR_FRAME_DEBUG'] == '1'
+    f.puts "pub const CLEAR_FRAME_DEBUG = #{frame_debug};"
+    f.puts 'const std = @import("std");'
+    f.puts 'const CheatHeader = @import("runtime/runtime-header.zig");'
+    f.puts 'const CheatLib = CheatHeader.CheatLib;'
+    f.puts 'const Runtime = CheatHeader.Runtime;'
+    f.puts 'const EbrContext = CheatHeader.EbrContext;'
+
+    entries.each do |entry|
+      path = entry[:path]
+      begin
+        block = generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
+        f.puts "\n// --- FUZZ: #{File.basename(path)} ---"
+        f.puts block
+      rescue StandardError => e
+        failed_transpile << [path, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]
+      end
+    end
+  end
+
+  return [[], [], failed_transpile, []] unless failed_transpile.empty?
+
+  fmt_out, fmt_status = Open3.capture2e(zig_exe, 'fmt', zig_path)
+  return [[], [[zig_path, fmt_out]], [], []] unless fmt_status.success?
+
+  args = [
+    zig_exe, 'test', 'all-fuzz.zig',
+    'runtime/switch.S', 'runtime/onRoot.S',
+    '-lc'
+  ]
+  out, status = Open3.capture2e(*args, chdir: build_dir)
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] pass bundle: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+
+  if !status.success? || out.include?('FAIL')
+    return [[], [[zig_path, out]], [], []]
+  end
+
+  leak = out =~ /MEMORY LEAKS:\s*[1-9]/ ||
+         out.include?('[DebugAllocator] (err)') ||
+         out.include?('[gpa] (err)') ||
+         out =~ /\d+ tests leaked memory/
+  return [[], [], [], [[zig_path, out]]] if leak
+
+  [entries.map { |e| e[:path] }, [], [], []]
+ensure
+  FileUtils.rm_rf(build_dir) if build_dir
+end
+
+def run_negative_builds(entries, out_dir)
+  return [[], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  clear = File.expand_path('../../clear', __dir__)
+  workers = [Etc.nprocessors, entries.size].min
+  queue = Queue.new
+  entries.each_with_index { |entry, i| queue << [entry, i] }
+  pass = []
+  unexpected_pass = []
+  mutex = Mutex.new
+
+  threads = workers.times.map do
+    Thread.new do
+      loop do
+        item = queue.pop(true) rescue nil
+        break unless item
+
+        entry, i = item
+        path = entry[:path]
+        bin = File.join(out_dir, ".neg-#{i}")
+        out, status = Open3.capture2e(clear, 'build', path, '-o', bin, '--no-stack-check')
+        mutex.synchronize do
+          if status.success?
+            unexpected_pass << [path, out]
+          else
+            pass << path
+          end
+        end
+      end
+    end
+  end
+  threads.each(&:join)
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] negative builds: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
+  [pass, unexpected_pass]
+end
+
+def hybrid_run(emitted, out_dir)
+  pass_entries = emitted.select { |e| e[:expected] == :pass }
+  negative_entries = emitted.select { |e| e[:expected] == :compile_error }
+
+  pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
+  negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir)
+
+  [pass_ok + negative_ok, fails, leaks, mir_errors, unexpected_pass]
+end
 
 def per_file_run(emitted)
   clear = File.expand_path('../../clear', __dir__)
@@ -131,7 +278,7 @@ def per_file_run(emitted)
   [pass, fails, leaks, mir_errors, unexpected_pass]
 end
 
-pass, fails, leaks, mir_errors, unexpected_pass = per_file_run(emitted)
+pass, fails, leaks, mir_errors, unexpected_pass = hybrid_run(emitted, opts[:out])
 
 puts
 puts "=" * 60

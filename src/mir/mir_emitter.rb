@@ -943,10 +943,8 @@ class MIREmitter
 
     when :versioned
       # MVCC L6: tear down a *Versioned(T) cell. EBR-retire the live
-      # ptr then destroy the outer struct. `rt` is the conventionally-
-      # named runtime in the emitted Zig (matching `:heap_struct_plain`
-      # above which also uses bare `rt`).
-      guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, rt, #{alloc}, #{name})", g, errdefer:)
+      # ptr then destroy the outer struct.
+      guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
       guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
@@ -1048,7 +1046,11 @@ class MIREmitter
       "    } else break :blk_copy #{src};\n" \
       "}"
     when :passthrough
-      src
+      "blk_copy_value: {\n" \
+      "    const __src = #{src};\n" \
+      "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :blk_copy_value __src.*;\n" \
+      "    break :blk_copy_value __src;\n" \
+      "}"
     when :full_value
       "try CheatLib.dupeValue(@TypeOf(#{src}), #{src}, #{alloc})"
     else

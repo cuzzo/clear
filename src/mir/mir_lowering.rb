@@ -4641,7 +4641,13 @@ class MIRLowering
 
     # Inside a DO block branch, access captured outer variables via ctx pointer
     capture_map = @do_capture_map || {}
-    return MIR::Ident.new(capture_map[node.name]) if capture_map.key?(node.name)
+    if capture_map.key?(node.name)
+      ident = MIR::Ident.new(capture_map[node.name])
+      if node.symbol&.sync == :atomic && !@atomic_emit_raw && !node.atomic_borrow && node.symbol&.layout != :indirect
+        return MIR::MethodCall.new(ident, "load", [], false)
+      end
+      return ident
+    end
 
     # Use disambiguated Zig name if the declaration was renamed to avoid
     # same-name collision in the MIR checker (see lower_var_decl).
@@ -5934,6 +5940,7 @@ class MIRLowering
     ft = Type.new(node.full_type || :Void)
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
     is_mutable ||= ft.collection?
+    is_mutable ||= ft.any_sync?
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
     # True-Sync-Polymorphism Gate 3: a plain T binding whose address

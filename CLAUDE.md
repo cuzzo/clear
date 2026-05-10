@@ -36,6 +36,8 @@ the `.code` string. If no AST node is available, raise `Unimplemented`.
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
 bundle exec prspec spec/              # Run all Ruby specs in parallel (~1s, excludes integration)
+./clear test transpile-tests/         # Run all .cht transpile tests
+ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean  # Run stable fuzz matrix last
 bundle exec prspec spec/ --tag integration  # Run integration tests (builds binaries, ~3-4 min)
 
 # Package integration test
@@ -64,9 +66,10 @@ fiber stacks compensate for the larger stack frames that safety instrumentation 
 
 ### Test Suites
 
-Run **all four** after making changes to the compiler:
+Run after making changes to the compiler:
 - **Ruby unit specs**: `bundle exec prspec spec/` (parallel, ~1s, excludes integration)
 - **transpile-tests**: `./clear test transpile-tests/` (130 tests)
+- **tools/fuzz stable matrix**: `ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean` (run last)
 - **module-integration**: `cd transpile-tests/module-integration && zig build test`
 - **ffi-integration**: `cd transpile-tests/ffi-integration && zig build test`
 
@@ -248,7 +251,7 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 3. If the new scenario involves a new category of heap-returning function (like `heap_carry_return`), add the detection to Phase E1 (`compute_heap_return_fns!`) and the call-site tagging to Phase E3.
 4. Do NOT add a new `upgrade_*` method to `MIRPass`. That pattern is being eliminated (tasks #27-#32). Adding a new upgrade method re-introduces the accumulation problem.
 5. Do NOT add a new invariant to `MIRChecker`. The checker's 7 invariants are fixed. If the checker fires unexpectedly after your change, the escape analysis missed a case -- fix it in `EscapeAnalysis`, not in the checker.
-6. Run `bundle exec prspec spec/` and `./clear test transpile-tests/`. Both must pass at 0 failures.
+6. Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean`. All must pass at 0 failures.
 
 ### MIR Pipeline: What Goes Where (Zero UAF / Double-Free)
 
@@ -453,7 +456,7 @@ Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violate
 - If you added a new type or collection: is its cleanup driven by MIR nodes, not transpiler heuristics? (INV-7, INV-8)
 - If you changed escape analysis or storage decisions: does every escaping value get heap-allocated at declaration, not frame-then-promoted? (INV-1, INV-5)
 - If you changed error handling: does the error path preserve allocator identity? No `catch` fallbacks returning data from a different allocator? (INV-9)
-- Run `bundle exec prspec spec/` and `./clear test transpile-tests/` to verify no regressions.
+- Run `bundle exec prspec spec/`, `./clear test transpile-tests/`, then `ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean` to verify no regressions.
 
 ### When fixing a bug:
 

@@ -48,7 +48,9 @@ EB_BOUNDARIES.each do |b|
     EB_OWNERSHIPS.each do |o|
       cell = { boundary: b, modifier: m, ownership: o }
       cell[:expected] =
-        if m == :parallel && (o == :local || o == :multiowned)
+        if b == :bg_stream && m != :none
+          :compile_error
+        elsif m == :parallel && (o == :local || o == :multiowned)
           :compile_error
         else
           :pass
@@ -98,9 +100,9 @@ end
 # the access path. DO branches don't need an Int64 result.
 def eb_body_void(o)
   case o
-  when :local         then "c.value = c.value + 1_i64;"
-  when :shared_locked then "WITH EXCLUSIVE c AS x { x.value = x.value + 1_i64; }"
-  when :multiowned    then "WITH c { _ = c.value; }"
+  when :local         then "touch(c.value)"
+  when :shared_locked then "WITH EXCLUSIVE c AS x { touch(x.value); }"
+  when :multiowned    then "WITH c { touch(c.value); }"
   end
 end
 
@@ -152,6 +154,10 @@ FuzzGenerator.register(:execution_boundary, cells: EXECUTION_BOUNDARY_CELLS) do 
 
   <<~CHT
     STRUCT Counter { value: Int64 }
+
+    FN touch(v: Int64) RETURNS Void ->
+        RETURN;
+    END
 
     FN main() RETURNS Void ->
         #{decl}

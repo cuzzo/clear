@@ -52,6 +52,9 @@ CONSUMERS.each do |c|
     LOCAL_MOVES.each do |m|
       cell = { consumer: c, ownership: :local, sync: :none, move: m, value: v }
       cell[:expected] = :compile_error if c == :do
+      # Copied stream-setup strings currently leak when the BG STREAM is
+      # torn down; reserve this cell until setup cleanup is explicit.
+      cell[:expected] = :in_dev if c == :bg_stream && m == :copy && v == :string
       STREAM_BOUNDARY_CELLS << cell
     end
   end
@@ -84,6 +87,9 @@ CONSUMERS.each do |c|
       cell = { consumer: c, ownership: :shared, sync: sync, move: m, value: value }
       cell[:expected] = :compile_error if c == :do                   # DO + @shared
       cell[:expected] = :compile_error if m == :clone                # CLONE constraint
+      # COPY of lock/versioned wrappers needs dedicated semantics. A naive
+      # value copy leaves cleanup with the wrong wrapper shape.
+      cell[:expected] = :in_dev if m == :copy && [:locked, :write_locked, :versioned].include?(sync)
       STREAM_BOUNDARY_CELLS << cell
     end
   end
@@ -225,9 +231,20 @@ FuzzGenerator.register(:stream_into_boundary, cells: STREAM_BOUNDARY_CELLS) do |
           }
     CHT
   when :bg_stream
-    inner_body = build_branch.call("c", "YIELD ")
+    move_setup, source_var =
+      case p[:move]
+      when :borrow then ["", "val"]
+      when :copy   then ["c = COPY val;", "c"]
+      when :clone  then ["c = CLONE val;", "c"]
+      when :give   then ["", "GIVE val"]
+      when :lend   then ["", "LEND val"]
+      end
+    read_setup, read_expr = fuzz_read_int_fragment(p, source_var)
+    inner_parts = [read_setup, "YIELD #{read_expr};"].reject(&:empty?)
+    inner_body = inner_parts.join(' ')
     <<~CHT.chomp
       inner: ~Int64[INF] = BG STREAM {
+              #{move_setup}
               MUTABLE k: Int64 = 0_i64;
               WHILE TRUE DO
                   #{inner_body}

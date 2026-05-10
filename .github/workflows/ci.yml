@@ -137,6 +137,29 @@ jobs:
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ./clear test transpile-tests/
 
+  tools-fuzz:
+    name: tools/fuzz stable matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      - run: ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean
+
   module-integration:
     name: transpile-tests/module-integration (zig build test)
     runs-on: ubuntu-latest

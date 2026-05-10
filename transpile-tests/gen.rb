@@ -205,6 +205,7 @@ end
 
 # --- Script Execution ---
 
+if __FILE__ == $0
 # Accept --mir for backward compatibility (ignored, MIR is always used)
 ARGV.delete('--mir')
 
@@ -276,3 +277,4 @@ end
 
 `zig fmt zig/all-tests.zig`
 puts "Done. Run with: zig test #{OUTPUT_FILE} -lc"
+end
