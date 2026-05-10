@@ -42,6 +42,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const fp = @import("scheduler.zig");
+const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
 const qs = @import("queues.zig");
 const ebr_mod = @import("../lib/ebr.zig");
@@ -56,6 +57,8 @@ const StackPool = fm.StackPool;
 const build_options = @import("build_options");
 
 const SKIP_BY_DEFAULT = false;
+const test_stack_size: fc.StackSize = if (build_options.tsan) .Xl else .Large;
+const completion_timeout_ms: u64 = if (build_options.tsan) 120_000 else 30_000;
 
 const test_alloc = std.heap.c_allocator;
 var global_ebr: ebr_mod.EbrContext = .{};
@@ -69,7 +72,10 @@ var post_run_workers = std.atomic.Value(usize).init(0);
 var deinit_phase = std.atomic.Value(bool).init(false);
 
 fn schedulerThread(a: std.mem.Allocator) void {
-    var sched = Scheduler.init(a, &global_ebr, &stack_pool) catch return;
+    var sched = Scheduler.init(a, &global_ebr, &stack_pool) catch {
+        _ = post_run_workers.fetchAdd(1, .release);
+        return;
+    };
     sched.global_shutdown = &global_shutdown;
     sched.shutdown_on_idle = false;
     fp.active_scheduler = &sched;
@@ -84,12 +90,40 @@ fn schedulerThread(a: std.mem.Allocator) void {
     sched.deinit();
 }
 
-fn startWorkers(threads: []std.Thread, n: usize) void {
-    for (threads[0..n]) |*t| {
-        t.* = std.Thread.spawn(.{}, schedulerThread, .{test_alloc}) catch continue;
-    }
-    while (fp.global_registry.count() < n) {
+fn abortStartedWorkers(threads: []std.Thread, n: usize) void {
+    global_shutdown.store(true, .release);
+    fp.global_registry.notifyAll();
+    while (post_run_workers.load(.acquire) < n) {
         compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+    deinit_phase.store(true, .release);
+    for (threads[0..n]) |*t| t.join();
+    global_shutdown.store(false, .release);
+    post_run_workers.store(0, .release);
+    deinit_phase.store(false, .release);
+}
+
+fn startWorkers(threads: []std.Thread, n: usize) !void {
+    var started: usize = 0;
+    for (threads[0..n]) |*t| {
+        t.* = std.Thread.spawn(.{}, schedulerThread, .{test_alloc}) catch {
+            abortStartedWorkers(threads, started);
+            return error.WorkerSpawnFailed;
+        };
+        started += 1;
+    }
+    var waited_ms: usize = 0;
+    while (fp.global_registry.count() < n) {
+        if (post_run_workers.load(.acquire) > 0) {
+            abortStartedWorkers(threads, started);
+            return error.WorkerSchedulerInitFailed;
+        }
+        if (waited_ms >= 30_000) {
+            abortStartedWorkers(threads, started);
+            return error.WorkerStartupTimedOut;
+        }
+        compat.sleepNs(1 * std.time.ns_per_ms);
+        waited_ms += 1;
     }
 }
 
@@ -108,7 +142,7 @@ fn stopWorkers(threads: []std.Thread, n: usize) void {
 
 fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerror!void) !void {
     var threads: [workers]std.Thread = undefined;
-    startWorkers(&threads, workers);
+    try startWorkers(&threads, workers);
 
     var sched = try Scheduler.init(test_alloc, &global_ebr, &stack_pool);
     // ORDER: stopWorkers BEFORE sched.deinit. See versioned-fiber-
@@ -140,7 +174,7 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&Runner.run)),
         &runner,
-        .{ .stack_size = .Large, .pinned = true },
+        .{ .stack_size = test_stack_size, .pinned = true },
     );
     sched.run();
 }
@@ -168,6 +202,7 @@ const Shared = struct {
     sample: Sample = .{},
     torn_reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     done_writers: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    done_readers: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 };
 
 const WriterCtx = struct {
@@ -228,9 +263,37 @@ const ReaderCtx = struct {
             }
             ctx.shared.rw.unlockShared();
         }
+        _ = ctx.shared.done_readers.fetchAdd(1, .release);
         ctx.inner.result = op;
     }
 };
+
+fn waitForHammerCompletion(rt: *Runtime, shared: *Shared, expected_writers: usize, expected_readers: usize) !void {
+    const deadline = compat.milliTimestamp() + @as(i64, @intCast(completion_timeout_ms));
+    while (true) {
+        const done_writers = shared.done_writers.load(.acquire);
+        const done_readers = shared.done_readers.load(.acquire);
+        if (done_writers == expected_writers and done_readers == expected_readers) return;
+
+        if (compat.milliTimestamp() >= deadline) {
+            std.debug.print(
+                "\nParkingRwLock fiber hammer timed out: writers {d}/{d}, readers {d}/{d}, write_locked={}, reader_count={d}, torn_reads={d}\n",
+                .{
+                    done_writers,
+                    expected_writers,
+                    done_readers,
+                    expected_readers,
+                    shared.rw.isWriteLocked(),
+                    shared.rw.readerCount(),
+                    shared.torn_reads.load(.monotonic),
+                },
+            );
+            return error.ParkingRwLockFiberHammerTimedOut;
+        }
+
+        rt.checkYield();
+    }
+}
 
 // Stackful fiber ParkingRwLock hammer: 4 writers + 8 readers spawned
 // across 4 worker schedulers + main = 5 schedulers via spawnBest. Each
@@ -278,7 +341,7 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
                     @intFromPtr(&Runtime.entryWrapper),
                     @as(CheatHeader.TaskFn, @ptrCast(&WriterCtx.run)),
                     ctx,
-                    .{ .stack_size = .Large },
+                    .{ .stack_size = test_stack_size },
                 );
             }
             for (0..NR) |i| {
@@ -294,9 +357,11 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
                     @intFromPtr(&Runtime.entryWrapper),
                     @as(CheatHeader.TaskFn, @ptrCast(&ReaderCtx.run)),
                     ctx,
-                    .{ .stack_size = .Large },
+                    .{ .stack_size = test_stack_size },
                 );
             }
+
+            try waitForHammerCompletion(rt, &shared, NW, NR);
 
             for (&wprom) |*p| _ = try p.next();
             for (&rprom) |*p| _ = try p.next();
