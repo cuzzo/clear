@@ -1,7 +1,31 @@
 #!/usr/bin/env ruby
 require 'prism'
 
+# ivar_types[class_path][attr_name] = type_string extracted from T.let in initialize
+ivar_types = Hash.new { |h, k| h[k] = {} }
 declared = Hash.new { |h, k| h[k] = [] }
+
+# Collect @attr = T.let(_, Type) bindings from an initialize body
+collect_ivar_types = lambda do |def_node, class_path|
+  return unless def_node.is_a?(Prism::DefNode) && def_node.name == :initialize
+  body = def_node.body
+  stmts = case body
+  when Prism::StatementsNode then body.body
+  when Prism::BeginNode      then body.statements&.body || []
+  else []
+  end
+  stmts.each do |stmt|
+    next unless stmt.is_a?(Prism::InstanceVariableWriteNode)
+    val = stmt.value
+    next unless val.is_a?(Prism::CallNode) && val.name == :let
+    recv = val.receiver
+    next unless recv.is_a?(Prism::ConstantReadNode) && recv.name == :T
+    args = val.arguments&.arguments
+    next unless args && args.size >= 2
+    ivar_name = stmt.name.to_s.delete_prefix('@')
+    ivar_types[class_path][ivar_name] = args[1].location.slice
+  end
+end
 
 walk_block_for_attrs = lambda do |block_node, class_path|
   return unless block_node
@@ -43,7 +67,6 @@ walk = lambda do |node, scope|
   end
 end
 
-# Also catch attr_accessor at class scope (not inside Struct.new).
 class_walk = nil
 class_walk = lambda do |node, scope|
   return unless node
@@ -54,16 +77,18 @@ class_walk = lambda do |node, scope|
     class_path = new_scope.join('::')
     if node.body.is_a?(Prism::StatementsNode)
       node.body.body.each do |stmt|
-        next unless stmt.is_a?(Prism::CallNode)
-        next unless [:attr_accessor, :attr_reader, :attr_writer].include?(stmt.name)
-        kind = stmt.name
-        names = (stmt.arguments&.arguments || []).filter_map do |a|
-          if a.is_a?(Prism::SymbolNode); a.value
-          elsif a.is_a?(Prism::StringNode); a.content
-          else nil
+        if stmt.is_a?(Prism::CallNode) && [:attr_accessor, :attr_reader, :attr_writer].include?(stmt.name)
+          kind = stmt.name
+          names = (stmt.arguments&.arguments || []).filter_map do |a|
+            if a.is_a?(Prism::SymbolNode); a.value
+            elsif a.is_a?(Prism::StringNode); a.content
+            else nil
+            end
           end
+          names.each { |n| declared[class_path] << [kind, n] }
+        elsif stmt.is_a?(Prism::DefNode)
+          collect_ivar_types.(stmt, class_path)
         end
-        names.each { |n| declared[class_path] << [kind, n] }
       end
     end
     class_walk.(node.body, new_scope)
@@ -84,7 +109,8 @@ Dir.glob('src/**/*.rb').sort.each do |f|
 end
 
 total = declared.values.map(&:uniq).map(&:size).sum
-warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq) across src/"
+typed_count = ivar_types.values.sum(&:size)
+warn "RBI generation: #{declared.size} classes, #{total} attr_* (uniq), #{typed_count} typed ivar matches"
 
 puts <<~HDR
   # typed: true
@@ -97,14 +123,10 @@ puts <<~HDR
   # Struct fields, not `attr_accessor`/`attr_reader`/`attr_writer`
   # declarations inside the do-block. Without this shim, every file
   # that flips to `# typed: true` and reads such an attribute trips a
-  # `Method does not exist` error. This file declares T.untyped sigs
-  # so the per-file typing rollout can proceed.
+  # `Method does not exist` error.
   #
-  # As the Self-host preparation tracker (TODO.md) advances, individual
-  # T.untyped sigs are tightened to real types (Symbol for identifiers
-  # per task #1, etc.). When all attrs are typed, this shim can be
-  # deleted and replaced by inline T::Sig declarations on the classes
-  # themselves.
+  # Where a matching T.let declaration exists in initialize, the sig is
+  # typed. Otherwise it falls back to T.untyped.
 
 HDR
 
@@ -113,12 +135,13 @@ declared.keys.sort.each do |cls|
   next if attrs.empty?
   puts "class #{cls}"
   attrs.each do |kind, name|
+    type_str = ivar_types.dig(cls, name.to_s) || "T.untyped"
     if kind == :attr_reader || kind == :attr_accessor
-      puts "  sig { returns(T.untyped) }"
+      puts "  sig { returns(#{type_str}) }"
       puts "  def #{name}; end"
     end
     if kind == :attr_writer || kind == :attr_accessor
-      puts "  sig { params(value: T.untyped).returns(T.untyped) }"
+      puts "  sig { params(value: #{type_str}).returns(#{type_str}) }"
       puts "  def #{name}=(value); end"
     end
   end

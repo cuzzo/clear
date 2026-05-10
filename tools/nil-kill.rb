@@ -1123,6 +1123,7 @@ module NilKill
 
   class Loop
     SKIP_FILE = File.join(ROOT, "tools", "nil-kill-skip.json")
+    Z3_SOLVER_PATH = File.join(ROOT, "tools", "nil-kill", "z3_solver.rb")
 
     def initialize(argv)
       if argv.delete("--defaults")
@@ -1133,6 +1134,14 @@ module NilKill
       @max_iters = ENV.fetch("NIL_KILL_MAX_ITERS", "10").to_i
       @skipped = Set.new
       @permanent_skip = load_permanent_skip
+      @z3_solver = nil
+      load_z3_solver
+    end
+
+    def load_z3_solver
+      require Z3_SOLVER_PATH
+    rescue LoadError, SyntaxError => e
+      warn "nil-kill: Z3 solver not loaded (#{e.message}); running without pre-filter"
     end
 
     def load_permanent_skip
@@ -1158,6 +1167,7 @@ module NilKill
         puts "nil-kill loop iteration #{iter}"
         Infer.new([]).run
         evidence = Store.read
+        @z3_solver = init_z3_solver(evidence)
         high_actions = evidence["actions"].select { |action| action["confidence"] == HIGH && !@skipped.include?(fingerprint(action)) && !permanently_skipped?(action) }
         high = high_actions.size
         puts "high-confidence actions: #{high}"
@@ -1170,8 +1180,31 @@ module NilKill
       end
     end
 
+    def init_z3_solver(evidence)
+      return nil unless defined?(NilKill::Z3Solver)
+      Z3Solver.new(evidence, NilKill.target_files)
+    rescue StandardError => e
+      warn "nil-kill: Z3 solver init failed: #{e.message}"
+      nil
+    end
+
     def apply_verified(actions)
       return 0 if actions.empty?
+
+      # Z3 pre-filter: if the batch is provably inconsistent, bisect without
+      # running the (expensive) spec suite.
+      if actions.size > 1 && @z3_solver
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        consistent = @z3_solver.consistent?(actions)
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+        unless consistent
+          warn "Z3: batch of #{actions.size} actions is UNSAT (#{elapsed.round(3)}s); bisecting without spec run"
+          mid = actions.size / 2
+          return apply_verified(actions.first(mid)) + apply_verified(actions.drop(mid))
+        end
+        puts "Z3: batch of #{actions.size} actions is SAT (#{elapsed.round(3)}s); proceeding to verify"
+      end
+
       snapshot = snapshot_files(actions)
       changed = Apply.new([]).apply_actions(actions)
       return changed if verify
