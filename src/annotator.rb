@@ -2232,6 +2232,22 @@ private
 
     visit(node.value)
 
+    # Inline BG return: `RETURN BG { ... }`. There is no decl_node for
+    # `stamp_bg_handle_lifetime!` to fire on (no `bg = BG{...}` binding),
+    # so we run the same lifetime check inline here. If the BG captures
+    # any scope-bounded source, the handle cannot escape past the
+    # function's own scope without a `RETURNS x:T` annotation.
+    if (node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)) &&
+       node.value.respond_to?(:capture_analysis) && node.value.capture_analysis
+      sources = bg_lifetime_sources(node.value.capture_analysis)
+      if sources.any?
+        source_names = sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
+        error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
+               type: node.value.full_type || "BG handle",
+               hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
+      end
+    end
+
     # RETURN inside a WITH block is forbidden ONLY when the returned value
     # carries a borrow of the WITH alias (the `AS` binding). Pure values
     # — primitives, fresh values returned by methods on the alias (e.g.
@@ -6379,31 +6395,50 @@ private
   # Walk the capture-analysis SymbolEntries and pick the ones whose
   # storage / sync makes them lifetime-bounded sources for the BG
   # handle. See stamp_bg_handle_lifetime! for the criteria.
+  #
+  # A capture is a SOURCE (binds the BG handle's lifetime to the
+  # capture's scope) when its underlying memory cannot independently
+  # outlive the binding. The bound conditions are explicit because
+  # each storage/sync combo has different reach semantics; the
+  # critical previously-missing case is plain `@local` (or unannotated)
+  # locals — captured by reference into the BG's fiber frame, so the
+  # source binding's death = pointer-into-freed-memory.
   sig { params(analysis: CapabilityHelper::CaptureAnalysis).returns(T::Array[SymbolEntry]) }
   def bg_lifetime_sources(analysis)
     sources = []
     (analysis.capture_symbols || {}).each_value do |info|
-      next unless info
+      next if info.nil?
       bound = false
       bound = true if info.sync == :atomic
       bound = true if info.sync == :locked || info.sync == :write_locked
       bound = true if info.storage == :multiowned
       bound = true if info.sync == :local
-      # @shared (Arc) without atomic/locked/versioned: refcounted, no
-      # lifetime constraint on the outer binding.
+      # Frame/stack-allocated locals (plain `@local` or unannotated
+      # struct/collection bindings) are captured by reference into the
+      # BG's fiber frame. They die with the source's scope. This was
+      # the missing case behind the lifetimed_return fuzz UAFs.
+      bound = true if (info.storage == :stack || info.storage == :frame) &&
+                      info.sync.nil? &&
+                      info.respond_to?(:type) && info.type &&
+                      !type_is_pure_value_copy?(info.type)
       bound = false if info.storage == :shared && !info.sync
-      # AtomicPtr M3.12: @indirect:atomic is Arc-managed under the
-      # hood (the AtomicPtr cell owns an Arc(T) payload; M3.5 auto-
-      # promotes ownership to :shared). Loaded snapshots have refcount
-      # lifetime; the cell itself can flow into struct fields, BG
-      # handles, RETURN values without trip-wiring the M2.6 escape
-      # audit. Exempt parallel to the @shared-without-sync rule
-      # above. Primitive @shared:atomic stays bounded -- bare
-      # *Atomic(T) is scope-bounded by M2.6 design.
       bound = false if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
       sources << info if bound
     end
     sources
+  end
+
+  # A type is "pure value copy" when capturing it into a BG frame
+  # produces an independent value (no pointer back to the source).
+  # Today: register-width primitives (Int64, Float64, Bool, etc.)
+  # and Id<T> handles. Structs — even all-Copy ones — are captured
+  # by reference, so they are NOT pure value copies.
+  sig { params(t: T.untyped).returns(T::Boolean) }
+  def type_is_pure_value_copy?(t)
+    ti = t.is_a?(Type) ? t : Type.new(t)
+    return true if ti.primitive?
+    return true if ti.respond_to?(:generic_instance?) && ti.generic_instance? && ti.generic_base == :Id
+    false
   end
 
   # Atomics M2.4 / M2.5: produce the list of dotted-path lifetime
