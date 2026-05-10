@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "type"
@@ -14,7 +14,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: Array, visitor: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], visitor: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -30,14 +30,14 @@ module AST
   # other BG bodies. Use this when classifying every BG in a function.
   # The single source of truth replacing the parallel walkers in
   # escape_analysis (e2_each_bg) and elsewhere.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.each_bg_block(body, &block)
     return unless body
     nodes = body.is_a?(Array) ? body : [body]
     nodes.each { |n| _bg_visit_recursive(n, &block) }
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self._bg_visit_recursive(node, &block)
     if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
       yield node
@@ -55,7 +55,7 @@ module AST
     end
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
+  sig { params(expr: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
@@ -117,7 +117,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: Array, block: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -161,9 +161,11 @@ module AST
   # case chains. Adding a new such node type means including this and
   # defining child_bodies — no walker edit required.
   module HasBodies
+    extend T::Sig
     # Override in including classes. Returns Array of stmt lists (each
     # itself an Array of statements). Nil/empty entries are filtered by
     # the walker via `Array(...)`/`.compact`.
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies
       []
     end
@@ -174,35 +176,112 @@ module AST
 
     sig { returns(Integer) }
     def line; token.line; end
+    sig { returns(Integer) }
     def column; token.column; end
+    sig { returns(T.untyped) }
     def token_value; token.value; end
 
-    attr_reader :coerced_type_object
-    attr_reader :type_object
-    attr_accessor :zig_pattern
-    attr_accessor :matched_stdlib_def  # Hash from STD_LIB entry (for return_alloc etc.)
-    attr_accessor :stdlib_allocates  # true when matched stdlib entry has allocates: true
-    attr_accessor :mutates_receiver  # true when matched stdlib entry has mutates_receiver: true
-    attr_accessor :was_moved
-    attr_accessor :container_borrow     # true when value is borrowed from container (map/list/pool access)
-    attr_accessor :needs_mut_ref        # true when GetIndex must emit pointer access (mutation through indexed element)
-    attr_accessor :target_is_list_field # true when value targets a struct/union @list field (skip .items conversion)
-    attr_accessor :needs_heap_create    # true when value must be heap-allocated via create(*T) — @indirect union payload
-    attr_accessor :collection_return    # true when return value is a collection needing escape promotion
-    attr_accessor :slot_size
-    attr_accessor :resource_close_zig   # set by annotator on resource declarations
-    attr_accessor :can_fail             # true when this call node can produce an error (stdlib can_fail, user !T return)
-    attr_accessor :error_kind           # Symbol — one of the 6 kinds (:Transient, :Input, :System, :NotFound, :Permission, :Canceled); nil = unclassified
-    attr_accessor :error_type           # Symbol — specific error name (:LockTimeout, :LockCycle, :Deadlock, ...); nil = unspecified. Narrower than error_kind.
-    attr_accessor :var_used             # true when the variable is read in user code
-    attr_accessor :var_mutated          # true when the variable is reassigned after declaration
-    attr_accessor :symbol               # SymbolEntry — set by annotator for resolved bindings
+    sig { returns(T.nilable(Type)) }
+    def coerced_type_object; @coerced_type_object = T.let(@coerced_type_object, T.nilable(Type)); end
+    sig { returns(T.nilable(Type)) }
+    def type_object; @type_object = T.let(@type_object, T.nilable(Type)); end
+
+    sig { returns(T.untyped) }
+    def zig_pattern; @zig_pattern = T.let(@zig_pattern, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def zig_pattern=(val); @zig_pattern = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def matched_stdlib_def=(val); @matched_stdlib_def = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def stdlib_allocates=(val); @stdlib_allocates = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def mutates_receiver; @mutates_receiver = T.let(@mutates_receiver, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def mutates_receiver=(val); @mutates_receiver = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def was_moved; @was_moved = T.let(@was_moved, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def was_moved=(val); @was_moved = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def container_borrow; @container_borrow = T.let(@container_borrow, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def container_borrow=(val); @container_borrow = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def needs_mut_ref; @needs_mut_ref = T.let(@needs_mut_ref, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def target_is_list_field; @target_is_list_field = T.let(@target_is_list_field, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def target_is_list_field=(val); @target_is_list_field = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def collection_return; @collection_return = T.let(@collection_return, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def collection_return=(val); @collection_return = T.let(val, T.untyped); end
+
+    sig { returns(T.nilable(Integer)) }
+    def slot_size; @slot_size = T.let(@slot_size, T.nilable(Integer)); end
+    sig { params(val: T.nilable(Integer)).returns(T.nilable(Integer)) }
+    def slot_size=(val); @slot_size = T.let(val, T.nilable(Integer)); end
+
+    sig { returns(T.untyped) }
+    def resource_close_zig; @resource_close_zig = T.let(@resource_close_zig, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def resource_close_zig=(val); @resource_close_zig = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def can_fail; @can_fail = T.let(@can_fail, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def can_fail=(val); @can_fail = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def error_kind; @error_kind = T.let(@error_kind, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def error_kind=(val); @error_kind = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def error_type; @error_type = T.let(@error_type, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def error_type=(val); @error_type = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def var_used; @var_used = T.let(@var_used, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def var_used=(val); @var_used = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def var_mutated; @var_mutated = T.let(@var_mutated, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def var_mutated=(val); @var_mutated = T.let(val, T.untyped); end
+
+    sig { returns(T.untyped) }
+    def symbol; @symbol = T.let(@symbol, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def symbol=(val); @symbol = T.let(val, T.untyped); end
 
     # Set full_type. Accepts a Type object (stored directly) or any other
     # value (wrapped in Type.new for backward compatibility).
     sig { params(val: T.untyped).returns(Type) }
     def full_type=(val)
-      @type_object = val.is_a?(Type) ? val : Type.new(val)
+      @type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
+      T.must(@type_object)
     end
 
     # Returns the Type object directly. Callers use type_info for rich access
@@ -214,10 +293,10 @@ module AST
 
     sig { params(val: T.untyped).returns(T.nilable(Type)) }
     def coerced_type=(val)
-      return @coerced_type_object = nil if val.nil?
+      return @coerced_type_object = T.let(nil, T.nilable(Type)) if val.nil?
 
       # Same logic: Wrap raw values, accept Type objects
-      @coerced_type_object = val.is_a?(Type) ? val : Type.new(val)
+      @coerced_type_object = T.let(val.is_a?(Type) ? val : Type.new(val), T.nilable(Type))
     end
 
     sig { returns(T.untyped) }
@@ -237,7 +316,7 @@ module AST
     # @param declared_type [Symbol, nil] The explicitly declared type (or nil/:Any for inference)
     # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
-    sig { params(declared_type: T.untyped).returns(Array) }
+    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
     def coerce!(declared_type)
       # fn_type must not be flattened to its return type — preserve the full Type object.
       return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
@@ -251,7 +330,7 @@ module AST
       return [declared_type, nil] if declared_type == inferred
 
       # Check if coercion is valid
-      error = Type.coerce_error(@type_object, declared_type)
+      error = Type.coerce_error(T.must(@type_object), declared_type)
       return [nil, error] if error
 
       # Valid coercion - set coerced_type and return declared
@@ -272,7 +351,7 @@ module AST
       T.bind(self, T.untyped) rescue nil
       # Calculate slot size
       type_obj = Type.new(final_type)
-      @slot_size = type_obj.slot_size(&schema_lookup)
+      @slot_size = T.let(type_obj.slot_size(&schema_lookup), T.nilable(Integer))
 
       # Determine storage from value's type if this node has a value
       if respond_to?(:value) && value.type_object
@@ -284,7 +363,7 @@ module AST
         storage = :frame if type_obj.list_collection? && storage != :heap
         value.storage = storage if value.respond_to?(:storage=)
       else
-        storage = type_obj.finalize_storage(@slot_size, nil)
+        storage = type_obj.finalize_storage(T.must(@slot_size), nil)
       end
 
       # Determine if value has a sync capability
@@ -395,11 +474,12 @@ module AST
 
     # -- REFACTORED HELPERS --
     # Delegate to the new class
-    sig { returns(Symbol) }
+    sig { returns(T.nilable(Symbol)) }
     def resolved_type
       @type_object&.resolved
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def base_type
       @type_object&.base_type
     end
@@ -417,7 +497,7 @@ module AST
       # other AST node that shares the same Type object. The override is node-local
       # so promote_expr_to_heap! can mark individual call-site nodes as heap without
       # touching the shared type.
-      @storage_override = val
+      @storage_override = T.let(val, T.nilable(Symbol))
     end
 
 
@@ -450,8 +530,10 @@ module AST
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     # Post-#335: the user EXPLICITLY wrote a `RETURNS T` clause (vs
@@ -592,6 +674,7 @@ module AST
     attr_accessor :auto_atomic_op
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
+    extend T::Sig
     include Locatable
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
@@ -602,6 +685,7 @@ module AST
     # the field's emission in MIR::BlockExpr when the field actually emitted
     # any pending allocs. OR_RESCUE's right side is the fallback expression;
     # its allocations must only run when the orelse short-circuits to it.
+    sig { returns(T::Array[T.untyped]) }
     def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
     # Observable Phase 2.2: true on a `|> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
     # whose source is a still-running tense stream — fold terminal is backed by
@@ -621,17 +705,21 @@ module AST
   # monomorphization of the callee).
   CallSiteOverride = Struct.new(:token, :kind, :n, :inner) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
+    extend T::Sig
     include Locatable
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
     attr_accessor :heap_dupe_result # true when this identifier's value must be heap-duped at use site
     attr_accessor :atomic_borrow    # Atomics M1.7: true when sync=:atomic ident is in fn-arg position (skip load wrap)
+    sig { returns(FalseClass) }
     def wildcard?; false end
     def name; self[:name].to_s end
   end
   Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
   ListLit      = Struct.new(:token, :items, :storage) { 
+    extend T::Sig
     include Locatable 
 
+    sig { params(declared_type: T.untyped).returns(T::Array[T.untyped]) }
     def coerce!(declared_type)
       res, error = super(declared_type)
       return [nil, error] if error
@@ -657,8 +745,10 @@ module AST
   end
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies = [then_branch, else_branch].compact
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
@@ -672,15 +762,19 @@ module AST
     include Locatable
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -688,6 +782,7 @@ module AST
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }
   FuncCall     = Struct.new(:token, :name, :args) do
+    extend T::Sig
     include Locatable
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
@@ -710,11 +805,13 @@ module AST
                                      # original `!T` is stashed here for OR-RESCUE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
+    sig { returns(FalseClass) }
     def wildcard?; false end
     def name; self[:name].to_s end
   end
 
   MethodCall   = Struct.new(:token, :object, :name, :args) do
+    extend T::Sig
     include Locatable
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
@@ -723,10 +820,12 @@ module AST
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
+    sig { returns(FalseClass) }
     def wildcard?; false end
     def name; self[:name].to_s end
   end
   GetField     = Struct.new(:token, :target, :field) do
+    extend T::Sig
     include Locatable
     # Set by visit_assignment_field before visiting this node so
     # downstream checks (e.g. CAP_FIELD_NEEDS_WITH_EXCLUSIVE for
@@ -734,11 +833,15 @@ module AST
     # assignment — writes go through visit_assignment_field's
     # auto-lock path instead.
     attr_accessor :is_assignment_lhs
+    sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
+    sig { returns(T.untyped) }
     def name; target.name end
   end
   GetIndex     = Struct.new(:token, :target, :index) do
+    extend T::Sig
     include Locatable
+    sig { returns(T.untyped) }
     def name; target.name end
   end
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
@@ -763,8 +866,10 @@ module AST
   #   { action: :raise | :pass | :exit | :block, message: <string|nil>, body: <Array|nil>, retries: <Integer|nil> }
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
@@ -870,7 +975,9 @@ module AST
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) do
+    extend T::Sig
     include Locatable
+    sig { returns(T.untyped) }
     def name; target.respond_to?(:name) ? target.name : nil end
   end
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
@@ -989,8 +1096,10 @@ module AST
   # pinned=true      → dispatch to least-loaded scheduler (spawnBest) instead of current (submitSpawn)
   # stack_size nil   → defaults to :standard (16 KB total: 12 KB stack + 4 KB arena)
   DoBlock           = Struct.new(:token, :branches) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies = branches.filter_map { |b| b[:body] }
   end
 
@@ -999,8 +1108,10 @@ module AST
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode, :can_smash) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :return_provenance # :heap when BG body calls a returns_promoted function
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
@@ -1032,8 +1143,10 @@ module AST
   # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
@@ -1064,8 +1177,10 @@ module AST
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies
       bodies = cases.filter_map { |c| c[:body] }
       bodies << default_case if default_case
@@ -1080,16 +1195,20 @@ module AST
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :tight
   end
 
   # ForEach: FOR var IN collection DO body END
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops, :is_mutable) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
@@ -1099,8 +1218,10 @@ module AST
 
   # TEST name DO setup... WHEN... END
   TestBlock = Struct.new(:token, :name, :setup, :whens) do
+    extend T::Sig
     include Locatable
     include HasBodies
+    sig { returns(T::Array[T.untyped]) }
     def child_bodies
       bodies = []
       bodies << setup if setup
@@ -1189,7 +1310,7 @@ module AST
                      :UInt8, :UInt16, :UInt32, :UInt64,
                      :Float32]
 
-  PRECEDENCE_MAP = {
+  PRECEDENCE_MAP = T.let({
     8 => { ops: ['**'], assoc: :right },
     7 => { ops: ['*', '/', 'MOD'], assoc: :left },
     6 => { ops: ['+', '-'], assoc: :left },
@@ -1199,10 +1320,10 @@ module AST
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
     1 => { ops: ['OR', '|>', 'AS'], assoc: :left }
-  }
-  MAX_PRECEDENCE = PRECEDENCE_MAP.keys.max
+  }, T::Hash[T.untyped, T.untyped])
+  MAX_PRECEDENCE = T.let(PRECEDENCE_MAP.keys.max, Integer)
 
-  OP_CODE_SENDABLE_SYMS = {
+  OP_CODE_SENDABLE_SYMS = T.let({
     :SUB => :-,
     :MUL => :*,
     :DIV => :/,
@@ -1215,14 +1336,14 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
-  }
+  }, T::Hash[T.untyped, T.untyped])
 
   # Canonical definitions are in Type class. These aliases maintain backward compat.
   NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
   BOOL_RESULT_OPS = Type::BOOL_RESULT_OPS
 
   # TODO: Make these symbols
-  OP_TO_OP_CODE = {
+  OP_TO_OP_CODE = T.let({
     '+' => :ADD,
     '-' => :SUB,
     '*' => :MUL,
@@ -1247,7 +1368,7 @@ module AST
     '!+' => :CHECK_ADD,
     '!-' => :CHECK_SUB,
     '!*' => :CHECK_MUL,
-  }
+  }, T::Hash[T.untyped, T.untyped])
 
   CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
 end
@@ -1274,8 +1395,10 @@ module MIR
   # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
   Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
                      :resource_close_zig, :source_node) do
+    extend T::Sig
     include AST::Locatable
     attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
+    sig { returns(TrueClass) }
     def needs_cleanup; true; end
   end
 
