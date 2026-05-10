@@ -124,8 +124,12 @@ class SemanticAnnotator
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
-    @og = OwnershipGraph.new
+    @og = T.let(OwnershipGraph.new, T.untyped)
     @og_scope_depth = T.let(0, Integer)
+    @synthetic_fns = T.let([], T::Array[T.untyped])
+    @branch_terminated = T.let(false, T::Boolean)
+    @snapshot_txn_violations = T.let(nil, T.nilable(T::Array[T.untyped]))
+    @stream_yield_types = T.let(nil, T.nilable(T::Array[T.untyped]))
     effects_init!
     capability_audit_init!
     setup_builtins
@@ -5512,7 +5516,7 @@ private
     end
     visit(node.expr)
     node.full_type = node.expr.full_type || :Void
-    @stream_yield_types << Type.new(node.full_type)
+    T.must(@stream_yield_types) << Type.new(node.full_type)
     record_effect(EffectTracker::SUSPENDS)
   end
 
