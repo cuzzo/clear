@@ -1168,7 +1168,15 @@ module NilKill
         Infer.new([]).run
         evidence = Store.read
         @z3_solver = init_z3_solver(evidence)
-        high_actions = evidence["actions"].select { |action| action["confidence"] == HIGH && !@skipped.include?(fingerprint(action)) && !permanently_skipped?(action) }
+        emit_z3_inferred_actions(@z3_solver, evidence) if @z3_solver
+        high_actions = evidence["actions"].select do |action|
+          next false unless action["confidence"] == HIGH
+          next false if @skipped.include?(fingerprint(action))
+          next false if permanently_skipped?(action)
+          # A4: block remove_dead_safe_nav actions whose receiver might be nil
+          next false if action["kind"] == "remove_dead_safe_nav" && @z3_solver && !@z3_solver.provably_dead_safe_nav?(action)
+          true
+        end
         high = high_actions.size
         puts "high-confidence actions: #{high}"
         break if high.zero?
@@ -1186,6 +1194,17 @@ module NilKill
     rescue StandardError => e
       warn "nil-kill: Z3 solver init failed: #{e.message}"
       nil
+    end
+
+    # A3: run static inference for unobserved params, write to z3-inferred.json,
+    # and print a one-line summary. Actions are REVIEW confidence -- not auto-applied.
+    def emit_z3_inferred_actions(solver, evidence)
+      actions = solver.infer_unobserved_params(evidence)
+      out = File.join(TMP_DIR, "z3-inferred.json")
+      File.write(out, JSON.pretty_generate(actions))
+      puts "Z3 A3: #{actions.size} static param inference(s) written to #{NilKill.rel(out)}"
+    rescue StandardError => e
+      warn "nil-kill: Z3 A3 inference failed: #{e.message}"
     end
 
     def apply_verified(actions)

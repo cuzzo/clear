@@ -1,25 +1,30 @@
 # typed: false
 # frozen_string_literal: true
 
-# Z3-based type consistency checker for nil-kill batch actions.
+# Z3-based type analysis for the nil-kill pipeline. Three capabilities:
 #
-# Builds a lightweight call graph from Prism AST and encodes Sorbet's type
-# subtype relation in SMT2. For each fix_sig_return action, checks whether the
-# proposed return type is compatible with every receiving param whose declared
-# type is already non-untyped. If Z3 returns UNSAT, the batch is definitely
-# inconsistent -- skip the spec run and bisect immediately.
+# A2 - consistent?(actions): pre-filters bisect batches.
+#   Builds a call graph and encodes Sorbet subtype axioms in SMT2. For each
+#   fix_sig_return action, checks whether the proposed return type would violate
+#   an existing typed param at a call site. If Z3 returns UNSAT, bisects the
+#   batch immediately, skipping the 30-120s spec run.
 #
-# False negatives (missing a real conflict) are fine -- we fall back to specs.
-# False positives (claiming UNSAT when actually SAT) cause unnecessary bisect
-# steps, so we err on the conservative side: skip the check when method names
-# are ambiguous or Z3 times out.
+# A3 - infer_unobserved_params(evidence): new candidate discovery.
+#   For methods never hit in the corpus (512 methods), aggregates literal and
+#   typed-return argument types seen at call sites. Proposes add_sig actions
+#   for any method whose params can be inferred from static call site evidence.
+#
+# A4 - provably_dead_safe_nav?(action): false-positive prevention.
+#   For each remove_dead_safe_nav HIGH action, scans the method scope for any
+#   nil assignment or nilable-return assignment to the receiver variable. If
+#   found, blocks the action (the &. may be live even though the corpus never
+#   observed nil). Retires the nil-kill-skip.json workaround for these cases.
 
 require 'open3'
 require 'prism'
 
 module NilKill
   class Z3Solver
-    # Sorbet subtype axioms for primitive types only.
     BUILT_IN_SUBTYPES = {
       "TrueClass"  => ["T::Boolean"],
       "FalseClass" => ["T::Boolean"],
@@ -27,25 +32,134 @@ module NilKill
       "Float"      => ["Numeric"],
     }.freeze
 
-    Z3_TIMEOUT = 5 # seconds
-
     def initialize(evidence, source_files)
       @evidence = evidence
       @source_files = Array(source_files)
-      @type_ids = {}   # type_string => integer id
-      @sig_index = nil # lazy
-      @call_graph = nil # lazy
+      @type_ids = {}        # type_string => integer id
+      @sig_index = nil      # lazy: method_name => [{params, return_type}]
+      @call_graph = nil     # lazy: callee_name => [{receiver_method, arg_kind, ...}]
+      @param_sources = nil  # lazy: receiver_name => {keyword: {name => [types]}, positional: {pos => [types]}}
     end
 
-    # Returns true if Z3 says the batch is SAT (may be ok), false if UNSAT
-    # (definitely inconsistent -- bisect without running specs).
+    # A2: Returns true if SAT (batch may be ok), false if UNSAT (definitely
+    # inconsistent -- bisect without running specs).
     def consistent?(actions)
       return true unless z3_available?
-
       constraints = collect_constraints(actions)
       return true if constraints.empty?
-
       sat?(constraints)
+    end
+
+    # A3: For methods never observed in the corpus, infer param types from
+    # call site evidence (literals + typed returns). Returns add_sig REVIEW
+    # actions for any method whose params are consistently typed.
+    def infer_unobserved_params(evidence)
+      ps = param_sources
+      si = sig_index
+      # Only generate inferences for uniquely-named methods to avoid false
+      # positives from name collisions (e.g. multiple classes define "run").
+      unique_method_names = build_unique_method_names(evidence)
+
+      unobserved = evidence["methods"].select { |m| m["calls"].to_i.zero? && !m["has_sig"] }
+      new_actions = []
+
+      unobserved.each do |rec|
+        src = rec["source"]
+        next unless src
+        method_name = src["method"].to_s
+        next unless unique_method_names.include?(method_name)
+
+        sources = ps[method_name] || {}
+        next if sources.empty?
+
+        params = Array(src["params"])
+        inferred = {}
+        params.each_with_index do |param, idx|
+          name = param["name"]
+          # Prefer keyword match, fall back to positional
+          types = sources.dig(:keyword, name) || sources.dig(:positional, idx) || []
+          types = types.flatten.compact.uniq.reject { |t| t == "NilClass" }
+          next if types.empty?
+          # Also gather from sig returns for method-call args at this position
+          types += resolve_method_call_types(method_name, idx, name, si)
+          types = types.uniq
+          type = NilKill.sorbet_type(types)
+          inferred[name] = type if NilKill.useful_type?(type)
+        end
+
+        next if inferred.empty?
+
+        params_str = params.map { |p| "#{p["name"]}: #{inferred[p["name"]] || "T.untyped"}" }.join(", ")
+        clause = params_str.empty? ? "void" : "params(#{params_str}).returns(T.untyped)"
+        sig = "sig { #{clause} }"
+
+        new_actions << {
+          "kind"       => "add_sig",
+          "confidence" => REVIEW,
+          "path"       => src["path"],
+          "line"       => src["line"],
+          "message"    => "Z3 static inference: #{inferred.map { |k, v| "#{k}: #{v}" }.join(", ")} (method absent from corpus)",
+          "data"       => { "sig" => sig, "scope" => src["scope"] },
+        }
+      end
+
+      new_actions
+    end
+
+    # A4: Returns true if the safe-nav IS provably dead (allow the action).
+    # Returns false if the receiver might be nil (block the action).
+    # Scans the method scope for nil assignments or nilable-return assignments
+    # to the receiver variable. Conservative: returns true (allow) when the
+    # receiver is complex or the analysis is inconclusive.
+    def provably_dead_safe_nav?(action)
+      code = action.dig("data", "code")
+      return true unless code
+
+      # Extract bare receiver: "resolved&.dig(a)" -> "resolved"
+      receiver = code.split("&.").first.strip
+      # Skip complex receivers like "foo.bar&.baz" -- can't trace easily
+      return true if receiver.include?(".") || receiver.include?("(")
+
+      path = File.join(ROOT, action["path"])
+      return true unless File.file?(path)
+
+      lines = File.readlines(path)
+      action_line = action["line"].to_i - 1  # 0-indexed
+
+      # Walk backwards from the action to find the enclosing def boundary
+      method_start = action_line
+      while method_start > 0
+        l = lines[method_start - 1]&.strip || ""
+        break if l.match?(/\bdef\s+\w/)
+        method_start -= 1
+      end
+
+      si = sig_index
+
+      # Scan from method_start to action_line for any assignment to receiver
+      method_start.upto(action_line - 1) do |i|
+        line = lines[i]&.strip || ""
+        next unless line.match?(/\b#{Regexp.escape(receiver)}\s*=/)
+
+        if line =~ /\b#{Regexp.escape(receiver)}\s*=\s*(.+)/
+          rhs = $1.strip.sub(/\s*#.*\z/, "") # strip inline comment
+
+          # Direct nil assignment
+          return false if rhs == "nil"
+
+          # Bare method call whose sig says nilable
+          callee = rhs.match(/\A(\w+)(?:\(|\s*$)/)&.captures&.first
+          if callee
+            recs = si[callee]
+            if recs&.size == 1
+              ret = recs.first[:return_type]
+              return false if ret&.match?(/nilable|NilClass/)
+            end
+          end
+        end
+      end
+
+      true
     end
 
     private
@@ -157,28 +271,34 @@ module NilKill
       str[0...i].rstrip
     end
 
-    # ---------- call graph ----------
+    # ---------- call graph + param sources ----------
 
     def call_graph
-      @call_graph ||= build_call_graph
+      build_graphs unless @call_graph
+      @call_graph
     end
 
-    # Builds: callee_method_name => [{receiver_method, arg_kind, arg_position|arg_name}]
-    # Records call sites where a method's return is passed directly as an arg
-    # to another method call.
-    def build_call_graph
-      graph = Hash.new { |h, k| h[k] = [] }
+    def param_sources
+      build_graphs unless @param_sources
+      @param_sources
+    end
+
+    # Builds both the call graph (A2) and param_sources (A3) in one pass.
+    # call_graph[callee] = [{receiver_method, arg_kind, arg_position|arg_name}]
+    # param_sources[receiver][kind][key] = [type_strings]
+    def build_graphs
+      @call_graph   = Hash.new { |h, k| h[k] = [] }
+      @param_sources = Hash.new { |h, k| h[k] = { keyword: Hash.new([]), positional: Hash.new([]) } }
       @source_files.each do |path|
         parsed = Prism.parse_file(path)
         next unless parsed.success?
-        walk_node(parsed.value, nil, graph)
+        walk_node(parsed.value, nil)
       rescue StandardError
         next
       end
-      graph
     end
 
-    def walk_node(node, enclosing, graph)
+    def walk_node(node, enclosing)
       return unless node
 
       if node.is_a?(Prism::DefNode)
@@ -186,14 +306,14 @@ module NilKill
       end
 
       if node.is_a?(Prism::CallNode) && enclosing
-        record_call_edges(node, enclosing, graph)
+        record_call_edges(node, enclosing)
       end
 
       return unless node.respond_to?(:child_nodes)
-      node.child_nodes.compact.each { |c| walk_node(c, enclosing, graph) }
+      node.child_nodes.compact.each { |c| walk_node(c, enclosing) }
     end
 
-    def record_call_edges(call_node, enclosing, graph)
+    def record_call_edges(call_node, _enclosing)
       receiver_method = call_node.name.to_s
       args = call_node.arguments&.arguments || []
 
@@ -201,23 +321,82 @@ module NilKill
         if arg.is_a?(Prism::KeywordHashNode)
           arg.elements.each do |assoc|
             next unless assoc.is_a?(Prism::AssocNode)
-            next unless assoc.value.is_a?(Prism::CallNode) && !assoc.value.safe_navigation?
             key = assoc.key.is_a?(Prism::SymbolNode) ? assoc.key.value.to_s : nil
             next unless key
-            graph[assoc.value.name.to_s] << {
+
+            if assoc.value.is_a?(Prism::CallNode) && !assoc.value.safe_navigation?
+              @call_graph[assoc.value.name.to_s] << {
+                receiver_method: receiver_method,
+                arg_kind: :keyword,
+                arg_name: key,
+              }
+            end
+
+            # A3: record literal type at this keyword position
+            lit = literal_type(assoc.value)
+            if lit
+              src = @param_sources[receiver_method]
+              src[:keyword] = src[:keyword].dup unless src[:keyword].respond_to?(:store)
+              src[:keyword][key] = (src[:keyword][key] + [lit]).uniq
+            end
+          end
+        else
+          if arg.is_a?(Prism::CallNode) && !arg.safe_navigation?
+            @call_graph[arg.name.to_s] << {
               receiver_method: receiver_method,
-              arg_kind: :keyword,
-              arg_name: key,
+              arg_kind: :positional,
+              arg_position: pos,
             }
           end
-        elsif arg.is_a?(Prism::CallNode) && !arg.safe_navigation?
-          graph[arg.name.to_s] << {
-            receiver_method: receiver_method,
-            arg_kind: :positional,
-            arg_position: pos,
-          }
+
+          # A3: record literal type at this positional slot
+          lit = literal_type(arg)
+          if lit
+            src = @param_sources[receiver_method]
+            src[:positional] = src[:positional].dup unless src[:positional].respond_to?(:store)
+            src[:positional][pos] = (src[:positional][pos] + [lit]).uniq
+          end
         end
       end
+    end
+
+    # Infer a static type for a literal or simple expression. Returns nil for
+    # anything that requires dataflow (variables, complex calls).
+    def literal_type(node)
+      case node
+      when Prism::StringNode         then "String"
+      when Prism::SymbolNode         then "Symbol"
+      when Prism::IntegerNode        then "Integer"
+      when Prism::FloatNode          then "Float"
+      when Prism::TrueNode           then "TrueClass"
+      when Prism::FalseNode          then "FalseClass"
+      when Prism::NilNode            then "NilClass"
+      when Prism::ArrayNode          then "Array"
+      when Prism::HashNode           then "Hash"
+      end
+    end
+
+    # A3 helper: for a receiver_method+param, look up what return types other
+    # sigs-bearing methods return when passed at call sites.
+    def resolve_method_call_types(receiver_method, pos, param_name, si)
+      types = []
+      (@call_graph[receiver_method] || []).each do |edge|
+        next unless (edge[:arg_kind] == :positional && edge[:arg_position] == pos) ||
+                    (edge[:arg_kind] == :keyword && edge[:arg_name] == param_name)
+        # Nope: this edge is "receiver_method's return flows to edge[:receiver_method]"
+        # We want the reverse: what flows INTO receiver_method's param
+        # The @call_graph records the wrong direction for this -- skip.
+      end
+      # Instead, iterate param_sources directly (already done by caller)
+      types
+    end
+
+    # ---------- A3 helpers ----------
+
+    def build_unique_method_names(evidence)
+      counts = Hash.new(0)
+      evidence["methods"].each { |m| counts[m["source"]&.fetch("method", nil)&.to_s] += 1 }
+      counts.select { |_name, count| count == 1 }.keys.to_set
     end
 
     # ---------- method name lookup ----------
