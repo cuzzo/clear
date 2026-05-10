@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require_relative "diagnostic_registry"
 
 # DiagnosticExamples — pulls canonical bad/good CLEAR snippets from
@@ -38,29 +38,34 @@ require_relative "diagnostic_registry"
 # are still plain RSpec; the convention is comment annotations + a
 # describe/it shape that the loader can extract verbatim.
 module DiagnosticExamples
+  extend T::Sig
   module_function
 
   # Default search path: every spec file the convention might live in.
   # New spec files using the convention should be added here.
-  DEFAULT_SPEC_FILES = [
+  DEFAULT_SPEC_FILES = T.let([
     File.expand_path("../../../spec/error_emission_coverage_spec.rb", __FILE__),
     File.expand_path("../../../spec/capabilities_spec.rb", __FILE__),
     File.expand_path("../../../spec/snapshot_annotator_spec.rb", __FILE__),
     File.expand_path("../../../spec/with_view_spec.rb", __FILE__),
     File.expand_path("../../../spec/with_guard_spec.rb", __FILE__),
     File.expand_path("../../../spec/atomic_ptr_bare_mutation_spec.rb", __FILE__),
-  ].freeze
+  ].freeze, T::Array[String])
 
   # Public entry point. Parses each spec file once, memoises results.
   # Returns a hash { CODE_SYM => { bad:, fix:, good:, file:, line: } }.
+  sig { returns(T.untyped) }
   def all
+    @all = T.let(@all, T.untyped)
     @all ||= load!
   end
 
+  sig { params(code: T.untyped).returns(T.untyped) }
   def lookup(code)
     all[code.to_sym]
   end
 
+  sig { params(spec_files: T.untyped).returns(T.untyped) }
   def load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
@@ -72,6 +77,7 @@ module DiagnosticExamples
 
   # ---- internals ----
 
+  sig { params(path: T.untyped, out: T.untyped).returns(T.untyped) }
   def scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)
@@ -120,6 +126,7 @@ module DiagnosticExamples
   # Walk forward from `start_idx` (line of `describe ... do`) and find
   # the `end` line at the same indentation level. Returns the index or
   # nil if the file is malformed.
+  sig { params(lines: T.untyped, start_idx: T.untyped, indent: T.untyped).returns(T.untyped) }
   def find_block_end(lines, start_idx, indent)
     depth = 1
     k = start_idx + 1
@@ -143,6 +150,7 @@ module DiagnosticExamples
   # body satisfies `expecting_raise` (true == contains `raise_error`,
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
+  sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.untyped) }
   def extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/
@@ -162,14 +170,15 @@ module DiagnosticExamples
   # The heredoc body starts on the line AFTER the `<<~CLEAR` (or
   # legacy `<<~FLUX`) marker and ends at the next line whose only
   # non-whitespace is the matching marker name.
+  sig { params(body: T.untyped).returns(T.untyped) }
   def extract_heredoc(body)
     return nil unless body =~ /<<~(CLEAR|FLUX)\b/
-    marker = T.must($~)[1]
-    after = T.must($~).post_match
+    marker = $~[1]
+    after = $~.post_match
     # Skip the rest of the marker line (e.g. ` ) }.to raise_error(...)`).
     nl = after.index("\n")
     return nil unless nl
-    after_lines = T.must(after[(nl + 1)..]).lines
+    after_lines = after[(nl + 1)..].lines
     end_idx = after_lines.index { |l| l =~ /^\s*#{marker}\s*$/ }
     return nil unless end_idx
     raw_lines = after_lines[0...end_idx]

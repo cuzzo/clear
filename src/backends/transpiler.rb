@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 #! /usr/bin/env ruby
 
 require 'bundler/setup' # so `bundle exec` not needed
@@ -32,12 +32,19 @@ class ZigTranspiler
 
   sig { params(importer: T.nilable(ModuleImporter), source_dir: T.nilable(String)).void }
   def initialize(importer: nil, source_dir: nil)
-    @importer   = importer
-    @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
+    @importer            = T.let(importer, T.nilable(ModuleImporter))
+    @source_dir          = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
+    @test_mode           = T.let(false, T::Boolean)
+    @default_stack_size  = T.let(nil, T.nilable(String))
+    @struct_schemas      = T.let(nil, T.untyped)
+    @union_schemas       = T.let(nil, T.untyped)
+    @enum_schemas        = T.let(nil, T.untyped)
+    @module_type_defs    = T.let(nil, T.untyped)
   end
 
   private
 
+  sig { params(node: T.untyped, result: T.untyped).returns(T.untyped) }
   def collect_bg_blocks(node, result)
     case node
     when Array
@@ -54,7 +61,7 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(Hash), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[T.untyped, T.untyped]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
@@ -64,7 +71,7 @@ class ZigTranspiler
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash, use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(Hash), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T.nilable(T::Hash[T.untyped, T.untyped]), main_tier: T.nilable(Symbol), default_stack: T.nilable(String)).returns(T.nilable(String)) }
   def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil, default_stack: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
@@ -144,10 +151,10 @@ class ZigTranspiler
     ZIG
   end
 
-  MAIN_STACK_VARIANTS = {
+  MAIN_STACK_VARIANTS = T.let({
     micro: "Micro", standard: "Standard", large: "Large", xl: "Xl",
     service: "Huge", unbounded: "Huge"
-  }.freeze
+  }.freeze, T::Hash[Symbol, String])
 
   sig { params(main_fn: T.nilable(AST::FunctionDef), override: T.untyped).returns(String) }
   def main_stack_variant(main_fn, override: nil)
@@ -157,7 +164,7 @@ class ZigTranspiler
 
   # Module entry point: transpile code as a Zig module (--module flag).
   # Emits @import("cheat_runtime") instead of runtime-header.zig, no runtime footer.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: Hash).returns(T.nilable(String)) }
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped]).returns(T.nilable(String)) }
   def transpile_as_module(cheat_code, source_dir: @source_dir, pkg_paths: {})
     @source_dir = File.expand_path(source_dir)
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)

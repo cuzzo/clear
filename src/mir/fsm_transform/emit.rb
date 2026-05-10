@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform/emit.rb -- state-machine emitter.
 #
 # Given a segment graph + liveness output + lowering context, builds
@@ -19,6 +19,7 @@ require_relative "../fsm_wrapper_emitter"
 
 module FsmTransform
   module Emit
+    extend T::Sig
     module_function
 
     # ================================================================
@@ -93,6 +94,7 @@ module FsmTransform
     #     descriptor's ctx_field_decls; member_fns = one per segment;
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
+    sig { params(ctx: T.untyped, segment_specs: T.untyped, promoted_field_decls: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       T.bind(self, T.untyped) rescue nil
       return nil if segment_specs.nil? || segment_specs.empty?
@@ -199,6 +201,7 @@ module FsmTransform
     # tails consult the descriptor for the kind-specific tail variant
     # (Yield / RegisterYield); non-suspend tails (Goto / LoopBack /
     # CondBranch / Done) map to the structural tail variants directly.
+    sig { params(spec: T.untyped, k: T.untyped, all_specs: T.untyped).returns(T.untyped) }
     def build_dispatch_tail(spec, k, all_specs)
       T.bind(self, T.untyped) rescue nil
       tail = spec[:tail]
@@ -285,6 +288,7 @@ module FsmTransform
     #
     # `liveness` is the Liveness analysis result; promoted_field_decls
     # are derived from cross_segment_vars.
+    sig { params(ctx: T.untyped, segments: T.untyped, liveness: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def build_recursive(ctx, segments, liveness, lowering)
       T.bind(self, T.untyped) rescue nil
       return nil if segments.nil? || segments.empty?
@@ -637,6 +641,7 @@ module FsmTransform
     # not Pass-4 emit defers; we don't see those in segment Zig
     # today, but the regex below requires the receiver to be a
     # bare identifier so it's robust against that case.
+    sig { params(seg_codes: T.untyped, segments: T.untyped, liveness: T.untyped, captured: T.untyped, conservative_promoted: T.untyped).returns(T.untyped) }
     def check_fsm_cleanup_invariant!(seg_codes, segments, liveness,
                                      captured, conservative_promoted)
       T.bind(self, T.untyped) rescue nil
@@ -684,6 +689,7 @@ module FsmTransform
     #
     # Returns nil on metadata / error-arm failure (caller falls
     # back to stackful).
+    sig { params(spec: T.untyped, ctx: T.untyped, capture_map: T.untyped, lowering: T.untyped, base_idx: T.untyped).returns(T.untyped) }
     def expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
       T.bind(self, T.untyped) rescue nil
       tail      = spec[:tail]
@@ -817,6 +823,7 @@ module FsmTransform
     # Resolve a SuspendDescriptor for a segment's suspend tail. Uses
     # SuspendResolvers (which lowers under the surrounding fiber
     # capture-map).
+    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, capture_map: T.untyped, sp_idx: T.untyped).returns(T.untyped) }
     def build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       tail = seg.tail
@@ -847,6 +854,7 @@ module FsmTransform
     # encountered. Returns { seg.index => sp_N }. Suspends that are
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
+    sig { params(segments: T.untyped).returns(T.untyped) }
     def compute_sp_indices(segments)
       T.bind(self, T.untyped) rescue nil
       out = {}
@@ -886,6 +894,7 @@ module FsmTransform
 
     # Shared spawn/init/break setup. Identical across all FSM
     # body shapes.
+    sig { params(ctx: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def build_spawn_setup(ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       is_local_pin = (ctx[:pin_mode] == true || ctx[:pin_mode] == :local)
@@ -928,6 +937,7 @@ module FsmTransform
       )
     end
 
+    sig { params(dispatch: T.untyped).returns(T.untyped) }
     def profile_dispatch_id(dispatch)
       T.bind(self, T.untyped) rescue nil
       case dispatch
@@ -938,6 +948,7 @@ module FsmTransform
       end
     end
 
+    sig { params(ctx: T.untyped, dispatch: T.untyped, form: T.untyped).returns(T.untyped) }
     def bg_profile_site_comment(ctx, dispatch, form)
       T.bind(self, T.untyped) rescue nil
       "// CLEAR_PROFILE_TASK_SITE id=#{ctx[:profile_site_id]} kind=BG line=#{ctx[:profile_line]} column=#{ctx[:profile_column]} dispatch=#{dispatch} form=#{form}"

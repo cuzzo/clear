@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Typed schemas for declared types stored in Scope.
 #
 # Replaces the hash-as-struct pattern where every type's schema was a
@@ -23,7 +23,7 @@ module Schemas
       extend T::Sig
 
     attr_reader :variants, :visibility
-    sig { params(variants: Set, visibility: Symbol).void }
+    sig { params(variants: T.untyped, visibility: Symbol).void }
     def initialize(variants:, visibility: :package)
       @variants = variants
       @visibility = visibility
@@ -37,15 +37,17 @@ module Schemas
   # and EXTERN STRUCT ... CLOSE forms, which can carry generic type params,
   # an extern module name, and an AS alias.
   class ResourceSchema
+    extend T::Sig
     attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility
+    sig { params(close_zig: T.untyped, static_methods: T.untyped, fields: T.untyped, type_params: T.untyped, extern_module: T.untyped, as_type: T.untyped, visibility: Symbol).void }
     def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package)
-      @close_zig = close_zig
-      @static_methods = static_methods
-      @fields = fields
-      @type_params = type_params
-      @extern_module = extern_module
-      @as_type = as_type
-      @visibility = visibility
+      @close_zig       = T.let(close_zig, T.untyped)
+      @static_methods  = T.let(static_methods, T.untyped)
+      @fields          = T.let(fields, T.untyped)
+      @type_params     = T.let(type_params, T.untyped)
+      @extern_module   = T.let(extern_module, T.untyped)
+      @as_type         = T.let(as_type, T.untyped)
+      @visibility      = T.let(visibility, Symbol)
       freeze
     end
   end
@@ -60,7 +62,7 @@ module Schemas
       extend T::Sig
 
     attr_reader :variants, :type_params, :visibility
-    sig { params(variants: Hash, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
+    sig { params(variants: T.untyped, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
     def initialize(variants:, type_params: nil, visibility: :package)
       @variants = variants
       @type_params = type_params
@@ -78,7 +80,7 @@ module Schemas
       extend T::Sig
 
     attr_reader :fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: Hash, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: Hash, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    sig { params(fields: T.untyped, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: T.untyped, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
     def initialize(fields: {}, field_defaults: nil, borrowed_fields: nil, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = fields
       @field_defaults = field_defaults
@@ -119,7 +121,7 @@ module Schemas
     )
   end
 
-  sig { params(schema: T.nilable(Hash)).returns(T.nilable(Schemas::UnionSchema)) }
+  sig { params(schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(Schemas::UnionSchema)) }
   def self.as_union_schema(schema)
     return schema if schema.is_a?(UnionSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :union
@@ -130,7 +132,7 @@ module Schemas
     )
   end
 
-  sig { params(schema: T.nilable(Hash)).returns(T.untyped) }
+  sig { params(schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.untyped) }
   def self.as_resource_schema(schema)
     return schema if schema.is_a?(ResourceSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :resource

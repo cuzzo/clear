@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # frozen_string_literal: true
 
 # Phase 3 compile-time correctness checks for concurrent CLEAR programs.
@@ -22,12 +22,14 @@
 # own diagnostics). Nodes inside lambdas / nested function defs are
 # similarly ignored — they're separate scopes.
 module ConcurrencyChecks
+  extend T::Sig
   module_function
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
   # type appears here participate in the rank-DAG protocol and are
   # exempt from P3.4 (the existing rank-cycle analysis owns ordering).
+  sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
   def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
     fn_nodes.each_value do |fn|
       next unless fn&.body
@@ -42,6 +44,7 @@ module ConcurrencyChecks
   # this WITH body. The yield property itself is read from the existing
   # annotator-stamped effect set (fn.effects, populated by record_effect
   # at visit_BgBlock / visit_NextExpr and propagated by compute_effects!).
+  sig { params(fn: T.untyped, fn_nodes: T.untyped, error_handler: T.untyped).returns(T.untyped) }
   def check_hold_across_yield!(fn, fn_nodes, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|
       walk_scope_no_nested_with(scope) do |node|
@@ -80,8 +83,9 @@ module ConcurrencyChecks
   # variants (BORROWED, RESTRICT) don't hold a lock; nesting them is
   # safe. Same-binding nesting is permitted (still useful for re-entry
   # checks; reentrant detection in P3.5 covers the dangerous case).
-  LOCK_HOLDING_CAPABILITIES = %i[EXCLUSIVE write_locked_read infer].to_set.freeze
+  LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
 
+  sig { params(fn: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
   def check_naked_nested_with!(fn, error_handler, lock_ranks = {})
     walk_with_blocks(fn.body) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
@@ -120,6 +124,7 @@ module ConcurrencyChecks
   # @writeLocked(rank: N) annotation. The pre-existing rank-DAG check
   # owns ordering correctness for ranked locks; P3.4 stays out of its way.
   # `lock_ranks` is the annotator-built type-rank registry.
+  sig { params(with_block: T.untyped, lock_ranks: T.untyped).returns(T::Boolean) }
   def any_lock_rank?(with_block, lock_ranks)
     return false if lock_ranks.empty?
     (with_block.capabilities || []).any? do |cap|
@@ -131,6 +136,7 @@ module ConcurrencyChecks
 
   # Names of bindings that the WithBlock acquires a LOCK on (vs.
   # borrow-only captures).
+  sig { params(with_block: T.untyped).returns(T.untyped) }
   def lock_holding_names(with_block)
     out = Set.new
     (with_block.capabilities || []).each do |cap|
@@ -144,6 +150,7 @@ module ConcurrencyChecks
   # P3.5: compile-time reentrant lock detection. For each WITH on
   # parameter `p`, every call inside whose callee has REQUIRES naming a
   # parameter aliasing `p` reacquires `p`'s lock.
+  sig { params(fn: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
   def check_reentrant!(fn, sig_lookup, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|
       held_params = collect_held_params(with_block, fn)
@@ -179,7 +186,8 @@ module ConcurrencyChecks
   # for in-scope statements. The scope is:
   #   - the WithBlock's body (legacy single-form), or
   #   - each arm's body (MATCH form). For MATCH, yields one tuple per arm.
-  def walk_with_blocks(body)
+  sig { params(body: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def walk_with_blocks(body, &blk)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::WithBlock)
       if node.arms
@@ -192,7 +200,8 @@ module ConcurrencyChecks
 
   # Walk a WithBlock's scope. Descend into IF/WHILE/FOR/ etc., but stop
   # at nested WithBlocks (they own their own checks) and lambdas.
-  def walk_scope_no_nested_with(stmts)
+  sig { params(stmts: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def walk_scope_no_nested_with(stmts, &blk)
     stack = stmts.is_a?(Array) ? stmts.dup : [stmts]
     until stack.empty?
       node = stack.pop
@@ -214,13 +223,15 @@ module ConcurrencyChecks
 
   # Find nested WithBlocks within a scope (no recursion into them; we
   # only care about the topmost nested one per branch).
-  def walk_scope_for_nested_with(stmts)
+  sig { params(stmts: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def walk_scope_for_nested_with(stmts, &blk)
     walk_scope_no_nested_with(stmts) do |node|
       yield(node) if node.is_a?(AST::WithBlock)
     end
   end
 
   # Names of function parameters held by a WithBlock's bindings.
+  sig { params(with_block: T.untyped, fn: T.untyped).returns(T.untyped) }
   def collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p[:name].to_s }.to_set
@@ -232,6 +243,7 @@ module ConcurrencyChecks
     out
   end
 
+  sig { params(var_node: T.untyped).returns(T.untyped) }
   def cap_var_name(var_node)
     var_node.is_a?(AST::Identifier) ? var_node.name : nil
   end

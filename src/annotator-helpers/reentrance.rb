@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # Reentrance bridge — Thunk Phase 1.3
 #
@@ -41,7 +41,7 @@ module ReentranceBridge
   # Compute and stamp the canonical reentrance_kind for every FunctionDef
   # in @fn_nodes. Idempotent. Validates REQUIRES clauses against the
   # parameter list of each function.
-  sig { params(program_node: AST::Program).returns(T.nilable(Array)) }
+  sig { params(program_node: AST::Program).returns(T.nilable(T::Array[T.untyped])) }
   def bridge_reentrance!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
     program_node.statements.each do |stmt|
@@ -215,9 +215,11 @@ module ReentranceBridge
   # (`:THUNK` if you want to fold it; `:MAX_DEPTH(N)` if you want a
   # bounded depth). Runs after `check_indirect_reentrancy!` so the
   # call-graph is settled and transitive cycles are visible.
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_not_logical_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
@@ -247,9 +249,11 @@ module ReentranceBridge
   #
   # Direct self-recursion is fine -- the depth counter handles it
   # exactly. Only the cross-fn cycle case demotes.
-  sig { returns(Hash) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
       # Direct-only is fine; counter handles it.
@@ -295,9 +299,11 @@ module ReentranceBridge
     end
   end
 
-  sig { returns(T.nilable(Hash)) }
+  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_thunk_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @call_graph = T.let(@call_graph, T.untyped)
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
@@ -537,7 +543,7 @@ module ReentranceBridge
     scc.to_a
   end
 
-  sig { params(graph: T::Hash[String, Set], start: String).returns(T::Set[String]) }
+  sig { params(graph: T::Hash[String, T::Set[T.untyped]], start: String).returns(T::Set[String]) }
   def compute_reachable(graph, start)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = Set.new
@@ -721,7 +727,7 @@ module ReentranceBridge
       fixes: [constrain_fix, propagate_fix])
   end
 
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Hash)) }
+  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_requires_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?
