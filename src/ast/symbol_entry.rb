@@ -132,7 +132,7 @@ class SymbolEntry
   #                                 stands in as the source; declaring
   #                                 scope is the limit)
   #   { sources: [...] } -> the source list verbatim
-  sig { returns(T.untyped) }
+  sig { returns(Array) }
   def lifetime_sources
     case @lifetime
     when nil           then []

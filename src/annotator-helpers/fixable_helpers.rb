@@ -70,7 +70,7 @@ module FixableHelper
     best_d <= max_distance ? best : nil
   end
 
-  sig { params(a: String, b: String).returns(T.untyped) }
+  sig { params(a: String, b: String).returns(Integer) }
   def levenshtein(a, b)
     T.bind(self, SemanticAnnotator) rescue nil
     return b.length if a.empty?
@@ -84,7 +84,7 @@ module FixableHelper
       end
       prev = curr
     end
-    prev.last
+    T.must(prev.last)
   end
 
   # Registry: an ON/CATCH selector names an identifier that isn't in

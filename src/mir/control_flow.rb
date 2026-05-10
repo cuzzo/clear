@@ -384,7 +384,7 @@ class OwnershipDataflow
   end
 
   # Ownership state at function exit (join of all paths reaching exit_block).
-  sig { returns(T.untyped) }
+  sig { returns(Hash) }
   def exit_states
     @block_in[@cfg.exit_block.id] || {}
   end
