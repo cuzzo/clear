@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 # union.rb — Union type validation helpers for CLEAR.
 #
@@ -10,7 +10,7 @@ module UnionAnalysis
   # Validate that all required methods for a union type exist and have
   # compatible signatures. Synthesizes default functions for stubs with
   # default bodies that have no concrete override.
-  sig { params(node: AST::UnionDef).returns(T.nilable(T::Array[Hash])) }
+  sig { params(node: AST::UnionDef).returns(T.nilable(T::Array[T.untyped])) }
   def validate_union_methods!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     union_name = node.name
@@ -42,6 +42,7 @@ module UnionAnalysis
             req[:token], req[:name], fn_params, [], req[:return_type],
             nil, req[:body], nil, nil, req_vis, nil, nil
           )
+          @synthetic_fns = T.let(@synthetic_fns, T.untyped)
           @synthetic_fns << fn_node
           next
         else
@@ -123,6 +124,7 @@ module UnionAnalysis
         )
       end
       var_data = schema[:variants][node.field]
+      @match_pattern_context = T.let(@match_pattern_context, T.untyped)
       if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
         error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
@@ -137,7 +139,7 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
-  sig { params(node: AST::UnionVariantLit, schema: T.nilable(Hash)).returns(T.nilable(Hash)) }
+  sig { params(node: AST::UnionVariantLit, schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_union_schema!(node, schema)
     T.bind(self, SemanticAnnotator) rescue {}
     if schema.nil?
@@ -170,7 +172,7 @@ module UnionAnalysis
 
   # Validate fields of an inline struct union variant: check for unknown fields,
   # missing required fields, and type-check each field value.
-  sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(Hash)) }
+  sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
     schema = lookup_type_schema(node.union_name.to_sym)

@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # Rule-driven scanner that detects common operator typos in CLEAR
 # source (e.g. `s>` meant `|>`, `=>` meant `->`) and emits FixableFinding
 # entries via FixCollector. Runs as a PRE-PARSE pass in `clear fix`;
@@ -30,10 +30,10 @@ module SyntaxTypoScanner
   # Patterns are literal string matches, not regexes — intentional; a
   # regex would risk matching sub-strings of larger identifiers (e.g.
   # `selectors>` would have `s>` inside it, which would be wrong to flag).
-  RULES = [
+  RULES = T.let([
     { match: 's>', replace: '|>', label: 'pipeline operator (use `|>`, not `s>`)' },
     { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
-  ].freeze
+  ].freeze, T::Array[T.untyped])
 
   sig { params(source: String).returns(T.untyped) }
   def self.scan!(source)
@@ -120,7 +120,7 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: Integer, col: Integer, rule: Hash).returns(T.nilable(T::Array[FixableFinding])) }
+  sig { params(line: Integer, col: Integer, rule: T.untyped).returns(T.nilable(T::Array[FixableFinding])) }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: "Replace `#{rule[:match]}` with `#{rule[:replace]}` — #{rule[:label]}.",

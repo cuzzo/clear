@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
@@ -303,7 +303,7 @@ class PipelineRewriter
     { source: cursor, stages: stages, terminal: terminal }
   end
 
-  sig { params(smooth_node: AST::BinaryOp, source: T.untyped, stages: Array, terminal: T.untyped).returns(T.untyped) }
+  sig { params(smooth_node: AST::BinaryOp, source: T.untyped, stages: T::Array[T.untyped], terminal: T.untyped).returns(T.untyped) }
   def fuse_pipeline(smooth_node, source, stages, terminal)
     # Generate unique variable names for this pipeline
     res_var = next_var("__res")
@@ -403,7 +403,7 @@ class PipelineRewriter
     block
   end
 
-  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(Array) }
+  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(T::Array[T.untyped]) }
   def build_init(terminal, res_var, token, smooth_node)
     case terminal
     when AST::SumOp, AST::CountOp
@@ -499,7 +499,7 @@ class PipelineRewriter
     end
   end
 
-  sig { params(stages: Array, terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, stage_inits: Array, res_type: T.nilable(Type)).returns(Array) }
+  sig { params(stages: T::Array[T.untyped], terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, stage_inits: T::Array[T.untyped], res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
   def build_recursive_body(stages, terminal, current_val, res_var, token, stage_inits = [], res_type = nil)
     if stages.empty?
       return build_terminal_action(terminal, current_val, res_var, token, res_type)
@@ -597,7 +597,7 @@ class PipelineRewriter
     end
   end
 
-  sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(Array) }
+  sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
     res_ident.full_type = res_type if res_type
@@ -734,6 +734,7 @@ class PipelineRewriter
 
   sig { returns(Proc) }
   def schema_lookup
+    @schema_lookup = T.let(@schema_lookup, T.nilable(Proc))
     @schema_lookup ||= ->(name) { @annotator&.lookup_type_schema(name) }
   end
 
@@ -760,6 +761,7 @@ class PipelineRewriter
 
   # Walk the left-spine of SMOOTH nodes and replace the deepest source.
   # Used when the rewriter skips a pipeline but has already rewritten the source.
+  sig { params(node: T.untyped, new_source: T.untyped).returns(T.untyped) }
   def patch_chain_source!(node, new_source)
     cursor = node
     while cursor.left.is_a?(AST::BinaryOp) && cursor.left.op == :SMOOTH

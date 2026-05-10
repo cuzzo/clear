@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require_relative "../ast/ast"
 
@@ -261,7 +261,7 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(T.nilable(Hash)) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     subst = {}
@@ -285,7 +285,7 @@ module GenericAnalysis
     subst
   end
 
-  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(NilClass) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: T::Array[T.untyped], type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     shared_args = T.let([], T::Array[T.untyped])
@@ -628,6 +628,7 @@ module GenericAnalysis
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+    @og = T.let(@og, T.untyped)
     @og[var_name]&.kind = :borrowed
     node.container_borrow = true
   end

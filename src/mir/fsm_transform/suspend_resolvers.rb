@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # fsm_transform/suspend_resolvers.rb -- per-suspend-kind resolvers.
 #
 # Each resolver turns a Segments::*Suspend tail into a uniform
@@ -15,6 +15,7 @@ require_relative "../mir"
 
 module FsmTransform
   module SuspendResolvers
+    extend T::Sig
     module_function
 
     # Public entry. `seg` is a Segments::Segment whose tail is one of
@@ -24,6 +25,7 @@ module FsmTransform
     # (e.g. "__rt_bg0").
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
+    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(T.untyped) }
     def resolve(seg, ctx, lowering, susp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       case seg.tail
@@ -50,6 +52,7 @@ module FsmTransform
     #   ctx_field_decls: rendered fsm_state_decls
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
+    sig { params(io_tail: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.untyped) }
     def resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
@@ -136,6 +139,7 @@ module FsmTransform
     # text inside MIR::ExprStmt via MIR::Lit for now -- subsequent
     # work will make this fully MIR-shaped (catch is already a MIR
     # expression form).
+    sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(T.untyped) }
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
       id = ctx[:id]

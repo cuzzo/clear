@@ -1,4 +1,5 @@
-# typed: true
+# typed: strict
+require "sorbet-runtime"
 require_relative "../mir/fsm_ops"
 
 STRING_TYPE = :String
@@ -12,7 +13,7 @@ HEAP_STRING_TYPE = :String
 #   ]
 FO = FsmOps::DSL
 
-STD_LIB = {
+STD_LIB = T.let({
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
 
   # NOT SUPPORTED YET IN TRANSPILATION
@@ -1001,7 +1002,7 @@ STD_LIB = {
     zig: "CheatLib.randomInt({0})",
     bc: true,
   },
-}
+}, T::Hash[String, T.untyped])
 
 # ============================================================================
 # Method Registry — type-specific method definitions for Pool and HashMap
@@ -1012,7 +1013,7 @@ STD_LIB = {
 #   return_type: lambda(obj_type) — compute return type from receiver type
 #   tag:         symbol to set on the node (pool_method / map_method)
 
-POOL_METHODS = {
+POOL_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
     bc: true,
@@ -1079,9 +1080,9 @@ POOL_METHODS = {
     borrows: :all,
     is_method: true,
   },
-}.freeze
+}.freeze, T::Hash[String, T.untyped])
 
-SET_METHODS = {
+SET_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
     zig: "try {0}.insert({alloc}, {1})",
@@ -1142,9 +1143,9 @@ SET_METHODS = {
     borrows: :all,
     is_method: true,
   },
-}.freeze
+}.freeze, T::Hash[String, T.untyped])
 
-MAP_METHODS = {
+MAP_METHODS = T.let({
   "put" => {
     arity: 2, tag: :map_method, allocates: true,
     mutates_receiver: true,
@@ -1275,7 +1276,7 @@ MAP_METHODS = {
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
-}.freeze
+}.freeze, T::Hash[String, T.untyped])
 
 # ============================================================================
 # Index Operations Registry — container[key] get/set semantics
@@ -1298,7 +1299,7 @@ MAP_METHODS = {
 #   :dupe_borrowed_union   deep-copy borrowed non-Copy union values
 #   :container_promote     promote frame-allocated sub-collections to heap
 
-INDEX_OPS = {
+INDEX_OPS = T.let({
   string_map: {
     get: {
       zig: "{target}.get({index})",
@@ -1412,7 +1413,7 @@ INDEX_OPS = {
     },
     # No :set — symbols are immutable.
   },
-}.freeze
+}.freeze, T::Hash[T.untyped, T.untyped])
 
 # ============================================================================
 # Collection Method Dispatch Configuration
@@ -1421,7 +1422,7 @@ INDEX_OPS = {
 # `resolve_collection_method` uses this instead of an if/elsif chain so that
 # new collection types only need a dispatch_key entry + this table entry.
 # ============================================================================
-COLLECTION_METHOD_CONFIGS = {
+COLLECTION_METHOD_CONFIGS = T.let({
   pool:           { registry: POOL_METHODS, tag: :pool_method,
                     label: ->(t) { "Pool<#{t.element_type.resolved}>" } },
   set_collection: { registry: SET_METHODS,  tag: :set_method,
@@ -1430,7 +1431,7 @@ COLLECTION_METHOD_CONFIGS = {
                     label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
   numeric_map:    { registry: MAP_METHODS,  tag: :map_method,
                     label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
-}.freeze
+}.freeze, T::Hash[Symbol, T.untyped])
 
 # ============================================================================
 # Builtin Operations Registry -- CheatLib runtime functions used by operators,
@@ -1441,7 +1442,7 @@ COLLECTION_METHOD_CONFIGS = {
 # Pattern placeholders: {0}, {1}, {2} = positional args
 # All entries implicitly borrow their args unless noted otherwise.
 
-BUILTIN_OPS = {
+BUILTIN_OPS = T.let({
   # --- String comparison ---
   eql:       { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
   strcmp:    { zig: "CheatLib.strcmp({0}, {1})", bc: true, borrows: :all },
@@ -1547,4 +1548,4 @@ BUILTIN_OPS = {
     zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
     borrows: :all
   },
-}.freeze
+}.freeze, T::Hash[Symbol, T.untyped])

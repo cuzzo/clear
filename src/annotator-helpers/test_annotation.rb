@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 require "sorbet-runtime"
 require 'set'
 
@@ -21,9 +21,9 @@ module TestAnnotation
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
   # Used by `validate_strict_io!` to demand a STUB for any reachable
   # IO call when strict-test mode is on.
-  IO_BUILTINS = %w[tcpRead tcpWrite accept connect readFile writeFile
+  IO_BUILTINS = T.let(%w[tcpRead tcpWrite accept connect readFile writeFile
                    readLine readLinePrompt listDir listAll fileSize
-                   socketRead socketWrite socketClose].to_set.freeze
+                   socketRead socketWrite socketClose].to_set.freeze, T::Set[String])
 
   sig { params(node: AST::TestBlock).returns(T.nilable(Symbol)) }
   def visit_TestBlock(node)
@@ -45,6 +45,7 @@ module TestAnnotation
     visit_test_hook_bodies(node)
 
     # Strict test mode: verify all IO functions are stubbed in this WHEN block.
+    @strict_test = T.let(@strict_test, T.untyped)
     if @strict_test
       stubbed_fns = node.setup
         .select { |s| s.is_a?(AST::StubDecl) }
@@ -67,7 +68,7 @@ module TestAnnotation
   # bodies, AFTER EACH bodies, sibling LETs, and every TEST THAT
   # body inside the enclosing block. Lowering injects the actual
   # variable declarations at the top of each test body.
-  sig { params(node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def visit_test_lets(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:lets)
@@ -88,7 +89,7 @@ module TestAnnotation
   # ALL bodies become standalone Zig test blocks but still need to be
   # annotated against the enclosing scope so type errors surface at
   # compile time.
-  sig { params(node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def visit_test_hook_bodies(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.respond_to?(:before_each)
@@ -105,6 +106,7 @@ module TestAnnotation
     node.full_type = :Void
   end
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def visit_AssertRaises(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
@@ -154,7 +156,7 @@ module TestAnnotation
   # has been stubbed in the enclosing WHEN block. Both runtime-level
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
-  sig { params(test_that: AST::TestThat, stubbed_fns: Set).returns(T.untyped) }
+  sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[T.untyped]).returns(T.untyped) }
   def validate_strict_io!(test_that, stubbed_fns)
     T.bind(self, SemanticAnnotator) rescue nil
     calls = scan_for_calls(test_that.body).first
@@ -174,6 +176,7 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
+      @fn_nodes = T.let(@fn_nodes, T.untyped)
       fn = @fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
@@ -183,6 +186,7 @@ module TestAnnotation
       end
 
       # Continue down the call chain
+      @call_graph = T.let(@call_graph, T.untyped)
       (@call_graph[name] || []).each { |c| queue << c }
     end
   end
