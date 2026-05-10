@@ -6,7 +6,6 @@ tracer="tools/nil-kill/runtime_trace.rb"
 
 should_skip_live_data_file() {
   case "$1" in
-    examples/brnfk/brnfk.cht|\
     examples/footguns/06_memory_ordering/main.cht|\
     examples/footguns/07_causal_ordering/main.cht|\
     examples/minivm/_bc_runner.cht|\
@@ -20,8 +19,7 @@ should_skip_live_data_file() {
     examples/minivm/vtest.cht)
       # Temporary live-data exclusions for .cht files that do not currently
       # transpile. 06/07 are blocked by the pending BG promise-capture bug;
-      # the rest are stale corpus/compiler-cleanup items found by the live
-      # data inventory. Remove these once the repository is cleaned up.
+      # the minivm files are corpus/compiler-cleanup exceptions.
       return 0
       ;;
   esac

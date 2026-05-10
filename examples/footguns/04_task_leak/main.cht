@@ -15,19 +15,19 @@ FN fetch_result() RETURNS String ->
   RETURN "result";
 END
 
-FN handle_request(id: Int64) RETURNS Void ->
+FN handle_request(id: Int64) RETURNS !Void ->
   # BG returns a promise. The promise MUST be awaited (NEXT).
   # Dropping it without NEXT is a compile error:
   #   "BG promise 'p' is never awaited — possible task leak"
   p = BG {fetch_result();};
   result = NEXT p;
   # structured: scope waits here until fiber done
-  print("request " + id.str() + ": " + result);
+  print("request " + id.toString() + ": " + result);
 END
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
   FOR i IN (0 ..< 5) DO
-    handle_request(1);
+    handle_request(1) OR RAISE;
   END
 
   # ----------------------------------------------------------------

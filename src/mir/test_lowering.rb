@@ -416,7 +416,7 @@ module TestLowering
   # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
   # match the actual Zig var (cleanup-classification may suffix-rename
   # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
-  sig { params(node: AST::Literal).returns(T::Array[String]) }
+  sig { params(node: T.untyped).returns(T::Array[String]) }
   def stub_local_idents(node)
     T.bind(self, MIRLowering) rescue nil
     @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)

@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
   WITH c AS inner {
     # Always 2000000: WITH EXCLUSIVE serializes all mutations.
     ASSERT inner.value == 2_000_000, "no data race";
-    print(inner.value.str());
+    print(inner.value.toString());
   }
 END
 

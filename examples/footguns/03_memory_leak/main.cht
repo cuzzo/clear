@@ -11,7 +11,7 @@ FN process(input: String) RETURNS !String ->
   buf: String = "processed: " + input;
   # heap allocation
 
-  IF input.startsWith("!") THEN
+  IF startsWith?(input, "!") THEN
     RAISE "bad input";
     # ERROR (if buf had no cleanup): MIRChecker: LEAK
     # 'buf' allocated on line above has no cleanup on this path.
@@ -41,7 +41,7 @@ FN main() RETURNS !Void ->
   #
   # FN broken(input: String) RETURNS !String ->
   #     buf: String = concat("processed: ", input);  -- heap alloc
-  #     IF input.startsWith("!") THEN
+  #     IF startsWith?(input, "!") THEN
   #         RAISE "bad";   -- ERROR: LEAK — buf has no cleanup here
   #     END                --   MIRChecker: alloc at line N has no
   #     RETURN buf;        --   matching Drop on the RAISE path

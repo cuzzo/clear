@@ -1023,7 +1023,7 @@ module EffectTracker
     stmts.each { |s| validate_tight_node!(s, loop_node) }
   end
 
-  sig { params(node: T.untyped, loop_node: AST::WhileLoop).returns(T.untyped) }
+  sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange)).returns(T.untyped) }
   def validate_tight_node!(node, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.untyped)

@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
 
   WITH acct AS a {
     # Always 20: exactly one withdrawal succeeded.
-    print("balance = " + a.balance.str());
+    print("balance = " + a.balance.toString());
   }
 END
 

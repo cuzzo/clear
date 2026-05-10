@@ -19,21 +19,21 @@
 # The "add during iteration" pattern does not arise because pipelines
 # produce new collections rather than mutating the source in-place.
 
-FN safe_filter() RETURNS Void ->
+FN safe_filter() RETURNS !Void ->
   numbers: Int64[] = [1, 2, 3, 4, 5];
 
   # Pipeline iteration: produces a new list, never modifies source.
   # numbers is not mutated; odd_count is a fresh value.
   odd_count = numbers
     |> WHERE (_ MOD 2) != 0
-    |> COUNT _;
+    |> COUNT TRUE;
   print("odd_count: " + odd_count.toString());
 
   # The source list is unchanged.
   print("numbers length: " + numbers.length().toString());
 END
 
-FN shared_list_access() RETURNS Void ->
+FN shared_list_access() RETURNS !Void ->
   items: Int64[]@list:shared:locked = [10, 20, 30, 40];
 
   # Reader: iterates while holding the lock.
@@ -60,9 +60,9 @@ FN shared_list_access() RETURNS Void ->
   NEXT writer;
 END
 
-FN main() RETURNS Void ->
-  safe_filter();
-  shared_list_access();
+FN main() RETURNS !Void ->
+  safe_filter() OR RAISE;
+  shared_list_access() OR RAISE;
 END
 
 # Summary:
