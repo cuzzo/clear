@@ -245,6 +245,7 @@ jobs:
     permissions:
       contents: read
       checks: write
+      issues: write
       pull-requests: write
     env:
       BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -307,10 +308,12 @@ jobs:
             --file "$BENCHER_JSON"
             --err
             --github-actions "$GITHUB_TOKEN"
+            --ci-id "benchmark-leak-shard-${{ matrix.shard }}"
           )
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             args+=(
+              --ci-number "${{ github.event.pull_request.number }}"
               --start-point "$GITHUB_BASE_REF"
               --start-point-hash "${{ github.event.pull_request.base.sha }}"
               --start-point-clone-thresholds
