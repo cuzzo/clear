@@ -829,7 +829,43 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
-      expect(emit(result)).to eq("x")
+      zig = emit(result)
+      expect(zig).to include("blk_copy_value")
+      expect(zig).to include("const __src = x")
+      expect(zig).to include("break :blk_copy_value __src")
+    end
+
+    it "lowers COPY of sync values as full-value dupes" do
+      locked_type = Type.new(:Counter, sync: :locked)
+      inner = make_id("c", full_type: locked_type)
+      node = AST::CopyNode.new(tok, inner)
+      node.full_type = locked_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::DeepCopy)
+      expect(result.strategy).to eq(:full_value)
+      expect(emit(result)).to eq("try CheatLib.dupeValue(@TypeOf(c), c, rt.heapAlloc())")
+    end
+
+    it "emits cleanup for declarations initialized from COPY of sync values" do
+      locked_type = Type.new(:Counter, sync: :locked)
+      inner = make_id("src", full_type: locked_type)
+      copy = AST::CopyNode.new(tok, inner)
+      copy.full_type = locked_type
+
+      node = AST::VarDecl.new(tok, "dst", nil, copy, false)
+      node.full_type = locked_type
+      node.var_used = true
+
+      result = lowering.lower(node)
+      expect(result).to be_a(Array)
+      expect(result[0]).to be_a(MIR::AllocMark)
+      expect(result[1]).to be_a(MIR::Let)
+      expect(result[1].mutable).to be true
+      expect(result[1].init).to be_a(MIR::DeepCopy)
+      expect(result[1].init.strategy).to eq(:full_value)
+      expect(result[2]).to be_a(MIR::Cleanup)
+      expect(result[2].cleanup_entry).to include(kind: :locked, alloc: :heap)
     end
 
     it "lowers MOVE as identity" do
@@ -1638,6 +1674,68 @@ RSpec.describe MIRLowering do
       # + ctx.x.* triplet that diverged from BG codegen.
       expect(zig).to include("x: @TypeOf(x)")
       expect(zig).to include(".x = x")
+    end
+
+    it "merges nested BG capture analysis into the DoBlock context" do
+      nested_body = make_id("inner", full_type: :Int64)
+      nested_analysis = OpenStruct.new(
+        captures: { "inner" => :Int64 },
+        capture_symbols: {},
+        close_patterns: {},
+        pointer_captures: Set.new,
+        string_captures: Set.new,
+        resource_captures: Set.new
+      )
+      nested_bg = AST::BgBlock.new(tok, [nested_body], nil, nil, nil, nil, nil, nil)
+      nested_bg.full_type = :"~Void"
+      nested_bg.capture_analysis = nested_analysis
+
+      branch_analysis = OpenStruct.new(
+        captures: {},
+        capture_symbols: {},
+        close_patterns: {},
+        pointer_captures: Set.new,
+        string_captures: Set.new,
+        resource_captures: Set.new
+      )
+      branch = {
+        body: [nested_bg],
+        capture_analysis: branch_analysis,
+        pinned: false,
+        stack_size: nil,
+        computed_stack_tier: nil
+      }
+      node = AST::DoBlock.new(tok, [branch])
+      node.full_type = :Void
+
+      zig = emit(lowering.lower(node))
+      expect(zig).to include("inner: @TypeOf(inner)")
+      expect(zig).to include(".inner = inner")
+      expect(zig).to include("_ = try __discard_bg_")
+      expect(zig).to include(".next()")
+    end
+
+    it "flattens array-lowered DoBlock body declarations" do
+      locked_type = Type.new(:Counter, sync: :locked)
+      inner = make_id("src", full_type: locked_type)
+      copy = AST::CopyNode.new(tok, inner)
+      copy.full_type = locked_type
+      decl = AST::VarDecl.new(tok, "dst", nil, copy, false)
+      decl.full_type = locked_type
+      decl.var_used = true
+      branch = {
+        body: [decl],
+        capture_analysis: nil,
+        pinned: false,
+        stack_size: nil,
+        computed_stack_tier: nil
+      }
+      node = AST::DoBlock.new(tok, [branch])
+      node.full_type = :Void
+
+      zig = emit(lowering.lower(node))
+      expect(zig).to include("var dst = try CheatLib.dupeValue")
+      expect(zig).to include("defer CheatLib.lockedDestroy")
     end
 
     it "lowers DoBlock with stack tier" do
