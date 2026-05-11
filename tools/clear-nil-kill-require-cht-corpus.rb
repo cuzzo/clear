@@ -8,8 +8,6 @@ ROOT = File.expand_path("..", __dir__)
 OUT = File.expand_path(File.join(ROOT, "tmp", "nil-kill", "require-corpus.cht"))
 SOURCE_DIRS = %w[examples benchmarks].freeze
 LIVE_DATA_EXCLUDES = %w[
-  examples/footguns/06_memory_ordering/main.cht
-  examples/footguns/07_causal_ordering/main.cht
   examples/minivm/_bc_runner.cht
   examples/minivm/_scheme_runner.cht
   examples/minivm/bench_pool_ops.cht
@@ -26,8 +24,7 @@ files = SOURCE_DIRS.flat_map do |dir|
 end.sort.reject do |abs_path|
   rel = abs_path.delete_prefix(ROOT + File::SEPARATOR)
   # Temporary live-data exclusions for files that do not currently transpile.
-  # 06/07 still hit the BG producer capture bug; the minivm files are
-  # corpus/compiler-cleanup exceptions.
+  # The minivm files are corpus/compiler-cleanup exceptions.
   LIVE_DATA_EXCLUDES.include?(rel)
 end
 

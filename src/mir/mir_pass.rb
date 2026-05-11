@@ -428,7 +428,7 @@ class MIRPass
     AST.each_bg_block_in_stmt(stmt) do |bg|
       bg.capture_analysis&.move_mark_names&.each do |name|
         entry = bindings&.dig(name)
-        next if entry && !entry[:needs_cleanup]
+        next unless entry && entry[:needs_cleanup]
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
     end

@@ -80,6 +80,7 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
 | `polymorphic_sync_admission`| 36              | Which (callee × caller binding) tuples are admitted |
 | `execution_boundary`        | 27              | What can / can't cross BG / DO / BG STREAM × @parallel / @pinned |
+| `promise_handle_capture`    | 3               | Plain `~T` promise handles moved into BG consumers and rejected on outer reuse |
 | `loop_cleanup`              | 40              | INV-2 / INV-6: alloc-cleanup pairing under loop disruptors (break, continue, return, raise) |
 | `error_cleanup`             | 24              | INV-9: alloc-cleanup pairing on error paths (OR PASS / RAISE / DEFAULT) |
 | `branch_cleanup`            | 48              | INV-2: alloc-cleanup pairing across IF/ELSE branches with optional early-return |

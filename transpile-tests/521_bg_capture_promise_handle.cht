@@ -1,0 +1,14 @@
+# A plain promise handle (~T) is affine-owned. Capturing it into another BG
+# transfers the right to NEXT it into that BG.
+
+FN main() RETURNS Void ->
+    producer: ~Int64 = BG { 41_i64; };
+    consumer: ~Int64 = BG {
+        v: Int64 = NEXT producer;
+        v + 1_i64;
+    };
+
+    result: Int64 = NEXT consumer;
+    ASSERT result == 42_i64, "BG captured promise handle should be consumed by consumer";
+    RETURN;
+END

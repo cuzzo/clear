@@ -190,6 +190,13 @@ module FuzzSurfaceRegistry
       execution_boundaries: [:bg, :do, :bg_stream],
     },
 
+    promise_handle_capture: {
+      escape_sources: [:bg_capture],
+      escape_sinks: [:bg_capture],
+      execution_boundaries: [:bg, :future_promise],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :non_copy_requires_explicit_move_or_copy],
+    },
+
     stream_into_boundary: {
       storage_capabilities: [:local, :shared],
       sync_capabilities: [:locked, :write_locked, :versioned, :atomic],
@@ -216,6 +223,7 @@ module FuzzSurfaceRegistry
     access_gate: [:escape_sinks, :sync_capabilities],
     lifetimed_return: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
     execution_boundary: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
+    promise_handle_capture: [:escape_sources, :escape_sinks, :execution_boundaries],
     stream_into_boundary: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
     polymorphic_sync_admission: [:storage_capabilities, :sync_capabilities],
   }.freeze

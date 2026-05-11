@@ -164,23 +164,40 @@ module CaptureStrategy
       return MoveInto.new(zig_t, name, name)
     end
 
-    # 3. Value-like captures are always safe: primitives, strings
+    # 3. A plain promise handle (~T) is an owned affine capability. Capturing
+    #    it into a fiber transfers the one right to NEXT it. Shared promises
+    #    and stream cursors are handled by their own sharing/resource rules.
+    if owned_affine_promise_handle?(type)
+      return MoveInto.new(zig_t, name, name)
+    end
+
+    # 4. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
     #    whose fields are all themselves value-like (resolved via
     #    schema_lookup).
     return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
 
-    # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
+    # 5. @multiowned / @shared / @locked / @writeLocked / @local clone
     #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
     #    safely via the existing retain/release discipline.
     return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
 
-    # 5. Anything else (heap-backed, borrow, pointer-passed) requires
+    # 6. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
     Refuse.new(refuse_reason_for(type), name)
   end
 
   # --- Helpers: purely local predicates, no external side effects. ---
+
+  sig { params(type: Type).returns(T::Boolean) }
+  def self.owned_affine_promise_handle?(type)
+    return false unless type.respond_to?(:future?) && type.future?
+    return false if type.respond_to?(:stream?) && type.stream?
+    return false if type.respond_to?(:shared_promise?) && type.shared_promise?
+    return false if type.respond_to?(:promise_list?) && type.promise_list?
+    return false if type.respond_to?(:observable?) && type.observable?
+    true
+  end
 
   # True iff the capture's data fits entirely in the union/value header,
   # with no aliased heap backing. Safe to byte-copy into the ctx struct.

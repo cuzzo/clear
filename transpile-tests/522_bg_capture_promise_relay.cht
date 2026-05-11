@@ -1,0 +1,18 @@
+# Relay chains should be able to move plain promise handles across BG
+# boundaries without requiring shared promises.
+
+FN main() RETURNS Void ->
+    producer: ~Int64 = BG { 7_i64; };
+    relay: ~Int64 = BG {
+        v: Int64 = NEXT producer;
+        v + 1_i64;
+    };
+    consumer: ~Int64 = BG {
+        relay_value: Int64 = NEXT relay;
+        relay_value + 1_i64;
+    };
+
+    result: Int64 = NEXT consumer;
+    ASSERT result == 9_i64, "BG relay should consume moved promise handles in order";
+    RETURN;
+END

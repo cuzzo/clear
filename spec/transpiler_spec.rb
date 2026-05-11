@@ -11,7 +11,6 @@ RSpec.describe ZigTranspiler do
 
   describe "BG promise capture regressions" do
     it "allows footguns/06-style consumer BG to NEXT a producer promise captured from the same scope" do
-      pending("MIR capture classification currently refuses captured Promise handles as unclassified_capture")
       src = <<~CLEAR
         STRUCT State {
           message: String
@@ -41,7 +40,6 @@ RSpec.describe ZigTranspiler do
     end
 
     it "allows footguns/07-style relay BG to NEXT a producer promise captured from the same scope" do
-      pending("MIR capture classification currently refuses captured Promise handles as unclassified_capture")
       src = <<~CLEAR
         STRUCT Payload {
           data: String
@@ -72,6 +70,20 @@ RSpec.describe ZigTranspiler do
       CLEAR
 
       expect { transpile(src) }.not_to raise_error
+    end
+
+    it "rejects using a plain producer promise after it is moved into a consumer BG" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          producer = BG { 1_i64; };
+          consumer = BG { NEXT producer; };
+          x = NEXT producer;
+          NEXT consumer;
+          RETURN;
+        END
+      CLEAR
+
+      expect { transpile(src) }.to raise_error(/USE AFTER MOVE/)
     end
   end
 

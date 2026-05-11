@@ -6,8 +6,6 @@ tracer="tools/nil-kill/runtime_trace.rb"
 
 should_skip_live_data_file() {
   case "$1" in
-    examples/footguns/06_memory_ordering/main.cht|\
-    examples/footguns/07_causal_ordering/main.cht|\
     examples/minivm/_bc_runner.cht|\
     examples/minivm/_scheme_runner.cht|\
     examples/minivm/bench_pool_ops.cht|\
@@ -18,8 +16,7 @@ should_skip_live_data_file() {
     examples/minivm/types.cht|\
     examples/minivm/vtest.cht)
       # Temporary live-data exclusions for .cht files that do not currently
-      # transpile. 06/07 still hit the BG producer capture bug; the minivm
-      # files are corpus/compiler-cleanup exceptions.
+      # transpile. The minivm files are corpus/compiler-cleanup exceptions.
       return 0
       ;;
   esac
