@@ -20,7 +20,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
 
     expect(out).to include("fn id(x: i64) i64")
     expect(out).to include("return CheatLib.intAdd(x, x);")
-    expect(out).to include("const y: i64 = id(c.load())")
+    expect(out).to include("const y: i64 = id(c.*.load())")
   end
 
   it "passes a primitive @atomic cell through an explicit Int64 @atomic parameter" do
@@ -36,7 +36,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
     CLEAR
 
     expect(out).to include("fn read(c: anytype) i64")
-    expect(out).to include("return c.load();")
+    expect(out).to include("return c.*.load();")
     expect(out).to include("const y: i64 = read(c)")
   end
 
@@ -71,7 +71,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
       END
     CLEAR
 
-    expect(out).to include("const z: i64 = add(a.load(), b.load())")
+    expect(out).to include("const z: i64 = add(a.*.load(), b.*.load())")
     expect(warnings.join("\n")).to include("reads multiple atomic values independently")
     expect(warnings.join("\n")).to include("STRICT/STRICT EXTREME")
   end
@@ -91,7 +91,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
       END
     CLEAR
 
-    expect(out).to include("const z: i64 = inc(a.load())")
+    expect(out).to include("const z: i64 = inc(a.*.load())")
     expect(warnings.join("\n")).not_to include("reads multiple atomic values independently")
   end
 
@@ -112,7 +112,7 @@ RSpec.describe "primitive non-shared atomics in functions" do
     CLEAR
 
     expect(out).to include("const z: i64 = sum_loaded(a, b)")
-    expect(out).to include("return CheatLib.intAdd(a.load(), b.load());")
+    expect(out).to include("return CheatLib.intAdd(a.*.load(), b.*.load());")
     expect(warnings.join("\n")).not_to include("reads multiple atomic values independently")
   end
 
@@ -129,6 +129,6 @@ RSpec.describe "primitive non-shared atomics in functions" do
     CLEAR
 
     expect(out).to include("fn get(rt: *Runtime) !i64")
-    expect(out).to include("return c.load();")
+    expect(out).to include("return c.*.load();")
   end
 end
