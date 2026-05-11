@@ -32,7 +32,6 @@
 # arbitrary control flow with recursion, etc.).
 
 require "sorbet-runtime"
-require_relative "segments"
 
 module ThunkTransform
   module RecursiveSplitter

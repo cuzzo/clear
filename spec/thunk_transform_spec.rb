@@ -6,25 +6,10 @@ require_relative "../src/ast/parser"
 require_relative "../src/ast/ast"
 require_relative "../src/backends/transpiler"
 
-# Thunk Phase 4a — scaffolding for the THUNK CPS transform plus
-# validation that `EFFECTS REENTRANT:THUNK` requires self-recursion
-# (analogous to ':TAIL_CALL').
-#
-# The transform itself currently returns nil for every input;
-# subsequent commits land the actual CPS lowering. This spec covers:
-#   - the module + submodule files load
-#   - the validation rejects non-recursive :THUNK declarations
-#   - the validation accepts directly-recursive :THUNK declarations
-#   - `transform` returns nil today (placeholder for Phase 4b+)
-
-RSpec.describe "ThunkTransform scaffolding" do
+RSpec.describe "ThunkTransform module wiring" do
   describe "module structure" do
     it "loads ThunkTransform" do
       expect(defined?(ThunkTransform)).to eq("constant")
-    end
-
-    it "loads ThunkTransform::Segments" do
-      expect(defined?(ThunkTransform::Segments)).to eq("constant")
     end
 
     it "loads ThunkTransform::RecursiveSplitter" do
@@ -33,27 +18,6 @@ RSpec.describe "ThunkTransform scaffolding" do
 
     it "loads ThunkTransform::Emit" do
       expect(defined?(ThunkTransform::Emit)).to eq("constant")
-    end
-
-    it "exposes Segment + tail variants" do
-      expect(ThunkTransform::Segments::Segment).to be_a(Class)
-      expect(ThunkTransform::Segments::Done).to be_a(Class)
-      expect(ThunkTransform::Segments::Goto).to be_a(Class)
-      expect(ThunkTransform::Segments::CondBranch).to be_a(Class)
-      expect(ThunkTransform::Segments::RecurseTail).to be_a(Class)
-      expect(ThunkTransform::Segments::RecurseStep).to be_a(Class)
-    end
-  end
-
-  describe "transform entry" do
-    it "returns nil today (Phase 4a placeholder)" do
-      fake_fn = Struct.new(:reentrance_kind).new(:reentrant_thunk)
-      expect(ThunkTransform.transform(fake_fn, nil)).to be_nil
-    end
-
-    it "returns nil for non-thunk functions regardless of body shape" do
-      fake_fn = Struct.new(:reentrance_kind).new(:reentrant)
-      expect(ThunkTransform.transform(fake_fn, nil)).to be_nil
     end
   end
 
@@ -87,7 +51,7 @@ RSpec.describe "ThunkTransform scaffolding" do
     it "names the helpers a future maintainer must extend" do
       expect {
         ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "!i64")
-      }.to raise_error(/emit_trampoline.*emit_mutual_trampoline.*errdefer/m)
+      }.to raise_error(/build_trampoline.*build_mutual_trampoline.*errdefer/m)
     end
   end
 end
@@ -154,18 +118,24 @@ RSpec.describe "ThunkTransform emit coverage" do
     { name: name, type: type }
   end
 
-  it "emits heap-CPS trampoline scaffolding for simple recursive thunks" do
+  it "builds and renders heap-CPS trampoline MIR for simple recursive thunks" do
     plan = OpenStruct.new(
       base_cases: [{ cond_ast: bin(id("n"), :LT_EQ, int(1)), value_ast: int(1) }],
       recurse_args: [bin(id("n"), :SUB, int(1))],
       combine_lhs: id("n"),
       combine_op: :MUL
     )
-    zig = ThunkTransform::Emit.emit_trampoline(
+    node = ThunkTransform::Emit.build_trampoline(
       fn("factorial", params: [param("n")], plan: plan),
       FakeThunkLowering.new
     )
 
+    expect(node).to be_a(MIR::ThunkTrampoline)
+    expect(node.fn_name).to eq("factorial")
+    expect(node.base_cases.first.fetch(:value_zig)).to eq("1")
+    expect(node.combine_lhs_zig).to eq("current.n")
+    expect(node.op_zig).to eq("*")
+    zig = MIREmitter.new.emit(node)
     expect(zig).to include("const Frame = struct")
     expect(zig).to include("rt.checkYield();")
     expect(zig).to include("const child = rt.heapAlloc().create(Frame) catch unreachable;")
@@ -181,28 +151,30 @@ RSpec.describe "ThunkTransform emit coverage" do
       combine_lhs: id("acc"),
       combine_op: :ADD
     )
-    zig = ThunkTransform::Emit.emit_trampoline(
+    node = ThunkTransform::Emit.build_trampoline(
       fn("sum", params: [param("n"), param("acc")], plan: plan, tight: true),
       FakeThunkLowering.new
     )
 
+    expect(node.yield_line).to eq("// (TIGHT: scheduler yield-check skipped)")
+    zig = MIREmitter.new.emit(node)
     expect(zig).to include("// (TIGHT: scheduler yield-check skipped)")
     expect(zig).not_to include("rt.checkYield();")
   end
 
   it "raises directed errors for invalid simple thunk plans" do
     expect {
-      ThunkTransform::Emit.emit_trampoline(fn("missing", params: []), FakeThunkLowering.new)
+      ThunkTransform::Emit.build_trampoline(fn("missing", params: []), FakeThunkLowering.new)
     }.to raise_error(/has no thunk_plan/)
 
     bad_op = OpenStruct.new(base_cases: [], recurse_args: [], combine_lhs: id("x"), combine_op: :MOD)
     expect {
-      ThunkTransform::Emit.emit_trampoline(fn("bad_op", params: [], plan: bad_op), FakeThunkLowering.new)
+      ThunkTransform::Emit.build_trampoline(fn("bad_op", params: [], plan: bad_op), FakeThunkLowering.new)
     }.to raise_error(/unsupported op MOD/)
 
     bad_arity = OpenStruct.new(base_cases: [], recurse_args: [id("x")], combine_lhs: id("x"), combine_op: :ADD)
     expect {
-      ThunkTransform::Emit.emit_trampoline(fn("bad_arity", params: [], plan: bad_arity), FakeThunkLowering.new)
+      ThunkTransform::Emit.build_trampoline(fn("bad_arity", params: [], plan: bad_arity), FakeThunkLowering.new)
     }.to raise_error(/arg\/param count mismatch/)
   end
 
@@ -213,7 +185,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       to eq("current.n + obj.n + name_extra + current.name")
   end
 
-  it "emits mutual-recursion trampolines with tagged frame variants" do
+  it "builds and renders mutual-recursion trampoline MIR with tagged frame variants" do
     even = fn("even", params: [param("n")])
     odd = fn("odd", params: [param("n")])
     even_plan = OpenStruct.new(
@@ -235,7 +207,7 @@ RSpec.describe "ThunkTransform emit coverage" do
     expect(node.variants.map { |v| v.fetch(:name) }).to eq(%w[even odd])
     expect(node.arms.map { |a| a.fetch(:target_variant) }).to eq(%w[odd even])
 
-    zig = ThunkTransform::Emit.emit_mutual_trampoline(even, FakeThunkLowering.new)
+    zig = MIREmitter.new.emit(node)
 
     expect(zig).to include("const Frame = union(enum)")
     expect(zig).to include("even: struct")
@@ -247,7 +219,7 @@ RSpec.describe "ThunkTransform emit coverage" do
   it "raises directed errors for invalid mutual thunk plans" do
     missing = fn("missing", params: [])
     expect {
-      ThunkTransform::Emit.emit_mutual_trampoline(missing, FakeThunkLowering.new)
+      ThunkTransform::Emit.build_mutual_trampoline(missing, FakeThunkLowering.new)
     }.to raise_error(/has no mutual_thunk_plan/)
 
     cf = fn("even", params: [param("n")])
@@ -269,9 +241,6 @@ RSpec.describe "ThunkTransform emit coverage" do
     }.to raise_error(/target arg\/param count mismatch/)
   end
 
-  it "keeps the legacy build hook as a no-op" do
-    expect(ThunkTransform::Emit.build([], nil, FakeThunkLowering.new, nil)).to be_nil
-  end
 end
 
 RSpec.describe "ThunkTransform recursive splitter helpers" do

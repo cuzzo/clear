@@ -51,14 +51,12 @@
 # wrapper allowed), and the type checker rejects mixed fallible/
 # plain in BinaryOp. A future Phase 4 expansion that lifts either
 # constraint MUST add an `errdefer` chain-walk that frees every
-# heap-allocated child Frame on the error-return path; today's
-# `return_or_pop_lines` only frees on the normal path. The
-# `assert_non_fallible_ret!` guard at the entry of `emit_trampoline`
-# fails loudly if the invariant is ever violated.
+# heap-allocated child Frame on the error-return path. The
+# `assert_non_fallible_ret!` guard at the builder entry points fails
+# loudly if the invariant is ever violated.
 
 require "sorbet-runtime"
 require_relative "../mir_emitter"
-require_relative "segments"
 
 module ThunkTransform
   module Emit
@@ -128,13 +126,6 @@ module ThunkTransform
       )
     end
 
-    # Compatibility helper for focused thunk-transform specs.
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_trampoline(fn_node, lowering)
-      T.bind(self, T.untyped) rescue nil
-      MIREmitter.new.emit(build_trampoline(fn_node, lowering))
-    end
-
     # Lower an AST expression to Zig text via the surrounding
     # MIRLowering (mirrors fsm_transform/recursive_splitter.rb's
     # pattern).
@@ -181,8 +172,8 @@ module ThunkTransform
             "return type (#{ret_zig.inspect}). The current codegen frees " \
             "heap-allocated child Frames only on the normal return path; an " \
             "error return would leak the in-flight chain. Before lifting the " \
-            "non-fallible invariant, extend `emit_trampoline` and " \
-            "`emit_mutual_trampoline` to emit an errdefer that walks " \
+            "non-fallible invariant, extend `build_trampoline` and " \
+            "`build_mutual_trampoline` to emit an errdefer that walks " \
             "`current.parent` and frees every non-initial Frame."
     end
 
@@ -268,12 +259,6 @@ module ThunkTransform
       )
     end
 
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_mutual_trampoline(fn_node, lowering)
-      T.bind(self, T.untyped) rescue nil
-      MIREmitter.new.emit(build_mutual_trampoline(fn_node, lowering))
-    end
-
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
@@ -330,16 +315,5 @@ module ThunkTransform
       out
     end
 
-    # Phase 4d's stub for the legacy entry; kept so future wider-
-    # shape passes have a consistent name.
-    sig { params(segments: T.untyped, liveness: T.untyped, lowering: T.untyped, ctx: T.untyped).returns(T.untyped) }
-    def build(segments, liveness, lowering, ctx)
-      T.bind(self, T.untyped) rescue nil
-      _ = segments
-      _ = liveness
-      _ = lowering
-      _ = ctx
-      nil
-    end
   end
 end
