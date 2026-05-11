@@ -172,7 +172,7 @@ module NilKill
           bundle exec ruby tools/nil-kill.rb infer [--no-sorbet]
           bundle exec ruby tools/nil-kill.rb apply [--dry-run] [--all]
           bundle exec ruby tools/nil-kill.rb review [--kind replace_nil_with_default]
-          bundle exec ruby tools/nil-kill.rb loop [--defaults] -- <verify command...>
+          bundle exec ruby tools/nil-kill.rb loop [--defaults] [--try-levenshtein] -- <verify command...>
           bundle exec ruby tools/nil-kill.rb report
           bundle exec ruby tools/nil-kill.rb struct-rbi [--output sorbet/rbi/nil-kill-structs.rbi]
           bundle exec ruby tools/nil-kill.rb doctor
@@ -182,6 +182,8 @@ module NilKill
           NIL_KILL_MIN_CALLS=20              runtime confidence threshold
           NIL_KILL_UNION_POLICY=untyped|any  default: untyped
           NIL_KILL_AUTO_DEFAULTS=1           promote safe nil default rewrites into loop/apply
+          NIL_KILL_LEVENSHTEIN_DISTANCE=2    max param-name/class-name distance for speculative narrowing
+          NIL_KILL_LEVENSHTEIN_LIMIT=50      max speculative actions per loop iteration; 0 = unlimited
           NIL_KILL_PRESSURE_SORT=priority|slots|hotness
           NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
       TEXT
@@ -195,7 +197,8 @@ module NilKill
       @methods = {}
       @tlets = {}
       @facts = { "files" => {}, "unsigned_methods" => [], "existing_sigs" => [], "tlet_sites" => [], "dead_nil_checks" => [],
-                 "struct_declarations" => [], "struct_field_static" => [], "tuple_arrays" => [], "hash_shapes" => [] }
+                 "struct_declarations" => [], "struct_field_static" => [], "tuple_arrays" => [], "hash_shapes" => [],
+                 "type_normalizers" => [] }
       @diagnostics = { "sorbet_errors" => [], "nil_origins" => [] }
       @actions = []
     end
@@ -304,6 +307,7 @@ module NilKill
         @store.facts["struct_field_static"].concat(idx.struct_field_static)
         @store.facts["tuple_arrays"].concat(idx.tuple_arrays)
         @store.facts["hash_shapes"].concat(idx.hash_shapes)
+        @store.facts["type_normalizers"].concat(idx.type_normalizers)
         idx.methods.each do |method|
           rec = @store.method_record([method["class"], method["method"], method["kind"], File.expand_path(method["path"], ROOT), method["line"]])
           rec["source"] = method
@@ -544,7 +548,8 @@ module NilKill
   end
 
   class SourceIndex
-    attr_reader :methods, :tlet_sites, :dead_nil_checks, :struct_declarations, :struct_field_static, :tuple_arrays, :hash_shapes
+    attr_reader :methods, :tlet_sites, :dead_nil_checks, :struct_declarations, :struct_field_static, :tuple_arrays, :hash_shapes,
+      :type_normalizers
 
     def initialize(path)
       @path = path
@@ -557,6 +562,7 @@ module NilKill
       @struct_field_static = []
       @tuple_arrays = []
       @hash_shapes = []
+      @type_normalizers = []
       @struct_fields_by_name = {}
       @struct_full_by_name = {}
       @non_nil_locals = Set.new
@@ -569,13 +575,33 @@ module NilKill
         collect_ivar_tlet_names(parsed.value)
         walk(parsed.value, [])
       end
+      collect_type_normalizer_lines
     end
 
     def summary
       { "methods" => @methods.size, "unsigned_methods" => @methods.count { |m| !m["has_sig"] },
         "tlet_sites" => @tlet_sites.count { |s| s["tlet"] }, "candidate_tlet_sites" => @tlet_sites.count { |s| !s["tlet"] },
         "dead_nil_checks" => @dead_nil_checks.size, "structs" => @struct_declarations.size,
-        "tuple_arrays" => @tuple_arrays.size, "hash_shapes" => @hash_shapes.size }
+        "tuple_arrays" => @tuple_arrays.size, "hash_shapes" => @hash_shapes.size,
+        "type_normalizers" => @type_normalizers.size }
+    end
+
+    def collect_type_normalizer_lines
+      current_method = nil
+      current_class = nil
+      @lines.each_with_index do |line, idx|
+        stripped = line.strip
+        if stripped.match?(/\A(?:class|module)\s+/)
+          current_class = stripped.split(/\s+/)[1].to_s
+        elsif stripped.match?(/\Adef\s+/)
+          current_method = stripped[/\Adef\s+([^\s(]+)/, 1]
+        elsif stripped == "end"
+          current_method = nil
+        end
+        next unless line.include?("is_a?(Type)") && line.include?("Type.new(")
+        @type_normalizers << { "path" => @rel, "line" => idx + 1, "class" => current_class,
+          "method" => current_method, "code" => stripped }
+      end
     end
 
     def walk(node, scope)
@@ -1129,6 +1155,9 @@ module NilKill
       if argv.delete("--defaults")
         ENV["NIL_KILL_AUTO_DEFAULTS"] = "1"
       end
+      @try_levenshtein = !!argv.delete("--try-levenshtein")
+      @levenshtein_distance = ENV.fetch("NIL_KILL_LEVENSHTEIN_DISTANCE", "2").to_i
+      @levenshtein_limit = ENV.fetch("NIL_KILL_LEVENSHTEIN_LIMIT", "50").to_i
       sep = argv.index("--")
       @verify_cmd = sep ? argv[(sep + 1)..] : []
       @max_iters = ENV.fetch("NIL_KILL_MAX_ITERS", "10").to_i
@@ -1179,6 +1208,15 @@ module NilKill
           end
           true
         end
+        if @try_levenshtein
+          speculative = levenshtein_actions(evidence).reject do |action|
+            @skipped.include?(fingerprint(action)) || permanently_skipped?(action)
+          end
+          seen = high_actions.map { |action| fingerprint(action) }.to_set
+          speculative.reject! { |action| seen.include?(fingerprint(action)) }
+          puts "Levenshtein speculative actions: #{speculative.size}"
+          high_actions.concat(speculative)
+        end
         high = high_actions.size
         puts "high-confidence actions: #{high}"
         break if high.zero?
@@ -1207,6 +1245,91 @@ module NilKill
       puts "Z3 A3: #{actions.size} static param inference(s) written to #{NilKill.rel(out)}"
     rescue StandardError => e
       warn "nil-kill: Z3 A3 inference failed: #{e.message}"
+    end
+
+    def levenshtein_actions(evidence)
+      rec_by_source = evidence["methods"].each_with_object({}) do |rec, lookup|
+        src = rec["source"]
+        lookup[[src["path"], src["line"]]] = rec if src
+      end
+      actions = []
+      Array(evidence.dig("facts", "existing_sigs")).each do |src|
+        sig = src["sig"].to_s
+        next unless sig.include?("T.untyped")
+        rec = rec_by_source[[src["path"], src["line"]]]
+        next unless rec
+        classes_by_name = params_for_levenshtein(rec)
+        Array(src["params"]).each do |param|
+          name = param["name"].to_s
+          next unless sig.match?(/\b#{Regexp.escape(name)}:\s*T\.untyped\b/)
+          observed = Array(classes_by_name[name]).compact.uniq
+          concrete = observed.reject { |klass| ignored_levenshtein_class?(klass) }
+          next unless concrete.size > 1
+          candidate = levenshtein_candidate(name, concrete)
+          next unless candidate
+          actions << { "kind" => "fix_sig_param", "confidence" => HIGH, "path" => src["path"], "line" => src["line"],
+            "message" => "try Levenshtein param #{name} -> #{candidate[:type]} from observed #{concrete.first(8).join(", ")}",
+            "data" => { "name" => name, "type" => candidate[:type], "distance" => candidate[:distance],
+              "observed_classes" => concrete.sort, "callsites" => param_sites_for_levenshtein(rec)[name] || {} } }
+        end
+      end
+      actions.sort_by! { |action| [action.dig("data", "distance").to_i, -action.dig("data", "observed_classes").to_a.size, action["path"], action["line"].to_i] }
+      @levenshtein_limit.positive? ? actions.first(@levenshtein_limit) : actions
+    end
+
+    def params_for_levenshtein(rec)
+      rec["params_ok"].empty? ? rec["params_by_name"] : rec["params_ok"]
+    end
+
+    def param_sites_for_levenshtein(rec)
+      rec["param_sites_ok"].empty? ? rec["param_sites"] : rec["param_sites_ok"]
+    end
+
+    def ignored_levenshtein_class?(klass)
+      klass == "NilClass" || klass == "T.untyped" || klass.to_s.include?("#") || klass.to_s.start_with?("Sorbet::Private::")
+    end
+
+    def levenshtein_candidate(param_name, classes)
+      scored = classes.filter_map do |klass|
+        base = klass.to_s.split("::").last
+        score = normalized_param_names(param_name).map { |name| levenshtein_distance(name, normalize_type_name(base)) }.min
+        next unless score && score <= @levenshtein_distance
+        { type: klass, distance: score, base: base }
+      end
+      return nil if scored.empty?
+      best_distance = scored.map { |item| item[:distance] }.min
+      best = scored.select { |item| item[:distance] == best_distance }
+      return nil if best.map { |item| normalize_type_name(item[:base]) }.uniq.size > 1
+      best.min_by { |item| item[:type].length }
+    end
+
+    def normalized_param_names(name)
+      normalized = normalize_type_name(name)
+      variants = [normalized]
+      variants << normalized.delete_suffix("s") if normalized.end_with?("s")
+      variants << normalized.delete_suffix("node") if normalized.end_with?("node")
+      variants << normalized.delete_suffix("tok") + "token" if normalized.end_with?("tok")
+      variants.reject(&:empty?).uniq
+    end
+
+    def normalize_type_name(name)
+      name.to_s.downcase.gsub(/[^a-z0-9]/, "")
+    end
+
+    def levenshtein_distance(a, b)
+      prev = (0..b.length).to_a
+      a.each_char.with_index do |char_a, idx_a|
+        cur = [idx_a + 1]
+        b.each_char.with_index do |char_b, idx_b|
+          cur << [
+            cur[idx_b] + 1,
+            prev[idx_b + 1] + 1,
+            prev[idx_b] + (char_a == char_b ? 0 : 1),
+          ].min
+        end
+        prev = cur
+      end
+      prev[b.length]
     end
 
     def apply_verified(actions)
@@ -1285,6 +1408,7 @@ module NilKill
         evidence["diagnostics"]["nil_origins"].first(20).each { |o| lines << "- #{o["origin"]}: #{o["count"]}" }
       end
       append_callsite_pressure(lines, actions)
+      append_type_normalizer_report(lines, evidence)
       append_struct_report(lines, evidence)
       append_tuple_report(lines, evidence)
       FileUtils.mkdir_p(TMP_DIR)
@@ -1454,6 +1578,27 @@ module NilKill
       actions.select { |a| a["kind"] == "union_observed" }.first(50).each do |action|
         classes = Array(action.dig("data", "classes")).join(", ")
         lines << "- #{action["path"]}:#{action["line"]} #{action.dig("data", "name")}: observed #{classes}; kept as T.untyped"
+      end
+    end
+
+    def append_type_normalizer_report(lines, evidence)
+      normalizers = Array(evidence.dig("facts", "type_normalizers"))
+      lines << ""
+      lines << "## Type Normalizer Sites"
+      lines << "- Sites matching `is_a?(Type)` plus `Type.new(...)`: #{normalizers.size}"
+      if normalizers.empty?
+        lines << "- none"
+        return
+      end
+      grouped = normalizers.group_by { |site| site["path"] }
+      grouped.sort_by { |path, sites| [-sites.size, path] }.first(20).each do |path, sites|
+        lines << "- #{path}: #{sites.size}"
+        sites.first(5).each do |site|
+          method = [site["class"], site["method"]].compact.reject(&:empty?).join("#")
+          method = "top-level" if method.empty?
+          lines << "  - line #{site["line"]} #{method}: #{site["code"]}"
+        end
+        lines << "  - ... #{sites.size - 5} more" if sites.size > 5
       end
     end
 
