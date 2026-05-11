@@ -18,8 +18,8 @@ should_skip_live_data_file() {
     examples/minivm/types.cht|\
     examples/minivm/vtest.cht)
       # Temporary live-data exclusions for .cht files that do not currently
-      # transpile. 06/07 are blocked by the pending BG promise-capture bug;
-      # the minivm files are corpus/compiler-cleanup exceptions.
+      # transpile. 06/07 still hit the BG producer capture bug; the minivm
+      # files are corpus/compiler-cleanup exceptions.
       return 0
       ;;
   esac

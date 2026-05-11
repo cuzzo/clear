@@ -26,8 +26,8 @@ files = SOURCE_DIRS.flat_map do |dir|
 end.sort.reject do |abs_path|
   rel = abs_path.delete_prefix(ROOT + File::SEPARATOR)
   # Temporary live-data exclusions for files that do not currently transpile.
-  # 06/07 are blocked by the pending BG promise-capture bug; the minivm files
-  # are corpus/compiler-cleanup exceptions.
+  # 06/07 still hit the BG producer capture bug; the minivm files are
+  # corpus/compiler-cleanup exceptions.
   LIVE_DATA_EXCLUDES.include?(rel)
 end
 
