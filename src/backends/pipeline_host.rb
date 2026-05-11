@@ -1044,7 +1044,7 @@ class PipelineHost
     smooth_node.respond_to?(:storage) && smooth_node.storage == :heap ? :heap : :frame
   end
 
-  sig { params(site: PipelineHost::PipelineSite, expr_node: AST::BinaryOp).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, expr_node: T.untyped).returns(MIR::BlockExpr) }
   def lower_where(site, expr_node)
     list_node = site.list
     smooth_node = site.options

@@ -111,7 +111,6 @@
 245_lambda_inferred_type
 254_same_name_in_elif_branches
 275_takes_list_param_length
-351_numeric_cast_narrowing
 368_gradual_basic
 369_gradual_ambiguity
 370_negative_predicate
@@ -143,6 +142,7 @@
 # Pipeline-over-non-local-source ForStmt iter + struct_list (ArrayInit
 # with struct elements via field-decomposed parallel arrays).
 26_reduce
+27_order_by
 66_aggregation_ops
 
 # MIR::Pipeline pass-through (lazy ranges), IterRange ForStmt,
@@ -152,8 +152,6 @@
 220_lazy_range_each
 221_lazy_select_where
 223_lazy_range_reduce
-354_fixed_array_mutation
-355_fixed_array_large
 373_fixed_array_to_slice_param
 71_tap_skip
 89_frame_alloc
@@ -168,7 +166,6 @@
 376_borrow_list_param_in_callee_for
 377_list_to_slice_callee
 378_mutable_list_param_forward
-379_cross_file_mutable_list_param
 53_writefile
 67_string_utf8
 72_string_escapes
@@ -491,3 +488,19 @@
 227_variable_stream_pipelines
 251_if_bind
 252_if_multi_bind
+
+# Runtime-faithful collection handles for struct fields and maps.
+#
+# - Struct-list fields that are themselves lists now store runtime
+#   list handles, so nested reads/mutations like `nodes[i].keys`
+#   operate on the original bucket rather than on a detached clone.
+# - INDEX over struct lists creates per-field dynamic maps from key
+#   to real list handles, preserving group buckets for subsequent
+#   length/index/field access.
+# - HashMap<Struct> stores scalar fields and list-handle fields in
+#   per-field maps, so replacing a struct with a populated list field
+#   avoids frame-backed list ownership leaks while keeping lookup
+#   semantics observable through the struct value.
+25_index
+167_nested_list_index_field
+181_hashmap_struct_list_field

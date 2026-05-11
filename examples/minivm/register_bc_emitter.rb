@@ -485,6 +485,8 @@ class RegisterBcEmitter
         elsif numeric_int64_map_type?(effective_zig_type)
           @vreg_by_name[param.name.to_s] = fresh_vreg
           @vkind_by_name[param.name.to_s] = :numeric_int_map
+        elsif (struct_map_type = string_struct_map_type?(effective_zig_type))
+          @value_by_name[param.name.to_s] = compile_struct_map_init(struct_map_type)
         elsif effective_zig_type.to_s.match?(/\A(?:CheatLib\.)?(?:Sharded)?Pool\(/)
           # Pool params: placeholder binding -- the inline-call path
           # overrides @pool_info with the caller's actual pool when
@@ -651,6 +653,8 @@ class RegisterBcEmitter
       compile_call_stmt(stmt)
     when MIR::ShardedMapPut
       compile_sharded_map_put(stmt)
+    when MIR::IndexInsert
+      compile_index_insert(stmt)
     when MIR::ExprStmt
       compile_expr_stmt(stmt)
     when MIR::ForStmt
@@ -659,6 +663,8 @@ class RegisterBcEmitter
       # Migrated pipeline operators carry the lowered shape (ForStmt
       # over range / list / etc.) in `inner`. Pass through.
       compile_stmt(stmt.inner)
+    when MIR::Sort
+      compile_sort(stmt)
     when MIR::IfBindStmt
       compile_if_bind_stmt(stmt)
     when MIR::SnapshotRead
@@ -1026,6 +1032,11 @@ class RegisterBcEmitter
   end
 
   def compile_let(stmt)
+    if stmt.init.is_a?(MIR::StructInit) && (struct_type = struct_list_map_type?(stmt.annotation))
+      bind_value(stmt.name.to_s, compile_struct_list_map_init(struct_type))
+      return
+    end
+
     value = compile_value_expr(stmt.init)
     if value
       bind_value(stmt.name.to_s, value)
@@ -1194,6 +1205,11 @@ class RegisterBcEmitter
   end
 
   def compile_index_set(target, value)
+    if target.object.is_a?(MIR::Ident) && @value_by_name[target.object.name.to_s]&.fetch(:kind, nil) == :struct_map
+      compile_struct_map_set(target, value)
+      return
+    end
+
     # `<struct_list>[i] = <struct_view>` / `<pool>[i] = <struct_view>`
     # -- write the struct's per-field regs back into the matching
     # parallel arrays at index i. Same shape for both; pool's alive
@@ -1214,8 +1230,7 @@ class RegisterBcEmitter
         case finfo[:kind]
         when :int_list    then emit(LSETI, finfo[:reg], idx_reg, field[:reg])
         when :f64_list    then emit(LFSET, finfo[:reg], idx_reg, field[:reg])
-        when :string_list
-          raise Unsupported, "register emitter lacks an opcode for string-list set-by-index; struct_list[i] write-back of String fields is not yet supported"
+        when :string_list then emit(LSSET, finfo[:reg], idx_reg, field[:reg])
         end
       end
       return
@@ -1531,6 +1546,24 @@ class RegisterBcEmitter
     case stmt.op
     when :append, :insert, :push
       args = stmt.args || []
+      receiver_is_plain_vreg = args[0].is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(args[0].name))
+      if args.length >= 2 && !receiver_is_plain_vreg && (handle = compile_list_handle_expr(args[0]))
+        case handle.fetch(:kind)
+        when :int_list_handle
+          emit(IHAPPEND, handle.fetch(:reg), compile_i64_expr(args[1]))
+        when :string_list_handle
+          emit(SHAPPEND, handle.fetch(:reg), compile_string_expr(args[1]))
+        end
+        return
+      end
+      if args.length >= 2 && !args[0].is_a?(MIR::Ident)
+        receiver_value = compile_value_expr(args[0])
+        if receiver_value && receiver_value[:kind] == :struct_list
+          append_struct_to_fields(receiver_value.fetch(:fields), receiver_value.fetch(:type), args[1])
+          return
+        end
+      end
+
       unless args.length >= 2 && args[0].is_a?(MIR::Ident)
         raise Unsupported, "register emitter only supports local list append in this tranche"
       end
@@ -2249,6 +2282,13 @@ class RegisterBcEmitter
       path = compile_string_expr(args[0])
       return emit_string_ncall(N_FILE_READ, [[ARG_S, path]])
     when :getAt
+      receiver_is_plain_vreg = args[0].is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(args[0].name))
+      if args.length >= 2 && !receiver_is_plain_vreg && (handle = compile_list_handle_expr(args[0], :string_list_handle))
+        dst = fresh_sreg
+        emit(SHGET, dst, handle.fetch(:reg), compile_i64_expr(args[1]))
+        return dst
+      end
+
       unless args.length >= 2 && args[0].is_a?(MIR::Ident)
         raise Unsupported, "register emitter only supports local String list getAt in this tranche"
       end
@@ -2282,6 +2322,16 @@ class RegisterBcEmitter
   end
 
   def compile_i64_length(expr)
+    plain_vreg_length = expr.is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(expr.name))
+    if !plain_vreg_length && (handle = compile_list_handle_expr(expr))
+      dst = fresh_ireg
+      case handle.fetch(:kind)
+      when :int_list_handle then emit(IHLEN, dst, handle.fetch(:reg))
+      when :string_list_handle then emit(SHLEN, dst, handle.fetch(:reg))
+      end
+      return dst
+    end
+
     if expr.is_a?(MIR::Ident)
       name = expr.name.to_s
       dst = fresh_ireg
@@ -2296,6 +2346,9 @@ class RegisterBcEmitter
              when :int_list then LLEN
              when :f64_list then LFLEN
              when :string_list then LSLEN
+             when :handle_list then LLEN
+             when :int_handle_values then IHLEN
+             when :string_handle_values then SHLEN
              end
         emit(op, dst, first[:reg])
         return dst
@@ -2842,6 +2895,8 @@ class RegisterBcEmitter
                :int_map
              elsif numeric_int64_map_type?(effective_zig_type)
                :numeric_int_map
+             elsif (struct_map_type = string_struct_map_type?(effective_zig_type))
+               [:struct_map, struct_map_type]
              elsif effective_zig_type.to_s.match?(/\A(?:CheatLib\.)?(?:Sharded)?Pool\(/)
                :pool
              else
@@ -2855,15 +2910,17 @@ class RegisterBcEmitter
             when :int_list, :f64_list, :string_list then compile_list_arg(arg, type)
             when :value_string_map, :value_list then compile_value_container_arg(arg, type)
             when :int_map, :numeric_int_map then compile_value_container_arg(arg, type)
-            when :pool then compile_pool_arg(arg)
             when Array
-              if type.first == :union
+              if type.first == :struct_map
+                compile_struct_map_arg(arg, type.last)
+              elsif type.first == :union
                 compile_union_arg(arg, type.last)
               elsif type.first == :struct
                 compile_struct_arg(arg, type.last)
               else
                 raise Unsupported, "register emitter does not support helper param type #{type.inspect}"
               end
+            when :pool then compile_pool_arg(arg)
             else
               raise Unsupported, "register emitter only supports Int64, Float64, String and list helper params in this tranche"
             end
@@ -2936,6 +2993,20 @@ class RegisterBcEmitter
     end
     unless value.fetch(:type) == expected_type
       raise Unsupported, "register emitter expected union arg #{expected_type.inspect}, got #{value.fetch(:type).inspect}"
+    end
+
+    value
+  end
+
+  def compile_struct_map_arg(arg, expected_type)
+    arg = arg.expr if arg.is_a?(MIR::AddressOf)
+    value = if arg.is_a?(MIR::Ident)
+              @value_by_name[arg.name.to_s]
+            else
+              compile_value_expr(arg)
+            end
+    unless value && value.fetch(:kind) == :struct_map && value.fetch(:type) == expected_type
+      raise Unsupported, "register emitter expected HashMap<#{expected_type}> arg"
     end
 
     value
@@ -3066,7 +3137,8 @@ class RegisterBcEmitter
         @pool_info ||= {}
         @pool_info[name] = reg
       when Array
-        @value_by_name[name] = reg if type.first == :union ||
+        @value_by_name[name] = reg if type.first == :struct_map ||
+                                       type.first == :union ||
                                        %i[struct rc_struct arc_struct locked_struct write_locked_struct local_struct versioned_struct atomic_ptr_struct].include?(type.first)
       end
     end
@@ -3141,6 +3213,14 @@ class RegisterBcEmitter
 
   def list_register_type?(type)
     type == :int_list || type == :f64_list || type == :string_list || type == :value_list || type == :value_string_map
+  end
+
+  def list_handle_type?(type)
+    type == :int_list_handle || type == :string_list_handle
+  end
+
+  def list_handle_value?(value)
+    value && %i[int_list_handle string_list_handle].include?(value[:kind])
   end
 
   def union_register_type?(type)
@@ -3223,6 +3303,8 @@ class RegisterBcEmitter
       # path for pure-data SELECT/WHERE/REDUCE; ordering effects from
       # actual fiber concurrency are out of scope here.
       compile_value_expr(expr.inner)
+    when MIR::ShardedMapGet
+      compile_struct_list_map_get(expr)
     when MIR::RangeLit
       # `0..<n` / `0..=n` as a value (e.g. `~Int64[] = 0..<n` for a
       # bounded stream pipeline). Materialize it eagerly into an
@@ -3276,13 +3358,21 @@ class RegisterBcEmitter
       # `<struct_list>[i]` / `<pool>[i]` -- materialize the per-index
       # struct view so a Let can bind it (e.g. CONCURRENT EACH /
       # pool EACH iterating by index).
-      if expr.object.is_a?(MIR::Ident)
-        kind = @vkind_by_name[expr.object.name.to_s]
+      if (list_name = index_get_list_name(expr.object))
+        kind = @vkind_by_name[list_name]
         if kind == :struct_list
-          return compile_struct_list_index_get(expr.object.name.to_s, expr.index)
+          return compile_struct_list_index_get(list_name, expr.index)
         elsif kind == :pool
-          return compile_pool_index_get(expr.object.name.to_s, expr.index)
+          return compile_pool_index_get(list_name, expr.index)
         end
+      end
+      object_value = if expr.object.is_a?(MIR::ListItems)
+                       compile_value_expr(expr.object.list)
+                     else
+                       compile_value_expr(expr.object)
+                     end
+      if object_value && object_value[:kind] == :struct_list
+        return compile_struct_list_value_index_get(object_value, expr.index)
       end
       nil
     end
@@ -3343,6 +3433,10 @@ class RegisterBcEmitter
         r = fresh_sreg
         emit(LSGET, r, finfo[:reg], i_reg)
         fields[fname] = { type: :string, reg: r }
+      when :handle_list
+        r = fresh_ireg
+        emit(LGETI, r, finfo[:reg], i_reg)
+        fields[fname] = { type: finfo[:type], reg: r }
       end
     end
     @value_by_name[capture] = { kind: :struct, type: info[:type], fields: fields, alive_reg: alive_reg }
@@ -3396,6 +3490,10 @@ class RegisterBcEmitter
         reg = fresh_sreg
         emit(LSGET, reg, finfo[:reg], idx_reg)
         fields[fname] = { type: :string, reg: reg }
+      when :handle_list
+        reg = fresh_ireg
+        emit(LGETI, reg, finfo[:reg], idx_reg)
+        fields[fname] = { type: finfo[:type], reg: reg }
       end
     end
     { kind: :struct, type: info[:type], fields: fields, alive_reg: alive_reg }
@@ -3477,6 +3575,10 @@ class RegisterBcEmitter
   # The result is a synthetic union local that downstream MATCH arms
   # destructure exactly like a non-container Value local.
   def compile_value_orelse(expr)
+    if (struct_value = compile_struct_map_orelse(expr))
+      return struct_value
+    end
+
     inner = expr.expr
     return nil unless inner.is_a?(MIR::ShardedMapGet) && inner.target.is_a?(MIR::Ident)
     map_name = inner.target.name.to_s
@@ -3629,6 +3731,9 @@ class RegisterBcEmitter
              when :int_list then LLEN
              when :f64_list then LFLEN
              when :string_list then LSLEN
+             when :handle_list then LLEN
+             when :int_handle_values then IHLEN
+             when :string_handle_values then SHLEN
              end
     len_reg = fresh_ireg
     emit(len_op, len_reg, first_field[:reg])
@@ -3707,21 +3812,26 @@ class RegisterBcEmitter
     info = (@struct_list_info || {})[list_name]
     raise Unsupported, "register emitter lost struct_list info for #{list_name.inspect}" unless info
 
+    append_struct_to_fields(info.fetch(:fields), info.fetch(:type), source_expr)
+  end
+
+  def append_struct_to_fields(fields, type_name, source_expr)
     value = compile_value_expr(source_expr)
     unless value && value.is_a?(Hash) && value[:kind] == :struct
       raise Unsupported, "register emitter expected a struct value for struct_list append, got #{value.inspect[0..80]}"
     end
-    unless value[:type] == info[:type]
-      raise Unsupported, "register emitter struct_list append type mismatch: expected #{info[:type].inspect}, got #{value[:type].inspect}"
+    unless value[:type] == type_name
+      raise Unsupported, "register emitter struct_list append type mismatch: expected #{type_name.inspect}, got #{value[:type].inspect}"
     end
 
-    info[:fields].each do |fname, finfo|
+    fields.each do |fname, finfo|
       field = value[:fields][fname.to_s] || value[:fields][fname]
       raise Unsupported, "register emitter missing field #{fname.inspect} in append source" unless field
       case finfo[:kind]
       when :int_list    then emit(LAPPENDI, finfo[:reg], field[:reg])
       when :f64_list    then emit(LFAPPEND, finfo[:reg], field[:reg])
       when :string_list then emit(LSAPPEND, finfo[:reg], field[:reg])
+      when :handle_list then emit(LAPPENDI, finfo[:reg], field[:reg])
       end
     end
   end
@@ -3733,6 +3843,10 @@ class RegisterBcEmitter
   def compile_struct_list_index_get(list_name, idx_expr)
     info = (@struct_list_info || {})[list_name]
     raise Unsupported, "register emitter lost struct_list info for #{list_name.inspect}" unless info
+    compile_struct_list_value_index_get({ type: info[:type], fields: info[:fields] }, idx_expr)
+  end
+
+  def compile_struct_list_value_index_get(info, idx_expr)
     idx_reg = compile_i64_expr(idx_expr)
     fields = {}
     info[:fields].each do |fname, finfo|
@@ -3749,9 +3863,255 @@ class RegisterBcEmitter
         reg = fresh_sreg
         emit(LSGET, reg, finfo[:reg], idx_reg)
         fields[fname] = { type: :string, reg: reg }
+      when :handle_list
+        reg = fresh_ireg
+        emit(LGETI, reg, finfo[:reg], idx_reg)
+        fields[fname] = { type: finfo[:type], reg: reg }
+      when :int_handle_values
+        reg = fresh_ireg
+        emit(IHGET, reg, finfo[:reg], idx_reg)
+        fields[fname] = { type: :i64, reg: reg }
+      when :string_handle_values
+        reg = fresh_sreg
+        emit(SHGET, reg, finfo[:reg], idx_reg)
+        fields[fname] = { type: :string, reg: reg }
       end
     end
     { kind: :struct, type: info[:type], fields: fields }
+  end
+
+  def index_get_list_name(object)
+    if object.is_a?(MIR::Ident)
+      object.name.to_s
+    elsif object.is_a?(MIR::ListItems) && object.list.is_a?(MIR::Ident)
+      object.list.name.to_s
+    end
+  end
+
+  def list_like_value?(value)
+    %i[int_list f64_list string_list struct_list].include?(value[:kind])
+  end
+
+  def clone_list_value(value)
+    case value[:kind]
+    when :int_list, :f64_list, :string_list
+      clone_scalar_list_value(value)
+    when :struct_list
+      clone_struct_list_value(value)
+    end
+  end
+
+  def clone_scalar_list_value(value)
+    src_reg = value.fetch(:reg)
+    kind = value.fetch(:kind)
+    dst_reg = fresh_vreg
+    new_op, len_op, get_op, append_op, fresh_fn = case kind
+      when :int_list
+        [LNEW, LLEN, LGETI, LAPPENDI, :fresh_ireg]
+      when :f64_list
+        [LFNEW, LFLEN, LFGET, LFAPPEND, :fresh_freg]
+      when :string_list
+        [LSNEW, LSLEN, LSGET, LSAPPEND, :fresh_sreg]
+      end
+    emit(new_op, dst_reg)
+    emit_clone_loop(src_reg, dst_reg, len_op, get_op, append_op, fresh_fn)
+    { kind: kind, reg: dst_reg }
+  end
+
+  def clone_struct_list_value(value)
+    fields = value.fetch(:fields)
+    cloned_fields = {}
+    fields.each do |fname, finfo|
+      cloned = clone_scalar_list_value(finfo)
+      cloned_fields[fname] = finfo.merge(reg: cloned.fetch(:reg))
+    end
+    { kind: :struct_list, type: value.fetch(:type), fields: cloned_fields }
+  end
+
+  def emit_clone_loop(src_reg, dst_reg, len_op, get_op, append_op, fresh_fn)
+    len_reg = fresh_ireg
+    emit(len_op, len_reg, src_reg)
+    i_reg = fresh_ireg
+    emit(ICONST, i_reg, add_const(0))
+    one_reg = fresh_ireg
+    emit(ICONST, one_reg, add_const(1))
+
+    loop_start = @ops.length
+    cond = fresh_ireg
+    emit(ILT, cond, i_reg, len_reg)
+    emit(JF, cond, 0)
+    exit_patch = @ops.length - 1
+
+    val = send(fresh_fn)
+    emit(get_op, val, src_reg, i_reg)
+    emit(append_op, dst_reg, val)
+    next_i = fresh_ireg
+    emit(IADD, next_i, i_reg, one_reg)
+    emit(IMOV, i_reg, next_i)
+    emit(JMP, loop_start)
+    @ops[exit_patch] = @ops.length
+  end
+
+  def compile_sort(node)
+    target = sort_target_value(node.items_expr)
+    raise Unsupported, "register emitter only supports ORDER_BY over list values in this tranche" unless target
+
+    case target.fetch(:kind)
+    when :int_list
+      compile_scalar_list_sort(target.fetch(:reg), :int_list, node)
+    when :f64_list
+      compile_scalar_list_sort(target.fetch(:reg), :f64_list, node)
+    when :struct_list
+      compile_struct_list_sort(target, node)
+    else
+      raise Unsupported, "register emitter does not support ORDER_BY over #{target.fetch(:kind).inspect}"
+    end
+  end
+
+  def sort_target_value(expr)
+    expr = expr.object while expr.is_a?(MIR::FieldGet) && expr.field.to_s == "items"
+    compile_value_expr(expr)
+  end
+
+  def compile_scalar_list_sort(list_reg, kind, node)
+    len_op, get_op, set_op, fresh_fn, bind_map = case kind
+      when :int_list
+        [LLEN, LGETI, LSETI, :fresh_ireg, @ireg_by_name]
+      when :f64_list
+        [LFLEN, LFGET, LFSET, :fresh_freg, @freg_by_name]
+      end
+    compile_sort_loop(len_op, list_reg) do |j_reg, next_j_reg, swap_end|
+      a = send(fresh_fn)
+      b = send(fresh_fn)
+      emit(get_op, a, list_reg, next_j_reg)
+      emit(get_op, b, list_reg, j_reg)
+      bind_map["a"] = a
+      bind_map["b"] = b
+      cond = compile_bool_expr(MIR::BinOp.new("<", node.key_a, node.key_b))
+      emit(JF, cond, 0)
+      swap_end << (@ops.length - 1)
+      emit(set_op, list_reg, j_reg, a)
+      emit(set_op, list_reg, next_j_reg, b)
+    end
+  end
+
+  def compile_struct_list_sort(value, node)
+    fields = value.fetch(:fields)
+    first = fields.values.first
+    raise Unsupported, "register emitter cannot sort empty struct_list" unless first
+
+    len_op = case first[:kind]
+             when :int_list then LLEN
+             when :f64_list then LFLEN
+             when :string_list then LSLEN
+             when :handle_list then LLEN
+             end
+    compile_sort_loop(len_op, first.fetch(:reg)) do |j_reg, next_j_reg, swap_end|
+      a_fields = load_struct_fields_at(fields, next_j_reg)
+      b_fields = load_struct_fields_at(fields, j_reg)
+      @value_by_name["a"] = { kind: :struct, type: value.fetch(:type), fields: a_fields }
+      @value_by_name["b"] = { kind: :struct, type: value.fetch(:type), fields: b_fields }
+      cond = compile_bool_expr(MIR::BinOp.new("<", node.key_a, node.key_b))
+      emit(JF, cond, 0)
+      swap_end << (@ops.length - 1)
+      store_struct_fields_at(fields, j_reg, a_fields)
+      store_struct_fields_at(fields, next_j_reg, b_fields)
+    end
+  end
+
+  def compile_sort_loop(len_op, len_source_reg)
+    saved_iregs = @ireg_by_name.dup
+    saved_fregs = @freg_by_name.dup
+    saved_sregs = @sreg_by_name.dup
+    saved_values = @value_by_name.dup
+
+    len_reg = fresh_ireg
+    emit(len_op, len_reg, len_source_reg)
+    one_reg = fresh_ireg
+    emit(ICONST, one_reg, add_const(1))
+    last_reg = fresh_ireg
+    emit(ISUB, last_reg, len_reg, one_reg)
+
+    i_reg = fresh_ireg
+    emit(ICONST, i_reg, add_const(0))
+    outer_start = @ops.length
+    outer_cond = fresh_ireg
+    emit(ILT, outer_cond, i_reg, len_reg)
+    emit(JF, outer_cond, 0)
+    outer_exit = @ops.length - 1
+
+    j_reg = fresh_ireg
+    emit(ICONST, j_reg, add_const(0))
+    inner_start = @ops.length
+    inner_cond = fresh_ireg
+    emit(ILT, inner_cond, j_reg, last_reg)
+    emit(JF, inner_cond, 0)
+    inner_exit = @ops.length - 1
+
+    next_j = fresh_ireg
+    emit(IADD, next_j, j_reg, one_reg)
+    swap_end = []
+    yield(j_reg, next_j, swap_end)
+    swap_end.each { |idx| @ops[idx] = @ops.length }
+    emit(IMOV, j_reg, next_j)
+    emit(JMP, inner_start)
+    @ops[inner_exit] = @ops.length
+
+    next_i = fresh_ireg
+    emit(IADD, next_i, i_reg, one_reg)
+    emit(IMOV, i_reg, next_i)
+    emit(JMP, outer_start)
+    @ops[outer_exit] = @ops.length
+  ensure
+    @ireg_by_name = saved_iregs if saved_iregs
+    @freg_by_name = saved_fregs if saved_fregs
+    @sreg_by_name = saved_sregs if saved_sregs
+    @value_by_name = saved_values if saved_values
+  end
+
+  def load_struct_fields_at(fields, idx_reg)
+    loaded = {}
+    fields.each do |fname, finfo|
+      case finfo[:kind]
+      when :int_list
+        reg = fresh_ireg
+        emit(LGETI, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: :i64, reg: reg }
+      when :f64_list
+        reg = fresh_freg
+        emit(LFGET, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: :f64, reg: reg }
+      when :string_list
+        reg = fresh_sreg
+        emit(LSGET, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: :string, reg: reg }
+      when :handle_list
+        reg = fresh_ireg
+        emit(LGETI, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: finfo[:type], reg: reg }
+      when :int_handle_values
+        reg = fresh_ireg
+        emit(IHGET, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: :i64, reg: reg }
+      when :string_handle_values
+        reg = fresh_sreg
+        emit(SHGET, reg, finfo[:reg], idx_reg)
+        loaded[fname] = { type: :string, reg: reg }
+      end
+    end
+    loaded
+  end
+
+  def store_struct_fields_at(fields, idx_reg, values)
+    fields.each do |fname, finfo|
+      field = values.fetch(fname)
+      case finfo[:kind]
+      when :int_list then emit(LSETI, finfo[:reg], idx_reg, field.fetch(:reg))
+      when :f64_list then emit(LFSET, finfo[:reg], idx_reg, field.fetch(:reg))
+      when :string_list then emit(LSSET, finfo[:reg], idx_reg, field.fetch(:reg))
+      when :handle_list then emit(LSETI, finfo[:reg], idx_reg, field.fetch(:reg))
+      end
+    end
   end
 
   def extract_fallback_variant(node)
@@ -3768,6 +4128,13 @@ class RegisterBcEmitter
   end
 
   def compile_value_call(expr)
+    if expr.callee.to_s == "CheatLib.makeList"
+      args = expr.args || []
+      source = args[2]
+      value = compile_value_expr(source)
+      return clone_list_value(value) if value && list_like_value?(value)
+    end
+
     function = @functions_by_name[expr.callee.to_s]
     return nil unless function
 
@@ -3807,7 +4174,8 @@ class RegisterBcEmitter
       return true if let && value_expr_candidate?(let.init)
       return true if let && let.init.is_a?(MIR::StructInit) &&
                      (int64_string_map_type?(let.init.zig_type.to_s) ||
-                      value_string_map_type?(let.init.zig_type.to_s))
+                      value_string_map_type?(let.init.zig_type.to_s) ||
+                      struct_list_map_type?(let.annotation))
     end
     false
   end
@@ -3817,11 +4185,13 @@ class RegisterBcEmitter
     when MIR::StructInit, MIR::ContainerInit, MIR::MakeList, MIR::FnRef, MIR::LambdaExpr
       true
     when MIR::Call
+      return true if expr.callee.to_s == "CheatLib.makeList"
+
       function = @functions_by_name[expr.callee.to_s]
       return_type = function && (list_value_type(function.ret_type) || value_type(function.ret_type))
       return_type && (value_register_type?(return_type) || union_register_type?(return_type) || list_register_type?(return_type))
     when MIR::Ident
-      @value_by_name.key?(expr.name.to_s) ||
+        @value_by_name.key?(expr.name.to_s) ||
         @vreg_by_name.key?(expr.name.to_s) ||
         @vkind_by_name[expr.name.to_s] == :struct_list
     when MIR::DeepCopy
@@ -4170,10 +4540,12 @@ class RegisterBcEmitter
       ftype_text = ftype.to_s
       norm = normalize_type(ftype_text)
       norm = :i64 if ftype_text == "bool" || ftype_text == "Bool"
+      norm = value_type(ftype_text) if norm == :unsupported
       kind = case norm
              when :i64    then :int_list
              when :f64    then :f64_list
              when :string then :string_list
+             when :int_list_handle, :string_list_handle then :handle_list
              else
                raise Unsupported, "register emitter only supports scalar struct fields for ArrayInit (got #{fname}: #{ftype})"
              end
@@ -4182,9 +4554,11 @@ class RegisterBcEmitter
                when :int_list then LNEW
                when :f64_list then LFNEW
                when :string_list then LSNEW
+               when :handle_list then LNEW
                end
       emit(new_op, reg)
-      field_lists[fname] = { kind: kind, reg: reg, type: ftype }
+      stored_type = kind == :handle_list ? norm : ftype
+      field_lists[fname] = { kind: kind, reg: reg, type: stored_type }
     end
 
     items.each do |item|
@@ -4203,6 +4577,10 @@ class RegisterBcEmitter
         when :string_list
           val = compile_string_expr(entry.fetch(:value))
           emit(LSAPPEND, info[:reg], val)
+        when :handle_list
+          handle = compile_list_handle_expr(entry.fetch(:value), info.fetch(:type))
+          raise Unsupported, "register emitter expected list handle for field #{fname.inspect}" unless handle
+          emit(LAPPENDI, info[:reg], handle.fetch(:reg))
         end
       end
     end
@@ -4304,6 +4682,56 @@ class RegisterBcEmitter
       key_idx = map_string_key_const(stmt.key)
       emit(MPUTI, map_reg, key_idx, value_reg)
     end
+  end
+
+  def compile_index_insert(stmt)
+    map = stmt.map.is_a?(MIR::Ident) ? @value_by_name[stmt.map.name.to_s] : compile_value_expr(stmt.map)
+    unless map && map[:kind] == :struct_list_map
+      raise Unsupported, "register emitter only supports INDEX into struct-list maps in this tranche"
+    end
+
+    value = compile_value_expr(stmt.value_expr)
+    unless value && value[:kind] == :struct && value[:type] == map[:type]
+      raise Unsupported, "register emitter expected #{map[:type]} value for INDEX bucket append"
+    end
+
+    key_reg = compile_string_expr(stmt.key_expr)
+    map[:fields].each do |fname, finfo|
+      field = value.fetch(:fields).fetch(fname)
+      handle = ensure_index_bucket_handle(finfo, key_reg)
+      case finfo[:kind]
+      when :int_handle_map
+        emit(IHAPPEND, handle, field.fetch(:reg))
+      when :string_handle_map
+        emit(SHAPPEND, handle, field.fetch(:reg))
+      end
+    end
+  end
+
+  def ensure_index_bucket_handle(finfo, key_reg)
+    exists = fresh_ireg
+    emit(MCONTAINSR, exists, finfo.fetch(:reg), key_reg)
+    emit(JF, exists, 0)
+    create_patch = @ops.length - 1
+
+    fallback = fresh_ireg
+    emit(ICONST, fallback, add_const(0))
+    handle = fresh_ireg
+    emit(MGETIR, handle, finfo.fetch(:reg), key_reg, fallback)
+    emit(JMP, 0)
+    done_patch = @ops.length - 1
+
+    @ops[create_patch] = @ops.length
+    case finfo.fetch(:kind)
+    when :int_handle_map
+      emit(IHNEW, handle)
+    when :string_handle_map
+      emit(SHNEW, handle)
+    end
+    emit(MPUTIR, finfo.fetch(:reg), key_reg, handle)
+
+    @ops[done_patch] = @ops.length
+    handle
   end
 
   def compile_i64_orelse(expr)
@@ -4411,6 +4839,154 @@ class RegisterBcEmitter
       # `HashMap<Int64, Int64>@sharded(N)` lowers to
       # PartitionedNumericMap(K, V, N).
       text.match?(/\A(?:CheatLib\.)?PartitionedNumericMap\((?:i64|Int64),\s*(?:i64|Int64),\s*\d+\)\z/)
+  end
+
+  def struct_list_map_type?(type)
+    text = type.to_s
+    match = text.match(/\A(?:CheatLib\.)?StringMap\((?:std\.)?ArrayListUnmanaged\(([A-Za-z_][A-Za-z0-9_]*)\)\)\z/) ||
+            text.match(/\AHashMap<([A-Za-z_][A-Za-z0-9_]*)\[\]>\z/)
+    return nil unless match
+
+    struct_type = match[1]
+    @struct_fields.key?(struct_type) ? struct_type : nil
+  end
+
+  def compile_struct_list_map_init(struct_type)
+    fields = @struct_fields.fetch(struct_type) do
+      raise Unsupported, "register emitter does not know struct #{struct_type.inspect} for INDEX"
+    end
+
+    field_maps = {}
+    fields.each do |fname, ftype|
+      norm = value_type(ftype)
+      kind = case norm
+             when :i64 then :int_handle_map
+             when :string then :string_handle_map
+             else
+               raise Unsupported, "register emitter only supports Int64/String fields in INDEX struct-list maps (got #{fname}: #{ftype})"
+             end
+      reg = fresh_vreg
+      emit(MNEW, reg)
+      field_maps[fname.to_s] = { kind: kind, reg: reg, type: norm }
+    end
+
+    { kind: :struct_list_map, type: struct_type, fields: field_maps }
+  end
+
+  def compile_struct_list_map_get(expr)
+    map = expr.target.is_a?(MIR::Ident) ? @value_by_name[expr.target.name.to_s] : compile_value_expr(expr.target)
+    return nil unless map && map[:kind] == :struct_list_map
+
+    key_reg = compile_string_expr(expr.key)
+    fields = {}
+    map.fetch(:fields).each do |fname, finfo|
+      fallback = fresh_ireg
+      case finfo.fetch(:kind)
+      when :int_handle_map
+        emit(IHNEW, fallback)
+      when :string_handle_map
+        emit(SHNEW, fallback)
+      end
+
+      handle = fresh_ireg
+      emit(MGETIR, handle, finfo.fetch(:reg), key_reg, fallback)
+      value_kind = case finfo.fetch(:kind)
+                   when :int_handle_map then :int_handle_values
+                   when :string_handle_map then :string_handle_values
+                   end
+      fields[fname] = { kind: value_kind, reg: handle, type: finfo.fetch(:type) }
+    end
+
+    { kind: :struct_list, type: map.fetch(:type), fields: fields }
+  end
+
+  def string_struct_map_type?(type)
+    text = type.to_s
+    match = text.match(/\A(?:CheatLib\.)?StringMap\(([A-Za-z_][A-Za-z0-9_]*)\)\z/) ||
+            text.match(/\AHashMap<([A-Za-z_][A-Za-z0-9_]*)>\z/)
+    return nil unless match
+
+    struct_type = match[1]
+    @struct_fields.key?(struct_type) ? struct_type : nil
+  end
+
+  def compile_struct_map_init(struct_type)
+    fields = @struct_fields.fetch(struct_type) do
+      raise Unsupported, "register emitter does not know struct #{struct_type.inspect} for HashMap"
+    end
+
+    field_maps = {}
+    fields.each do |fname, ftype|
+      norm = value_type(ftype)
+      kind, new_op = case norm
+                     when :i64 then [:int_field_map, MNEW]
+                     when :string then [:string_field_map, VMNEW]
+                     when :int_list_handle then [:int_list_handle_field_map, MNEW]
+                     when :string_list_handle then [:string_list_handle_field_map, MNEW]
+                     else
+                       raise Unsupported, "register emitter only supports scalar/list-handle fields in HashMap<Struct> (got #{fname}: #{ftype})"
+                     end
+      reg = fresh_vreg
+      emit(new_op, reg)
+      field_maps[fname.to_s] = { kind: kind, reg: reg, type: norm }
+    end
+
+    { kind: :struct_map, type: struct_type, fields: field_maps }
+  end
+
+  def compile_struct_map_set(target, value)
+    map = @value_by_name[target.object.name.to_s]
+    src = compile_value_expr(value)
+    unless map && map[:kind] == :struct_map && src && src[:kind] == :struct && src[:type] == map[:type]
+      raise Unsupported, "register emitter expected matching struct map assignment"
+    end
+
+    key_reg = compile_string_expr(target.index)
+    map.fetch(:fields).each do |fname, finfo|
+      field = src.fetch(:fields).fetch(fname)
+      case finfo.fetch(:kind)
+      when :int_field_map
+        emit(MPUTIR, finfo.fetch(:reg), key_reg, field.fetch(:reg))
+      when :string_field_map
+        emit(VMPUTSR, finfo.fetch(:reg), key_reg, field.fetch(:reg))
+      when :int_list_handle_field_map, :string_list_handle_field_map
+        emit(MPUTIR, finfo.fetch(:reg), key_reg, field.fetch(:reg))
+      end
+    end
+  end
+
+  def compile_struct_map_orelse(expr)
+    inner = expr.expr
+    return nil unless inner.is_a?(MIR::ShardedMapGet)
+    map = inner.target.is_a?(MIR::Ident) ? @value_by_name[inner.target.name.to_s] : compile_value_expr(inner.target)
+    return nil unless map && map[:kind] == :struct_map
+
+    result = compile_value_expr(expr.fallback)
+    unless result && result[:kind] == :struct && result[:type] == map[:type]
+      raise Unsupported, "register emitter expected #{map[:type]} fallback for HashMap<Struct> get"
+    end
+
+    key_reg = compile_string_expr(inner.key)
+    first = map.fetch(:fields).values.first
+    exists = fresh_ireg
+    emit(MCONTAINSR, exists, first.fetch(:reg), key_reg)
+    emit(JF, exists, 0)
+    done_patch = @ops.length - 1
+
+    map.fetch(:fields).each do |fname, finfo|
+      field = result.fetch(:fields).fetch(fname)
+      case finfo.fetch(:kind)
+      when :int_field_map
+        emit(MGETIR, field.fetch(:reg), finfo.fetch(:reg), key_reg, field.fetch(:reg))
+      when :string_field_map
+        emit(VMGETSR, field.fetch(:reg), finfo.fetch(:reg), key_reg)
+      when :int_list_handle_field_map, :string_list_handle_field_map
+        emit(MGETIR, field.fetch(:reg), finfo.fetch(:reg), key_reg, field.fetch(:reg))
+      end
+    end
+
+    @ops[done_patch] = @ops.length
+    result
   end
 
   # Polymorphic HashMap. Recognizes HashMap<UserUnion> where the user's
@@ -4525,6 +5101,10 @@ class RegisterBcEmitter
       reg = fresh_vreg
       emit(VMNEW, reg)
       return { kind: :value_string_map, reg: reg, union_name: vinfo[:union_name], variant_map: vinfo[:variants] }
+    end
+
+    if (struct_type = string_struct_map_type?(expr.zig_type))
+      return compile_struct_map_init(struct_type)
     end
 
     if (vinfo = value_list_type?(expr.zig_type))
@@ -4661,6 +5241,60 @@ class RegisterBcEmitter
     { kind: :pool, type: struct_type_name, fields: base[:fields], alive_reg: alive_reg }
   end
 
+  def compile_list_handle_expr(expr, expected_type = nil)
+    if expr.is_a?(MIR::Ident)
+      name = resolve_ctx_name(expr.name)
+      if (value = @value_by_name[name]) && list_handle_value?(value)
+        return value if expected_type.nil? || value[:kind] == expected_type
+      end
+
+      if @vreg_by_name.key?(name)
+        case @vkind_by_name[name]
+        when :int_list
+          return clone_vreg_list_to_handle(:int_list_handle, @vreg_by_name.fetch(name))
+        when :string_list
+          return clone_vreg_list_to_handle(:string_list_handle, @vreg_by_name.fetch(name))
+        end
+      end
+    end
+
+    if expr.is_a?(MIR::ContainerInit) || expr.is_a?(MIR::MakeList)
+      list_type = list_value_type(expr.respond_to?(:zig_type) ? expr.zig_type : expr.elem_type)
+      if list_type == :int_list || expected_type == :int_list_handle
+        handle = fresh_ireg
+        emit(IHNEW, handle)
+        (expr.respond_to?(:items) ? (expr.items || []) : []).each do |item|
+          emit(IHAPPEND, handle, compile_i64_expr(item))
+        end
+        return { kind: :int_list_handle, reg: handle }
+      elsif list_type == :string_list || expected_type == :string_list_handle
+        handle = fresh_ireg
+        emit(SHNEW, handle)
+        (expr.respond_to?(:items) ? (expr.items || []) : []).each do |item|
+          emit(SHAPPEND, handle, compile_string_expr(item))
+        end
+        return { kind: :string_list_handle, reg: handle }
+      end
+    end
+
+    value = compile_value_expr(expr)
+    return value if list_handle_value?(value) && (expected_type.nil? || value[:kind] == expected_type)
+
+    nil
+  end
+
+  def clone_vreg_list_to_handle(kind, list_reg)
+    handle = fresh_ireg
+    if kind == :int_list_handle
+      emit(IHNEW, handle)
+      emit_clone_loop(list_reg, handle, LLEN, LGETI, IHAPPEND, :fresh_ireg)
+    elsif kind == :string_list_handle
+      emit(SHNEW, handle)
+      emit_clone_loop(list_reg, handle, LSLEN, LSGET, SHAPPEND, :fresh_sreg)
+    end
+    { kind: kind, reg: handle }
+  end
+
   def compile_struct_init_value(expr)
     type_name = expr.zig_type.to_s
     if (variants = union_variants_for(type_name))
@@ -4699,7 +5333,18 @@ class RegisterBcEmitter
             when :i64 then compile_i64_expr(field.fetch(:value))
             when :f64 then compile_f64_expr(field.fetch(:value))
             when :string then compile_string_expr(field.fetch(:value))
+            when :int_list_handle, :string_list_handle
+              handle = compile_list_handle_expr(field.fetch(:value), field_type)
+              raise Unsupported, "register emitter expected #{field_type} field #{name.inspect}" unless handle
+              handle.fetch(:reg)
             when Array
+              if field_type.first == :struct_list
+                value = compile_value_expr(field.fetch(:value))
+                unless value && value.fetch(:kind) == :struct_list && value.fetch(:type) == field_type.last
+                  raise Unsupported, "register emitter expected #{field_type.last} struct-list field #{name.inspect}"
+                end
+                value
+              else
               unless field_type.first == :struct
                 raise Unsupported, "register emitter only supports nested struct fields in this tranche"
               end
@@ -4709,6 +5354,7 @@ class RegisterBcEmitter
                 raise Unsupported, "register emitter expected #{field_type.last} struct field #{name.inspect}"
               end
               value
+              end
             else
               raise Unsupported, "register emitter only supports Int64 and Float64 struct fields in Tranche 7"
             end
@@ -4871,6 +5517,12 @@ class RegisterBcEmitter
       @vkind_by_name[name] = value.fetch(:kind)
       @value_list_variants ||= {}
       @value_list_variants[name] = { union_name: value.fetch(:union_name), variants: value.fetch(:variant_map) }
+    when :int_list_handle, :string_list_handle
+      @value_by_name[name] = value
+    when :struct_list_map
+      @value_by_name[name] = value
+    when :struct_map
+      @value_by_name[name] = value
     when :struct_list
       # @vkind_by_name marks this binding as a struct list; the
       # field-decomposed layout lives in @struct_list_info, indexed
@@ -4933,6 +5585,12 @@ class RegisterBcEmitter
     case object.fetch(:kind)
     when :struct
       field = object.fetch(:fields)[expr.field.to_s]
+      if field && list_handle_type?(field.fetch(:type))
+        return { kind: field.fetch(:type), reg: field.fetch(:reg) }
+      end
+      if field && field.fetch(:type).is_a?(Array) && field.fetch(:type).first == :struct_list
+        return field.fetch(:reg)
+      end
       return nil unless field && value_register_type?(field.fetch(:type))
 
       field.fetch(:reg)
@@ -5020,13 +5678,21 @@ class RegisterBcEmitter
       # `<struct_list>[i].field` / `<pool>[i].field` -- materialize
       # the per-index struct view from parallel arrays so subsequent
       # field reads work.
-      if expr.object.is_a?(MIR::Ident)
-        kind = @vkind_by_name[expr.object.name.to_s]
+      if (list_name = index_get_list_name(expr.object))
+        kind = @vkind_by_name[list_name]
         if kind == :struct_list
-          return compile_struct_list_index_get(expr.object.name.to_s, expr.index)
+          return compile_struct_list_index_get(list_name, expr.index)
         elsif kind == :pool
-          return compile_pool_index_get(expr.object.name.to_s, expr.index)
+          return compile_pool_index_get(list_name, expr.index)
         end
+      end
+      object_value = if expr.object.is_a?(MIR::ListItems)
+                       compile_value_expr(expr.object.list)
+                     else
+                       compile_value_expr(expr.object)
+                     end
+      if object_value && object_value[:kind] == :struct_list
+        return compile_struct_list_value_index_get(object_value, expr.index)
       end
       nil
     when MIR::InlineBc
@@ -5042,6 +5708,10 @@ class RegisterBcEmitter
           elsif kind == :pool
             return compile_pool_index_get(list_arg.name.to_s, idx_arg)
           end
+        end
+        list_value = compile_value_expr(list_arg)
+        if list_value && list_value[:kind] == :struct_list
+          return compile_struct_list_value_index_get(list_value, idx_arg)
         end
       end
       nil
@@ -5275,6 +5945,16 @@ class RegisterBcEmitter
       end
     end
 
+    if expr.op == :getAt
+      args = expr.args || []
+      receiver_is_plain_vreg = args[0].is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(args[0].name))
+      if args.length >= 2 && !receiver_is_plain_vreg && (handle = compile_list_handle_expr(args[0], :int_list_handle))
+        dst = fresh_ireg
+        emit(IHGET, dst, handle.fetch(:reg), compile_i64_expr(args[1]))
+        return dst
+      end
+    end
+
     if expr.op == :length || expr.op == :count
       args = expr.args || []
       if args.length >= 1 && args[0].is_a?(MIR::Ident) && @vkind_by_name[args[0].name.to_s] == :pool
@@ -5379,6 +6059,15 @@ class RegisterBcEmitter
     end
     if expr.op == :length || expr.op == :count
       args = expr.args || []
+      plain_vreg_length = args[0].is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(args[0].name))
+      if args.length >= 1 && !plain_vreg_length && (handle = compile_list_handle_expr(args[0]))
+        dst = fresh_ireg
+        case handle.fetch(:kind)
+        when :int_list_handle then emit(IHLEN, dst, handle.fetch(:reg))
+        when :string_list_handle then emit(SHLEN, dst, handle.fetch(:reg))
+        end
+        return dst
+      end
       unless args.length >= 1 && args[0].is_a?(MIR::Ident)
         raise Unsupported, "register emitter only supports local Int64/Float64 list length in this tranche"
       end
@@ -5392,6 +6081,9 @@ class RegisterBcEmitter
                  when :int_list then LLEN
                  when :f64_list then LFLEN
                  when :string_list then LSLEN
+                 when :handle_list then LLEN
+                 when :int_handle_values then IHLEN
+                 when :string_handle_values then SHLEN
                  end
         dst = fresh_ireg
         emit(len_op, dst, first[:reg])
@@ -5820,6 +6512,16 @@ class RegisterBcEmitter
 
     text = type.to_s.delete_prefix("!").delete_prefix("anyerror!")
     text = text.delete_prefix("?").delete_prefix("*")
+    if (m = text.match(/\A(?:std\.)?ArrayListUnmanaged\(([A-Za-z_][A-Za-z0-9_]*)\)\z/))
+      inner = m[1]
+      return [:struct_list, inner] if @struct_fields.key?(inner)
+    end
+    return :int_list_handle if text == "Int64[]" ||
+                               text == "[]i64" ||
+                               text.match?(/\A(?:std\.)?ArrayListUnmanaged\(i64\)\z/)
+    return :string_list_handle if text == "String[]" ||
+                                  text == "[][]const u8" ||
+                                  text.match?(/\A(?:std\.)?ArrayListUnmanaged\(\[\]const u8\)\z/)
     return [:struct, text] if @struct_fields.key?(text)
     return [:union, text] if union_variants_for(text)
     # Capability wrappers around scalar structs share the field-

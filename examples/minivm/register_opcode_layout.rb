@@ -104,6 +104,7 @@ module MiniVM
         Opcode.new(name: :LFAPPEND, code: 50, arity: 2, vm_name: "LFAppend"),
         Opcode.new(name: :LFGET, code: 51, arity: 3, vm_name: "LFGet"),
         Opcode.new(name: :SEQ, code: 52, arity: 3, vm_name: "SEq"),
+        Opcode.new(name: :LSSET, code: 53, arity: 3, vm_name: "LSSet"),
         Opcode.new(name: :LSETI, code: 54, arity: 3, vm_name: "LSetI"),
         Opcode.new(name: :LFSET, code: 55, arity: 3, vm_name: "LFSet"),
         Opcode.new(name: :LFLEN, code: 56, arity: 2, vm_name: "LFLen"),
@@ -214,6 +215,18 @@ module MiniVM
         Opcode.new(name: :MVALUES,  code: 117, arity: 2, vm_name: "MValues"),
         Opcode.new(name: :NMKEYS,   code: 118, arity: 2, vm_name: "NMKeys"),
         Opcode.new(name: :NMVALUES, code: 119, arity: 2, vm_name: "NMValues"),
+        # Runtime collection handles. Handle IDs live in iregs and
+        # point into VM-owned dynamic list tables. Struct-list rows and
+        # StringMap<Int64> buckets can therefore store collection
+        # references without needing typed nested containers in vregs.
+        Opcode.new(name: :IHNEW,    code: 120, arity: 1, vm_name: "IHNew"),
+        Opcode.new(name: :IHAPPEND, code: 121, arity: 2, vm_name: "IHAppend"),
+        Opcode.new(name: :IHGET,    code: 122, arity: 3, vm_name: "IHGet"),
+        Opcode.new(name: :IHLEN,    code: 123, arity: 2, vm_name: "IHLen"),
+        Opcode.new(name: :SHNEW,    code: 124, arity: 1, vm_name: "SHNew"),
+        Opcode.new(name: :SHAPPEND, code: 125, arity: 2, vm_name: "SHAppend"),
+        Opcode.new(name: :SHGET,    code: 126, arity: 3, vm_name: "SHGet"),
+        Opcode.new(name: :SHLEN,    code: 127, arity: 2, vm_name: "SHLen"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -303,6 +316,7 @@ module MiniVM
         LFAPPEND: [:v_use, :f_use],
         LFGET: [:f_def, :v_use, :i_use],
         SEQ: [:i_def, :s_use, :s_use],
+        LSSET: [:v_use, :i_use, :s_use],
         LSETI: [:v_use, :i_use, :i_use],
         LFSET: [:v_use, :i_use, :f_use],
         LFLEN: [:i_def, :v_use],
@@ -319,6 +333,14 @@ module MiniVM
         MVALUES:  [:v_use, :v_use],
         NMKEYS:   [:v_use, :v_use],
         NMVALUES: [:v_use, :v_use],
+        IHNEW:    [:i_def],
+        IHAPPEND: [:i_use, :i_use],
+        IHGET:    [:i_def, :i_use, :i_use],
+        IHLEN:    [:i_def, :i_use],
+        SHNEW:    [:i_def],
+        SHAPPEND: [:i_use, :s_use],
+        SHGET:    [:s_def, :i_use, :i_use],
+        SHLEN:    [:i_def, :i_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

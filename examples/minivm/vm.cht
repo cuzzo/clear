@@ -68,7 +68,7 @@ ENUM RegisterOp {
     LFAppend,
     LFGet,
     SEq,
-    Reserved53,
+    LSSet,
     LSetI,
     LFSet,
     LFLen,
@@ -135,12 +135,28 @@ ENUM RegisterOp {
     MValues,
     NMKeys,
     NMValues,
+    IHNew,
+    IHAppend,
+    IHGet,
+    IHLen,
+    SHNew,
+    SHAppend,
+    SHGet,
+    SHLen,
     Operand,
 }
 
 STRUCT PackedRegisterProgram {
     ops: Int64[]@list,
     opcodes: RegisterOp[]@list,
+}
+
+STRUCT RegisterIntListHandle {
+    values: Int64[]@list,
+}
+
+STRUCT RegisterStringListHandle {
+    values: String[]@list,
 }
 
 # Per-binding metadata recorded by the emitter when --debug is set:
@@ -469,7 +485,7 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.LFAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.LFGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.SEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.Reserved53 -> PASS;,
+            RegisterOp.LSSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.LSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.LFSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.LFLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
@@ -536,6 +552,14 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.MValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.NMKeys -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.NMValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -597,7 +621,7 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.LFAppend -> RETURN 2_i64;,
         RegisterOp.LFGet -> RETURN 3_i64;,
         RegisterOp.SEq -> RETURN 3_i64;,
-        RegisterOp.Reserved53 -> RETURN 0_i64;,
+        RegisterOp.LSSet -> RETURN 3_i64;,
         RegisterOp.LSetI -> RETURN 3_i64;,
         RegisterOp.LFSet -> RETURN 3_i64;,
         RegisterOp.LFLen -> RETURN 2_i64;,
@@ -664,6 +688,14 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.MValues -> RETURN 2_i64;,
         RegisterOp.NMKeys -> RETURN 2_i64;,
         RegisterOp.NMValues -> RETURN 2_i64;,
+        RegisterOp.IHNew -> RETURN 1_i64;,
+        RegisterOp.IHAppend -> RETURN 2_i64;,
+        RegisterOp.IHGet -> RETURN 3_i64;,
+        RegisterOp.IHLen -> RETURN 2_i64;,
+        RegisterOp.SHNew -> RETURN 1_i64;,
+        RegisterOp.SHAppend -> RETURN 2_i64;,
+        RegisterOp.SHGet -> RETURN 3_i64;,
+        RegisterOp.SHLen -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -833,6 +865,8 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE nmap1: HashMap<Int64, Int64> = {};
     MUTABLE nmap2: HashMap<Int64, Int64> = {};
     MUTABLE nmap3: HashMap<Int64, Int64> = {};
+    MUTABLE intListHandles: RegisterIntListHandle[]@list = List[];
+    MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
     MUTABLE frameIBases: Int64[]@list = List[];
     MUTABLE frameFBases: Int64[]@list = List[];
     MUTABLE frameITops: Int64[]@list = List[];
@@ -1496,6 +1530,15 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     left = ops[ip]; ip += 1;
                     right = ops[ip]; ip += 1;
                     IF sregs[left] == sregs[right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.LSSet ->
+                # LSSET list idx src
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN slist0[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 1 THEN slist1[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 2 THEN slist2[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 3 THEN slist3[iregs[iBase + idxReg]] = COPY sregs[src]; END,
             RegisterOp.LSetI ->
                 # LSETI list idx src
                     listReg = ops[ip]; ip += 1;
@@ -1647,9 +1690,6 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;,
             RegisterOp.Reserved36 ->
-                    print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
-                    RETURN RegisterValue.Nil;,
-            RegisterOp.Reserved53 ->
                     print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;,
             RegisterOp.Trap ->
@@ -2194,6 +2234,42 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                       ELSE_IF dst == 2 THEN list2 = nmap3.values();
                       ELSE_IF dst == 3 THEN list3 = nmap3.values(); END
                     END,
+            RegisterOp.IHNew ->
+                    dst = ops[ip]; ip += 1;
+                    newHandle = intListHandles.length();
+                    intListHandles.append(RegisterIntListHandle{ values: [] });
+                    iregs[iBase + dst] = newHandle;,
+            RegisterOp.IHAppend ->
+                    handleReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    intListHandles[iregs[iBase + handleReg]].values.append(iregs[iBase + src]);,
+            RegisterOp.IHGet ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+            RegisterOp.IHLen ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values.length();,
+            RegisterOp.SHNew ->
+                    dst = ops[ip]; ip += 1;
+                    newHandle = stringListHandles.length();
+                    stringListHandles.append(RegisterStringListHandle{ values: [] });
+                    iregs[iBase + dst] = newHandle;,
+            RegisterOp.SHAppend ->
+                    handleReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    stringListHandles[iregs[iBase + handleReg]].values.append(COPY sregs[src]);,
+            RegisterOp.SHGet ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    sregs[dst] = COPY stringListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+            RegisterOp.SHLen ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = stringListHandles[iregs[iBase + handleReg]].values.length();,
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;
