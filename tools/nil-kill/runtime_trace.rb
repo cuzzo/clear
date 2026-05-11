@@ -83,6 +83,9 @@ module NilKillRuntimeTrace
       param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_sites_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_sites_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_traces_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_traces_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_elem: Hash.new { |h, k| h[k] = Set.new },
       param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
       returns: Set.new,
@@ -104,11 +107,16 @@ module NilKillRuntimeTrace
       bucket: b,
       params: Hash.new { |h, k| h[k] = Set.new },
       param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
+      param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_elem: Hash.new { |h, k| h[k] = Set.new },
       param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
       callsite: callsite_for(tp),
+      trace: callstack_for(tp),
+      method_site: "#{File.expand_path(tp.path, ROOT)}:#{tp.lineno}",
     }
     @lock.synchronize do
+      active_trace = @frames[Thread.current.object_id].reverse.filter_map { |active| active[:method_site] }
+      frame[:trace] = (Array(frame[:trace]) + active_trace).uniq
       b[:calls] += 1
       params.each do |kind, name|
         next unless name
@@ -117,6 +125,8 @@ module NilKillRuntimeTrace
         cls = class_name(value)
         frame[:params][name.to_s] << cls
         frame[:param_sites][name.to_s][site_key(frame[:callsite], cls)] += 1 if frame[:callsite]
+        trace_key = trace_key(frame[:trace], cls)
+        frame[:param_traces][name.to_s][trace_key] += 1 if trace_key
         shape = container_shape(value)
         next unless shape
         if shape[0] == :array
@@ -188,6 +198,13 @@ module NilKillRuntimeTrace
         target[name][site] += count
       end
     end
+    frame[:param_traces].each do |name, traces|
+      traces.each do |trace, count|
+        bucket[:param_traces][name][trace] += count
+        target = outcome == :ok ? bucket[:param_traces_ok] : bucket[:param_traces_raised]
+        target[name][trace] += count
+      end
+    end
     frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
     frame[:param_kv].each do |name, kv|
       bucket[:param_kv][name][0].merge(kv[0])
@@ -196,15 +213,35 @@ module NilKillRuntimeTrace
   end
 
   def self.callsite_for(tp)
-    caller_locations(2, 30).find do |loc|
+    callstack_for(tp).first
+  end
+
+  def self.callstack_for(_tp)
+    caller_locations(2, 40).filter_map do |loc|
       path = loc.absolute_path || loc.path
-      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
-    end
+      next unless path && target_path?(path)
+      next if File.expand_path(path, ROOT) == File.expand_path(__FILE__, ROOT)
+      loc
+    end.first(12)
   end
 
   def self.site_key(loc, cls)
     path = File.expand_path(loc.absolute_path || loc.path, ROOT)
     "#{path}:#{loc.lineno}:#{cls}"
+  end
+
+  def self.trace_key(trace, cls)
+    frames = Array(trace).filter_map do |loc|
+      if loc.respond_to?(:absolute_path)
+        path = loc.absolute_path || loc.path
+        next unless path
+        "#{File.expand_path(path, ROOT)}:#{loc.lineno}"
+      else
+        loc.to_s
+      end
+    end
+    return nil if frames.empty?
+    "#{frames.join("|")}:#{cls}"
   end
 
   def self.install_tlet_hook
@@ -414,6 +451,9 @@ module NilKillRuntimeTrace
           param_sites: rec[:param_sites].transform_values { |sites| sites.sort.to_h },
           param_sites_ok: rec[:param_sites_ok].transform_values { |sites| sites.sort.to_h },
           param_sites_raised: rec[:param_sites_raised].transform_values { |sites| sites.sort.to_h },
+          param_traces: rec[:param_traces].transform_values { |traces| traces.sort.to_h },
+          param_traces_ok: rec[:param_traces_ok].transform_values { |traces| traces.sort.to_h },
+          param_traces_raised: rec[:param_traces_raised].transform_values { |traces| traces.sort.to_h },
           param_elem: rec[:param_elem].transform_values { |set| set.to_a.sort },
           param_kv: rec[:param_kv].transform_values { |kv| [kv[0].to_a.sort, kv[1].to_a.sort] },
           returns: rec[:returns].to_a.sort,

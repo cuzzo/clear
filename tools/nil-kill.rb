@@ -208,6 +208,7 @@ module NilKill
         "key" => key, "calls" => 0, "ok_calls" => 0, "raised_calls" => 0,
         "params_by_name" => {}, "params_ok" => {}, "params_raised" => {}, "param_elem" => {}, "param_kv" => {},
         "param_sites" => {}, "param_sites_ok" => {}, "param_sites_raised" => {},
+        "param_traces" => {}, "param_traces_ok" => {}, "param_traces_raised" => {},
         "returns" => [], "return_elem" => [], "return_kv" => [[], []], "raised" => [],
         "source" => nil, "has_sig" => false,
       }
@@ -262,6 +263,9 @@ module NilKill
           merge_hash_counts(rec["param_sites"], obs["param_sites"])
           merge_hash_counts(rec["param_sites_ok"], obs["param_sites_ok"])
           merge_hash_counts(rec["param_sites_raised"], obs["param_sites_raised"])
+          merge_hash_counts(rec["param_traces"], obs["param_traces"])
+          merge_hash_counts(rec["param_traces_ok"], obs["param_traces_ok"])
+          merge_hash_counts(rec["param_traces_raised"], obs["param_traces_raised"])
           merge_hash_sets(rec["param_elem"], obs["param_elem"])
           merge_hash_kv(rec["param_kv"], obs["param_kv"])
           merge_kv(rec["return_kv"], obs["return_kv"])
@@ -781,7 +785,7 @@ module NilKill
 
     def method_record(node, scope)
       sig = sig_above(node.location.start_line)
-      { "path" => @rel, "line" => node.location.start_line, "class" => scope.join("::"),
+      { "path" => @rel, "line" => node.location.start_line, "end_line" => node.location.end_line, "class" => scope.join("::"),
         "method" => node.name.to_s, "kind" => node.receiver.is_a?(Prism::SelfNode) ? "class" : "instance",
         "has_sig" => !sig.nil?, "sig" => sig, "params" => params(node), "scope" => scope,
         "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => uses_yield?(node.body),
@@ -1408,6 +1412,7 @@ module NilKill
         evidence["diagnostics"]["nil_origins"].first(20).each { |o| lines << "- #{o["origin"]}: #{o["count"]}" }
       end
       append_callsite_pressure(lines, actions)
+      append_foreign_class_pressure(lines, evidence)
       append_type_normalizer_report(lines, evidence)
       append_struct_report(lines, evidence)
       append_tuple_report(lines, evidence)
@@ -1579,6 +1584,122 @@ module NilKill
         classes = Array(action.dig("data", "classes")).join(", ")
         lines << "- #{action["path"]}:#{action["line"]} #{action.dig("data", "name")}: observed #{classes}; kept as T.untyped"
       end
+    end
+
+    def append_foreign_class_pressure(lines, evidence)
+      pressure = foreign_class_pressure(evidence)
+      lines << ""
+      lines << "## Foreign Scalar Inputs Into Object-Typed Params"
+      lines << "This ranks caller origins where `String`/`Symbol` values flow into params that also receive object instances. It skips `src/tools` origins unless `NIL_KILL_FOREIGN_INCLUDE_TOOLS=1`."
+      if pressure.empty?
+        lines << "- none"
+        return
+      end
+      pressure.sort_by { |_origin, data| [-data["calls"], -data["slots"].size] }.first(50).each do |origin, data|
+        lines << "- #{origin} #{source_line(origin)}; #{data["calls"]} foreign scalar call(s), affects #{data["slots"].size} slot(s)"
+        data["examples"].values.sort_by { |example| -example["calls"] }.first(6).each do |example|
+          desired = Array(example["desired"]).first(5).join(", ")
+          foreign = Array(example["foreign"]).first(5).join(", ")
+          trace = example["trace"].empty? ? "" : "; trace #{example["trace"].first(4).join(" -> ")}"
+          lines << "  - #{example["sink"]} #{example["param"]}: #{foreign} into #{desired} (#{example["calls"]})#{trace}"
+        end
+      end
+    end
+
+    def foreign_class_pressure(evidence)
+      pressure = Hash.new { |h, k| h[k] = { "calls" => 0, "slots" => Set.new, "examples" => {} } }
+      Array(evidence["methods"]).each do |rec|
+        source = rec["source"]
+        next unless source
+        params = rec["params_ok"].empty? ? rec["params_by_name"] : rec["params_ok"]
+        traces = rec["param_traces_ok"].empty? ? rec["param_traces"] : rec["param_traces_ok"]
+        sites = rec["param_sites_ok"].empty? ? rec["param_sites"] : rec["param_sites_ok"]
+        params.each do |name, classes|
+          foreign = Array(classes) & foreign_scalar_classes
+          desired = desired_object_classes(classes)
+          next if foreign.empty? || desired.empty?
+          each_foreign_origin(rec, name, foreign, traces[name], sites[name]) do |origin, count, trace|
+            next if skip_foreign_origin?(origin)
+            slot = "#{source["path"]}:#{source["line"]}:#{name}"
+            sink = "#{source["path"]}:#{source["line"]} #{source["class"]}##{source["method"]}"
+            data = pressure[origin]
+            data["calls"] += count.to_i
+            data["slots"] << slot
+            key = "#{slot}:#{foreign.sort.join("/")}"
+            ex = (data["examples"][key] ||= { "sink" => sink, "param" => name, "desired" => desired,
+              "foreign" => foreign, "calls" => 0, "trace" => trace })
+            ex["calls"] += count.to_i
+          end
+        end
+      end
+      pressure
+    end
+
+    def foreign_scalar_classes
+      %w[String Symbol]
+    end
+
+    def desired_object_classes(classes)
+      Array(classes).compact.uniq.reject do |klass|
+        klass == "NilClass" || klass == "T.untyped" || foreign_scalar_classes.include?(klass) ||
+          klass.include?("#") || klass.start_with?("Sorbet::Private::") || klass.match?(/\A(?:Integer|Float|TrueClass|FalseClass)\z/)
+      end.select { |klass| klass.match?(/\A[A-Z]/) }.sort
+    end
+
+    def each_foreign_origin(rec, name, foreign, traces, sites)
+      if traces && !traces.empty?
+        traces.each do |trace_key, count|
+          trace, klass = split_trace_key(trace_key)
+          next unless foreign.include?(klass)
+          origin = trace_origin(rec, trace)
+          yield origin, count, trace if origin
+        end
+      else
+        filter_sites_by_class(sites, foreign).each do |site, count|
+          root = site.sub(/:[^:]+\z/, "")
+          yield root, count, [root]
+        end
+      end
+    end
+
+    def split_trace_key(trace_key)
+      trace_part, _sep, klass = trace_key.to_s.rpartition(":")
+      [trace_part.split("|"), klass]
+    end
+
+    def trace_origin(rec, trace)
+      source = rec["source"] || {}
+      trace.find do |frame|
+        path, line = split_site(frame)
+        next false unless path && line
+        rel = NilKill.rel(path)
+        !(rel == source["path"] && line >= source["line"].to_i && line <= source.fetch("end_line", source["line"]).to_i)
+      end
+    end
+
+    def skip_foreign_origin?(origin)
+      return false if ENV["NIL_KILL_FOREIGN_INCLUDE_TOOLS"] == "1"
+      rel = NilKill.rel(origin.sub(/:\d+\z/, ""))
+      rel.start_with?("src/tools/")
+    end
+
+    def source_line(origin)
+      path, line = split_site(origin)
+      return "" unless path && line
+      source = File.readlines(path)[line - 1]&.strip
+      source && !source.empty? ? "`#{source[0, 160]}`" : ""
+    rescue Errno::ENOENT
+      ""
+    end
+
+    def split_site(site)
+      match = site.to_s.match(/\A(.+):(\d+)\z/)
+      match ? [match[1], match[2].to_i] : [nil, nil]
+    end
+
+    def filter_sites_by_class(sites, classes)
+      wanted = Array(classes).to_set
+      (sites || {}).select { |site, _count| wanted.include?(site.to_s.split(":").last) }
     end
 
     def append_type_normalizer_report(lines, evidence)
