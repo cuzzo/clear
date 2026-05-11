@@ -85,3 +85,8 @@ if ENV["COVERAGE"] == "1"
     merge_timeout 3600
   end
 end
+
+if defined?(ParallelRSpec) && File.basename($PROGRAM_NAME) == "prspec"
+  files = RSpec.configuration.instance_variable_get(:@files_or_directories_to_run)
+  RSpec.configuration.files_or_directories_to_run = RSpec.configuration.default_path if files.empty?
+end

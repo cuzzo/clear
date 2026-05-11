@@ -412,12 +412,13 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user).to match(/if \((?:@This\(\)\.)?runSeg1\(__ctx_\d+\)\) \|_\| \{\} else \|err\| \{[\s\S]*?inner\.result = err/)
     end
 
-    it "stashes the suspend promise and frees its inner before reading the result" do
+    it "stashes the suspend promise and consumes it through the FSM NEXT helper" do
       user = transpile(simple_b2_src).split("// 3. Main Entry").first
       # sp_1 is assigned at the end of runSeg0 (the promise expression).
       expect(user).to match(/__ctx_\d+\.sp_1 = /)
-      # In step 1, the dispatcher reads the result then destroys the inner cell.
-      expect(user).to match(/__ctx_\d+\.sp_1\.alloc\.destroy\(__ctx_\d+\.sp_1\.inner\)/)
+      # In the resumed segment, finishFsmNext consumes the settled result
+      # without blocking the scheduler thread and owns the Inner lifecycle.
+      expect(user).to match(/__ctx_\d+\.sp_1\.finishFsmNext\(\) catch \|__err_1\|/)
     end
 
     it "promotes only pre-stmt locals that cross a suspend boundary" do
@@ -587,10 +588,11 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user).to include("y: i64 = undefined")
       # Dispatcher uses the labeled while-true switch.
       expect(user).to include("__sw: while (true)")
-      # Each step's sp_K is read with success/error union, then
-      # destroyed before continuing.
-      expect(user).to match(/if \(__ctx_\d+\.sp_1\.inner\.result\) \|__res_1\|/)
-      expect(user).to match(/if \(__ctx_\d+\.sp_2\.inner\.result\) \|__res_2\|/)
+      # Each resumed segment consumes its suspend slot through the FSM
+      # helper, preserving nonblocking scheduler behavior and single-owner
+      # cleanup of the promise inner cell.
+      expect(user).to match(/__ctx_\d+\.sp_1\.finishFsmNext\(\) catch \|__err_1\|/)
+      expect(user).to match(/__ctx_\d+\.sp_2\.finishFsmNext\(\) catch \|__err_2\|/)
     end
 
     it "rewrites assignment LHS through the capture map (Set + BindExpr :assign)" do
