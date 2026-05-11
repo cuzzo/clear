@@ -349,6 +349,24 @@ module MIR
     def expr?; true; end  # can appear in expression position too
   end
 
+  # Non-mutual THUNK trampoline body. This is still emitted as a local
+  # synchronous frame machine, but the MIR now exposes the frame layout,
+  # base cases, recursive step, combine op, and yield policy instead of
+  # hiding the entire function body in RawZig.
+  ThunkTrampoline = Struct.new(
+    :fn_name,
+    :ret_zig,
+    :param_field_decls,
+    :param_init_fields,
+    :base_cases,
+    :recurse_arg_inits,
+    :combine_lhs_zig,
+    :op_zig,
+    :yield_line
+  ) do
+    include Stmt
+  end
+
   # Background block. Wraps raw Zig code for a fiber spawn but exposes
   # capture_analysis for ownership verification (BG_ESCAPE check).
   # captures: { name => Type-like object } from capture_analysis.captures

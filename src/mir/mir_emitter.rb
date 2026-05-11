@@ -75,6 +75,7 @@ class MIREmitter
     when MIR::IndexInsert      then emit_index_insert(node)
     when MIR::BatchWindowPush  then emit_batch_window_push(node)
     when MIR::BatchWindowFlush then emit_batch_window_flush(node)
+    when MIR::ThunkTrampoline  then emit_thunk_trampoline(node)
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
@@ -779,6 +780,70 @@ class MIREmitter
   sig { params(node: MIR::BatchWindowFlush).returns(String) }
   def emit_batch_window_flush(node)
     emit_batch_window_emit(node, "try #{node.window}.flush()")
+  end
+
+  sig { params(node: MIR::ThunkTrampoline).returns(String) }
+  def emit_thunk_trampoline(node)
+    param_field_decls = node.param_field_decls.join("\n            ")
+    param_init = node.param_init_fields.join(", ")
+    base_case_branches = node.base_cases.map { |bc|
+      <<~ZIG.chomp
+        if (#{bc.fetch(:cond_zig)}) {
+                            const result: #{node.ret_zig} = #{bc.fetch(:value_zig)};
+        #{emit_thunk_return_or_pop}
+                        }
+      ZIG
+    }.join("\n                    ")
+    recurse_arg_inits = node.recurse_arg_inits.join(", ")
+
+    <<~ZIG
+      const Frame = struct {
+              #{param_field_decls}
+              step: u8 = 0,
+              child_result: #{node.ret_zig} = undefined,
+              parent: ?*@This() = null,
+          };
+          var initial: Frame = .{ #{param_init} };
+          var current: *Frame = &initial;
+          while (true) {
+              // Cooperative yield: hands control back to the scheduler
+              // periodically (rt.checkYield uses its own internal
+              // counter -- thunk depth doesn't fight the fiber's
+              // own yield budget). Strippable via :TIGHT:THUNK
+              // for tight inner loops where the caller manages
+              // scheduler hand-off externally.
+              #{node.yield_line}
+              switch (current.step) {
+                  0 => {
+                      #{base_case_branches}
+                      // recursive call -- push child frame
+                      const child = rt.heapAlloc().create(Frame) catch unreachable;
+                      child.* = .{ #{recurse_arg_inits}, .parent = current };
+                      current.step = 1;
+                      current = child;
+                      continue;
+                  },
+                  1 => {
+                      const result: #{node.ret_zig} = #{node.combine_lhs_zig} #{node.op_zig} current.child_result;
+      #{emit_thunk_return_or_pop}
+                  },
+                  else => unreachable,
+              }
+          }
+    ZIG
+  end
+
+  sig { returns(String) }
+  def emit_thunk_return_or_pop
+    <<~ZIG.chomp
+                          if (current.parent) |p| {
+                              p.child_result = result;
+                              if (current != &initial) rt.heapAlloc().destroy(current);
+                              current = p;
+                              continue;
+                          }
+                          return result;
+    ZIG
   end
 
   sig { params(node: T.untyped, source: String).returns(String) }

@@ -1374,8 +1374,7 @@ class MIRLowering
     # ThunkTransform::Emit. The function's signature stays normal so
     # callers see no change.
     if node.thunk_plan
-      trampoline_zig = ThunkTransform::Emit.emit_trampoline(node, self)
-      body_mir = takes_mir + [MIR::RawZig.new(trampoline_zig, :thunk_trampoline_body, nil, nil)]
+      body_mir = takes_mir + [ThunkTransform::Emit.build_trampoline(node, self)]
     elsif node.mutual_thunk_plan
       # Phase 4f.1: tagged-union trampoline for mutual recursion.
       trampoline_zig = ThunkTransform::Emit.emit_mutual_trampoline(node, self)

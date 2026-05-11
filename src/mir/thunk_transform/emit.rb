@@ -2,8 +2,8 @@
 # thunk_transform/emit.rb -- Zig codegen for the simple-recurrence
 # THUNK shape detected by Phase 4c.
 #
-# Produces a single top-level Zig fn (Frame as a local type inside
-# the fn body) that runs the heap-CPS trampoline. Layout:
+# Builds a MIR::ThunkTrampoline statement for a function body. The
+# emitter renders it as a local synchronous frame machine. Layout:
 #
 #   fn <name>(rt: *Runtime, <params>) <ret> {
 #       const Frame = struct {
@@ -57,6 +57,7 @@
 # fails loudly if the invariant is ever violated.
 
 require "sorbet-runtime"
+require_relative "../mir_emitter"
 require_relative "segments"
 
 module ThunkTransform
@@ -74,12 +75,10 @@ module ThunkTransform
       DIV: "/",
     }.freeze, T::Hash[Symbol, String])
 
-    # Synthesize the trampoline body Zig for a function whose
+    # Synthesize a structural MIR trampoline body for a function whose
     # AST::FunctionDef has a thunk_plan (set by Phase 4c detection).
-    # Returns a String -- inserted into the function via a single
-    # MIR::RawZig node.
     sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_trampoline(fn_node, lowering)
+    def build_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       plan = fn_node.thunk_plan
       raise ArgumentError, "fn '#{fn_node.name}' has no thunk_plan" if plan.nil?
@@ -88,93 +87,52 @@ module ThunkTransform
 
       param_field_decls = (fn_node.params || []).map { |p|
         "#{p[:name]}: #{param_zig_type(p, lowering)},"
-      }.join("\n        ")
+      }
 
-      param_init = (fn_node.params || []).map { |p|
+      param_init_fields = (fn_node.params || []).map { |p|
         ".#{p[:name]} = #{p[:name]}"
-      }.join(", ")
+      }
 
-      base_case_branches = plan.base_cases.map { |bc|
+      base_cases = plan.base_cases.map { |bc|
         cond  = render_expr(bc[:cond_ast], lowering)
         value = render_expr(bc[:value_ast], lowering)
-        # Rewrite param refs in cond / value to current.<name>:
-        cond_q  = qualify_params(cond, fn_node)
-        value_q = qualify_params(value, fn_node)
-        <<~ZIG.chomp
-          if (#{cond_q}) {
-                            const result: #{ret_zig} = #{value_q};
-          #{return_or_pop_lines(ret_zig)}
-                        }
-        ZIG
-      }.join("\n                    ")
+        {
+          cond_zig: qualify_params(cond, fn_node),
+          value_zig: qualify_params(value, fn_node),
+        }
+      }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
         param = (fn_node.params || [])[i]
         raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
         rendered = qualify_params(render_expr(arg, lowering), fn_node)
         ".#{param[:name]} = #{rendered}"
-      }.join(", ")
+      }
 
       combine_lhs_zig = qualify_params(render_expr(plan.combine_lhs, lowering), fn_node)
       op_zig = OP_TO_ZIG.fetch(plan.combine_op) {
         raise "thunk: unsupported op #{plan.combine_op}"
       }
-
-      # Build the full body. The whitespace is fragile-ish but the
-      # output goes through Zig which doesn't care; readability is
-      # for compiler debugging.
       yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
-      <<~ZIG
-        const Frame = struct {
-                #{param_field_decls}
-                step: u8 = 0,
-                child_result: #{ret_zig} = undefined,
-                parent: ?*@This() = null,
-            };
-            var initial: Frame = .{ #{param_init} };
-            var current: *Frame = &initial;
-            while (true) {
-                // Cooperative yield: hands control back to the scheduler
-                // periodically (rt.checkYield uses its own internal
-                // counter -- thunk depth doesn't fight the fiber's
-                // own yield budget). Strippable via :TIGHT:THUNK
-                // for tight inner loops where the caller manages
-                // scheduler hand-off externally.
-                #{yield_line}
-                switch (current.step) {
-                    0 => {
-                        #{base_case_branches}
-                        // recursive call -- push child frame
-                        const child = rt.heapAlloc().create(Frame) catch unreachable;
-                        child.* = .{ #{recurse_arg_inits}, .parent = current };
-                        current.step = 1;
-                        current = child;
-                        continue;
-                    },
-                    1 => {
-                        const result: #{ret_zig} = #{combine_lhs_zig} #{op_zig} current.child_result;
-        #{return_or_pop_lines(ret_zig)}
-                    },
-                    else => unreachable,
-                }
-            }
-      ZIG
+
+      MIR::ThunkTrampoline.new(
+        fn_node.name,
+        ret_zig,
+        param_field_decls,
+        param_init_fields,
+        base_cases,
+        recurse_arg_inits,
+        combine_lhs_zig,
+        op_zig,
+        yield_line
+      )
     end
 
-    # Lines that handle "frame finished -- return or pop to parent".
-    # Same shape for both base case and combine branches.
-    sig { params(_ret_zig: T.untyped).returns(String) }
-    def return_or_pop_lines(_ret_zig)
+    # Compatibility helper for focused thunk-transform specs.
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    def emit_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
-      <<~ZIG.chomp
-                            if (current.parent) |p| {
-                                p.child_result = result;
-                                if (current != &initial) rt.heapAlloc().destroy(current);
-                                current = p;
-                                continue;
-                            }
-                            return result;
-      ZIG
+      MIREmitter.new.emit(build_trampoline(fn_node, lowering))
     end
 
     # Lower an AST expression to Zig text via the surrounding
@@ -203,7 +161,7 @@ module ThunkTransform
     end
 
     # Today's THUNK trampolines free heap-allocated child Frames only
-    # on the normal return path (`return_or_pop_lines`). Two upstream
+    # on the normal return path. Two upstream
     # constraints keep the body contractually non-fallible: the
     # simple-recurrence splitter only accepts `RETURN <lhs> <op>
     # self_call(args)` (no fallible wrapper allowed), and the type
