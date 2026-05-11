@@ -90,7 +90,7 @@ RSpec.describe "COPY keyword" do
   it "deep-copies @indirect union fields when reconstructing variant in new union literal" do
     src = <<~CLEAR
       UNION Val { Nil, Box { data: Val @indirect, id: Int64 } }
-      FN rebuild(TAKES v: Val) RETURNS Val ->
+      FN rebuild(TAKES v: Val) RETURNS !Val ->
           PARTIAL MATCH TAKES v START
               Val.Box AS b ->
                   RETURN Val.Box{ data: b.data, id: b.id };,

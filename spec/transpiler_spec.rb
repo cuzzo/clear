@@ -1514,14 +1514,14 @@ RSpec.describe ZigTranspiler do
     it "hoists non-Copy union return from function call used as non-TAKES arg" do
       src = <<~CLEAR
         UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
-        FN makeVal!() RETURNS Value ->
+        FN makeVal!() RETURNS !Value ->
             RETURN Value.Lambda{ body: Value{ Num: 1.0 }, id: 1 };
         END
         FN useVal(v: Value) RETURNS String ->
             RETURN "ok";
         END
-        FN test!() RETURNS String ->
-            RETURN useVal(makeVal!());
+        FN test!() RETURNS !String ->
+            RETURN useVal(makeVal!() OR RAISE);
         END
       CLEAR
       zig = transpile(src)

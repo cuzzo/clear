@@ -463,7 +463,7 @@ RSpec.describe SemanticAnnotator do
     context "owned parameter captured in union variant" do
       let(:code) {
         preamble + <<~CLEAR
-          FN good(TAKES items: Value[]) RETURNS Value ->
+          FN good(TAKES items: Value[]) RETURNS !Value ->
               RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };
           END
         CLEAR
@@ -561,7 +561,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
-          FN bad(TAKES v: Value) RETURNS Value ->
+          FN bad(TAKES v: Value) RETURNS !Value ->
               PARTIAL MATCH v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
@@ -583,7 +583,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
-          FN good(TAKES v: Value) RETURNS Value ->
+          FN good(TAKES v: Value) RETURNS !Value ->
               PARTIAL MATCH TAKES v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
