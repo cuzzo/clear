@@ -12,21 +12,33 @@ module NilKillRuntimeTrace
     File.expand_path(path, ROOT)
   end
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
+  TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
   @methods = {}
   @tlets = {}
   @structs = {}
   @tuples = {}
   @frames = Hash.new { |h, k| h[k] = [] }
+  @path_cache = {}
+  @target_cache = {}
   @lock = Mutex.new
 
   class << self
-    attr_reader :methods, :tlets, :structs, :tuples, :frames, :lock
+    attr_reader :methods, :tlets, :structs, :tuples, :frames, :path_cache, :target_cache, :lock
+  end
+
+  def self.abs_path(path)
+    raw = path.to_s
+    @path_cache[raw] ||= File.expand_path(raw, ROOT)
   end
 
   def self.target_path?(path)
-    abs = File.expand_path(path.to_s, ROOT)
+    raw = path.to_s
+    cached = @target_cache[raw]
+    return cached unless cached.nil?
+    abs = abs_path(raw)
     TARGETS.any? { |target| abs == target || abs.start_with?(target + File::SEPARATOR) }
+      .tap { |matched| @target_cache[raw] = matched }
   end
 
   def self.class_name(value)
@@ -72,7 +84,8 @@ module NilKillRuntimeTrace
   def self.bucket(tp)
     owner = method_owner(tp.defined_class)
     return nil unless owner
-    key = [owner[0], tp.method_id.to_s, owner[1], File.expand_path(tp.path, ROOT), tp.lineno]
+    path = abs_path(tp.path)
+    key = [owner[0], tp.method_id.to_s, owner[1], path, tp.lineno]
     @methods[key] ||= {
       calls: 0,
       ok_calls: 0,
@@ -103,16 +116,16 @@ module NilKillRuntimeTrace
     return unless b
     binding = tp.binding
     frame = {
-      key: [method_owner(tp.defined_class), tp.method_id.to_s, File.expand_path(tp.path, ROOT)],
+      key: [method_owner(tp.defined_class), tp.method_id.to_s, abs_path(tp.path)],
       bucket: b,
       params: Hash.new { |h, k| h[k] = Set.new },
       param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
       param_elem: Hash.new { |h, k| h[k] = Set.new },
       param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-      callsite: callsite_for(tp),
-      trace: callstack_for(tp),
-      method_site: "#{File.expand_path(tp.path, ROOT)}:#{tp.lineno}",
+      callsite: nil,
+      trace: [],
+      method_site: "#{abs_path(tp.path)}:#{tp.lineno}",
     }
     @lock.synchronize do
       active_trace = @frames[Thread.current.object_id].reverse.filter_map { |active| active[:method_site] }
@@ -124,9 +137,11 @@ module NilKillRuntimeTrace
         value = binding.local_variable_get(name) rescue nil
         cls = class_name(value)
         frame[:params][name.to_s] << cls
-        frame[:param_sites][name.to_s][site_key(frame[:callsite], cls)] += 1 if frame[:callsite]
-        trace_key = trace_key(frame[:trace], cls)
-        frame[:param_traces][name.to_s][trace_key] += 1 if trace_key
+        frame[:param_sites][name.to_s][site_key(frame[:method_site], cls)] += 1
+        if TRACE_PARAM_CLASSES.include?(cls)
+          trace_key = trace_key(frame[:trace], cls)
+          frame[:param_traces][name.to_s][trace_key] += 1 if trace_key
+        end
         shape = container_shape(value)
         next unless shape
         if shape[0] == :array
@@ -178,7 +193,7 @@ module NilKillRuntimeTrace
   def self.pop_frame(tp)
     owner = method_owner(tp.defined_class)
     return nil unless owner
-    expected = [owner, tp.method_id.to_s, File.expand_path(tp.path, ROOT)]
+    expected = [owner, tp.method_id.to_s, abs_path(tp.path)]
     stack = @frames[Thread.current.object_id]
     idx = stack.rindex { |frame| frame[:key] == expected }
     return nil unless idx
@@ -213,21 +228,16 @@ module NilKillRuntimeTrace
   end
 
   def self.callsite_for(tp)
-    callstack_for(tp).first
+    "#{abs_path(tp.path)}:#{tp.lineno}"
   end
 
-  def self.callstack_for(_tp)
-    caller_locations(2, 40).filter_map do |loc|
-      path = loc.absolute_path || loc.path
-      next unless path && target_path?(path)
-      next if File.expand_path(path, ROOT) == File.expand_path(__FILE__, ROOT)
-      loc
-    end.first(12)
+  def self.callstack_for(tp)
+    [callsite_for(tp)]
   end
 
   def self.site_key(loc, cls)
-    path = File.expand_path(loc.absolute_path || loc.path, ROOT)
-    "#{path}:#{loc.lineno}:#{cls}"
+    return "#{loc}:#{cls}" unless loc.respond_to?(:absolute_path)
+    "#{abs_path(loc.absolute_path || loc.path)}:#{loc.lineno}:#{cls}"
   end
 
   def self.trace_key(trace, cls)
@@ -235,7 +245,7 @@ module NilKillRuntimeTrace
       if loc.respond_to?(:absolute_path)
         path = loc.absolute_path || loc.path
         next unless path
-        "#{File.expand_path(path, ROOT)}:#{loc.lineno}"
+        "#{abs_path(path)}:#{loc.lineno}"
       else
         loc.to_s
       end
