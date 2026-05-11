@@ -60,7 +60,7 @@ class Type
     if auto_present
       case op
       when :AND, :OR, *BOOL_RESULT_OPS
-        return BinaryOpResult.new(type: :Bool)
+        return BinaryOpResult.new(type: Type.new(:Bool))
       else
         auto_t = Type.new(:Auto, auto: true)
         return BinaryOpResult.new(type: auto_t)
@@ -72,19 +72,19 @@ class Type
 
     case op
     when :AND, :OR
-      BinaryOpResult.new(type: :Bool)
+      BinaryOpResult.new(type: Type.new(:Bool))
 
     when *BOOL_RESULT_OPS
-      BinaryOpResult.new(type: :Bool)
+      BinaryOpResult.new(type: Type.new(:Bool))
 
     when *NUMBER_RESULT_OPS
-      resolve_numeric_op(t_left, t_right)
+      resolve_numeric_op(left_type, right_type)
 
     when :ADD
       resolve_add_op(t_left, t_right, left_type, right_type)
 
     when :WRAP_ADD, :CHECK_ADD
-      resolve_numeric_op(t_left, t_right)
+      resolve_numeric_op(left_type, right_type)
 
     else
       BinaryOpResult.new(error: "Unknown operator: #{op}")
@@ -121,39 +121,39 @@ class Type
 
   private
 
-  sig { params(t_left: Symbol, t_right: Symbol).returns(BinaryOpResult) }
-  def self.resolve_numeric_op(t_left, t_right)
-    lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
-    rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
+  sig { params(left_type: Type, right_type: Type).returns(BinaryOpResult) }
+  def self.resolve_numeric_op(left_type, right_type)
+    t_left = left_type.resolved
+    t_right = right_type.resolved
 
     # Same type: result is that type
     if t_left == t_right
-      return BinaryOpResult.new(type: t_left)
+      return BinaryOpResult.new(type: left_type)
     end
 
     # Both integers: promote to the wider type (use Int64 as default)
-    if lt.integer? && rt.integer?
-      return BinaryOpResult.new(type: :Int64,
+    if left_type.integer? && right_type.integer?
+      return BinaryOpResult.new(type: t_left == :Int64 ? left_type : right_type,
         left_coercion: t_left == :Int64 ? nil : :Int64,
         right_coercion: t_right == :Int64 ? nil : :Int64)
     end
 
     # Both floats: promote to f64
-    if lt.float? && rt.float?
-      return BinaryOpResult.new(type: :Float64,
+    if left_type.float? && right_type.float?
+      return BinaryOpResult.new(type: t_left == :Float64 ? left_type : right_type,
         left_coercion: t_left == :Float64 ? nil : :Float64,
         right_coercion: t_right == :Float64 ? nil : :Float64)
     end
 
     # Mixed int/float: promote integer operand to the float type
-    if lt.integer? && rt.float?
-      return BinaryOpResult.new(type: t_right, left_coercion: t_right)
+    if left_type.integer? && right_type.float?
+      return BinaryOpResult.new(type: right_type, left_coercion: t_right)
     end
-    if lt.float? && rt.integer?
-      return BinaryOpResult.new(type: t_left, right_coercion: t_left)
+    if left_type.float? && right_type.integer?
+      return BinaryOpResult.new(type: left_type, right_coercion: t_left)
     end
 
-    BinaryOpResult.new(type: :Float64)
+    BinaryOpResult.new(type: Type.new(:Float64))
   end
 
   sig { params(t_left: Symbol, t_right: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
@@ -163,19 +163,19 @@ class Type
 
     # A. Numeric addition (all int/float types)
     if lt.numeric? && rt.numeric?
-      return resolve_numeric_op(t_left, t_right)
+      return resolve_numeric_op(left_type, right_type)
     end
 
     # B. String Concatenation
     if t_left == HEAP_STRING_TYPE || t_right == HEAP_STRING_TYPE
       left_coercion = (t_left != :String && safe_autocast?(t_left, :String)) ? :String : nil
       right_coercion = (t_right != :String && safe_autocast?(t_right, :String)) ? :String : nil
-      return BinaryOpResult.new(type: HEAP_STRING_TYPE, left_coercion: left_coercion, right_coercion: right_coercion, storage: :frame)
+      return BinaryOpResult.new(type: Type.new(HEAP_STRING_TYPE), left_coercion: left_coercion, right_coercion: right_coercion, storage: :frame)
     end
 
     # D. Array Concatenation
     if left_type.array? && right_type.array?
-      return BinaryOpResult.new(type: t_left, storage: :frame)
+      return BinaryOpResult.new(type: Type.new(left_type), storage: :frame)
     end
 
     BinaryOpResult.new(error: "Cannot add types: #{t_left} and #{t_right}")
