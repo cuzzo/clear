@@ -256,7 +256,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       own_plan: OpenStruct.new(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.emit_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
     }.to raise_error(/cycle member 'odd' not found/)
 
     target = fn("odd", params: [param("n")])
@@ -265,7 +265,7 @@ RSpec.describe "ThunkTransform emit coverage" do
       own_plan: OpenStruct.new(base_cases: [], target_fn: "odd", target_args: [])
     )
     expect {
-      ThunkTransform::Emit.emit_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+      ThunkTransform::Emit.build_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
     }.to raise_error(/target arg\/param count mismatch/)
   end
 

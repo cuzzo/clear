@@ -310,12 +310,6 @@ module ThunkTransform
       }
     end
 
-    sig { params(cf: T.untyped, mtp: T.untyped, ret_zig: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_mutual_arm(cf, mtp, ret_zig, lowering)
-      T.bind(self, T.untyped) rescue nil
-      MIREmitter.new.send(:emit_mutual_thunk_arm, build_mutual_arm(cf, mtp, ret_zig, lowering))
-    end
-
     sig { params(cf: T.untyped, name: T.untyped).returns(T.untyped) }
     def find_cycle_member(cf, name)
       T.bind(self, T.untyped) rescue nil
