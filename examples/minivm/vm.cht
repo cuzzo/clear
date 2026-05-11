@@ -1379,6 +1379,8 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         18 -> sregs[dst] = readFile(sregs[argReg0]) OR RAISE;,
                         19 -> writeFile(sregs[argReg0], sregs[argReg1]) OR RAISE;,
                         20 -> iregs[iBase + dst] = indexOf(sregs[argReg0], sregs[argReg1]) OR -1_i64;,
+                        21 -> iregs[iBase + dst] = 1_i64;,
+                        22 -> iregs[iBase + dst] = 0_i64;,
                         DEFAULT -> print(formatVmError("unknown native " + nativeId.toString(), instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     END,
             RegisterOp.IPrint ->

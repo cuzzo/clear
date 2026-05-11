@@ -42,6 +42,8 @@ class RegisterBcEmitter
   N_FILE_READ = 18
   N_FILE_WRITE = 19
   N_STRING_INDEX_OF = 20
+  N_THREAD_COUNT = 21
+  N_CURRENT_MEMORY_KB = 22
 
   MAIN_NAMES = %w[main clearMain cheatMain].freeze
 
@@ -1629,6 +1631,10 @@ class RegisterBcEmitter
     when :sleep
       # The bc VM has no clock; treat sleep as a no-op. Tests that
       # observe wall-clock behavior remain pending separately.
+      nil
+    when :reserve
+      # The register VM lists grow on mutation; reserve only affects
+      # capacity/perf on the Zig backend and is semantically a no-op here.
       nil
     when :remove
       args = stmt.args || []
@@ -5965,8 +5971,14 @@ class RegisterBcEmitter
     if expr.op == :timestampMs
       return emit_i64_ncall(N_TIMESTAMP_MS, [])
     end
+    if expr.op == :threadCount
+      return emit_i64_ncall(N_THREAD_COUNT, [])
+    end
     if expr.op == :framePeakBytes
       return emit_i64_ncall(N_FRAME_PEAK_BYTES, [])
+    end
+    if expr.op == :currentMemoryKb
+      return emit_i64_ncall(N_CURRENT_MEMORY_KB, [])
     end
     if expr.op == :codepointCount
       args = expr.args || []

@@ -219,7 +219,7 @@ END
 # reflected on the next `:info b`.
 FN debugPrintBreakpoints!(
     breakpointEntries: BreakpointEntry[]@list,
-    isBreakpoint: Int64[]
+    isBreakpoint: Int64[]@list
 ) RETURNS !Void ->
     IF breakpointEntries.length() == 0_i64 THEN
         print("no breakpoints set");
@@ -246,7 +246,7 @@ END
 FN debugAddBreakpoint!(
     line: Int64,
     sourceLines: Int64[]@list,
-    MUTABLE isBreakpoint: Int64[],
+    MUTABLE isBreakpoint: Int64[]@list,
     MUTABLE breakpointEntries: BreakpointEntry[]@list
 ) RETURNS !Void ->
     IF line <= 0_i64 THEN
@@ -289,7 +289,7 @@ END
 # live `isBreakpoint[ip]` flag, so zeroing the flag is enough.
 FN debugDeleteBreakpoint!(
     id: Int64,
-    MUTABLE isBreakpoint: Int64[],
+    MUTABLE isBreakpoint: Int64[]@list,
     breakpointEntries: BreakpointEntry[]@list
 ) RETURNS !Void ->
     MUTABLE found: Bool = FALSE;
@@ -464,7 +464,7 @@ FN registerDebugPause!(
     frameRetIps: Int64[]@list,
     sourceLines: Int64[]@list,
     sourceColumns: Int64[]@list,
-    MUTABLE isBreakpoint: Int64[],
+    MUTABLE isBreakpoint: Int64[]@list,
     MUTABLE breakpointEntries: BreakpointEntry[]@list,
     traceEvents: TraceEvent[]@list,
     traceStrings: String[]@list,
