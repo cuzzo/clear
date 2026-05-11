@@ -5,7 +5,7 @@ I wanted a language like Rust, but substantially safer and more intuitive.
 
 I thought outsourcing this to LLMs was reasonable. The goal was primarily to understand their capabilities and limitations. My initial expectations were low.
 
-Verifying compiler correctness is notoriously difficult. While harder problems exist, compilers are challenging. Controlling the language limits the problem space, yet for the goals I had - the problem space would be inherently difficult to verify correctness. Even though LLMs are particularly weak here, they have completely blown away my expections. I have been both humbled and endlessly frustrated by their powers and limitations.
+Verifying compiler correctness is notoriously difficult. While harder problems exist, compilers are challenging. Controlling the language limits the problem space, yet for the goals I had - the problem space would be inherently difficult to verify correctness. Even though LLMs are particularly weak here, they have completely blown away my expectations. I have been both humbled and endlessly frustrated by their powers and limitations.
 
 The language is [CLEAR](https://github.com/cuzzo/clear), and these are my learnings from this six-month adventure.
 
@@ -129,7 +129,7 @@ Blitzing through features usually resulted in more work and headaches. Even with
 
  * I had great success when I followed my learnings closely for this [FSM / Thunks / Streams PR](https://github.com/cuzzo/clear/pull/3).
     - The FSM implementation went especially well, which is where I slowed down the most.
- * I had much pain and suffering when I ignored my leanrings, and prematurely merged in a ["hotfix"](https://github.com/cuzzo/clear/pull/31).
+ * I had much pain and suffering when I ignored my learnings, and prematurely merged in a ["hotfix"](https://github.com/cuzzo/clear/pull/31).
     - It ended up being a "Hot Bug Party" instead.
 
 ### 3. Not understanding LLM limitations early

@@ -1,6 +1,6 @@
 # WHY CLEAR
 
-If you already know Logic (Javascript/Python), the only thing stopping you from writing System-Level code is Memory.
+If you already know Logic (JavaScript/Python), the only thing stopping you from writing System-Level code is Memory.
 
  * In Ruby/Python/JavaScript, Memory is "Magic."
  * In C, it's an incomprehensible arcana.

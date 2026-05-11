@@ -472,7 +472,7 @@ Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violate
 
 If you ever encounter a compiler bug, stop everything you're doing, and fix the bug.  See the above section for how to do this appropriately.
 
-If you ever find a limitation in the language that you have to work around, stop, identify the problem, and suggest how the language needs to be improved to fix this limitation focing work arounds.
+If you ever find a limitation in the language that you have to work around, stop, identify the problem, and suggest how the language needs to be improved to fix this limitation forcing workarounds.
 
 ## Definition of Done
 

@@ -67,7 +67,7 @@ The primary focus of the v0.1 release is to demonstrate that CLEAR "works" by an
 
 It is easier said than done to formally verify that for a concurrent runtime model.
 
- * Ability to turn on Deadlock prevention on syncronization (liveness safety)
+ * Ability to turn on Deadlock prevention on synchronization (liveness safety)
  * `FREEZE`: the ability to take any object and re-organize all its heap memory to be contiguous
    * As well as profile support to detect when freezing is optimal for your workloads.
  * DEFAULTS: The ability to set default fields on structs, and to RETURN DEFAULT if a struct is defaultable.
@@ -84,14 +84,14 @@ The key focus will revolve around `clear profile <myApp.cht>`, which will identi
 
 Further language/runtime features will include:
 
- * MVCC & LockFree Ring Buffers syncronization capabilities for one-line-ish changes to optimize for read-heavy and write-heavy workloads.
+ * MVCC & LockFree Ring Buffers synchronization capabilities for one-line-ish changes to optimize for read-heavy and write-heavy workloads.
    * The CHEAT Runtime already has support for MVCC.
    * But testing it thoroughly enough to include in the language is too much effort to include in the v0.1 release.
  * Runtime as a library: to improve build times
  * io_uring networking
  * CI integration
  * STRICT mode compilation
-   * Non-slient effects: the compiler currently tracks EFFECTS silently.  In strict mode, it will require these to be annotated explicitly: `clear fix ...` will handle it automatically.
+   * Non-silent effects: the compiler currently tracks EFFECTS silently.  In strict mode, it will require these to be annotated explicitly: `clear fix ...` will handle it automatically.
  * An RSpec like testing framework
    * The goal of CLEAR is to make code easier to test than in any language in the same performance class.
    * CLEAR already supports much of what you need.

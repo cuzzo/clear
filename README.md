@@ -77,7 +77,7 @@ users
 BG { @micro:arena -> foo() }
 ```
 
-### Polymorphic Syncronization
+### Polymorphic Synchronization
 
 In CLEAR, you can handle all synchronization methods with a single function:
 
@@ -99,9 +99,9 @@ END
 
 This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.  All dependencies (imports) *must* compile in STRICT mode.
 
-To support rapid prototyping, CLEAR has a sane policy for handling synchronization failures when compiling in non-STRICT mode (default).  You can also set your own policy to overide the system defaults, or compile in STRICT mode where failure methods must be handled inline.
+To support rapid prototyping, CLEAR has a sane policy for handling synchronization failures when compiling in non-STRICT mode (default).  You can also set your own policy to override the system defaults, or compile in STRICT mode where failure methods must be handled inline.
 
-Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like `BLOCKING` or `LATENCY`.
+Further, you can restrict the type of shared objects you allow, if you explicitly do not want your function to have certain effects, like `BLOCKING` or `LATENCY`.
 
 In this example, AtomicPtrs (`@shared:atomic`) do not support multi-object consistency, and are automatically dropped from the list of allowed synchronization strategies. In STRICT mode, the function signature would reflect that.
 
@@ -121,7 +121,7 @@ In CLEAR, the compiler can tell when you're *probably* employing a bad strategy,
 
 For the v0.1-pre release, CLEAR comes with a Control Plane.  It can detect when you've employed a bad strategy.  It works with the profiler (`clear profile`) to help you pick better strategies.  For some, it can self-correct (like if you picked a bad stack-size for a reentrant fiber).  In the near future, it will correct from contention issues.  In the far future, the Control Plane *aims* to be able to protect you from even heavily skewed workloads (when you picked the wrong strategy, like shared-nothing).
 
-CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you rarely have the tools to shoot yourself in the foot, and when you do, CLEAR makes it painfully obvious you could be shooting yourself in the foot.
+CLEAR is designed such that you can override default compiler behaviors if you know what you're doing, but you rarely have the tools to shoot yourself in the foot, and when you do, CLEAR makes it painfully obvious you could be shooting yourself in the foot.
 
 ### Full Access to the Entire C Library
 
@@ -131,7 +131,7 @@ In addition, Zig supports compiling *to* any target *from* any machine. I.e. you
 
 It also has exceptionally fast *debug* build times, but does not produce production binaries as fast as Go.
 
-In general, CLEAR thinks that the people buiding Zig are some of the smartest people in the world, and it has the picked the most practical build system trade-offs. Some Go engineers will likely disagree.
+In general, CLEAR thinks that the people building Zig are some of the smartest people in the world, and it has the picked the most practical build system trade-offs. Some Go engineers will likely disagree.
 
 ## BUILDING & TESTING
 
@@ -219,7 +219,7 @@ See [benchmarks/README.md](benchmarks/README.md).
  * **Mutex Overhead:** Under heavy contention with short critical sections, CLEAR's Mutex can be up to 4x slower than standard implementations.
  * **Future Fixes (v0.3):** This performance gap should be narrowed by v0.3, though Mutexes with deadlock prevention will likely always carry performance overhead.
  * **Design Philosophy:** CLEAR’s main goal is to provide you with a robust set of alternative tools so that standard Mutex locks are *almost* never the best choice.
- * **Fininte State Machines:** are relatively newly supported to the langauge and have a number of known optimizations left to make more performant. For very short-lived tasks, due to the difference in how they are allocated, FSMs can perform worse. This *will* be addressed by v0.2.
+ * **Finite State Machines:** are relatively newly supported to the language and have a number of known optimizations left to make more performant. For very short-lived tasks, due to the difference in how they are allocated, FSMs can perform worse. This *will* be addressed by v0.2.
 
 ## ⚠️ DISCLAIMER ⚠️
 
@@ -227,7 +227,7 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 
 - **Safety**: The examples, benchmarks, and transpile-tests cover a wide range of the language and there are no use-after-free, double-free, or memory leaks. CLEAR is designed *to be* memory safe. It is only 6 months in development. Do not expect that everything you can compile will be as safe as Rust for the v0.1 release (and certainly not before). CLEAR *aims* to approach ADA-levels of safety. It is nowhere near that level of safety today.
 - **Benchmarks**: There's an extensive set of benchmarks, but it is hard to make "apples to apples" concurrent comparisons with mature ecosystems (Go, Rust/Tokio). The current state of benchmarks should serve as evidence CLEAR is not vaporware, and is currently competitive in *many* cases. Take it with a grain of salt.  It should not be considered *proof* of anything - just *some* evidence.
-- **Tail Latency**: While throughput is high in the benchmarks, CLEAR's p99.9 latency is **NOT** expected to be competitive with Go's preemptive scheduler across all adversarial workloads in this release (and probably not until the v0.4 release). Go is *nearly* perfect at what its designed to do. CLEAR is unlikely to beat it on the benchmarks its most optimized for any time soon. Go was designed to be relatively easy, have fast build times, exceptional throughput, and p99.9 latency predictability (especially across adversarial workloads). The cost of that is memory. Go was designed in the days when "memory is cheap" reigned supreme. That is somewhat true still, but cache locality is becoming increasingly important. CLEAR *aims* to beat Go in total throughput, use substantially less RAM, have significantly lower latency at p50 across the board and up to p99 in predictable workloads, and to be competitive at p99.9 levels (though Go will likely reign supreme for some adversarial workloads). This is with much added inherent safety and, in CLEAR's opinion, better developer ergonomics that make it substantially easier to accomplish *most* concurrent tasks *correctly*.
+- **Tail Latency**: While throughput is high in the benchmarks, CLEAR's p99.9 latency is **NOT** expected to be competitive with Go's preemptive scheduler across all adversarial workloads in this release (and probably not until the v0.4 release). Go is *nearly* perfect at what it's designed to do. CLEAR is unlikely to beat it on the benchmarks it's most optimized for any time soon. Go was designed to be relatively easy, have fast build times, exceptional throughput, and p99.9 latency predictability (especially across adversarial workloads). The cost of that is memory. Go was designed in the days when "memory is cheap" reigned supreme. That is somewhat true still, but cache locality is becoming increasingly important. CLEAR *aims* to beat Go in total throughput, use substantially less RAM, have significantly lower latency at p50 across the board and up to p99 in predictable workloads, and to be competitive at p99.9 levels (though Go will likely reign supreme for some adversarial workloads). This is with much added inherent safety and, in CLEAR's opinion, better developer ergonomics that make it substantially easier to accomplish *most* concurrent tasks *correctly*.
 - **Standard Library**: The current "standard library" is a barebones shim used for bootstrapping and internal testing. It is highly likely that none of the current internal APIs will survive into the v0.3 release.
 - **Stability**: Although CLEAR has an extensive test suite, several significant bugs were identified in the final week before the demo-release. The v0.1-pre release required a major refactor to reach a reasonable level of assurance use-after-free, double-free, and memory leaks won't compile for *most* of the supported language. Still, days before the v0.1-pre release, *some* use-after-free, and double-free bugs were still discovered. The v0.1 release will still be an unstable preview and is not representative of the stability goals for v0.2.
 - **Linux Only**: CLEAR is not currently cross platform. It will only support x86 Linux until v0.3+.
@@ -257,5 +257,5 @@ How?
      - In other languages, Stateless Model Checking is a separate, difficult tool you have to opt into. In CLEAR, it's just how `./clear test` *will* work.
   3. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
   4. For code, even at the highest-level of optimization, to be easily understandable.
-  5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible and adversarial workloads, it can glide through it gracefully.
+  5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictable and adversarial workloads, it can glide through it gracefully.
   6. To be able to distribute loads across multiple machines effortlessly like BEAM, but with native speeds.

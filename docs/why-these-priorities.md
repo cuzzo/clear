@@ -18,7 +18,7 @@ Pony eliminates nearly all concurrency hazards by design. Rust merely ensures me
 
 Rust & Pony were both not willing to make tradeoffs to prioritize ease-of-use or understandability.
 
-Go made those trade-offs. But Go is a thin veneer over C with the most sophisticated runtime in the world bolted on. To achieve best in class speeds Go - like C - relies on loading a footgun and exposing yourself to a number of hazards and developer discipline and/or chosing the right libraries to get it right. It provides valuable best-in-class tooling to help mitigate *some* of these problems.
+Go made those trade-offs. But Go is a thin veneer over C with the most sophisticated runtime in the world bolted on. To achieve best in class speeds Go - like C - relies on loading a footgun and exposing yourself to a number of hazards and developer discipline and/or choosing the right libraries to get it right. It provides valuable best-in-class tooling to help mitigate *some* of these problems.
 
 CLEAR exists because it thinks Rust is not truly safe enough inherently, Pony is not easy enough, and Go is currently the most practical trade-off but is too dangerous and cannot fix its inherent problems.
 
@@ -26,7 +26,7 @@ Further, although Pony literally forces you into the actor pattern - at least at
 
 Pony did not want to make any sacrifices on safety. This led to a language that is impractical and/or not competitive for many of workloads (with a high cognitive burden).
 
-CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them. The goal is to make trade-offs to achieve understandability, and to sacrfice *some* safety if it means giving you tools necessary to realistically accomplish common workloads.
+CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them. The goal is to make trade-offs to achieve understandability, and to sacrifice *some* safety if it means giving you tools necessary to realistically accomplish common workloads.
 
 ## Rubric
 
@@ -62,7 +62,7 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 
   * **Cognitive Load:** CLEAR is designed so that **Profile Guided Optimization (PGO)** and automated tooling solve the heavy lifting. You write intuitive, sequential code, and the profiler suggests (and injects) the necessary optimization directives based on actual workloads.
   * **Memory Safety:** Like Rust, CLEAR utilizes **Affine Ownership** to guarantee memory safety.
-  * **Logical TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in a deterministic VM to catch dependencies and break them. Use-after-free and race conditions are included in Memory Saftey. Time-related bugs are captured in Causal & Stream Ordering categories.
+  * **Logical TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in a deterministic VM to catch dependencies and break them. Use-after-free and race conditions are included in Memory Safety. Time-related bugs are captured in Causal & Stream Ordering categories.
   * **Deadlock:** Technical deadlock is not part of CLEAR’s intended concurrency model, and by v0.3 the runtime aims to detect and prevent unbounded lock-wait cycles from silently persisting. Locks are intentionally more cumbersome to use because they are rarely the best-performing or safest solution. When developers opt into lock-based coordination anyway, they are also opting into explicit responsibility for handling lock-related failures correctly. A language like Pony or BEAM which does not have locks deserves a better ranking.
   * **Starvation & Backpressure:** Like BEAM, CLEAR *will* prevent CPU starvation via its cooperative scheduler with automatically injected yielding. It separately tracks per-task memory consumption to kill runaway tasks and enforce backpressure.
   * **Memory Consumption:** CLEAR uses **MVCC** as a default synchronization technique. This adds memory overhead to eliminate common classes of bugs (deadlocks, contention).
@@ -103,7 +103,7 @@ Go claims to be *easy* - which implies simplicity. But Go allows and often force
 
 Go may claim to be easy, but if you need to write 20 lines of imperative arcana in the precise ceremonial order or rely on a set of libraries to do common things efficiently - it is not truly easy.
 
-In essence, CLEAR thinks SQL proved that it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizaitons clearly separate from code).
+In essence, CLEAR thinks SQL proved that it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizations clearly separate from code).
 
 It is much harder to think like the computer and tell it *HOW* to do that, or list what *CAN* be done and hope that matches what you want to do.
 

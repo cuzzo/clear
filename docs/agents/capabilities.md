@@ -248,7 +248,7 @@ process(w.inner);
 
 ### Risks and Technical Implications
 
-While field-level capabilities are more expressive, they introduce specific rchitectural risks that the developer (and compiler) must manage:
+While field-level capabilities are more expressive, they introduce specific architectural risks that the developer (and compiler) must manage:
 
  * Recursive Poisoning: If a STRUCT contains even one non-thread-safe field (like @multiowned or @local), the entire struct is considered "poisoned."
     * It cannot be captured in a @parallel block or moved across schedulers, even

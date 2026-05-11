@@ -1,6 +1,6 @@
 # Sharing Capabilities: @local, @multiowned, @shared
 
-CLEAR separates **what data is** (Types) from **how it's accessed** (Gates & Boundaires) from the **strategy it uses** (Capabilities). 
+CLEAR separates **what data is** (Types) from **how it's accessed** (Gates & Boundaries) from the **strategy it uses** (Capabilities).
 
 ## Types, Capabilities, and Execution Boundaries
 Rust is not inherently complicated, nor is its type system much more complex than C++'s. The actual friction comes from Rust using a 'God-like' type system forced to handle too many things at once.
@@ -80,7 +80,7 @@ FAQ:
     * `FN foo(x: T@shared)` does not accept a `@distributed:actor`.
     * `FN foo(x: T@distributed)` does not accept a `@shared:actor` (it may not exist on the machine!)
 
-NOTE: `@actor` and `@buffered` are in scope for v0.3.  They are not currently available.  `@distrubted` is in scope for v0.4.
+NOTE: `@actor` and `@buffered` are in scope for v0.3.  They are not currently available.  `@distributed` is in scope for v0.4.
 
 ### Analogy
 

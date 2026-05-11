@@ -503,7 +503,7 @@ END
 
 `@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, use `@link` -- CLEAR's weak reference.
 
-`?.` is the safe navigate operator to peak into optional types.  It combines with `OR` to handle missing data like an error.
+`?.` is the safe navigate operator to peek into optional types.  It combines with `OR` to handle missing data like an error.
 
 ### Weak References with @link
 

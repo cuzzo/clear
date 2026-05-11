@@ -95,7 +95,7 @@ result = BG {
 };
 ```
 
-`THEN` is mostly useful for shrot-chained tasks, especially in a complex pipeline:
+`THEN` is mostly useful for short-chained tasks, especially in a complex pipeline:
 
 ```ruby clear illustrative
 result = BG {
@@ -111,7 +111,7 @@ result = BG {
 ```clear
 # ILLUSTRATIVE
 result = BG {
-    fetch(url) OR RAISE           # propagate error to calle
+    fetch(url) OR RAISE           # propagate error to caller
       AS response THEN parse(response) OR default_value
       AS parsed THEN transform(parsed);
 };

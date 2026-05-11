@@ -2,12 +2,12 @@
 
 **1. Arena-Based Memory & Isolation**
   * CLEAR leverages affine types and Arena-based memory to give you near High-Frequency Trading standards of allocation with zero thought.
-  * Due to optimizing broadly for a fiber-runtime, there are cases when the stack could be better leveraged, but CLEAR chooses not to for large stack objects (to keep fiber stacks small, until most fibers are transformed seemlessly into Finite State Machines by v0.4).
+  * Due to optimizing broadly for a fiber-runtime, there are cases when the stack could be better leveraged, but CLEAR chooses not to for large stack objects (to keep fiber stacks small, until most fibers are transformed seamlessly into Finite State Machines by v0.4).
 
 **2. Deterministic Shared-Memory and a Declarative Concurrency Model**
   * Parallelism is achieved via `BG/DO/CONCURRENT`, which creates isolated execution contexts.
     * Rather than telling the code *how* to achieve fast speeds, you simply tell write the code that expresses your intent - the *what*.
-    * CLEAR provides one-line capability optimizations. Changing your app from an Arc/RwLock strategy suffering from syncronization bottle-necks to a shared-nothing architecture which can compete with Dragonfly DB can be a one-line change.
+    * CLEAR provides one-line capability optimizations. Changing your app from an Arc/RwLock strategy suffering from synchronization bottle-necks to a shared-nothing architecture which can compete with Dragonfly DB can be a one-line change.
   * Spawning a process creates a lightweight, isolated fiber / memory arena (or Finite State Machine in the near future).
 
 **3. Implicit "Railway" Error Handling**
