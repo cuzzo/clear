@@ -24,7 +24,7 @@ module LSP
     # `debounce_ms` is configurable so specs can drive the debounce
     # path without sleeping for half a second; production runs at the
     # default 500.
-    sig { params(stdin: StringIO, stdout: StringIO, log_level: Symbol, debounce_ms: Integer).void }
+    sig { params(stdin: T.any(IO, StringIO), stdout: T.any(IO, StringIO), log_level: Symbol, debounce_ms: Integer).void }
     def initialize(stdin: $stdin, stdout: $stdout, log_level: :info, debounce_ms: 500)
       @stdin            = stdin
       @stdout           = stdout
@@ -112,17 +112,17 @@ module LSP
       end
     end
 
-    sig { params(id: Integer, result: T.untyped).returns(StringIO) }
+    sig { params(id: Integer, result: T.untyped).returns(T.any(IO, StringIO)) }
     def respond(id, result)
       send_message(jsonrpc: "2.0", id: id, result: result)
     end
 
-    sig { params(id: Integer, code: Integer, message: String).returns(StringIO) }
+    sig { params(id: Integer, code: Integer, message: String).returns(T.any(IO, StringIO)) }
     def respond_error(id, code, message)
       send_message(jsonrpc: "2.0", id: id, error: { code: code, message: message })
     end
 
-    sig { params(msg: T::Hash[Symbol, T.untyped]).returns(StringIO) }
+    sig { params(msg: T::Hash[Symbol, T.untyped]).returns(T.any(IO, StringIO)) }
     def send_message(msg)
       @logger.debug("→ #{msg[:method] || (msg[:result] ? "result(id=#{msg[:id]})" : "error(id=#{msg[:id]})")}")
       @output_mutex.synchronize do

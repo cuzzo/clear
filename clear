@@ -1252,6 +1252,7 @@ when 'fix'
   require_relative 'src/ast/syntax_typo_scanner'
   require_relative 'src/tools/predicate_rewriter'
   require_relative 'src/tools/multi_statement_linter'
+  require_relative 'src/backends/importer'
   require_relative 'src/annotator'
 
   args = ARGV[1..] || []

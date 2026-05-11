@@ -67,7 +67,7 @@ module FixableHelper
         best_d = d
       end
     end
-    best_d <= max_distance ? best : nil
+    best_d <= max_distance ? best.to_s : nil
   end
 
   sig { params(a: String, b: String).returns(Integer) }
