@@ -552,6 +552,16 @@ pub fn bind(comptime deps: type) type {
                 return val;
             }
 
+            /// FSM resume path for NEXT. The FSM dispatch has already
+            /// registered/yielded or observed count==0, so it must not call
+            /// wait() on the scheduler thread. It only consumes the settled
+            /// result and frees Inner exactly once.
+            pub fn finishFsmNext(self: Self) anyerror!T {
+                const val = self.inner.result;
+                self.alloc.destroy(self.inner);
+                return val;
+            }
+
             /// No-op: next() owns the Inner lifecycle. After next() frees Inner,
             /// the pointer is dangling. Cleanup must not recurse into fields.
             pub fn deinit(self: *Self, alloc_: std.mem.Allocator) void {

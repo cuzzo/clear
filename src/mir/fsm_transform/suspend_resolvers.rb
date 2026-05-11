@@ -127,18 +127,10 @@ module FsmTransform
     # can simplify: wrap the err path as `return error.<...>` and let
     # the dispatch arm propagate it.
     #
-    # The simpler bind:
-    #   const __res_K = ctx.sp_<K>.inner.result catch |__err| {
-    #      ctx.sp_<K>.alloc.destroy(ctx.sp_<K>.inner);
-    #      return __err;
-    #   };
-    #   ctx.sp_<K>.alloc.destroy(ctx.sp_<K>.inner);
-    #   <result_var> = __res_K;   // or _ = __res_K
-    #
-    # Same semantics, simpler MIR. We carry it as RawZig-equivalent
-    # text inside MIR::ExprStmt via MIR::Lit for now -- subsequent
-    # work will make this fully MIR-shaped (catch is already a MIR
-    # expression form).
+    # The bind path is structural MIR around Promise.finishFsmNext().
+    # The dispatch arm already registered/yielded or observed count==0,
+    # so finishFsmNext consumes the settled result and destroys Inner
+    # without blocking the scheduler thread.
     sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(T.untyped) }
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
@@ -157,27 +149,7 @@ module FsmTransform
         "__ctx_#{id}.#{sp_field}.inner.wg.registerFsmWaiter(__ctx_#{id}.task)"
       tail = MIR::FsmTailRegisterYield.new(nil, register_zig, "WaitForLock")
 
-      # Bind block as MIR Lit-wrapped Zig. Migrating to fully MIR
-      # IfStmt + ReturnStmt is a small follow-up; the current shape
-      # matches what build_next_chain_resume_fn used to inline.
       result_var = next_tail.result_var
-      bind_lhs =
-        if result_var
-          "__ctx_#{id}.#{result_var} = __res_#{susp_idx};"
-        else
-          "_ = __res_#{susp_idx};"
-        end
-      bind_zig = <<~ZIG.chomp
-        if (__ctx_#{id}.#{sp_field}.inner.result) |__res_#{susp_idx}| {
-            #{bind_lhs}
-        } else |__err_#{susp_idx}| {
-            __ctx_#{id}.#{sp_field}.alloc.destroy(__ctx_#{id}.#{sp_field}.inner);
-            return __err_#{susp_idx};
-        }
-        __ctx_#{id}.#{sp_field}.alloc.destroy(__ctx_#{id}.#{sp_field}.inner);
-      ZIG
-      bind_stmts = [MIR::RawZig.new(bind_zig, "fsm_next_bind", nil, nil)]
-
       promise_ft = next_tail.promise_ast.full_type
       sp_zig = promise_ft ? Type.new(promise_ft).zig_type : "anyopaque"
       inner_zig =
@@ -185,6 +157,29 @@ module FsmTransform
           Type.new(pt.tense_type).zig_type
         else
           nil
+        end
+
+      finish_call = MIR::MethodCall.new(
+        MIR::FieldGet.new(ctx_ident, sp_field),
+        "finishFsmNext",
+        [],
+        false,
+      )
+      err_name = "__err_#{susp_idx}"
+      finish_expr = MIR::TryCatch.new(
+        finish_call,
+        MIR::ScopeBlock.new([MIR::ReturnStmt.new(MIR::Ident.new(err_name))]),
+        err_name,
+      )
+      bind_stmts =
+        if result_var
+          res_name = "__res_#{susp_idx}"
+          [
+            MIR::Let.new(res_name, finish_expr, false, inner_zig, nil),
+            MIR::Set.new(MIR::FieldGet.new(ctx_ident, result_var), MIR::Ident.new(res_name), false),
+          ]
+        else
+          [MIR::ExprStmt.new(finish_expr, true)]
         end
 
       ctx_field_decls = ["#{sp_field}: #{sp_zig} = undefined,"]

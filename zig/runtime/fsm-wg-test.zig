@@ -19,6 +19,7 @@ const FsmTask = fsm_mod.FsmTask;
 const YieldReason = fsm_mod.YieldReason;
 const WaitGroup = fp.WaitGroup;
 const Scheduler = fp.Scheduler;
+const Promise = @import("runtime-header.zig").CheatLib.Promise;
 
 const alloc = std.testing.allocator;
 
@@ -212,4 +213,34 @@ test "WaitGroup.registerFsmWaiter: returns false when count is already 0" {
     wg.done();
     try std.testing.expect(wg.waiting_fsm == null);
     try std.testing.expect(wg.waiting_task == null);
+}
+
+test "Promise.finishFsmNext: consumes settled success without waiting" {
+    var ebr_ctx: ebr.EbrContext = .{};
+    defer ebr_ctx.deinit(alloc);
+    var pool = fm.StackPool.init(alloc);
+    defer pool.deinit();
+    var sched = try fp.Scheduler.init(alloc, &ebr_ctx, &pool);
+    defer sched.deinit();
+
+    var p = try Promise(i64).spawn(alloc, &sched);
+    p.inner.result = 42;
+    p.inner.wg.done();
+
+    try std.testing.expectEqual(@as(i64, 42), try p.finishFsmNext());
+}
+
+test "Promise.finishFsmNext: consumes settled error without waiting" {
+    var ebr_ctx: ebr.EbrContext = .{};
+    defer ebr_ctx.deinit(alloc);
+    var pool = fm.StackPool.init(alloc);
+    defer pool.deinit();
+    var sched = try fp.Scheduler.init(alloc, &ebr_ctx, &pool);
+    defer sched.deinit();
+
+    var p = try Promise(i64).spawn(alloc, &sched);
+    p.inner.result = error.LockError;
+    p.inner.wg.done();
+
+    try std.testing.expectError(error.LockError, p.finishFsmNext());
 }

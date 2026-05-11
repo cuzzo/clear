@@ -139,11 +139,34 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.result_var).to eq("x")
     end
 
+    it "binds NEXT results with structured MIR instead of RawZig" do
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(0, [], next_tail_with_var),
+        ctx, lowering, susp_idx: 1)
+      expect(d.bind_stmts).to contain_exactly(
+        an_instance_of(MIR::Let),
+        an_instance_of(MIR::Set),
+      )
+      expect(d.bind_stmts).not_to include(an_instance_of(MIR::RawZig))
+      expect(d.bind_stmts.first.init).to be_a(MIR::TryCatch)
+      expect(d.bind_stmts.first.init.expr).to be_a(MIR::MethodCall)
+      expect(d.bind_stmts.first.init.expr.method).to eq("finishFsmNext")
+    end
+
     it "leaves result_var nil for bare NEXT" do
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], next_tail_bare),
         ctx, lowering, susp_idx: 1)
       expect(d.result_var).to be_nil
+    end
+
+    it "still consumes bare NEXT with structured MIR" do
+      d = FsmTransform::SuspendResolvers.resolve(
+        FsmTransform::Segments::Segment.new(0, [], next_tail_bare),
+        ctx, lowering, susp_idx: 1)
+      expect(d.bind_stmts).to contain_exactly(an_instance_of(MIR::ExprStmt))
+      expect(d.bind_stmts.first.expr).to be_a(MIR::TryCatch)
+      expect(d.bind_stmts.first.expr.expr.method).to eq("finishFsmNext")
     end
   end
 
