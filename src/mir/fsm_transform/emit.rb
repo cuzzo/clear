@@ -125,12 +125,14 @@ module FsmTransform
       end
 
       member_fns = segment_specs.filter_map do |spec|
-        next nil if spec[:fn_name].nil?
         body = []
         body.concat(spec[:prologue_stmts] || [])
-        if (incoming_bind = bind_for_index[spec[:index]])
+        incoming_bind = bind_for_index[spec[:index]]
+        if incoming_bind
+          spec[:fn_name] ||= "runSeg#{spec[:index]}"
           body.concat(incoming_bind)
         end
+        next nil if spec[:fn_name].nil?
         body.concat(spec[:body_stmts] || [])
         if (d = spec[:descriptor])
           body.concat(d.setup_stmts || [])

@@ -1,0 +1,26 @@
+# Regression: FSM NEXT of a captured void promise immediately followed by a
+# lock-acquire segment must still consume and destroy the awaited promise Inner.
+
+STRUCT State {
+    message: String
+}
+
+FN main() RETURNS Void ->
+    s = State{ message: "" } @shared:locked;
+
+    producer: ~Void = BG {
+        WITH EXCLUSIVE s AS inner {
+            inner.message = "done";
+        }
+    };
+
+    consumer: ~Void = BG {
+        NEXT producer;
+        WITH s AS inner {
+            ASSERT inner.message == "done", "producer should finish before consumer reads";
+        }
+    };
+
+    NEXT consumer;
+    RETURN;
+END
