@@ -206,7 +206,8 @@ class MIRLowering
     if ast_node.is_a?(AST::GetIndex)
       ti = ast_node.target.type_info rescue nil
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      return !!(ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?))
+      return false unless ti.is_a?(Type)
+      return !!(ti.map? || ti.pool? || ti.list_collection? || (ti.array? && !ti.string?))
     end
     if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
       return container_borrow_expr?(ast_node.left)
@@ -1654,8 +1655,9 @@ class MIRLowering
       # truth for "callee takes" — the lowering must not re-derive it from
       # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
       takes = a.was_moved
-      arg = hoist_alloc(lower(a), a, err_cleanup: takes)
-      arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) unless takes
+      raw_arg = lower(a)
+      arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
+      arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
       # Array/List args: convert to slice via .items (skip strings - already []const u8).
       #
       # Exception: when the callee declares `MUTABLE xs: T[]@list`, pass
