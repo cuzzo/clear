@@ -3407,6 +3407,192 @@ pub fn testStreamRingHeadTailAtomicCoverage() !void {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// concurrentListCount / concurrentListReduce atomic coverage
+//
+// These helpers use a shared atomic work index plus an atomic first-error
+// slot. The loom test runs the production streams.zig implementation with
+// a small WaitGroup shim so next_idx.fetchAdd, err_code.cmpxchgStrong, and
+// err_code.load all resolve to SimAtomic and yield inside the harness.
+// ─────────────────────────────────────────────────────────────────────
+
+const ListReduceLoomRuntime = struct {
+    pub fn getSched(_: *@This()) *fp.Scheduler {
+        return &g_sched;
+    }
+
+    pub fn checkYield(_: *@This()) void {
+        if (fc.__fiber) |fiber| fiber.yield();
+    }
+};
+
+const ListReduceLoomTask = struct {
+    user_fn: qs.TaskFn,
+    args: ?*anyopaque,
+};
+
+const ListReduceLoomWaitGroup = struct {
+    sched: *fp.Scheduler,
+    remaining: qs.Atomic(usize) = qs.Atomic(usize).init(0),
+
+    pub fn init(sched: *fp.Scheduler) @This() {
+        return .{ .sched = sched };
+    }
+
+    pub fn add(self: *@This(), n: usize) void {
+        self.remaining.store(n, .release);
+    }
+
+    pub fn done(self: *@This()) void {
+        _ = self.remaining.fetchSub(1, .acq_rel);
+    }
+
+    pub fn wait(self: *@This()) void {
+        for (0..g_list_reduce_task_count) |i| {
+            harness.createThread(i, listReduceEntryPtr(i)) catch {
+                g_list_reduce_harness_failed = true;
+                return;
+            };
+        }
+        harness.run() catch {
+            g_list_reduce_harness_failed = true;
+            return;
+        };
+        if (self.remaining.load(.acquire) != 0) g_list_reduce_harness_failed = true;
+    }
+};
+
+var g_list_reduce_rt: ListReduceLoomRuntime = .{};
+var g_list_reduce_tasks: [4]ListReduceLoomTask = undefined;
+var g_list_reduce_task_count: usize = 0;
+var g_list_reduce_harness_failed: bool = false;
+
+fn listReduceEntryPtr(slot: usize) usize {
+    return switch (slot) {
+        0 => @intFromPtr(&entryListReduceWorker0),
+        1 => @intFromPtr(&entryListReduceWorker1),
+        2 => @intFromPtr(&entryListReduceWorker2),
+        3 => @intFromPtr(&entryListReduceWorker3),
+        else => unreachable,
+    };
+}
+
+fn entryListReduceWorker(slot: usize) void {
+    const task = g_list_reduce_tasks[slot];
+    task.user_fn(@ptrCast(&g_list_reduce_rt), task.args) catch {
+        g_list_reduce_harness_failed = true;
+    };
+    harness.done[slot] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryListReduceWorker0() callconv(.c) void { entryListReduceWorker(0); }
+fn entryListReduceWorker1() callconv(.c) void { entryListReduceWorker(1); }
+fn entryListReduceWorker2() callconv(.c) void { entryListReduceWorker(2); }
+fn entryListReduceWorker3() callconv(.c) void { entryListReduceWorker(3); }
+
+fn listReduceLoomLocalSpawn(_: *fp.Scheduler, user_fn: qs.TaskFn, args: ?*anyopaque, _: void) !void {
+    if (g_list_reduce_task_count >= g_list_reduce_tasks.len) return error.TooManyLoomWorkers;
+    g_list_reduce_tasks[g_list_reduce_task_count] = .{ .user_fn = user_fn, .args = args };
+    g_list_reduce_task_count += 1;
+}
+
+fn listReduceLoomParallelSpawn(user_fn: qs.TaskFn, args: ?*anyopaque, _: void) !void {
+    try listReduceLoomLocalSpawn(&g_sched, user_fn, args, {});
+}
+
+fn listReduceLoomKeepGtFour(_: *ListReduceLoomRuntime, _: ?*anyopaque, value: i64) anyerror!bool {
+    return value > 4;
+}
+
+fn listReduceLoomMapI64(_: *ListReduceLoomRuntime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    return value;
+}
+
+fn listReduceLoomErrorOnFive(_: *ListReduceLoomRuntime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    if (value == 5) return error.LoomListReduce;
+    return value;
+}
+
+fn resetListReduceLoomRun(h: *LoomHarness, schedule: []const u8) void {
+    h.resetExhaustive(schedule);
+    g_list_reduce_task_count = 0;
+    g_list_reduce_harness_failed = false;
+}
+
+pub fn testConcurrentListReduceAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [8]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    const items = [_]i64{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    var failures: usize = 0;
+    const total: usize = if (build_options.coverage) 16 else 256;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u3, @intCast(bit % 8))) & 1);
+        }
+
+        resetListReduceLoomRun(&h, &schedule_buf);
+        const count = streams.concurrentListCount(
+            ListReduceLoomWaitGroup, i64, listReduceLoomKeepGtFour,
+            listReduceLoomLocalSpawn, listReduceLoomParallelSpawn,
+            &g_list_reduce_rt, items[0..], 3, 2, false, {}, null
+        ) catch {
+            failures += 1;
+            continue;
+        };
+        if (g_list_reduce_harness_failed or count != 4) {
+            failures += 1;
+            continue;
+        }
+
+        resetListReduceLoomRun(&h, &schedule_buf);
+        const sum = streams.concurrentListReduce(
+            ListReduceLoomWaitGroup, i64, i64, listReduceLoomMapI64,
+            listReduceLoomLocalSpawn, listReduceLoomParallelSpawn,
+            &g_list_reduce_rt, items[0..], 3, 2, false, {}, null, 0, .sum
+        ) catch {
+            failures += 1;
+            continue;
+        };
+        if (g_list_reduce_harness_failed or sum != 36) {
+            failures += 1;
+            continue;
+        }
+
+        resetListReduceLoomRun(&h, &schedule_buf);
+        _ = streams.concurrentListReduce(
+            ListReduceLoomWaitGroup, i64, i64, listReduceLoomErrorOnFive,
+            listReduceLoomLocalSpawn, listReduceLoomParallelSpawn,
+            &g_list_reduce_rt, items[0..], 3, 2, false, {}, null, 0, .sum
+        ) catch |err| {
+            if (g_list_reduce_harness_failed or err != error.LoomListReduce) {
+                failures += 1;
+            }
+            continue;
+        };
+        failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\nconcurrent-list-reduce-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Multi-fallible sorted-acquire pattern (emit_sorted_lock_acquires_fallible)
 //

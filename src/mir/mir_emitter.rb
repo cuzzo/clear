@@ -73,6 +73,8 @@ class MIREmitter
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
     when MIR::IndexInsert      then emit_index_insert(node)
+    when MIR::BatchWindowPush  then emit_batch_window_push(node)
+    when MIR::BatchWindowFlush then emit_batch_window_flush(node)
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
@@ -767,6 +769,32 @@ class MIREmitter
       "        return #{emit(node.key_a)} < #{emit(node.key_b)};\n" \
       "    }\n" \
       "}.lessThan);"
+  end
+
+  sig { params(node: MIR::BatchWindowPush).returns(String) }
+  def emit_batch_window_push(node)
+    emit_batch_window_emit(node, "try #{node.window}.push(#{emit(node.item_expr)})")
+  end
+
+  sig { params(node: MIR::BatchWindowFlush).returns(String) }
+  def emit_batch_window_flush(node)
+    emit_batch_window_emit(node, "try #{node.window}.flush()")
+  end
+
+  sig { params(node: T.untyped, source: String).returns(String) }
+  def emit_batch_window_emit(node, source)
+    slice = "#{node.batch_var}_slice"
+    val = "#{node.batch_var}_val"
+    alloc = alloc_zig(node.alloc)
+    <<~ZIG.strip
+      if (#{source}) |#{slice}| {
+          defer #{node.window}.freeBatch(#{slice});
+          var #{node.batch_var} = std.ArrayListUnmanaged(#{node.elem_zig}){ .items = #{slice}, .capacity = #{slice}.len };
+          _ = &#{node.batch_var};
+          const #{val} = #{emit(node.value_expr)};
+          try #{node.result_var}.append(#{alloc}, #{val});
+      }
+    ZIG
   end
 
   sig { params(node: MIR::ScopeBlock).returns(String) }

@@ -28,6 +28,25 @@ RSpec.describe PipelineRewriter do
     expect(bind.value.args.first.name).to eq("x")
   end
 
+  it "rewrites RECOVER pipelines into OR fallback expressions" do
+    ast = parse_and_rewrite(<<~CLEAR)
+      FN risky(n: Int64) RETURNS !Int64 -> RETURN n; END
+      FN main() RETURNS Void ->
+          result = risky(1_i64) |> RECOVER(0_i64);
+          RETURN;
+      END
+    CLEAR
+    main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+    bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
+
+    expect(bind.value).to be_a(AST::BinaryOp)
+    expect(bind.value.op).to eq(:OR_RESCUE)
+    expect(bind.value.left).to be_a(AST::FuncCall)
+    expect(bind.value.left.name).to eq("risky")
+    expect(bind.value.right).to be_a(AST::Literal)
+    expect(bind.value.right.value).to eq(0)
+  end
+
   it "fuses WHERE and SELECT into a single ForEach loop" do
     ast = parse_and_rewrite(<<~CLEAR)
       FN main() RETURNS Void ->

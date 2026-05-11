@@ -1077,7 +1077,7 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------------
     # Zig output
     # -------------------------------------------------------------------------
-    it "CONCURRENT SELECT emits WaitGroup and persistent worker pool" do
+    it "CONCURRENT SELECT routes through the list runtime helper" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
@@ -1085,13 +1085,13 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("WaitGroup")
-      expect(out).to include("submitSpawn")
-      expect(out).to include("fetchAdd") # atomic work index
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("@intCast(3)")
+      expect(out).to include("return (__item * 2.0)")
       expect(out).not_to include("Semaphore") # no semaphore in worker pool
     end
 
-    it "CONCURRENT WHERE emits WaitGroup and persistent worker pool" do
+    it "CONCURRENT WHERE routes through the list runtime helper" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
@@ -1099,13 +1099,13 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("WaitGroup")
-      expect(out).to include("submitSpawn")
-      expect(out).to include("fetchAdd")
+      expect(out).to include("CheatLib.concurrentListWhere")
+      expect(out).to include("@intCast(CheatLib.threadCount())")
+      expect(out).to include("return (__item > 1.0)")
       expect(out).not_to include("Semaphore")
     end
 
-    it "CONCURRENT EACH emits WaitGroup and persistent worker pool" do
+    it "CONCURRENT EACH routes through the list runtime helper" do
       out = transpile_fn(<<~CLEAR)
         STRUCT Score { value: Float64 }
         FN f() RETURNS !Void ->
@@ -1114,9 +1114,8 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      expect(out).to include("WaitGroup")
-      expect(out).to include("submitSpawn")
-      expect(out).to include("fetchAdd")
+      expect(out).to include("CheatLib.concurrentListEachInPlace")
+      expect(out).to include("@intCast(2)")
       expect(out).not_to include("Semaphore")
     end
 
@@ -1145,9 +1144,8 @@ RSpec.describe SemanticAnnotator do
       # Should not raise; resolved type is Float64[] not !Float64[]
       expect { transpile_fn(src) }.not_to raise_error
       out = transpile_fn(src)
-      expect(out).to include("__CcsWorker0")
-      # result type should be Float64 (not error union)
-      expect(out).to include("?f64")
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("f64")
     end
 
     it "CONCURRENT SELECT fn OR RAISE — expression type is unwrapped T" do
@@ -1163,11 +1161,11 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       expect { transpile_fn(src) }.not_to raise_error
       out = transpile_fn(src)
-      expect(out).to include("__CcsWorker0")
-      expect(out).to include("?f64")
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("f64")
     end
 
-    it "CONCURRENT default uses submitSpawn (local scheduler, deterministic)" do
+    it "CONCURRENT default requests local scheduler dispatch" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
@@ -1176,10 +1174,10 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       user_code = out.split("// 3. Main Entry").first
-      expect(user_code).to include("submitSpawn")
+      expect(user_code).to include(", false, .{ .stack_size = .Standard }")
     end
 
-    it "CONCURRENT(parallel: TRUE) distributes via spawnBest (multi-core parallel)" do
+    it "CONCURRENT(parallel: TRUE) requests spawnBest dispatch" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
@@ -1188,7 +1186,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       user_code = out.split("// 3. Main Entry").first
-      expect(user_code).to include("spawnBest")
+      expect(user_code).to include(", true, .{ .stack_size = .Standard }")
     end
 
     it "CONCURRENT SELECT fn OR PRUNE emits catch |_| return in fiber body" do
@@ -1206,7 +1204,7 @@ RSpec.describe SemanticAnnotator do
       expect(out).to include("catch return")
     end
 
-    it "CONCURRENT SELECT fn OR RAISE emits cmpxchgStrong and @errorFromInt" do
+    it "CONCURRENT SELECT fn OR RAISE leaves error propagation to the runtime helper" do
       src = <<~CLEAR
         FN mayFail(x: Float64) RETURNS !Float64 ->
           RETURN x * 2.0;
@@ -1218,8 +1216,8 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile_fn(src)
-      expect(out).to include("cmpxchgStrong")
-      expect(out).to include("@errorFromInt")
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("return mayFail(__item)")
     end
 
     # -------------------------------------------------------------------------

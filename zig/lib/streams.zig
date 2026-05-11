@@ -965,6 +965,146 @@ pub fn concurrentBoundedEach(
     if (err_int != 0) return @errorFromInt(err_int);
 }
 
+pub fn concurrentShardedListEachInPlace(
+    comptime WaitGroupT: type,
+    comptime T: type,
+    comptime N: usize,
+    comptime eachFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
+    list: anytype,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !void {
+    const RuntimeT = @TypeOf(rt.*);
+
+    if (!fp.scheduler_running or fp.active_scheduler.current_task == null) {
+        for (0..N) |i| {
+            for (list.shards[i].items) |*item_ptr| {
+                try eachFn(rt, user_ctx, item_ptr);
+            }
+        }
+        return;
+    }
+
+    var err_code = Atomic(u16).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        shard: *std.ArrayListUnmanaged(T),
+        err_code: *Atomic(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            for (ctx.shard.items) |*item_ptr| {
+                eachFn(worker_rt, ctx.user_ctx, item_ptr) catch |err| {
+                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                    continue;
+                };
+            }
+            worker_rt.checkYield();
+        }
+    };
+
+    var worker_ctxs: [N]Worker = undefined;
+    wg.add(N);
+    for (0..N) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .shard = &list.shards[i],
+            .err_code = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+}
+
+pub fn concurrentShardedPoolEachInPlace(
+    comptime WaitGroupT: type,
+    comptime T: type,
+    comptime N: usize,
+    comptime eachFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
+    pool: anytype,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !void {
+    const RuntimeT = @TypeOf(rt.*);
+    const ShardPtrT = @TypeOf(&pool.shards[0]);
+    _ = T;
+
+    if (!fp.scheduler_running or fp.active_scheduler.current_task == null) {
+        for (0..N) |i| {
+            for (pool.shards[i].slots) |*slot| {
+                if (!slot.alive) continue;
+                try eachFn(rt, user_ctx, &slot.value);
+            }
+        }
+        return;
+    }
+
+    var err_code = Atomic(u16).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        shard: ShardPtrT,
+        err_code: *Atomic(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            for (ctx.shard.slots) |*slot| {
+                if (!slot.alive) continue;
+                eachFn(worker_rt, ctx.user_ctx, &slot.value) catch |err| {
+                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                    continue;
+                };
+            }
+            worker_rt.checkYield();
+        }
+    };
+
+    var worker_ctxs: [N]Worker = undefined;
+    wg.add(N);
+    for (0..N) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .shard = &pool.shards[i],
+            .err_code = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+}
+
 // Dynamic-stream variants of the concurrent helpers above. They mirror
 // concurrentBoundedSelect/Where/Each but pull items via `next()` /
 // `nextOrNull()` over an unsized source stream, fanning items out to
@@ -1719,4 +1859,196 @@ pub fn concurrentListEachInPlace(
 
     const err_int = err_code.load(.seq_cst);
     if (err_int != 0) return @errorFromInt(err_int);
+}
+
+pub const ConcurrentReduceKind = enum { sum, average, min, max };
+
+pub fn concurrentListCount(
+    comptime WaitGroupT: type,
+    comptime T: type,
+    comptime predFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
+    items: []const T,
+    workers: usize,
+    batch: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !i64 {
+    const RuntimeT = @TypeOf(rt.*);
+
+    const Partial = struct { value: i64 align(64) = 0 };
+    var partials: [64]Partial = [_]Partial{.{}} ** 64;
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        items: []const T,
+        next_idx: *Atomic(usize),
+        batch_size: usize,
+        err_code: *Atomic(u16),
+        partial: *i64,
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (true) {
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item = ctx.items[idx];
+                    const keep = predFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    if (keep) ctx.partial.* += 1;
+                }
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    var worker_ctxs: [64]Worker = undefined;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, @as(usize, 64));
+    if (actual_workers == 0) return 0;
+    wg.add(actual_workers);
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .items = items,
+            .next_idx = &next_idx,
+            .batch_size = batch_size,
+            .err_code = &err_code,
+            .partial = &partials[i].value,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+
+    var result: i64 = 0;
+    for (0..actual_workers) |i| result += partials[i].value;
+    return result;
+}
+
+pub fn concurrentListReduce(
+    comptime WaitGroupT: type,
+    comptime T: type,
+    comptime R: type,
+    comptime mapFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
+    items: []const T,
+    workers: usize,
+    batch: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+    initial: R,
+    comptime kind: ConcurrentReduceKind,
+) !R {
+    const RuntimeT = @TypeOf(rt.*);
+
+    const Partial = struct { value: R align(64) = undefined };
+    var partials: [64]Partial = undefined;
+    for (&partials) |*partial| partial.value = initial;
+    var err_code = Atomic(u16).init(0);
+    var next_idx = Atomic(usize).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        items: []const T,
+        next_idx: *Atomic(usize),
+        batch_size: usize,
+        err_code: *Atomic(u16),
+        partial: *R,
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (true) {
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item = ctx.items[idx];
+                    const value = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    switch (kind) {
+                        .sum, .average => ctx.partial.* += value,
+                        .min => {
+                            if (value < ctx.partial.*) ctx.partial.* = value;
+                        },
+                        .max => {
+                            if (value > ctx.partial.*) ctx.partial.* = value;
+                        },
+                    }
+                }
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    var worker_ctxs: [64]Worker = undefined;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, @as(usize, 64));
+    if (actual_workers == 0 or items.len == 0) return initial;
+    wg.add(actual_workers);
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .items = items,
+            .next_idx = &next_idx,
+            .batch_size = batch_size,
+            .err_code = &err_code,
+            .partial = &partials[i].value,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+
+    var result: R = initial;
+    for (0..actual_workers) |i| {
+        const partial = partials[i].value;
+        switch (kind) {
+            .sum, .average => result += partial,
+            .min => {
+                if (partial < result) result = partial;
+            },
+            .max => {
+                if (partial > result) result = partial;
+            },
+        }
+    }
+    if (comptime kind == .average) return result / @as(R, @floatFromInt(items.len));
+    return result;
 }

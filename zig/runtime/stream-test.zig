@@ -103,6 +103,94 @@ fn boundedEachErrorOnThirty(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!vo
     if (value == 30) return error.IntentionalBoundedEach;
 }
 
+const ListReduceState = struct {
+    items: [6]i64 = .{ 1, 2, 3, 4, 5, 6 },
+    count: i64 = -1,
+    sum: i64 = -1,
+    average: f64 = -1,
+    min: i64 = -1,
+    max: i64 = -1,
+    empty_count: i64 = -1,
+    empty_sum: i64 = -1,
+    empty_average: f64 = -1,
+    empty_min: i64 = -1,
+    empty_max: i64 = -1,
+};
+
+const ListReduceErrorState = struct {
+    items: [6]i64 = .{ 1, 2, 3, 4, 5, 6 },
+    count_err: ?anyerror = null,
+    reduce_err: ?anyerror = null,
+};
+
+fn listKeepGtTwo(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!bool {
+    return value > 2;
+}
+
+fn listMapI64(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    return value;
+}
+
+fn listMapF64(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!f64 {
+    return @floatFromInt(value);
+}
+
+fn listKeepErrorOnFive(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!bool {
+    if (value == 5) return error.IntentionalListCount;
+    return value > 0;
+}
+
+fn listMapErrorOnFive(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    if (value == 5) return error.IntentionalListReduce;
+    return value;
+}
+
+fn listReduceConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*ListReduceState, @ptrCast(@alignCast(raw_args.?)));
+    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null);
+    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
+    state.average = try CheatLib.concurrentListReduce(i64, f64, listMapF64,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
+    state.min = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
+    state.max = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
+
+    const empty = state.items[0..0];
+    state.empty_count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
+        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null);
+    state.empty_sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum);
+    state.empty_average = try CheatLib.concurrentListReduce(i64, f64, listMapF64,
+        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, 0.0, .average);
+    state.empty_min = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.maxInt(i64), .min);
+    state.empty_max = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, empty, 3, 2, false, .{ .stack_size = test_stack_size }, null, std.math.minInt(i64), .max);
+}
+
+fn listReduceParallelConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*ListReduceState, @ptrCast(@alignCast(raw_args.?)));
+    state.count = try CheatLib.concurrentListCount(i64, listKeepGtTwo,
+        rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null);
+    state.sum = try CheatLib.concurrentListReduce(i64, i64, listMapI64,
+        rt, state.items[0..], 3, 2, true, .{ .stack_size = test_stack_size }, null, 0, .sum);
+}
+
+fn listReduceErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*ListReduceErrorState, @ptrCast(@alignCast(raw_args.?)));
+    _ = CheatLib.concurrentListCount(i64, listKeepErrorOnFive,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null) catch |err| {
+        state.count_err = err;
+    };
+    _ = CheatLib.concurrentListReduce(i64, i64, listMapErrorOnFive,
+        rt, state.items[0..], 3, 2, false, .{ .stack_size = test_stack_size }, null, 0, .sum) catch |err| {
+        state.reduce_err = err;
+    };
+}
+
 fn boundedSelectConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedSelectState, @ptrCast(@alignCast(raw_args.?)));
     state.results = try CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapDouble,
@@ -1394,4 +1482,100 @@ test "concurrentBounded callbacks propagate worker errors" {
     try std.testing.expectEqual(error.IntentionalBoundedSelect, select_state.err.?);
     try std.testing.expectEqual(error.IntentionalBoundedWhere, where_state.err.?);
     try std.testing.expectEqual(error.IntentionalBoundedEach, each_state.err.?);
+}
+
+test "concurrentListCount and concurrentListReduce compute scalar folds" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var state = ListReduceState{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&listReduceConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(i64, 4), state.count);
+    try std.testing.expectEqual(@as(i64, 21), state.sum);
+    try std.testing.expectApproxEqAbs(@as(f64, 3.5), state.average, 0.0001);
+    try std.testing.expectEqual(@as(i64, 1), state.min);
+    try std.testing.expectEqual(@as(i64, 6), state.max);
+
+    try std.testing.expectEqual(@as(i64, 0), state.empty_count);
+    try std.testing.expectEqual(@as(i64, 0), state.empty_sum);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), state.empty_average, 0.0001);
+    try std.testing.expectEqual(std.math.maxInt(i64), state.empty_min);
+    try std.testing.expectEqual(std.math.minInt(i64), state.empty_max);
+}
+
+test "concurrentList scalar folds support spawnBest dispatch" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var state = ListReduceState{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&listReduceParallelConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(i64, 4), state.count);
+    try std.testing.expectEqual(@as(i64, 21), state.sum);
+}
+
+test "concurrentList scalar fold callbacks propagate worker errors" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var state = ListReduceErrorState{};
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&listReduceErrorConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(error.IntentionalListCount, state.count_err.?);
+    try std.testing.expectEqual(error.IntentionalListReduce, state.reduce_err.?);
 }

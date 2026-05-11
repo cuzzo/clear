@@ -1,0 +1,44 @@
+# Direct RangeLit sources should use runtime-backed CONCURRENT helpers,
+# not legacy RawZig pipeline emission.
+
+STRUCT Acc { value: Int64 }
+
+FN main() RETURNS Void ->
+    selected = (1..<5) |> CONCURRENT(workers: 2) SELECT _ * 2_i64;
+    ASSERT selected.length() == 4, "range concurrent SELECT length";
+    ASSERT selected[0] == 2_i64, "range concurrent SELECT first";
+    ASSERT selected[3] == 8_i64, "range concurrent SELECT last";
+
+    filtered = (1..<6) |> CONCURRENT(workers: 2) WHERE _ MOD 2_i64 == 0_i64;
+    ASSERT filtered.length() == 2, "range concurrent WHERE length";
+    ASSERT filtered[0] == 2_i64, "range concurrent WHERE first";
+    ASSERT filtered[1] == 4_i64, "range concurrent WHERE second";
+
+    n = (1..<6) |> CONCURRENT(workers: 2) COUNT _ > 2_i64;
+    ASSERT n == 3_i64, "range concurrent COUNT";
+
+    sum = (1..<6) |> CONCURRENT(workers: 2) SUM _;
+    ASSERT sum == 15_i64, "range concurrent SUM";
+
+    avg = (1..<6) |> CONCURRENT(workers: 2) AVERAGE _;
+    ASSERT avg == 3.0, "range concurrent AVERAGE";
+
+    mn = (1..<6) |> CONCURRENT(workers: 2) MIN _;
+    ASSERT mn == 1_i64, "range concurrent MIN";
+
+    mx = (1..<6) |> CONCURRENT(workers: 2) MAX _;
+    ASSERT mx == 5_i64, "range concurrent MAX";
+
+    acc = Acc{ value: 0_i64 } @shared:locked;
+    (1..<6) |> CONCURRENT(workers: 2) EACH {
+        WITH EXCLUSIVE acc AS a {
+            a.value = a.value + _;
+        }
+    };
+    WITH acc AS a {
+        ASSERT a.value == 15_i64, "range concurrent EACH";
+    }
+
+    print("OK");
+    RETURN;
+END

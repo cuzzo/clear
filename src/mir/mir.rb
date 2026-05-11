@@ -285,6 +285,20 @@ module MIR
     include Stmt
   end
 
+  # Batch-window runtime emission. These model the two ownership-sensitive
+  # steps around CheatLib.BatchWindow(T): push-driven flushes and final flush.
+  # The returned runtime slice is freed inside the emitted if-body after the
+  # user expression has consumed the temporary ArrayListUnmanaged view.
+  BatchWindowPush = Struct.new(:window, :item_expr, :batch_var, :elem_zig,
+                               :result_var, :value_expr, :alloc) do
+    include Stmt
+  end
+
+  BatchWindowFlush = Struct.new(:window, :batch_var, :elem_zig,
+                                :result_var, :value_expr, :alloc) do
+    include Stmt
+  end
+
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do

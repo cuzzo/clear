@@ -702,7 +702,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("__each_slot.alive")
       end
 
-      it "emits N parallel fiber structs for EACH on @pool:sharded(4)" do
+      it "emits runtime sharded-pool EACH helper for EACH on @pool:sharded(4)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
@@ -711,12 +711,9 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("WaitGroup")
-        expect(out).to include("submitSpawn")
-        expect(out).to include("__EachShardCtx0_0")
-        expect(out).to include("__EachShardCtx0_1")
-        expect(out).to include("__EachShardCtx0_2")
-        expect(out).to include("__EachShardCtx0_3")
+        expect(out).to include("concurrentShardedPoolEachInPlace")
+        expect(out).to include("__BoundedConcurrentCtx")
+        expect(out).to include("__sh_each_src = &sp")
       end
 
       it "uses __it in Zig output (Zig reserves _ as discard identifier)" do
@@ -959,6 +956,23 @@ RSpec.describe SemanticAnnotator do
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("pool.deinit(")
     end
+
+    it "uses field-slice iteration for scalar folds without materializing structs" do
+      code = <<~CLEAR
+        STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
+        FN f() RETURNS !Float64 ->
+          MUTABLE pool: Entity[100]@pool:soa = [];
+          total = pool |> SUM _.health;
+          RETURN total;
+        END
+      CLEAR
+      zig = ZigTranspiler.new.transpile(code)
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include("data.items(.health)")
+      expect(user_code).to include("alive[__soa_i]")
+      expect(user_code).not_to include("pipe_mat")
+      expect(user_code).not_to include("data.get(__soa_i)")
+    end
   end
 
   # ===========================================================================
@@ -1033,6 +1047,8 @@ RSpec.describe SemanticAnnotator do
       # SOA list path should NOT have alive check (that's pool-only)
       user_code = zig.split("// 3. Main Entry").first
       expect(user_code).not_to include("alive")
+      expect(user_code).not_to include("pipe_mat")
+      expect(user_code).not_to include("data.get(__soa_i)")
     end
 
     it "plain @list still generates ArrayListUnmanaged (not SoaList)" do
@@ -2459,7 +2475,7 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: @list:sharded EACH emits parallel fibers" do
+    context "Zig output: @list:sharded EACH emits runtime helper" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
@@ -2468,11 +2484,11 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "emits parallel fiber structs for EACH shard" do
+      it "emits sharded-list EACH helper" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("EachListShardCtx")
-        expect(zig).to include("ctx.shard.items")
-        expect(zig).to include("WaitGroup")
+        expect(zig).to include("concurrentShardedListEachInPlace")
+        expect(zig).to include("__BoundedConcurrentCtx")
+        expect(zig).to include("__sh_each_src = &slist")
       end
     end
   end

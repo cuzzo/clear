@@ -1978,7 +1978,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("ctx.items[__idx].val")
+      expect(zig).to include("CheatLib.concurrentListSelect")
+      expect(zig).to include("return (__item.val * 2.0)")
+      expect(zig).not_to include("ctx.items[__idx].val")
     end
 
     it "CONCURRENT SUM uses $u as the current element" do
@@ -1991,7 +1993,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("ctx.items[__idx].val")
+      expect(zig).to include("CheatLib.concurrentListReduce")
+      expect(zig).to include("return __item.val")
+      expect(zig).not_to include("ctx.items[__idx].val")
     end
   end
 

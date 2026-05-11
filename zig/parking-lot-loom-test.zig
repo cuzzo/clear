@@ -57,6 +57,7 @@ const tests = [_]Test{
     .{ .name = "split-stream production lifecycle: retain, publish, close, error, deinit", .func = &ploom.testSplitStreamProductionLifecycle },
     .{ .name = "split-stream production park/wake: empty next parks, close resumes null", .func = &ploom.testSplitStreamParkedSubscriberCloseWake },
     .{ .name = "stream ring-atomic: Stream(T) SPSC head/tail release/acquire vs buf[] (4096 schedules)",            .func = &ploom.testStreamRingHeadTailAtomicCoverage },
+    .{ .name = "stream concurrent-list-reduce atomic: work index and first-error slot (256 schedules)", .func = &ploom.testConcurrentListReduceAtomicCoverage },
     .{ .name = "multi-fallible sorted-acquire: 2-fiber address-ordered held-bitmap (500 seeds)",      .func = &ploom.testMultiFallibleSortedAcquire },
     .{ .name = "tryLock + presetLocked: happy + contended single-thread paths",                       .func = &ploom.testTryLockHappyAndContended },
     .{ .name = "ParkingMutex post-park epilogue: parker wakes with lock_timed_out=true",               .func = &ploom.testMutexLockTimeoutEpilogue },

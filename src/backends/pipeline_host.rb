@@ -47,6 +47,15 @@ class PipelineHost
     @each_idx_counter = T.let(nil, T.nilable(Integer))
     @sh_counter = T.let(nil, T.nilable(Integer))
     @bounded_conc_counter = T.let(nil, T.nilable(Integer))
+    @pipe_label_counter = T.let(0, Integer)
+    @current_pipe_label = T.let(nil, T.nilable(String))
+    @placeholder_name = T.let(nil, T.nilable(String))
+    @acc_placeholder = T.let(nil, T.untyped)
+    @shard_direct_map = T.let(nil, T.untyped)
+    @shard_direct_idx = T.let(nil, T.untyped)
+    @shard_direct_key = T.let(nil, T.untyped)
+    @shard_direct_hash = T.let(nil, T.untyped)
+    @do_rt_name = T.let(nil, T.nilable(String))
     # Named pipeline bindings: "$u" -> "__pipe_u" (persist across stages, cleared per-chain)
     @named_bindings = T.let({}, T::Hash[T.untyped, T.untyped])
     @join_param_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -384,15 +393,15 @@ class PipelineHost
     lhs = node.left
     lhs_type = lhs.type_info
 
-    # SOA scalar operators have zero allocations -- field-slice path in the
-    # string generator is strictly better (no materialization overhead) on
-    # the Zig backend. The VM has no SoA layout (Value.List is uniform), so
-    # in BC mode, treat the SoA source as a regular list and dispatch through
-    # the structural fold path. This keeps both backends going through MIR
-    # nodes the bc_emitter can compile.
+    # SOA scalar operators must keep the direct field-slice loop on the
+    # Zig backend; materializing full structs would erase the point of SOA.
+    # The VM has no SoA layout (Value.List is uniform), so BC keeps using
+    # the generic structural fold path.
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
     scalar_op = RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
-    return nil if is_soa && scalar_op && @lowering.instance_variable_get(:@target) != :bc
+    if is_soa && scalar_op && @lowering.instance_variable_get(:@target) != :bc
+      return lower_soa_scalar_fold(PipelineSite.new(list: lhs, options: node), rhs)
+    end
 
     # Range source with fold terminal: fuse into a single accumulating while loop.
     if RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
@@ -432,14 +441,7 @@ class PipelineHost
     when AST::ReduceOp  then lower_reduce(site, rhs)
     when AST::WindowOp       then lower_window(site, rhs)
     when AST::BatchWindowOp
-      # Zig keeps the legacy template (battle-tested, has time-based
-      # semantics via CheatLib.BatchWindow). BC has no equivalent runtime
-      # type, so route to a structural slice-based lowering on BC only.
-      if @lowering.instance_variable_get(:@target) == :bc
-        lower_batch_window(site, rhs)
-      else
-        nil
-      end
+      lower_batch_window(site, rhs)
     when AST::OrderByOp      then lower_order_by(site, rhs)
     when AST::IndexOp   then lower_index(site, rhs.expression)
     when AST::JoinOp    then lower_join(site, rhs)
@@ -692,6 +694,176 @@ class PipelineHost
     end
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def ast_uses_bare_placeholder?(node)
+    return false unless node
+    return false if node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
+                    node.is_a?(TrueClass) || node.is_a?(FalseClass)
+    return node.name == "_" if node.is_a?(AST::Identifier)
+    if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+      return false
+    end
+
+    [:left, :right, :value, :args, :object, :target, :index, :condition,
+     :then_branch, :else_branch, :do_branch, :body, :start, :finish].each do |field|
+      next unless node.respond_to?(field)
+      child = node.public_send(field)
+      case child
+      when Array
+        return true if child.any? { |c| ast_uses_bare_placeholder?(c) }
+      when NilClass, String, Symbol, Numeric, TrueClass, FalseClass, Hash
+        next
+      else
+        return true if ast_uses_bare_placeholder?(child)
+      end
+    end
+    false
+  end
+
+  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped).returns(MIR::BlockExpr) }
+  def lower_soa_scalar_fold(site, fold_node)
+    list_node = site.list
+    label = next_pipe_label
+    source_mir = visit_mir(list_node)
+    @current_pipe_label = label
+
+    prev_soa_active = @soa_rewrite_active
+    prev_soa_each = @soa_each_mode
+    prev_soa_fields = @soa_needed_fields
+    expr_mir = T.let(nil, T.untyped)
+    fields = T.let([], T::Array[T.untyped])
+    needs_whole_item = T.let(false, T::Boolean)
+
+    begin
+      @soa_rewrite_active = true
+      @soa_each_mode = false
+      @soa_needed_fields = Set.new
+
+      if fold_node.respond_to?(:expression)
+        expr_mir = with_pipeline_context(placeholder: "it") { visit_mir(fold_node.expression) }
+      end
+      fields = @soa_needed_fields.to_a.sort_by(&:to_s)
+      needs_whole_item = fold_node.is_a?(AST::FindOp) ||
+        !!(fold_node.respond_to?(:expression) && ast_uses_bare_placeholder?(fold_node.expression))
+    ensure
+      @soa_rewrite_active = prev_soa_active
+      @soa_each_mode = prev_soa_each
+      @soa_needed_fields = prev_soa_fields
+    end
+
+    build_soa_scalar_fold_block(site, fold_node, label, source_mir, expr_mir, fields, needs_whole_item)
+  end
+
+  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped, label: String, source_mir: T.untyped, expr_mir: T.untyped, fields: T::Array[T.untyped], needs_whole_item: T::Boolean).returns(MIR::BlockExpr) }
+  def build_soa_scalar_fold_block(site, fold_node, label, source_mir, expr_mir, fields, needs_whole_item)
+    list_node = site.list
+    lhs_type = list_node.type_info
+    smooth_node = site.options
+
+    len_expr = lhs_type.pool? ?
+      MIR::Cast.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "live_count"), "usize", :intCast) :
+      MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data")), "usize", :intCast)
+    iter_expr = MIR::IterRange.new(MIR::Lit.new("0"),
+      MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data")), "usize", :intCast))
+
+    pre_loop = [
+      MIR::Let.new("__soa_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
+      *fields.map { |f|
+        MIR::Let.new("__soa_#{f}", MIR::SoaFieldAccess.new(MIR::Ident.new("__soa_src"), f), false, nil, nil)
+      }
+    ]
+
+    loop_prefix = []
+    if lhs_type.pool?
+      loop_prefix << MIR::IfStmt.new(
+        MIR::UnaryOp.new("!", MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "alive"), MIR::Ident.new("__soa_i"))),
+        [MIR::ContinueStmt.new(nil)], nil)
+    end
+    if needs_whole_item
+      loop_prefix << MIR::Let.new("it",
+        MIR::MethodCall.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data"), "get", [MIR::Ident.new("__soa_i")], false),
+        false, nil, nil)
+    end
+
+    result_type = smooth_node.respond_to?(:full_type) && smooth_node.full_type ? transpile_type(smooth_node.full_type.to_s) : "f64"
+    init_stmts = []
+    loop_body = []
+    final_expr = nil
+
+    case fold_node
+    when AST::CountOp
+      init_stmts << MIR::Let.new("count_result", MIR::Lit.new("0"), true, "i64", nil)
+      loop_body << MIR::IfStmt.new(expr_mir, [
+        MIR::Set.new(MIR::Ident.new("count_result"), MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1")))
+      ], nil)
+      final_expr = MIR::Ident.new("count_result")
+    when AST::SumOp
+      init_stmts << MIR::Let.new("sum_result", MIR::Lit.new("0"), true, result_type, nil)
+      loop_body << MIR::Set.new(MIR::Ident.new("sum_result"), MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir))
+      final_expr = MIR::Ident.new("sum_result")
+    when AST::AverageOp
+      init_stmts << MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, "f64", nil)
+      init_stmts << MIR::Let.new("avg_count", len_expr, false, nil, nil)
+      loop_body << MIR::Set.new(MIR::Ident.new("avg_sum"), MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir))
+      final_expr = MIR::Conditional.new(
+        MIR::BinOp.new("==", MIR::Ident.new("avg_count"), MIR::Lit.new("0")),
+        MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
+        MIR::BinOp.new("/", MIR::Ident.new("avg_sum"),
+          MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("avg_count"), nil, :floatFromInt), "f64", :as)))
+    when AST::MinOp
+      init_stmts << MIR::IfStmt.new(MIR::BinOp.new("==", len_expr, MIR::Lit.new("0")), [MIR::Panic.new("MIN applied to empty list")], nil)
+      init_stmts << MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, result_type), true, result_type, nil)
+      loop_body << MIR::Let.new("min_val", expr_mir, false, nil, nil)
+      loop_body << MIR::IfStmt.new(MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
+        [MIR::Set.new(MIR::Ident.new("min_result"), MIR::Ident.new("min_val"))], nil)
+      final_expr = MIR::Ident.new("min_result")
+    when AST::MaxOp
+      init_stmts << MIR::IfStmt.new(MIR::BinOp.new("==", len_expr, MIR::Lit.new("0")), [MIR::Panic.new("MAX applied to empty list")], nil)
+      init_stmts << MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, result_type), true, result_type, nil)
+      loop_body << MIR::Let.new("max_val", expr_mir, false, nil, nil)
+      loop_body << MIR::IfStmt.new(MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
+        [MIR::Set.new(MIR::Ident.new("max_result"), MIR::Ident.new("max_val"))], nil)
+      final_expr = MIR::Ident.new("max_result")
+    when AST::AnyOp
+      init_stmts << MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil)
+      loop_body << MIR::IfStmt.new(expr_mir, [
+        MIR::Set.new(MIR::Ident.new("any_result"), MIR::Lit.new("true")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      final_expr = MIR::Ident.new("any_result")
+    when AST::AllOp
+      init_stmts << MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil)
+      loop_body << MIR::IfStmt.new(MIR::UnaryOp.new("!", expr_mir), [
+        MIR::Set.new(MIR::Ident.new("all_result"), MIR::Lit.new("false")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      final_expr = MIR::Ident.new("all_result")
+    when AST::FindOp
+      elem_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
+      init_stmts << MIR::Let.new("find_result", MIR::Undef.new(nil), true, elem_zig_type, nil)
+      init_stmts << MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil)
+      loop_body << MIR::Let.new("find_matches", expr_mir, false, nil, nil)
+      loop_body << MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
+        MIR::Set.new(MIR::Ident.new("find_result"), MIR::Ident.new("it")),
+        MIR::Set.new(MIR::Ident.new("find_found"), MIR::Lit.new("true")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      final_expr = MIR::Conditional.new(
+        MIR::Ident.new("find_found"),
+        MIR::Cast.new(MIR::Ident.new("find_result"), "?#{elem_zig_type}", :as),
+        MIR::Lit.new("null"))
+    else
+      raise "BUG: unsupported SOA scalar fold #{fold_node.class}"
+    end
+
+    MIR::BlockExpr.new(label, [
+      *pre_loop,
+      *init_stmts,
+      MIR::ForStmt.new(iter_expr, "__soa_i", [*loop_prefix, *loop_body], nil),
+      MIR::BreakStmt.new(label, final_expr)
+    ])
+  end
+
   # --- Scalar accumulator lowerings (Phase 1) ---
 
   sig { params(site: PipelineHost::PipelineSite, count_node: AST::CountOp).returns(MIR::BlockExpr) }
@@ -745,7 +917,7 @@ class PipelineHost
             MIR::BinOp.new("==", MIR::Ident.new("avg_count"), MIR::Lit.new("0")),
             MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
             MIR::BinOp.new("/", MIR::Ident.new("avg_sum"),
-              MIR::Cast.new(MIR::Ident.new("avg_count"), "f64", :floatFromInt))))
+              MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("avg_count"), nil, :floatFromInt), "f64", :as))))
       ]
     end
   end
@@ -1222,6 +1394,17 @@ class PipelineHost
   # there is no time-based mid-stream flush; the final flush captures
   # any accumulated tail. Tests using time-only windows (e.g. test 7
   # of 243_batch_window) rely on the final flush for a single batch.
+  BATCH_WINDOW_TIME_NS = T.let({ 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze, T::Hash[T.untyped, T.untyped])
+
+  sig { params(bw_node: T.untyped).returns(String) }
+  def batch_window_timeout_ns(bw_node)
+    return "0" unless bw_node.options["time"]
+    str = bw_node.options["time"].value
+    match = /\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.match(str)
+    return "0" unless match
+    (match[1].to_f * BATCH_WINDOW_TIME_NS.fetch(match[2])).to_i.to_s
+  end
+
   sig { params(site: PipelineHost::PipelineSite, bw_node: AST::BatchWindowOp).returns(MIR::BlockExpr) }
   def lower_batch_window(site, bw_node)
     list_node = site.list
@@ -1250,6 +1433,8 @@ class PipelineHost
     expr_mir = with_pipeline_context(placeholder: placeholder_var) {
       visit_mir(bw_node.expression)
     }
+
+    return lower_zig_batch_window(site, bw_node, elem_zig, res_zig, size_mir, expr_mir, alloc, placeholder_var) unless bc_target?
 
     # BC + inf-stream identifier source: lower_pipeline_block emits
     # `pipe_items = ItemsAccess(channel)` which is identity in BC, so
@@ -1372,6 +1557,96 @@ class PipelineHost
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
     end
+  end
+
+  sig do
+    params(
+      site: PipelineHost::PipelineSite,
+      bw_node: AST::BatchWindowOp,
+      elem_zig: String,
+      res_zig: String,
+      size_mir: T.untyped,
+      expr_mir: T.untyped,
+      alloc: Symbol,
+      placeholder_var: String
+    ).returns(MIR::BlockExpr)
+  end
+  def lower_zig_batch_window(site, bw_node, elem_zig, res_zig, size_mir, expr_mir, alloc, placeholder_var)
+    list_node = site.list
+    lhs_type = list_node.type_info
+    timeout_ns = batch_window_timeout_ns(bw_node)
+
+    if lhs_type&.open_stream? || lhs_type&.dynamic_stream? || lhs_type&.inf_stream?
+      label = next_pipe_label
+      @current_pipe_label = label
+      pop_method = lhs_type&.inf_stream? ? "nextOrNull" : "next"
+      source_mir = visit_mir(list_node)
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new("__bw_src", source_mir, true, nil, "_ = &__bw_src;"),
+        *batch_window_setup_stmts(elem_zig, res_zig, size_mir, timeout_ns, alloc),
+        MIR::WhileStmt.new(
+          MIR::MethodCall.new(MIR::Ident.new("__bw_src"), pop_method, [], true),
+          [batch_window_push_stmt("__bw_item", elem_zig, expr_mir, alloc, placeholder_var)],
+          "__bw_item", nil, nil, nil),
+        batch_window_flush_stmt(elem_zig, expr_mir, alloc, placeholder_var),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ])
+    end
+
+    if lhs_type&.bounded_stream?
+      label = next_pipe_label
+      @current_pipe_label = label
+      source_mir = visit_mir(list_node)
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new("__bw_bsrc", source_mir, false, nil, nil),
+        *batch_window_setup_stmts(elem_zig, res_zig, size_mir, timeout_ns, alloc),
+        MIR::ForStmt.new(
+          MIR::FieldGet.new(MIR::Ident.new("__bw_bsrc"), "items"),
+          "__bw_item",
+          [batch_window_push_stmt("__bw_item", elem_zig, expr_mir, alloc, placeholder_var)],
+          nil, nil, nil),
+        batch_window_flush_stmt(elem_zig, expr_mir, alloc, placeholder_var),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ])
+    end
+
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        *batch_window_setup_stmts(elem_zig, res_zig, size_mir, timeout_ns, alloc),
+        MIR::ForStmt.new(
+          MIR::Ident.new(items),
+          "__bw_item",
+          [batch_window_push_stmt("__bw_item", elem_zig, expr_mir, alloc, placeholder_var)],
+          nil, nil, nil),
+        batch_window_flush_stmt(elem_zig, expr_mir, alloc, placeholder_var),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  sig { params(elem_zig: String, res_zig: String, size_mir: T.untyped, timeout_ns: String, alloc: Symbol).returns(T::Array[T.untyped]) }
+  def batch_window_setup_stmts(elem_zig, res_zig, size_mir, timeout_ns, alloc)
+    [
+      MIR::Let.new("res_list", MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
+      MIR::Let.new("__bw",
+        MIR::Call.new("CheatLib.BatchWindow(#{elem_zig}).init", [
+          MIR::AllocatorRef.new(alloc),
+          MIR::Cast.new(size_mir, "usize", :intCast),
+          MIR::Lit.new(timeout_ns)
+        ], false),
+        true, nil, nil),
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("__bw"), "deinit", [], false))
+    ]
+  end
+
+  sig { params(item_var: String, elem_zig: String, expr_mir: T.untyped, alloc: Symbol, placeholder_var: String).returns(MIR::BatchWindowPush) }
+  def batch_window_push_stmt(item_var, elem_zig, expr_mir, alloc, placeholder_var)
+    MIR::BatchWindowPush.new("__bw", MIR::Ident.new(item_var), placeholder_var, elem_zig, "res_list", expr_mir, alloc)
+  end
+
+  sig { params(elem_zig: String, expr_mir: T.untyped, alloc: Symbol, placeholder_var: String).returns(MIR::BatchWindowFlush) }
+  def batch_window_flush_stmt(elem_zig, expr_mir, alloc, placeholder_var)
+    MIR::BatchWindowFlush.new("__bw", placeholder_var, elem_zig, "res_list", expr_mir, alloc)
   end
 
   sig { params(site: PipelineHost::PipelineSite, order_node: AST::OrderByOp).returns(MIR::BlockExpr) }
@@ -1609,11 +1884,10 @@ class PipelineHost
     smooth_node = site.options
     lhs_type = list_node.type_info
 
-    # Sharded pools/lists need fibers on the Zig backend (one per shard) --
-    # stay on the string path there. For BC the sharded structure is
-    # flattened to a Value.List at runtime, so the regular per-item
-    # ForStmt path below works for both sharded pools and sharded lists.
-    return nil if lhs_type&.sharded? && !bc_target?
+    # Sharded pools/lists use one runtime worker per shard on the Zig
+    # backend. BC flattens sharded structures to Value.List at runtime,
+    # so the regular per-item ForStmt path below handles it there.
+    return lower_sharded_each(site, each_op) if lhs_type&.sharded? && !bc_target?
 
     # In BC mode the VM has no SoA layout, so the field-slice optimization
     # has no benefit. Skip the SoaFieldAccess emission and let the regular
@@ -1808,6 +2082,49 @@ class PipelineHost
     end
 
     nil  # Fall through to string path
+  end
+
+  sig { params(site: PipelineHost::PipelineSite, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
+  def lower_sharded_each(site, each_op)
+    list_node = site.list
+    lhs_type = list_node.type_info
+    item_t = Type.new(lhs_type.element_type.resolved)
+    shard_count = lhs_type.shard_count
+
+    # Reuse the CONCURRENT callback builder so the worker body is still
+    # structural MIR. There is no user-facing CONCURRENT wrapper here;
+    # sharded EACH has always implied one worker per shard.
+    conc = AST::ConcurrentOp.new(each_op.token, each_op, {})
+    cb = build_bounded_concurrent_callback_pointer(conc, item_t)
+
+    source_mir = visit_mir(list_node)
+    setup = if list_node.is_a?(AST::Identifier)
+      [MIR::Let.new("__sh_each_src", MIR::AddressOf.new(source_mir), false, nil, nil)]
+    else
+      [
+        MIR::Let.new("__sh_each_val", source_mir, true, nil, "_ = &__sh_each_val;"),
+        MIR::Let.new("__sh_each_src", MIR::AddressOf.new(MIR::Ident.new("__sh_each_val")), false, nil, nil)
+      ]
+    end
+
+    helper = lhs_type.pool? ? :concurrentShardedPoolEachInPlace : :concurrentShardedListEachInPlace
+    call = @lowering.send(:emit_builtin, helper, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Lit.new(shard_count.to_s),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Ident.new("rt"),
+      MIR::Ident.new("__sh_each_src"),
+      MIR::Lit.new("false"),
+      bounded_concurrent_task_cfg_mir(conc),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    MIR::ScopeBlock.new([
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup,
+      MIR::ExprStmt.new(call, false)
+    ])
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -2018,8 +2335,7 @@ class PipelineHost
 
     when AST::AverageOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      # Use f64 for count to avoid @floatFromInt in the division (same as the
-      # non-binding-chain AVERAGE code path in PipelineGenerator).
+      # Use f64 for count to avoid @floatFromInt in the division.
       init = [MIR::Let.new(sum_n, MIR::Lit.new("0"), true, "f64", nil),
               MIR::Let.new(cnt_n, MIR::Lit.new("0.0"), true, "f64", nil)]
       accum = [MIR::Set.new(MIR::Ident.new(sum_n),
@@ -2984,9 +3300,8 @@ class PipelineHost
     ])
   end
 
-  # CONCURRENT pipeline: worker dispatch stays as RawZig string (struct defs,
-  # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
-  # checker knows the allocation effects.
+  # CONCURRENT pipeline: supported shapes lower through structural MIR or
+  # runtime-backed InlineZig calls. Falling through here is now a migration bug.
   sig { params(site: PipelineHost::PipelineSite, conc_op: AST::ConcurrentOp).returns(T.untyped) }
   def lower_concurrent(site, conc_op)
     _lhs = site.list
@@ -3005,19 +3320,15 @@ class PipelineHost
     # simulation. Strip the CONCURRENT wrapper and redispatch the inner
     # op through the regular pipeline lowering. Result-order-deterministic
     # tests pass identically; tests asserting via order-invariant aggregates
-    # (sum/count/min/max) don't care. Stream sources still fall through to
-    # the RawZig path below — the regular lower_select / lower_where don't
-    # handle stream materialization, and the BC stream-pipeline story is
-    # its own piece of work (see UNIMPL: 240/241/242/243).
+    # (sum/count/min/max) don't care.
     if @lowering.instance_variable_get(:@target) == :bc
       lhs_ti = smooth_node.left.type_info
       stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? ||
-                              lhs_ti.open_stream? || lhs_ti.inf_stream? ||
-                              smooth_node.left.is_a?(AST::RangeLit))
+                              lhs_ti.open_stream? || lhs_ti.inf_stream?)
       return lower_concurrent_bc(smooth_node.left, conc_op, smooth_node) unless stream_lhs
     end
 
-    if smooth_node.left.type_info&.bounded_stream?
+    if !smooth_node.left.is_a?(AST::RangeLit) && smooth_node.left.type_info&.bounded_stream?
       return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
     end
 
@@ -3026,7 +3337,8 @@ class PipelineHost
     # (Zig: real feeder + worker fibers via BoundedChannel) or to
     # compile_concurrent_stream (BC: sequential simulation via .next()).
     lhs_ti = smooth_node.left.type_info
-    stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?)
+    stream_lhs = !smooth_node.left.is_a?(AST::RangeLit) &&
+      lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?)
     if stream_lhs
       case conc_op.op
       when AST::SelectOp
@@ -3051,7 +3363,8 @@ class PipelineHost
         real_lhs = lhs_node.left
       end
       real_lhs_ti = real_lhs.type_info
-      if real_lhs_ti && real_lhs_ti.list_collection?
+      if concurrent_range_runtime_source?(real_lhs) ||
+         (real_lhs_ti && concurrent_list_runtime_source?(real_lhs_ti))
         case conc_op.op
         when AST::SelectOp
           return with_optional_named_binding(bind_name, "__item") {
@@ -3060,6 +3373,14 @@ class PipelineHost
         when AST::WhereOp
           return with_optional_named_binding(bind_name, "__item") {
             lower_concurrent_list_where(real_lhs, conc_op, conc_op.op)
+          }
+        when AST::CountOp
+          return with_optional_named_binding(bind_name, "__item") {
+            lower_concurrent_list_count(real_lhs, conc_op, conc_op.op)
+          }
+        when AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp
+          return with_optional_named_binding(bind_name, "__item") {
+            lower_concurrent_list_reduce(real_lhs, conc_op, conc_op.op, smooth_node)
           }
         when AST::EachOp
           # If the body directly mutates `_` (e.g. `_.field = X` or
@@ -3078,30 +3399,21 @@ class PipelineHost
       end
     end
 
-    # Detect `list AS $u |> CONCURRENT SELECT $u.field` -- thread the binding
-    # into the CONCURRENT worker body so $u resolves to ctx.items[__idx].
-    lhs = smooth_node.left
-    prev_outer = @concurrent_outer_binding
-    @concurrent_outer_binding = if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
-      lhs.right.name   # "$u"
-    end
-
     inner = conc_op.op
-    zig_code = transpile_concurrent(smooth_node)
-    @concurrent_outer_binding = prev_outer
+    lhs_type = smooth_node.left.type_info
+    raise "lower_concurrent: unsupported non-legacy CONCURRENT shape lhs=#{smooth_node.left.class} lhs_type=#{lhs_type&.class} op=#{inner.class}"
+  end
 
-    allocates = case inner
-                when AST::SelectOp, AST::WhereOp then true
-                else false
-                end
+  sig { params(lhs_type: T.untyped).returns(T::Boolean) }
+  def concurrent_list_runtime_source?(lhs_type)
+    return false if lhs_type.dynamic_stream? || lhs_type.bounded_stream? ||
+                    lhs_type.open_stream? || lhs_type.inf_stream?
+    lhs_type.respond_to?(:element_type) && !lhs_type.element_type.nil?
+  end
 
-    stdlib_def = { allocates: allocates }
-    stdlib_def[:return] = :Void unless allocates
-
-    MIR::RawZig.new(zig_code,
-      "concurrent_#{inner.class.name.split('::').last.downcase}",
-      { consumes: [], produces: [], borrows: [] },
-      stdlib_def)
+  sig { params(lhs: T.untyped).returns(T::Boolean) }
+  def concurrent_range_runtime_source?(lhs)
+    lhs.is_a?(AST::RangeLit)
   end
 
   # BC sequential simulation of CONCURRENT. Strips the CONCURRENT wrapper
@@ -3113,9 +3425,8 @@ class PipelineHost
   # When `lhs` is `BIND_VAR(source, $u)`, register $u as an alias for the
   # pipeline iterator "it" and use the unwrapped source as the actual
   # data source. This makes `users AS $u |> CONCURRENT SELECT $u.field`
-  # work — substitute_placeholders rewrites $u → it inside the inner
-  # expression at MIR-build time. Mirrors @concurrent_outer_binding's
-  # role on the Zig path.
+  # work: substitute_placeholders rewrites $u to it inside the inner
+  # expression at MIR-build time.
   sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(T.untyped) }
   def lower_concurrent_bc(lhs, conc_op, smooth_node)
     inner = conc_op.op
@@ -3159,10 +3470,8 @@ class PipelineHost
     bind_name ? with_named_binding(bind_name, "it", &work) : work.call
   end
 
-  # Mirror of pipeline_generator.rb's extract_concurrent_error_policy --
-  # peels OR PRUNE / OR RAISE from the inner pipeline expression. We
-  # duplicate it here (instead of borrowing from the generator) so the BC
-  # path is self-contained.
+  # Peels OR PRUNE / OR RAISE from the inner pipeline expression for the
+  # BC sequential simulation path.
   sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
   def extract_concurrent_error_policy_for_bc(expr)
     if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
@@ -3227,8 +3536,7 @@ class PipelineHost
     if !is_bc && ctx[:key_allocates_frame]
       # The key expression allocates from the frame arena (e.g. a string
       # concat). Save/restore per iteration so successive iterations
-      # don't accumulate frame memory. Mirrors what
-      # transpile_shard_concurrent_each used to emit.
+      # don't accumulate frame memory.
       lm_var = "__sh#{id}_loop_mark"
       rt = @do_rt_name || "rt"
       inner << MIR::InlineZig.new("const #{lm_var} = #{rt}.saveLoopMark();", "shard_loop_save_mark")
@@ -3680,7 +3988,13 @@ class PipelineHost
       with_fiber_capture_map(caps.capture_map, capture_symbols: caps.capture_symbols, rt_override: "__rt") do
         case body_kind
         when :expr
-          [MIR::ReturnStmt.new(visit_mir(conc_op.op.expression))]
+          expr_mir = visit_mir(conc_op.op.expression)
+          expr_type = conc_op.op.expression.full_type
+          ret_type = Type.new(return_type)
+          if expr_type && Type.new(expr_type).integer? && ret_type.float?
+            expr_mir = MIR::Cast.new(MIR::Cast.new(expr_mir, nil, :floatFromInt), ret_type.zig_type, :as)
+          end
+          [MIR::ReturnStmt.new(expr_mir)]
         when :each
           [*visit_pipeline_body_mir(conc_op.op.body, placeholder: "__item"), MIR::ReturnStmt.new(nil)]
         else
@@ -3800,8 +4114,7 @@ class PipelineHost
     ])
   end
 
-  # Element type for ~T[] / ~T[INF] / open-stream sources, mirroring the
-  # extraction in the legacy transpile_concurrent_stream_* paths.
+  # Element type for ~T[] / ~T[INF] / open-stream sources.
   sig { params(lhs_ti: Type).returns(Type) }
   def stream_concurrent_element_type(lhs_ti)
     if lhs_ti.inf_stream?
@@ -3952,13 +4265,25 @@ class PipelineHost
     ])
   end
 
-  # Source materialization for list-source CONCURRENT. Reuses the
-  # legacy build_pipe_items_block / visit() to produce a Zig prelude
+  # Source materialization for collection-source CONCURRENT. Reuses
+  # build_pipe_items_block / visit() to produce a Zig prelude
   # that binds `pipe_src_list` and `pipe_items` (a slice). The shape
   # adaptation (sharded pool / SoA / etc.) lives in build_pipe_items_block;
   # only the worker-pool wiring is migrated to structural MIR.
-  sig { params(lhs: AST::Identifier).returns(MIR::InlineZig) }
+  sig { params(lhs: T.untyped).returns(MIR::InlineZig) }
   def list_concurrent_source_setup_iz(lhs)
+    if lhs.is_a?(AST::RangeLit)
+      range_zig = visit(lhs)
+      setup = <<~ZIG
+        var pipe_src_list = #{range_zig};
+        _ = &pipe_src_list;
+        var pipe_mat = try pipe_src_list.toList(rt.heapAlloc());
+        defer pipe_mat.deinit(rt.heapAlloc());
+        const pipe_items = pipe_mat.items;
+      ZIG
+      return MIR::InlineZig.new(setup, "range_concurrent_src_setup")
+    end
+
     lhs_type = lhs.type_info
     list_zig = visit(lhs)
     src_needs_cleanup = lhs.is_a?(AST::MethodCall) &&
@@ -3972,9 +4297,19 @@ class PipelineHost
     MIR::InlineZig.new(setup, "list_concurrent_src_setup")
   end
 
-  sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
+  sig { params(lhs: T.untyped).returns(Type) }
+  def concurrent_list_item_type(lhs)
+    if lhs.is_a?(AST::RangeLit)
+      elem = lhs.type_info&.tense_type&.element_type&.resolved ||
+        lhs.start.full_type || :Int64
+      return Type.new(elem)
+    end
+    Type.new(lhs.type_info.element_type.resolved)
+  end
+
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_list_select(lhs, conc_op, inner)
-    item_t  = Type.new(T.must(T.must(lhs.type_info).element_type).resolved)
+    item_t  = concurrent_list_item_type(lhs)
     result_t = Type.new(inner.expression.full_type)
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
     setup_iz = list_concurrent_source_setup_iz(lhs)
@@ -4002,9 +4337,9 @@ class PipelineHost
     ])
   end
 
-  sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: T.untyped).returns(MIR::BlockExpr) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: T.untyped).returns(MIR::BlockExpr) }
   def lower_concurrent_list_where(lhs, conc_op, inner)
-    item_t  = Type.new(T.must(T.must(lhs.type_info).element_type).resolved)
+    item_t  = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
     setup_iz = list_concurrent_source_setup_iz(lhs)
 
@@ -4030,9 +4365,85 @@ class PipelineHost
     ])
   end
 
-  sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::CountOp).returns(MIR::BlockExpr) }
+  def lower_concurrent_list_count(lhs, conc_op, inner)
+    item_t = concurrent_list_item_type(lhs)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
+    setup_iz = list_concurrent_source_setup_iz(lhs)
+
+    call = @lowering.send(:emit_builtin, :concurrentListCount, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Ident.new("rt"),
+      MIR::Ident.new("pipe_items"),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      setup_iz,
+      cb[:ctx_def],
+      cb[:ctx_let],
+      MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: T.untyped, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
+  def lower_concurrent_list_reduce(lhs, conc_op, inner, smooth_node)
+    item_t = concurrent_list_item_type(lhs)
+
+    result_t = Type.new(T.must(smooth_node.full_type))
+    result_zig = result_t.zig_type
+    kind = case inner
+           when AST::SumOp then :sum
+           when AST::AverageOp then :average
+           when AST::MinOp then :min
+           when AST::MaxOp then :max
+           else raise "lower_concurrent_list_reduce: unsupported inner op #{inner.class}"
+           end
+    initial = case kind
+              when :sum then MIR::Lit.new("0")
+              when :average then MIR::Lit.new("0.0")
+              when :min
+                MIR::InlineZig.new(agg_minmax_sentinels(result_zig, T.must(smooth_node.full_type).resolved)[0], "concurrent_reduce_min_init")
+              when :max
+                MIR::InlineZig.new(agg_minmax_sentinels(result_zig, T.must(smooth_node.full_type).resolved)[1], "concurrent_reduce_max_init")
+              end
+
+    cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
+    setup_iz = list_concurrent_source_setup_iz(lhs)
+
+    call = @lowering.send(:emit_builtin, :concurrentListReduce, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new(result_zig),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Ident.new("rt"),
+      MIR::Ident.new("pipe_items"),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+      initial,
+      MIR::InlineZig.new(".#{kind}", "concurrent_reduce_kind"),
+    ])
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      setup_iz,
+      cb[:ctx_def],
+      cb[:ctx_let],
+      MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_concurrent_list_each(lhs, conc_op, inner)
-    item_t  = Type.new(T.must(T.must(lhs.type_info).element_type).resolved)
+    item_t  = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Void, :each)
     setup_iz = list_concurrent_source_setup_iz(lhs)
 
@@ -4107,9 +4518,9 @@ class PipelineHost
   # invocation receives `*T` so the body can update the slice element
   # via field/index assignment. Used when the body has a direct
   # `_.field = X` or `_[i] = X` mutation.
-  sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, inner: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_concurrent_list_each_in_place(lhs, conc_op, inner)
-    item_t = Type.new(T.must(T.must(lhs.type_info).element_type).resolved)
+    item_t = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback_pointer(conc_op, item_t)
     setup_iz = list_concurrent_source_setup_iz(lhs)
 
@@ -4199,59 +4610,4 @@ class PipelineHost
     { id: id, ctx_name: ctx_name, ctx_def: ctx_def, ctx_var: ctx_var, ctx_let: ctx_let }
   end
 
-  # String entry point for SMOOTH pipeline nodes from MIRLowering.
-  # Dispatches to PipelineGenerator methods that return Zig strings.
-  sig { params(node: AST::BinaryOp).returns(String) }
-  def transpile_pipeline(node)
-    lhs = node.left
-    rhs = node.right
-
-    # Dispatch by operator type
-    case rhs
-    when AST::SelectOp      then return transpile_select_projection(lhs, rhs.expression)
-    when AST::WhereOp       then return transpile_where_filter(lhs, rhs.expression)
-    when AST::IndexOp       then return transpile_index_grouping(lhs, rhs.expression, node)
-    when AST::ReduceOp      then return transpile_reduce(lhs, rhs)
-    when AST::OrderByOp     then return transpile_order_by(lhs, rhs, node)
-    when AST::LimitOp       then return transpile_limit(lhs, rhs, node)
-    when AST::UnnestOp      then return transpile_unnest(lhs, rhs, node)
-    when AST::DistinctOp    then return transpile_distinct(lhs, rhs, node)
-    when AST::EachOp        then return transpile_each(node)
-    when AST::FindOp        then return transpile_find(lhs, rhs, node)
-    when AST::AnyOp         then return T.must(transpile_any(lhs, rhs, node))
-    when AST::AllOp         then return T.must(transpile_all(lhs, rhs, node))
-    when AST::CountOp       then return T.must(transpile_count(lhs, rhs, node))
-    when AST::SumOp         then return T.must(transpile_sum(lhs, rhs, node))
-    when AST::AverageOp     then return transpile_average(lhs, rhs, node)
-    when AST::MinOp         then return transpile_min(lhs, rhs, node)
-    when AST::MaxOp         then return transpile_max(lhs, rhs, node)
-    when AST::TakeWhileOp   then return transpile_take_while(lhs, rhs.expression, node)
-    when AST::WindowOp      then return transpile_window(lhs, rhs, node)
-    when AST::BatchWindowOp then return transpile_batch_window(lhs, rhs, node)
-    when AST::JoinOp        then return transpile_join(lhs, rhs, node)
-    when AST::RecoverOp
-      default_code = visit(rhs.default_expr)
-      left_code = visit(lhs).sub(/^try /, '')
-      return "(#{left_code} catch #{default_code})"
-    when AST::TapOp         then return transpile_tap(node)
-    when AST::SkipOp        then return transpile_skip(lhs, rhs, node)
-    when AST::ShardOp       then raise "SHARD must be followed by |> CONCURRENT EACH"
-    when AST::ConcurrentOp  then return transpile_concurrent(node)
-    end
-
-    # Simple function pipe: x |> f -> f(x)
-    synthetic_call = if rhs.is_a?(AST::Identifier)
-      AST::FuncCall.new(rhs.token, rhs.name, [lhs])
-    elsif rhs.is_a?(AST::FuncCall)
-      AST::FuncCall.new(rhs.token, rhs.name, [lhs] + rhs.args)
-    else
-      raise "PipelineHost Error: Invalid Pipe Destination #{rhs.class}"
-    end
-
-    synthetic_call.zig_pattern = rhs.zig_pattern
-    synthetic_call.full_type = rhs.full_type
-    synthetic_call.coerced_type = rhs.coerced_type
-
-    visit(synthetic_call)
-  end
 end

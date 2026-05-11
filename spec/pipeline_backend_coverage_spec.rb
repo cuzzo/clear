@@ -118,27 +118,6 @@ RSpec.describe "pipeline backend coverage" do
       expect(host.build_pipe_items_block(ptype, "rt.frameAlloc()")).to include("pipe_src_list[0..]")
     end
 
-    it "emits standard and SOA pipeline macro wrappers" do
-      list = id("items", type: ptype(list_collection?: true))
-      storage = OpenStruct.new(storage: :heap)
-      zig = host.transpile_pipeline_macro(list, storage, res_type: "Int64") { |alloc| "break :#{host.instance_variable_get(:@current_pipe_label)} #{alloc};" }
-      expect(zig).to include("rt.heapAlloc()")
-      expect(zig).to include("CheatLib.makeList(i64")
-
-      soa_type = ptype(list_collection?: true, soa?: true)
-      soa_list = id("points", type: soa_type)
-      host.instance_variable_set(:@soa_needed_fields, Set[:x])
-      soa_zig = host.transpile_pipeline_macro(soa_list, OpenStruct.new(storage: :frame)) { "for (pipe_items) |it| {\n  _ = it;\n}" }
-      expect(soa_zig).to include("const __soa_x")
-      expect(soa_zig).to include("for (0..@intCast(__soa_src.data.len)) |__soa_i|")
-    end
-
-    it "parses batch-window time options" do
-      expect(host.batch_window_timeout_ns(OpenStruct.new(options: {}))).to eq("0")
-      expect(host.batch_window_timeout_ns(OpenStruct.new(options: { "time" => OpenStruct.new(value: "2.5s") }))).to eq("2500000000")
-      expect(host.batch_window_timeout_ns(OpenStruct.new(options: { "time" => OpenStruct.new(value: "bad") }))).to eq("0")
-    end
-
     it "uses numeric sentinel values by result family" do
       expect(host.agg_minmax_sentinels("f64", :Float64)).to eq(["std.math.floatMax(f64)", "-std.math.floatMax(f64)"])
       expect(host.agg_minmax_sentinels("i64", :Int64)).to eq(["std.math.maxInt(i64)", "std.math.minInt(i64)"])
@@ -146,33 +125,6 @@ RSpec.describe "pipeline backend coverage" do
       expect(host.agg_minmax_sentinels("Custom", :Custom)).to eq(["std.math.floatMax(f64)", "-std.math.floatMax(f64)"])
     end
 
-    it "emits representative operator bodies" do
-      list_type = ptype(list_collection?: true)
-      list = id("items", type: list_type)
-      expr = id("_", type: Type.new(:Int64))
-      expr.full_type = Type.new(:Int64)
-      smooth = OpenStruct.new(storage: :frame, full_type: Type.new(:Int64), observable_dest: nil)
-
-      expect(host.transpile_where_filter(list, expr)).to include("const matches")
-      expect(host.transpile_take_while(list, expr, smooth)).to include("if (!matches) break")
-      expect(host.transpile_skip(list, OpenStruct.new(count: lit(2)), smooth)).to include("skip_actual")
-      expect(host.transpile_limit(list, OpenStruct.new(count: lit(2)), smooth)).to include("lim_actual")
-      expect(host.transpile_sum(list, OpenStruct.new(expression: expr), smooth)).to include("sum_result")
-      expect(host.transpile_any(list, OpenStruct.new(expression: expr), smooth)).to include("any_result")
-      expect(host.transpile_all(list, OpenStruct.new(expression: expr), smooth)).to include("all_result")
-      expect(host.transpile_count(list, OpenStruct.new(expression: expr), smooth)).to include("count_result")
-    end
-
-    it "raises if observable destinations reach legacy aggregate emitters" do
-      list = id("items", type: ptype(list_collection?: true))
-      expr = id("_", type: Type.new(:Int64))
-      smooth = OpenStruct.new(storage: :frame, full_type: Type.new(:Int64), observable_dest: true)
-
-      expect { host.transpile_sum(list, OpenStruct.new(expression: expr), smooth) }.to raise_error(/observable_dest/)
-      expect { host.transpile_count(list, OpenStruct.new(expression: expr), smooth) }.to raise_error(/observable_dest/)
-      expect { host.transpile_any(list, OpenStruct.new(expression: expr), smooth) }.to raise_error(/observable_dest/)
-      expect { host.transpile_all(list, OpenStruct.new(expression: expr), smooth) }.to raise_error(/observable_dest/)
-    end
   end
 
   describe PipelineHost do

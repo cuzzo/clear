@@ -110,6 +110,32 @@ RSpec.describe MIRLowering do
     expect(errors).to be_empty
   end
 
+  def collect_mir_nodes(root, klass)
+    seen = {}
+    nodes = []
+    visit = nil
+    visit = lambda do |obj|
+      return if obj.nil?
+      if obj.is_a?(Array)
+        obj.each { |v| visit.call(v) }
+        return
+      end
+      if obj.is_a?(Hash)
+        obj.each { |k, v| visit.call(k); visit.call(v) }
+        return
+      end
+      return unless obj.class.name&.start_with?("MIR::")
+      oid = obj.object_id
+      return if seen[oid]
+      seen[oid] = true
+      nodes << obj if obj.is_a?(klass)
+      obj.each_pair { |_name, value| visit.call(value) } if obj.respond_to?(:each_pair)
+      obj.instance_variables.each { |ivar| visit.call(obj.instance_variable_get(ivar)) }
+    end
+    visit.call(root)
+    nodes
+  end
+
   describe "task profile helpers" do
     it "injects profile fields into empty and non-empty task configs" do
       low = lowering
@@ -2961,19 +2987,35 @@ RSpec.describe MIRLowering do
       expect(zig).to include("20")
     end
 
-    it "lowers complex pipeline ops via pipeline_fallback when given" do
-      lhs = make_id("items", full_type: :List)
-      rhs = AST::CountOp.new(tok)
-      rhs.full_type = :Number
-
+    it "lowers RECOVER directly to TryCatch without legacy pipeline fallback" do
+      lhs = AST::FuncCall.new(tok, "fallible", [])
+      lhs.full_type = :Int64
+      lhs.error_union_type = Type.new(:"!Int64")
+      lhs.can_fail = true
+      rhs = AST::RecoverOp.new(tok, make_lit(:INT64, 0, full_type: :Int64))
       node = AST::BinaryOp.new(tok, lhs, :SMOOTH, rhs)
-      node.full_type = :Number
+      node.full_type = :Int64
 
-      fallback_lowering = MIRLowering.new(pipeline_fallback: ->(n) { "fallback_zig_code" })
-      result = fallback_lowering.lower(node)
-      expect(result).to be_a(MIR::Pipeline)
-      expect(result.inner).to be_a(MIR::RawZig)
-      expect(result.inner.code).to eq("fallback_zig_code")
+      result = lowering.lower(node)
+
+      expect(result).to be_a(MIR::TryCatch)
+      expect(result.expr).to be_a(MIR::Call)
+      expect(result.expr.callee).to eq("fallible")
+      expect(result.catch_body).to be_a(MIR::Lit)
+      expect(emit(result)).to eq("(fallible(rt) catch 0)")
+    end
+
+    it "lowers BatchWindowOp through structural MIR instead of the legacy pipeline host" do
+      mir = lower_fixture_mir("transpile-tests/243_batch_window.cht")
+
+      expect(collect_mir_nodes(mir, MIR::BatchWindowPush)).not_to be_empty
+      expect(collect_mir_nodes(mir, MIR::BatchWindowFlush)).not_to be_empty
+      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
+      expect(raw_reasons).not_to include("pipeline_legacy_host")
+
+      zig = emit(mir)
+      expect(zig).to include("CheatLib.BatchWindow(i64).init")
+      expect(zig).to include(".freeBatch(")
     end
 
     it "collects named observables by calling next directly" do

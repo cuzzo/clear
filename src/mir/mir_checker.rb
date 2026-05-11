@@ -361,6 +361,11 @@ class MIRChecker
       walk_mir(node.default_body, &block)
     when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
+    when MIR::BatchWindowPush
+      walk_mir_node(node.item_expr, &block)
+      walk_mir_node(node.value_expr, &block)
+    when MIR::BatchWindowFlush
+      walk_mir_node(node.value_expr, &block)
     when MIR::Let          then yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
     when MIR::BgBlock      then walk_mir(node.run_body, &block)
     when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
@@ -595,17 +600,11 @@ class MIRChecker
   # (b) add the reason here with a commit message explaining why the site
   # cannot be decomposed.
   RAW_JUSTIFIED_REASONS = %w[
-    pipeline_fallback_test
-    pipeline_legacy_host
     require_local_module_opaque
     thunk_trampoline_body
   ].freeze
 
-  # Reason prefixes whose every concrete variant is justified (the
-  # per-operator name is appended by the lowering, e.g. concurrent_eachop).
-  RAW_JUSTIFIED_PREFIXES = %w[
-    concurrent_
-  ].freeze
+  RAW_JUSTIFIED_PREFIXES = T.let([].freeze, T::Array[T.untyped])
 
   sig { params(zig_nodes: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def verify_raw_justified!(zig_nodes)
@@ -716,6 +715,10 @@ class MIRChecker
         expr_has_frame_alloc?(s.expr)
       when MIR::Let
         expr_has_frame_alloc?(s.init)
+      when MIR::BatchWindowPush
+        expr_has_frame_alloc?(s.item_expr) || expr_has_frame_alloc?(s.value_expr)
+      when MIR::BatchWindowFlush
+        expr_has_frame_alloc?(s.value_expr)
       when MIR::IfStmt
         body_has_frame_alloc?(s.then_body) || body_has_frame_alloc?(s.else_body)
       when MIR::ScopeBlock, MIR::BlockExpr
@@ -850,6 +853,11 @@ class MIRChecker
       check_stmts_for_unhoisted(node.default_body)
     when MIR::DeferStmt    then check_stmt_for_unhoisted(node.body)
     when MIR::ErrDeferStmt then check_stmt_for_unhoisted(node.body)
+    when MIR::BatchWindowPush
+      check_expr_for_unhoisted(node.item_expr, allow_top: false)
+      check_expr_for_unhoisted(node.value_expr, allow_top: false)
+    when MIR::BatchWindowFlush
+      check_expr_for_unhoisted(node.value_expr, allow_top: false)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
       check_stmts_for_unhoisted(node.body)
     when MIR::WithMatchDispatch

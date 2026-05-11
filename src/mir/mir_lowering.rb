@@ -37,10 +37,10 @@ class MIRLowering
   attr_reader :fn_sigs
   attr_accessor :shard_context
 
-  sig { params(struct_schemas: T::Hash[Symbol, T.untyped], enum_schemas: T::Hash[Symbol, T::Array[T.untyped]], union_schemas: T::Hash[Symbol, T.untyped], fn_sigs: T::Hash[T.untyped, T.untyped], moved_guard_info: T::Hash[String, T::Hash[T.untyped, T.untyped]], pipeline_fallback: T.nilable(Proc), importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
+  sig { params(struct_schemas: T::Hash[Symbol, T.untyped], enum_schemas: T::Hash[Symbol, T::Array[T.untyped]], union_schemas: T::Hash[Symbol, T.untyped], fn_sigs: T::Hash[T.untyped, T.untyped], moved_guard_info: T::Hash[String, T::Hash[T.untyped, T.untyped]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
-                 pipeline_fallback: nil, importer: nil, source_dir: nil,
+                 importer: nil, source_dir: nil,
                  debug_mode: false, target: :zig)
     @struct_schemas = T.let(struct_schemas || {}, T::Hash[Symbol, T.untyped])
     @enum_schemas = T.let(enum_schemas || {}, T::Hash[Symbol, T::Array[T.untyped]])
@@ -52,7 +52,6 @@ class MIRLowering
     @emitted_extern_modules = T.let(Set.new, T::Set[T.untyped])
     @block_expr_counter = T.let(0, Integer)
     @indirect_fields = T.let({}, T::Hash[T.untyped, T.untyped])
-    @pipeline_fallback = pipeline_fallback
     @pipeline_host = T.let(nil, T.nilable(PipelineHost))
     @importer = T.let(importer, T.nilable(ModuleImporter))
     @source_dir = T.let(source_dir, T.nilable(String))
@@ -3307,10 +3306,18 @@ class MIRLowering
     when :return
       [MIR::ReturnStmt.new(lower(clause[:value]))]
     when :raise
-      [MIR::RawZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line});\n__flow.* = .{ .kind = .raise_no_commit };\nreturn;), "with_guard_fail_raise")]
+      [
+        MIR::ExprStmt.new(MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line})), "with_guard_fail_raise"), false),
+        MIR::ExprStmt.new(MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_raise_flow"), false),
+        MIR::ReturnStmt.new(nil)
+      ]
     when :exit
       msg_zig = emit_expr(lower(clause[:message]))
-      [MIR::RawZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line});\n__flow.* = .{ .kind = .raise_no_commit };\nreturn;), "with_guard_fail_exit")]
+      [
+        MIR::ExprStmt.new(MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line})), "with_guard_fail_exit"), false),
+        MIR::ExprStmt.new(MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_exit_flow"), false),
+        MIR::ReturnStmt.new(nil)
+      ]
     when :block
       lower_body(clause[:body])
     else
@@ -4434,12 +4441,12 @@ class MIRLowering
     line = node.token.line.to_s
 
     if node.kind
-      stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind", { consumes: [], produces: [], borrows: [] }), false)
+      stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind"), false)
       if node.error_name
-        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] }), false)
+        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type"), false)
       else
         # Kind without type -> clear any stale type from the prior context.
-        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type", { consumes: [], produces: [], borrows: [] }), false)
+        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type"), false)
       end
     elsif node.error_name
       # Type-only: annotator already backfilled node.kind via
@@ -4448,18 +4455,18 @@ class MIRLowering
       # already emitted the error; skip emission.
       if AST.error_type?(node.error_name.to_sym)
         registered_kind = AST.kind_of_type(node.error_name.to_sym)
-        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type", { consumes: [], produces: [], borrows: [] }), false)
-        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] }), false)
+        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type"), false)
+        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type"), false)
       end
     end
 
     if node.message
       msg_zig = emit_expr(lower(node.message))
-      stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg", { consumes: [], produces: [], borrows: [] }), false)
+      stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg"), false)
     end
 
     # Always update clear_line so diagnostics point at this OR EXIT.
-    stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line", { consumes: [], produces: [], borrows: [] }), false)
+    stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line"), false)
 
     stmts << MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
     MIR::ScopeBlock.new(stmts)
@@ -5077,27 +5084,16 @@ class MIRLowering
 
     # Complex pipeline ops that survived PipelineRewriter (pool/sharded/SOA
     # sources, OrderByOp, IndexOp, WindowOp, JoinOp, ConcurrentOp).
-    # All decisions are made here in lowering -- RawZig is INV-7 compliant.
+    # All decisions are made here in lowering.
     complex_ops = [
       AST::SelectOp, AST::WhereOp, AST::IndexOp, AST::ReduceOp,
       AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
       AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
       AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
-      AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp, AST::RecoverOp,
+      AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp,
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }
-      # Test fallback bypasses pipeline host entirely.
-      # Opaque: Zig emitted by an injected test callback; justified in
-      # RAW_JUSTIFIED_REASONS as "pipeline_fallback_test".
-      if @pipeline_fallback
-        zig_code = @pipeline_fallback.call(node)
-        inner = MIR::RawZig.new(zig_code, "pipeline_fallback_test",
-          { consumes: [], produces: [], borrows: [] })
-        inner.stdlib_def = { allocates: true, borrows: :all }
-        return MIR::Pipeline.new(node, inner, nil, nil, nil, nil)
-      end
-
       host = pipeline_host
 
       # Detect source type for pipeline IR metadata.
@@ -5107,15 +5103,7 @@ class MIRLowering
       mir_result = host.lower_pipeline(node)
       return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, nil) if mir_result
 
-      # Fall back to string path (non-migrated operators).
-      # Opaque: Zig emitted by pipeline_host.transpile_pipeline (legacy
-      # string-based path). Justified in RAW_JUSTIFIED_REASONS as
-      # "pipeline_legacy_host" until PipelineHost is migrated to MIR.
-      zig_code = host.transpile_pipeline(node)
-      inner = MIR::RawZig.new(zig_code, "pipeline_legacy_host",
-        { consumes: [], produces: [], borrows: [] })
-      inner.stdlib_def = { allocates: true, borrows: :all }
-      return MIR::Pipeline.new(node, inner, source_type, nil, nil, nil)
+      raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
     end
 
     # COLLECT: x |> COLLECT -> joins the observable + destroys the heap
@@ -5272,25 +5260,25 @@ class MIRLowering
         stmts = []
 
         if ex.kind
-          stmts << MIR::RawZig.new("#{rt_name}.__error.kind = .#{ex.kind}", "or_exit_kind", { consumes: [], produces: [], borrows: [] })
+          stmts << MIR::InlineZig.new("#{rt_name}.__error.kind = .#{ex.kind}", "or_exit_kind")
           if ex.error_name
-            stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] })
+            stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type")
           else
-            stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type", { consumes: [], produces: [], borrows: [] })
+            stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type")
           end
         elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
           # Type-only: the annotator seeded the registry; look up the kind.
           registered_kind = AST.kind_of_type(ex.error_name.to_sym)
-          stmts << MIR::RawZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type", { consumes: [], produces: [], borrows: [] })
-          stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] })
+          stmts << MIR::InlineZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type")
+          stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type")
         end
 
         if ex.message
           msg_zig = emit_expr(lower(ex.message))
-          stmts << MIR::RawZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg", { consumes: [], produces: [], borrows: [] })
+          stmts << MIR::InlineZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg")
         end
 
-        stmts << MIR::RawZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line", { consumes: [], produces: [], borrows: [] })
+        stmts << MIR::InlineZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line")
         stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
         catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
         return try_catch_with_provenance(left, catch_block, "__exit_err")

@@ -1548,4 +1548,20 @@ BUILTIN_OPS = T.let({
     zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
     borrows: :all
   },
+  concurrentListCount: {
+    zig: "try CheatLib.concurrentListCount({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
+    borrows: :all
+  },
+  concurrentListReduce: {
+    zig: "try CheatLib.concurrentListReduce({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
+    borrows: :all
+  },
+  concurrentShardedListEachInPlace: {
+    zig: "try CheatLib.concurrentShardedListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
+    borrows: :all
+  },
+  concurrentShardedPoolEachInPlace: {
+    zig: "try CheatLib.concurrentShardedPoolEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
+    borrows: :all
+  },
 }.freeze, T::Hash[Symbol, T.untyped])

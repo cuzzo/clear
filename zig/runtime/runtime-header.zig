@@ -461,6 +461,115 @@ pub const CheatLib = struct {
         );
     }
 
+    pub fn concurrentListCount(
+        comptime T: type,
+        comptime predFn: fn (*Runtime, ?*anyopaque, T) anyerror!bool,
+        rt: *Runtime,
+        items: []const T,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !i64 {
+        return streams.concurrentListCount(
+            fp.WaitGroup, T, predFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, items, workers, batch, parallel, task_cfg, user_ctx
+        );
+    }
+
+    pub fn concurrentListReduce(
+        comptime T: type,
+        comptime R: type,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) anyerror!R,
+        rt: *Runtime,
+        items: []const T,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+        initial: R,
+        comptime kind: streams.ConcurrentReduceKind,
+    ) !R {
+        return streams.concurrentListReduce(
+            fp.WaitGroup, T, R, mapFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, items, workers, batch, parallel, task_cfg, user_ctx, initial, kind
+        );
+    }
+
+    pub fn concurrentShardedListEachInPlace(
+        comptime T: type,
+        comptime N: usize,
+        comptime eachFn: fn (*Runtime, ?*anyopaque, *T) anyerror!void,
+        rt: *Runtime,
+        list: anytype,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !void {
+        return streams.concurrentShardedListEachInPlace(
+            fp.WaitGroup, T, N, eachFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, list, parallel, task_cfg, user_ctx
+        );
+    }
+
+    pub fn concurrentShardedPoolEachInPlace(
+        comptime T: type,
+        comptime N: usize,
+        comptime eachFn: fn (*Runtime, ?*anyopaque, *T) anyerror!void,
+        rt: *Runtime,
+        pool: anytype,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !void {
+        return streams.concurrentShardedPoolEachInPlace(
+            fp.WaitGroup, T, N, eachFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, pool, parallel, task_cfg, user_ctx
+        );
+    }
+
     pub const File = struct {
         fd: std.posix.fd_t,
 
