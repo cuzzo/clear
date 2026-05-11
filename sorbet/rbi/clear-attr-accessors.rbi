@@ -935,7 +935,7 @@ class Edit
 end
 
 class EffectSet
-  sig { returns(T.untyped) }
+  sig { returns(T::Set[Symbol]) }
   def effects; end
 end
 
@@ -984,18 +984,18 @@ class FieldDef
 end
 
 class Fix
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def confidence; end
   sig { returns(T.untyped) }
   def description; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[Edit]) }
   def edits; end
 end
 
 class FixableFinding
   sig { returns(T.untyped) }
   def category; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[Fix]) }
   def fixes; end
   sig { returns(T.untyped) }
   def level; end
@@ -1083,9 +1083,9 @@ end
 class FunctionCFG
   sig { returns(T::Array[T.untyped]) }
   def blocks; end
-  sig { returns(T.untyped) }
+  sig { returns(BasicBlock) }
   def entry; end
-  sig { returns(T.untyped) }
+  sig { returns(BasicBlock) }
   def exit_block; end
   sig { returns(T.untyped) }
   def fn_name; end
@@ -1448,7 +1448,7 @@ class MIREmitter
 end
 
 class MIRLowering
-  sig { returns(T.untyped) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def fn_sigs; end
   sig { returns(T.untyped) }
   def shard_context; end
@@ -1528,8 +1528,6 @@ end
 class PipelineHost
   sig { returns(T.untyped) }
   def fn_sigs; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def fn_sigs=(value); end
 end
 
 class Pprof::Profile
@@ -1577,7 +1575,7 @@ class ResourceSchema
   def static_methods; end
   sig { returns(T.untyped) }
   def type_params; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
@@ -1616,7 +1614,7 @@ class Schemas::ResourceSchema
   def static_methods; end
   sig { returns(T.untyped) }
   def type_params; end
-  sig { returns(T.untyped) }
+  sig { returns(Symbol) }
   def visibility; end
 end
 
@@ -1661,9 +1659,9 @@ class Scope
   def locals; end
   sig { params(value: T::Hash[T.untyped, T.untyped]).returns(T::Hash[T.untyped, T.untyped]) }
   def locals=(value); end
-  sig { returns(Set) }
+  sig { returns(T::Set[T.untyped]) }
   def owned_names; end
-  sig { params(value: Set).returns(Set) }
+  sig { params(value: T::Set[T.untyped]).returns(T::Set[T.untyped]) }
   def owned_names=(value); end
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def types; end
@@ -1739,9 +1737,9 @@ class StructSchema
 end
 
 class SymbolEntry
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def borrowed_alias; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def borrowed_alias=(value); end
   sig { returns(T.untyped) }
   def capabilities; end
@@ -1755,49 +1753,49 @@ class SymbolEntry
   def invalid_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def invalid_reason=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def is_param; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def is_param=(value); end
   sig { returns(T.untyped) }
   def layout; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def layout=(value); end
-  sig { returns(T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))) }
-  def lifetime; end
-  sig { params(value: T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))).returns(T.nilable(T.any(Symbol, T::Hash[T.untyped, T.untyped]))) }
-  def lifetime=(value); end
   sig { returns(T.untyped) }
-  def link_source; end
+  def lifetime; end
   sig { params(value: T.untyped).returns(T.untyped) }
+  def lifetime=(value); end
+  sig { returns(T.nilable(Symbol)) }
+  def link_source; end
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def link_source=(value); end
   sig { returns(T.untyped) }
   def mutable; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutable=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def mutable_ref_target; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def mutable_ref_target=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def mutated; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def mutated=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def ownership_kind=(value); end
   sig { returns(T.untyped) }
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def poly_borrow_target; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def poly_borrow_target=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def read; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def read=(value); end
   sig { returns(T.untyped) }
   def rebindable; end
@@ -1815,9 +1813,9 @@ class SymbolEntry
   def scope; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def scope=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Integer)) }
   def scope_depth; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
   def scope_depth=(value); end
   sig { returns(T.untyped) }
   def size; end
@@ -1835,9 +1833,9 @@ class SymbolEntry
   def sync_families; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_families=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Boolean)) }
   def takes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
   def takes=(value); end
   sig { returns(T.untyped) }
   def type; end
@@ -1873,28 +1871,28 @@ class TestBlock
 end
 
 class TestBlockCtx
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def setup_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def test_after_each_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def test_before_each_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::TestBlock) }
   def test_block; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def test_name; end
 end
 
 class TestLowering::TestBlockCtx
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(T::Array[T.untyped])) }
   def setup_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def test_after_each_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def test_before_each_mir; end
-  sig { returns(T.untyped) }
+  sig { returns(AST::TestBlock) }
   def test_block; end
-  sig { returns(T.untyped) }
+  sig { returns(String) }
   def test_name; end
 end
 
@@ -1958,17 +1956,17 @@ class Type
   def observable_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def observable_token=(value); end
-  sig { returns(T.nilable(Symbol)) }
+  sig { returns(T.untyped) }
   def ownership; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  sig { params(value: T.untyped).returns(T.untyped) }
   def ownership=(value); end
   sig { returns(T.untyped) }
   def polymorphic_shared; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def polymorphic_shared=(value); end
-  sig { returns(T.nilable(Symbol)) }
+  sig { returns(T.untyped) }
   def provenance; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  sig { params(value: T.untyped).returns(T.untyped) }
   def provenance=(value); end
   sig { returns(T.untyped) }
   def raw; end

@@ -3034,7 +3034,12 @@ class MIRLowering
     "(if (comptime #{is_ptr}) " \
       "(if (comptime @typeInfo(#{inner_t}) == .@\"struct\") " \
         "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{zig_var}.ctrl.data else #{zig_var}) " \
-       "else #{zig_var}) " \
+       "else " \
+        "(if (comptime @typeInfo(#{inner_t}) == .pointer) " \
+          "(if (comptime @typeInfo(@typeInfo(#{inner_t}).pointer.child) == .@\"struct\") " \
+            "(if (comptime @hasField(@typeInfo(#{inner_t}).pointer.child, \"ctrl\")) #{zig_var}.*.ctrl.data else #{zig_var}.*) " \
+           "else #{zig_var}.*) " \
+         "else #{zig_var})) " \
     "else " \
       "(if (comptime @typeInfo(@TypeOf(#{zig_var})) == .@\"struct\") " \
         "(if (comptime @hasField(@TypeOf(#{zig_var}), \"ctrl\")) #{zig_var}.ctrl.data else &#{zig_var}) " \
@@ -3054,14 +3059,14 @@ class MIRLowering
     case family
     when :VERSIONED
       <<~ZIG.rstrip
-        var #{guard_var} = #{unwrap}.read(#{@rt_name});
+        var #{guard_var} = #{unwrap}.*.read(#{@rt_name});
         defer #{guard_var}.release();
         const #{safe_alias} = #{guard_var}.get();
         _ = &#{safe_alias};
       ZIG
     when :LOCKED
       <<~ZIG.rstrip
-        var #{guard_var} = #{unwrap}.acquire();
+        var #{guard_var} = #{unwrap}.*.acquire();
         defer #{guard_var}.release();
         const #{safe_alias} = #{guard_var}.get();
         _ = &#{safe_alias};
@@ -3087,7 +3092,7 @@ class MIRLowering
     when :ATOMIC
       if node.respond_to?(:snapshot_mode) && node.snapshot_mode
         <<~ZIG.rstrip
-          var #{guard_var} = #{unwrap}.read(#{@rt_name});
+          var #{guard_var} = #{unwrap}.*.read(#{@rt_name});
           defer #{guard_var}.release();
           const #{safe_alias} = #{guard_var}.get();
           _ = &#{safe_alias};
@@ -3233,6 +3238,7 @@ class MIRLowering
     @atomic_emit_raw = true
     cell_zig = emit_expr(lower(var_node))
     @atomic_emit_raw = prev_raw
+    cell_zig = "&#{cell_zig}"
     # The body's `x` alias is a `*T` -- grab the bare T (post-Arc,
     # post-sync-wrapper) for the closure signature.
     resolved   = cap[:resolved_type]
@@ -3780,21 +3786,21 @@ class MIRLowering
         pairs.filter_map { |expr, mir|
           code = emit_expr(mir)
           next nil if code.nil? || code.empty?
-          code = if T.must(code).strip.match?(/\A__bg\d+:/)
+          code = if code.strip.match?(/\A__bg\d+:/)
             @tmp_counter += 1
             discard_name = "__discard_bg_#{@tmp_counter}"
             "const #{discard_name} = #{code};\n        _ = try #{discard_name}.next();"
-          elsif T.must(code).strip.end_with?(";")
+          elsif code.strip.end_with?(";")
             code
-          elsif T.must(code).strip.end_with?("}")
+          elsif code.strip.end_with?("}")
             expr_type = expr.full_type || :Void
             is_void_expr = expr_type.nil? || expr_type == :Void ||
               (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
             is_void_expr = false if mir.is_a?(MIR::BgBlock)
-            is_void_expr = false if T.must(code).strip.match?(/\A__bg\d+:/)
+            is_void_expr = false if code.strip.match?(/\A__bg\d+:/)
             is_void_expr ? code : "_ = #{code};"
           else
-            T.must(code) + ";"
+            code + ";"
           end
           code
         }.join("\n        ")
@@ -4257,7 +4263,7 @@ class MIRLowering
       body_mir.filter_map { |mir|
         code = emit_expr(mir)
         next nil if code.nil? || code.empty?
-        code = T.must(code) + ";" unless T.must(code).strip.end_with?(";") || T.must(code).strip.end_with?("}")
+        code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
         code
       }.join("\n            ")
     end
@@ -4842,7 +4848,7 @@ class MIRLowering
       # Atomics M2.2: bare Atomic(T) — call .load() directly on the
       # binding. M1's `.ctrl.data.load()` indirection is gone since
       # there's no Arc wrap.
-      return MIR::MethodCall.new(ident, "load", [], false)
+      return MIR::MethodCall.new(MIR::Deref.new(ident), "load", [], false)
     end
 
     # Loop-carry string: identifier was marked for heap dupe at the use site
@@ -6409,11 +6415,13 @@ class MIRLowering
     end
     mapped = @do_capture_map && @do_capture_map[target_name]
     target_ident = MIR::Ident.new(mapped || safe)
-    # Atomics M2.2: bare Atomic(T) — call the method directly. M1's
+    # Atomics M2.2: bare Atomic(T) — dereference the bare cell pointer
+    # before calling the method. Zig 0.16 does not auto-deref far enough
+    # for `(*AtomicInt).fetchAdd`; `cell.*.fetchAdd(...)` is the stable
+    # shape for both bindings and atomic params.
     # `.ctrl.data.fetchAdd(...)` indirection is gone since there's no
-    # Arc wrap. Zig auto-derefs `*Atomic(T)` so this works for both
-    # value-bound atomics and pointer-captured atomics inside BG.
-    cell = target_ident
+    # Arc wrap.
+    cell = MIR::Deref.new(target_ident)
 
     arg_ast = if node.compound_op
                 # Desugared form: node.value is BinaryOp(target, op, rhs).

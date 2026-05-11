@@ -275,7 +275,7 @@ class MIREmitter
   def emit_snapshot_read(node)
     body = emit_body(node.body || [])
     parts = [
-      "var #{node.guard_var} = #{node.cell_unwrap}.read(#{node.rt});",
+      "var #{node.guard_var} = #{node.cell_unwrap}.*.read(#{node.rt});",
       "defer #{node.guard_var}.release();",
       "const #{node.alias_zig} = #{node.guard_var}.get();",
       "_ = &#{node.alias_zig};",
@@ -423,7 +423,7 @@ class MIREmitter
   def emit_snapshot_transaction(node)
     body_zig = emit_body(node.body || [])
     core = <<~ZIG.rstrip
-      #{node.cell_unwrap}.update(#{node.rt}, #{node.alloc}, struct {
+      #{node.cell_unwrap}.*.update(#{node.rt}, #{node.alloc}, struct {
           fn run(#{node.alias_zig}: *#{node.bare_t_zig}) void {
               _ = &#{node.alias_zig};
               #{body_zig}

@@ -109,7 +109,7 @@ module TestLowering
 
       (when_block.benchmarks || []).each do |b|
         name = "#{ctx.test_name}: #{when_desc}: benchmark#{tag_suffix}"
-        body = [ctx.fresh_preamble] + stub_mir + ctx.setup_mir + T.must(when_setup_mir) + [lower(b)]
+        body = [ctx.fresh_preamble] + stub_mir + T.must(ctx.setup_mir) + T.must(when_setup_mir) + [lower(b)]
         tests << MIR::TestDef.new(name, body)
       end
 

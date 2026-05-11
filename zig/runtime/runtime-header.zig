@@ -2378,12 +2378,16 @@ pub const CheatLib = struct {
     ///     a small handle, passed without pointer indirection).
     /// All branches are comptime-elided when not taken so the
     /// expression is well-typed for every shape.
-    pub fn WithMatchInner(comptime ValT: type) type {
-        const Underlying = if (@typeInfo(ValT) == .pointer)
-            @typeInfo(ValT).pointer.child
+    pub fn StripPointers(comptime ValT: type) type {
+        return if (@typeInfo(ValT) == .pointer)
+            StripPointers(@typeInfo(ValT).pointer.child)
         else
             ValT;
-        if (@hasField(Underlying, "ctrl")) {
+    }
+
+    pub fn WithMatchInner(comptime ValT: type) type {
+        const Underlying = StripPointers(ValT);
+        if (@typeInfo(Underlying) == .@"struct" and @hasField(Underlying, "ctrl")) {
             const CtrlPtr = std.meta.fieldInfo(Underlying, .ctrl).type;
             const Ctrl = @typeInfo(CtrlPtr).pointer.child;
             const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
@@ -2730,21 +2734,25 @@ pub const CheatLib = struct {
         comptime body: anytype,
         args: anytype,
     ) !void {
-        const Inner = @TypeOf(inner.*);
+        const InnerRaw = @TypeOf(inner.*);
+        if (comptime @typeInfo(InnerRaw) == .pointer) {
+            return polymorphicMutateInner(inner.*, rt, body, args);
+        }
+        const Inner = InnerRaw;
         if (comptime @hasDecl(Inner, "update")) {
             // Versioned or AtomicPtr -- both expose the same shape:
             //   `.update(rt, alloc, comptime fn, args)`.
-            try inner.update(rt, rt.heapAlloc(), body, args);
+            try inner.*.update(rt, rt.heapAlloc(), body, args);
         } else if (comptime @hasDecl(Inner, "write")) {
-            var g = inner.write();
+            var g = inner.*.write();
             defer g.release();
             @call(.auto, body, .{g.get()} ++ args);
         } else if (comptime @hasDecl(Inner, "acquire")) {
-            var g = inner.acquire();
+            var g = inner.*.acquire();
             defer g.release();
             @call(.auto, body, .{g.get()} ++ args);
         } else {
-            @call(.auto, body, .{inner} ++ args);
+            @call(.auto, body, .{@constCast(inner)} ++ args);
         }
     }
 
@@ -2781,19 +2789,23 @@ pub const CheatLib = struct {
         comptime body: anytype,
         args: anytype,
     ) !void {
-        const Inner = @TypeOf(inner.*);
+        const InnerRaw = @TypeOf(inner.*);
+        if (comptime @typeInfo(InnerRaw) == .pointer) {
+            return polymorphicMutateFlowInner(inner.*, rt, body, args);
+        }
+        const Inner = InnerRaw;
         if (comptime @hasDecl(Inner, "updateFlow")) {
-            try inner.updateFlow(rt, rt.heapAlloc(), body, args);
+            try inner.*.updateFlow(rt, rt.heapAlloc(), body, args);
         } else if (comptime @hasDecl(Inner, "write")) {
-            var g = inner.write();
+            var g = inner.*.write();
             defer g.release();
             @call(.auto, body, .{g.get()} ++ args);
         } else if (comptime @hasDecl(Inner, "acquire")) {
-            var g = inner.acquire();
+            var g = inner.*.acquire();
             defer g.release();
             @call(.auto, body, .{g.get()} ++ args);
         } else {
-            @call(.auto, body, .{inner} ++ args);
+            @call(.auto, body, .{@constCast(inner)} ++ args);
         }
     }
 
