@@ -505,9 +505,8 @@ class Type
     !!@is_auto
   end
 
-  # Source-position token for the `Auto` keyword. Set by the parser
-  # at the explicit-Auto site so the fix emitter (M1.4) can compute
-  # the span when replacing `Auto` with the resolved concrete type.
+  # Source-position token for the `Auto` keyword, used by fix emission when
+  # replacing `Auto` with the resolved concrete type.
   # Nil for implicit-Auto (omitted annotation under `--gradual`),
   # which has no source token to point at.
   attr_accessor :auto_token
@@ -1017,7 +1016,6 @@ class Type
     @generic_args_obj ||= @generic_args_raw.map { |a| Type.new(a) }
   end
 
-  # TODO: keep metatype from ast, use that
   sig { returns(T::Boolean) }
   def struct?
     !primitive? && !any? && !void? && !string? && !array? && !map? && !optional? && !error_union? && !tense? && !fn_type?
@@ -1361,7 +1359,6 @@ class Type
     1 # Default
   end
 
-  # TODO: In future, need to be able to call slot-size for small structs.
   sig { returns(T::Boolean) }
   def requires_move?
     return false if fn_type?                # Function pointers are pointer-sized; no move semantics
@@ -2140,13 +2137,8 @@ class Type
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
         inner_zig = "CheatLib.Versioned(#{inner_zig})" if @sync == :versioned
-        # AtomicPtr M3.1: `@indirect:atomic` (struct case) wraps in
-        # AtomicPtr(T), not bare Atomic(T). The cell is an atomic
-        # pointer to a refcounted heap-allocated T -- single-CAS
-        # publish at the pointer level, Arc-managed payload lifetime.
-        # Distinct from primitive @atomic (single CAS-able machine
-        # word, no indirection) -- see the @sync == :atomic branch
-        # below.
+        # @indirect:atomic wraps structs in AtomicPtr(T), not bare Atomic(T),
+        # because updates publish a refcounted heap payload via a pointer CAS.
         if @sync == :atomic && @layout == :indirect
           inner_zig = "CheatLib.AtomicPtr(#{inner_zig})"
         elsif @sync == :atomic
@@ -2154,19 +2146,11 @@ class Type
         end
       end
 
-      # Atomics M2.2: drop the Arc / Rc wrap for `@shared:atomic` /
-      # `@multiowned:atomic`. The atomic cell itself is heap-allocated
-      # by `atomicCreate` (returns `*Atomic(T)`) and the binding holds
-      # the bare pointer; Zig auto-derefs so `c.load()` / `c.fetchAdd
-      # (...)` work on either a pointer or a value receiver. M2.3's
-      # BG-handle lifetime stamp + M2.6's escape audit make pointer-
-      # capture safe without an outer refcount, so the Arc is now
-      # redundant. `@multiowned:atomic` is still parser-rejected (Rc
-      # isn't thread-safe), but the guard here is symmetric.
+      # Atomic cells are heap-allocated and bindings hold bare pointers. Zig
+      # auto-deref keeps `c.load()` / `c.fetchAdd(...)` working for pointer or
+      # value receivers, and lifetime checks make the outer refcount redundant.
       #
-      # M3.1: `@indirect:atomic` (with or without explicit @shared)
-      # uses the same bare-pointer layout -- the AtomicPtr cell is
-      # heap-allocated and the binding holds the bare pointer.
+      # `@indirect:atomic` uses the same bare-pointer binding layout.
       if @sync == :atomic && (@ownership == :shared || @ownership == :multiowned || @layout == :indirect)
         return "*#{inner_zig}"
       end
@@ -2328,10 +2312,8 @@ module TypeHelper
     else
       return
     end
-    # Unwrap an error union so `RETURN 256` against `RETURNS !Byte`
-    # range-checks against the underlying `Byte`. Post-#338, fallible
-    # int returns are stamped `!Int8`/`!Byte`/etc; the range checker's
-    # INT_TYPE_MAX lookup happens on the bare type symbol.
+    # Unwrap error unions so fallible integer returns range-check against the
+    # underlying payload type.
     if effective_type.respond_to?(:error_union?) && effective_type.error_union? &&
        effective_type.respond_to?(:payload_type)
       effective_type = effective_type.payload_type

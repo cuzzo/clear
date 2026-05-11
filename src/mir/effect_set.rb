@@ -28,11 +28,8 @@ require 'set'
 class EffectSet
     extend T::Sig
 
-  # True-Sync-Polymorphism (#327): the ?-form contention/blocking
-  # effects are now spelled `contends_maybe` / `blocks_maybe` for
-  # readability. The legacy spellings (`contention?`, `blocking?`)
-  # are accepted as aliases for backward compatibility but are not
-  # produced by the inferer anymore.
+  # The ?-form contention/blocking effects use readable spellings. Legacy
+  # spellings are accepted as aliases but are not produced by the inferer.
   KNOWN = T.let(%i[
     yield alloc_heap io fail
     contention blocking
@@ -85,8 +82,8 @@ class EffectSet
     @effects.hash
   end
 
-  # Human-readable summary used by the formatter (P4.2). Effects are
-  # rendered in a stable order so signatures are deterministic.
+  # Human-readable summary used by the formatter. Effects are rendered in a
+  # stable order so signatures are deterministic.
   EFFECT_ORDER = T.let(%i[
     yield alloc_heap io fail
     contention contends_maybe contention?

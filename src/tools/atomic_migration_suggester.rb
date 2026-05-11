@@ -1,8 +1,8 @@
 # typed: strict
 require_relative "migration_suggester_helpers"
 
-# Atomics M1.9 + M1.10: static eligibility detector for the
-# `@shared:locked` / `@locked` -> `@shared:atomic` migration.
+# Static eligibility detector for `@shared:locked` / `@locked` to
+# `@shared:atomic` migration.
 #
 # This is a TOOL, not an annotator pass. It runs from `clear doctor`
 # (combined with lock-profile contention data), surfacing migration
@@ -13,21 +13,20 @@ require_relative "migration_suggester_helpers"
 #
 # Eligibility is intentionally narrow (false-positive intolerant):
 #
-#   1. The binding's type is a STRUCT with exactly ONE field whose
-#      declared type is Int64, Float64, or Bool (the v0.2 atomic
-#      surface).
-#   2. The binding's sync is :locked (NOT :write_locked — RWLocks
-#      have read+write semantics that don't map to a single Atomic).
-#   3. Every use of the binding is the var_node of a WITH EXCLUSIVE
-#      capture, and every statement in each WITH body is one of:
+#   - The binding's type is a STRUCT with exactly ONE field whose
+#     declared type is Int64, Float64, or Bool.
+#   - The binding's sync is :locked (NOT :write_locked — RWLocks
+#     have read+write semantics that don't map to a single Atomic).
+#   - Every use of the binding is the var_node of a WITH EXCLUSIVE
+#     capture, and every statement in each WITH body is one of:
 #        - `alias.field`            (read)
 #        - `alias.field = expr`     where `expr` references `alias`
 #                                    only as `alias.field` and only as
 #                                    the bare LHS-on-RHS of `+ N` /
 #                                    `- N` (the `+=` / `-=` desugar)
-#   4. The wrapper struct doesn't escape: not passed to a function,
-#      returned, stored in a heap container, or referenced outside
-#      the WITH alias-binding contract.
+#   - The wrapper struct doesn't escape: not passed to a function,
+#     returned, stored in a heap container, or referenced outside
+#     the WITH alias-binding contract.
 #
 # Returns an Array of Candidate hashes; the doctor decides whether
 # to surface based on the lock profile. Empty Array when nothing
@@ -36,9 +35,9 @@ require_relative "migration_suggester_helpers"
 # Shape boilerplate (analyze / analyze_fn / walk_recursive /
 # classify_uses! / control_flow_stmt? / references_alias? /
 # rhs_uses_alias_only_for_field_get?) lives in
-# `MigrationSuggesterHelpers` and is shared with M3.15's atomic-ptr
-# suggester. This module owns the M1.9-specific eligibility (single-
-# primitive-field struct + compound-arith-rewriteable WITH body).
+# `MigrationSuggesterHelpers` and is shared with the atomic-ptr suggester.
+# This module owns single-primitive-field struct eligibility and
+# compound-arith-rewriteable WITH bodies.
 module AtomicMigrationSuggester
   module_function
   extend MigrationSuggesterHelpers

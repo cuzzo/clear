@@ -450,10 +450,8 @@ module AST
         vt = value.type_object
         t.ownership = vt.ownership if vt.ownership && vt.ownership != :affine
         t.sync      = vt.sync      if vt.sync
-        # AtomicPtr M3.5: carry the :layout axis (e.g. :indirect from
-        # @indirect:atomic on the VALUE) into the binding's full_type
-        # so visit_VarDecl's `node.type_info&.layout` -> SymbolEntry
-        # propagation lands. Mirrors the sync line above.
+        # Preserve value layout so VarDecl can propagate @indirect:atomic
+        # bindings into the symbol table.
         t.layout    = vt.layout    if vt.layout
       end
 
@@ -520,11 +518,8 @@ module AST
 
   Program      = Struct.new(:token, :statements) do
     include Locatable
-    # True-Sync-Polymorphism (#325): the resolved program-level
-    # SYNC POLICY (the user-written one if present, else the baked-in
-    # system default). Stamped by SemanticAnnotator.visit_Program after
-    # validation. Lowering (#328) reads this when filling unhandled
-    # WITH error slots.
+    # Resolved program-level SYNC POLICY, either user-written or the baked-in
+    # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
   end
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
@@ -536,14 +531,12 @@ module AST
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
-    # Post-#335: the user EXPLICITLY wrote a `RETURNS T` clause (vs
-    # implicit-Void / annotator-inferred return). Stamped at parse
-    # time so the fallible-signature check only enforces on user-
-    # authored return types.
+    # True when the user wrote RETURNS explicitly; fallible-signature checks
+    # only enforce on user-authored return types.
     attr_accessor :explicit_return_type
-    attr_accessor :requires      # P2: REQUIRES clause — { param_name => Set[Family] } or nil
+    attr_accessor :requires      # REQUIRES clause — { param_name => Set[Family] } or nil
                                  #     Family symbols: :LOCKED, :VERSIONED, :ACTOR, :LOCK_FREE
-    attr_accessor :effect_set    # P3: projected EffectSet (yield/alloc_heap/io/fail)
+    attr_accessor :effect_set    # projected EffectSet (yield/alloc_heap/io/fail)
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
@@ -652,15 +645,11 @@ module AST
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
     attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
-    # Atomics M1.5: stamped by parser when `target += rhs` etc. desugars
-    # into `target = target op rhs`. The annotator reads this to decide
-    # whether the target's @atomic sync should rewrite the assignment to
-    # an atomic_fetch_<op> instead of load+op+store.
+    # Preserves the source compound operator so atomic targets can lower to
+    # fetch_<op> instead of load/modify/store.
     attr_accessor :compound_op
-    # Atomics M1.5: stamped by annotator when target is @shared:atomic.
-    # MIR-lowering reads this to emit MethodCall(cell, op, args) instead
-    # of plain Set. One of: :store, :fetchAdd, :fetchSub, :fetchAnd,
-    # :fetchOr, :fetchXor.
+    # Stamped by the annotator for @shared:atomic targets so MIR lowering emits
+    # MethodCall(cell, op, args) instead of plain Set.
     attr_accessor :auto_atomic_op
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
@@ -669,7 +658,6 @@ module AST
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
-    # Atomics M1.5: see Assignment#compound_op / #auto_atomic_op.
     attr_accessor :compound_op
     attr_accessor :auto_atomic_op
   end
@@ -677,7 +665,7 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
-    attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
+    attr_accessor :storage        # :heap when carry-var concat is promoted to heap
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
     attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
@@ -687,29 +675,24 @@ module AST
     # its allocations must only run when the orelse short-circuits to it.
     sig { returns(T::Array[T.untyped]) }
     def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
-    # Observable Phase 2.2: true on a `|> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
+    # True on a `|> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
     # whose source is a still-running tense stream — fold terminal is backed by
     # an Observable<T> / atomic accumulator and may be observed via WITH VIEW.
     attr_accessor :observable_terminal
-    # Pipeline-terminal observable wiring (Commit 3): set by the
-    # annotator when the pipe's destination is a `~T@observable`
-    # binding. Read by pipeline_generator.rb (Commit 4) to switch
-    # from inline-fold to fiber-spawn-with-accumulator codegen.
+    # Set when the pipe's destination is a `~T@observable` binding so
+    # pipeline lowering switches to fiber-spawn-with-accumulator codegen.
     attr_accessor :observable_dest
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
-  # Thunk Phase 4.1 / 4.2: parser-only placeholder for `@thunk(N) f(args)`
-  # and `@maxDepth(N) f(args)` call-site overrides. `kind` is :thunk or
-  # :maxDepth. The annotator emits a "not yet implemented" diagnostic
-  # for both -- runtime semantics defer to v0.3 (per-call-site
-  # monomorphization of the callee).
+  # Parser-only placeholder for call-site override syntax; the annotator
+  # rejects it until runtime semantics are implemented.
   CallSiteOverride = Struct.new(:token, :kind, :n, :inner) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
     extend T::Sig
     include Locatable
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
     attr_accessor :heap_dupe_result # true when this identifier's value must be heap-duped at use site
-    attr_accessor :atomic_borrow    # Atomics M1.7: true when sync=:atomic ident is in fn-arg position (skip load wrap)
+    attr_accessor :atomic_borrow    # true when sync=:atomic ident is in fn-arg position (skip load wrap)
     sig { returns(FalseClass) }
     def wildcard?; false end
     def name; self[:name].to_s end
@@ -791,15 +774,15 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
-    attr_accessor :arg_families      # Atomics M1.6.5: per-arg Set<Family> for ?-form effect resolution
-    attr_accessor :collapsed_errors  # True-Sync-Polymorphism (#329): Set<Symbol> of errors this
+    attr_accessor :arg_families      # per-arg Set<Family> for ?-form effect resolution
+    attr_accessor :collapsed_errors  # Set<Symbol> of errors this
                                      # specific call site can surface, projected per actual-family of
                                      # each REQUIRES'd arg. Strictly a subset of the callee fn's full
                                      # !T error union -- for `tick(myVersioned)` where tick has
                                      # REQUIRES x: SNAPSHOTTED, this is {:MvccConflict} (not the full
                                      # {:MvccConflict, :AtomicConflict}). nil for calls that don't
                                      # touch any REQUIRES'd param's family axis.
-    attr_accessor :error_union_type  # CLEAR's auto-propagate (post-#338): when the callee
+    attr_accessor :error_union_type  # when the callee
                                      # returns `!T`, `full_type` is stripped to the success
                                      # type `T` (so `x = call()` makes x of type T). The
                                      # original `!T` is stashed here for OR-RESCUE consumers
@@ -876,41 +859,27 @@ module AST
     #   { kind: :deadlock | :lock_cycle, token: Token }
     # nil = no opt-out; annotator rejects violating nesting.
     attr_accessor :deadlock_escape
-    # P2.3: arms for the WITH MATCH form. nil for plain WITH (single-family).
+    # Arms for the WITH MATCH form. nil for plain WITH (single-family).
     # Array of { family: Symbol, body: [stmts], lock_error_clauses: [clause, ...], token: Token }.
     # Single-family WITH is a one-arm WithMatch internally; the parser
     # leaves arms nil when no MATCH keyword was used.
     attr_accessor :arms
-    # Observables Phase 2.3/2.4: :view (cheap immutable borrow on
-    # ~T@observable) or :materialized_view (owned snapshot on any ~T
-    # aggregate). nil for traditional capability blocks.
+    # :view is a cheap immutable borrow on ~T@observable; :materialized_view is
+    # an owned snapshot on any ~T aggregate. nil for traditional capability blocks.
     attr_accessor :view_kind
-    # MVCC L4: :read for `WITH SNAPSHOT a AS y { ... }` (one or more
-    # immutable cell views), :transaction for `WITH SNAPSHOT a AS
-    # MUTABLE va, ... { ... } ON MvccConflict ...` (one or more mutable
-    # cell views, ON MvccConflict required). nil for traditional
-    # capability blocks. Each capability entry carries `:alias_mutable`
-    # already; `snapshot_mode` is the rolled-up classification used by
-    # downstream passes.
+    # Rolled-up snapshot classification used by downstream passes. Each
+    # capability entry still carries the per-cell `:alias_mutable` flag.
     attr_accessor :snapshot_mode
-    # True-Sync-Polymorphism step 1: `WITH POLYMORPHIC ...` opts into
-    # the polymorphic comptime-dispatch lowering. The annotator enforces
-    # that POLYMORPHIC is required iff the binding's REQUIRES admits
-    # more than one storage axis (and rejected otherwise).
+    # Opts into polymorphic comptime-dispatch lowering. The annotator enforces
+    # that POLYMORPHIC matches the binding's REQUIRES family set.
     attr_accessor :polymorphic
-    # True-Sync-Polymorphism Gate 3: stamped by the annotator on a
-    # WITH POLYMORPHIC whose bound parameter has no narrow REQUIRES
-    # (universal polymorphism — admits every sync family). The
-    # lowering routes such a block to MIR::PolymorphicMutate, which
-    # comptime-dispatches per the caller's actual sync family.
+    # Stamped when WITH POLYMORPHIC admits every sync family; lowering routes
+    # the block to MIR::PolymorphicMutate for caller-family dispatch.
     attr_accessor :universal_poly
   end
 
-  # True-Sync-Polymorphism step 1: top-level `SYNC POLICY START ... END`
-  # block. The handlers list is the same shape as `WithBlock#lock_error_clause`
-  # (an array of those clauses, since a SYNC POLICY may declare multiple).
-  # Validation (single-instance, main-file-only, completeness, inline-only
-  # error guard for Deadlock/LockCycle) lives in the annotator (#325).
+  # Top-level SYNC POLICY handlers use the same clause shape as
+  # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
@@ -1342,7 +1311,6 @@ module AST
   NUMBER_RESULT_OPS = Type::NUMBER_RESULT_OPS
   BOOL_RESULT_OPS = Type::BOOL_RESULT_OPS
 
-  # TODO: Make these symbols
   OP_TO_OP_CODE = T.let({
     '+' => :ADD,
     '-' => :SUB,
@@ -1359,7 +1327,7 @@ module AST
     '&&' => :AND,
     '||' => :OR,
     'MOD' => :MOD,
-    'OR' => :OR_RESCUE, # TODO: Check if this is necessary
+    'OR' => :OR_RESCUE,
     '~' => :BITWISE_NOT,
     'AS' => :BIND_VAR,
     '%+' => :WRAP_ADD,

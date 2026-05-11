@@ -8,7 +8,7 @@ class Scope
     extend T::Sig
 
   attr_accessor :locals, :dependencies, :owned_names
-  attr_accessor :depth   # Atomics M2.6: stack depth at scope creation; 0 for root
+  attr_accessor :depth   # stack depth at scope creation; 0 for root
   attr_reader   :types
 
   sig { void }
@@ -37,9 +37,8 @@ class Scope
       close_zig: close_zig,
     )
     entry.scope = self
-    # Atomics M2.6: stamp the binding's declaring depth so the escape
-    # checker can compare lifetimes ("source's depth must be <= dest's
-    # depth" -- nested-or-equal-scope = OK).
+    # Stamp declaring depth so escape checks can compare source and destination
+    # lifetimes by scope nesting.
     entry.scope_depth = @depth
     @locals[name] = entry
   end
@@ -324,10 +323,8 @@ module ScopeHelper
   sig { params(scope: T.nilable(Scope), blk: T.untyped).returns(T.nilable(Scope)) }
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
-    # Atomics M2.6: stamp depth on the freshly pushed scope so
-    # `Scope#declare` can stamp `entry.scope_depth` for lifetime
-    # comparisons. Root scope keeps depth 0; each `with_new_scope`
-    # nest increases the depth by one.
+    # Root scope keeps depth 0; each `with_new_scope` nest increases depth by
+    # one so declarations can record their lifetime boundary.
     new_scope.depth = scope_stack.size
     scope_stack.push(new_scope)
     blk.call

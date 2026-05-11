@@ -1,6 +1,6 @@
-//! AtomicPtr(T) — lock-free atomic-pointer cell for the M3 `@indirect:atomic`
-//! capability. Publishes whole-T snapshots via atomic pointer swap; readers
-//! get an EBR-pinned snapshot for the duration of a `WITH SNAPSHOT` block.
+//! AtomicPtr(T) is the lock-free atomic-pointer cell for `@indirect:atomic`.
+//! It publishes whole-T snapshots via atomic pointer swap; readers get an
+//! EBR-pinned snapshot for the duration of a `WITH SNAPSHOT` block.
 //!
 //! Mental model: this is the runtime side of CLEAR's `@indirect:atomic`.
 //! Roughly Rust `arc-swap::ArcSwap<T>` semantics with EBR (instead of
@@ -25,13 +25,10 @@
 //! just CAS-and-retire-on-success.
 //!
 //! Design contract — see docs/agents/atomicptr.md §4 / §5:
-//!   - Single-cell only. Multi-pointer atomicity is not supported (M3.9
-//!     rejects multi-cell `WITH SNAPSHOT MUTABLE` at parse/annotate);
-//!     this primitive doesn't even expose a multi-CAS API.
-//!   - No conflict-handler today: rcu retries until success. Once
-//!     #330 bounds the loop at 256 attempts, the right handler at the
-//!     CLEAR level will be `ON AtomicConflict`, defaulted by the
-//!     baked-in SYNC POLICY.
+//!   - Single-cell only. Multi-pointer atomicity is not supported; this
+//!     primitive doesn't expose a multi-CAS API.
+//!   - Bounded retry surfaces `error.AtomicConflict`; CLEAR handles that as
+//!     `ON AtomicConflict`, defaulted by the baked-in SYNC POLICY.
 //!   - Memory ordering: seq_cst surfaces (acq_rel / acquire on CAS,
 //!     acquire on read load). v0.3 inherits seq_cst-only from M1
 //!     atomics; relaxation surfaces are deferred.
@@ -53,13 +50,9 @@ pub const Atomic = blk: {
     break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
 };
 
-// True-Sync-Polymorphism (#330): hard cap on AtomicPtr.update CAS
-// retries before surfacing `error.AtomicConflict` (bridges to CLEAR
-// `AtomicConflict`). 256 is generous because atomic-pointer retry is
-// cheap (one acquire-load + one closure call + one CAS); past 256
-// fresh attempts all losing the publish race signals real contention
-// the caller (or CLEAR's `ON AtomicConflict RETRY(N)` / SYNC POLICY)
-// should handle.
+// Hard cap on AtomicPtr.update CAS retries before surfacing
+// `error.AtomicConflict`. 256 is generous because atomic-pointer retry is
+// cheap; exhausting it indicates contention the caller should handle.
 //
 // Test seam: a test wrapper at zig/ root may declare
 // `pub const CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES: usize = N;` to lower
@@ -199,13 +192,8 @@ pub fn AtomicPtr(comptime T: type) type {
         ///     the failure-side load of `actual_old` with the
         ///     winning writer's prior `.release`.
         ///
-        /// BOUNDED RETRY (True-Sync-Polymorphism #330): the loop is
-        /// capped at `MAX_UPDATE_RETRIES` (256 by default; tests can
-        /// override via `pub const CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES`
-        /// at root). Past the cap, returns `error.AtomicConflict` so
-        /// the caller (or CLEAR's per-WITH `ON AtomicConflict ...` /
-        /// program SYNC POLICY) can surface a real contention failure
-        /// instead of spinning indefinitely.
+        /// Bounded retry caps the loop at `MAX_UPDATE_RETRIES`. Past the cap,
+        /// return `error.AtomicConflict` instead of spinning indefinitely.
         ///
         /// The cap is generous (256) because atomic-pointer retry is
         /// cheap -- one acquire-load + one closure call + one CAS --

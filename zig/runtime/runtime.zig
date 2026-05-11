@@ -86,11 +86,9 @@ pub const ErrorName_LockCycle: u32 = 2;
 pub const ErrorName_Deadlock: u32 = 3;
 pub const ErrorName_UnexpectedRecursion: u32 = 4;
 pub const ErrorName_MaxDepthExceeded: u32 = 5;
-// True-Sync-Polymorphism (#324): the legacy `Conflict` (id=6) split
-// into `MvccConflict` (versioned commit retry exhausted, inherits
-// id=6 -- same bridge from error.UpdateRetriesExhausted) and
-// `AtomicConflict` (atomic CAS retry exhausted, new at id=7;
-// internal cap of 256 lands in #330).
+// MvccConflict keeps the legacy Conflict id because versioned commit retry
+// exhaustion already bridged through that slot. AtomicConflict uses the next
+// stable stdlib id for atomic CAS retry exhaustion.
 pub const ErrorName_MvccConflict: u32 = 6;
 pub const ErrorName_AtomicConflict: u32 = 7;
 
@@ -185,10 +183,8 @@ pub fn zigErrorToName(err: anyerror) u32 {
     if (std.mem.eql(u8, name, "Deadlock"))            return ErrorName_Deadlock;
     if (std.mem.eql(u8, name, "UnexpectedRecursion")) return ErrorName_UnexpectedRecursion;
     if (std.mem.eql(u8, name, "MaxDepthExceeded"))    return ErrorName_MaxDepthExceeded;
-    // True-Sync-Polymorphism (#324): UpdateRetriesExhausted is the
-    // versioned commit-retry exhaustion path -> MvccConflict.
-    // AtomicPtr's CAS-retry exhaustion path raises error.AtomicConflict
-    // directly (#330) -> AtomicConflict.
+    // Versioned commit-retry exhaustion maps to MvccConflict; atomic CAS
+    // retry exhaustion raises AtomicConflict directly.
     if (std.mem.eql(u8, name, "UpdateRetriesExhausted")) return ErrorName_MvccConflict;
     if (std.mem.eql(u8, name, "MvccConflict"))           return ErrorName_MvccConflict;
     if (std.mem.eql(u8, name, "AtomicConflict"))         return ErrorName_AtomicConflict;
@@ -368,7 +364,7 @@ pub const Runtime = struct {
     // Stack Helper: Get current Mark (Offset)
     pub fn saveFrameMark(self: *Runtime) FrameMark {
         return FrameMark{
-            .stack_index = 0,  // TODO: Deprecate
+            .stack_index = 0,
             .overflow_mark = self.overflow_arena.getMark(),
         };
     }
@@ -451,7 +447,6 @@ pub const Runtime = struct {
         self.heap_allocator.rawFree(buf, buf_align, ret_addr);
     }
 
-    // TODO: Deprecate
     pub fn globalAlloc(self: *Runtime) std.mem.Allocator {
         return self.heap_allocator;
     }
@@ -551,8 +546,7 @@ pub const Runtime = struct {
         }
     }
 
-    // Helper to spawn tasks easily from the Runtime
-    // TODO: need to pass config here.
+    // Helper to spawn tasks easily from the Runtime.
     pub fn spawn(_: *Runtime, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
         try fp.active_scheduler.submitSpawn(
             @intFromPtr(&entryWrapper), // trampoline
@@ -563,7 +557,6 @@ pub const Runtime = struct {
     }
 
     // SPAWN ON (Specific Thread)
-    // TODO: need to pass config here.
     pub fn spawnOn(target_id: std.Thread.Id, user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
         const target = fp.global_registry.get(target_id) orelse return error.ThreadNotFound;
 
@@ -578,7 +571,6 @@ pub const Runtime = struct {
     }
 
     // Power-of-Two Choices via lock-free pickTwo.
-    // TODO: need to pass config here.
     pub fn spawnBest(user_fn: *const fn (*Runtime, ?*anyopaque) anyerror!void, args_ptr: ?*anyopaque) !void {
         const pair = fp.global_registry.pickTwo();
         const a = pair.a orelse return error.NoThreads;

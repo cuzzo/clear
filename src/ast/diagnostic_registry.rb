@@ -2127,7 +2127,7 @@ module DiagnosticRegistry
     },
     LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT: {
       severity: :error, category: :lifetime,
-      template: "Lifetime Error: function '%{fn}' declares `RETURNS %{name}:T` AND `REQUIRES %{name}: ATOMIC | %{others}`. The returned value's lifetime model differs by family: ATOMIC is a bare pointer to a scope-bounded cell (M2.2), while %{others_label} is reference-counted via Arc. The compiler can't pick one lifetime story at the declaration site. Either split into two functions (one per family) or drop the ATOMIC family from REQUIRES.",
+      template: "Lifetime Error: function '%{fn}' declares `RETURNS %{name}:T` AND `REQUIRES %{name}: ATOMIC | %{others}`. The returned value's lifetime model differs by family: ATOMIC is a bare pointer to a scope-bounded cell, while %{others_label} is reference-counted via Arc. The compiler can't pick one lifetime story at the declaration site. Either split into two functions (one per family) or drop the ATOMIC family from REQUIRES.",
       summary:  "Function declares RETURNS for a name whose REQUIRES mixes ATOMIC with another family.",
     },
     LIFETIME_ROOT_NOT_PARAM: {

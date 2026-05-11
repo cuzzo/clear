@@ -297,15 +297,12 @@ class MIREmitter
   #   }.run, .{}) catch |err| switch (err) { ... };
   # Wraps in a counted retry loop when retries != nil.
   #
-  # AtomicPtr M3.6: when node.is_atomic_ptr is set, skip the
-  # conflict-handler wrap entirely. AtomicPtr.update never returns
-  # UpdateRetriesExhausted -- it retries until success (Rust rcu).
+  # When node.is_atomic_ptr is set, skip the conflict-handler wrap entirely.
+  # AtomicPtr.update retries until success and never returns UpdateRetriesExhausted.
   # Just call with `try` so the only path back to the caller is
   # OOM (which the user can't usefully handle inline anyway).
-  # True-Sync-Polymorphism Gate 3: emit `polymorphicMutate(cell, rt, fn, .{})`
-  # for `WITH POLYMORPHIC c AS x { body }` on a universally-polymorphic
-  # parameter (no narrow REQUIRES). The runtime helper comptime-dispatches
-  # to the right family-specific path; the body is a no-capture closure.
+  # Universally-polymorphic WITH lowers through a runtime helper that
+  # comptime-dispatches to the right family-specific path.
   sig { params(node: MIR::PolymorphicMutate).returns(String) }
   def emit_polymorphic_mutate(node)
     body_zig = emit_body(node.body || [])
@@ -434,13 +431,8 @@ class MIREmitter
           }
       }.run, .{})
     ZIG
-    # True-Sync-Polymorphism (#330): both Versioned.update and
-    # AtomicPtr.update now surface a Zig error when their bounded
-    # retry budget is exhausted. The error name differs per family:
-    # Versioned -> error.UpdateRetriesExhausted (legacy bridge to
-    # MvccConflict); AtomicPtr -> error.AtomicConflict (introduced
-    # by this milestone). Both go through the same wrap_conflict_handler
-    # so the catch-and-action shape is uniform.
+    # Versioned and AtomicPtr surface different retry-exhaustion errors, but
+    # share the same catch-and-action wrapper shape.
     zig_error_name = node.is_atomic_ptr ? "AtomicConflict" : "UpdateRetriesExhausted"
     wrap_conflict_handler(core, node.conflict_action, node.retries, zig_error_name)
   end
@@ -480,8 +472,7 @@ class MIREmitter
 
   # Helper: wrap a Versioned.update[Multi] / AtomicPtr.update call
   # expression with the conflict handler (and optional RETRY(N)
-  # outer-retry shape). True-Sync-Polymorphism (#330) parameterizes
-  # the Zig error name so the same wrapper works for both families:
+  # outer-retry shape). Parameterize the Zig error name so the same wrapper works for both families:
   # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
   # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
   sig { params(core_call: String, conflict_action: String, retries: NilClass, zig_error_name: String).returns(String) }

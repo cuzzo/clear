@@ -1,30 +1,23 @@
 # typed: strict
 require_relative "migration_suggester_helpers"
 
-# AtomicPtr M3.15: static eligibility detector for the
-# `@shared:writeLocked` / `@shared:locked` (struct, not single-primitive)
-# -> `@indirect:atomic` migration. M3.16 extension: also recognizes
-# `@shared:versioned` sources (the upgrade-from-MVCC path; the
-# doctor cross-references with mvcc-profile multi_commits == 0).
+# Static eligibility detector for migrating struct-shaped locked/versioned
+# bindings to `@indirect:atomic`.
 #
 # This is a TOOL, not an annotator pass. It runs from `clear doctor`
-# (combined with lock-profile contention data, M3.16), surfacing
-# migration candidates only when both signals line up: hot lock +
-# atomic-ptr-eligible use shape. Running it standalone in the
-# annotator would fire on every cold struct, not just the ones
-# where the migration matters.
+# combined with profile data, surfacing migration candidates only when both
+# signals line up: hot lock and atomic-ptr-eligible use shape. Running it
+# standalone in the annotator would fire on every cold struct.
 #
 # Eligibility (false-positive intolerant):
 #
-#   1. The binding's type is a STRUCT (multi-field, OR single-field
-#      whose field type isn't ATOMIC-eligible -- the M1.9 detector
-#      handles single-field-primitive bindings already).
-#   2. The binding's sync is :locked / :write_locked (replace-the-lock
-#      with rcu-publish) OR :versioned (upgrade-from-MVCC, gated by
-#      mvcc-profile).
-#   3. Every use of the binding is the var_node of a WITH EXCLUSIVE
-#      (locked) or WITH SNAPSHOT (versioned) capture.
-#   4. Every WITH-body statement is one of:
+#   - The binding's type is a STRUCT. Single-field primitive bindings are
+#     handled by the atomic-primitive suggester.
+#   - The binding's sync is :locked / :write_locked (replace the lock with
+#     rcu-publish) or :versioned (upgrade from MVCC, gated by mvcc-profile).
+#   - Every use of the binding is the var_node of a WITH EXCLUSIVE (locked) or
+#     WITH SNAPSHOT (versioned) capture.
+#   - Every WITH-body statement is one of:
 #      - Read-only: `_ = alias.field` / `x = alias.field` / etc.
 #        (alias appears ONLY as target.field reads, not bare).
 #      - Whole-struct replace: `alias = StructName{...}`
@@ -38,10 +31,9 @@ require_relative "migration_suggester_helpers"
 # Shape boilerplate (analyze / analyze_fn / walk_recursive /
 # classify_uses! / control_flow_stmt? / references_alias? /
 # rhs_uses_alias_only_for_field_get?) lives in
-# `MigrationSuggesterHelpers` and is shared with M1.9's atomic-primitive
-# suggester. This module owns the M3.15 / M3.16-specific eligibility
-# (struct + whole-struct-replace WITH body) and the per-family
-# capability dispatch (EXCLUSIVE for locked, SNAPSHOT for versioned).
+# `MigrationSuggesterHelpers` and is shared with the atomic-primitive
+# suggester. This module owns struct + whole-struct-replace eligibility and
+# the per-family capability dispatch.
 module AtomicPtrMigrationSuggester
   module_function
   extend MigrationSuggesterHelpers
@@ -50,9 +42,8 @@ module AtomicPtrMigrationSuggester
     run_analyze(source)
   end
 
-  # Eligibility: STRUCT under :locked / :write_locked / :versioned
-  # sync. The doctor (M3.16) gates further by mvcc-profile signals
-  # for the :versioned case.
+  # Eligibility: STRUCT under :locked / :write_locked / :versioned sync. The
+  # doctor gates :versioned candidates further with mvcc-profile signals.
   def candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)
@@ -67,9 +58,8 @@ module AtomicPtrMigrationSuggester
     syn = ti.sync
     # Three sync families are atomic-ptr-fit candidates:
     #   - @locked / @writeLocked (replace-the-lock with rcu-publish)
-    #   - @versioned (M3.16: upgrade-from-MVCC when the cell only does
-    #     single-cell whole-struct commits and never multi-cell;
-    #     gated by mvcc-profile multi_commits == 0)
+    #   - @versioned when the cell only does single-cell whole-struct commits,
+    #     gated by mvcc-profile multi_commits == 0.
     return nil unless syn == :locked || syn == :write_locked || syn == :versioned
     return nil unless ti.respond_to?(:struct?) && ti.struct?
 

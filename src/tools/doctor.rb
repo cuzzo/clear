@@ -725,8 +725,8 @@ module Doctor
       # time is the most direct signal — readers blocked behind a writer
       # are exactly what MVCC's lock-free read path eliminates.
       is_mvcc_fit = read_pct >= 80 && total_acqs >= 1_000 && cont_pct >= 10
-      # Atomics M1.10 fit: write-heavy lock with EITHER real contention OR
-      # very high acquire frequency. Atomic-eligible counters benefit two
+      # Write-heavy locks with either visible contention or very high acquire
+      # frequency can benefit from atomic counters. Atomic-eligible counters benefit two
       # ways: (1) the lock-acquire path itself is heavier than a single
       # LOCK XADDQ even uncontended (~30-50ns vs ~5-20ns), and (2) BG
       # auto-pinning kicks in for @shared:locked captures, hiding cross-
@@ -738,15 +738,9 @@ module Doctor
         (total_acqs >= 1_000 && cont_pct >= 10) ||
         total_acqs >= 100_000
       )
-      # AtomicPtr M3.16 fit: a contended lock whose access pattern is
-      # write-mostly publish OR read-heavy snapshot. Both shapes win
-      # from a switch to @indirect:atomic IF the source has the
-      # whole-struct-replace body shape (M3.15 static check). The
-      # contention bar is permissive (any contention + minimum
-      # acquire count) because the M3.15 static check IS the
-      # false-positive gate -- a struct that isn't atomic-ptr-fit
-      # never makes the candidate list. Distinct from is_atomic_fit
-      # (M1.10) which targets single-primitive counters.
+      # AtomicPtr candidates are gated mainly by the static whole-struct
+      # publish check; the runtime profile only needs to prove the lock is
+      # hot enough to matter.
       is_atomic_ptr_fit = total_acqs >= 1_000 && cont_pct >= 10
       diagnosis =
         if is_mvcc_fit
@@ -804,28 +798,18 @@ module Doctor
       puts "  docs/mvcc.md and docs/agents/true-synchronization-polymorphism.md."
     end
 
-    # Atomics M1.9 / M1.10: when the profile flagged any write-heavy
-    # contended lock AND the source has atomic-eligible counter
-    # patterns, surface the migration. The contention signal alone is
-    # too vague (any contended lock could be a counter); the static
-    # check alone is too noisy (every cold counter would surface).
-    # Both signals together = a real migration win.
+    # Surface atomic migrations only when runtime contention and static
+    # counter-shape eligibility agree.
     emit_atomic_migration!(profile_dir) if atomic_candidates.any?
 
-    # AtomicPtr M3.16: same gating, struct-publish path. Surfaces
-    # @indirect:atomic candidates whose source-side whole-struct
-    # replace shape lines up with the lock-profile contention.
-    # Distinct from M1.10 (single-primitive counters); the two can
-    # both fire on the same source if there's a mix of cells.
+    # Same gating for struct-publish cells; this can fire alongside atomic
+    # primitive suggestions when a source mixes both shapes.
     emit_atomic_ptr_migration!(profile_dir) if atomic_ptr_candidates.any?
     puts ""
   end
 
-  # Atomics M1.9 / M1.10: surface eligible @shared:locked / @locked
-  # counter patterns from `source.cht`, scoped to runs whose lock-
-  # profile already flagged write-heavy contention. Skipped silently
-  # when source.cht is missing (the profile may have been recorded
-  # before that capture landed) or when nothing eligible is found.
+  # Surface eligible locked-counter migrations only when the profile already
+  # flagged write-heavy contention.
   def emit_atomic_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -856,12 +840,8 @@ module Doctor
     end
   end
 
-  # AtomicPtr M3.16: surface eligible @shared:locked / @shared:writeLocked
-  # struct bindings whose WITH-EXCLUSIVE bodies match the whole-struct-
-  # publish shape (read-mostly OR `alias = StructName{...}` only). The
-  # M3.15 static suggester is the false-positive gate; the lock-profile
-  # contention check upstream gates by "this lock matters at runtime."
-  # Both must hold to surface.
+  # Surface whole-struct-publish migrations only when static eligibility and
+  # runtime contention both agree.
   def emit_atomic_ptr_migration!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -988,14 +968,9 @@ module Doctor
       # the binding has the wrong shape.
       is_misuse = c[:commits] >= 1_000 && c[:reads] < c[:commits]
 
-      # AtomicPtr M3.16 upgrade signal: when a cell does only single-
-      # cell whole-struct commits (multi_commits == 0) AND has been
-      # reasonably exercised (>=1K commits OR reads), it could skip
-      # MVCC's bounded-retry + EBR-pin-on-update overhead by switching
-      # to @indirect:atomic. The struct-shape check (M3.15 suggester:
-      # whole-struct replace, no field-level mutation) is the false-
-      # positive gate; this predicate just gates by "this cell
-      # actually matters at runtime AND has no multi-cell ties."
+      # Single-cell whole-struct Versioned cells can skip MVCC update overhead
+      # with @indirect:atomic. Static shape analysis remains the
+      # false-positive gate.
       is_atomic_ptr_upgrade = c[:multi_commits] == 0 &&
                               (c[:commits] >= 1_000 || c[:reads] >= 1_000)
 
@@ -1057,22 +1032,14 @@ module Doctor
       puts "  See docs/mvcc.md."
     end
 
-    # AtomicPtr M3.16: when an MVCC cell only does single-cell
-    # whole-struct commits (no multi-cell, no field-level mutation),
-    # @indirect:atomic skips Versioned.update's bounded-retry +
-    # EBR-pin-on-update overhead. The lock-profile path (above) is
-    # the primary surface; this is the upgrade-from-MVCC follow-up.
+    # The lock-profile path is the primary surface; this catches the same
+    # @indirect:atomic upgrade signal from MVCC profile data.
     emit_atomic_ptr_upgrade_from_mvcc!(profile_dir) if atomic_ptr_upgrade.any?
     puts ""
   end
 
-  # AtomicPtr M3.16 upgrade-from-MVCC: when one or more
-  # @shared:versioned cells in the lock-profile flagged as
-  # "single-cell only" (multi_commits == 0 + meaningful traffic),
-  # cross-reference with the static suggester. Surfaces only when
-  # both signals fire: the cell's runtime profile says
-  # "atomic-ptr-fit" AND the source-side WITH SNAPSHOT MUTABLE
-  # bodies are whole-struct replace (M3.15 eligibility).
+  # Cross-reference runtime single-cell MVCC traffic with static whole-struct
+  # replacement eligibility before suggesting @indirect:atomic.
   def emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -1106,10 +1073,10 @@ module Doctor
     end
   end
 
-  # ── Atomic Escape (Atomics M2.9) ──
+  # ── Atomic Escape ──
   # Static analysis on `<profile-dir>/source.cht`. The compiler
   # rejects `@shared:atomic` bindings that escape their declaring
-  # scope (M2.6 lifetime audit) -- this section translates the
+  # scope; this section translates the
   # "Lifetime Error: cannot store/RETURN ..." messages into a
   # plain-language explanation alongside the migration paths
   # (`@shared:locked` today, atomic struct fields in v0.3).

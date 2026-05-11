@@ -5,53 +5,16 @@ require_relative "../ast/ast"
 module FunctionAnalysis
     extend T::Sig
 
-  # Converts an intrinsic definition from STD_LIB format to the standard
-  # function signature format used by verify_function_signature!.
-  #
-  # Input format (STD_LIB):
-  #   { args: [:Int64, :String], return: :Bool, zig: "..." }
-  #
-  # Output format (standard signature):
-  #   {
-  #     params: [
-  #       { name: "arg0", type: :Int64, required: true, mutable: false, takes: false },
-  #       { name: "arg1", type: :String, required: true, mutable: false, takes: false }
-  #     ],
-  #     return: { type: :Bool },
-  #     zig: "..."
-  #   }
-  #
-  # Supports extended param format for future use:
-  #   args: [{ type: :Int64, mutable: true }, :String]
-  #
-  # Builds a standard function signature from lambda parameters and return type.
-  # This allows lambdas to use the same verify_function_signature! validation.
-  #
-  # @param params [Array] Lambda parameters from AST (each with :name, :type, :mutable, :default, :takes)
-  # @param return_type [Symbol] The inferred or declared return type
-  # @return [Hash] Standard signature format with :lambda marker
-  #
-  # Example output:
-  #   {
-  #     params: [
-  #       { name: "x", type: :Float64, required: true, mutable: false, takes: false }
-  #     ],
-  #     return: { type: :Bool },
-  #     lambda: true
-  #   }
-  #
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
   sig { params(node: T.untyped, body: T.untyped, declared_return: T.untyped, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
   def analyze_routine(node, body, declared_return, is_implicit)
     T.bind(self, SemanticAnnotator) rescue nil
-    # 1. Routine Prologue (Before Scope)
     verify_captures!(node)
     # Save and reset returns on the current FunctionContext (supports nested lambdas).
     saved_returns = current_fn_ctx&.returns
     current_fn_ctx.returns = [] if current_fn_ctx
 
-    # 2. Body Analysis (Inside Scope)
     with_new_scope do
       og_push_scope
       declare_and_verify_params(node)
@@ -78,7 +41,6 @@ module FunctionAnalysis
       og_pop_scope(archive: true)
     end
 
-    # 3. Routine Epilogue (Process Returns)
     found_returns = (current_fn_ctx&.returns || []).uniq
     # Restore saved returns (for enclosing function/lambda).
     current_fn_ctx.returns = saved_returns if current_fn_ctx && saved_returns
@@ -347,7 +309,6 @@ module FunctionAnalysis
     max_args = params.size
     given_args = node.args.size
 
-    # A. Arity Check (Count)
     if given_args < min_args || given_args > max_args
       if min_args == max_args
         error!(node, :ARITY_MISMATCH, name: node.name, expected: min_args, got: given_args)
@@ -356,7 +317,6 @@ module FunctionAnalysis
       end
     end
 
-    # A2. Inject default args for omitted optional params.
     if given_args < max_args
       params[given_args...max_args].each do |param|
         next if param[:required]
@@ -382,21 +342,16 @@ module FunctionAnalysis
       next if param[:comptime]  # comptime type params are not type-checked
       verify_param_lifetime!(arg_node, param, signature)
 
-      # B. Check mutability
       if param[:mutable]
-        # Rule 1: Must be a Variable (Identifier), not a literal/expression
         if !arg_node.is_a?(AST::Identifier)
           error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param[:name])
         end
 
-        # Rule 2: The Variable being passed must be MUTABLE
-        # We check the scope to see if the user declared it with 'MUTABLE'
         if current_scope.is_immutable?(arg_node.name)
           emit_immutable_arg_error!(arg_node, current_scope, i + 1, param[:name])
         end
 
-        # Rule 3: Mark the caller's binding as mutated-through-call on
-        # the SymbolEntry. The callee receives a mutable reference
+        # Mark only the SymbolEntry as mutated-through-call. The callee receives a mutable reference
         # (CLEAR's MUTABLE-by-ref calling convention), so any mutation
         # inside the callee is observable at the caller's binding —
         # post-annotation passes like the GUARD MUTABLE-mutation check
@@ -411,9 +366,6 @@ module FunctionAnalysis
         end
       end
 
-      # C. Handle ownership (Affine / Linear):
-      # TAKES (callee declares ownership) or GIVE (caller relinquishes ownership)
-      # Both suppress caller-side cleanup. Unwrap MoveNode to get the identifier.
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
       if param[:takes] || is_give
@@ -460,8 +412,7 @@ module FunctionAnalysis
         node.args[i].was_moved = true if node.args[i].respond_to?(:was_moved=)
       end
 
-      # D0. @link arguments cannot be passed to functions expecting a concrete type.
-      # The caller must RESOLVE the weak ref first. Skip for :Any params (intrinsics).
+      # Weak refs must be RESOLVE'd before passing to concrete params.
       arg_ti = arg_node.respond_to?(:type_info) ? arg_node.type_info : nil
       expected_raw = param[:type]
       if arg_ti&.link? && expected_raw != :Any
@@ -472,7 +423,6 @@ module FunctionAnalysis
         end
       end
 
-      # D. Type Check
       expected = param[:type]
       actual = arg_node.resolved_type
 
@@ -528,7 +478,6 @@ module FunctionAnalysis
         match = true if expected_type_obj.resolved == actual_type_obj.resolved
       end
 
-      # Case 1: Exact Match or Any
       if !match && (expected == :Any || actual == :Any || expected == actual)
         match = true
 
@@ -554,16 +503,13 @@ module FunctionAnalysis
         error!(arg_node, :ARGUMENT_TYPE_ERROR, fn: arg_name, index: i+1, expected: expected, got: actual)
       end
 
-      # E. Check for Alias overlap (i.e. swap(x, x) -> ERROR!)
       current_path = get_path_to_root(arg_node)
 
       next if current_path.nil?
       is_mutable = param[:mutable]
 
       encountered_args.each_with_index do |prev, prev_index|
-        # Conflict Condition:
-        # 1. At least one of them is MUTABLE (Mut/Mut OR Mut/Immut)
-        # 2. The paths overlap (e.g. "x" overlaps "x.child", "x" overlaps "x")
+        # Mutable aliases conflict when their root paths overlap.
         if (is_mutable || prev[:mutable]) && paths_overlap?(current_path, prev[:path])
 
           error!(arg_node, :ARG_ALIAS_CONFLICT,
@@ -641,8 +587,6 @@ module FunctionAnalysis
       "will require an explicit @inconsistent call-site annotation.")
   end
 
-  # TODO: Needs updated once lifetimes are complex
-  # TODO: At definition time, verify the full path is valid
   sig { params(arg_node: T.untyped, param: T::Hash[Symbol, T.untyped], signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
   def verify_param_lifetime!(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -653,9 +597,7 @@ module FunctionAnalysis
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
-    # Atomics M2.4 / M2.5: signature.return_lifetime is now an
-    # Array of dotted-path strings (or [:wildcard]) instead of a
-    # single string. Empty array = no lifetime annotation.
+    # Empty return_lifetime means the signature has no lifetime annotation.
     lifetime_paths = signature.return_lifetime || []
     lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
     return true if lifetime_paths.empty?
@@ -676,8 +618,6 @@ module FunctionAnalysis
     error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param[:name])
   end
 
-  # Atomics M2.4 / M2.5: validate `RETURNS <lifetime>:T`.
-  #
   # `node.return_lifetime` shapes:
   #   nil                    -- no lifetime
   #   :wildcard              -- `RETURNS *:T` (lazy)
@@ -709,26 +649,14 @@ module FunctionAnalysis
       verify_lifetime_source!(node, source)
     end
 
-    # Atomics M2.7: a `REQUIRES x: ATOMIC | <non-atomic>` with a
-    # `RETURNS x:T` lifetime can't be safely emitted -- the runtime
-    # layout differs per family (bare `*Atomic(T)` vs `Arc(Locked
-    # (T))`), so a single returned future would have two different
-    # lifetime stories at the call site. Reject the combination at
-    # the declaration site so the user picks one family or splits
-    # into two fns.
+    # A returned lifetime tied to a param cannot mix atomic and non-atomic
+    # families because their runtime lifetime models differ.
     verify_no_mixed_atomic_returned_lifetime!(node, sources)
     true
   end
 
-  # Atomics M2.7: when the fn declares `RETURNS <param>:T` (the
-  # returned value's lifetime is tied to <param>) AND the param's
-  # REQUIRES disjunction mixes ATOMIC with a non-atomic family,
-  # error. The returned value's runtime layout depends on which
-  # family the caller passes, but the source-tracking (M2.3 +
-  # M2.6) treats every concrete family the same way -- so the
-  # mixed declaration is ambiguous in a way the lifetime checker
-  # can't model. Force the user to split into separate fns or pick
-  # one family.
+  # Mixed atomic/non-atomic returned lifetimes are ambiguous because the
+  # returned value's runtime layout depends on the caller's family choice.
   sig { params(node: AST::FunctionDef, sources: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -820,17 +748,8 @@ module FunctionAnalysis
         end
       end
 
-      # Thread sync into the binding's SymbolEntry. Sources, in priority:
-      #   1. Explicit :sync on the signature param (cross-module form).
-      #   2. The param's declared type's sync (legacy direct-annotation).
-      #   3. The function's REQUIRES clause — if the param is constrained
-      #      to a sync family (LOCKED, etc.), seed a default sync that
-      #      satisfies the deferred WITH validation. This unblocks the
-      #      cross-module case where propagate_caller_sync! can't see
-      #      callers (e.g., a helper in a REQUIRE'd file). The actual
-      #      caller-supplied sync still flows in via P1.4 propagation
-      #      when callers are visible; this seed just keeps the in-file
-      #      annotation valid.
+      # Seed sync for cross-module helpers where caller-sync propagation
+      # cannot see call sites. Visible callers still override this later.
       param_sync = nil
       if param[:sync]
         param_sync = param[:sync]
@@ -839,15 +758,8 @@ module FunctionAnalysis
       elsif node.respond_to?(:requires) && node.requires
         families = node.requires[param[:name].to_s]
         if families
-          # Polymorphic LOCKED | VERSIONED | ATOMIC falls through
-          # to LOCKED's seed (the WITH MATCH x WHEN @versioned ...
-          # WHEN @locked / WHEN @atomic arm-check overrides per-arm
-          # anyway, so any pinned-default is informational only).
-          # True-Sync-Polymorphism (#326): SNAPSHOTTED is the umbrella
-          # family for {@versioned, @atomic}; seed :versioned so the
-          # WITH SNAPSHOT body validation accepts a polymorphic param.
-          # The actual caller-supplied sync overrides via P1.4
-          # propagation when callers are visible.
+          # Polymorphic family seeds are only defaults; visible callers
+          # override them during caller-sync propagation.
           if families.include?(:LOCKED)
             param_sync = :locked
           elsif families.include?(:VERSIONED)
@@ -857,21 +769,14 @@ module FunctionAnalysis
           elsif families.include?(:SNAPSHOTTED)
             param_sync = :versioned
           elsif families.include?(:LOCAL)
-            # #336: LOCAL admits @local / @multiowned / plain T. Seed
-            # `:local` so the deferred WITH POLYMORPHIC validation
-            # accepts the param; the actual caller-supplied storage
-            # axis flows in via P1.4 propagation.
+            # LOCAL admits @local, @multiowned, and plain T; seed :local so
+            # deferred WITH POLYMORPHIC validation can proceed.
             param_sync = :local
           end
         end
       end
-      # AtomicPtr M3.11: when REQUIRES includes ATOMIC AND the param's
-      # type is a struct (not a primitive), the implicit cap is
-      # `@indirect:atomic` (the struct case). Seed `:layout = :indirect`
-      # so WITH SNAPSHOT's cap_var_layout check accepts the cell --
-      # parallel to the param_sync seed above. Primitives (Int64 /
-      # Float64 / Bool) keep layout=nil because their @atomic surface
-      # is the bare-cell @shared:atomic form, not AtomicPtr.
+      # Struct ATOMIC params are AtomicPtr cells; primitive ATOMIC params use
+      # the bare-cell form.
       param_layout = nil
       if param_sync == :atomic
         param_t = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type])
@@ -881,16 +786,12 @@ module FunctionAnalysis
         param[:name], nil, param[:type], param[:mutable], false, nil, :stack,
         Set.new, [], sync: param_sync, layout: param_layout
       )
-      # Stash the SymbolEntry on the param hash so the transitive sync
-      # propagation pass (P1.4) and downstream code can find it without
-      # walking the body for an Identifier reference.
+      # Stash the SymbolEntry on the param hash so downstream passes don't
+      # need to find an Identifier reference in the body.
       param[:symbol] = current_scope.locals[param[:name]]
-      # Mark as a parameter so deferred WITH validation (P1.7) can
-      # distinguish it from local bindings.
       param[:symbol].is_param = true
       param[:symbol].param_decl_token = param[:name_token]
-      # Atomics M1.6.5: stamp sync_families from the REQUIRES disjunction so
-      # call-site effect resolution can detect polymorphic bindings (size > 1).
+      # Preserve REQUIRES disjunctions for call-site effect resolution.
       if node.respond_to?(:requires) && node.requires
         fams = node.requires[param[:name].to_s]
         param[:symbol].sync_families = fams if fams.is_a?(Set) && !fams.empty?
@@ -987,7 +888,6 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     type = Type.new(return_type)
 
-    # 1. Small Objects & Pointers -> Return in Register (Fastest)
     if !type.requires_move? || type.heap?
       return :register
     elsif type.void?
@@ -1011,8 +911,6 @@ module FunctionAnalysis
       return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
     end
 
-    # Atomics M2.5: lifetime is now an Array of dotted-path strings
-    # (or [:wildcard] for `RETURNS *:T`). Empty array == no lifetime.
     lifetime_paths = current_fn_ctx&.lifetime || []
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
@@ -1079,13 +977,7 @@ module FunctionAnalysis
   sig { params(path_a: T::Array[Symbol], path_b: T::Array[Symbol]).returns(T::Boolean) }
   def paths_overlap?(path_a, path_b)
     T.bind(self, SemanticAnnotator) rescue nil
-    # 1. Different Roots? (e.g. [:x, ...] vs [:y, ...]) -> No Overlap
     return false if path_a.first != path_b.first
-
-    # 2. Same Root -> Check if one is a prefix of the other.
-    # We only compare up to the length of the shorter path.
-    # [:x, :a] vs [:x, :b] -> Compare [:x, :a] vs [:x, :b] -> mismatch at index 1 -> Safe.
-    # [:x] vs [:x, :y]     -> Compare [:x] vs [:x]          -> match -> Unsafe.
 
     len = [path_a.size, path_b.size].min
     return path_a[0...len] == path_b[0...len]

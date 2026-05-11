@@ -1,21 +1,20 @@
 # typed: strict
 # frozen_string_literal: true
 
-# Phase 3 compile-time correctness checks for concurrent CLEAR programs.
+# Compile-time correctness checks for concurrent CLEAR programs.
 #
 # Runs after EffectInference.analyze! has stamped fn.effect_set, so
 # transitive yield/io/fail/alloc effects are visible.
 #
-# The checks (mapped to design-doc invariants):
+# The checks:
 #
-#   P3.3  Hold-lock-across-yield        — refuse :yield inside any WITH body
-#   P3.4  Naked nested WITH on differing parameters — refuse it; suggest
-#                                          the multi-resource form
-#   P3.5  Compile-time reentrant lock   — refuse a call into a callee whose
-#                                          REQUIRES names a parameter that
-#                                          aliases a held lock
-#   P3.6  FAST_PATH constraint          — author-written `! fast_path` is
-#                                          violated by any blocking effect
+#   Hold-lock-across-yield        — refuse :yield inside any WITH body
+#   Naked nested WITH             — refuse nested WITH on differing parameters
+#                                   and suggest the multi-resource form
+#   Compile-time reentrant lock   — refuse calls into callees whose REQUIRES
+#                                   names a parameter that aliases a held lock
+#   FAST_PATH constraint          — author-written `! fast_path` is violated
+#                                   by any blocking effect
 #
 # The checks share a `walk_scope_no_nested_with` helper: descend into a
 # WithBlock body or arm, but skip nested WithBlocks (those bubble their
@@ -27,8 +26,8 @@ module ConcurrencyChecks
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
-  # type appears here participate in the rank-DAG protocol and are
-  # exempt from P3.4 (the existing rank-cycle analysis owns ordering).
+  # type appears here participate in the rank-DAG protocol; the rank-cycle
+  # analysis owns ordering for those bindings.
   sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
   def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
     fn_nodes.each_value do |fn|
@@ -39,7 +38,7 @@ module ConcurrencyChecks
     end
   end
 
-  # P3.3: a WITH body must not contain any node that yields. The walker
+  # A WITH body must not contain any node that yields. The walker
   # is purely structural — it has to find nodes by their LOCATION inside
   # this WITH body. The yield property itself is read from the existing
   # annotator-stamped effect set (fn.effects, populated by record_effect
@@ -78,11 +77,11 @@ module ConcurrencyChecks
     end
   end
 
-  # P3.4: refuse `WITH x { WITH y { ... } }` (different parameter) when
+  # Refuse `WITH x { WITH y { ... } }` (different parameter) when
   # BOTH the outer and inner block acquire actual locks. Borrow-only
   # variants (BORROWED, RESTRICT) don't hold a lock; nesting them is
   # safe. Same-binding nesting is permitted (still useful for re-entry
-  # checks; reentrant detection in P3.5 covers the dangerous case).
+  # checks; reentrant detection covers the dangerous case).
   LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
 
   sig { params(fn: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
@@ -90,11 +89,8 @@ module ConcurrencyChecks
     walk_with_blocks(fn.body) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
       next if outer_lock_names.empty?
-      # @locked(rank: N) bindings opt into the rank-DAG analysis. The
-      # pre-existing compute_lock_cycles! pass enforces ascending-rank
-      # acquires, which is a stronger guarantee than P3.4's pattern
-      # check. Skip P3.4 when any outer binding carries a rank — the
-      # author has explicitly chosen the rank-ordered protocol.
+      # @locked(rank: N) bindings opt into the rank-DAG analysis, which is a
+      # stronger ordering guarantee than this pattern check.
       next if any_lock_rank?(outer, lock_ranks)
 
       walk_scope_for_nested_with(outer_scope) do |inner|
@@ -103,8 +99,8 @@ module ConcurrencyChecks
         # Same opt-out applies if the inner block uses ranks.
         next if any_lock_rank?(inner, lock_ranks)
 
-        # Re-entry on the same binding(s) is permitted — flagged by
-        # P3.5's reentrant detection if it's actually unsafe.
+        # Re-entry on the same binding is permitted; reentrant detection flags
+        # the unsafe case.
         names = inner_lock_names - outer_lock_names
         next if names.empty?
 
@@ -121,8 +117,8 @@ module ConcurrencyChecks
   end
 
   # Any binding in this WithBlock that carries an @locked(rank: N) /
-  # @writeLocked(rank: N) annotation. The pre-existing rank-DAG check
-  # owns ordering correctness for ranked locks; P3.4 stays out of its way.
+  # @writeLocked(rank: N) annotation. The rank-DAG check owns ordering
+  # correctness for ranked locks.
   # `lock_ranks` is the annotator-built type-rank registry.
   sig { params(with_block: T.untyped, lock_ranks: T.untyped).returns(T::Boolean) }
   def any_lock_rank?(with_block, lock_ranks)
@@ -147,9 +143,8 @@ module ConcurrencyChecks
     out
   end
 
-  # P3.5: compile-time reentrant lock detection. For each WITH on
-  # parameter `p`, every call inside whose callee has REQUIRES naming a
-  # parameter aliasing `p` reacquires `p`'s lock.
+  # For each WITH on parameter `p`, any call inside whose callee has REQUIRES
+  # naming a parameter aliasing `p` reacquires `p`'s lock.
   sig { params(fn: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
   def check_reentrant!(fn, sig_lookup, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|

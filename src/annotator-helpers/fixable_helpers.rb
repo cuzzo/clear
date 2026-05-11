@@ -1294,16 +1294,9 @@ module FixableHelper
     )
   end
 
-  # Atomics M2.8: a M2.6 lifetime error fired (escape via store /
-  # field-assign / RETURN) AND the offending source binding's sync
-  # axis is `:atomic`. Build a Fix that swaps `@shared:atomic` to
-  # `@shared:locked` at the source's declaration line so `clear fix`
-  # has a concrete edit to surface; the `:interactive` confidence
-  # forces the user to review (the migration is more involved than
-  # a sigil swap -- `@shared:locked` typically requires a STRUCT
-  # wrap around the primitive). Returns nil when source isn't
-  # atomic or the decl line text isn't locatable; the caller then
-  # falls back to the plain `error!` path.
+  # Atomic bindings that escape their declaring scope need a reviewed migration
+  # path: swapping to @shared:locked usually also requires wrapping primitives
+  # in a STRUCT, so the fix is interactive rather than automatic.
   sig { params(source_sym: SymbolEntry, source_name: String).returns(T.nilable(Fix)) }
   def build_atomic_escape_migration_fix(source_sym, source_name)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -1341,12 +1334,12 @@ module FixableHelper
   end
 
   # ---------------------------------------------------------------
-  # Auto / gradual-typing fixable findings (M1.4) + operator-aware
-  # suggestions (M2.1). See docs/agents/gradual-typing.md §6 and §12.
+  # Auto / gradual-typing fixable findings plus operator-aware suggestions.
+  # See docs/agents/gradual-typing.md §6 and §12.
   # ---------------------------------------------------------------
 
-  # Per-operator candidate-type table for M2.1 suggestions. Each
-  # entry: { default: Symbol, alts: [Symbol], notes: { Sym => String } }.
+  # Per-operator candidate-type table. Each entry:
+  # { default: Symbol, alts: [Symbol], notes: { Sym => String } }.
   # The :default candidate is ranked first; :alts follow in order.
   # When multiple operators apply to the same slot, the candidate
   # set is the INTERSECTION across ops; ranking is by lowest sum of
@@ -1447,7 +1440,7 @@ module FixableHelper
   end
 
   # ---------------------------------------------------------------
-  # Auto / gradual-typing fixable findings (M1.4).
+  # Auto / gradual-typing fixable findings.
   # See docs/agents/gradual-typing.md §5 (clear fix integration) and
   # §6 (ambiguity resolution) for the diagnostic-format spec.
   # ---------------------------------------------------------------
@@ -1458,11 +1451,9 @@ module FixableHelper
   # there is no token to replace — we still emit the :info finding so
   # the user sees what was inferred, but no auto fix.
   #
-  # M2.2: shape-tagged slots are skipped here. Per-sub-slot findings
-  # would offer wrong fix replacements (writing the scalar element /
-  # key / value type into the binding's `Auto` slot, which holds the
-  # whole container type). The caller emits one binding-level
-  # finding per shape-tracked decl via `emit_auto_shape_resolved_finding!`.
+  # Shape-tagged slots are skipped here because per-sub-slot findings would
+  # replace the binding's `Auto` with a scalar element/key/value type instead
+  # of the whole container type.
   sig { params(resolution: AutoUnifier::Resolution).returns(T.untyped) }
   def emit_auto_resolved_finding!(resolution)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -1480,12 +1471,9 @@ module FixableHelper
     )
   end
 
-  # M2.2 — Emits a single :info finding per shape-tracked decl whose
-  # `decl.type` has been successfully wrapped by `stamp_slot!` /
-  # `stamp_map_pairs!` (i.e., for lists when the element type
-  # resolved, for maps when both key and value resolved). The fix
-  # replacement is the wrapped type's source form so the user's
-  # `clear fix` rewrites `Auto` to e.g. `Int64[]` /
+  # Emits a single :info finding per shape-tracked decl whose `decl.type` has
+  # been wrapped successfully. The fix replacement uses the wrapped container
+  # type so `clear fix` rewrites `Auto` to e.g. `Int64[]` or
   # `HashMap<String, Int64>` rather than the misleading scalar.
   # Partial map resolutions intentionally produce no resolved
   # finding here — the unresolved sub-slot's finding tells the
@@ -1529,11 +1517,9 @@ module FixableHelper
   # per spec §6. None of the proposed actions are :auto: the user
   # must pick a concrete type and either narrow callsites or build a
   # union. v1 includes the option text in the message; per-callsite
-  # conversion fixes are a follow-up (would require knowing each
-  # callsite's argument span and a coercion table). M2.1 layers
-  # operator-derived candidates on top: when the body uses the
-  # binding in operator expressions, those operators' default types
-  # are offered as :interactive Fixes.
+  # conversion fixes are a follow-up because they require each callsite's
+  # argument span and a coercion table. Operator-derived candidates are added
+  # when the body uses the binding in operator expressions.
   sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
   def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
@@ -1544,7 +1530,6 @@ module FixableHelper
 
     message = build_auto_ambiguity_message(T.must(label), observed_strs, slot)
 
-    # M2.1: append operator-derived suggestions when present.
     ops = op_evidence[slot_id_for(slot)] || Set.new
     candidates = auto_rank_candidates(ops)
     message += build_auto_op_evidence_block(ops, candidates) unless candidates.empty?
@@ -1564,16 +1549,14 @@ module FixableHelper
   # No observed types at all — Auto slot the inference pass could not
   # constrain (e.g., a parameter on a fn that's never called, or an
   # empty `[]` never used). Emits :error directing the user to
-  # specify a concrete type. M2.1: when the body uses the binding in
-  # operator expressions, ranked candidate types per the
-  # AUTO_OP_CANDIDATES table are offered as :interactive Fixes.
+  # specify a concrete type. When the body uses the binding in operator
+  # expressions, ranked candidate types are offered as interactive fixes.
   sig { params(slot: AutoConstraintCollector::Slot, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
   def emit_auto_unresolved_finding!(slot, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     label = auto_slot_label(slot)
     base_msg = "Cannot infer type for #{label} — no observed uses to drive inference."
 
-    # M2.1: operator-derived candidates ranked per AUTO_OP_CANDIDATES.
     ops = op_evidence[slot_id_for(slot)] || Set.new
     candidates = auto_rank_candidates(ops)
 
@@ -1628,9 +1611,8 @@ module FixableHelper
   sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(String)) }
   def auto_slot_label(slot)
     T.bind(self, SemanticAnnotator) rescue nil
-    # M2.2: shape-tagged slots (forward-flow inference for empty
-    # `[]` / `{}`) get a more specific label so the diagnostic
-    # tells the user which sub-type is being inferred.
+    # Shape-tagged slots get a more specific label so the diagnostic tells the
+    # user which sub-type is being inferred.
     if slot.respond_to?(:shape) && slot.shape
       name = slot.decl_node.respond_to?(:name) ? slot.decl_node.name : "<local>"
       case slot.shape

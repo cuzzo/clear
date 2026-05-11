@@ -50,11 +50,9 @@ pub const CellStats = struct {
     reads: u64 = 0,             // successful read() calls
     commits: u64 = 0,           // successful update() commits (single-cell)
     multi_commits: u64 = 0,     // successful updateMulti() commits where
-                                // this cell participated. AtomicPtr M3.16
-                                // doctor signal: if commits > 0 AND
-                                // multi_commits == 0, the cell only does
-                                // single-cell whole-struct commits and is
-                                // upgrade-eligible to @indirect:atomic.
+                                // this cell participated. If commits > 0 AND
+                                // multi_commits == 0, the cell only does single-cell
+                                // whole-struct commits and is upgrade-eligible.
     retries: u64 = 0,           // CAS failures inside update() (excludes the
                                 // final success). Per-update retry counts add
                                 // here: 0 for fast-path-success, N for
@@ -177,9 +175,8 @@ pub noinline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, commit
     }
 }
 
-/// AtomicPtr M3.16: record a successful `updateMulti()` commit
-/// touching this cell. The cell's `multi_commits` increments
-/// per participating cell; the doctor uses
+/// Record a successful `updateMulti()` commit touching this cell.
+/// The cell's `multi_commits` increments per participating cell; the doctor uses
 /// `multi_commits == 0 && commits > 0` as the gate for the
 /// "upgrade @shared:versioned -> @indirect:atomic" suggestion
 /// (multi-cell commits forbid the upgrade because AtomicPtr has

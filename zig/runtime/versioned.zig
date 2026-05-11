@@ -17,8 +17,7 @@ pub const Atomic = blk: {
 
 // Hard cap on update / updateMulti CAS retries before surfacing
 // `error.UpdateRetriesExhausted` (bridges to CLEAR `MvccConflict`).
-// True-Sync-Polymorphism (#330) lowers this from the original 10,000
-// to 64. Versioned.update re-runs the WHOLE transaction body on
+// Versioned.update re-runs the WHOLE transaction body on
 // retry (vs. AtomicPtr.update which just re-applies a closure on a
 // fresh allocation), so retry is more expensive here. 64 is the
 // realistic "give-up budget" -- past that, the caller (or CLEAR's
@@ -624,11 +623,9 @@ pub fn updateMulti(
             const T = @TypeOf(cells[i].*).Inner;
             const old_node: *T = @ptrFromInt(snap_addrs[i]);
             try ebr.retire(allocator, old_node);
-            // AtomicPtr M3.16: record per-cell that THIS commit was
-            // multi-cell. The doctor uses `multi_commits > 0` to
-            // disqualify the cell from the @shared:versioned ->
-            // @indirect:atomic upgrade suggestion (AtomicPtr has no
-            // multi-pointer CAS primitive).
+            // Record per-cell that THIS commit was multi-cell. The doctor
+            // uses this to reject @shared:versioned -> @indirect:atomic
+            // suggestions because AtomicPtr has no multi-pointer CAS.
             if (rt_profile.CLEAR_PROFILE) {
                 mvcc_profile.recordMultiCommit(@intFromPtr(cells[i]), @sizeOf(T));
             }

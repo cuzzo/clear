@@ -686,7 +686,8 @@ class MIRLowering
       needs_heap = receiver_type&.needs_heap_backing?
       needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
       # For method calls, check the receiver object's storage (e.g., parts.append -> parts.storage).
-      # Also check the declaration node (symbol.reg) in case Phase 2.5 heap-promoted the container
+      # Also check the declaration node in case a later pass heap-promoted
+      # the container.
       # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
@@ -1096,12 +1097,10 @@ class MIRLowering
     final_type = transpile_type(ret_type)
 
     fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
-    # Thunk Phase 4d: the synthesized trampoline allocates child
-    # frames via rt.heapAlloc(), so force needs_rt=true regardless
-    # of what the user's body looks like.
+    # Synthesized trampolines allocate child frames, so they need rt even
+    # when the user body does not otherwise mention it.
     fn_needs_rt = true if node.thunk_plan
-    # Thunk Phase 4f.1: tagged-union mutual trampoline calls
-    # rt.checkYield() each iteration; force needs_rt=true.
+    # Mutual trampolines call rt.checkYield() each iteration.
     fn_needs_rt = true if node.mutual_thunk_plan
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
@@ -1163,14 +1162,8 @@ class MIRLowering
       p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
       p_type_obj = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
       is_user_struct = @struct_schemas&.key?(p_type_sym)
-      # Atomics M1.7: a primitive @shared:atomic param (REQUIRES c: ATOMIC
-      # or REQUIRES c: ATOMIC | ...) needs `anytype` so the comptime probe
-      # in WITH MATCH can resolve to the correct path. Without this, the
-      # signature is concrete `*CheatLib.Atomic(i64)`, which forces the
-      # caller to pre-load (and the auto-rewrite emits `bump(c.ctrl.data
-      # .load())` — passes a value, not the cell). Same logic applies for
-      # polymorphic REQUIRES that includes ATOMIC; the SymbolEntry's
-      # sync/sync_families captures both cases.
+      # Atomic params need `anytype` so call sites pass the cell itself,
+      # allowing WITH MATCH comptime probes to dispatch by actual family.
       sym = param[:symbol]
       atomic_sync = sym && (sym.sync == :atomic ||
                             (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
@@ -1211,10 +1204,8 @@ class MIRLowering
     return_type_str = if tied_shared_return
       tied_shared_return
     elsif fn_can_fail
-      # If the user already declared `RETURNS !T`, `final_type` already
-      # carries the error union (post-#338 migration the canonical
-      # form is `anyerror!T`, but bare `!T` is also accepted). Don't
-      # double-prefix.
+      # If the user declared `RETURNS !T`, `final_type` already carries the
+      # error union. Don't double-prefix.
       if final_type.include?("anyerror!") || final_type.include?("error{")
         final_type
       elsif node.reentrant == :reentrant && final_type.start_with?("!")
@@ -1258,11 +1249,8 @@ class MIRLowering
                          end
     uses_frame_or_alloc = has_frame_bindings || node.uses_alloc
     ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
-    # Unwrap `!T` so the value-type / string-return classification
-    # below sees the underlying type. Post-#338, `RETURNS !Void` /
-    # `RETURNS !Status` etc. are common; without this unwrap,
-    # `void?` / `enum_schemas[resolved]` miss and `saveFrameMark` is
-    # never emitted in the prologue.
+    # Unwrap `!T` so value-type and string-return classification sees the
+    # payload; otherwise frame save/restore is skipped for error-union returns.
     bare_ret = if ret_type_obj.respond_to?(:error_union?) && ret_type_obj.error_union? &&
                   ret_type_obj.respond_to?(:payload_type)
                  ret_type_obj.payload_type || ret_type_obj
@@ -1296,7 +1284,6 @@ class MIRLowering
     #     (raises System UnexpectedRecursion on re-entry)
     #   :MAX_DEPTH(N) (max_depth_n set) -> per-fn depth counter
     #     (raises System MaxDepthExceeded above N).
-    # Phase 4g will read max_depth_n to compute precise stack size.
     if node.reentrant == :non_reentrant
       if node.max_depth_n
         # try safety.enterDepth(@src(), N);
@@ -1368,15 +1355,11 @@ class MIRLowering
     has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
     @current_fn_has_catch = has_catch
     @current_fn_snapshot_types = Set.new if has_catch
-    # Thunk Phase 4d: when the annotator stamped thunk_plan on the
-    # FunctionDef (Phase 4c shape recognized), bypass normal body
-    # lowering and synthesize the trampoline body via
-    # ThunkTransform::Emit. The function's signature stays normal so
-    # callers see no change.
+    # Trampoline bodies are synthesized directly while preserving the
+    # normal function signature seen by callers.
     if node.thunk_plan
       body_mir = takes_mir + [ThunkTransform::Emit.build_trampoline(node, self)]
     elsif node.mutual_thunk_plan
-      # Phase 4f.1: tagged-union trampoline for mutual recursion.
       body_mir = takes_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
     else
       pre_checks = lower_pre_clauses(node)
@@ -1748,14 +1731,8 @@ class MIRLowering
           MIR::AddressOf.new(arg)
         end
       elsif universal_poly_arg_needs_addr?(a, callee_sig, idx)
-        # True-Sync-Polymorphism Gate 3: plain T into a universally-
-        # polymorphic param (REQUIRES = Set[]) is auto-borrowed, so the
-        # callee's `WITH POLYMORPHIC c AS x { x.field = ... }` mutates
-        # the caller's binding instead of a pass-by-value copy. Other
-        # capability shapes (Arc/Rc/*T/Locked/Versioned/...) already
-        # arrive as pointers or as wrappers the helper unwraps, and
-        # are handled by the helper's comptime dispatch -- no &-wrap
-        # needed at the call site.
+        # Plain T into a universally polymorphic param is auto-borrowed so
+        # mutations in the polymorphic body flow back to the caller.
         MIR::AddressOf.new(arg)
       else
         arg
@@ -2567,22 +2544,10 @@ class MIRLowering
 
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_with_block(node)
-    # MVCC L7.1: WITH MATCH (multi-arm) form. The arms list is stamped
-    # by the parser; per-arm codegen (comptime if-else dispatch via
-    # @hasField/@hasDecl, per-arm Arc-unwrap, per-arm mutability) lands
-    # in L7.2 - L7.4 (#261, #262, #263). For now this is a dispatch
-    # seam: single-arm WITH (arms == nil) flows through the existing
-    # path unchanged; multi-arm WITH routes to a placeholder that
-    # panics at runtime so silent no-ops are impossible.
     return lower_with_match_block(node) if node.arms
 
-    # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC c AS x { body }`
-    # on a universally-polymorphic parameter (no narrow REQUIRES, or
-    # `Set.new`-stamped) lowers to a single helper call that
-    # comptime-dispatches per family at the actual call site. The
-    # body becomes a no-capture closure `struct { fn run(x: *T) }.run`.
-    # The annotator stamps `node.universal_poly = true` when the
-    # WithBlock satisfies this shape (with_match_check.rb Rule 1).
+    # Universal polymorphic WITH lowers to a helper that dispatches by
+    # actual family at the call site.
     if node.universal_poly && (node.capabilities || []).length == 1
       return lower_polymorphic_universal(node)
     end
@@ -2693,10 +2658,8 @@ class MIRLowering
       when :BORROWED
         # PURE: cap[:var_node] is always an Identifier or field ref; never allocating.
         source_zig = emit_expr(lower(cap[:var_node]))
-        # #336: WITH POLYMORPHIC auto-promotes immutable non-sync
-        # bindings to :BORROWED. For poly params (anytype) the alias
-        # needs the comptime unwrap probe so plain T / @local /
-        # @multiowned all bind uniformly to a `*T`-shaped value.
+        # Polymorphic params need the comptime unwrap probe so plain T,
+        # @local, and @multiowned all bind as `*T`.
         is_param = with_cap_is_param?(cap[:var_node])
         if is_param && (var_sync.nil? || var_sync == :local) &&
            cap[:var_node].symbol && !cap[:var_node].symbol.mutable
@@ -2706,10 +2669,8 @@ class MIRLowering
           bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
         end
       when :RESTRICT
-        # PURE / no-sync alias: var_sync is nil (plain T / @multiowned)
-        # OR :local (#336: WITH POLYMORPHIC on @local, auto-promoted
-        # from :infer in capabilities.rb). The body lowers to a
-        # direct alias -- no Guard, no Arc unwrap, no snapshot.
+        # Plain and @local aliases lower directly: no Guard, Arc unwrap,
+        # or snapshot.
         #
         # For polymorphic params (anytype), use the comptime
         # `with_match_unwrap_value` probe so the alias resolves
@@ -2745,9 +2706,7 @@ class MIRLowering
           end
         end
       when :VIEW
-        # Observables Phase 2.5/2.6. The runtime backing (AtomicSum,
-        # AtomicMax, ..., StreamSet, Observable<T>) exposes a
-        # uniform `.view()` method.
+        # Observable backings expose a uniform `.view()` method.
         #   - Scalar wrappers (Atomic*) return the current value by
         #     copy; no resource to release.
         #   - Collection / handle wrappers (StreamSet, Observable<T>)
@@ -2794,9 +2753,8 @@ class MIRLowering
           bindings << "const #{safe_alias} = #{source_zig}.view();\n#{coop_yield}\n_ = &#{safe_alias};"
         end
       when :SNAPSHOT
-        # MVCC L6: lower `WITH SNAPSHOT cell AS [MUTABLE] alias { body }`.
-        # Read-only single cell -> `cell.read(rt)` + Guard release.
-        # Any MUTABLE cell -> entire WITH is a transaction; the
+        # Read-only snapshots acquire Guards. Any mutable snapshot makes the
+        # whole WITH a transaction; the
         #   post-loop `emit_snapshot_mutable_call` covers all cells
         #   via `update()` (single) or `versionedUpdateMulti(...)`
         #   (multi). Skip per-cell binding for the whole WITH so the
@@ -2810,22 +2768,16 @@ class MIRLowering
         guard_var = "__#{var_name}_snap_#{node.object_id.abs}"
         # Shape-agnostic unwrap so the same emit works for *Versioned,
         # *Arc<Versioned>, and Arc<Versioned> by value (the BG-capture
-        # case). Reuses the L7.4 helper (mirrors L7.3's WithMatchInner
-        # at the value level). The MIR::SnapshotRead node carries the
+        # case). The MIR::SnapshotRead node carries the
         # structured fields; mir_emitter.rb renders them. Pre-migration
         # this was an InlineZig blob -- the heap-allocated read Guard
         # was invisible to the checker (INV-12 violation).
         unwrap = with_match_unwrap_value(T.must(source_zig))
         bindings << MIR::SnapshotRead.new(unwrap, rt_name, safe_alias, guard_var, nil)
       when :MATERIALIZED_VIEW
-        # Observables Phase 2.7. Owned snapshot — the runtime
-        # backing's `.materialize(allocator)` performs an explicit
-        # O(n) copy. For scalar observables (SUM/MAX/...) the result
-        # is a value-type T (no heap, no cleanup). For collection
-        # observables (DISTINCT) it's an owned `[]T` slice that the
-        # alias must free at end-of-WITH, otherwise it leaks (the
-        # rt.heapAlloc() bulk-free at process exit masks the leak in
-        # tests but it's a real bug in long-running programs).
+        # Materialized views perform an explicit copy. Scalar observables
+        # return values; collection observables return owned slices that must
+        # be freed at the end of WITH.
         #
         # We detect collection shape from the source binding's type:
         # `tense_type.array?` means the source is `~T[]@set:observable`
@@ -2874,12 +2826,8 @@ class MIRLowering
       end
     end
 
-    # MVCC L6.2 / L6.3: lower SNAPSHOT-mutable into a single
-    # `update()` (one cell) or `versionedUpdateMulti(...)` (multi-cell)
-    # call whose closure body is the user's WITH body. The body is
-    # lowered + emitted-as-Zig-text inline, then placed inside the
-    # closure. After this, body_stmts is empty -- the body is owned
-    # by the update call, not by the WITH scope.
+    # Mutable snapshots own the WITH body inside an update closure, so no
+    # body statements remain for the surrounding WITH scope.
     mutable_snap_caps = (node.capabilities || []).select { |c|
       c[:capability] == :SNAPSHOT && c[:alias_mutable]
     }
@@ -2949,13 +2897,11 @@ class MIRLowering
   end
 
 
-  # MVCC L7.2/L7.3: WITH MATCH (multi-arm form) lowering. Emits a
-  # comptime if-else chain that probes the bound variable's wrapper
-  # type via @hasField/@hasDecl. Zig elides the not-taken branches at
-  # compile time so the same fn body works for callers passing any of
-  # the families declared in REQUIRES.
+  # WITH MATCH lowers to a comptime if-else chain that probes the bound
+  # variable's wrapper type. Zig elides not-taken branches, so one function
+  # body works for every family declared in REQUIRES.
   #
-  # Family probes (L7.2):
+  # Family probes:
   #   :VERSIONED  -> @hasDecl(<inner_type>, "Inner")
   #                  Versioned(T) re-exports `pub const Inner = T`;
   #                  Locked(T) and bare T do not.
@@ -2963,20 +2909,8 @@ class MIRLowering
   #                  Locked(T) has a `mutex` field; bare T doesn't.
   #   :LOCAL      -> else branch (no probe; runtime fallback).
   #
-  # L7.3 Arc-unwrap: each probe is wrapped in a comptime Arc-unwrap
-  # so it works for both bare callers (`@versioned`, `@locked`,
-  # `@local`) and Arc-wrapped callers (`@shared:versioned`,
-  # `@shared:locked`). The Arc(T) struct has a `ctrl: *ArcControlBlock`
-  # field; ArcControlBlock has `data: *T`. So `<var>.ctrl.data.*`
-  # yields the inner T for Arc-wrapped, and the not-taken branch is
-  # elided when `<var>.*` doesn't have `ctrl`.
-  #
-  # Open gaps closed by L7.4/L7.5:
-  #   - Per-arm body emission uses the SAME alias binding for every
-  #     arm (resolved by acquire_capability!'s polymorphic-fallback
-  #     rule). Bodies aren't yet family-specialized: L7.4 (#263) will
-  #     visit each arm under its own family-resolved capability.
-  #   - L7.5 (#264) adds end-to-end transpile-tests.
+  # Each probe is wrapped in a comptime Arc unwrap so bare and Arc-wrapped
+  # callers share the same generated body.
 
   # Per-family probe for WITH MATCH dispatch. Routes through the
   # comptime helper `CheatLib.WithMatchInner` (runtime-header.zig)
@@ -3010,14 +2944,8 @@ class MIRLowering
         "@hasDecl(#{inner_t}, \"Inner\")"
       end
     when :LOCKED then "@hasField(#{inner_t}, \"mutex\")"
-    # Atomics M1.6: AtomicInt(T) / AtomicFloat(T) / AtomicBool all
-    # expose `cmpxchgStrong` (Locked/Versioned do not). Unique +
-    # comptime-resolved at zero runtime cost.
-    # AtomicPtr M3: AtomicPtr(T) exposes `compareAndPublish` (unique).
-    # In SNAPSHOT MATCH the cell is always AtomicPtr (primitive
-    # @atomic doesn't support SNAPSHOT) so probe by compareAndPublish.
-    # In non-SNAPSHOT WITH MATCH the cell is always primitive, probe
-    # by cmpxchgStrong.
+    # Primitive atomics expose `cmpxchgStrong`; AtomicPtr exposes
+    # `compareAndPublish`. Pick the probe from the surrounding mode.
     when :ATOMIC
       if snapshot
         "@hasDecl(#{inner_t}, \"compareAndPublish\")"
@@ -3030,12 +2958,8 @@ class MIRLowering
     end
   end
 
-  # MVCC L7.4: comptime expression that resolves to a `*Inner` value
-  # pointer regardless of param shape. Mirrors `WithMatchInner` (which
-  # gives the *type*) but at the *value* level. Inside each comptime
-  # if-else arm only one path is alive, so the not-taken branches'
-  # invalid expressions (`<var>.ctrl.data` for non-Arc, `&<var>` for
-  # by-ref) are elided.
+  # Resolve to a `*Inner` value regardless of param shape. Invalid
+  # expressions in not-taken comptime branches are elided by Zig.
   sig { params(zig_var: String).returns(String) }
   def with_match_unwrap_value(zig_var)
     is_ptr  = "@typeInfo(@TypeOf(#{zig_var})) == .pointer"
@@ -3080,24 +3004,11 @@ class MIRLowering
         const #{safe_alias} = #{guard_var}.get();
         _ = &#{safe_alias};
       ZIG
-    # Atomics M1.6: atomic primitives have no Guard / acquire / release.
-    # The alias binds directly to the cell pointer so the body can call
-    # atomic ops on it (e.g. `alias.fetchAdd(1)`). Note: M1 doesn't
-    # auto-rewrite `alias += 1` inside the WHEN ATOMIC arm body to
-    # fetchAdd; users in the arm must call atomic methods explicitly.
-    # The auto-rewrite for direct (non-MATCH) `c += 1` on an
-    # @shared:atomic binding still works (M1.5).
+    # Atomic primitives have no Guard/acquire/release; the alias binds
+    # directly to the cell pointer so arm bodies can call atomic methods.
     #
-    # AtomicPtr M3: in SNAPSHOT MATCH context the cell is an
-    # AtomicPtr, so the alias binds via Guard.read (mirrors the
-    # VERSIONED arm). The body sees `*T` (bare struct) and can do
-    # `alias.field` reads. Mutate semantics for SNAPSHOT MATCH
-    # MUTABLE on AtomicPtr land here too (alias = Guard.get()'s
-    # *T) -- not strictly correct for the publish path, but it
-    # matches what the existing VERSIONED MUTABLE arm does too
-    # (writes through the snapshot). Proper publish-via-CAS for
-    # SNAPSHOT MATCH MUTABLE arms is a separate larger lowering
-    # change; tracked in atomicptr-review.md.
+    # In SNAPSHOT MATCH, AtomicPtr binds through a Guard like VERSIONED.
+    # Mutable publish-via-CAS requires a larger lowering change.
     when :ATOMIC
       if node.respond_to?(:snapshot_mode) && node.snapshot_mode
         <<~ZIG.rstrip
@@ -3199,11 +3110,8 @@ class MIRLowering
     ZIG
   end
 
-  # MVCC L6.2/L6.3: emit a single `Versioned.update` (one cell) or
-  # `versionedUpdateMulti` (multi-cell) call whose closure runs the
-  # WITH body. The user's `ON MvccConflict <action>` becomes a `catch`
-  # arm that translates `error.UpdateRetriesExhausted` -> the
-  # configured action (RAISE / PASS / EXIT / `-> { }`).
+  # Emit a single-cell or multi-cell snapshot transaction whose closure
+  # runs the WITH body. Conflict handlers become catch arms.
   #
   # Single-cell shape:
   #   cell.update(rt, alloc, struct {
@@ -3224,12 +3132,8 @@ class MIRLowering
   #     error.UpdateRetriesExhausted => { <conflict_action> },
   #     else => return __err,
   #   };
-  # Returns a structured MIR node (MIR::SnapshotTransaction or
-  # MIR::SnapshotMultiTxn) instead of an InlineZig blob. The body
-  # MIR statements are passed through directly to mir_emitter so the
-  # checker can walk them. Pre-migration this concatenated everything
-  # into one big InlineZig string (#268), making the heap allocation
-  # in Versioned.update opaque to MIRChecker (INV-12 violation).
+  # Return structured MIR so the checker can see the transaction body and
+  # runtime heap allocation instead of treating them as opaque InlineZig.
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_polymorphic_universal(node)
     cap = node.capabilities.first
@@ -3413,14 +3317,8 @@ class MIRLowering
   def emit_snapshot_mutable_call(node, with_label)
     snap_caps = node.capabilities || []
     body_mir = lower_body(node.body)
-    # MVCC L8-followup + True-Sync-Polymorphism (#330): ON <Conflict>
-    # RETRY(N) THEN <action>. The runtime's Versioned.update /
-    # AtomicPtr.update already retries up to MAX_UPDATE_RETRIES (64
-    # for Versioned, 256 for AtomicPtr) on inner CAS contention. The
-    # user's RETRY(N) wraps the whole call in an OUTER retry loop --
-    # when the inner budget exhausts and surfaces error.UpdateRetriesExhausted
-    # (Versioned) or error.AtomicConflict (AtomicPtr), the outer loop
-    # tries N more times before running THEN.
+    # User RETRY(N) wraps the whole snapshot call; runtime update helpers
+    # already do their own inner CAS retry budget.
     retries = node.lock_error_clause&.dig(:retries)
     alloc_zig = "#{@rt_name}.heapAlloc()"
 
@@ -3437,10 +3335,8 @@ class MIRLowering
       source_unwrap = with_match_unwrap_value(T.must(source_zig))
       st = cap[:resolved_type].is_a?(Type) ? cap[:resolved_type] : Type.new(cap[:resolved_type])
       bare_t_zig = st.bare_data_type.zig_type
-      # AtomicPtr M3.6 + #330: detect @indirect:atomic so the emitter
-      # picks the right Zig error name (AtomicConflict vs
-      # UpdateRetriesExhausted) and the conflict_action emits the
-      # right ErrorName for the setError call.
+      # AtomicPtr commits surface AtomicConflict; Versioned commits surface
+      # MvccConflict.
       sym = var_node.symbol
       is_atomic_ptr = sym && sym.sync == :atomic && sym.layout == :indirect
       conflict_error = is_atomic_ptr ? :AtomicConflict : :MvccConflict
@@ -3460,9 +3356,8 @@ class MIRLowering
         safe_alias = T.let(zig_safe_name(alias_name), T.untyped)
         "const #{safe_alias} = views[#{i}]; _ = &#{safe_alias};"
       }.join("\n            ")
-      # Multi-cell SNAPSHOT is Versioned-only -- AtomicPtr multi-cell
-      # is blocked by #333 (no portable multi-pointer CAS). So the
-      # conflict action always uses MvccConflict for this branch.
+      # Multi-cell SNAPSHOT is Versioned-only because AtomicPtr has no
+      # portable multi-pointer CAS.
       conflict_action = emit_conflict_action_zig(
         node.lock_error_clause, with_label, node, :MvccConflict,
       )
@@ -3473,19 +3368,9 @@ class MIRLowering
     end
   end
 
-  # MVCC L6.2 + True-Sync-Polymorphism (#324 / #330): emit the Zig
-  # statements for the user's `ON <Conflict> <action>` clause.
-  # Mirrors `emit_lock_action_zig` but uses `ErrorName.<conflict_error>`
-  # (kind :Transient) as the error label. The conflict_error name
-  # picks per cell family: :MvccConflict for @versioned commits,
-  # :AtomicConflict for @indirect:atomic CAS-loop exhaustion (#330).
-  # RETRY semantics for SNAPSHOT-transactions are NOT honored here --
-  # the runtime already retries up to MAX_UPDATE_RETRIES (64 for
-  # Versioned, 256 for AtomicPtr); once that budget exhausts we
-  # surface the conflict and run the user action. `nil` clause
-  # shouldn't happen for a SNAPSHOT-mutable WITH (the policy
-  # synthesis in #328 always provides one), but defensively rethrow
-  # if it does.
+  # Emit the user's snapshot-conflict action using the conflict error chosen
+  # for the cell family. Retry loops are handled around the transaction call,
+  # not inside this action.
   sig { params(clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(String) }
   def emit_conflict_action_zig(clause, with_label, with_node, conflict_error = :MvccConflict)
     line = with_node.token&.line.to_s
@@ -4527,8 +4412,7 @@ class MIRLowering
       lines << file_scope_types if file_scope_types && !file_scope_types.strip.empty?
       lines << "const #{node.namespace} = struct {\n#{indented}\n};"
       # Opaque: body comes from a completed separate transpile pass (mod.transpiled_body).
-      # Decomposition requires threading MIR through the module-importer pipeline
-      # (separate, larger refactor from Phase 2). Justified in RAW_JUSTIFIED_REASONS.
+      # Decomposition requires threading MIR through the module-importer pipeline.
       raw = MIR::RawZig.new(lines.join("\n"), "require_local_module_opaque",
         { consumes: [], produces: [], borrows: [] })
 
@@ -4838,35 +4722,17 @@ class MIRLowering
                zig_safe_name(node.name)
     ident = MIR::Ident.new(zig_name)
 
-    # Atomics M1.5: a read of an `@shared:atomic` binding lowers to an
-    # atomic load. M1 layout is `Arc(Atomic(T))`, so we dereference
-    # through `.ctrl.data` to reach the inner Atomic primitive. M2 will
-    # drop the Arc and this becomes `c.load()` directly.
-    #
-    # Skipped when @atomic_emit_raw is set -- the auto_atomic compound
-    # rewrite path needs the raw cell reference (without a load wrapping)
-    # to invoke `fetchAdd` / `store` etc. on the same cell.
-    #
-    # Atomics M1.7: also skipped when the annotator stamped atomic_borrow
-    # on the node (fn-arg position whose param expects ATOMIC). The
-    # caller passes the cell ref so the callee body can dispatch via
-    # @hasDecl probes per family. The callee's anytype param accepts
-    # whichever shape lands.
+    # Atomic reads normally lower to `.load()`, but raw emission and
+    # atomic-borrow call sites need the cell reference itself.
     if node.symbol&.sync == :atomic && !@atomic_emit_raw
       return ident if node.atomic_borrow
-      # AtomicPtr M3.5: @indirect:atomic uses the WITH SNAPSHOT
-      # surface (read returns a Guard via cell.read(rt), MUTABLE
-      # body wraps in cell.update(rt, ..., closure)). The bare
-      # identifier reference IS the cell pointer; the WITH wrapper
-      # adds the .read() call. Skip the auto-`.load()` path here --
-      # AtomicPtr has no `.load()` method (the bare Atomic(T) does;
-      # AtomicPtr(T) doesn't).
+      # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
+      # cell pointer and AtomicPtr has no `.load()` method.
       if node.symbol&.layout == :indirect
         return ident
       end
-      # Atomics M2.2: bare Atomic(T) — call .load() directly on the
-      # binding. M1's `.ctrl.data.load()` indirection is gone since
-      # there's no Arc wrap.
+      # Dereference bare atomic cells before loading; AtomicPtr reads use the
+      # snapshot path above.
       return MIR::MethodCall.new(MIR::Deref.new(ident), "load", [], false)
     end
 
@@ -5917,10 +5783,8 @@ class MIRLowering
     zig_base = transpile_type(base_type)
     alloc = :heap
 
-    # AtomicPtr M3.5: @indirect:atomic on a STRUCT lowers to
-    # `atomicPtrCreate` -> `*CheatLib.AtomicPtr(T)`, distinct from the
-    # primitive @atomic path which uses `atomicCreate` -> `*Atomic(T)`.
-    # Both share the bare-pointer ownership (no outer Arc/Rc wrap).
+    # AtomicPtr and primitive Atomic use different constructors but both use
+    # bare-pointer ownership without an outer Arc/Rc wrapper.
     is_atomic_ptr = node.sync == :atomic && node.layout == :indirect
     sync_fn = case node.sync
               when :locked then "lockedCreate"
@@ -5936,13 +5800,8 @@ class MIRLowering
                 when :versioned then "CheatLib.Versioned(#{zig_base})"
                 when :atomic then (is_atomic_ptr ? "CheatLib.AtomicPtr(#{zig_base})" : "CheatLib.Atomic(#{zig_base})")
                 end
-    # Atomics M2.2: @shared:atomic drops the Arc wrap. The Atomic
-    # cell IS thread-safe; Arc was only there for lifetime extension,
-    # and M2.3's BG-handle lifetime stamp + M2.6's escape audit make
-    # pointer-capture safe without an outer refcount.
-    # AtomicPtr M3.5 inherits the same drop -- the AtomicPtr cell
-    # internally owns an Arc-managed payload, so an outer Arc would
-    # double-wrap.
+    # Atomic cells are already thread-safe; AtomicPtr also owns an
+    # Arc-managed payload internally, so an outer Arc/Rc would double-wrap.
     own_fn = case node.ownership
              when :shared then (node.sync == :atomic ? nil : "arcCreate")
              when :multiowned then (node.sync == :atomic ? nil : "rcCreate")
@@ -6061,9 +5920,7 @@ class MIRLowering
   # Returns the wrapped MIR node (typically MIR::CapWrap).
   sig { params(inner_mir: T.any(MIR::ContainerInit, MIR::StructInit), bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.any(MIR::CapWrap, MIR::ContainerInit, MIR::StructInit)) }
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
-    # AtomicPtr M3.5: see lower_cap_wrap above. Same is_atomic_ptr
-    # branch -- @indirect:atomic wraps via atomicPtrCreate, primitive
-    # @atomic wraps via atomicCreate.
+    # AtomicPtr and primitive Atomic use distinct constructors.
     is_atomic_ptr = ft.sync == :atomic && ft.layout == :indirect
     sync_fn = case ft.sync
               when :locked         then "lockedCreate"
@@ -6079,10 +5936,8 @@ class MIRLowering
               when :versioned      then "CheatLib.Versioned(#{bare_zig_t})"
               when :atomic         then (is_atomic_ptr ? "CheatLib.AtomicPtr(#{bare_zig_t})" : "CheatLib.Atomic(#{bare_zig_t})")
               end
-    # Atomics M2.2: same Arc-drop rule as in lower_cap_wrap. `@shared:
-    # atomic` / `@multiowned:atomic` produce a bare Atomic(T); the
-    # ownership-wrap step is skipped because pointer-capture on a
-    # scope-bounded atomic is now safe (M2.3 + M2.6).
+    # Atomic wrappers skip the ownership wrap; the cell is the shareable
+    # synchronization object.
     own_fn  = case ft.ownership
               when :shared      then (ft.sync == :atomic ? nil : "arcCreate")
               when :multiowned  then (ft.sync == :atomic ? nil : "rcCreate")
@@ -6108,12 +5963,8 @@ class MIRLowering
     is_mutable ||= ft.any_sync?
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
-    # True-Sync-Polymorphism Gate 3: a plain T binding whose address
-    # is taken at a universally-polymorphic call site needs Zig `var`
-    # storage even when the local-mutation analyzer would otherwise
-    # flip it to `const`. Without this, &binding produces *const T,
-    # which doesn't unify with the body's `*T` parameter and the
-    # mutation never reaches the caller.
+    # Plain T bindings borrowed by reference need Zig `var`; otherwise
+    # &binding produces *const T and the callee cannot write back.
     is_mutable = true if node.symbol&.poly_borrow_target || node.symbol&.mutable_ref_target
 
     # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
@@ -6130,11 +5981,8 @@ class MIRLowering
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           ft.heap_provenance? || ft.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
-    # A binding whose address is taken by a MUTABLE param or universal-poly
-    # call site MUST emit Zig `var` so &binding is
-    # *T (not *const T). The local-mutation analyzer would otherwise
-    # downgrade this to `const` when the binding is only "field-mutated"
-    # via the callee body -- which is invisible to var_mutated.
+    # Borrowed-by-reference bindings force Zig `var` even when local mutation
+    # analysis only sees field mutation through the callee.
     by_ref_borrow = node.symbol&.mutable_ref_target == true || node.symbol&.poly_borrow_target == true
     keyword_mutable = if !is_mutable
       false
@@ -6360,11 +6208,8 @@ class MIRLowering
       end
       result
     else
-      # Atomics M1.5: when the annotator stamped auto_atomic_op, emit a
-      # method call on the atomic cell instead of a plain Set. Bypasses
-      # the regular value-lowering for compound forms (the desugared
-      # `c = c + n` would otherwise emit a load+store race; the auto-
-      # atomic path emits `c.fetchAdd(n)` directly).
+      # Atomic compound assignments must emit cell methods; the desugared
+      # load+store form would race.
       if node.auto_atomic_op
         return lower_atomic_assignment(node)
       end
@@ -6376,7 +6221,7 @@ class MIRLowering
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
       # Consult @do_capture_map so a reassignment to a captured /
       # promoted local rewrites the LHS to the appropriate ctx-field
-      # reference (FSM Phase B2 promotion).
+      # reference.
       mapped = @do_capture_map && @do_capture_map[node.name]
       value = lower(node.value)
       value = copy_container_borrow_if_needed(value, node.value)
@@ -6390,15 +6235,14 @@ class MIRLowering
     end
   end
 
-  # Atomics M1.5: emit `cell.<op>(arg)` for an @shared:atomic assignment.
-  # The annotator stamped `auto_atomic_op` based on shape:
+  # Emit `cell.<op>(arg)` for atomic assignments. The annotator stamped
+  # `auto_atomic_op` based on shape:
   #   `c = v`       (compound_op nil)        -> :store    -> cell.store(v)
   #   `c += n`      (compound_op :ADD)       -> :fetchAdd -> cell.fetchAdd(n)
   #   `c -= n`      (compound_op :SUB)       -> :fetchSub -> cell.fetchSub(n)
   #
-  # `cell` is the M1 Arc-unwrap (`c.ctrl.data`); M2 will collapse that to
-  # plain `c` once the layout drops the Arc. The compound forms grab the
-  # operand from the desugared BinaryOp's right side (parser desugared
+  # Compound forms grab the operand from the desugared BinaryOp's right side
+  # (parser desugared
   # `c += n` to `c = c + n`, so node.value.right is `n`). The plain
   # form passes node.value as-is.
   sig { params(node: AST::BindExpr).returns(MIR::ExprStmt) }
@@ -6407,22 +6251,15 @@ class MIRLowering
     target_name = node.name.is_a?(String) ? node.name : node.name.name
     safe = zig_safe_name(target_name)
     safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
-    # Atomics M1.7: a mutable scalar param (`MUTABLE c: Int64` w/ REQUIRES
-    # c: ATOMIC) is renamed to `_m_c` in the Zig signature and the prologue
-    # shadows it as `var c = _m_c;` only when the body REFERENCES `c` in
-    # an Identifier. A bare-write (`c = v`) doesn't qualify, so the shadow
-    # may be absent. Resolve through the param mangling explicitly.
+    # A bare write to a mutable scalar atomic param may not create the usual
+    # shadow variable, so resolve through param mangling explicitly.
     if @current_fn_mutable_scalar_params&.include?(target_name)
       safe = "_m_#{target_name}"
     end
     mapped = @do_capture_map && @do_capture_map[target_name]
     target_ident = MIR::Ident.new(mapped || safe)
-    # Atomics M2.2: bare Atomic(T) — dereference the bare cell pointer
-    # before calling the method. Zig 0.16 does not auto-deref far enough
-    # for `(*AtomicInt).fetchAdd`; `cell.*.fetchAdd(...)` is the stable
-    # shape for both bindings and atomic params.
-    # `.ctrl.data.fetchAdd(...)` indirection is gone since there's no
-    # Arc wrap.
+    # Dereference the bare cell pointer before calling the method; Zig does
+    # not auto-deref far enough for these atomic operations.
     cell = MIR::Deref.new(target_ident)
 
     arg_ast = if node.compound_op
@@ -6461,7 +6298,7 @@ class MIRLowering
     target = if node.name.is_a?(String)
       # Consult @do_capture_map so an assignment to a captured /
       # promoted local rewrites the LHS to the appropriate
-      # ctx-field reference (FSM Phase B2 promotion).
+      # ctx-field reference.
       mapped = @do_capture_map && @do_capture_map[node.name]
       MIR::Ident.new(mapped || zig_safe_name(node.name))
     else
@@ -7311,8 +7148,7 @@ class MIRLowering
       zig_type = ret_field_promote[:zig_type]
       stmts = T.let([MIR::Let.new("__ret", value, true, nil, nil)], T::Array[T.untyped])
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
-      # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
-      # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
+      # fields of __ret.
       stmts << MIR::AllocMark.new("__ret", :heap, nil)
       # ErrCleanup: if any promote call fails, free partially-promoted fields.
       # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
@@ -7411,13 +7247,9 @@ class MIRLowering
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end
 
-  # True-Sync-Polymorphism Gate 3: detect a call-site auto-borrow.
-  # The callee has REQUIRES set to Set[] for this param (universal
-  # polymorphism via WITH POLYMORPHIC) and the arg is a plain T
-  # binding -- no @local/@multiowned/@shared/Locked/Versioned/... that
-  # the polymorphicMutate helper would already unwrap to a pointer.
-  # In that case we emit `&arg` so the body's mutation flows back
-  # through the pointer instead of into a local pass-by-value copy.
+  # Detect call-site auto-borrow for universal polymorphism. Plain T args
+  # need `&arg`; wrapped/sync args are already pointer-like or unwrapped by
+  # the polymorphic helper.
   sig { params(arg_node: T.untyped, callee_sig: T.untyped, idx: Integer).returns(T::Boolean) }
   def universal_poly_arg_needs_addr?(arg_node, callee_sig, idx)
     return false unless callee_sig.is_a?(FunctionSignature)

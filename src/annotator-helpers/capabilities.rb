@@ -110,10 +110,8 @@ module CapabilityHelper
     nil
   end
 
-  # AtomicPtr M3.5: read the :layout axis (`:indirect` for
-  # `@indirect:atomic`) off either the SymbolEntry (canonical) or the
-  # node's full_type (fallback when symbol isn't bound yet, e.g.
-  # GetField paths). Mirrors cap_var_sync / cap_var_storage.
+  # Read layout from the SymbolEntry when available, or from full_type before
+  # symbol binding has completed. Mirrors cap_var_sync / cap_var_storage.
   sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
   def cap_var_layout(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -139,10 +137,8 @@ module CapabilityHelper
     when :EXCLUSIVE
       syn = cap_var_sync(var_node)
       unless syn
-        # P1.7: defer the check for function parameters. Their entry.sync
-        # may still be nil here because EscapeAnalysis.propagate_caller_sync!
-        # hasn't run yet — it runs at the end of annotate!. Locals (non-
-        # params) error eagerly because no propagation will fix them.
+        # Function parameters may not have propagated sync yet; locals error
+        # eagerly because no later propagation can fix them.
         if var_node.symbol&.is_param
           @deferred_with_validations << {
             node: node, var_node: var_node, capability: :EXCLUSIVE
@@ -185,18 +181,15 @@ module CapabilityHelper
       # No special validation needed beyond the identity check above.
 
     when :VIEW
-      # Observables Phase 2.3 + 2.8: source MUST be a tense observable
-      # type. When it isn't, emit a fixable error proposing
-      # `WITH MATERIALIZED VIEW` (always-correct, O(N)) as :auto and
-      # the @observable annotation as :interactive.
+      # VIEW requires a tense observable source; MATERIALIZED VIEW is the
+      # always-correct fallback for non-observable tense aggregates.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future? && t.observable?
         emit_view_not_observable_finding!(node, var_node, t)
       end
 
     when :MATERIALIZED_VIEW
-      # Observables Phase 2.4 placeholder: any tense aggregate is allowed
-      # (observable or not). Reject non-tense sources with a clear message.
+      # Any tense aggregate is allowed; non-tense sources are rejected.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future?
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
@@ -204,13 +197,8 @@ module CapabilityHelper
       end
 
     when :SNAPSHOT
-      # MVCC L5: source MUST be `T@versioned` (sync == :versioned)
-      # OR (AtomicPtr M3.5) `T@indirect:atomic` (sync == :atomic AND
-      # layout == :indirect). Both share the WITH SNAPSHOT surface --
-      # read returns a Guard, MUTABLE wraps the body in an
-      # update/CAS-loop. Per-cap dispatch happens at lowering time
-      # (mir_lowering's `:SNAPSHOT` branch) and via the with_match_
-      # unwrap helper at zig-emit time.
+      # Versioned cells and indirect atomic cells share the WITH SNAPSHOT
+      # surface; lowering chooses the Guard or update/CAS path per capability.
       syn = cap_var_sync(var_node)
       lay = cap_var_layout(var_node)
       atomic_ptr_ok = syn == :atomic && lay == :indirect
@@ -257,9 +245,7 @@ module CapabilityHelper
       end
 
     when :ATOMIC
-      # Atomics M1.7: source MUST be sync == :atomic (either a concrete
-      # @shared:atomic local, or a param seeded by REQUIRES c: ATOMIC).
-      # Polymorphic params may have entry.sync nil at this stage; defer.
+      # Polymorphic params may not have sync propagated yet; defer those checks.
       syn = cap_var_sync(var_node)
       unless syn == :atomic
         if var_node.symbol&.is_param && syn.nil?
@@ -667,23 +653,13 @@ module CapabilityHelper
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
                          when syn == :versioned         then :SNAPSHOT
-                         # Atomics M1.7: @shared:atomic / REQUIRES c: ATOMIC
-                         # bindings get a non-blocking ATOMIC capability. The
+                         # Atomic bindings get a non-blocking ATOMIC capability. The
                          # WITH body (or per-arm prelude) binds the alias to
                          # the cell ref directly so atomic ops can be invoked.
                          when syn == :atomic            then :ATOMIC
-                         # #336: WITH POLYMORPHIC on a non-sync binding
-                         # (@local / @multiowned / plain T -- syn is nil
-                         # or :local; storage is :local / :multiowned /
-                         # :stack). Auto-promote to a no-op alias so
-                         # the body can read (and, when the binding is
-                         # mutable, write) through `*T`. Mutable bindings
-                         # land on :RESTRICT with alias_mutable=true;
-                         # immutable bindings land on :BORROWED. The
-                         # lowering's :RESTRICT-no-sync / :BORROWED
-                         # branches emit `const x = &c;` (or the
-                         # comptime probe for poly params) -- no Guard,
-                         # no Arc unwrap, no snapshot.
+                         # WITH POLYMORPHIC on a non-sync binding becomes a
+                         # no-op alias so the body can read, and when mutable
+                         # write, through `*T` without a Guard/Arc/snapshot.
                          when (node.respond_to?(:polymorphic) && node.polymorphic) &&
                               (syn.nil? || syn == :local) &&
                               (storage.nil? || storage == :local ||
@@ -714,13 +690,9 @@ module CapabilityHelper
     # their use sites (visit_Identifier read, visit_BindExpr atomic store /
     # fetchAdd) since atomic primitives don't go through WITH.
     #
-    # Atomics M1.6.5: for WITH MATCH (polymorphic) form, defer effect
-    # recording to per-arm tracking so the family-specific prelude effects
-    # (BLOCKING for LOCKED, none for ATOMIC, CONTENTION-only for
-    # VERSIONED) collapse correctly into concrete + ?-form. The outer
-    # cap.capability defaults to :EXCLUSIVE here only because the seeded
-    # param sync resolves to LOCKED — but the actual runtime path
-    # depends on which arm fires.
+    # WITH MATCH defers effect recording to per-arm tracking so family-specific
+    # prelude effects collapse correctly; the actual runtime path depends on
+    # which arm fires.
     if node.respond_to?(:arms) && node.arms
       # WITH MATCH form: per-arm recording in visit_WithBlock handles it.
     else
@@ -785,11 +757,8 @@ module CapabilityHelper
     # Sync may live on the binding (Identifier path) or on the field's
     # declared type (GetField path) — cap_var_sync covers both.
     syn = cap_var_sync(cap[:var_node])
-    # P1.7: a WITH EXCLUSIVE / write_locked_read on a parameter whose sync
-    # has not yet been propagated should still declare its inner alias.
-    # Propagation runs after annotation; the deferred WITH validation will
-    # error later if sync stays nil. Optimistically declaring the alias
-    # avoids a misleading "Undefined variable 'inner'" cascade.
+    # Parameters without propagated sync still declare their inner aliases; the
+    # deferred validation emits the real error later if sync stays nil.
     deferred_param = source_entry&.is_param && syn.nil? &&
       (cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read)
     is_field = cap[:var_node].is_a?(AST::GetField)
@@ -1115,11 +1084,9 @@ module CapabilityHelper
 
           # Collect capture for code generation (type_info + close pattern).
           # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
-          # Atomics M1.7: for sync == :atomic bindings, the use-site type_info
-          # has been narrowed to the bare inner T (load semantics) — but the
-          # BG ctx needs the FULL Arc(Atomic(T)) shape so the captured cell
-          # ref stays the same identity across fibers. Fall back to the
-          # SymbolEntry's type when sync == :atomic.
+          # Atomic reads narrow type_info to the bare inner T, but BG captures
+          # need the full cell shape so the captured ref keeps identity across
+          # fibers.
           unless result.captures.key?(name)
             cap_type = info.sync == :atomic ? info.type : node.type_info
             result.captures[name] = cap_type
@@ -1161,12 +1128,8 @@ module CapabilityHelper
           # Non-shared striped maps (@sharded(N):locked without @shared) MUST be pinned
           # because the map is affine-owned and concurrent access without Arc is unsafe.
           is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
-          # Atomics M1.8: @shared:atomic is self-synchronizing too — every
-          # access goes through hardware atomic ops on the shared cache
-          # line. Pinning would defeat the point (cross-thread parallel
-          # increments are the whole reason to pick @shared:atomic over
-          # @local). Skip has_shared so the BG stays eligible for work
-          # stealing across schedulers.
+          # @shared:atomic is self-synchronizing; pinning would defeat the
+          # cross-thread parallelism that atomic storage is meant to allow.
           is_atomic = info.sync == :atomic
           unless is_dashmap || is_atomic
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local

@@ -926,13 +926,9 @@ pub const CheatLib = struct {
         return ptr;
     }
 
-    /// AtomicPtr M3.5 -- allocate `*AtomicPtr(T)` on the heap, init
-    /// it by publishing an initial heap-allocated `T` snapshot,
-    /// return the cell pointer. Mirrors `atomicCreate` for the
-    /// struct case (`T@indirect:atomic`). The cell publishes whole-T
-    /// snapshots via atomic pointer swap (lock-free Rust arc-swap
-    /// rcu semantics). The CLEAR codegen calls this for
-    /// `c = ... @indirect:atomic`.
+    /// Allocate `*AtomicPtr(T)` on the heap by publishing an initial
+    /// heap-allocated `T` snapshot. The cell publishes whole-T snapshots via
+    /// atomic pointer swap.
     pub const AtomicPtr = @import("../lib/atomic_ptr.zig").AtomicPtr;
     pub fn atomicPtrCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*@import("../lib/atomic_ptr.zig").AtomicPtr(T) {
         const APT = @import("../lib/atomic_ptr.zig").AtomicPtr(T);
@@ -940,10 +936,8 @@ pub const CheatLib = struct {
         cell.* = try APT.init(alloc, data);
         return cell;
     }
-    /// AtomicPtr M3.5 -- tear down a `*AtomicPtr(T)` cell. Retires
-    /// the currently-published `*T` via EBR (deferred-free until
-    /// every active epoch drains -- safe even if a reader is in the
-    /// middle of `read()`) and destroys the cell struct.
+    /// Tear down a `*AtomicPtr(T)` cell, retiring the currently-published
+    /// `*T` through EBR before destroying the cell.
     pub fn atomicPtrDestroy(comptime T: type, rt: *Runtime, alloc: std.mem.Allocator, cell: *@import("../lib/atomic_ptr.zig").AtomicPtr(T)) void {
         cell.deinit(rt, alloc) catch {};
         alloc.destroy(cell);
@@ -2317,7 +2311,6 @@ pub const CheatLib = struct {
         try target.submitSpawn(trampoline_addr, user_fn, args, config);
     }
 
-    // TODO: When does this get cleaned up?
     pub fn spawnThread(sys_allocator: std.mem.Allocator, frame_size: usize, global_ctx: *EbrContext, comptime func: anytype, args: anytype) !std.Thread {
         // We don't call 'func' directly. We call the wrapper.
         // We pass the config + the function + the args TO the wrapper.
@@ -2332,7 +2325,7 @@ pub const CheatLib = struct {
         return ptr;
     }
 
-    // Polymorphic free: TODO: do this in the transpiler
+    // Polymorphic free for runtime-owned values.
     pub fn free(rt: *Runtime, item: anytype) void {
         const T = @TypeOf(item);
 
@@ -2959,13 +2952,8 @@ pub const CheatLib = struct {
             return;
         }
 
-        // Atomics M2.2: bare pointer-to-Atomic(U). After dropping the
-        // Arc wrap from `@shared:atomic`, the binding holds a heap-
-        // allocated `*Atomic(U)` returned by atomicCreate. Cleanup
-        // is just `alloc.destroy(ptr.*)`. Detected at comptime via
-        // the pointer-to-struct-with-`cmpxchgStrong`-decl shape; the
-        // three Atomic primitives (AtomicInt / AtomicFloat /
-        // AtomicBool) all expose that.
+        // Bare pointer-to-Atomic(U). Atomic bindings hold a heap-allocated
+        // `*Atomic(U)`, so cleanup just destroys that cell.
         if (comptime blk: {
             const ti = @typeInfo(T);
             if (ti != .pointer or ti.pointer.size != .one) break :blk false;
@@ -2977,12 +2965,9 @@ pub const CheatLib = struct {
             return;
         }
 
-        // AtomicPtr M3.5: pointer-to-AtomicPtr(U) cell. The cell owns
-        // the currently-published `*U` (allocated by atomicPtrCreate /
-        // updates via Self.update); cleanup must (a) recursively
-        // clean the inner U's owned heap fields (strings, slices,
-        // nested unions, ...) via the same generic `cleanup()` shim,
-        // (b) destroy the inner *U, (c) destroy the AtomicPtr cell.
+        // Pointer-to-AtomicPtr(U) cell. Cleanup must recursively clean the
+        // published U's owned heap fields, destroy the inner *U, then destroy
+        // the AtomicPtr cell.
         //
         // The runtime EBR retire path (`AtomicPtr.deinit`) needs a
         // `*ThreadLocalEbr` to defer the inner free; cleanup() runs
@@ -3273,7 +3258,7 @@ pub const CheatLib = struct {
         // `return value` for any type with a deinit method -- the caller got
         // a shallow ArrayList header pointing at the original's buffer, and
         // freeing one would dangling-pointer the other (the COPY @list bug
-        // 258). Uses T's own initCapacity / appendAssumeCapacity so it works
+        // copy). Uses T's own initCapacity / appendAssumeCapacity so it works
         // for any std.ArrayListUnmanaged-shaped struct (the same shape
         // isArrayList accepts).
         if (comptime isArrayList(T)) {

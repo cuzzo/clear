@@ -18,7 +18,7 @@
 # `Scope.live_param_syms(fn)` first. See the doc comment on
 # `Scope#initialize_copy` for the full rationale.
 #
-# Lifetime model (Atomics M2.1 unification — see docs/agents/atomics.md §8):
+# Lifetime model:
 #
 # CLEAR has one lifetime mechanism on a binding: `lifetime`. The model
 # answers a single question at every use site: "where is this binding
@@ -46,7 +46,7 @@
 #                              foo's lifetime is, the returned value
 #                              inherits it. If foo itself has a tied
 #                              lifetime, the chain is followed.
-#                          (b) BG / DO / CONCURRENT capture (M2.3) —
+#                          BG / DO / CONCURRENT capture —
 #                              the spawned handle gets `{ sources:
 #                              [each captured @shared:atomic / borrow
 #                              binding] }`. The handle is free to
@@ -82,7 +82,7 @@ class SymbolEntry
                                  # no `reg` — also record their mutation.
                 :invalid_reason, :resource, :close_zig, :read,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
-                :scope_depth,    # Atomics M2.6: declaring scope depth (0 = root)
+                :scope_depth,    # declaring scope depth (0 = root)
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
                 :takes,          # true if parameter declared with TAKES (callee owns)
                 :is_param,       # true when entry was declared as a function parameter
@@ -92,19 +92,16 @@ class SymbolEntry
                                    # auto-fix at the parameter when the body
                                    # mutates it without `MUTABLE`.
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
-                :lifetime,       # Atomics M2.1: nil | :current_scope | { source: SymbolEntry }
+                :lifetime,       # nil | :current_scope | { source: SymbolEntry }
                 :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF
-                :sync_families,  # Set of families when bound by REQUIRES disjunction (ATOMICS M1.6.5)
-                :layout,         # AtomicPtr M3.1: nil | :indirect — heap-pinned cell with stable address
+                :sync_families,  # Set of families when bound by REQUIRES disjunction
+                :layout,         # nil | :indirect — heap-pinned cell with stable address
                 :mutable_ref_target, # This binding is passed to a MUTABLE parameter by reference.
                                      # Forces Zig `var` storage so &binding yields *T, not *const T.
-                :poly_borrow_target  # True-Sync-Polymorphism Gate 3: this binding has its address taken
-                                     # at a universally-polymorphic call site. Forces the var_decl
-                                     # to emit `var` (mutable Zig storage) so &binding yields *T, not
-                                     # *const T -- otherwise the polymorphic body's mutation can't
-                                     # write through to the caller's binding.
+                :poly_borrow_target  # address is taken at a universal-polymorphic call site;
+                                     # forces mutable Zig storage so the callee can write back.
 
-  # Atomics M2.1: backward-compat alias for `lifetime == :current_scope`.
+  # Backward-compat alias for `lifetime == :current_scope`.
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,
   # annotator visit_*, escape_analysis) read and write this; both paths
   # delegate to `lifetime` so there's a single source of truth.
@@ -122,8 +119,8 @@ class SymbolEntry
     end
   end
 
-  # Atomics M2.1: uniform accessor for the source list regardless of
-  # the lifetime's shape. Walkers (escape checker, BG-capture lifetime
+  # Uniform accessor for the source list regardless of the lifetime's shape.
+  # Walkers (escape checker, BG-capture lifetime
   # propagation, RETURN value validation) iterate this without needing
   # to case on the lifetime variant. Returns:
   #
@@ -142,10 +139,8 @@ class SymbolEntry
     end
   end
 
-  # Atomics M2.1 (M2.3 producer): build a tied lifetime from a non-
-  # empty Array of source SymbolEntries. Empty / nil input returns nil
-  # (unconstrained), so callers can pass through the result of
-  # collecting captured bindings without a guard.
+  # Build a tied lifetime from source SymbolEntries. Empty / nil input returns
+  # nil so callers can pass collected captures through without a guard.
   sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def self.tied_lifetime(sources)
     return nil if sources.nil? || sources.empty?

@@ -1,16 +1,16 @@
 # typed: strict
 require "sorbet-runtime"
-# P2.4 / P2.5 / P2.6: validation of REQUIRES + WITH MATCH at the function
-# level + call-site family check.
+# Validation of REQUIRES + WITH MATCH at the function level and call-site
+# family check.
 #
 # Two structural rules, enforced once per function after annotation:
 #
-#   1. WITH-on-param ⇒ REQUIRES-on-param
+#   WITH-on-param ⇒ REQUIRES-on-param
 #      A WITH (any form) that binds a parameter requires the function to
 #      name that parameter in REQUIRES. Capability flow stops at the WITH
 #      boundary; the constraint must be authored.
 #
-#   2. REQUIRES↔WHEN exhaustiveness
+#   REQUIRES↔WHEN exhaustiveness
 #      For a WITH MATCH form, the set of WHEN-arm families must exactly
 #      equal the family disjunction in REQUIRES for the bound parameters.
 #      No missing arm; no extra arm; no default.
@@ -20,18 +20,15 @@ require "sorbet-runtime"
 module WithMatchCheck
     extend T::Sig
 
-  # True-Sync-Polymorphism (#326): each REQUIRES family expands to a set of
-  # storage axes. A REQUIRES disjunction is "polymorphic" when its union
-  # admits more than one axis -- the WITH body must lower via comptime
-  # `@hasDecl` dispatch in that case (#328 lowering). Per design doc,
-  # LOCKED and SNAPSHOTTED are poly; VERSIONED and ATOMIC are mono.
+  # Each REQUIRES family expands to storage axes. A disjunction is
+  # polymorphic when its union admits more than one axis, which requires
+  # comptime dispatch in the WITH body.
   FAMILY_AXES = T.let({
     LOCKED:      Set[:locked, :write_locked].freeze,
     SNAPSHOTTED: Set[:versioned, :atomic].freeze,
     VERSIONED:   Set[:versioned].freeze,
     ATOMIC:      Set[:atomic].freeze,
-    # #336: non-sync umbrella. The three axes correspond to the three
-    # admissible bindings: @local, @multiowned, and plain T (no sigil).
+    # Non-sync bindings split into @local, @multiowned, and plain T axes.
     # All three lower to direct field access; the axis split exists
     # so the polymorphic-iff-rule sees LOCAL as poly (3 > 1) and the
     # body must use WITH POLYMORPHIC. Concrete-binding callers are
@@ -59,25 +56,19 @@ module WithMatchCheck
 
     AST.walk_body(fn.body) do |node|
       next unless node.is_a?(AST::WithBlock)
-      # Observables: WITH VIEW / WITH MATERIALIZED VIEW are reads on
-      # an `@observable` source -- not lock acquisitions -- so the
-      # LOCKED auto-shim must NOT fire here. The shim's purpose is
-      # to bridge pre-Phase-2 lock-using code; observable view blocks
-      # are unrelated.
+      # WITH VIEW / WITH MATERIALIZED VIEW are reads on an `@observable`
+      # source, not lock acquisitions, so the LOCKED auto-shim must not fire.
       next if node.view_kind
 
       bound_params = collect_bound_param_names(node, param_names)
 
-      # True-Sync-Polymorphism (#326): polymorphic-iff rule.
       # WITH POLYMORPHIC is REQUIRED when the bound binding's REQUIRES
       # admits more than one storage axis; REJECTED otherwise. Applies
       # only to plain WITH (the WITH MATCH form has its own per-arm
-      # dispatch and is being phased out in #332). VIEW / SNAPSHOT / etc
-      # have their own paths that don't go through plain WITH.
+      # dispatch). VIEW and SNAPSHOT have their own paths.
       enforce_polymorphic_iff_rule!(node, bound_params, requires_map, fn,
                                     error_handler) unless node.arms
 
-      # True-Sync-Polymorphism (#327): polymorphic-warning surface.
       # For WITH POLYMORPHIC blocks, project the admissible-family
       # error set and warn on errors that no handler covers (per-WITH
       # ON or program SYNC POLICY).
@@ -88,15 +79,9 @@ module WithMatchCheck
       bound_params.each do |pname|
         next if requires_map.key?(pname)
 
-        # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC` on a no-
-        # REQUIRES param is universally polymorphic — admits every
-        # sync family. Stamp `fn.requires[p] = Set[]` (empty) so the
-        # call-site check accepts every caller without falling
-        # through to the LOCKED auto-shim. Empty-Set means "no
-        # specific family is required", which is what universal
-        # polymorphism means. Also stamp the WithBlock so the
-        # lowering can route to the comptime-dispatched mutate
-        # helper without re-deriving the universal status.
+        # `WITH POLYMORPHIC` on a param without REQUIRES is universally
+        # polymorphic. Empty Set means no specific family is required and lets
+        # call-site checks accept every caller without hitting the LOCKED shim.
         if node.polymorphic
           requires_map[pname] = Set.new
           fn.requires ||= {}
@@ -113,8 +98,8 @@ module WithMatchCheck
           next
         end
 
-        # P2.7: compatibility shim. Pre-Phase-2 source that uses WITH on a
-        # parameter without declaring REQUIRES is auto-upgraded to
+        # Compatibility shim: source that uses WITH on a parameter without
+        # declaring REQUIRES is auto-upgraded to
         # `REQUIRES <pname>: LOCKED`. A deprecation note surfaces so the
         # migration is visible. The shim will be removed in a future release.
         if warn_handler
@@ -125,8 +110,8 @@ module WithMatchCheck
             "Add the clause explicitly to silence this warning; the shim " \
             "will be removed in a future release.")
           requires_map[pname] = Set[:LOCKED]
-          # Also stamp on fn.requires so downstream readers (P2.6 call-site
-          # check, FunctionSignature) see the inferred clause.
+          # Also stamp fn.requires so call-site checks and FunctionSignature
+          # see the inferred clause.
           fn.requires ||= {}
           fn.requires[pname] = Set[:LOCKED]
         else
@@ -184,7 +169,7 @@ module WithMatchCheck
     out
   end
 
-  # True-Sync-Polymorphism (#326). Per-WITH polymorphic-iff rule:
+  # Per-WITH polymorphic-iff rule:
   #
   #   - WITH POLYMORPHIC is REQUIRED when any bound param's REQUIRES
   #     admits more than one storage axis (`poly_requires?` true).
@@ -197,9 +182,8 @@ module WithMatchCheck
   #     the user to "either be specific (drop POLYMORPHIC) or broaden
   #     REQUIRES to a polymorphic family."
   #
-  # The check only runs for plain WITH (skipped for WITH MATCH, VIEW,
-  # MATERIALIZED VIEW, SNAPSHOT — those have their own dispatch shapes;
-  # WITH MATCH itself is being phased out in #332 in favor of POLYMORPHIC).
+  # The check only runs for plain WITH. WITH MATCH, VIEW, MATERIALIZED VIEW,
+  # and SNAPSHOT have their own dispatch shapes.
   sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], fn: AST::FunctionDef, error_handler: Proc).returns(T.untyped) }
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
@@ -207,12 +191,9 @@ module WithMatchCheck
 
     has_poly_param = bound_params.any? { |p| poly_requires?(requires_map[p]) }
 
-    # True-Sync-Polymorphism Gate 3: a parameter with NO REQUIRES is
-    # universally polymorphic — it admits every sync family. Treat
-    # this case as `has_poly_param` for the WITH POLYMORPHIC branch
-    # (so the unified `tick!(c: Counter)` body is accepted), but
-    # leave the plain-WITH branch alone so the legacy LOCKED
-    # auto-shim path (no REQUIRES + plain WITH) keeps working.
+    # A parameter without REQUIRES is universally polymorphic. Treat it as
+    # polymorphic only for WITH POLYMORPHIC so the plain-WITH LOCKED shim keeps
+    # working.
     has_universal_poly_param = bound_params.any? { |p|
       !requires_map.key?(p) || (requires_map[p]&.empty?)
     }
@@ -238,23 +219,14 @@ module WithMatchCheck
     end
   end
 
-  # P2.6: at every FuncCall in `fn`, verify each REQUIRES'd arg's binding
-  # belongs to one of the families in the callee's disjunction.
-  #
-  # @param fn [AST::FunctionDef]
-  # @param sig_lookup [Proc] name → FunctionSignature (or nil)
-  # @param error_handler [Proc] (node, msg) → raises CompilerError
+  # At every FuncCall in `fn`, verify each REQUIRES'd arg's binding belongs to
+  # one of the families in the callee's disjunction.
   sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).returns(T.nilable(T::Array[T.untyped])) }
   def self.check_call_sites!(fn, sig_lookup, error_handler)
     return unless fn.respond_to?(:body) && fn.body
 
-    # True-Sync-Polymorphism Gate 3: walk every FuncCall in the body
-    # (including those nested in expressions like `tick!(c) OR EXIT`)
-    # and stamp poly_borrow_target on plain-T args bound to universal-
-    # poly params. The symbol flag flows to lower_var_decl, which
-    # forces Zig `var` so &c yields *T (not *const T) -- otherwise the
-    # polymorphicMutate body's mutation can't write back through the
-    # pointer.
+    # Plain-T args passed to universal-poly params must be lowered as Zig `var`
+    # so &c yields *T instead of *const T and polymorphicMutate can write back.
     deep_funcalls(fn.body).each do |call_node|
       sig = sig_lookup.call(call_node.name.to_s)
       next unless sig.is_a?(FunctionSignature) && sig.requires
@@ -310,7 +282,7 @@ module WithMatchCheck
   # LOCKED    = mutex / rwlock / refcell -- the lock-based path.
   # VERSIONED = MVCC Versioned(T) -- the lock-free snapshot path.
   # ATOMIC    = single-cell Atomic(T) -- the lock-free single-cell path.
-  # ACTOR / LOCK_FREE remain reserved for future phases.
+  # ACTOR / LOCK_FREE remain reserved.
   LOCKED_SYNCS    = T.let(%i[locked write_locked always_mutable].to_set.freeze, T::Set[Symbol])
   VERSIONED_SYNCS = T.let(%i[versioned].to_set.freeze, T::Set[Symbol])
   ATOMIC_SYNCS    = T.let(%i[atomic].to_set.freeze, T::Set[Symbol])
@@ -322,9 +294,9 @@ module WithMatchCheck
     return :LOCKED    if LOCKED_SYNCS.include?(sym.sync)
     return :VERSIONED if VERSIONED_SYNCS.include?(sym.sync)
     return :ATOMIC    if ATOMIC_SYNCS.include?(sym.sync)
-    # #336: non-sync bindings (plain T, @local, @multiowned) are all
-    # in the LOCAL family. The body lowers to direct alias access at
-    # comptime via the no-op WITH POLYMORPHIC path.
+    # Non-sync bindings (plain T, @local, @multiowned) are all in the LOCAL
+    # family. The body lowers to direct alias access through the no-op
+    # WITH POLYMORPHIC path.
     #   - @local       -> sym.sync == :local
     #   - @multiowned  -> sym.storage == :multiowned (sync nil)
     #   - plain T      -> sym.sync nil + storage stack/heap (no shared)
@@ -336,11 +308,8 @@ module WithMatchCheck
     nil
   end
 
-  # True-Sync-Polymorphism (#326): does the REQUIRES disjunction admit
-  # this concrete arg-family? SNAPSHOTTED is the umbrella family that
-  # admits {VERSIONED, ATOMIC}; LOCKED admits :LOCKED at the family
-  # level (the storage-axis split between :locked / :write_locked is
-  # below the family abstraction). Other families are exact-match.
+  # SNAPSHOTTED is the umbrella family for VERSIONED and ATOMIC; LOCKED admits
+  # :LOCKED at the family level. Other families are exact-match.
   sig { params(disjunction: T::Set[Symbol], arg_family: Symbol).returns(T::Boolean) }
   def self.disjunction_admits?(disjunction, arg_family)
     (disjunction || []).any? { |f|
@@ -350,8 +319,7 @@ module WithMatchCheck
     }
   end
 
-  # Atomics M1.6.5 + #326: return the SET of families an arg's binding
-  # could be in.
+  # Return the set of families an arg's binding could be in.
   # For a concrete @shared:atomic / :locked / :versioned binding, returns a
   # singleton set ({:ATOMIC} / {:LOCKED} / {:VERSIONED}).
   # For a parameter constrained by a multi-family REQUIRES disjunction
@@ -384,10 +352,9 @@ module WithMatchCheck
     out
   end
 
-  # True-Sync-Polymorphism (#327): per-storage-axis error projection.
+  # Per-storage-axis error projection.
   # Each axis can surface a fixed set of errors at the WITH boundary.
-  # Used by the polymorphic-warning surface (errors_for_polymorphic_with)
-  # and by future call-site error collapsing (#329).
+  # Used by the polymorphic-warning surface and call-site error collapsing.
   AXIS_ERRORS = T.let({
     locked:        Set[:LockTimeout].freeze,
     write_locked:  Set[:LockTimeout].freeze,

@@ -117,16 +117,11 @@ class SemanticAnnotator
     @in_auto_locked_assign = T.let(nil, T.nilable(String))
     @with_block_depth = T.let(0, Integer)
 
-    # Phase 2 lock analysis storage (keyed by fn name). Hooked in
-    # visit_WithBlock / user-fn-call visitors; cycle-checked as a
-    # post-pass after @call_graph is complete.
+    # Lock analysis is cycle-checked after @call_graph is complete.
     init_lock_analysis!
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = T.let(false, T::Boolean)
-    # P1.7: WITH validations on parameter bindings are deferred to a
-    # post-annotation pass so EscapeAnalysis.propagate_caller_sync! has a
-    # chance to populate sync from callers' arg bindings first. Each entry:
-    # { node:, var_node:, capability:, kind: :exclusive | :write_locked_read }
+    # WITH validations on parameter bindings need caller-sync propagation first.
     @deferred_with_validations = T.let([], T::Array[T.untyped])
     @predicate_call_sites = T.let([], T::Array[T.untyped])
     # Tracks remaining statements in current body for forward reference analysis
@@ -149,21 +144,13 @@ class SemanticAnnotator
     # parallel, multi-program test harness) doesn't leak in. Stdlib
     # types are preserved.
     AST.reset_user_types!
-    @program = T.let(node, T.nilable(AST::Program))  # #327: WithMatchCheck reads node.sync_policy below.
+    @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     visit(node)
-    # Auto / gradual-typing inference (gradual-typing.md M1.7).
-    # After the body walk has populated `type_info` on every
-    # constraint-source AST node, run Pass B (collector) + Pass C
-    # (unifier) to resolve Auto slots. Resolved slots have their decl
-    # types mutated to concrete; unresolved / ambiguous slots emit
-    # fixable findings via M1.4 helpers. Runs BEFORE the downstream
-    # analyses (effect inference, with-match check) so they see
-    # finalized signatures.
+    # Resolve Auto slots before downstream analyses so they see finalized
+    # signatures and concrete declaration types.
     run_auto_inference!(node) if program_has_auto?(node)
-    # P1.7: now that all bodies are annotated and arg.symbol is wired at
-    # every call site, propagate caller sync into callee param entries.
-    # Then re-check the WITH validations that we deferred during the body
-    # walk; any param whose entry.sync is still nil is a genuine error.
+    # Caller sync depends on annotated call-site args, so propagate it after
+    # the body walk and before replaying deferred WITH validations.
     EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
     # Single authority for BG capture-strategy facts. Runs AFTER
     # propagate_caller_sync! (so SymbolEntry stamps are final) and
@@ -174,18 +161,14 @@ class SemanticAnnotator
     # of each re-deriving with their own walker (the divergence class
     # of bug fixed in 378036a0 / 1522e534).
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: ->(t) { lookup_type_schema(t) rescue nil })
-    # P3.2: infer per-function effects (yield/alloc_heap/io/fail) and
-    # propagate transitively through the call graph.
     EffectInference.analyze!(@fn_nodes)
     err = ->(n, msg) { error!(n, :EFFECT_INFERENCE_VIOLATION, message: msg) }
     warn = ->(n, msg) { note!(n, msg) }
     sig_lookup = ->(name) {
       @scope_stack.first.locals[name]&.type
     }
-    # P2.4 / P2.5 / P2.7 first: validates per-fn REQUIRES ↔ WITH and
-    # auto-fills `fn.requires` for legacy code via the deprecation shim.
-    # #327: pass the program-level SYNC POLICY handlers so the
-    # polymorphic-warning surface knows what's already covered.
+    # Pass the program policy so polymorphic warnings don't duplicate
+    # handling already covered by SYNC POLICY.
     policy_handlers = @program&.sync_policy
     @fn_nodes.each_value { |fn|
       WithMatchCheck.check_function!(fn, err, warn_handler: warn,
@@ -197,12 +180,9 @@ class SemanticAnnotator
       sig = @scope_stack.first.locals[name]&.type
       sig.requires = fn.requires if sig.is_a?(FunctionSignature)
     end
-    # P2.6: call-site family check now runs against finalized REQUIRES.
     @fn_nodes.each_value { |fn| WithMatchCheck.check_call_sites!(fn, sig_lookup, err) }
-    # P3.3-3.5: compile-time concurrency checks (hold-across-yield,
-    # naked-nested-WITH, reentrant). The lock_ranks registry exempts
-    # @locked(rank: N) sites from P3.4 — those are governed by the
-    # pre-existing rank-DAG analysis instead.
+    # Rank-annotated locks are checked by the rank-DAG analysis, not the
+    # pattern-based naked-nested-WITH check.
     ConcurrencyChecks.check_all!(@fn_nodes, sig_lookup, err,
                                  lock_ranks: @lock_type_ranks || {})
     # Residual deferred WITH validations (any param whose sync is still
@@ -213,68 +193,44 @@ class SemanticAnnotator
 
 private
 
-  # M1.7 — Auto / gradual-typing inference pipeline. Runs Pass B
-  # (collect constraint sources) and Pass C (unify, resolve, emit
-  # diagnostics) after the body walk has populated type_info on
-  # every constraint source. Mutates decl types in place — Auto
-  # Types become concrete after a successful resolution.
-  #
-  # M2.1 layers an operator-evidence collector that scans body
-  # BinaryOp expressions for hints; ambiguity / unresolved findings
-  # consult this evidence to offer ranked candidate fixes.
+  # Auto inference runs after the body walk has populated type_info on
+  # every constraint source. It mutates successful Auto declarations to
+  # concrete types and uses operator evidence to rank ambiguous fixes.
   sig { params(program_node: AST::Program).returns(T.untyped) }
   def run_auto_inference!(program_node)
     collector = AutoConstraintCollector.new(@fn_nodes)
     slots = collector.collect!(program_node)
     return if slots.empty?
 
-    # M2.2: forward-flow evidence for shape-tagged slots from empty
-    # `[]` / `{}` initializers. Walks each fn body for `.append(e)`
-    # / `x[k] = v` patterns and records the operands as constraint
-    # sources on the matching shape slot.
+    # Empty `[]` / `{}` initializers need forward-flow evidence from later
+    # appends and index writes before unification can pick an element type.
     ShapeEvidenceCollector.new(slots, @fn_nodes).collect!
 
-    # M2.1: collect operator hints from BinaryOps over Auto-binding
-    # operands. Used by ambiguity / unresolved finding builders.
     op_evidence = OperatorEvidenceCollector.new(slots, @fn_nodes).collect!
 
     unifier = AutoUnifier.new(slots)
     result = unifier.resolve!
 
-    # M2.2: stamp paired `:map_key` + `:map_value` resolutions into a
-    # joint `HashMap<K, V>` type on the binding's decl.
     unifier.stamp_map_pairs!(result.resolved)
 
     # Resolved slots: emit :info findings with :auto fix (replace
     # the Auto keyword span with the resolved type's source form).
-    # M2.2: shape slots are skipped by emit_auto_resolved_finding!
-    # (per-sub-slot fixes would write the scalar where the wrapped
-    # container type belongs). The shape-aware emission below
-    # produces one finding per fully-resolved shape-tracked decl.
+    # Shape slots emit one binding-level finding; per-sub-slot fixes would
+    # write a scalar type where the container type belongs.
     result.resolved.each_value { |resolution| emit_auto_resolved_finding!(resolution) }
     emit_auto_shape_resolved_findings!(result.resolved)
 
-    # Ambiguous slots: emit :error findings with the ranked Option 1/
-    # 2/3 text plus operator-derived candidates (M2.1).
     result.ambiguous.each_value { |ambiguity|
       emit_auto_ambiguity_finding!(ambiguity, op_evidence: op_evidence)
     }
 
-    # Unresolved slots: emit :error findings. M2.1 attaches ranked
-    # candidates from operator evidence when the body uses the
-    # binding in BinaryOp expressions. M2.2: shape sub-slots
-    # (map_key / map_value / list_element) emit per-sub-slot
-    # unresolved findings so the user knows which half is missing.
     result.unresolved.each_value { |slot|
       emit_auto_unresolved_finding!(slot, op_evidence: op_evidence)
     }
   end
 
-  # M2.2 — One :info finding per shape-tracked decl whose type was
-  # successfully wrapped (list_element resolved → `T[]`; map pair
-  # both resolved → `HashMap<K,V>`). Groups by decl_node so map
-  # pairs produce a single binding-level message instead of two
-  # confusing per-sub-slot ones.
+  # Shape-tracked decls produce one binding-level message so HashMap key/value
+  # inference does not surface as two unrelated sub-slot findings.
   sig { params(resolved_slots: T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]).returns(T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]) }
   def emit_auto_shape_resolved_findings!(resolved_slots)
     seen = {}
@@ -314,9 +270,8 @@ private
     false
   end
 
-  # P1.7: replay each deferred WITH-on-param check now that caller-sync
-  # propagation has had a chance to populate entry.sync. If a param's sync
-  # is still nil, fire the original eager error.
+  # Replay deferred WITH-on-param checks after caller-sync propagation has
+  # had a chance to populate entry.sync.
   sig { returns(T::Array[T.untyped]) }
   def flush_deferred_with_validations!
     @deferred_with_validations.each do |d|
@@ -404,66 +359,45 @@ private
 
   sig { params(node: AST::Program).returns(T.untyped) }
   def visit_Program(node)
-    # PASS 0: Process REQUIRE statements — import symbols from required files
-    # before any types or functions in this file are registered.
+    # Imports must be available before local types or functions are registered.
     node.statements.each do |stmt|
       visit_RequireNode(stmt) if stmt.is_a?(AST::RequireNode)
     end
 
-    # PASS 1: Hoist Types (StructDefs, ExternStructDecl, EnumDef, UnionDef)
-    # Register all type definitions first so they can be used in function signatures.
+    # Types are registered before function signatures can reference them.
     node.statements.each do |stmt|
       visit(stmt) if stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::ExternStructDecl) ||
                      stmt.is_a?(AST::EnumDef)   || stmt.is_a?(AST::UnionDef)
     end
 
-    # PASS 2: Hoist Function Signatures (FunctionDef + ExternFnDecl)
-    # Register function signatures in the global scope.
-    # This allows functions to call other functions defined later in the file.
+    # Function signatures are hoisted so functions can call later definitions.
     node.statements.each do |stmt|
       pre_register_function(stmt) if stmt.is_a?(AST::FunctionDef)
       visit_ExternFnDecl(stmt)    if stmt.is_a?(AST::ExternFnDecl)
     end
 
-    # PASS 2.5: Validate union method requirements.
-    # All function signatures are now registered; check that required methods exist.
-    # Methods with default bodies that have no concrete override are synthesized here.
+    # Union default methods are synthesized only after all function signatures
+    # are known.
     @synthetic_fns = []
     node.statements.each do |stmt|
       next unless stmt.is_a?(AST::UnionDef) && stmt.methods&.any?
       validate_union_methods!(stmt)
     end
-    # Pre-register synthesized default functions so Pass 3 bodies can call them.
+    # Pre-register synthesized defaults so user bodies can call them.
     @synthetic_fns.each { |fn| pre_register_function(fn) }
 
-    # PASS 2.6: Bridge legacy `@reentrant` and new `EFFECTS REENTRANT`
-    # into a canonical `fn_node.reentrance_kind` field, and validate
-    # every `REQUIRES <name>: NON_REENTRANT` clause names a real
-    # parameter. Runs after Pass 2 (so @fn_nodes is fully populated)
-    # and BEFORE Pass 3 (so visit_FunctionDef's recursion check sees
-    # the back-filled legacy attrs when only EFFECTS REENTRANT was
-    # declared). See annotator-helpers/reentrance.rb.
+    # Bridge legacy `@reentrant` and new `EFFECTS REENTRANT` after
+    # @fn_nodes is populated and before function bodies are checked.
     bridge_reentrance!(node)
 
-    # PASS 2.9: Seed the error-type registry from every RAISE site that
-    # provides both a kind and a type. This pre-pass means CATCH Type
-    # clauses can reference types registered by later-in-source RAISE
-    # sites (source order independence). Collision diagnostics still
-    # point at the first-seen site since register_type! records the
-    # token.
+    # Seed before body analysis so CATCH Type clauses can reference error
+    # types registered by later-in-source RAISE sites.
     seed_error_types_from_raises!(node)
 
-    # PASS 2.95: True-Sync-Polymorphism (#325). Validate any
-    # `SYNC POLICY START ... END` block (single-instance, main-file-only,
-    # completeness, inline-only-error guard). Stamps node.sync_policy
-    # with the resolved policy (user-written or baked-in default) so
-    # later passes can read a single source of truth.
+    # Stamps the resolved SYNC POLICY, user-written or default, so later
+    # passes read a single source of truth.
     validate_and_resolve_sync_policy!(node)
 
-    # PASS 3: Analyze Logic
-    # Visit all statements in order.
-    # - VarDecls will be registered here (linear scoping).
-    # - FunctionDefs will be visited "fully" here (analyzing their bodies).
     node.statements.each do |stmt|
       # Skip nodes already processed in earlier passes.
       next if stmt.is_a?(AST::StructDef)    || stmt.is_a?(AST::RequireNode) ||
@@ -480,75 +414,51 @@ private
       node.statements << fn
     end
 
-    # PASS 4: Indirect reentrancy cycle detection.
-    # Now that all function bodies have been analyzed and @call_graph is complete,
-    # detect mutually-recursive function groups and require @reentrant or @nonReentrant.
+    # Indirect recursion needs the complete call graph.
     check_indirect_reentrancy!
 
-    # PASS 4.1a (F1): NOT_LOGICAL static-recursion validation.
     # Reject `:reentrant_not_logical` on a function the call-graph
     # proves is reachable from itself; nudge toward `:THUNK` /
     # `:MAX_DEPTH(N)` instead.
     validate_not_logical_recursion!
 
-    # PASS 4.1b (F4): MAX_DEPTH-mutual-cycle warning. A `:MAX_DEPTH`
-    # fn caught in a mutual cycle silently demotes to ':unbounded'
-    # tier; warn so the user can pick the actual fix.
+    # A `:MAX_DEPTH` fn in a mutual cycle demotes to ':unbounded'; warn
+    # so the user can choose an explicit fix.
     validate_max_depth_mutual_cycle!
 
-    # PASS 4.1: Thunk recursion validation. Distinguishes between
-    # not-recursive-at-all, directly-self-recursive, and
-    # mutually-recursive `:reentrant_thunk` functions. Mutual
-    # recursion needs tagged-union frames -- not yet implemented;
-    # error with a precise forward-pointing message so users know
-    # to refactor to direct self-recursion or use plain
-    # 'EFFECTS REENTRANT' for now.
+    # Mutual thunk recursion needs tagged-union frames; until then, report
+    # a precise error instead of falling into incorrect codegen.
     validate_thunk_recursion!
 
-    # PASS 5: Compute needs_rt and can_fail for every function via call-graph fixed-point.
     compute_needs_rt!
     compute_can_fail!
 
-    # PASS 5a (post-#334): enforce Zig-style fallible-signature discipline.
-    # Every fn whose call-graph fixed-point determined `can_fail = true`
-    # must declare its return type as an error union (`RETURNS !T`).
-    # The check runs AFTER compute_can_fail! so transitive fallibility
-    # is captured -- a fn that calls a fallible callee inherits the
-    # requirement.
+    # Transitive fallibility is known only after compute_can_fail!, so
+    # error-union return declarations are enforced here.
     enforce_fallible_returns!
 
-    # PASS 5b: Functions referenced as fn-type values must match the fn-pointer calling
-    # convention (*Runtime, params) !return. Mark them needs_rt=true so their signatures
-    # are compatible with the fn-type Zig type emitted by type.rb#zig_type.
+    # Function values must match the fn-pointer calling convention emitted
+    # by type.rb#zig_type.
     mark_fn_value_references!(node)
 
-    # PASS 6: Compute effect sets for every function via call-graph fixed-point.
     compute_effects!
     validate_predicate_purity!
 
-    # PASS 6a: FSM Phase A — classify each function for stackless-fsm
-    # compilation, enumerate suspend points, and tag every BG block with
-    # spawn_form (:fsm / :stackful). Phase A only records metadata; the
-    # emitter still produces stackful spawns. Phase B consumes this data.
+    # FSM metadata is computed before lock-cycle and stack analysis so spawn
+    # form and suspend points are available to later passes.
     compute_fsm_eligibility!
     enumerate_fsm_suspend_points!
     classify_bg_spawn_form!(node)
 
-    # PASS 6b: Static lock-cycle / self-deadlock detection. Propagates
-    # lock acquires through @call_graph, synthesizes held-while-calling
-    # edges, then runs SCC over the global held->acquired graph and
-    # reports any cycles.
+    # Lock-cycle detection needs propagated held-while-calling edges.
     check_lock_cycles!
 
-    # PASS 7: Compute stack tier recommendations per function.
     compute_stack_tiers!
 
-    # PASS 8: Auto-size fiber spawns (BG/DO blocks) from call-graph analysis.
     assign_fiber_stack_tiers!(node)
 
-    # PASS 9: Copy computed metadata to FunctionSignature objects in scope.
-    # This allows callers to read needs_rt, can_fail, return_provenance from
-    # the signature without needing @fn_nodes.
+    # Copy computed metadata to FunctionSignature objects so callers don't
+    # need direct access to @fn_nodes.
     @fn_nodes.each do |name, fn|
       sig = fn.full_type
       # Unwrap Type objects that wrap a FunctionSignature (e.g. @reentrant functions
@@ -714,8 +624,6 @@ private
     )
   end
 
-  # TODO: Implement return_strategy for lambdas
-  # TODO: Implement force heap for USE
   # Unifies analysis for callables (Functions and Lambdas).
   # Handles scope entry, parameter/capture declaration, body analysis, 
   # cleanup generation, and return-type inference.
@@ -798,9 +706,8 @@ private
       record_effect(EffectTracker::REENTRANT)
       case node.reentrant
       when :non_reentrant
-        # F1 (NOT_LOGICAL) gets a specific compile-time error from
-        # `validate_not_logical_recursion!` in PASS 4.1a, so skip the
-        # legacy phrasing here.
+        # NOT_LOGICAL gets a specific compile-time error from
+        # `validate_not_logical_recursion!`, so skip the legacy phrasing here.
         # MAX_DEPTH on direct self-recursion is FINE -- the runtime
         # depth counter is exactly the mechanism that bounds it; the
         # legacy "Use @reentrant" message would mislead. The cycle-
@@ -817,23 +724,16 @@ private
           hint: "Add `EFFECTS REENTRANT` to the function signature to allow this.")
       end
 
-      # Tail call validation: if @reentrant:tailCall, verify the self-call is in tail position.
       if node.tail_call
         validate_tail_call!(node)
       end
 
-      # Thunk Phase 4b/4c: :reentrant_thunk handling. The bridge
-      # sets node.tail_call = true for tail-recursive :THUNK fns so
-      # the line above handles them via the existing TailCall MIR
-      # emission. Non-tail :THUNK lands here -- Phase 4c detects the
-      # simple-recurrence pattern (factorial-shape); Phase 4d will
-      # land the Zig codegen. Until then, the error message reports
-      # whether the splitter recognized the shape so users can plan.
+      # Tail-recursive :THUNK uses the existing tail-call lowering; non-tail
+      # thunks need a splitter plan before MIR lowering can synthesize the
+      # trampoline body.
       if node.reentrance_kind == :reentrant_thunk && !node.tail_call
         plan = ThunkTransform::RecursiveSplitter.split(node.body, node.name, self)
         if plan
-          # Phase 4d: shape recognized -- stamp the plan so MIR
-          # lowering can synthesize the trampoline body.
           node.thunk_plan = plan
         else
           error!(node, :REENTRANCE_THUNK_NON_TAIL, name: node.name, hint: "a shape this phase does not yet recognize. Supported: simple " \
@@ -886,7 +786,7 @@ private
     if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
       # Resolve each parsed clause to a { kind, error_names } pair the
       # lowering can emit directly. Validates every type against the
-      # registry (seeded by PASS 2.9) and rejects kind mismatches.
+      # registry and rejects kind mismatches.
       node.catch_clauses.each { |c| resolve_catch_clause!(c) }
 
       # Collect snapshot types from pipeline steps for typed snapshot access
@@ -909,9 +809,8 @@ private
       end
 
       # CATCH wrappers heap-dupe all string returns (both success and catch paths).
-      # Post-#338: a fallible String fn declares `RETURNS !String`; the outer
-      # Type isn't string?-true (the error union is), so unwrap the payload
-      # before classifying.
+      # A fallible String return is an error union, so unwrap the payload
+      # before classifying string-return ownership.
       ret_type = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
       bare_ret = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
                     ret_type.respond_to?(:payload_type)
@@ -953,10 +852,8 @@ private
     end
   end
 
-  # True-Sync-Polymorphism (#325). The set of errors a SYNC POLICY
-  # block must handle. Deadlock and LockCycle are deliberately absent
-  # -- those are inline-only (the user must handle them at the WITH
-  # site, never via a default policy).
+  # Deadlock and LockCycle are deliberately absent because they must be
+  # handled at the WITH site, never via a default policy.
   SYNC_POLICY_REQUIRED_ERRORS = %i[LockTimeout MvccConflict AtomicConflict].freeze
   # Errors that may NEVER appear in a SYNC POLICY block.
   SYNC_POLICY_INLINE_ONLY_ERRORS = %i[Deadlock LockCycle].freeze
@@ -1044,25 +941,10 @@ private
     end
   end
 
-  # True-Sync-Polymorphism (#329): project the callee fn's full !T
-  # error union down to only the errors this specific call site can
-  # surface, given the actual-family set of each REQUIRES'd arg.
-  # Returns a Set<Symbol> of error type names (e.g., :MvccConflict).
-  #
-  # Mechanism: for each parameter constrained by REQUIRES, find the
-  # actual arg's family SET at the call site (via family_of_arg_set,
-  # which returns the disjunction for polymorphic params and a
-  # singleton for concrete bindings; SNAPSHOTTED is expanded to
-  # {VERSIONED, ATOMIC}). For each family in the set, look up its
-  # storage axes (FAMILY_AXES) and project each axis's error set
-  # (AXIS_ERRORS). The union over all REQUIRES'd args is the
-  # collapsed error set at this call site.
-  #
-  # Forwarding: when a polymorphic fn `a` (REQUIRES b: VERSIONED)
-  # forwards `b` to a broader `c` (REQUIRES b: SNAPSHOTTED), the
-  # inner call's collapsed_errors reflects `a`'s narrower constraint
-  # ({:MvccConflict}, NOT the full {:MvccConflict, :AtomicConflict}).
-  # Concrete bindings narrow further to a single axis.
+  # Project a callee's full !T error union down to only the errors this
+  # call site can surface. Forwarded polymorphic args keep the caller's
+  # narrower family constraint instead of widening to the callee's full
+  # REQUIRES set.
   sig { params(sig: FunctionSignature, args: T::Array[T.untyped]).returns(T::Set[Symbol]) }
   def collapse_errors_for_call(sig, args)
     require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
@@ -1084,15 +966,8 @@ private
     collapsed
   end
 
-  # True-Sync-Polymorphism (#328): policy chain — for a WITH that
-  # didn't get a per-WITH `ON <Error> ...` handler, look up the
-  # matching handler in the program-level SYNC POLICY and synthesize
-  # a clause shape compatible with the existing emit pipeline. The
-  # baked-in default is always stamped on `Program#sync_policy`, so
-  # this returns a non-nil clause for any of the three policy errors
-  # (LockTimeout / MvccConflict / AtomicConflict). Returns nil only
-  # for inline-only errors (Deadlock / LockCycle), which by design
-  # never have a policy-level handler.
+  # Synthesize the same clause shape as a per-WITH handler so emission can
+  # use one path. Inline-only errors intentionally have no policy fallback.
   sig { params(error_name: Symbol).returns(T.untyped) }
   def synthesize_clause_from_policy(error_name)
     handlers = @program&.sync_policy
@@ -1104,12 +979,8 @@ private
     }
   end
 
-  # PASS 3 visitor: SyncPolicyDecl is validated up front in
-  # validate_and_resolve_sync_policy! (PASS 2.95), so the PASS 3
-  # walk is a no-op. This visitor exists so the AST walker doesn't
-  # silently skip the node. The action bodies for `:block`-action
-  # handlers (`ON X -> { stmts }`) ARE visited here so types in
-  # those bodies get annotated.
+  # SyncPolicyDecl is validated up front. This visitor keeps the AST walker
+  # explicit and visits block-action handler bodies so their types are annotated.
   sig { params(node: AST::SyncPolicyDecl).returns(T::Array[T.untyped]) }
   def visit_SyncPolicyDecl(node)
     (node.handlers || []).each do |clause|
@@ -2280,7 +2151,6 @@ private
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
 
-    # 1. Lifetime Tracking
     verify_return(node.value)
     verify_tied_return!(node)
 
@@ -2288,20 +2158,13 @@ private
     actual_full = return_value_type(node.value)
     expected = current_fn_ctx.return_type
 
-    # 2. Move marking: returning a non-Copy value moves it out of the function.
-    # Set was_moved so the transpiler emits _moved = true before return.
     if node.value.is_a?(AST::Identifier)
       vti = node.value.type_info
       if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         node.value.was_moved = true
       end
-      # Atomics M2.6: a `RETURN <ident>` where the value is a future
-      # (~T) consumes the promise -- the caller now owns it. Mark the
-      # binding as moved in the OG so the existing finalize_scope
-      # "promise must be consumed" check (annotator.rb:4765) sees the
-      # consumption. Without this, ANY function that returns a `~T`
-      # binding errors at scope-end before the return-lifetime check
-      # gets a chance to run. Mirrors NEXT's `og_set_moved` (line ~4388).
+      # Returning a future consumes the promise; otherwise scope finalization
+      # reports it as unconsumed before return-lifetime checks can run.
       vt = vti.is_a?(Type) ? vti : (vti ? Type.new(vti) : nil)
       if vt&.future?
         og_set_moved(node.value.name, at_token: node.value.token, action: :return)
@@ -2343,11 +2206,8 @@ private
       end
     end
 
-    # Gradual-typing tolerance: if either the expected (declared)
-    # return or the actual (computed) return is an unresolved Auto,
-    # skip the strict-equality check. The unifier (Pass C) resolves
-    # both ends after the body walk; mismatch surfaces when the
-    # resolved decl gets re-validated downstream.
+    # Auto returns are resolved after the body walk, so strict equality here
+    # would reject valid programs before the unifier has run.
     actual_is_auto = actual_full.respond_to?(:auto?) && actual_full.auto?
     expected_obj   = expected.is_a?(Type) ? expected : (expected ? Type.new(expected) : nil)
     expected_is_auto = expected_obj.is_a?(Type) && expected_obj.auto?
@@ -2535,7 +2395,6 @@ private
       promote_to_expr_match!(node, arg) if arg.is_a?(AST::MatchStatement)
     }
 
-    # Handle "native_call" special case
     if node.name == "native_call"
       node.full_type = :Any
       return
@@ -2549,39 +2408,27 @@ private
     # to SUSPENDS_LOOP; likewise for conditional.
     record_call_site(node.name) if node.name.is_a?(String)
 
-    # Atomics M1.6.5: stamp per-arg family on the FuncCall so the
-    # transitive-effect propagation can resolve callee ?-form effects
-    # (CONTENTION_MAYBE / BLOCKING_MAYBE) to concrete or null based on
-    # what the caller actually passes. family_of_arg_set returns a Set of
-    # families: size 1 = concrete; size > 1 = polymorphic param (REQUIRES
-    # disjunction); empty Set = no sync attribute on the arg.
+    # Effect propagation needs the actual sync family passed at each call
+    # site so ?-form effects can collapse to concrete effects or no effect.
     if node.args && !node.args.empty? && node.name.is_a?(String)
       require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
       arg_family_sets = node.args.map { |a| WithMatchCheck.family_of_arg_set(a) }
       node.arg_families = arg_family_sets
       record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
 
-      # True-Sync-Polymorphism (#329): collapse the callee's !T error
-      # union to only the errors the actually-passed bindings can
-      # surface. Per design: if `tick` has REQUIRES x: SNAPSHOTTED
-      # (admits {MvccConflict, AtomicConflict}) and the caller passes
-      # `@versioned`, this call site sees only {:MvccConflict}.
+      # Error unions narrow at the call site based on the actual binding
+      # families, not just the callee's declared family set.
       sig = @scope_stack.first.locals[node.name]&.type if node.name.is_a?(String)
       if sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
         node.collapsed_errors = collapse_errors_for_call(sig, node.args)
       end
 
-      # True-Sync-Polymorphism Gate 3 plain-T auto-borrow stamping
-      # lives in WithMatchCheck.check_call_sites! (runs after
-      # universal-poly REQUIRES is finalized) so we don't need to
-      # duplicate it here.
+      # Plain-T auto-borrow stamping waits for finalized REQUIRES in
+      # WithMatchCheck.check_call_sites!.
     end
 
-    # Phase 2: when this call happens inside a held WITH scope and targets
-    # a user-defined function, record a held->callee site so the post-pass
-    # can add (held, T) edges for every T the callee transitively acquires.
-    # Uses the Array-of-Hash @held_lock_types shape so opted_out flows
-    # through to synthesized edges.
+    # Held-lock call sites become graph edges after callee lock acquires have
+    # propagated through the call graph.
     if @held_lock_types && !@held_lock_types.empty? && @fn_nodes.key?(node.name)
       fn_name = current_fn_ctx&.name || "<top>"
       record_held_call!(fn_name, node.name, @held_lock_types, node.token)
@@ -2770,27 +2617,21 @@ private
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
-    # Atomics M2.3: tie BG-handle lifetimes (see visit_BindExpr).
-    # Walks the value to find BG blocks anywhere — direct, or buried
-    # in struct literals — so a tied lifetime propagates through
-    # structural construction.
+    # Walk the value so BG-handle lifetimes propagate through structural
+    # construction, not just direct BG initializers.
     stamp_bg_handle_lifetime!(node)
   end
 
   # Shared declaration body used by visit_VarDecl and the declaration path of
   # visit_BindExpr. mutable_flag is node.mutable for VarDecl and false for BindExpr
   # (BindExpr declarations are immutable by default).
-  # Pipeline-terminal observable detection (Commit 3 of the
-  # observable wiring). When the bind site has shape:
+  # Pipeline-terminal observable detection. When the bind site has shape:
   #
   #   running: ~Int64@observable = stream |> SUM _;
   #
-  # Phase 2.2 already stamped `observable_terminal = true` on the
-  # pipe BinaryOp. Here we lift the pipe's apparent type from
-  # scalar (`Int64`) to the LHS type (`~Int64@observable`) so the
-  # subsequent `coerce!` check passes, and stamp `observable_dest`
-  # so pipeline_generator.rb (Commit 4) emits the accumulator path
-  # instead of an inline fold.
+  # The pipe's apparent scalar type has to be lifted to the LHS observable
+  # type so coerce! accepts the assignment and codegen chooses the
+  # accumulator path instead of an inline fold.
   sig { params(node: T.untyped).returns(T.nilable(Type)) }
   def promote_pipe_to_observable_dest!(node)
     return unless node.respond_to?(:type) && node.type
@@ -2854,16 +2695,10 @@ private
     validate_type_annotation!(node, node.type) if node.type
     validate_stream_type!(node)
 
-    # Pipeline-terminal observable: when LHS is `~T@observable` and
-    # RHS is a fold-pipe whose source is a tense stream (Phase 2.2's
-    # `observable_terminal` stamp), promote the pipe's apparent type
-    # to match the LHS so coerce! accepts the assignment. The
-    # `observable_dest` flag tells pipeline_generator.rb to emit the
-    # accumulator-and-fiber codegen path (Commit 4).
     promote_pipe_to_observable_dest!(node)
 
-    # I1: an `~T@observable` binding has no usable shape unless it was
-    # initialized by a fold-pipe over a tense stream -- the
+    # An `~T@observable` binding has no usable shape unless it was
+    # initialized by a fold-pipe over a tense stream: the
     # heap-allocated wrapper, the producer fiber, and the WaitGroup
     # bridge are all created in lower_range_fold_observable_default.
     # A bare `running: ~Int64@observable` (no initializer) or one
@@ -2885,7 +2720,7 @@ private
               "no producer, so NEXT/COLLECT would deadlock and cleanup would touch an " \
               "uninitialized wrapper."
 
-        # A20: offer a fixable that drops `@observable` from the type
+        # Offer a fixable that drops `@observable` from the type
         # annotation. When the parser captured a token for the
         # `@observable` capability, we can target it precisely. If the
         # capability was chained (`~Int64@locked:observable` → token's
@@ -2922,17 +2757,9 @@ private
     final_type, error = node.value.coerce!(node.type)
     error!(node, :TYPE_COERCION_FAILED, message: error) if error
 
-    # M2.2 — empty `[]` / `{}` initializer with `: Auto`: coerce!
-    # returns the Auto Type unchanged because Auto tolerates any
-    # source. But binding the scope as Auto then breaks method
-    # dispatch (e.g. `xs.append(...)` has no Auto overload). Force
-    # the scope-bound type to the value's inferred container type
-    # (`Any[]` / `HashMap<Any>`) so the body walk type-checks
-    # against a permissive container; ShapeEvidenceCollector +
-    # AutoUnifier later refine the decl's stamped type to the
-    # forward-flow result. The decl_node.type stays Auto so the
-    # constraint collector still recognizes the binding as a
-    # shape-tagged Auto slot.
+    # Empty collection literals annotated as Auto need a permissive
+    # container type in scope so method dispatch works during the body walk;
+    # the declaration annotation remains Auto for the later constraint pass.
     if node.type.is_a?(Type) && node.type.auto? &&
        node.value.respond_to?(:type_object) && node.value.type_object &&
        (
@@ -2999,16 +2826,8 @@ private
     if node.type_info&.observable?
       node.symbol.non_escaping = true
     end
-    # MVCC L5-followup (D4): bare `T@versioned` (no Group-1 sigil) is
-    # legal but unusual -- a single-owner MVCC cell can't be reached
-    # from another thread, so the lock-free path's value is moot.
-    # `T@shared:versioned` (Arc<Versioned>) is the typical shape.
-    # T3: upgrade from a bare [Note] to a [Fixable] with an auto-fix
-    # that splices `@shared:` in front of `@versioned`. Preserves the
-    # Versioned semantics while enabling cross-thread sharing -- the
-    # most likely intent if the user reached for `@versioned` at all.
-    # Users who genuinely want a local cell can ignore the fix and
-    # remove the sigil manually.
+    # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
+    # cannot be reached from another thread, so suggest the shared form.
     if node.type_info&.versioned? && node.type_info&.ownership == :affine
       cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
       fixes = []
@@ -3065,16 +2884,12 @@ private
       promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
       node.mode = :decl
       finalize_decl_node!(node, false)
-      # Struct with BORROWED fields: propagate non_escaping to the binding.
       if node.value.instance_variable_get(:@has_borrowed_fields)
         node.symbol.non_escaping   = true
         node.symbol.borrowed_alias = true
       end
-      # Atomics M2.3: a BG handle inherits the lifetime of the atomics
-      # and lifetime-bounded borrows it captures. The handle cannot
-      # outlive the shortest-lived source. M2.5's escape checker reads
-      # `symbol.lifetime` to validate RETURN / store / queue-push sites.
-      # Walks struct literals to handle `h = Holder{ bg: BG{...} }`.
+      # A BG handle inherits the lifetime of captured bindings that cannot
+      # outlive their declaring scope.
       stamp_bg_handle_lifetime!(node)
 
     elsif scope.is_immutable?(node.name)
@@ -3094,11 +2909,8 @@ private
       mark_var_mutated(node.name)
       og_set_live(node.name)
 
-      # Atomics M1.5: rewrite assignment to an @shared:atomic binding into
-      # an atomic op call. Plain `c = v` becomes `c.store(v)`. Compound
-      # forms (parser already desugared `c += 1` to `c = c + 1` and tagged
-      # compound_op = :ADD) become `c.fetchAdd(1)` so the read-modify-write
-      # is actually atomic instead of a load+add+store race.
+      # Atomic compound assignments must become fetch ops; load+add+store
+      # would lose atomicity.
       target_sync = scope.locals[node.name]&.sync
       if target_sync == :atomic
         op = case node.compound_op
@@ -3115,7 +2927,6 @@ private
                nil
              end
         node.auto_atomic_op = op if op
-        # Atomics M1.6.5: atomic store / fetch_op contends on the cell line.
         record_effect(EffectTracker::CONTENTION)
       end
     end
@@ -3155,19 +2966,10 @@ private
       node.full_type = Type.new(raw_type.raw)
       node.fn_ref = true
     elsif raw_type.is_a?(Type) && raw_type.atomic? && raw_type.layout != :indirect
-      # Atomics M1.5: a read of an `@shared:atomic` binding produces
-      # the bare inner value (load semantics). Type-system-wise the
-      # binding shows as the inner T at use sites — the Arc/Atomic
-      # wrappers are an implementation detail. The MIR-lowering emits
-      # the actual atomic load via lower_identifier's :atomic check.
-      # The symbol's stored sync (:atomic) is preserved for the
-      # assignment-target side, which still needs to detect it.
-      # Note: passing an @shared:atomic identifier as a fn arg whose
-      # param has REQUIRES c: ATOMIC currently load-then-passes the
-      # value, not the cell — full call-site dispatch lands in M1.7.
+      # Atomic reads type as the inner value; the symbol keeps :atomic so
+      # assignment targets and MIR lowering still see the cell semantics.
       node.full_type = Type.new(raw_type.raw)
-      # Atomics M1.6.5: atomic load -> :CONTENTION (cache-coherence
-      # pressure on the cell line). No :BLOCKING — atomics never park.
+      # Atomic loads contend on the cache line but never park.
       record_effect(EffectTracker::CONTENTION)
     else
       node.full_type = raw_type
@@ -3335,24 +3137,19 @@ private
     @in_auto_locked_assign = saved_auto_lock
 
     verify_unrestricted!(node)
-    # Atomics M2.6: a tied-lifetime value flowing into a destination
-    # whose declaring scope is OUTSIDE every source's scope is a
-    # cross-scope escape. Fires on `a.field = bg` (where `a` outlives
-    # the source) and `arr[i] = bg` (where `arr` outlives).
+    # Tied-lifetime values cannot be stored into destinations that outlive
+    # any of their lifetime sources.
     verify_tied_assignment!(node)
 
     target = node.name
     case target
     when AST::Identifier, String
-      # Simple Variable Assignment: x = 1
       visit_assignment_variable(target, node)
 
     when AST::GetIndex
-      # Array/Map Index Assignment: x[0] = 1
       visit_assignment_index(target, node)
 
     when AST::GetField
-      # Struct Field Assignment: x.field = 1
       visit_assignment_field(target, node)
 
     else
@@ -3362,7 +3159,6 @@ private
     handle_assign_move(node)
     handle_assign_borrow(node)
 
-    # If sucessfully assigned, set live
     target_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name
     og_set_live(target_name)
   end
@@ -3396,13 +3192,10 @@ private
 
   sig { params(index_node: AST::GetIndex, assignment_node: AST::Assignment).returns(T.untyped) }
   def visit_assignment_index(index_node, assignment_node)
-    # 1. Analyze the access itself (resolves types, checks bounds if possible)
     visit(index_node)
 
-    # 1b. Flag mutable access through list indexing in the target chain.
     mark_chain_needs_mut_ref!(index_node)
 
-    # 2. Check Mutability of the owner
     if index_node.target.is_a?(AST::Identifier)
       var_name = index_node.target.name
       if current_scope.is_immutable?(var_name)
@@ -3418,8 +3211,7 @@ private
       mark_var_mutated(root) if root
     end
 
-    # 3. Type Check — for map assignments, use the unwrapped value type (V, not ?V).
-    #    map[key] READ returns ?V, but map[key] = val STORES V.
+    # Map reads return ?V, but map writes store V.
     assign_type = index_node.type_info
     if assign_type&.optional?
       assign_type_resolved = assign_type.wrapped_type.resolved
@@ -3430,7 +3222,7 @@ private
 
     assignment_node.full_type = assign_type_resolved
 
-    # HashMap put requires heap allocation (rt.heapAlloc()) — record so needs_rt propagates.
+    # HashMap put may allocate, so needs_rt must propagate.
     target_type = index_node.target.type_info
     if target_type&.map?
       current_fn_ctx.heap_count += 1 if current_fn_ctx
@@ -3440,32 +3232,17 @@ private
 
   sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).returns(T.nilable(Symbol)) }
   def visit_assignment_field(field_node, assignment_node)
-    # 1. Analyze field access. Mark the GetField as an assignment LHS
-    # so visit_GetField's CAP_FIELD_NEEDS_WITH_* check skips it —
-    # field writes go through the auto-lock path below, not the
-    # WITH-required diagnostic that's meant for reads.
+    # Field writes go through the auto-lock path, not the WITH-required
+    # diagnostic used for reads.
     field_node.is_assignment_lhs = true
     visit(field_node)
 
-    # AtomicPtr M3.10: bare `cfg.field = ...` on an `@indirect:atomic`
-    # binding is invalid -- the AtomicPtr cell publishes whole-T
-    # snapshots via atomic pointer swap, not per-field writes. Only
-    # the WITH SNAPSHOT MUTABLE alias (a regular *T pointer to a
-    # clone the runtime CAS-publishes at scope exit) accepts field
-    # assignments. The alias's SymbolEntry is declared without
-    # sync/layout so it falls through this check; the original cell
-    # binding has sync==:atomic + layout==:indirect.
-    #
-    # Error message MUST distinguish from primitive @shared:atomic
-    # (which uses direct ops `c += 1` because the cell fits in a
-    # single CAS-able machine word). Per design contract
-    # docs/agents/atomicptr.md §6.1.
+    # AtomicPtr publishes whole-T snapshots; only the WITH SNAPSHOT MUTABLE
+    # alias can accept field assignments.
     reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
 
-    # 1b. Flag mutable access through list indexing in the target chain.
     mark_chain_needs_mut_ref!(field_node)
 
-    # 2. Check Mutability of the owner
     # @alwaysMutable (RefCell) allows field mutation through const bindings.
     if field_node.target.is_a?(AST::Identifier)
       var_name = field_node.target.name
@@ -3521,7 +3298,7 @@ private
     # node.target is "Config".
     # In a strict language, we'd check if :HashMap can cast to Config.
     # For now, just trust the user and carry the type forward.
-    node.full_type = node.target.to_sym  # TODO: Check is this is needed
+    node.full_type = node.target.to_sym
   end
 
   sig { params(node: AST::GetIndex).returns(T.nilable(Type)) }
@@ -3693,10 +3470,8 @@ private
     end
   end
 
-  # Thunk Phase 4.1 / 4.2 (parser-only commit): the syntax is
-  # reserved; runtime semantics defer to v0.3. Emit a precise
-  # "not yet implemented" error so users get a clear forward-
-  # pointing diagnostic instead of silently wrong codegen.
+  # Call-site recursion overrides are parsed but not lowered yet; emit a
+  # precise diagnostic instead of silently generating wrong code.
   sig { params(node: AST::CallSiteOverride).returns(T.untyped) }
   def visit_CallSiteOverride(node)
     sigil = node.kind == :thunk ? "@thunk" : "@maxDepth"
@@ -3734,11 +3509,8 @@ private
       return
     end
 
-    # Analyze all keys + values. Visiting keys populates their
-    # type_info, which the Auto-inference pass (`:map_key` shape
-    # slots, M2.2) reads to resolve the binding's HashMap key type
-    # when the user writes `m: Auto = { "k": v, ... }` or reassigns
-    # a shape-tracked binding to a hash literal.
+    # Visiting keys populates type_info used by Auto inference for HashMap
+    # key shape slots.
     node.pairs.each { |k, v| visit(k); visit(v) }
 
     # Infer Type from first value
@@ -4342,12 +4114,9 @@ private
     # primitives error.
     is_atomic_primitive = node.sync == :atomic && node.layout != :indirect
 
-    # AtomicPtr M3.4: `@indirect:atomic` is the STRUCT-as-AtomicPtr form
-    # (lowers to *CheatLib.AtomicPtr(T)). Reject on primitives -- the
-    # primitive case already has `@shared:atomic` (M1) and there is no
-    # win in indirect-wrapping a 1-machine-word value. Carve this check
-    # out BEFORE the generic primitive-cap rejection so the user gets a
-    # message that names the right migration path.
+    # `@indirect:atomic` is the struct-as-AtomicPtr form. Reject it on
+    # primitives before the generic primitive-capability error so the
+    # diagnostic can name the right migration path.
     if ti.primitive? && node.sync == :atomic && node.layout == :indirect
       error!(node, :INDIRECT_ATOMIC_PRIMITIVE, type: base_type)
     end
@@ -4357,21 +4126,14 @@ private
       error!(node, :CAPABILITY_ON_PRIMITIVE, cap: cap_name, type: base_type, hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
     end
 
-    # AtomicPtr M3.4: `@atomic` alone on a STRUCT is invalid; the struct
-    # case requires `@indirect:atomic` (atomic pointer swap publishes a
-    # whole-T snapshot, not a single-word fetch_add). Distinct from
-    # primitive `@shared:atomic`, which uses direct ops on a CAS-sized
-    # cell. Catch BEFORE downstream emission tries to lower
-    # `*CheatLib.Atomic(SomeStruct)`, which has no defined backing.
+    # Struct atomics need AtomicPtr snapshot semantics; direct atomic ops only
+    # make sense for CAS-sized primitive cells.
     if !ti.primitive? && node.sync == :atomic && node.layout != :indirect
       error!(node, :STRUCT_ATOMIC_NEEDS_INDIRECT, type: base_type)
     end
 
-    # AtomicPtr M3.4: `@local:indirect:atomic` and `@multiowned:indirect:atomic`
-    # combinations are disallowed -- atomic without cross-thread visibility
-    # is pointless (@local), and Rc isn't thread-safe (@multiowned). The
-    # implicit `@shared` (Arc) that `@indirect:atomic` provides under the
-    # hood is the only valid ownership for the AtomicPtr cell.
+    # AtomicPtr is cross-thread by design; @local is pointless and
+    # @multiowned's Rc backing is not thread-safe.
     if node.sync == :atomic && node.layout == :indirect
       if node.ownership == :local
         error!(node, :LOCAL_INDIRECT_ATOMIC)
@@ -4383,34 +4145,18 @@ private
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
     ti.lock_rank = node.lock_rank if node.lock_rank
-    # AtomicPtr M3.1: stamp the :layout axis on Type. Until M3.1, the
-    # only consumer of @indirect was the @indirect:atomic combination
-    # (-> *CheatLib.AtomicPtr(T) in zig_type), so all earlier @indirect
-    # uses just collapsed to provenance=:heap. Keep that fallback for
-    # cases where layout isn't paired with a sync or ownership cap.
     ti.layout    = node.layout    if node.layout
-    # AtomicPtr M3.5: `@indirect:atomic` implies `@shared` (the design
-    # contract in docs/agents/atomicptr.md §3 -- "the user writes
-    # `@indirect:atomic`. The compiler infers `:shared` because escaping
-    # the declaring scope is the whole point of atomic-ptr"). Promote
-    # the ownership axis here so downstream cleanup classification (the
-    # :rc kind in promotion_plan picks up `*AtomicPtr(T)` for the
-    # cleanup zig_type) and lifetime audit (M2.6 treats `:shared` cells
-    # as Arc-escapable) match the design intent. The `:multiowned` /
-    # `:local` cases are already rejected upstream (M3.4 errors), so
-    # this only fires when the user wrote bare `@indirect:atomic` with
-    # no explicit ownership.
+    # AtomicPtr implies shared ownership because escaping the declaring
+    # scope is the point of the construct; local and multiowned cases were
+    # rejected above.
     if node.sync == :atomic && node.layout == :indirect && !node.ownership
       ti.ownership = :shared
     end
     # @indirect forces heap location (same as @local, but different intent).
     ti.provenance = :heap           if node.layout == :indirect
 
-    # Phase 3: enforce per-type rank consistency. First declaration of a
-    # type with a rank sets it; subsequent declarations must match. A
-    # mismatch is a programming error — the rank is meant to induce a
-    # total order across acquire sites, which only works if all sites
-    # agree on the rank of T.
+    # Lock ranks induce a total order only if every declaration of a type
+    # uses the same rank.
     if node.lock_rank && node.sync && (node.sync == :locked || node.sync == :write_locked)
       record_lock_type_rank!(ti.base_type, node.lock_rank, node)
     end
@@ -4722,10 +4468,9 @@ private
   def visit_WithBlock(node)
     @with_block_depth = (@with_block_depth || 0) + 1
 
-    # MVCC L7.4 followup (T2 + G1): reject WITH MATCH shapes that
-    # would silently miscompile.
+    # Reject WITH MATCH shapes that would silently miscompile.
     #
-    # T2: `WITH c AS MUTABLE va MATCH ... WHEN VERSIONED -> { va.field = X }`
+    # `WITH c AS MUTABLE va MATCH ... WHEN VERSIONED -> { va.field = X }`
     # writes through the read-snapshot Guard — the write goes into a
     # frozen pointer that's about to be replaced and never commits. The
     # LOCKED arm works (Guard.get() returns *T into the live cell), so
@@ -4733,14 +4478,14 @@ private
     # front and direct the user to `WITH SNAPSHOT cell AS MUTABLE va
     # { ... } ON MvccConflict ...` for transactional mutation.
     #
-    # AtomicPtr M3.7/M3.8 carve-out: SNAPSHOT MATCH bypasses this
-    # rejection because each arm dispatches to `Versioned.update`
+    # SNAPSHOT MATCH bypasses this rejection because each arm dispatches to
+    # `Versioned.update`
     # (VERSIONED) or `AtomicPtr.update` (ATOMIC), which DO commit
     # transactionally. The legacy guard only applied to generic
     # WITH MATCH (no SNAPSHOT prefix), where the VERSIONED arm
     # would write through a read-snapshot Guard.
     #
-    # G1: multi-cell WITH MATCH (`WITH c1 AS a1, c2 AS a2 MATCH`) is
+    # Multi-cell WITH MATCH (`WITH c1 AS a1, c2 AS a2 MATCH`) is
     # parser-allowed but lower_with_match_block emits prelude for
     # `node.capabilities.first` only — secondary aliases are undefined
     # in arm bodies. Reject until codegen is extended.
@@ -4759,31 +4504,20 @@ private
       end
     end
 
-    # 1. Validate each capability's variable exists and resolve its type
     expanded_capabilities = []
     node.capabilities.each do |cap|
       acquire_capability!(node, cap, expanded_capabilities)
     end
 
-    # Phase 1 static nested-lock check: reject same-variable-name nested
-    # fallible acquire unless the inner WITH carries POSSIBLE_DEADLOCK.
     check_nested_lock_reacquire!(node, expanded_capabilities)
 
-    # Phase 3: local rank-ordering check. Runs before edge accumulation
-    # so a ranked violation fires with a clear "rank X violates rank Y"
-    # message rather than a later SCC-based diagnostic.
+    # Run local rank checks before edge accumulation so ranked violations
+    # produce direct diagnostics instead of later SCC errors.
     check_lock_rank_ordering!(node, expanded_capabilities)
 
-    # Phase 2: record per-fn held->acquired edges and direct acquires
-    # for the global cycle-detection pass. Edges from an opted-out WITH
-    # (POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE) are marked opted_out and
-    # excluded from the cycle graph.
-    #
-    # Atomics M1.6.5: for WITH MATCH form, BLOCKING/SUSPENDS are recorded
-    # per-arm (only the LOCKED arm prelude blocks). Lock-cycle edges
-    # are still emitted at the outer level — the static analysis is
-    # conservative and treats any LOCKED-eligible call as potentially
-    # acquiring a lock.
+    # WITH MATCH records blocking effects per arm, but lock-cycle edges stay
+    # conservative at the outer level because any LOCKED-eligible call may
+    # acquire a lock.
     fn_name_for_lock = current_fn_ctx&.name || "<top>"
     held_entries_now = @held_lock_types || []
     is_match_form = !node.arms.nil?
@@ -4815,16 +4549,9 @@ private
       @held_lock_types << { type: t, opted_out: cur_opt } if t
     end
 
-    # 2. Enter a child scope for the capability block
-    # Inherits parent variables so the WITH body can see enclosing locals,
-    # but new declarations inside are isolated to the WITH block.
-    # Escape checking is handled by the non_escaping flag on SymbolEntry —
-    # every escape site (ensure_owned_value!, handle_assign_move, RETURN)
-    # checks this flag automatically.
-    #
-    # MVCC L5-followup (D1): mark the body as a SNAPSHOT-transaction
-    # context so record_effect() captures any SUSPENDS-family effects
-    # the body produces. After the body visit, raise if any landed.
+    # The child scope inherits parent variables for reads, but declarations
+    # inside the WITH remain isolated. SNAPSHOT transaction bodies also need
+    # effect tracking so retryable bodies cannot suspend after mutation starts.
     is_snapshot_txn_body = (node.snapshot_mode == :transaction)
     if is_snapshot_txn_body
       @inside_snapshot_txn = (@inside_snapshot_txn || 0) + 1
@@ -4851,23 +4578,9 @@ private
           fallible_sources
         )
       end
-      # MVCC L7.2: WITH MATCH per-arm body annotation. Each arm's body
-      # is visited in its own nested scope under the SAME alias binding
-      # resolved by the polymorphic-fallback in acquire_capability!
-      # (see function_analysis.rb: LOCKED | VERSIONED -> :locked).
-      # Per-arm capability resolution + family-specific binding lands
-      # in L7.3/L7.4 (#262, #263); for now this gets arm bodies type-
-      # stamped enough that lower_with_match_block can lower them into
-      # the comptime if-else dispatch (L7.2 mir_lowering side).
       if node.arms
-        # Atomics M1.6.5: per-arm effect tracking. Each arm runs through
-        # the body in its own scope; we record family-specific prelude
-        # effects BEFORE the body so the synthetic acquire/snapshot
-        # contributions of LOCKED / VERSIONED / ATOMIC are visible
-        # in the per-arm delta. Then we collapse into concrete
-        # (intersection across arms) + ?-form (effects in some-but-
-        # not-all arms) so the call-site can later resolve the ?-form
-        # back to concrete based on the actual arg family.
+        # Record family-specific prelude effects before each arm body so
+        # the per-arm delta includes synthetic acquire/snapshot work.
         fn_ctx_name = current_fn_ctx&.name
         snapshot = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
         per_arm_effects = []
@@ -4974,18 +4687,8 @@ private
       if node.snapshot_mode == :read || node.snapshot_mode == :transaction || versioned_arm
         current_fn_ctx.needs_rt = true
       end
-      # True-Sync-Polymorphism Gate 3: a `WITH POLYMORPHIC` block whose
-      # bound binding is a parameter with no narrow REQUIRES becomes
-      # universally polymorphic and lowers to `polymorphicMutate(c, rt,
-      # ...)`. The helper threads rt into Versioned/AtomicPtr
-      # `.update(rt, alloc, ...)` paths, so the enclosing fn must carry
-      # rt -- even when the surface body looks lock-free.
-      # Detection at visit time: WITH POLYMORPHIC + the bound binding
-      # is a param + the function's REQUIRES (so far) doesn't list this
-      # param. The annotator's polymorphic-iff rule (in check_function!)
-      # will later re-confirm and stamp `node.universal_poly` so the
-      # lowering can route to the new MIR node; but we set rt/fail here
-      # because compute_needs_rt! runs before check_function!.
+      # Universal-polymorphic mutation can route through Versioned/AtomicPtr
+      # update helpers, so mark rt/fail here before compute_needs_rt! runs.
       if node.polymorphic && (node.capabilities || []).length == 1
         bound_var = node.capabilities.first[:var_node]
         bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
@@ -5021,11 +4724,10 @@ private
   # Symbols matched by the clause are stamped onto clause[:matched_types];
   # unmatched types bubble up as their registry kind at codegen time.
   LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
-  # MVCC L5 + True-Sync-Polymorphism (#324 / #330): the errors a
-  # SNAPSHOT MUTABLE commit can surface depend on the cell family.
+  # SNAPSHOT MUTABLE commit errors depend on the cell family.
   # @versioned -> MvccConflict (Versioned.update bounded retry).
-  # @indirect:atomic -> AtomicConflict (AtomicPtr.update bounded
-  # retry, #330 = 256 CAS losses). The dispatch picks per cell at
+  # @indirect:atomic -> AtomicConflict after bounded AtomicPtr retries.
+  # The dispatch picks per cell at
   # validate_lock_error_clause! time; SNAPSHOT_POSSIBLE_TYPES is the
   # union over both for the resolve_error_selectors! reachability
   # check.
@@ -5106,25 +4808,15 @@ private
     clause = node.lock_error_clause
     is_snapshot_txn = node.snapshot_mode == :transaction
 
-    # AtomicPtr M3.8: SNAPSHOT MATCH MUTABLE has per-arm conflict
-    # contracts. The trailing `node.lock_error_clause` is nil
-    # (arms own their own ON MvccConflict clauses); validate each arm
-    # against its family's rule and short-circuit before the
-    # single-arm checks below.
+    # SNAPSHOT MATCH MUTABLE arms own their conflict handlers, so validate
+    # them before the single-arm checks below.
     if node.arms && is_snapshot_txn
       validate_snapshot_match_arms!(node)
       return
     end
 
-    # AtomicPtr M3.6 + True-Sync-Polymorphism (#324): split the
-    # SNAPSHOT-transaction conflict-handler contract by family.
-    # Versioned (MVCC) transactions REQUIRE the handler -- bounded
-    # retry, MvccConflict on exhaustion. AtomicPtr (Rust rcu) FORBIDS
-    # the handler today -- unbounded retry, no conflict path to handle
-    # (#330 will bound this and surface AtomicConflict, but that's a
-    # future task). The split only matters when ANY cell in this
-    # WITH is @indirect:atomic; mixed cells trip the multi-cell
-    # rejection in M3.9.
+    # AtomicPtr and Versioned cells have different conflict surfaces, so
+    # choose the handler contract from the participating cell family.
     snap_caps = node.capabilities || []
     has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
       next false unless c[:capability] == :SNAPSHOT
@@ -5132,16 +4824,8 @@ private
       sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
     }
 
-    # MVCC L5 + True-Sync-Polymorphism (#328): SNAPSHOT-transaction
-    # without a per-WITH conflict handler now falls back to the
-    # program-level SYNC POLICY (the baked-in default is always
-    # stamped when no user policy exists, so this can't fail in
-    # practice). The synthesized clause is stamped on
-    # node.lock_error_clause so the lowering takes the catch path
-    # uniformly. The error type comes from the cell family:
-    # @versioned -> MvccConflict; @indirect:atomic -> AtomicConflict
-    # (#330 bounded the AtomicPtr.update loop at 256 and surfaced
-    # error.AtomicConflict on exhaustion).
+    # Missing per-WITH conflict handlers fall back to SYNC POLICY. Stamp the
+    # synthesized clause onto the node so lowering uses the same catch path.
     if is_snapshot_txn && clause.nil?
       target_error = has_atomic_ptr ? :AtomicConflict : :MvccConflict
       synth = synthesize_clause_from_policy(target_error)
@@ -5153,11 +4837,7 @@ private
       end
     end
 
-    # AtomicPtr M3.6 + True-Sync-Polymorphism (#330): an @indirect:atomic
-    # SNAPSHOT MUTABLE block now CAN raise AtomicConflict (after
-    # MAX_UPDATE_RETRIES = 256 CAS losses). An inline conflict handler
-    # is permitted iff its selector is `AtomicConflict` (not
-    # `MvccConflict`, which can't fire from atomic-pointer commit).
+    # AtomicPtr commits can raise AtomicConflict, not MvccConflict.
     if has_atomic_ptr && clause
       bad_selector = (clause[:selectors] || []).find { |s|
         s[:form] == :type && s[:name] == :MvccConflict
@@ -5194,21 +4874,8 @@ private
     end
   end
 
-  # AtomicPtr M3.11 [REMOVED #332]: this rule rejected bare
-  # `WITH SNAPSHOT <param> AS MUTABLE x { ... }` on a polymorphic
-  # `REQUIRES c: VERSIONED | ATOMIC` parameter, forcing the user to
-  # use MATCH dispatch because the two families differed in their
-  # ON Conflict requirement (VERSIONED required it, ATOMIC forbade
-  # it). After #324 split Conflict into Mvcc/AtomicConflict, #328
-  # added the SYNC POLICY chain (no inline handler required), and
-  # #330 bounded AtomicPtr.update + bridged AtomicConflict, both
-  # families now use identical SNAPSHOT MUTABLE syntax. The rule's
-  # premise is gone, so it no longer fires.
-
-  # AtomicPtr M3.10: reject `cfg.field = ...` (or `cfg.field += 1`,
-  # etc) when `cfg` is `@indirect:atomic`. The AtomicPtr cell
-  # publishes whole-T snapshots via atomic pointer swap, not per-
-  # field writes -- there's no per-field cmpxchg on a struct field.
+  # Reject `cfg.field = ...` when `cfg` is `@indirect:atomic`. The cell
+  # publishes whole-T snapshots via atomic pointer swap, not per-field writes.
   # Only the WITH SNAPSHOT MUTABLE alias (a regular *T pointer
   # passed to AtomicPtr.update's closure) accepts field assignments.
   #
@@ -5243,13 +4910,9 @@ private
     "<field>"
   end
 
-  # AtomicPtr M3.9 + True-Sync-Polymorphism (#333): reject any
-  # multi-binding WITH where one or more sync-constrained cells
-  # could be `@atomic` / `@indirect:atomic` at runtime. Atomic ops
-  # are per-cell; CLEAR has no portable multi-pointer atomic
-  # primitive and software MCAS is out of scope, so multi-cell
-  # atomic gives no atomicity ACROSS cells (readers can see states
-  # nobody ever published, writers cannot commit-or-rollback).
+  # Reject multi-binding WITH when any sync-constrained cell could be atomic:
+  # CLEAR has no portable multi-pointer atomic primitive, so the operation
+  # would not be atomic across cells.
   #
   # Covers all multi-binding WITH forms (plain, POLYMORPHIC, SNAPSHOT,
   # SNAPSHOT MATCH). Sync-only: BORROWED / RESTRICT / VIEW /
@@ -5280,12 +4943,8 @@ private
     error!(node, :WITH_MULTI_OBJECT_ATOMIC, name: var_name)
   end
 
-  # True-Sync-Polymorphism (#333): a capability is "sync-constrained"
-  # when its WITH binding actually synchronizes against a cell at
-  # runtime. BORROWED / RESTRICT / VIEW / MATERIALIZED VIEW are pure
-  # borrows or observable reads -- they don't acquire a lock or pin a
-  # snapshot. EXCLUSIVE / SNAPSHOT / ATOMIC and inferred capabilities
-  # whose var_node has a sync axis at the symbol level all count.
+  # A capability is sync-constrained only when it synchronizes against a
+  # runtime cell. Pure borrows and observable reads do not count.
   sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T::Boolean) }
   def sync_constrained_cap?(cap)
     case cap[:capability]
@@ -5303,8 +4962,7 @@ private
     end
   end
 
-  # True-Sync-Polymorphism (#333): does this capability's binding
-  # potentially run as `:atomic` at runtime? Two paths:
+  # Does this capability's binding potentially run as `:atomic` at runtime?
   #   - concrete sync `:atomic` (covers primitive @atomic and
   #     indirect:atomic via sym.layout == :indirect, both flagged
   #     by sym.sync == :atomic);
@@ -5321,16 +4979,14 @@ private
     expanded.include?(:ATOMIC)
   end
 
-  # AtomicPtr M3.8 + True-Sync-Polymorphism (#324): per-arm conflict-
-  # handler validation for SNAPSHOT MATCH MUTABLE blocks. The two
-  # families have opposite contracts:
+  # Per-arm conflict-handler validation for SNAPSHOT MATCH MUTABLE blocks.
+  # The two families have different contracts:
   #   - VERSIONED arm: REQUIRES at least one `ON MvccConflict` clause
   #     (mirrors the single-arm M5 contract; Versioned.update bounds
   #     retries and surfaces UpdateRetriesExhausted -> MvccConflict).
   #   - ATOMIC arm: FORBIDS conflict handlers (today rcu retries
-  #     until success; once #330 bounds AtomicPtr.update at 256 the
-  #     right handler will be `ON AtomicConflict`, not `ON
-  #     MvccConflict` -- but for now no handler is permitted).
+  #     until success; when bounded, the right handler is
+  #     `ON AtomicConflict`, not `ON MvccConflict`.
   # Read-mode SNAPSHOT MATCH (no MUTABLE) skips this entirely --
   # read paths can't fail, so neither arm needs / accepts a handler.
   sig { params(node: AST::WithBlock).returns(T.nilable(T::Array[T.untyped])) }
@@ -5339,9 +4995,7 @@ private
       clauses = arm[:lock_error_clauses] || []
       case arm[:family]
       when :VERSIONED
-        # True-Sync-Polymorphism (#328): VERSIONED arm without a
-        # per-arm conflict handler falls back to the program SYNC
-        # POLICY (always stamped, so this can't fail in practice).
+        # VERSIONED arms without an inline handler fall back to SYNC POLICY.
         if clauses.empty?
           synth = synthesize_clause_from_policy(:MvccConflict)
           if synth
@@ -5923,15 +5577,13 @@ private
     func_type = scope.resolve_type(func_name)
     return nil unless func_type.is_a?(FunctionSignature)
 
-    # Atomics M2.4 / M2.5: multi-binding lifetime returns the FIRST
-    # source. The borrow tracking still records under one root; if a
+    # Multi-binding lifetime returns track the first source only. Borrow
+    # tracking still records under one root; if a
     # multi-source RETURNS is used, the caller-side check in
     # `handle_assign_borrow` uses this single source. Multi-source
     # borrow tracking (record borrows on ALL sources, error when ANY
-    # is already borrowed) is M2.6 audit-matrix work — we err on the
-    # conservative side here (track only the first source) to avoid
-    # spurious errors before the audit lands. Wildcard returns nil
-    # (no specific source to track).
+    # is already borrowed) needs broader audit work. Wildcard returns nil
+    # because there is no specific source to track.
     lifetime = func_type.return_lifetime
     return nil if lifetime.nil?
     lifetime = [lifetime] unless lifetime.is_a?(Array)
@@ -6110,9 +5762,8 @@ private
         next if [:resource, :collection, :rc].include?(info.ownership_kind)
         next unless info.reg
 
-        # TODO: not yet auto-fixable — `_` collides with the Zig discard
-        # keyword and deletion loses any RHS side effects. Kept as a plain
-        # stderr warning until we add an :interactive "delete line" fix.
+        # Keep this as a plain stderr warning: `_` collides with Zig discard
+        # and deleting the line could drop RHS side effects.
         loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
         $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{name}'#{loc}"
       end
@@ -6188,15 +5839,8 @@ private
     path
   end
 
-  # Atomics M2.6: an `a.field = bg` / `arr[i] = bg` / plain `x = bg`
-  # is a cross-scope escape when the assigned binding's tied lifetime
-  # has a source declared in a DEEPER scope than the destination.
-  # Reads `value.symbol.lifetime_sources` and compares each source's
-  # scope_depth to the destination's scope_depth. Source's depth must
-  # be <= dest's depth (i.e., the source is at the same scope or an
-  # ancestor of the destination -- so the destination's scope ends
-  # first). Fires only for tied-lifetime values; nil-lifetime
-  # bindings flow through unchanged.
+  # A tied-lifetime value cannot be stored where it would outlive any
+  # source. Nil-lifetime bindings flow through unchanged.
   sig { params(assign_node: AST::Assignment).returns(T.untyped) }
   def verify_tied_assignment!(assign_node)
     val = assign_node.value
@@ -6220,11 +5864,8 @@ private
             "(declared at scope depth #{source.scope_depth}) into a destination " \
             "at scope depth #{dest_depth} -- the destination outlives the source. " \
             "Move the destination into the same scope, or COPY the value."
-      # Atomics M2.8: when the source binding is `@shared:atomic`,
-      # produce a fixable finding so `clear fix` can suggest the
-      # `@shared:atomic` -> `@shared:locked` migration. Falls back
-      # to plain error! for non-atomic tied-lifetime sources (the
-      # @shared:locked migration doesn't apply to those).
+      # Atomic sources get a migration fix; non-atomic tied sources do not
+      # have an equivalent @shared:locked repair.
       fix = build_atomic_escape_migration_fix(source, source_name)
       if fix
         fixable!(assign_node, message: msg, category: :escape,
@@ -6235,11 +5876,8 @@ private
     end
   end
 
-  # Atomics M2.6: a `RETURN <val>` of a tied-lifetime binding is
-  # legal only when the enclosing function declares
-  # `RETURNS <source>:T` for at least one of the val's sources. The
-  # function's `return_lifetime` array is matched by NAME against
-  # the source's binding name; wildcard `RETURNS *:T` accepts.
+  # Returning a tied-lifetime value is legal only when the function declares
+  # a matching `RETURNS <source>:T`; wildcard accepts any source.
   sig { params(return_node: AST::ReturnNode).returns(T.untyped) }
   def verify_tied_return!(return_node)
     val = return_node.value
@@ -6285,11 +5923,8 @@ private
           "(propagates the lifetime to the caller), or COPY the value " \
           "before returning it."
 
-    # Atomics M2.8: if at least one source is `@shared:atomic`,
-    # produce a fixable finding suggesting the migration to
-    # `@shared:locked`. Picks the first atomic source whose
-    # decl-line text we can locate; the rest fall through to the
-    # plain error path.
+    # Pick the first atomic source we can repair; otherwise use the plain
+    # lifetime error path.
     atomic_fix = T.let(nil, T.untyped)
     sources.each_with_index do |source, idx|
       name = source_names[idx] || lookup_source_name(source) || "(unnamed)"
@@ -6328,17 +5963,8 @@ private
     nil
   end
 
-  # Atomics M2.6: lifetime escape check. The val_node has a tied
-  # lifetime (sources non-empty). The destination's `dest_depth` is
-  # the scope depth where the value will live. The check: every
-  # source's `scope_depth` must be >= dest_depth (source is anchored
-  # in dest's scope or deeper). Returns nil when the escape is safe;
-  # an error message string when it isn't.
-  #
-  # Conservative shortcut: when val_node has no symbol or no tied
-  # lifetime, returns nil immediately. The check fires only for
-  # actually-tied bindings (atomic-captured BG handles today,
-  # multi-source returns and similar in M2.9+).
+  # Return an error string when storing val_node at dest_depth would let it
+  # outlive one of its tied-lifetime sources.
   sig { params(val_node: T.untyped, dest_depth: T.untyped).returns(T.nilable(String)) }
   def lifetime_violation_for_store(val_node, dest_depth)
     sources = lifetime_sources_for_value(val_node)
@@ -6388,14 +6014,8 @@ private
     nil
   end
 
-  # Atomics M2.3: stamp the lifetime of a BG / BG STREAM handle
-  # binding from its captures. The handle's lifetime is the
-  # intersection of every captured @shared:atomic / @locked /
-  # @writeLocked / @multiowned binding's lifetime. The escape checker
-  # (M2.5 / M2.6) reads `symbol.lifetime_sources` at every potential
-  # escape site (RETURN, struct-field assign, list/queue append, BG
-  # capture) and rejects when the destination scope outlives any
-  # source.
+  # A BG handle's lifetime is bounded by the shortest-lived captured
+  # atomic/locked/multiowned/local source.
   #
   # Skipped sources (no lifetime contribution):
   #   - @shared (Arc): refcounted; the inner data lives as long as
@@ -6404,8 +6024,7 @@ private
   #   - @local: BG is auto-pinned, so the BG and the @local binding
   #     run on the same scheduler. The capture is by-pointer; the
   #     captured pointer's validity IS bounded by the @local
-  #     binding's scope, so we DO include it. (M2.6 audit may revisit
-  #     when @local + non-pinned spawn becomes a thing.)
+  #     binding's scope, so we include it.
   #   - Captures whose binding has no SymbolEntry on capture_symbols
   #     (e.g. observable view aliases); those are already errored at
   #     visit_BgBlock via has_non_escaping_capture.
@@ -6500,13 +6119,9 @@ private
     }.compact
   end
 
-  # ── Capability declarative axis (default-deny) ────────────────────────────
-  # Per-sigil declaration of "is this storage/sync layer ESCAPE-SAFE
-  # for BG capture?" Adding a new sigil without explicitly listing it
-  # here defaults to "lifetime-bound" — the safe direction. The whole
-  # set is small and finite, so an exhaustive declaration is feasible
-  # AND the omission of a new sigil produces a compile-time
-  # over-rejection instead of a silent UAF.
+  # Captures are lifetime-bound by default. A storage/sync layer is escape-safe
+  # only when listed here, so new combinations over-reject instead of silently
+  # permitting a dangling BG capture.
 
   # `sync` values that DON'T wrap the underlying data in a
   # reference-bound layer. :raw / :symbol are pure data-access modes
@@ -6560,13 +6175,8 @@ private
     ti.bg_capture_is_value_copy? { |name| lookup_type_schema(name) rescue nil }
   end
 
-  # Atomics M2.4 / M2.5: produce the list of dotted-path lifetime
-  # roots (`["r.foo.bar"]` for `RETURNS r.foo.bar:T`,
-  # `["a", "b"]` for `RETURNS (a b):T`). Wildcard / nil returns []
-  # because there is no source-restricted path the return value must
-  # match — wildcard accepts anything (with a warning at the
-  # declaration), nil means the function isn't declared as returning
-  # a borrow.
+  # Produce dotted-path lifetime roots. Wildcard and nil return [] because
+  # there is no source-restricted path the return value must match.
   sig { params(func_node: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def get_lifetime_paths(func_node)
     rl = func_node.return_lifetime
@@ -6612,21 +6222,8 @@ private
 
   # ── Tail Call Validation ─────────────────────────────────────────
 
-  # Verify that @reentrant:tailCall functions have the self-recursive call
-  # in tail position: the RETURN expression must be a direct call to self
-  # with no wrapping operations (no +, -, etc.).
-  # Thunk Phase 3: every recursive self-call inside a function declared
-  # `EFFECTS REENTRANT:TAIL_CALL` (or legacy `@reentrant:tailCall`) MUST
-  # be the direct value of a RETURN node. Any other position -- statement,
-  # nested expression inside a RETURN, body of a WHILE/FOR loop, etc. --
-  # is a hard error: the codegen lowering relies on the call being a
-  # self-loop, and a non-tail call would consume real stack on every
-  # invocation.
-  #
-  # Approach: walk the body recursively, collecting every self-call
-  # AST::FuncCall, then collecting every RETURN whose value IS a self-
-  # call (those are the "blessed" tail calls). Error on each self-call
-  # that isn't blessed. Recurses through IF / WHILE / FOR / WITH bodies.
+  # Tail-call lowering relies on recursion becoming a self-loop; any
+  # wrapped or nested self-call would still consume real stack.
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
   def validate_tail_call!(fn_node)
     fn_name = fn_node.name
@@ -6737,12 +6334,8 @@ private
     traverse.call(program_node.statements)
   end
 
-  # Validate stack sizing for a fiber spawn.
-  # Phase 4g: plain `EFFECTS REENTRANT` callees REQUIRE explicit
-  # `@service` on the spawn site. The compiler no longer auto-
-  # infers OS-thread stacks -- the user pays the cost knowingly,
-  # or chooses a bounded variant (`:THUNK` / `:TAIL_CALL` /
-  # `:NOT_LOGICAL` / `:MAX_DEPTH(N)`) on the callee.
+  # Plain `EFFECTS REENTRANT` callees require explicit `@service` on the
+  # spawn site so OS-thread cost is an explicit user choice.
   sig { params(node: T.untyped, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).returns(T.untyped) }
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
     if can_smash
@@ -6829,12 +6422,8 @@ private
     nil
   end
 
-  # Phase 4g: emit the @service-required diagnostic as a fixable
-  # finding. Two interactive fixes:
-  #   1. Insert `@service ->` right after `{` (no-prefix case)
-  #   2. Replace the existing tier sigil with `@service`
-  # When neither span is locatable (e.g. DO branches), fall back
-  # to a plain error! with the message text.
+  # Emit @service-required as a fixable when the spawn-site span is known;
+  # DO branches fall back to a plain error because their span is ambiguous.
   sig { params(node: T.untyped, reentrant_fn: String, user_size: T.nilable(Symbol)).returns(T.untyped) }
   def emit_service_required_error!(node, reentrant_fn, user_size)
     msg = "Stack safety: this fiber transitively calls '#{reentrant_fn}' which is " \

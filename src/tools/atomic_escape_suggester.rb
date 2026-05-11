@@ -4,15 +4,14 @@ require_relative "../ast/parser"
 require_relative "../annotator"
 require_relative "../ast/fixable_error"
 
-# Atomics M2.9: doctor-side static detector for the M2.6 atomic-
-# escape pattern. The compiler already rejects code that captures
-# `@shared:atomic` into a destination outliving its declaring scope
+# Doctor-side static detector for atomic escape patterns. The compiler already
+# rejects code that captures `@shared:atomic` into a destination outliving its
+# declaring scope
 # (long-lived queue push, struct-field store, RETURN without
 # `RETURNS x:T`). This tool runs the annotator with `FixCollector`
 # enabled, drains the resulting `:escape`-category findings, and
 # returns them in a doctor-friendly shape so `clear doctor` can
-# explain the rejection in plain language ("M2 disallows this --
-# use `@shared:locked` or wait for v0.3 atomic struct fields")
+# explain the rejection in plain language and suggest `@shared:locked`
 # alongside lock-profile output.
 #
 # Returns Array of finding hashes:
@@ -37,9 +36,8 @@ module AtomicEscapeSuggester
       # raises after recording the first fatal one; drain what we
       # have. The annotator's flow is "raise on first :error in
       # non-collector mode, but raise_in_collector: true for the
-      # M2.8 fixables means collector mode also raises after
-      # pushing -- so the finding IS in the collector by the time
-      # we land here.
+      # fixables may still raise in collector mode after pushing the finding,
+      # so the finding is available when we land here.
     end
     findings = FixCollector.drain
     FixCollector.disable!

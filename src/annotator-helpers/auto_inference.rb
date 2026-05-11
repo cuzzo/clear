@@ -4,10 +4,10 @@ require "sorbet-runtime"
 #
 # Given a parsed program and the @fn_nodes registry produced by
 # Pass A, walks the AST and accumulates the set of "constraint source"
-# AST nodes for every Auto slot in the program. The unifier (Pass C,
-# M1.3) reads each slot's source list, computes types, and resolves
-# the slot to a single concrete type — or routes ambiguity / unresolved
-# cases to the fix-emission helpers.
+# AST nodes for every Auto slot in the program. The unifier reads each
+# slot's source list, computes types, and resolves the slot to a single
+# concrete type — or routes ambiguity / unresolved cases to the
+# fix-emission helpers.
 #
 # This pass is intentionally lightweight: it does not type-check, does
 # not invoke the annotator, and never triggers user-visible errors.
@@ -26,16 +26,16 @@ require "sorbet-runtime"
 class AutoConstraintCollector
     extend T::Sig
 
-  # `shape` (M2.2): nil for scalar slots; for empty `[]` / `{}`
-  # initializers, one of `:list_element`, `:map_key`, `:map_value`.
+  # `shape`: nil for scalar slots; for empty `[]` / `{}` initializers, one
+  # of `:list_element`, `:map_key`, `:map_value`.
   # Shape slots carry no initializer source — their evidence comes
   # from forward-flow uses (`x.append(e)`, `x[k] = v`) collected by
   # ShapeEvidenceCollector. The unifier resolves them like scalar
   # slots; stamp_slot! wraps the resolved type into a list / map
   # type before stamping the decl.
   #
-  # `auto_token` (M2.2 fix): a cached pointer to the original Auto
-  # keyword token. `stamp_slot!` overwrites `decl_node.type` with
+  # `auto_token`: cached pointer to the original Auto keyword token.
+  # `stamp_slot!` overwrites `decl_node.type` with
   # the resolved Type, which loses the auto_token attached to the
   # original Auto Type. Callers that need the source span for the
   # `clear fix` edit (the fixable-helpers' `auto_token_for`) read
@@ -187,11 +187,9 @@ class AutoConstraintCollector
   sig { params(decl_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def record_local(decl_node)
     if auto?(decl_node.type)
-      # M2.2 — empty `[]` / `{}` initializer: register shape-tagged
-      # slot(s) instead of recording the (meaningless) `Any[]` /
-      # `HashMap<Any>` initializer type as a source. Forward-flow
-      # evidence (`.append(e)`, `x[k] = v`) populates the slot via
-      # ShapeEvidenceCollector.
+      # Empty container literals need shape-tagged slots because `Any[]` /
+      # `HashMap<Any>` would be meaningless evidence. Forward-flow use sites
+      # provide the real element/key/value observations.
       if empty_list_lit?(decl_node.value)
         register_list_shape_slot(decl_node)
         return
@@ -302,11 +300,8 @@ class AutoConstraintCollector
       decl_node: decl_node, sources: [], shape: :map_value,
       auto_token: auto_tok,
     )
-    # Audit#1: register the binding name with both shape slot ids
-    # so a later reassignment `m = { ... }` can deliver evidence to
-    # both halves. The hash form ({ key:, value: }) distinguishes
-    # map-shape entries from scalar / list-shape entries (which are
-    # raw slot_id tuples) in @local_decls.
+    # Register the binding name with both shape slot ids so later
+    # reassignments can deliver evidence to both halves.
     @local_decls[decl_node.name] = { key: key_id, value: val_id } if @local_decls
   end
 end
@@ -329,8 +324,8 @@ end
 # upstream Auto dependencies resolved.
 #
 # The unifier itself does NOT emit diagnostics. It produces a
-# structured Result that M1.4 (fix emission) consumes and turns into
-# FixableFindings with the appropriate ranked options.
+# structured Result that fix emission consumes and turns into FixableFindings
+# with the appropriate ranked options.
 class AutoUnifier
     extend T::Sig
 
@@ -355,9 +350,8 @@ class AutoUnifier
     # `type_of` lets callers plug in a custom source-type resolver.
     # Default reads `node.type_info` (CLEAR's existing per-node type
     # accessor — set by the annotator on AST nodes during body
-    # validation). When integrated into the pipeline (M1.7), the
-    # tolerant body-pass populates type_info on each constraint
-    # source before this unifier runs.
+    # validation). The tolerant body-pass populates type_info on each
+    # constraint source before this unifier runs.
     @type_of = T.let(type_of || ->(node) {
       node.respond_to?(:type_info) ? node.type_info : nil
     }, T.untyped)
@@ -412,8 +406,7 @@ class AutoUnifier
   # unresolved diagnostic at fixpoint).
   #
   # `Byte[N]` (the type of a string literal like `"hello"` → `Byte[5]`)
-  # is widened to `String` for ALL slots — both scalar (M1) and
-  # shape (M2.2). Without widening, ambiguity diagnostics report
+  # is widened to `String` for all slots. Without widening, diagnostics report
   # `Byte[5]` (confusing) and resolved container types come out as
   # `HashMap<Byte[1], V>` (unfit for use). The user almost always
   # means `String` when they pass / store a string literal; widening
@@ -456,8 +449,8 @@ class AutoUnifier
   # MIR lowering) see ordinary types. Wrap raw symbols in Type.new
   # so the decl always carries a Type object.
   #
-  # M2.2: shape-tagged slots wrap the resolved scalar before
-  # stamping. `:list_element T` → `T[]`. `:map_key` and
+  # Shape-tagged slots wrap the resolved scalar before stamping.
+  # `:list_element T` → `T[]`. `:map_key` and
   # `:map_value` are stamped jointly by the post-pass below; this
   # method records the resolution on the slot and leaves the decl
   # untouched until both sub-slots resolve.
@@ -515,7 +508,7 @@ class AutoUnifier
   end
 end
 
-# Forward-flow evidence collector for shape-tagged Auto slots (M2.2).
+# Forward-flow evidence collector for shape-tagged Auto slots.
 #
 # Empty container literals (`x: Auto = []`, `m: Auto = {}`) carry
 # no element-type information at the declaration site. Constraint
@@ -672,17 +665,16 @@ class ShapeEvidenceCollector
   end
 end
 
-# Operator-aware evidence collector (M2.1).
+# Operator-aware evidence collector.
 #
 # When a slot is unresolvable from constraint sources alone (e.g., a
 # function never called, or a return-Auto whose body uses an Auto
 # param so the return expression's type also collapses to Auto), the
-# body's *operator usage* still gives us strong type hints. M2.1
+# body's *operator usage* still gives us strong type hints. This collector
 # walks BinaryOp expressions in each function body and accumulates a
 # `Set<op>` of operators applied to operands referencing each slot's
-# binding. The fix-emission helpers (M1.4, extended for M2.1) read
-# this evidence and rank candidate concrete types per the
-# OPERATOR_CANDIDATES table.
+# binding. The fix-emission helpers read this evidence and rank candidate
+# concrete types per the OPERATOR_CANDIDATES table.
 #
 # This is a **separate** pass from AutoConstraintCollector so it can
 # run independently of constraint resolution — the operator evidence

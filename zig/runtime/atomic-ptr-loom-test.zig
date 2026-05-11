@@ -13,9 +13,8 @@
 //!     publish + retire intermediate snapshots).
 //!   - cmpxchg memory-ordering wired correctly (acquire on load,
 //!     release on CAS success-path, acquire on failure-path).
-//!   - rcu-style update is bounded at MAX_UPDATE_RETRIES (256;
-//!     #330) — completes after N CAS-fail
-//!     iterations driven by hand without ever returning an error.
+//!   - rcu-style update is bounded at MAX_UPDATE_RETRIES and completes
+//!     hand-driven CAS-fail iterations without returning an error.
 //!   - Retire callbacks fire eventually under reclaimLocal pressure;
 //!     no leak survives ctx.deinit (DebugAllocator catches).
 //!
@@ -268,9 +267,8 @@ test "AtomicPtr: rcu-update completes a long retry-driven sequence (within 256 c
     // Single-threaded, so no real CAS contention; each update call
     // succeeds on its first CAS attempt. Run 10K update calls
     // back-to-back, each driven by a user-fn that increments by 1.
-    // True-Sync-Polymorphism (#330) bounded the inner CAS loop at
-    // MAX_UPDATE_RETRIES = 256 -- but with no contention the cap
-    // is never approached, so no `error.AtomicConflict` surfaces.
+    // With no contention, the bounded retry cap is never approached and no
+    // `error.AtomicConflict` surfaces.
     var ctx = EbrContext{};
     defer ctx.deinit(testing.allocator);
 
@@ -404,7 +402,7 @@ test "AtomicPtr: updateFlow short-circuits on .skip_no_commit (no publish)" {
     try testing.expectEqual(@as(i64, 200), g.get().b);
 }
 
-test "AtomicPtr: bounded retry surfaces error.AtomicConflict when cap is exhausted (#330)" {
+test "AtomicPtr: bounded retry surfaces error.AtomicConflict when cap is exhausted" {
     // Pin the new bounded-retry contract: under sustained CAS
     // contention that defeats every retry, the loop returns
     // `error.AtomicConflict` (the bridge to CLEAR's AtomicConflict).

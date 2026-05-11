@@ -105,8 +105,7 @@ test "multi-threaded stress test" {
     // Use a small slab size to force frequent grow() calls under contention
     var slab = Slab.init(std.heap.page_allocator, 4096);
     defer {
-        // flush main thread cache before checking
-        // TODO: If this doesn't crash, then no leak
+        // Flush the main thread cache before checking for leaks.
         slab.flushThreadCache();
     }
     defer slab.deinit();
@@ -164,7 +163,6 @@ test "PROVE memory reclamation (interleaved free)" {
     // this crashes on leak
     slab_alloc.flushThreadCache();
 
-    // TODO: Catch error
     // std.debug.print("\nExpected 0 bytes, found {} bytes leaking.\n", .{usage_end});
     // return error.MemoryLeakDetected;
 }

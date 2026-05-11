@@ -335,7 +335,6 @@ class Parser
   suffix(:CHAR, '(') do |lhs|
     T.bind(self, Parser) rescue nil
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-    # FIX: Pass 'lhs' (the node), not 'lhs.name'
     AST::FuncCall.new(start_token, lhs, args)
   end
 
@@ -477,15 +476,11 @@ class Parser
 
     pattern.each do |item|
       case item
-      # RULE 1: String Literal -> Match & Ignore
-      # Example: '=', ';'
       when String
         consume_literal(item)
 
-      # RULE 2: Hash -> Optional
-      # Example: { ':' => :type_annotation }
       when Hash
-        trigger, action = item.first # Get key/value pair
+        trigger, action = item.first
 
         if match_literal!(trigger)
           captures << run_action(action)
@@ -493,7 +488,6 @@ class Parser
           captures << :Any
         end
 
-      # RULE 3: Symbol -> Capture Token or Run Method
       when Symbol
         captures << run_action(item)
       end
@@ -557,19 +551,15 @@ class Parser
 
   sig { params(type: Symbol, value: T.nilable(String)).returns(T.nilable(Lexer::Token)) }
   def consume(type, value=nil)
-    # 1. Capture the current token BEFORE moving the pointer
+    # Return the consumed token rather than `current`, which advances to the next token.
     token = current
 
-    # 2. Validate it matches what we expect
     if (token.type == type) || (value && token.value == value)
       if value && token.value != value
          emit_consume_error_with_fix(token, type, value)
       end
 
-      # 3. Advance the pointer
       @pos += 1
-
-      # 4. RETURN THE CAPTURED TOKEN (Not 'current', which is now the next one!)
       token
     else
       emit_consume_error_with_fix(token, type, value)
@@ -739,9 +729,8 @@ class Parser
 
       if target.is_a?(AST::Identifier)
         bind = AST::BindExpr.new(target_token, target.name, nil, desugared_value)
-        # Atomics M1.5: tag the desugared form so the annotator can
-        # detect "this came from a compound op" and rewrite to an
-        # atomic fetch_<op> when target is @shared:atomic.
+        # Preserve the original compound operator so atomic targets can lower
+        # to fetch_<op> instead of load/modify/store.
         bind.compound_op = op_sym
         return bind
       else
@@ -1174,19 +1163,14 @@ class Parser
         var_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
-          # Supports @indirect on fields for recursive types.
-          # NOTE: @indirect is consumed by parse_type_annotation (line ~1425)
-          # but silently discarded. We detect it by checking if the type was
-          # marked as indirect BEFORE parse_type_annotation returns.
+          # parse_type_annotation records consumed @indirect so recursive union
+          # fields can preserve indirect payloads.
           indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
             fname = T.must(fname_tok).value
             consume(:CHAR, ':')
-            # Peek: will parse_type_annotation consume @indirect?
             ftype = parse_type_annotation
-            # parse_type_annotation consumed @indirect silently.
-            # We detect it was present by checking @last_indirect_consumed.
             indirect_fields << fname if @last_indirect_consumed
             @last_indirect_consumed = false
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
@@ -1270,15 +1254,12 @@ class Parser
 
     params = parse_argument_list()
 
-    # 2. Parse USE() UpValues
     captures = []
     if match!(:KEYWORD, 'USE')
       captures = parse_argument_list()
     end
 
-    # 3. Parse optional RETURNS [<lifetime>:] <type>
-    #
-    # Lifetime forms (Atomics M2.4):
+    # Return lifetime syntax:
     #   - omitted              -- no lifetime constraint on the return
     #   - `foo:T`              -- single-source: returned value's lifetime
     #                              is bound to param `foo`. Stored as a
@@ -1291,10 +1272,8 @@ class Parser
     #   - `*:T`                -- wildcard / lazy: every parameter's
     #                              lifetime is conservatively folded into
     #                              the source set. Stored as the symbol
-    #                              `:wildcard`. The annotator emits a
-    #                              warning at this binding so `clear fix`
-    #                              (M1.x linter follow-up) can offer to
-    #                              replace it with the explicit list.
+    #                              `:wildcard`; the annotator can replace it
+    #                              with an explicit list.
     return_type = nil
     return_type_token = nil
     return_lifetime_token = nil
@@ -1343,9 +1322,8 @@ class Parser
       return_type = mark_polymorphic_shared_type(T.must(return_type)) if shared_return
     end
 
-    # 3.5. Parse optional REQUIRES clause: gates which sync families this
-    # function accepts on its parameters. Mandatory whenever the body uses
-    # WITH on a parameter (P2.5 enforces). Stored as { param => Set[Family] }.
+    # Gates which sync families this function accepts on its parameters.
+    # Mandatory whenever the body uses WITH on a parameter.
     requires_clause = nil
     early_requires_clauses = nil
     if match!(:KEYWORD, 'REQUIRES')
@@ -1357,12 +1335,8 @@ class Parser
       early_requires_clauses = @last_requires_clauses
     end
 
-    # 4. Parse optional @reentrant / @nonReentrant / @reentrant:tailCall function annotation.
-    # NOTE: this is the LEGACY annotation form. Thunk Phase 1 introduces
-    # `EFFECTS REENTRANT[:VARIANT]` as the canonical declaration; both are
-    # accepted in parallel (the annotator bridges them in
-    # src/annotator-helpers/reentrance.rb). `clear fix` will migrate the
-    # legacy form to the new clause.
+    # Legacy reentrance annotations are still accepted so `clear fix` can
+    # migrate them to EFFECTS REENTRANT declarations.
     reentrant = nil
     tail_call = false
     reentrant_token = nil
@@ -1378,8 +1352,7 @@ class Parser
       end
     end
 
-    # 5. Parse optional `EFFECTS REENTRANT[:VARIANT]` declaration.
-    # See docs/agents/thunks.md. Variants:
+    # EFFECTS REENTRANT variants:
     #   EFFECTS REENTRANT             -> :reentrant              (real recursion;
     #                                                             caller runs on @service)
     #   EFFECTS REENTRANT:THUNK       -> :reentrant_thunk        (CPS + trampoline)
@@ -1391,11 +1364,8 @@ class Parser
       error!(fn_token, :REENTRANT_LEGACY_AND_NEW, name: name)
     end
 
-    # 6. Parse zero or more `REQUIRES <name>: <KIND>` constraint clauses.
-    # Today only NON_REENTRANT is recognized (Thunk Phase 1.2). Constraints
-    # bind to a parameter by name; validation that the name actually
-    # references a parameter happens in the annotator (Phase 1.3) so the
-    # parser stays purely syntactic.
+    # Reentrance constraints bind by parameter name; the annotator validates
+    # that each name references a real parameter so the parser stays syntactic.
     requires_clauses = parse_requires_clauses(name)
     # Merge any reentrance kinds caught by the early-position
     # parse_requires_clause into the canonical hash. Duplicates
@@ -1409,12 +1379,8 @@ class Parser
       end
     end
 
-    # 7. Optional PRE clauses (zero or more). Each `PRE: <expr>` is
-    # checked at function entry, fail-fast, with PreconditionFail
-    # raised on failure. parse_expression naturally terminates at the
-    # next keyword (PRE / -> / etc.), so no statement terminator is
-    # required. We snapshot the source text of the predicate so the
-    # runtime error message can quote it back to the user.
+    # PRE predicates keep their source slice so runtime failures can quote
+    # the condition that failed.
     pre_clauses = []
     while match!(:KEYWORD, 'PRE')
       consume(:CHAR, ':')
@@ -1425,10 +1391,7 @@ class Parser
       pre_clauses << { expr: expr, source: src }
     end
 
-    # 8. Optional DEBUG_POST clauses (zero or more). Same shape as PRE,
-    # but checked in a debug-only wrapper around the function body.
-    # Predicate may reference parameters and the synthetic `result`.
-    # Panics on violation; not present in release builds.
+    # DEBUG_POST predicates may reference parameters and the synthetic `result`.
     post_clauses = []
     while match!(:KEYWORD, 'DEBUG_POST')
       consume(:CHAR, ':')
@@ -1443,15 +1406,6 @@ class Parser
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
 
-    # 2. Parse Optional CATCH blocks (multi-clause)
-    # Syntax:
-    #   CATCH ErrorName WITH("msg")
-    #     body;
-    #   CATCH ErrorName
-    #     body;
-    #   DEFAULT
-    #     body;
-    #   END
     catch_block = nil
     # Parse CATCH clauses (unified error-system grammar):
     #
@@ -1486,14 +1440,11 @@ class Parser
       while match?(:KEYWORD, 'CATCH')
         consume(:KEYWORD, 'CATCH')
 
-        # 1) One or more comma-separated items.
         items = [parse_catch_item]
         while match!(:CHAR, ',')
           items << parse_catch_item
         end
 
-        # 2) Optional WITH(<filter_list>). Filters may be types
-        #    (TYPE_ID) or messages (STRING).
         filters = []
         if match?(:KEYWORD, 'WITH')
           consume(:KEYWORD, 'WITH')
@@ -1552,21 +1503,17 @@ class Parser
   # starts a new group.
   #
   # Returns: { param_name_string => Set[Symbol] }
-  # True-Sync-Polymorphism (#326 / #336): family table for REQUIRES.
+  # Family table for REQUIRES.
   #   - LOCKED: mutex / rwlock (admits @locked, @writeLocked).
   #   - SNAPSHOTTED: retry-style umbrella (admits @versioned, @atomic).
   #   - VERSIONED / ATOMIC: escape hatches that forbid the other.
-  #   - LOCAL (#336): non-sync umbrella (admits @local, @multiowned, plain T).
+  #   - LOCAL: non-sync umbrella (admits @local, @multiowned, plain T).
   #     A WITH POLYMORPHIC body on a LOCAL-typed param lowers to direct
   #     field access -- no lock, no Arc unwrap, no snapshot. Lets a
   #     single transaction fn accept every supported binding kind.
-  #   - ACTOR / LOCK_FREE are out of scope for this milestone.
   REQUIRES_VALID_FAMILIES = T.let(%w[LOCKED SNAPSHOTTED VERSIONED ATOMIC LOCAL ACTOR LOCK_FREE].to_set.freeze, T::Set[String])
-  # Reentrancy constraints (Thunk Phase 1.2) live alongside capability
-  # families in the same `REQUIRES` grammar slot. The parse_requires_clause
-  # parser routes them into the NON_REENTRANT-only `requires_clauses` hash
-  # (returned via @last_requires_clauses) so they don't pollute the
-  # capability-family `requires` hash.
+  # Reentrancy constraints share the REQUIRES grammar slot, but are routed
+  # into `requires_clauses` so they don't pollute the capability-family hash.
   REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
@@ -1633,19 +1580,11 @@ class Parser
     T.must(res)[:family]
   end
 
-  # Thunk Phase 1.2: parse zero or more `REQUIRES <name>: <KIND>` clauses
-  # between the function header and the `->` arrow. Returns a Hash<String,
-  # Symbol> mapping the parameter name to the constraint kind. Each clause
-  # is one keyword + var name + colon + kind name; multiple clauses run
-  # back-to-back.
+  # Legacy reentrance REQUIRES clauses can appear between the function header
+  # and `->`. They coexist with capability-family REQUIRES until the grammar
+  # is unified.
   #
   #   REQUIRES f: NON_REENTRANT REQUIRES g: NON_REENTRANT ->
-  #
-  # NOTE: this lives ALONGSIDE master's `parse_requires_clause` (above).
-  # Both REQUIRES grammars currently coexist; master's handles capability
-  # families (LOCKED / VERSIONED / ACTOR / LOCK_FREE) with a comma-list,
-  # this one handles the reentrancy constraint NON_REENTRANT with one
-  # keyword per clause. Unifying them is a follow-up cleanup.
   sig { params(fn_name: String).returns(T::Hash[String, Symbol]) }
   def parse_requires_clauses(fn_name)
     out = {}
@@ -1673,12 +1612,8 @@ class Parser
     out
   end
 
-  # Thunk Phase 1.1: parse optional `EFFECTS REENTRANT[:VARIANT]` after the
-  # function header's RETURNS clause. Returns one of nil, :reentrant,
-  # :reentrant_thunk, :reentrant_tail_call. The variant tokens (REENTRANT,
-  # THUNK, TAIL_CALL) parse as TYPE_IDs matched by value -- they are not
-  # added to the lexer KEYWORD set because the only context they appear in
-  # is right after the EFFECTS keyword.
+  # REENTRANT, THUNK, and TAIL_CALL parse as TYPE_IDs matched by value because
+  # the only context they appear in is right after EFFECTS.
   sig { returns(T.nilable(T::Array[T.untyped])) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
@@ -1808,11 +1743,8 @@ class Parser
   def parse_binary_op(lhs, op_token, op_prec)
     op_val = op_token.value
     
-    # 1. Handle Right-Associativity (e.g. power operator **)
-    #    Subtract 1 from precedence so the next call consumes subsequent terms
     next_prec = (op_val == '**') ? op_prec - 1 : op_prec
 
-    # 2. Special Operators
     case op_val
     when 'AS'
       rhs = parse_var_id
@@ -1844,7 +1776,6 @@ class Parser
       return AST::RangeLit.new(op_token, lhs, rhs, true)
     end
 
-    # 3. Standard Operators (+, -, *, etc.)
     rhs = parse_expression(next_prec)
     op_sym = AST::OP_TO_OP_CODE[op_val] || op_val.to_sym
     
@@ -1855,7 +1786,6 @@ class Parser
   def parse_or_rescue
     # Syntax: ... OR RETURN
     if match!(:KEYWORD, 'RETURN')
-      # TODO: TEST!
       rhs = AST::ReturnNode.new(previous, nil)
 
     # Syntax: ... OR RAISE (bubble up error - Zig's `try`)
@@ -1954,13 +1884,8 @@ class Parser
       right = parse_unary
       return AST::UnaryOp.new(op_token, AST::OP_TO_OP_CODE[v], right)
     end
-    # Thunk Phase 4.1 / 4.2: call-site override prefixes. The
-    # parser RECOGNIZES `@thunk(N)` and `@maxDepth(N)` immediately
-    # before a call expression, but the runtime semantics
-    # (per-call-site monomorphization of the callee) are deferred
-    # to v0.3. The annotator emits a clear "not yet implemented"
-    # error so the syntax is reserved without producing wrong
-    # codegen.
+    # Call-site override syntax is reserved here; the annotator rejects it
+    # until runtime semantics are implemented.
     if current.type == :VAR_ID && (current.value == '@thunk' || current.value == '@maxDepth')
       sigil_tok = consume(:VAR_ID)
       consume(:CHAR, '(')
@@ -1998,7 +1923,6 @@ class Parser
 
   sig { returns(T.untyped) }
   def parse_var_id
-    # 1. Base Case: Always start with an Identifier
     var_token = consume(:VAR_ID)
     name = T.must(var_token).value
     node = AST::Identifier.new(var_token, name)
@@ -2009,13 +1933,11 @@ class Parser
       name = "#{name}?"
     end
 
-    # 2. Check for Immediate Function Call: name(...)
     if match?(:CHAR, '(')
       _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
       node = AST::FuncCall.new(var_token, name, args)
     end
 
-    # 3. Apply general suffixes (Dot, Bracket, etc.)
     return parse_suffixes(node)
   end
 
@@ -2515,12 +2437,8 @@ class Parser
     pairs.to_h
   end
 
-  # M2.3 — `Auto` is not allowed in aggregate-type field/variant
-  # positions (struct fields, union inline-variant fields, union
-  # single-type payloads). Cross-callsite type inference into a
-  # named aggregate is intentionally not supported; aggregate field
-  # types must be concrete. The diagnostic points at the field's
-  # declaration so the user can replace `Auto` with a real type.
+  # Cross-callsite type inference into named aggregates is intentionally not
+  # supported; aggregate field types must be concrete.
   sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).returns(T.untyped) }
   def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
     return unless type.is_a?(Type) && type.auto?
@@ -2646,7 +2564,6 @@ class Parser
       end
       return AST::HashLit.new(start_token, pairs.to_h, storage)
     elsif match?(:STRING)
-      # TODO: Should only ever happen in parse_sigil
       return AST::Literal.new(current, :STRING, T.must(consume(:STRING)).value, storage)
     end
     return nil
@@ -2971,30 +2888,17 @@ class Parser
     observable  = caps&.dig(:observable) || false
     observable_token = caps&.dig(:observable_token)
 
-    # @indirect on non-array types (union fields) only sets @last_indirect_consumed
-    # (signals union field parser). The Type itself is not heap-boxed.
-    #
-    # AtomicPtr M3.2 carve-out: @indirect:atomic on a non-array IS
-    # the AtomicPtr surface and DOES propagate to Type as
-    # layout=:indirect (lowers to *CheatLib.AtomicPtr(T)). The
-    # union-field strip only fires when @indirect appears alone
-    # (or paired with a sync that wants the union-field semantics --
-    # currently none, so atomic is the sole carve-out).
+    # Plain @indirect on non-array types is a union-field signal, not a
+    # heap-boxed Type layout. @indirect:atomic is the exception because it
+    # represents the AtomicPtr surface.
     is_indirect = false if is_indirect && !inner.start_with?("[") && sync != :atomic
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
     loc = is_heap ? :heap : (is_indirect ? :heap : nil)
     layout = is_indirect ? :indirect : nil
-    # AtomicPtr M3.5: `@indirect:atomic` implies `@shared` (Arc-managed
-    # cell; design contract docs/agents/atomicptr.md §3). The
-    # CapabilityWrap path auto-promotes in visit_CapabilityWrap; mirror
-    # the same for type-annotation positions (fn return types, param
-    # types, struct-field types) so cleanup classification (any_rc?
-    # path) lands on the same :rc kind whether the user writes
-    # `cfg = Cfg{...} @indirect:atomic` (CapabilityWrap) or
-    # `cfg: Cfg@indirect:atomic = ...` / `RETURNS Cfg@indirect:atomic`
-    # (parse_type_annotation).
+    # Mirror CapabilityWrap's auto-promotion so @indirect:atomic has the same
+    # ownership whether it appears in an expression or a type annotation.
     if sync == :atomic && layout == :indirect && ownership.nil?
       ownership = :shared
     end
@@ -3249,10 +3153,7 @@ class Parser
     when "@observable"
       error!(token, :DUPLICATE_OBSERVABLE_CAP) if result[:observable]
       result[:observable] = true
-      # A20: stash the token's location so I1's fixable error can
-      # offer to delete the literal `@observable` (or `:observable`
-      # in a chained capability list) text from the source. No effect
-      # on type semantics; consumed by capabilities that need a span.
+      # Keep the token span so fixable errors can delete the source capability.
       result[:observable_token] = token
     else
       emit_typo_suggestion!(
@@ -3272,28 +3173,19 @@ class Parser
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
 
-    # Observables Phase 2.3 / 2.4: `WITH VIEW v AS s { ... }` or
-    # `WITH MATERIALIZED VIEW v AS s { ... }`. Routed before the
-    # generic capability-list parser so VIEW / MATERIALIZED don't have
-    # to participate in the comma-separated capability grammar.
+    # VIEW forms are routed before the generic capability-list parser so they
+    # don't participate in the comma-separated capability grammar.
     if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED')
       return parse_view_block(T.must(with_token))
     end
 
-    # MVCC L4: `WITH SNAPSHOT a AS [MUTABLE] alias [, SNAPSHOT b AS
-    # [MUTABLE] alias ...] { body } [ON Conflict ...]`. Routed
-    # before the generic capability-list parser since SNAPSHOT
-    # requires its own list shape (each cell prefixed by SNAPSHOT
-    # rather than a single capability sigil for the whole list).
+    # SNAPSHOT requires its own list shape, with each cell prefixed by SNAPSHOT.
     if match?(:KEYWORD, 'SNAPSHOT')
       return parse_snapshot_block(T.must(with_token))
     end
 
-    # True-Sync-Polymorphism step 1: optional POLYMORPHIC marker
-    # immediately after WITH. Indicates the binding is a polymorphic
-    # param (REQUIRES with admissible-set > 1) and the body should be
-    # lowered via comptime @hasDecl dispatch across all admissible
-    # families. Annotator (#326) enforces the polymorphic-iff-rule.
+    # POLYMORPHIC marks a binding whose admissible sync family set has more
+    # than one member; the annotator enforces that it matches REQUIRES.
     polymorphic = false
     if match?(:KEYWORD, 'POLYMORPHIC')
       consume(:KEYWORD, 'POLYMORPHIC')
@@ -3374,8 +3266,7 @@ class Parser
       break unless match!(:CHAR, ',')
     end
 
-    # P2.3: WITH MATCH form. After the binding-list, an optional MATCH
-    # keyword introduces per-family arms.
+    # WITH MATCH introduces per-family arms after the binding list.
     if match!(:KEYWORD, 'MATCH')
       arms = parse_with_match_arms
       consume(:KEYWORD, 'END')
@@ -3408,7 +3299,7 @@ class Parser
     node
   end
 
-  # MVCC L4. Grammar:
+  # Snapshot grammar:
   #
   #   WITH SNAPSHOT <var> AS <alias> { <body> }
   #     -- single read (immutable view).
@@ -3424,12 +3315,7 @@ class Parser
   #     any AS MUTABLE; the runtime sorts cell pointers by address
   #     (no deadlock) and commits via `Shared.updateMulti`.
   #
-  # The capability list on the resulting `AST::WithBlock` contains
-  # one entry per SNAPSHOT cell with `capability: :SNAPSHOT`; the
-  # `snapshot_mode` accessor on the node is `:read` if every cell
-  # is read-only, `:transaction` if any cell is MUTABLE. Annotator-
-  # side validation (L5) enforces ON Conflict presence when
-  # `snapshot_mode == :transaction`.
+  # The annotator enforces ON Conflict presence when any cell is MUTABLE.
   sig { params(with_token: Lexer::Token).returns(T.nilable(AST::WithBlock)) }
   def parse_snapshot_block(with_token)
     capabilities = []
@@ -3454,14 +3340,8 @@ class Parser
       break unless match!(:CHAR, ',')
     end
 
-    # AtomicPtr M3.7: per-family dispatch via `MATCH ... END` after the
-    # cell list. Polymorphic `REQUIRES x: VERSIONED | ATOMIC` mutate
-    # surfaces differ (one requires `ON Conflict`, the other forbids
-    # it), so the user picks per family. Mirrors the generic
-    # `WITH ... MATCH` path (parser.rb:2882-2896): SNAPSHOT, AS,
-    # MUTABLE, alias, and the cell list stay OUTSIDE the MATCH;
-    # per-arm bodies + per-arm trailing ON Conflict clauses live
-    # inside, parsed by `parse_with_match_arms`.
+    # VERSIONED and ATOMIC snapshot surfaces differ on conflict handling, so
+    # MATCH arms let the user choose per family.
     if match!(:KEYWORD, 'MATCH')
       arms = parse_with_match_arms
       consume(:KEYWORD, 'END')
@@ -3488,7 +3368,7 @@ class Parser
     node
   end
 
-  # Observables Phase 2.3 / 2.4. Grammar:
+  # View grammar:
   #
   #   WITH VIEW <var> AS <alias> { <body> } [END]
   #   WITH MATERIALIZED VIEW <var> AS <alias> { <body> } [END]
@@ -3527,10 +3407,8 @@ class Parser
       consume(:CHAR, '}')
     end
 
-    # `view_token` is read by `emit_view_not_observable_finding!` in
-    # capabilities.rb to compute the exact replacement span for the
-    # Phase 2.8 fixable error (VIEW -> MATERIALIZED VIEW). Do NOT
-    # drop this field on a refactor without updating that path.
+    # `view_token` lets fixable errors replace VIEW with MATERIALIZED VIEW
+    # using the exact source span.
     node = AST::WithBlock.new(with_token, [{
       capability: capability,
       var_node: var_node,
@@ -3578,13 +3456,9 @@ class Parser
     arms
   end
 
-  # True-Sync-Polymorphism step 1: top-level `SYNC POLICY START ... END`.
-  # Body is one-or-more error-handler clauses (same shape as per-WITH `ON`
-  # handlers, parsed by `parse_lock_error_clause`). Validation lives in
-  # the annotator (#325): single-instance, main-file-only, must handle
-  # exactly { LockTimeout, MvccConflict, AtomicConflict }, and must NOT
-  # handle Deadlock or LockCycle (those are inline-only — see #325 for
-  # the error message).
+  # Top-level SYNC POLICY uses the same handler grammar as per-WITH ON clauses.
+  # The annotator enforces single-instance, main-file-only, and required
+  # handler coverage.
   sig { returns(T.nilable(AST::SyncPolicyDecl)) }
   def parse_sync_policy_block
     sync_tok = consume(:KEYWORD, 'SYNC')

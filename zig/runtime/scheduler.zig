@@ -117,8 +117,7 @@ const FiberNode = struct {
 
     fiber: Fiber,
 
-    // TODO: deprecated
-    // Not needed when we trust our sizing, but keeping for safety.
+    // Not needed when we trust our sizing, but kept as a safety check.
     magic: u64,
 };
 
@@ -1431,8 +1430,7 @@ pub const Scheduler = struct {
         }
     }
 
-    // Helper to wake a specific fiber
-    // TODO: Deprecate
+    // Helper to wake a specific fiber.
     pub fn schedule(self: *Scheduler, task: *Task) void {
         self.submitResume(task);
     }
@@ -1620,7 +1618,7 @@ pub const Scheduler = struct {
     /// idle. Caller is responsible for the outer loop and termination
     /// condition.
     ///
-    /// TODO: migrate the following manual polling loops to use this helper:
+    /// Manual polling loops that should use this helper:
     ///   - zig/runtime/steal-hammer-test.zig:189-213 (same broken pattern
     ///     as stream-test had: missing `in_inbox = IDLE` after pop +
     ///     missing .Finished CAS guard + missing .Ready in_inbox guard).
@@ -2828,4 +2826,3 @@ pub const Semaphore = struct {
 pub threadlocal var active_scheduler: *Scheduler = undefined;
 // True when a Scheduler has been initialised on this thread (safe to call coopYield).
 pub threadlocal var scheduler_running: bool = false;
-

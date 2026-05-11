@@ -33,7 +33,7 @@ module EffectTracker
   YIELD        = :YIELD
   IO           = :IO
 
-  # Atomics M1.6.5: contention / blocking axis for sync capabilities.
+  # Contention / blocking axis for sync capabilities.
   # CONTENTION fires on any use of an @shared:atomic / @shared:versioned /
   # @shared:locked binding (cache-coherence pressure or CAS retry).
   # BLOCKING fires only when the caller's binding is lock-based (mutex
@@ -94,12 +94,8 @@ module EffectTracker
     # scanning. Used by compute_effects! to promote SUSPENDS → SUSPENDS_LOOP
     # or SUSPENDS_CONDITIONAL when the call site sits in that context.
     @call_site_context = T.let(Hash.new { |h, k| h[k] = {} }, T.untyped)
-    # Atomics M1.6.5: per-(caller, callee) list of arg-family sets, one
-    # entry per call site. Used by compute_effects! to resolve callee
-    # ?-form effects (CONTENTION_MAYBE / BLOCKING_MAYBE) into concrete
-    # CONTENTION / BLOCKING (or to drop them) based on what families the
-    # caller actually passes. Each entry is an Array<Set<Symbol>> matching
-    # the call's positional args.
+    # Per-(caller, callee) arg-family sets, one entry per call site. Used to
+    # resolve callee ?-form effects based on what families the caller passes.
     @call_site_arg_families = T.let(Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }, T.untyped)
   end
 
@@ -181,7 +177,7 @@ module EffectTracker
     }
   end
 
-  # Atomics M1.6.5: record the per-arg family Sets at this call site.
+  # Record the per-arg family Sets at this call site.
   # `arg_family_sets` is an Array of Set<Symbol> in positional order (same
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
@@ -213,11 +209,8 @@ module EffectTracker
     resolved = {}
     @fn_direct_effects.each { |name, effs| resolved[name] = effs.dup }
 
-    # F2: recursive functions that emit `rt.checkYield()` (either at
-    # the prologue for plain :reentrant / :TAIL_CALL / :MAX_DEPTH, or
-    # inside the trampoline loop for :THUNK) yield to the scheduler.
-    # Seed YIELD on those fns so P3.3 (`hold-lock-across-yield`) sees
-    # the suspension when the call happens inside a WITH lock body.
+    # Recursive functions that emit `rt.checkYield()` yield to the scheduler.
+    # Seed YIELD so hold-lock-across-yield sees calls inside WITH lock bodies.
     # TIGHT skips the yield emission, so TIGHT fns aren't seeded.
     # NOT_LOGICAL never yields (the StackGuard doesn't suspend).
     @fn_nodes.each do |name, fn_node|
@@ -227,9 +220,8 @@ module EffectTracker
       (resolved[name] ||= Set.new).add(YIELD)
     end
 
-    # Propagate: if foo calls bar, foo inherits bar's effects
-    # (with context promotion for SUSPENDS family, plus Atomics M1.6.5
-    # ?-form resolution from per-call-site arg families).
+    # Propagate: if foo calls bar, foo inherits bar's effects with context
+    # promotion and ?-form resolution from per-call-site arg families.
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
@@ -255,10 +247,8 @@ module EffectTracker
     end
   end
 
-  # Atomics M1.6.5: resolve callee's ?-form effects (CONTENTION_MAYBE,
-  # BLOCKING_MAYBE) into concrete effects (CONTENTION, BLOCKING) when the
-  # caller's call sites pin the family. Returns a new Set or the original
-  # callee_set if no resolution applies.
+  # Resolve callee ?-form effects into concrete effects when the caller's call
+  # sites pin the family. Returns a new Set or the original if none apply.
   #
   # Resolution rules, aggregated across ALL call sites of `callee` from `caller`:
   #   - any concrete LOCKED arg          -> BLOCKING_MAYBE upgrades to BLOCKING
@@ -466,7 +456,7 @@ module EffectTracker
     end
   end
 
-  # PASS 5a (post-#334): enforce Zig-style fallible-signature discipline.
+  # Enforce Zig-style fallible-signature discipline.
   # Every fn whose can_fail is true MUST declare its return type as an
   # error union (`RETURNS !T`). The user authored the body that raises
   # or that calls a fallible callee; the signature must reflect that.
@@ -483,16 +473,9 @@ module EffectTracker
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.untyped)
-    # Post-#335: the rule is implemented but currently a NO-OP (off
-    # behind FALLIBLE_RETURNS_ENFORCE = true). Flipping it to true
-    # turns each "fn can fail but doesn't declare !T" into a hard
-    # compile error. The migration cost is currently ~600 spec
-    # fixtures and an unknown count of transpile-tests / examples /
-    # benchmarks that need `RETURNS T` -> `RETURNS !T` -- too big
-    # to land in one commit. The scaffolding (parser's
-    # `explicit_return_type` stamp, this method, the diagnostic hint
-    # helper) stays in place so the migration can be picked up
-    # incrementally, and the flag flipped once the tree is clean.
+    # Enforcement is gated because migrating every fallible `RETURNS T` to
+    # `RETURNS !T` is a tree-wide source change. Keep the scaffolding in place
+    # so the flag can flip once call sites have been migrated.
     return unless T.unsafe(FALLIBLE_RETURNS_ENFORCE)
 
     @fn_nodes.each do |name, fn_node|
@@ -516,10 +499,8 @@ module EffectTracker
       has_default = fn_node.respond_to?(:default_catch) && fn_node.default_catch
       next if has_catch || has_default
 
-      # Post-#335: only enforce on EXPLICIT `RETURNS T` clauses. A fn
-      # without `RETURNS` is implicit-Void / inferred and stays exempt
-      # (the user didn't author a non-error type, so there's nothing
-      # to migrate). Stamped at parse time on FunctionDef#explicit_return_type.
+      # Only explicit RETURNS clauses are enforced; omitted RETURNS did not
+      # author a non-error surface type.
       next unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
 
       ret = fn_node.return_type
