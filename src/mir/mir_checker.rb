@@ -165,6 +165,7 @@ class MIRChecker
   sig { params(init: T.untyped).returns(T::Boolean) }
   def owned_return_init?(init)
     return true if init.is_a?(MIR::Call) && init.heap_provenance
+    return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
       ret = init.stdlib_def[:return]
@@ -379,6 +380,10 @@ class MIRChecker
     if node.is_a?(MIR::Call) && node.heap_provenance
       leaks << error(:HPT_LEAK, node.callee,
         "heap-returning call result not bound to variable (leak)")
+    end
+    if node.is_a?(MIR::TryCatch) && node.heap_provenance
+      leaks << error(:HPT_LEAK, "try-catch",
+        "heap-returning try/catch result not bound to variable (leak)")
     end
     if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node)
       ret = node.stdlib_def[:return]

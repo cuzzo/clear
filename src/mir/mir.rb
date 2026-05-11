@@ -1462,7 +1462,7 @@ module MIR
   # Try-catch expression.
   # Zig: expr catch |err| fallback
   # or   (expr catch fallback)
-  TryCatch = Struct.new(:expr, :catch_body, :capture) do
+  TryCatch = Struct.new(:expr, :catch_body, :capture, :heap_provenance) do
     include Expr
     # capture: error variable name or nil
   end

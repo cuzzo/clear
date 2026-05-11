@@ -157,6 +157,8 @@ class MIRLowering
       node.alloc == :heap
     when MIR::Call
       node.heap_provenance ? true : false
+    when MIR::TryCatch
+      node.heap_provenance ? true : false
     when MIR::Cast
       # Cast is a type coercion wrapper with no allocation of its own.
       # Delegate to the wrapped expression.
@@ -311,20 +313,27 @@ class MIRLowering
     when MIR::Cast
       # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call
-      ti = Type.from_node(ast_node)
-      return nil unless ti
-      ti = ti.payload_type || ti if ti.error_union?
-      if ti.string?
-        { kind: :heap_string, alloc: :heap, has_moved_guard: false }
-      else
-        zig_t = (Type.new(ti.resolved).zig_type rescue nil)
-        return nil unless zig_t
-        { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
-      end
+    when MIR::Call, MIR::TryCatch
+      cleanup_entry_for_heap_result(ast_node)
     else
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
+    end
+  end
+
+  sig { params(ast_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  def cleanup_entry_for_heap_result(ast_node)
+    ti = Type.from_node(ast_node)
+    return nil unless ti
+    ti = ti.payload_type || ti if ti.error_union?
+    if ti.string?
+      { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+    elsif ti.list_collection?
+      { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: ti.zig_type }
+    else
+      zig_t = (Type.new(ti.resolved).zig_type rescue nil)
+      return nil unless zig_t
+      { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
     end
   end
 
@@ -1787,7 +1796,8 @@ class MIRLowering
     end
 
     call = MIR::Call.new(fn_zig, all_args, can_fail)
-    call.heap_provenance = call_heap_provenance?(node)
+    call.heap_provenance = call_heap_provenance?(node) ||
+                           (callee_sig.respond_to?(:return_provenance) && callee_sig.return_provenance == :heap)
     call
   end
 
@@ -1812,6 +1822,7 @@ class MIRLowering
 
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
+    callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.map { |a|
       # Single source of truth: was_moved (set by annotator when callee TAKES).
       # See note in lower_call_inner.
@@ -1853,7 +1864,8 @@ class MIRLowering
     end
 
     call = MIR::Call.new(fn_zig, all_args, can_fail)
-    call.heap_provenance = call_heap_provenance?(node)
+    call.heap_provenance = call_heap_provenance?(node) ||
+                           (callee_sig.respond_to?(:return_provenance) && callee_sig.return_provenance == :heap)
     call
   end
 
@@ -4144,7 +4156,7 @@ class MIRLowering
   # producing silent UAFs. Users must write GIVE / COPY / CLONE inside
   # the BG body to transfer ownership, or wrap the container in
   # @shared:locked / @multiowned for shared access.
-  sig { params(node: AST::BgBlock, _captured: T::Hash[String, T.untyped]).returns(T.untyped) }
+  sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), _captured: T::Hash[String, T.untyped]).returns(T.untyped) }
   def enforce_bg_capture_strategies!(node, _captured)
     refused = (node.capture_analysis&.strategies || {}).select do |_name, strat|
       strat.is_a?(CaptureStrategy::Refuse)
@@ -4231,6 +4243,7 @@ class MIRLowering
 
     analysis = node.capture_analysis
     rt_name = @rt_name
+    enforce_bg_capture_strategies!(node, analysis&.captures || {})
 
     # Capture handling delegated to FiberCtxBuilder -- same builder
     # BG/DO/CONCURRENT use. BG STREAM's site-specific extras are the
@@ -4364,6 +4377,7 @@ class MIRLowering
              "}"
       iz = MIR::InlineZig.new(code, "next_promise_list")
       iz.stdlib_def = { allocates: true }
+      iz.allocs = { results_var => alloc_sym }
       return iz
     end
 
@@ -5279,26 +5293,26 @@ class MIRLowering
         stmts << MIR::RawZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line", { consumes: [], produces: [], borrows: [] })
         stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
         catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
-        return MIR::TryCatch.new(strip_try(left), catch_block, "__exit_err")
+        return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
       return left
     end
 
     # OR PASS: ignore error (Zig's catch undefined)
     if node.right.is_a?(AST::OrPass)
-      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("undefined"), nil) if is_error
+      return try_catch_with_provenance(left, MIR::Ident.new("undefined"), nil) if is_error
       return left
     end
 
     # OR BREAK: error-to-break (Zig's catch break)
     if node.right.is_a?(AST::OrBreak)
-      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("break"), nil) if is_error
+      return try_catch_with_provenance(left, MIR::Ident.new("break"), nil) if is_error
       return left
     end
 
     # OR PRUNE: same as OR PASS for now
     if node.right.is_a?(AST::OrPrune)
-      return MIR::TryCatch.new(strip_try(left), MIR::Ident.new("undefined"), nil) if is_error
+      return try_catch_with_provenance(left, MIR::Ident.new("undefined"), nil) if is_error
       return left
     end
 
@@ -5313,7 +5327,7 @@ class MIRLowering
     right = descend(node, :right)
 
     if is_error
-      return MIR::TryCatch.new(strip_try(left), right, nil)
+      return try_catch_with_provenance(left, right, nil, fallback: right)
     end
 
     # Optional orelse
@@ -6290,7 +6304,9 @@ class MIRLowering
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
       ft = node.type_info ? (Type.new(node.type_info) rescue nil) : nil
-      node_alloc = if node.respond_to?(:storage) && node.storage == :heap
+      node_alloc = if mir_allocates?(init)
+        :heap
+      elsif node.respond_to?(:storage) && node.storage == :heap
         :heap
       elsif binding_entry && binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft&.needs_heap_backing?
         alloc_for_node(node)
@@ -7616,11 +7632,18 @@ class MIRLowering
 
   # Strip try-wrapping from a MIR node so it can be used inside catch/orelse.
   # Returns a new node without try, or the original node if not try-wrapped.
+  sig { params(left: T.untyped, catch_body: T.untyped, capture: T.nilable(String), fallback: T.untyped).returns(MIR::TryCatch) }
+  def try_catch_with_provenance(left, catch_body, capture, fallback: nil)
+    tc = MIR::TryCatch.new(strip_try(left), catch_body, capture)
+    tc.heap_provenance = mir_allocates?(left) || (!!fallback && mir_allocates?(fallback))
+    tc
+  end
+
   sig { params(mir_node: T.untyped).returns(T.untyped) }
   def strip_try(mir_node)
     case mir_node
     when MIR::Call
-      MIR::Call.new(mir_node.callee, mir_node.args, false)
+      MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.heap_provenance)
     when MIR::MethodCall
       MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false)
     when MIR::TryExpr

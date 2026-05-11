@@ -1549,6 +1549,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".append(")
       expect(zig).to include("__p.next()")
       expect(zig).to include("frameAlloc()")
+      expect(zig).to include("CheatLib.cleanup(std.ArrayListUnmanaged(i64), rt.frameAlloc(), &results)")
     end
   end
 

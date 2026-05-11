@@ -121,6 +121,8 @@ jobs:
   transpile-tests:
     name: transpile-tests/ (.cht via clear test)
     runs-on: ubuntu-latest
+    env:
+      COVERAGE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -141,6 +143,13 @@ jobs:
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ./clear test transpile-tests/
+      - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/coverage.xml
+          flags: ruby,transpile-tests
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   examples-benchmarks-corpus:
     name: examples/benchmarks buildable corpus
@@ -161,6 +170,8 @@ jobs:
     name: tools/fuzz stable matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      COVERAGE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -178,7 +189,14 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean
+      - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/coverage.xml
+          flags: ruby,fuzz
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)
