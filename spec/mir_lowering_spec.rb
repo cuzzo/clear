@@ -3019,29 +3019,54 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers non-mutual THUNK recursion through structural MIR instead of RawZig" do
-      mir = lower_fixture_mir("transpile-tests/302_thunk_stack_sizing_no_os_thread.cht")
+      mir = lower_fixture_mir("transpile-tests/526_non_mutual_thunk_trampoline.cht")
 
-      expect(collect_mir_nodes(mir, MIR::ThunkTrampoline)).not_to be_empty
+      thunk_nodes = collect_mir_nodes(mir, MIR::ThunkTrampoline)
+      expect(thunk_nodes.length).to eq(1)
+      thunk = thunk_nodes.fetch(0)
+      expect(thunk.fn_name).to eq("sum_down")
+      expect(thunk.ret_zig).to eq("i64")
+      expect(thunk.base_cases.length).to eq(1)
+      expect(thunk.base_cases.first.fetch(:value_zig)).to eq("0")
+      expect(thunk.combine_lhs_zig).to eq("current.n")
+      expect(thunk.op_zig).to eq("+")
+      expect(thunk.recurse_arg_inits.length).to eq(1)
+      expect(thunk.recurse_arg_inits.first).to include("current.n")
+      expect(thunk.yield_line).to eq("rt.checkYield();")
       raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
       expect(raw_reasons).not_to include(:thunk_trampoline_body)
-
-      zig = emit(mir)
-      expect(zig).to include("const Frame = struct")
-      expect(zig).to include("current.step = 1;")
-      expect(zig).to include("current.n * current.child_result")
     end
 
     it "lowers mutual THUNK recursion through structural MIR instead of RawZig" do
       mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.cht")
 
-      expect(collect_mir_nodes(mir, MIR::MutualThunkTrampoline)).not_to be_empty
+      thunk_nodes = collect_mir_nodes(mir, MIR::MutualThunkTrampoline)
+      expect(thunk_nodes.map(&:fn_name)).to contain_exactly("is_even", "is_odd")
+      thunk_nodes.each do |thunk|
+        expect(thunk.variants.map { |v| v.fetch(:name) }).to contain_exactly("is_even", "is_odd")
+        expect(thunk.initial_variant).to eq(thunk.fn_name)
+        expect(thunk.initial_fields).to eq([".n = n"])
+        expect(thunk.yield_line).to eq("rt.checkYield();")
+      end
+
+      even = thunk_nodes.find { |n| n.fn_name == "is_even" }
+      expect(even).not_to be_nil
+      even_arm = even.arms.find { |a| a.fetch(:variant_name) == "is_even" }
+      expect(even_arm).not_to be_nil
+      expect(even_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("true")
+      expect(even_arm.fetch(:target_variant)).to eq("is_odd")
+      expect(even_arm.fetch(:target_arg_inits).first).to include("f.n")
+
+      odd = thunk_nodes.find { |n| n.fn_name == "is_odd" }
+      expect(odd).not_to be_nil
+      odd_arm = odd.arms.find { |a| a.fetch(:variant_name) == "is_odd" }
+      expect(odd_arm).not_to be_nil
+      expect(odd_arm.fetch(:base_cases).first.fetch(:value_zig)).to eq("false")
+      expect(odd_arm.fetch(:target_variant)).to eq("is_even")
+      expect(odd_arm.fetch(:target_arg_inits).first).to include("f.n")
+
       raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
       expect(raw_reasons).not_to include(:thunk_trampoline_body)
-
-      zig = emit(mir)
-      expect(zig).to include("const Frame = union(enum)")
-      expect(zig).to include("is_even: struct")
-      expect(zig).to include("current = .{ .is_odd = .{ .n = CheatLib.intSub(f.n, 1) } };")
     end
 
     it "collects named observables by calling next directly" do

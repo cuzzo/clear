@@ -1,0 +1,10 @@
+FN sum_down(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n <= 0 -> RETURN 0;
+  RETURN n + sum_down(n - 1);
+END
+
+FN main() RETURNS Void ->
+  ASSERT sum_down(5000_i64) == 12502500_i64, "sum_down(5000)";
+  RETURN;
+END
