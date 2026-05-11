@@ -173,6 +173,14 @@ module UnionAnalysis
   sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(Hash)) }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
+    schema = lookup_type_schema(node.union_name.to_sym)
+    variant_data = schema&.dig(:variants)&.[](node.variant_name)
+    indirect_fields = if variant_data.is_a?(Hash)
+      variant_data[:indirect_fields] || Set.new
+    else
+      Set.new
+    end
+
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
         error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)
@@ -187,6 +195,11 @@ module UnionAnalysis
 
     node.fields.each do |fname, val_node|
       visit(val_node)
+      if indirect_fields.include?(fname)
+        val_node.needs_heap_create = true
+        current_fn_ctx.heap_count += 1 if current_fn_ctx
+        record_effect(EffectTracker::HEAP)
+      end
       reject_borrowed_value!(val_node, "#{node.union_name}.#{node.variant_name}.#{fname}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_fields[fname], "#{node.union_name}.#{node.variant_name}.#{fname}")

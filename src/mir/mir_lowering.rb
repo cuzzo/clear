@@ -165,6 +165,68 @@ class MIRLowering
     MIR::Ident.new(name)
   end
 
+  # Hoist a non-allocating expression that nevertheless owns heap-backed data
+  # (for example a union literal containing a COPY'd string) so its cleanup is
+  # visible to MIRChecker. This is different from hoist_alloc: the expression
+  # itself may be a stack-sized value, but it owns children that must be dropped.
+  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean)).returns(T.untyped) }
+  def hoist_owned_value_temp(expr, ast_node, err_cleanup: false)
+    return expr unless owned_value_temp_needs_cleanup?(ast_node)
+
+    @tmp_counter += 1
+    name = "__tmp_#{@tmp_counter}"
+    ti = Type.from_node(ast_node)
+    zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
+    entry = { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
+
+    @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
+    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    @pending_stmts << (err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry))
+    MIR::Ident.new(name)
+  end
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def owned_value_temp_needs_cleanup?(ast_node)
+    return false unless ast_node
+    return false if ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode) || ast_node.is_a?(AST::MoveNode)
+    return false if ast_node.is_a?(AST::Identifier) || ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
+    return false if container_borrow_expr?(ast_node)
+    ti = Type.from_node(ast_node)
+    return false unless ti
+    ti = ti.payload_type || ti if ti.error_union?
+    @union_schemas&.key?(ti.resolved) &&
+      ti.needs_explicit_cleanup?(:heap, ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) })
+  rescue
+    false
+  end
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def container_borrow_expr?(ast_node)
+    return false unless ast_node
+    if ast_node.is_a?(AST::GetIndex)
+      ti = ast_node.target.type_info rescue nil
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      return !!(ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?))
+    end
+    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+      return container_borrow_expr?(ast_node.left)
+    end
+    false
+  rescue
+    false
+  end
+
+  sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  def copy_container_borrow_if_needed(expr, ast_node)
+    return expr unless container_borrow_expr?(ast_node)
+    ti = Type.from_node(ast_node)
+    return expr unless ti
+    ti = ti.payload_type || ti if ti.error_union?
+    return expr unless @union_schemas&.key?(ti.resolved)
+    copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :union, :heap)
+    hoist_alloc(copied, ast_node, err_cleanup: true)
+  end
+
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(Hash)) }
@@ -1593,6 +1655,7 @@ class MIRLowering
       # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
       takes = a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
+      arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) unless takes
       # Array/List args: convert to slice via .items (skip strings - already []const u8).
       #
       # Exception: when the callee declares `MUTABLE xs: T[]@list`, pass
@@ -6257,6 +6320,7 @@ class MIRLowering
       # reference (FSM Phase B2 promotion).
       mapped = @do_capture_map && @do_capture_map[node.name]
       value = lower(node.value)
+      value = copy_container_borrow_if_needed(value, node.value)
       if node.reassign_cleanup
         zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
         alloc = alloc_from_sym(node.reassign_cleanup[:alloc])
@@ -6343,6 +6407,7 @@ class MIRLowering
       lower(node.name)
     end
     value = lower(node.value)
+    value = copy_container_borrow_if_needed(value, node.value)
     result = MIR::Set.new(target, value)
 
     # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
@@ -6439,6 +6504,13 @@ class MIRLowering
       if kind == :string_map && idx.is_a?(MIR::ConcatStr)
         idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
       end
+      idx = hoist_alloc(idx, node.name.index) if kind == :string_map
+      # Map put takes ownership of the stored value on success. If the value
+      # expression produces owned heap children (for example Value{ Str: COPY s }),
+      # expose that temporary to MIRChecker with error-only cleanup: normal
+      # cleanup would double-free after the map owns it.
+      val = hoist_alloc(val, node.value, err_cleanup: true)
+      val = hoist_owned_value_temp(val, node.value, err_cleanup: true)
 
       # Apply value transforms in the lowering (Zig-only effect — BC's
       # MAP_PUT handles value storage uniformly via the Value union).
