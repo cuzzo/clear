@@ -535,12 +535,10 @@ module MiniVM
 
       def run(source, source_dir: Dir.pwd, timeout_seconds: 10, optimized: false)
         with_source_file(source, source_dir) do |path|
-          raw = nil
-          status = nil
-          Timeout.timeout(timeout_seconds) do
-            env = optimized ? { "BC_OPT" => "1" } : {}
-            raw, status = Open3.capture2e(env, "ruby", BC_RUN, path, "--run")
-          end
+          env = optimized ? { "BC_OPT" => "1" } : {}
+          raw, status = Open3.capture2e(env, "timeout", "--kill-after=2", timeout_seconds.to_s, "ruby", BC_RUN, path, "--run")
+          return RunResult.new(status: :timeout, output: "", raw_output: raw, bench_ms: nil) if status.exitstatus == 124
+
           RunResult.new(
             status: status.success? ? :pass : :error,
             output: normalize_output(raw),
@@ -548,8 +546,6 @@ module MiniVM
             bench_ms: MiniVM::Golden.bench_ms(raw)
           )
         end
-      rescue Timeout::Error
-        RunResult.new(status: :timeout, output: "", raw_output: "", bench_ms: nil)
       end
 
       private
@@ -609,12 +605,10 @@ module MiniVM
 
       def run(source, source_dir: Dir.pwd, timeout_seconds: 10, optimized: false)
         with_source_file(source, source_dir) do |path|
-          raw = nil
-          status = nil
-          Timeout.timeout(timeout_seconds) do
-            env = optimized ? { "BC_OPT" => "1" } : {}
-            raw, status = Open3.capture2e(env, "ruby", BC_RUN, path, "--run", "--vm=register")
-          end
+          env = optimized ? { "BC_OPT" => "1" } : {}
+          raw, status = Open3.capture2e(env, "timeout", "--kill-after=2", timeout_seconds.to_s, "ruby", BC_RUN, path, "--run", "--vm=register")
+          return RunResult.new(status: :timeout, output: "", raw_output: raw, bench_ms: nil) if status.exitstatus == 124
+
           if status.exitstatus == 2
             message = raw.to_s.sub(/\ARegister VM pending:\s*/, "").strip
             raise PendingTarget, message
@@ -626,8 +620,6 @@ module MiniVM
             bench_ms: MiniVM::Golden.bench_ms(raw)
           )
         end
-      rescue Timeout::Error
-        RunResult.new(status: :timeout, output: "", raw_output: "", bench_ms: nil)
       end
 
       private

@@ -19,12 +19,16 @@ options = {
   optimized: true,
   compare_languages: false,
   all_vm_bench: false,
+  all_benchmarks: false,
   single_core: true,
   timeout_seconds: 30,
   profile_register_bytecode: false,
   smoke: false,
   skip_stack_vm: false,
   smoke_cases: nil,
+  summarize_register_blockers: false,
+  write_register_compile_ok: nil,
+  write_register_run_ok: nil,
 }
 
 parser = OptionParser.new do |opts|
@@ -41,6 +45,13 @@ parser = OptionParser.new do |opts|
     options[:suite] = :vm_bench
     options[:all_vm_bench] = true
     options[:compare_languages] = true
+  end
+  opts.on("--all-benchmarks", "Survey every benchmark .cht under benchmarks/ with the VM targets") do
+    options[:suite] = :all_benchmarks
+    options[:all_benchmarks] = true
+    options[:allowlist] = nil
+    options[:compare_languages] = false
+    options[:summarize_register_blockers] = true
   end
   opts.on("--compare-languages", "Run sibling Ruby/Python/Lua benchmark files when available") { options[:compare_languages] = true }
   opts.on("--no-compare-languages", "Skip sibling Ruby/Python/Lua benchmark files") { options[:compare_languages] = false }
@@ -73,8 +84,21 @@ parser = OptionParser.new do |opts|
   end
   opts.on("--smoke-cases=N", Integer, "Number of cases for --smoke (default 6)") { |n| options[:smoke_cases] = n }
   opts.on("--skip-stack-vm", "Skip the deprecated stack VM run path") { options[:skip_stack_vm] = true }
+  opts.on("--summarize-register-blockers", "Group register VM pending/error cases by first failure line") do
+    options[:summarize_register_blockers] = true
+  end
+  opts.on("--write-register-compile-ok=PATH", "Write register compile-OK benchmark case names to PATH") do |path|
+    options[:write_register_compile_ok] = path
+  end
+  opts.on("--write-register-run-ok=PATH", "Write register run-OK benchmark case names to PATH") do |path|
+    options[:write_register_run_ok] = path
+  end
 end
 parser.parse!(ARGV)
+
+if options[:run] && %i[vm_bench all_benchmarks].include?(options[:suite]) && !options[:optimized]
+  abort "Benchmark execution requires the optimized register VM runner. Remove --no-optimized."
+end
 
 def read_allowlist(path)
   return [] unless File.exist?(path)
@@ -138,6 +162,15 @@ def sibling_benchmark(path, ext)
   File.exist?(sibling) ? sibling : nil
 end
 
+def benchmark_sources(root = File.join(MiniVM::Golden::ROOT, "benchmarks"))
+  Dir.glob(File.join(root, "**", "*.cht")).sort.reject do |path|
+    parts = path.split(File::SEPARATOR)
+    File.basename(path).start_with?("minivm-golden-") ||
+      parts.any? { |part| part.start_with?(".") } ||
+      path.include?("#{File::SEPARATOR}bench.profile#{File::SEPARATOR}")
+  end
+end
+
 def command_available?(cmd)
   ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
     File.executable?(File.join(dir, cmd))
@@ -177,8 +210,78 @@ def profile_register_bytecode!(stats, bytecode)
   end
 end
 
+def warm_optimized_register_runner!
+  warm_source = File.join(MiniVM::Golden::ROOT, "examples", "minivm", "vm-tests", "basics", "return_i64.cht")
+  return unless File.exist?(warm_source)
+
+  env = { "BC_OPT" => "1" }
+  raw, status = Open3.capture2e(
+    env,
+    "timeout", "--kill-after=2", "300",
+    "ruby", MiniVM::Golden::BC_RUN, warm_source, "--run", "--vm=register"
+  )
+  return if status.success?
+
+  warn "WARNING: optimized register VM warmup failed: #{raw.lines.last&.strip || "exit #{status.exitstatus}"}"
+end
+
+def first_status_line(message)
+  line = message.to_s.lines.first.to_s.strip
+  line.empty? ? nil : line
+end
+
+def register_blocker_reason(row, phase)
+  case phase
+  when :compile
+    first_status_line(row[:register_compile_message]) || "register compile #{row[:register_compile_status]}"
+  when :run
+    first_status_line(row[:register_run_message]) || "register run #{row[:register_status]}"
+  else
+    raise ArgumentError, "unknown blocker phase #{phase.inspect}"
+  end
+end
+
+def print_register_blocker_group(title, rows, phase)
+  groups = Hash.new { |h, k| h[k] = [] }
+  rows.each do |row|
+    groups[register_blocker_reason(row, phase)] << row[:name]
+  end
+
+  puts "#{title}:"
+  if groups.empty?
+    puts "  none"
+    return
+  end
+
+  groups
+    .sort_by { |reason, names| [-names.length, reason] }
+    .each do |reason, names|
+      puts format("  %3d  %s", names.length, reason)
+      names.first(8).each { |name| puts "       - #{name}" }
+      puts format("       ... %d more", names.length - 8) if names.length > 8
+    end
+end
+
+def print_register_blocker_summary(case_rows, include_run:)
+  compile_blockers = case_rows.reject { |row| row[:register_compile_status] == :ok }
+  puts
+  puts "register blockers:"
+  print_register_blocker_group("  compile", compile_blockers, :compile)
+
+  return unless include_run
+
+  run_blockers = case_rows.select do |row|
+    row[:register_compile_status] == :ok &&
+      row[:register_status] &&
+      row[:register_status] != :pass
+  end
+  print_register_blocker_group("  run", run_blockers, :run)
+end
+
 paths = if options[:golden]
           MiniVM::Golden::Case.all.map(&:path)
+        elsif options[:suite] == :all_benchmarks && ARGV.empty?
+          benchmark_sources
         elsif options[:suite] == :vm_bench && options[:all_vm_bench] && ARGV.empty?
           Dir.glob(File.join(MiniVM::Golden::ROOT, "benchmarks", "vm", "*.cht")).sort
         elsif options[:suite] == :vm_bench && ARGV.empty?
@@ -203,8 +306,16 @@ cases = paths.map do |path|
 end.compact
 
 cases = cases.first(options[:smoke_cases]) if options[:smoke_cases]
+name_root = if options[:suite] == :vm_bench
+              File.join(MiniVM::Golden::ROOT, "benchmarks", "vm")
+            elsif options[:suite] == :all_benchmarks
+              File.join(MiniVM::Golden::ROOT, "benchmarks")
+            else
+              File.join(MiniVM::Golden::ROOT, "transpile-tests")
+            end
 
 ENV["CLEAR_THREADS"] ||= "1" if options[:single_core]
+warm_optimized_register_runner! if options[:run] && options[:optimized]
 
 stats = {
   stack_compile_seconds: 0.0,
@@ -252,9 +363,14 @@ options[:iterations].times do
     source = test_case.source
     source_dir = test_case.source_dir
     row = {
-      name: test_case.relative_path(File.join(MiniVM::Golden::ROOT, "benchmarks", "vm")),
+      name: test_case.relative_path(name_root),
+      stack_compile_status: nil,
+      stack_compile_message: nil,
+      register_compile_status: nil,
+      register_compile_message: nil,
       stack_status: nil,
       register_status: nil,
+      register_run_message: nil,
       stack_bench_ms: nil,
       register_bench_ms: nil,
       languages: {},
@@ -271,7 +387,10 @@ options[:iterations].times do
       stats[:stack_compile_ok] += 1
       stats[:stack_ops] += stack_bc.ops.length
       stats[:stack_raw_bytes] += stack_bc.raw_snapshot.bytesize
-    rescue
+      row[:stack_compile_status] = :ok
+    rescue => e
+      row[:stack_compile_status] = :error
+      row[:stack_compile_message] = e.message
       stats[:stack_compile_error] += 1
     end
 
@@ -287,9 +406,14 @@ options[:iterations].times do
       stats[:register_ops] += register_bc.ops.length
       stats[:register_raw_bytes] += register_bc.raw_snapshot.bytesize
       profile_register_bytecode!(stats, register_bc) if options[:profile_register_bytecode]
-    rescue MiniVM::Golden::PendingTarget
+      row[:register_compile_status] = :ok
+    rescue MiniVM::Golden::PendingTarget => e
+      row[:register_compile_status] = :pending
+      row[:register_compile_message] = e.message
       stats[:register_compile_pending] += 1
-    rescue
+    rescue => e
+      row[:register_compile_status] = :error
+      row[:register_compile_message] = e.message
       stats[:register_compile_error] += 1
     end
 
@@ -325,6 +449,7 @@ options[:iterations].times do
         stats[:register_run_seconds] += elapsed
         row[:register_status] = register_result.status
         row[:register_bench_ms] = register_result.bench_ms
+        row[:register_run_message] = register_result.raw_output unless register_result.status == :pass
         if register_result.status == :pass
           stats[:register_run_ok] += 1
           if register_result.bench_ms
@@ -336,9 +461,11 @@ options[:iterations].times do
         end
       rescue MiniVM::Golden::PendingTarget
         row[:register_status] = :pending
+        row[:register_run_message] = $!.message
         stats[:register_run_pending] += 1
-      rescue
+      rescue => e
         row[:register_status] = :error
+        row[:register_run_message] = e.message
         stats[:register_run_error] += 1
       end
 
@@ -379,8 +506,8 @@ options[:iterations].times do
           end
         end
       end
-      case_rows << row
     end
+    case_rows << row
   end
 end
 
@@ -407,14 +534,16 @@ if stats[:stack_compile_seconds].positive? && stats[:register_compile_seconds].p
   puts format("  register_vs_stack_compile_ratio=%.3f", stats[:register_compile_seconds] / stats[:stack_compile_seconds])
 end
 puts
+puts "cases:"
 if options[:run]
-  puts "cases:"
-  header = ["case", "stack_ms", "register_ms"]
+  header = ["case", "stack_compile", "register_compile", "stack_ms", "register_ms"]
   header.concat(%w[ruby_ms python_ms lua_ms]) if options[:compare_languages] && options[:suite] == :vm_bench
   puts "  " + header.join("\t")
   case_rows.each do |row|
     values = [
       row[:name],
+      row[:stack_compile_status] || "-",
+      row[:register_compile_status] || "-",
       row[:stack_bench_ms] || row[:stack_status] || "-",
       row[:register_bench_ms] || row[:register_status] || "-",
     ]
@@ -426,6 +555,23 @@ if options[:run]
     end
     puts "  " + values.join("\t")
   end
+else
+  header = ["case", "stack_compile", "register_compile", "register_reason"]
+  puts "  " + header.join("\t")
+  case_rows.each do |row|
+    reason = row[:register_compile_message].to_s.lines.first.to_s.strip
+    reason = reason[0, 160] if reason.length > 160
+    values = [
+      row[:name],
+      row[:stack_compile_status] || "-",
+      row[:register_compile_status] || "-",
+      reason.empty? ? "-" : reason,
+    ]
+    puts "  " + values.join("\t")
+  end
+end
+
+if options[:run]
   puts
   puts "run:"
   puts format("  stack_ok=%d", stats[:stack_run_ok])
@@ -477,6 +623,27 @@ if options[:run]
 else
   puts "run: skipped (--compile-only)"
 end
+
+print_register_blocker_summary(case_rows, include_run: options[:run]) if options[:summarize_register_blockers]
+
+if options[:write_register_compile_ok]
+  names = case_rows
+    .select { |row| row[:register_compile_status] == :ok }
+    .map { |row| row[:name] }
+    .sort
+  File.write(options[:write_register_compile_ok], names.join("\n") + (names.empty? ? "" : "\n"))
+  puts "wrote_register_compile_ok=#{options[:write_register_compile_ok]} count=#{names.length}"
+end
+
+if options[:write_register_run_ok]
+  names = case_rows
+    .select { |row| row[:register_status] == :pass }
+    .map { |row| row[:name] }
+    .sort
+  File.write(options[:write_register_run_ok], names.join("\n") + (names.empty? ? "" : "\n"))
+  puts "wrote_register_run_ok=#{options[:write_register_run_ok]} count=#{names.length}"
+end
+
 puts
 puts "bytecode:"
 puts format("  stack_ops=%d", stats[:stack_ops])
