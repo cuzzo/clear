@@ -367,6 +367,22 @@ module MIR
     include Stmt
   end
 
+  # Mutual THUNK trampoline body. This is the tagged-union sibling of
+  # ThunkTrampoline: each mutually-recursive function is a union variant,
+  # and each arm either returns a base-case value or overwrites current
+  # with the next variant's payload.
+  MutualThunkTrampoline = Struct.new(
+    :fn_name,
+    :ret_zig,
+    :variants,
+    :initial_variant,
+    :initial_fields,
+    :arms,
+    :yield_line
+  ) do
+    include Stmt
+  end
+
   # Background block. Wraps raw Zig code for a fiber spawn but exposes
   # capture_analysis for ownership verification (BG_ESCAPE check).
   # captures: { name => Type-like object } from capture_analysis.captures

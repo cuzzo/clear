@@ -76,6 +76,7 @@ class MIREmitter
     when MIR::BatchWindowPush  then emit_batch_window_push(node)
     when MIR::BatchWindowFlush then emit_batch_window_flush(node)
     when MIR::ThunkTrampoline  then emit_thunk_trampoline(node)
+    when MIR::MutualThunkTrampoline then emit_mutual_thunk_trampoline(node)
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
@@ -843,6 +844,53 @@ class MIREmitter
                               continue;
                           }
                           return result;
+    ZIG
+  end
+
+  sig { params(node: MIR::MutualThunkTrampoline).returns(String) }
+  def emit_mutual_thunk_trampoline(node)
+    variant_decls = node.variants.map { |variant|
+      fields = variant.fetch(:param_field_decls).join("\n          ")
+      <<~ZIG.chomp
+        #{variant.fetch(:name)}: struct {
+                  #{fields}
+              },
+      ZIG
+    }.join("\n      ")
+    initial_fields = node.initial_fields.join(", ")
+    switch_arms = node.arms.map { |arm| emit_mutual_thunk_arm(arm) }.join("\n              ")
+
+    <<~ZIG
+      const Frame = union(enum) {
+          #{variant_decls}
+      };
+      var current: Frame = .{ .#{node.initial_variant} = .{ #{initial_fields} } };
+      while (true) {
+          #{node.yield_line}
+          switch (current) {
+              #{switch_arms}
+          }
+      }
+    ZIG
+  end
+
+  sig { params(arm: T.untyped).returns(String) }
+  def emit_mutual_thunk_arm(arm)
+    base_branches = arm.fetch(:base_cases).map { |bc|
+      <<~ZIG.chomp
+        if (#{bc.fetch(:cond_zig)}) {
+                              return #{bc.fetch(:value_zig)};
+                          }
+      ZIG
+    }.join("\n                      ")
+    target_arg_inits = arm.fetch(:target_arg_inits).join(", ")
+
+    <<~ZIG.chomp
+      .#{arm.fetch(:variant_name)} => |f| {
+                      #{base_branches}
+                      current = .{ .#{arm.fetch(:target_variant)} = .{ #{target_arg_inits} } };
+                      continue;
+                  },
     ZIG
   end
 

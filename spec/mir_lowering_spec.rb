@@ -3031,6 +3031,19 @@ RSpec.describe MIRLowering do
       expect(zig).to include("current.n * current.child_result")
     end
 
+    it "lowers mutual THUNK recursion through structural MIR instead of RawZig" do
+      mir = lower_fixture_mir("transpile-tests/525_mutual_thunk_trampoline.cht")
+
+      expect(collect_mir_nodes(mir, MIR::MutualThunkTrampoline)).not_to be_empty
+      raw_reasons = collect_mir_nodes(mir, MIR::RawZig).map(&:reason)
+      expect(raw_reasons).not_to include(:thunk_trampoline_body)
+
+      zig = emit(mir)
+      expect(zig).to include("const Frame = union(enum)")
+      expect(zig).to include("is_even: struct")
+      expect(zig).to include("current = .{ .is_odd = .{ .n = CheatLib.intSub(f.n, 1) } };")
+    end
+
     it "collects named observables by calling next directly" do
       lhs = make_id("running", full_type: :"~Int64@observable")
       rhs = AST::CollectOp.new(tok)

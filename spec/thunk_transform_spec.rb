@@ -230,6 +230,11 @@ RSpec.describe "ThunkTransform emit coverage" do
     even.mutual_thunk_plan = OpenStruct.new(cycle_fns: cycle, own_plan: even_plan)
     odd.mutual_thunk_plan = OpenStruct.new(cycle_fns: cycle, own_plan: odd_plan)
 
+    node = ThunkTransform::Emit.build_mutual_trampoline(even, FakeThunkLowering.new)
+    expect(node).to be_a(MIR::MutualThunkTrampoline)
+    expect(node.variants.map { |v| v.fetch(:name) }).to eq(%w[even odd])
+    expect(node.arms.map { |a| a.fetch(:target_variant) }).to eq(%w[odd even])
+
     zig = ThunkTransform::Emit.emit_mutual_trampoline(even, FakeThunkLowering.new)
 
     expect(zig).to include("const Frame = union(enum)")

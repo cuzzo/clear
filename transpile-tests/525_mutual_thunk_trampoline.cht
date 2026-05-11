@@ -1,0 +1,18 @@
+FN is_even(n: Int64) RETURNS Bool
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN TRUE;
+  RETURN is_odd(n - 1);
+END
+
+FN is_odd(n: Int64) RETURNS Bool
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN FALSE;
+  RETURN is_even(n - 1);
+END
+
+FN main() RETURNS Void ->
+  ASSERT is_even(1000_i64), "1000 is even";
+  ASSERT is_odd(999_i64), "999 is odd";
+  ASSERT !is_even(999_i64), "999 is not even";
+  RETURN;
+END

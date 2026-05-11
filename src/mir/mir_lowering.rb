@@ -1377,8 +1377,7 @@ class MIRLowering
       body_mir = takes_mir + [ThunkTransform::Emit.build_trampoline(node, self)]
     elsif node.mutual_thunk_plan
       # Phase 4f.1: tagged-union trampoline for mutual recursion.
-      trampoline_zig = ThunkTransform::Emit.emit_mutual_trampoline(node, self)
-      body_mir = takes_mir + [MIR::RawZig.new(trampoline_zig, :thunk_trampoline_body, nil, nil)]
+      body_mir = takes_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
     else
       pre_checks = lower_pre_clauses(node)
       body_mir = takes_mir + pre_checks + T.must(lower_body(node.body))

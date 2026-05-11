@@ -229,7 +229,7 @@ module ThunkTransform
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
     sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_mutual_trampoline(fn_node, lowering)
+    def build_mutual_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       mtp = fn_node.mutual_thunk_plan
       raise ArgumentError, "fn '#{fn_node.name}' has no mutual_thunk_plan" if mtp.nil?
@@ -238,53 +238,58 @@ module ThunkTransform
       assert_non_fallible_ret!(fn_node, ret_zig)
       cycle_fns = mtp.cycle_fns
 
-      variant_decls = cycle_fns.map { |cf|
-        fields = (cf.params || []).map { |p|
-          "#{p[:name]}: #{param_zig_type(p, lowering)},"
-        }.join("\n            ")
-        "#{cf.name}: struct {\n            #{fields}\n        },"
-      }.join("\n        ")
+      variants = cycle_fns.map { |cf|
+        {
+          name: cf.name,
+          param_field_decls: (cf.params || []).map { |p|
+            "#{p[:name]}: #{param_zig_type(p, lowering)},"
+          },
+        }
+      }
 
-      self_init_fields = (fn_node.params || []).map { |p|
+      initial_fields = (fn_node.params || []).map { |p|
         ".#{p[:name]} = #{p[:name]}"
-      }.join(", ")
+      }
 
-      switch_arms = cycle_fns.map { |cf|
-        emit_mutual_arm(cf, mtp, ret_zig, lowering)
-      }.join("\n                ")
+      arms = cycle_fns.map { |cf|
+        build_mutual_arm(cf, mtp, ret_zig, lowering)
+      }
 
       yield_line = fn_node.tight_reentrance ? "// (TIGHT: scheduler yield-check skipped)" : "rt.checkYield();"
-      <<~ZIG
-        const Frame = union(enum) {
-            #{variant_decls}
-        };
-        var current: Frame = .{ .#{fn_node.name} = .{ #{self_init_fields} } };
-        while (true) {
-            #{yield_line}
-            switch (current) {
-                #{switch_arms}
-            }
-        }
-      ZIG
+
+      MIR::MutualThunkTrampoline.new(
+        fn_node.name,
+        ret_zig,
+        variants,
+        fn_node.name,
+        initial_fields,
+        arms,
+        yield_line
+      )
+    end
+
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    def emit_mutual_trampoline(fn_node, lowering)
+      T.bind(self, T.untyped) rescue nil
+      MIREmitter.new.emit(build_mutual_trampoline(fn_node, lowering))
     end
 
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
     sig { params(cf: T.untyped, _mtp: T.untyped, ret_zig: T.untyped, lowering: T.untyped).returns(T.untyped) }
-    def emit_mutual_arm(cf, _mtp, ret_zig, lowering)
+    def build_mutual_arm(cf, _mtp, ret_zig, lowering)
       T.bind(self, T.untyped) rescue nil
       own_plan = cf.mutual_thunk_plan.own_plan
 
-      base_branches = own_plan.base_cases.map { |bc|
-        cond  = qualify_with_f(render_expr(bc[:cond_ast], lowering),  cf)
+      base_cases = own_plan.base_cases.map { |bc|
+        cond = qualify_with_f(render_expr(bc[:cond_ast], lowering), cf)
         value = qualify_with_f(render_expr(bc[:value_ast], lowering), cf)
-        <<~ZIG.chomp
-          if (#{cond}) {
-                                return #{value};
-                            }
-        ZIG
-      }.join("\n                        ")
+        {
+          cond_zig: cond,
+          value_zig: value,
+        }
+      }
 
       target_fn = own_plan.target_fn
       target_args = own_plan.target_args
@@ -294,16 +299,21 @@ module ThunkTransform
       arg_inits = target_args.each_with_index.map { |arg, i|
         rendered = qualify_with_f(render_expr(arg, lowering), cf)
         ".#{target_params[i][:name]} = #{rendered}"
-      }.join(", ")
+      }
       _ = ret_zig
 
-      <<~ZIG.chomp
-        .#{cf.name} => |f| {
-                        #{base_branches}
-                        current = .{ .#{target_fn} = .{ #{arg_inits} } };
-                        continue;
-                    },
-      ZIG
+      {
+        variant_name: cf.name,
+        base_cases: base_cases,
+        target_variant: target_fn,
+        target_arg_inits: arg_inits,
+      }
+    end
+
+    sig { params(cf: T.untyped, mtp: T.untyped, ret_zig: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    def emit_mutual_arm(cf, mtp, ret_zig, lowering)
+      T.bind(self, T.untyped) rescue nil
+      MIREmitter.new.send(:emit_mutual_thunk_arm, build_mutual_arm(cf, mtp, ret_zig, lowering))
     end
 
     sig { params(cf: T.untyped, name: T.untyped).returns(T.untyped) }

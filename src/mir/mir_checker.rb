@@ -601,7 +601,6 @@ class MIRChecker
   # cannot be decomposed.
   RAW_JUSTIFIED_REASONS = %w[
     require_local_module_opaque
-    thunk_trampoline_body
   ].freeze
 
   RAW_JUSTIFIED_PREFIXES = T.let([].freeze, T::Array[T.untyped])
