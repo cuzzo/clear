@@ -2232,20 +2232,17 @@ private
 
     visit(node.value)
 
-    # Inline BG return: `RETURN BG { ... }`. There is no decl_node for
-    # `stamp_bg_handle_lifetime!` to fire on (no `bg = BG{...}` binding),
-    # so we run the same lifetime check inline here. If the BG captures
-    # any scope-bounded source, the handle cannot escape past the
-    # function's own scope without a `RETURNS x:T` annotation.
-    if (node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)) &&
-       node.value.respond_to?(:capture_analysis) && node.value.capture_analysis
-      sources = bg_lifetime_sources(node.value.capture_analysis)
-      if sources.any?
-        source_names = sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
-        error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-               type: node.value.full_type || "BG handle",
-               hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
-      end
+    # Inline BG return: `RETURN BG { ... }`, plus composite returns such
+    # as `RETURN Holder{ bg: BG { ... } }`. There is no decl_node for
+    # `stamp_bg_handle_lifetime!` to fire on, so run the same source walk
+    # inline. If any contained BG captures a scope-bounded source, the
+    # returned value cannot outlive those captures.
+    inline_bg_sources = collect_bg_sources_in_expr(node.value).uniq
+    if inline_bg_sources.any?
+      source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
+      error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
+             type: node.value.full_type || "BG handle",
+             hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
     end
 
     # RETURN inside a WITH block is forbidden ONLY when the returned value
@@ -6181,12 +6178,10 @@ private
   sig { params(assign_node: AST::Assignment).returns(T.untyped) }
   def verify_tied_assignment!(assign_node)
     val = assign_node.value
-    return unless val.is_a?(AST::Identifier)
-    sym = val.symbol
-    return unless sym
-    sources = sym.lifetime_sources
+    sym = val.respond_to?(:symbol) ? val.symbol : nil
+    sources = lifetime_sources_for_value(val)
     return if sources.empty?
-    return if sources == [sym]   # :current_scope is its own check path
+    return if sym && sources == [sym]   # :current_scope is its own check path
 
     dest_depth = dest_scope_depth_for_target(assign_node.name)
     return if dest_depth.nil?
@@ -6323,10 +6318,7 @@ private
   # actually-tied bindings (atomic-captured BG handles today,
   # multi-source returns and similar in M2.9+).
   def lifetime_violation_for_store(val_node, dest_depth)
-    return nil unless val_node.respond_to?(:symbol)
-    sym = val_node.symbol
-    return nil unless sym
-    sources = sym.lifetime_sources
+    sources = lifetime_sources_for_value(val_node)
     return nil if sources.empty?
     # `:current_scope` lifetime is detected via lifetime_sources
     # returning [self], which means source.scope_depth = sym's own
@@ -6343,6 +6335,17 @@ private
       end
     end
     nil
+  end
+
+  sig { params(val_node: T.untyped).returns(T::Array[SymbolEntry]) }
+  def lifetime_sources_for_value(val_node)
+    sources = T.let([], T::Array[SymbolEntry])
+    if val_node.respond_to?(:symbol)
+      sym = val_node.symbol
+      sources.concat(sym.lifetime_sources) if sym
+    end
+    sources.concat(collect_bg_sources_in_expr(val_node))
+    sources.uniq
   end
 
   # Convenience: the escape destination's effective scope depth.

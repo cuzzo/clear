@@ -25,23 +25,11 @@
 
 LIFETIMED_RETURN_CELLS = []
 
-# v1 active: :local ownership only — exercises the @local lifetime-stamp
-# path in src/annotator.rb:6457 and immediately surfaced two real bugs
-# (return_handle and store_in_field both UNEXPECTED-PASS at compile,
-# crash with SIGABRT at runtime).
-#
-# v1 in_dev: :atomic_int and :locked. The await_in_scope baseline for
-# both currently fails compilation because BG capture of @shared:atomic
-# / @locked does not auto-unwrap inside the BG body (you get a *AtomicInt
-# / Arc(Locked) pointer where an Int64 is expected). That's a separate
-# bug class from lifetime enforcement; folding it in here would conflate
-# findings. Flip these to :pass once the BG-body unwrap path lands.
 [:bg, :bg_stream].each do |consumer|
   [:local, :atomic_int, :locked].each do |ownership|
     [:await_in_scope, :return_handle, :store_in_field].each do |escape|
       cell = { consumer: consumer, ownership: ownership, escape: escape }
       cell[:expected] = (escape == :await_in_scope) ? :pass : :compile_error
-      cell[:expected] = :in_dev if ownership != :local
       LIFETIMED_RETURN_CELLS << cell
     end
   end
@@ -49,37 +37,62 @@ end
 
 # ── helpers ───────────────────────────────────────────────────────────
 
-# Declares the captured value with the given ownership inside a function
-# body. Returns: [decl_lines, value_expr_inside_bg_body].
+# Declares the captured value with the given ownership inside a function body.
 #
 # - :local       → `MUTABLE c = Counter{} @local;` ; capture reads `c.value`
 # - :atomic_int  → `MUTABLE c: Int64 = 0_i64 @shared:atomic;` ; capture reads `c`
 # - :locked      → `c = Counter{ value: 0 } @locked;` ; capture reads
-#                  via `WITH EXCLUSIVE c AS x { x.value }`
+#                  via statement-form `WITH EXCLUSIVE`
 def lifetime_value_setup(ownership)
   case ownership
   when :local
-    decl = "    MUTABLE c = Counter{ value: 0_i64 } @local;"
-    use  = "c.value"
+    "    MUTABLE c = Counter{ value: 0_i64 } @local;"
   when :atomic_int
-    decl = "    MUTABLE c: Int64 = 0_i64 @shared:atomic;"
-    use  = "c"
+    "    MUTABLE c: Int64 = 0_i64 @shared:atomic;"
   when :locked
-    decl = "    c = Counter{ value: 0_i64 } @locked;"
-    use  = "WITH EXCLUSIVE c AS x { x.value }"
+    "    c = Counter{ value: 0_i64 } @locked;"
   end
-  [decl, use]
+end
+
+def lifetime_bg_value_expr(ownership)
+  case ownership
+  when :local then "c.value"
+  when :atomic_int then "c"
+  end
+end
+
+def lifetime_locked_read_lines(indent)
+  [
+    "#{indent}MUTABLE locked_value: Int64 = 0_i64;",
+    "#{indent}WITH EXCLUSIVE c AS x { locked_value = x.value; }",
+  ]
+end
+
+def lifetime_bg_body(consumer, ownership)
+  if ownership == :locked
+    case consumer
+    when :bg
+      (lifetime_locked_read_lines("    ") + ["    locked_value;"]).join("\n")
+    when :bg_stream
+      (["WHILE TRUE DO"] +
+       lifetime_locked_read_lines("        ") +
+       ["        YIELD locked_value;", "    END"]).join("\n")
+    end
+  else
+    value = lifetime_bg_value_expr(ownership)
+    case consumer
+    when :bg then "#{value};"
+    when :bg_stream then "WHILE TRUE DO YIELD #{value}; END"
+    end
+  end
 end
 
 FuzzGenerator.register(:lifetimed_return, cells: LIFETIMED_RETURN_CELLS) do |p|
-  decl, use = lifetime_value_setup(p[:ownership])
+  decl = lifetime_value_setup(p[:ownership])
 
   # Yield-shape inside the consumer body — :bg returns the value once;
   # :bg_stream YIELDs the value forever and main reads two iterations.
-  bg_body = case p[:consumer]
-  when :bg        then "#{use}; "
-  when :bg_stream then "WHILE TRUE DO YIELD #{use}; END"
-  end
+  bg_body = lifetime_bg_body(p[:consumer], p[:ownership])
 
   bg_decl_type = case p[:consumer]
   when :bg        then "~Int64"
@@ -138,15 +151,20 @@ FuzzGenerator.register(:lifetimed_return, cells: LIFETIMED_RETURN_CELLS) do |p|
     CHT
 
   when :store_in_field
-    # Negative case — heap-allocated holder stores a BG handle that
-    # captures the source. Holder outlives source ⇒ UAF on later NEXT.
+    # Negative case — helper stores a BG handle in a holder and returns it.
+    # The holder outlives the captured source, so later NEXT would read a
+    # dead capture unless the compiler rejects the construction.
     <<~CHT
       STRUCT Counter { value: Int64 }
       STRUCT Holder { bg: #{bg_decl_type} }
 
-      FN main() RETURNS Void ->
+      FN make_holder() RETURNS Holder ->
       #{decl}
-          MUTABLE h: Holder = Holder{ bg: #{bg_lit} };
+          RETURN Holder{ bg: #{bg_lit} };
+      END
+
+      FN main() RETURNS Void ->
+          h = make_holder();
           #{p[:consumer] == :bg ? 'r: Int64 = NEXT h.bg;' : 'a: Int64 = NEXT h.bg;'}
           RETURN;
       END

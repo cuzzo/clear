@@ -76,7 +76,7 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `mutable_collection_param`  | 8            | E2 :mutable_list_param_escape, INV-CROSS-FRAME-PARAM-ALLOC |
 | `nested_loop_escape`        | 8            | Loop-local list/map escape -> outer container (commit 9fa21926) |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
-| `lifetimed_return`          | 6 (+12 in_dev) | BG handle escape rejection — exercises bg_lifetime_sources stamping |
+| `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
 | `polymorphic_sync_admission`| 36              | Which (callee × caller binding) tuples are admitted |
 | `execution_boundary`        | 27              | What can / can't cross BG / DO / BG STREAM × @parallel / @pinned |
@@ -296,16 +296,9 @@ Cell parameters: `consumer` ∈ {bg, bg_stream} × `ownership` ∈ {local,
 atomic_int, locked} × `escape` ∈ {await_in_scope, return_handle,
 store_in_field}.
 
-Currently active: `:local` only (6 cells). The two negative cells for
-`(BG, @local, return_handle)` and `(BG, @local, store_in_field)` are
-`UNEXPECTED-PASS` against the current tree — the compiler accepts them and
-runtime crashes with SIGABRT. **This is a real UAF surface that the
-matrix immediately surfaced.** `bg_stream` correctly rejects both patterns.
-
-In_dev (12): `:atomic_int` and `:locked` baselines fail to compile because
-BG capture of `@shared:atomic` / `@locked` doesn't auto-unwrap inside the
-BG body — same root cause as the `stream_into_boundary` outstanding
-failures. Flip these to `:pass` once the unwrap path lands.
+All 18 cells are active. `await_in_scope` is the positive baseline; both
+`return_handle` and `store_in_field` must compile-error because the returned
+BG handle, or a struct containing it, would outlive the captured source.
 
 ### `fsm_lowering` matrix
 
