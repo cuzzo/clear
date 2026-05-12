@@ -1160,9 +1160,37 @@ class RegisterBcEmitter
       unless value && value.fetch(:kind) == @value_by_name[name].fetch(:kind)
         raise Unsupported, "register emitter expected value assignment for #{name.inspect}"
       end
-      @value_by_name[name] = value
+      if value[:kind] == :struct
+        assign_struct_value_to_binding(name, value)
+      else
+        @value_by_name[name] = value
+      end
     else
       raise Unsupported, "register emitter cannot assign unknown local #{name.inspect}"
+    end
+  end
+
+  def assign_struct_value_to_binding(name, src)
+    dst = @value_by_name.fetch(name)
+    dst_fields = dst.fetch(:fields)
+    src.fetch(:fields).each do |fname, sfield|
+      dfield = dst_fields[fname.to_s] || dst_fields[fname.to_sym]
+      raise Unsupported, "register emitter missing destination field #{fname.inspect} for #{name.inspect}" unless dfield
+
+      case dfield.fetch(:type)
+      when :i64, :bool
+        emit(IMOV, dfield.fetch(:reg), sfield.fetch(:reg)) unless dfield.fetch(:reg) == sfield.fetch(:reg)
+      when :f64
+        emit(FMOV, dfield.fetch(:reg), sfield.fetch(:reg)) unless dfield.fetch(:reg) == sfield.fetch(:reg)
+      when :string
+        emit(SMOV, dfield.fetch(:reg), sfield.fetch(:reg)) unless dfield.fetch(:reg) == sfield.fetch(:reg)
+      else
+        if list_handle_type?(dfield.fetch(:type))
+          dst_fields[fname.to_s] = sfield
+        else
+          raise Unsupported, "register emitter only supports scalar/list-handle struct reassignment fields in this tranche"
+        end
+      end
     end
   end
 
@@ -2025,6 +2053,8 @@ class RegisterBcEmitter
       bound_names.each do |bound|
         @vreg_by_name[bound] = @vreg_by_name.fetch(src_name)
         @vkind_by_name[bound] = @vkind_by_name.fetch(src_name)
+        @borrowed_list_aliases ||= {}
+        @borrowed_list_aliases[bound] = true
       end
       return
     end
@@ -2388,7 +2418,9 @@ class RegisterBcEmitter
       dst = fresh_ireg
       case handle.fetch(:kind)
       when :int_list_handle then emit(IHLEN, dst, handle.fetch(:reg))
+      when :borrowed_int_list_handle then emit(LLEN, dst, handle.fetch(:reg))
       when :string_list_handle then emit(SHLEN, dst, handle.fetch(:reg))
+      when :borrowed_string_list_handle then emit(LSLEN, dst, handle.fetch(:reg))
       end
       return dst
     end
@@ -3160,6 +3192,7 @@ class RegisterBcEmitter
     saved_tag_types = @tag_type_by_name
     saved_return_type = @return_type
     saved_inline_return = @inline_return
+    saved_borrowed_list_aliases = @borrowed_list_aliases
 
     @ireg_by_name = saved_iregs.dup
     @freg_by_name = saved_fregs.dup
@@ -3169,6 +3202,7 @@ class RegisterBcEmitter
     @value_by_name = saved_values.dup
     @callable_by_name = saved_callables.dup
     @tag_type_by_name = saved_tag_types.dup
+    @borrowed_list_aliases = saved_borrowed_list_aliases ? saved_borrowed_list_aliases.dup : {}
     saved_value_map_variants = @value_map_variants ? @value_map_variants.dup : {}
     saved_value_list_variants = @value_list_variants ? @value_list_variants.dup : {}
     @value_map_variants = saved_value_map_variants.dup
@@ -3237,6 +3271,7 @@ class RegisterBcEmitter
     @value_by_name = saved_values
     @callable_by_name = saved_callables
     @tag_type_by_name = saved_tag_types
+    @borrowed_list_aliases = saved_borrowed_list_aliases
     @return_type = saved_return_type
     @inline_return = saved_inline_return
   end
@@ -3294,11 +3329,18 @@ class RegisterBcEmitter
   end
 
   def list_handle_type?(type)
-    type == :int_list_handle || type == :string_list_handle
+    type == :int_list_handle || type == :string_list_handle ||
+      type == :borrowed_int_list_handle || type == :borrowed_string_list_handle
   end
 
   def list_handle_value?(value)
-    value && %i[int_list_handle string_list_handle].include?(value[:kind])
+    value && %i[int_list_handle string_list_handle borrowed_int_list_handle borrowed_string_list_handle].include?(value[:kind])
+  end
+
+  def compatible_list_handle_kind?(kind, expected_type)
+    return true if expected_type.nil? || kind == expected_type
+    (expected_type == :int_list_handle && kind == :borrowed_int_list_handle) ||
+      (expected_type == :string_list_handle && kind == :borrowed_string_list_handle)
   end
 
   def union_register_type?(type)
@@ -5538,14 +5580,22 @@ class RegisterBcEmitter
     if expr.is_a?(MIR::Ident)
       name = resolve_ctx_name(expr.name)
       if (value = @value_by_name[name]) && list_handle_value?(value)
-        return value if expected_type.nil? || value[:kind] == expected_type
+        return value if compatible_list_handle_kind?(value[:kind], expected_type)
       end
 
       if @vreg_by_name.key?(name)
         case @vkind_by_name[name]
         when :int_list
+          if (@borrowed_list_aliases || {})[name] && compatible_list_handle_kind?(:borrowed_int_list_handle, expected_type)
+            return { kind: :borrowed_int_list_handle, reg: @vreg_by_name.fetch(name) }
+          end
+
           return clone_vreg_list_to_handle(:int_list_handle, @vreg_by_name.fetch(name))
         when :string_list
+          if (@borrowed_list_aliases || {})[name] && compatible_list_handle_kind?(:borrowed_string_list_handle, expected_type)
+            return { kind: :borrowed_string_list_handle, reg: @vreg_by_name.fetch(name) }
+          end
+
           return clone_vreg_list_to_handle(:string_list_handle, @vreg_by_name.fetch(name))
         end
       end
@@ -5571,7 +5621,7 @@ class RegisterBcEmitter
     end
 
     value = compile_value_expr(expr)
-    return value if list_handle_value?(value) && (expected_type.nil? || value[:kind] == expected_type)
+    return value if list_handle_value?(value) && compatible_list_handle_kind?(value[:kind], expected_type)
 
     nil
   end
@@ -5629,6 +5679,7 @@ class RegisterBcEmitter
             when :int_list_handle, :string_list_handle
               handle = compile_list_handle_expr(field.fetch(:value), field_type)
               raise Unsupported, "register emitter expected #{field_type} field #{name.inspect}" unless handle
+              field_type = handle.fetch(:kind)
               handle.fetch(:reg)
             when Array
               if field_type.first == :struct_list
@@ -6273,7 +6324,8 @@ class RegisterBcEmitter
       receiver_is_plain_vreg = args[0].is_a?(MIR::Ident) && @vreg_by_name.key?(resolve_ctx_name(args[0].name))
       if args.length >= 2 && !receiver_is_plain_vreg && (handle = compile_list_handle_expr(args[0], :int_list_handle))
         dst = fresh_ireg
-        emit(IHGET, dst, handle.fetch(:reg), compile_i64_expr(args[1]))
+        op = handle[:kind] == :borrowed_int_list_handle ? LGETI : IHGET
+        emit(op, dst, handle.fetch(:reg), compile_i64_expr(args[1]))
         return dst
       end
     end
@@ -6387,7 +6439,9 @@ class RegisterBcEmitter
         dst = fresh_ireg
         case handle.fetch(:kind)
         when :int_list_handle then emit(IHLEN, dst, handle.fetch(:reg))
+        when :borrowed_int_list_handle then emit(LLEN, dst, handle.fetch(:reg))
         when :string_list_handle then emit(SHLEN, dst, handle.fetch(:reg))
+        when :borrowed_string_list_handle then emit(LSLEN, dst, handle.fetch(:reg))
         end
         return dst
       end
@@ -6583,7 +6637,8 @@ class RegisterBcEmitter
     unless expr.object.is_a?(MIR::Ident)
       if (handle = compile_list_handle_expr(expr.object, :int_list_handle))
         dst = fresh_ireg
-        emit(IHGET, dst, handle.fetch(:reg), compile_i64_expr(expr.index))
+        op = handle[:kind] == :borrowed_int_list_handle ? LGETI : IHGET
+        emit(op, dst, handle.fetch(:reg), compile_i64_expr(expr.index))
         return dst
       end
     end
