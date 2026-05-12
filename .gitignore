@@ -74,6 +74,7 @@ examples/**
 # General source files
 !examples/**/*.cht
 !examples/**/*.md
+!examples/**/*.puck
 !examples/**/*.toml
 !examples/**/*.zon
 !examples/**/*.zig

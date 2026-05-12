@@ -13,8 +13,6 @@ class Compiler
   def compile_statements(ast, mem, procedures, loop_exits, codes)
     ast.each do |node|
       if node[:type] == :Procedure
-        # Each procedure has its own memory!
-        # It only has the values / parameters passed into it, no upvalues like in Lisp.
         procedure_mem = {}
         node.val[:params].each { |param| procedure_mem[param] ||= procedure_mem.length }
         procedures[node.var] = {
@@ -77,6 +75,10 @@ class Compiler
       # When a literal integer, our simple case from before `42`, push the value directly:
       when :Integer
         codes << ByteCode.new(:PUSH, expression.value)
+
+      # When a literal string, allocate a VM string ref:
+      when :String
+        codes << ByteCode.new(:ALLOC, { type: :String, value: expression.value })
 
       # When a variable, load the value of the variable `result`:
       when :Variable

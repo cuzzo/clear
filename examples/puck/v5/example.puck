@@ -1,0 +1,5 @@
+message := "hello";
+SYSCALL(1, message);
+
+message := "forty-two";
+SYSCALL(1, message);

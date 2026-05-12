@@ -16,7 +16,7 @@ I would not start with trying to build Rust...
 * **Parsing difficulty:** Dependent on grammar and syntax.
 * **Annotation / Type difficulty:** You can typically trade static annotation in the parser for dynamic type difficulty in the VM, but not eliminate both.
 * **Memory Management:** Easy mode = just leak memory, but RefCounting is nearly as easy.
-* **Compilation / Interpretation difficulty:** Can be as simple as 7 primitives.
+* **Compilation / Interpretation difficulty:** Can be as simple as a handful of primitives.
 
 So you could build a fully functioning language in **~300 dense lines of code** (not counting comments, whitespace, or end-only lines).
 
@@ -98,7 +98,7 @@ Oberon is **statically typed**. While dynamic typing sounds easier, it is a runt
 
 ---
 
-## The Seven Magic Primitives
+## The Tiny VM Primitives
 
 In 1960, John McCarthy famously proved that you only need seven basic operations (`car`, `cdr`, `cons`, `quote`, `atom`, `eq`, `cond`) to compute literally anything in the universe using Lisp.
 
@@ -106,8 +106,9 @@ But we aren’t building a Lisp interpreter. We are building a statically typed,
 
 Our "primitives" aren't list manipulators; they are the fundamental atoms of the CPU. The beauty of compilation is that no matter how complex your high-level language gets, it all eventually boils down to a tiny handful of incredibly dumb operations.
 
-If you look back at our `Factorial` example, it seems like there is a lot of high-level logic happening. But to a CPU, that entire program is just a combination of these seven primitive instructions:
+If you look back at our `Factorial` example, it seems like there is a lot of high-level logic happening. But to a CPU, that entire program is just a combination of these primitive instructions:
 
+ * `ALLOC`: Allocate a heap value, like a string, and push the resulting reference onto the stack.
  * `LOAD`: Read a value from memory (like looking up the variable n).
  * `STORE`: Write a value to memory (like the := assignment to result).
  * `MATH`: Perform basic arithmetic (Add, Subtract, Multiply).
@@ -123,8 +124,8 @@ If you look back at our `Factorial` example, it seems like there is a lot of hig
 What we will implement:
 
  * **A parser:** shockingly easy for LL(1) with an extremely minimal grammar, nearly as easy as Lisp or even Forth
- * **A bytecode compiler:** to compile our language down to 7 byte code operations
- * **A VM:** to run the 7 bytecodes and execute any program computable.
+ * **A bytecode compiler:** to compile our language down to a tiny bytecode instruction set
+ * **A VM:** to run the bytecodes and execute any program computable.
 
 You can also follow through each section with an interacive version of the compiler we build to see *exactly* what it does, which helps immensely if you learn visually or interactively.
 
@@ -207,7 +208,7 @@ IfStatement(
 
 ### 3. Compiler
 
-Flattens that tree down into our 7 primitive machine instructions (Bytecode):
+Flattens that tree down into our primitive machine instructions (Bytecode):
 
 ```
 001: LOAD n
@@ -227,7 +228,7 @@ The loop that actually reads those instructions one by one and executes them on 
 2. **V2:** Define and call a function. Split into four files (~160 dense lines).
 3. **V3:** Add conditionals, print selectively. (~230 dense lines).
 4. **V4:** Add loops, all math, fizzBuzz (~260 dense lines).
-5. **V5:** Add GC/Strings (~280 dense lines).
+5. **V5:** Add strings, heap refs, and refcounting (~280 dense lines).
 6. **V6:** Add `MODULE` for a standard library (~325 dense lines).
 7. **V7:** Add `MACRO` for Structs and advanced syntax (~400 dense lines).
 

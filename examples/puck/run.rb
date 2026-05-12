@@ -11,12 +11,14 @@ rescue LoadError
   # The runner can still work without tty-* gems, but tmux/Linux behaves better with them.
 end
 
-Frame = Struct.new(:name, :codes, :ip, :memory, keyword_init: true)
-TraceState = Struct.new(:frames, :stack, :output, :touched_memory, :halted, keyword_init: true)
+Frame = Struct.new(:name, :codes, :ip, :memory, :last_ip, keyword_init: true)
+TraceHeapValue = Struct.new(:value, :refs)
+TraceHeapRef = Struct.new(:id)
+TraceState = Struct.new(:frames, :stack, :output, :touched_memory, :heap, :halted, keyword_init: true)
 TraceProgram = Struct.new(:version, :source, :codes, :procedures, keyword_init: true)
 
 class VersionLoader
-  VERSIONS = ["v1", "v2", "v3", "v4"]
+  VERSIONS = ["v1", "v2", "v3", "v4", "v5"]
 
   def self.load(version, source_path)
     source = File.read(source_path || File.expand_path("#{version}/example.puck", __dir__))
@@ -109,6 +111,8 @@ class TraceCompiler
     case expression.type
       when :Integer
         codes << ByteCode.new(:PUSH, expression.value)
+      when :String
+        codes << ByteCode.new(:ALLOC, { type: :String, value: expression.value })
       when :Variable
         codes << ByteCode.new(:LOAD, mem.fetch(expression.name))
       when :Add
@@ -137,10 +141,11 @@ class TraceVM
   def initialize(program)
     @program = program
     @state = TraceState.new(
-      frames: [Frame.new(name: "main", codes: program.codes, ip: 0, memory: [])],
+      frames: [Frame.new(name: "main", codes: program.codes, ip: 0, memory: [], last_ip: nil)],
       stack: [],
       output: [],
       touched_memory: nil,
+      heap: [],
       halted: false
     )
     @history = [snapshot]
@@ -151,6 +156,7 @@ class TraceVM
 
     frame = current_frame
     if frame.nil? || frame.ip >= frame.codes.length
+      cleanup(frame.memory) if frame
       @state.frames.pop
       @state.halted = @state.frames.empty?
       @history << snapshot
@@ -159,6 +165,7 @@ class TraceVM
 
     @state.touched_memory = nil
     code = frame.codes[frame.ip]
+    frame.last_ip = frame.ip
     frame.ip += 1
 
     execute(code, frame)
@@ -188,11 +195,14 @@ class TraceVM
     case code.op
       when :PUSH
         @state.stack.push(code.arg)
+      when :ALLOC
+        @state.stack.push(allocate(code.arg))
       when :LOAD
         @state.touched_memory = code.arg
-        @state.stack.push(frame.memory[code.arg])
+        @state.stack.push(retain(frame.memory[code.arg]))
       when :STORE
         @state.touched_memory = code.arg
+        release(frame.memory[code.arg])
         frame.memory[code.arg] = @state.stack.pop
       when :MATH
         right = @state.stack.pop
@@ -210,19 +220,21 @@ class TraceVM
         call_procedure(code.arg)
       when :RETURN
         result = @state.stack.pop
+        cleanup(frame.memory)
         @state.frames.pop
         @state.stack.push(result) unless result.nil?
         @state.halted = @state.frames.empty?
       when :SYSCALL
         value = @state.stack.pop
-        @state.output << "OUTPUT: #{value}"
+        @state.output << "OUTPUT: #{display(value)}"
+        release(value)
     end
   end
 
   def call_procedure(procedure)
     if procedure[:codes]
       args = @state.stack.pop(procedure[:params].length)
-      @state.frames << Frame.new(name: "procedure", codes: procedure[:codes], ip: 0, memory: args)
+      @state.frames << Frame.new(name: "procedure", codes: procedure[:codes], ip: 0, memory: args, last_ip: nil)
     elsif procedure[:body]
       result = run_ast_procedure(procedure)
       @state.stack.push(result) unless result.nil?
@@ -267,28 +279,66 @@ class TraceVM
 
   def snapshot
     TraceState.new(
-      frames: @state.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup) },
+      frames: @state.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip) },
       stack: @state.stack.dup,
       output: @state.output.dup,
       touched_memory: @state.touched_memory,
+      heap: @state.heap.map { |value| value && TraceHeapValue.new(value.value, value.refs) },
       halted: @state.halted
     )
   end
 
   def restore(snap)
     @state = TraceState.new(
-      frames: snap.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup) },
+      frames: snap.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip) },
       stack: snap.stack.dup,
       output: snap.output.dup,
       touched_memory: snap.touched_memory,
+      heap: snap.heap.map { |value| value && TraceHeapValue.new(value.value, value.refs) },
       halted: snap.halted
     )
+  end
+
+  def allocate(arg)
+    return allocate_string(arg[:value]) if arg[:type] == :String
+
+    raise "Unexpected allocation type."
+  end
+
+  def allocate_string(value)
+    id = @state.heap.length
+    @state.heap << TraceHeapValue.new(value, 1)
+    TraceHeapRef.new(id)
+  end
+
+  def retain(value)
+    @state.heap[value.id].refs += 1 if value.is_a?(TraceHeapRef)
+    value
+  end
+
+  def release(value)
+    return unless value.is_a?(TraceHeapRef)
+    return unless @state.heap[value.id]
+
+    @state.heap[value.id].refs -= 1
+    @state.heap[value.id] = nil if @state.heap[value.id].refs.zero?
+  end
+
+  def cleanup(memory)
+    memory.each { |value| release(value) }
+  end
+
+  def display(value)
+    return @state.heap[value.id].value if value.is_a?(TraceHeapRef) && @state.heap[value.id]
+
+    value
   end
 end
 
 class Renderer
   STACK_WIDTH = 10
   MEMORY_WIDTH = 14
+  HEAP_WIDTH = 18
   EFFECT_WIDTH = 20
   MAX_SOURCE_HEIGHT = 10
   MAX_PANE_HEIGHT = 10
@@ -362,7 +412,8 @@ class Renderer
 
   def render_source(width, source_height)
     focus = source_focus
-    start = [[focus - 4, 0].max, [@source_lines.length - source_height, 0].max].min
+    start_focus = focus || first_nonblank_line
+    start = [[start_focus - 4, 0].max, [@source_lines.length - source_height, 0].max].min
     lines = @source_lines[start, source_height] || [""]
     lines.each_with_index.map do |line, idx|
       line_no = start + idx
@@ -372,11 +423,20 @@ class Renderer
   end
 
   def source_focus
+    return nil if @vm.state.halted
+
     frame = @vm.current_frame
     code = @vm.current_code
-    return first_nonblank_line unless frame && code
+    return first_nonblank_line unless frame
 
-    ip = frame.ip
+    ip = code ? frame.ip : frame.last_ip
+    code ||= frame.codes[ip]
+    return first_nonblank_line unless code
+
+    return syscall_source_line(frame, ip) if code.op == :SYSCALL
+    return syscall_source_line(frame, ip + 1) if code.op == :LOAD && next_op(frame, ip) == :SYSCALL
+    call_ip = upcoming_call_ip(frame, ip)
+    return call_source_line(frame, call_ip) if call_ip
 
     patterns = if frame.name == "procedure" && procedure_return_sequence?(frame, ip)
       [/RETURN/]
@@ -387,6 +447,8 @@ class Renderer
         next_op(frame, ip) == :SYSCALL ? [/SYSCALL/] : condition_patterns(frame, ip)
       when :PUSH, :MATH
         upcoming_store?(frame, ip) ? store_patterns(frame, ip) : condition_patterns(frame, ip)
+      when :ALLOC
+        upcoming_store?(frame, ip) && code.arg[:type] == :String ? string_store_patterns(code.arg[:value]) : [/\S/]
       when :COMPARE, :JUMP_IF_FALSE
         condition_patterns(frame, ip)
       when :JUMP
@@ -412,6 +474,20 @@ class Renderer
     end
 
     first_nonblank_line
+  end
+
+  def syscall_source_line(frame, ip)
+    syscall_idx = frame.codes[0..ip].count { |code| code.op == :SYSCALL } - 1
+    lines = @source_lines.each_index.select { |idx| @source_lines[idx].match?(/SYSCALL/) }
+    lines[syscall_idx] || first_nonblank_line
+  end
+
+  def call_source_line(frame, ip)
+    call_idx = frame.codes[0..ip].count { |code| code.op == :CALL } - 1
+    lines = @source_lines.each_index.select do |idx|
+      @source_lines[idx].match?(/^\s*(?!PROCEDURE|SYSCALL)(?:\w+\s*:=\s*)?\w+\(.*\);/)
+    end
+    lines[call_idx] || first_nonblank_line
   end
 
   def condition_patterns(frame, ip)
@@ -448,6 +524,18 @@ class Renderer
     frame.codes[ip + 1]&.op
   end
 
+  def upcoming_call_ip(frame, ip)
+    idx = ip
+    while idx < frame.codes.length
+      op = frame.codes[idx].op
+      return idx if op == :CALL
+      return nil if [:STORE, :SYSCALL, :RETURN, :JUMP, :JUMP_IF_FALSE].include?(op)
+      idx += 1
+    end
+
+    nil
+  end
+
   def upcoming_store?(frame, ip)
     (frame.codes[ip, 4] || []).any? { |code| code.op == :STORE }
   end
@@ -464,6 +552,9 @@ class Renderer
 
   def store_patterns(frame, ip)
     previous = frame.codes[[ip - 4, 0].max, 4] || []
+    string = previous.find { |code| code.op == :ALLOC && code.arg[:type] == :String }&.arg&.fetch(:value)
+    return string_store_patterns(string) if string
+
     if previous.any? { |code| code.op == :MATH && code.arg == :+ }
       [/:=.*\+/, /:=/]
     else
@@ -471,27 +562,36 @@ class Renderer
     end
   end
 
+  def string_store_patterns(value)
+    [/:=.*"#{Regexp.escape(value)}"/, /:=/]
+  end
+
   def render_panes(width, pane_height)
-    byte_width = [width - EFFECT_WIDTH - STACK_WIDTH - MEMORY_WIDTH - 6, 20].max
+    heap_width = @vm.state.heap.any? ? HEAP_WIDTH : 0
+    effect_width = heap_width.positive? ? 14 : EFFECT_WIDTH
+    byte_width = [width - effect_width - STACK_WIDTH - MEMORY_WIDTH - heap_width - (heap_width.positive? ? 8 : 6), 12].max
     byte_rows = bytecode_lines(byte_width, pane_height)
-    effect_rows = effect_lines(EFFECT_WIDTH, pane_height)
+    effect_rows = effect_lines(effect_width, pane_height)
     stack_rows = stack_lines(pane_height)
     memory_rows = memory_lines(pane_height)
+    heap_rows = heap_lines(heap_width, pane_height)
 
     header = [
       "BYTECODE".ljust(byte_width),
-      "EFFECT".ljust(EFFECT_WIDTH),
+      "EFFECT".ljust(effect_width),
       "STACK".ljust(STACK_WIDTH),
-      "MEMORY".ljust(MEMORY_WIDTH)
-    ].join("  ")
+      "MEMORY".ljust(MEMORY_WIDTH),
+      heap_width.positive? ? "HEAP".ljust(heap_width) : nil
+    ].compact.join("  ")
 
     rows = pane_height.times.map do |idx|
       [
         (byte_rows[idx] || "").ljust(byte_width),
-        (effect_rows[idx] || "").ljust(EFFECT_WIDTH),
+        (effect_rows[idx] || "").ljust(effect_width),
         (stack_rows[idx] || "").ljust(STACK_WIDTH),
-        (memory_rows[idx] || "").ljust(MEMORY_WIDTH)
-      ].join("  ")[0, width]
+        (memory_rows[idx] || "").ljust(MEMORY_WIDTH),
+        heap_width.positive? ? (heap_rows[idx] || "").ljust(heap_width) : nil
+      ].compact.join("  ")[0, width]
     end
 
     ([truncate(header, width)] + rows).join("\n")
@@ -504,9 +604,15 @@ class Renderer
     start = [[frame.ip - 4, 0].max, [frame.codes.length - pane_height, 0].max].min
     frame.codes[start, pane_height].each_with_index.map do |code, idx|
       ip = start + idx
-      marker = ip == frame.ip ? ">" : " "
+      marker = ip == current_bytecode_ip(frame) ? ">" : " "
       truncate("#{marker} #{format('%03d', ip)}: #{format_code(code)}", width)
     end
+  end
+
+  def current_bytecode_ip(frame)
+    return frame.ip if frame.ip < frame.codes.length
+
+    frame.last_ip || frame.codes.length - 1
   end
 
   def effect_lines(width, pane_height)
@@ -523,6 +629,8 @@ class Renderer
     case code.op
       when :PUSH
         "push #{format_value(code.arg)}"
+      when :ALLOC
+        "alloc #{code.arg[:value].inspect}"
       when :LOAD
         "M#{format('%02d', code.arg)} -> #{format_value(frame.memory[code.arg])}"
       when :STORE
@@ -580,6 +688,20 @@ class Renderer
     end
   end
 
+  def heap_lines(width, pane_height)
+    return [] unless width.positive?
+
+    rows = @vm.state.heap.each_with_index.map do |value, idx|
+      if value
+        "S#{format('%02d', idx)} r#{value.refs} #{value.value.inspect}"
+      else
+        "S#{format('%02d', idx)} free"
+      end
+    end
+
+    rows.first(pane_height)
+  end
+
   def active_stack_indexes
     code = @vm.current_code
     size = @vm.state.stack.length
@@ -627,6 +749,7 @@ class Renderer
 
   def format_code(code)
     arg = code.arg
+    arg = "#{arg[:type]} #{arg[:value].inspect}" if code.op == :ALLOC
     arg = "proc" if arg.is_a?(Hash)
     [code.op, arg].compact.join(" ")
   end
@@ -636,6 +759,7 @@ class Renderer
       when nil then "xxx"
       when true then "001"
       when false then "000"
+      when TraceHeapRef then "S#{format('%02d', value.id)}"
       when Integer then format('%03d', value)
       else value.to_s[0, 3]
     end
@@ -739,7 +863,7 @@ steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
 unless VersionLoader::VERSIONS.include?(version)
-  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4] [source.puck] [--steps=N]"
+  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5] [source.puck] [--steps=N]"
 end
 
 program = VersionLoader.load(version, source_path)
