@@ -13,8 +13,11 @@ class Compiler
   def compile_statements(ast, mem, procedures, loop_exits, codes)
     ast.each do |node|
       if node[:type] == :Procedure
-        procedure_mem = {}
-        node.val[:params].each { |param| procedure_mem[param] ||= procedure_mem.length }
+        # Each procedure has its own memory!
+        # It only has the values / parameters passed into it, no upvalues like in Lisp.
+        procedure_mem = node.val[:params].reduce({}) do |param| 
+          procedure_mem[param] ||= procedure_mem.length
+        end
         procedures[node.var] = {
           params: node.val[:params],
           codes: compile_statements(node.val[:body], procedure_mem, procedures, [], [])

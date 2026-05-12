@@ -211,4 +211,4 @@ Your computer screen:
 
 Pat yourself on the back.  You just built a working VM!
 
-When you're ready, jump to [V2](v2/README.md), where we expand on this to lay the ground work for a real VM.
+When you're ready, jump to [V2](../v2/README.md), where we expand on this to lay the ground work for a real VM.

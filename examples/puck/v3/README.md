@@ -393,4 +393,4 @@ change the instruction pointer instead of blindly running the next instruction
 
 V3 is the first step toward that.
 
-When you're ready, jump to [V4](v4/README.md), where we add loops and ~40 LOC, and reach a Turing-complete language at only ~275 dense LOC!
+When you're ready, jump to [V4](../v4/README.md), where we add loops and ~40 LOC, and reach a Turing-complete language at only ~275 dense LOC!

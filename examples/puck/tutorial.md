@@ -18,7 +18,7 @@ I would not start with trying to build Rust...
 * **Memory Management:** Easy mode = just leak memory, but RefCounting is nearly as easy.
 * **Compilation / Interpretation difficulty:** Can be as simple as 7 primitives.
 
-So you could build a fully functioning language in **< 300 dense lines of code** (not counting comments, whitespace, or end-only lines).
+So you could build a fully functioning language in **~300 dense lines of code** (not counting comments, whitespace, or end-only lines).
 
 ---
 
@@ -151,7 +151,7 @@ This is all you need to build a *shockingly* usable language.
 
 ## The Scope
 
-First, over 6 stages we will implement the prototype in Ruby, so that it's incredibly easy to understand, and only about ~250 lines of code.
+First, over 6 stages we will implement the prototype in Ruby, so that it's incredibly easy to understand, and only about ~325 lines of code.
 
 Finally, we will add `MACRO` to the parser, which will nearly double the size of the Ruby parser, but will make our language quite usable!
 
