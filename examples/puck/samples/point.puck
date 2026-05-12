@@ -1,0 +1,14 @@
+RECORD Point
+  x: Integer
+  y: Integer
+END;
+
+PROCEDURE Calculate();
+VAR
+  localPoint: Point;
+  heapPoint: REF Point;
+BEGIN
+  localPoint.x := 10;
+  localPoint.y := 20;
+  Print(localPoint.x)
+END Calculate;

@@ -1,0 +1,136 @@
+# Core Puck surface library.
+#
+# This file is intentionally Puck source, not CLEAR. The CLEAR parser in
+# puck.cht validates this syntax shape. These macros define the first layer of
+# realistic Oberon surface syntax over the primitive core:
+# assignment, calls, IF, LOOP, EXIT, macro expansion, and scope cleanup.
+
+MACRO WHILE(condition: Node; body: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    LOOP
+      IF NOT ~condition THEN EXIT END;
+      ~body
+    END
+  END;
+
+  RETURN transformed
+END WHILE;
+
+MACRO REPEAT(body: Node; condition: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    LOOP
+      ~body
+      IF ~condition THEN EXIT END;
+    END
+  END;
+
+  RETURN transformed
+END REPEAT;
+
+MACRO FOR(name: Node; first: Node; last: Node; step: Node; body: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    ~name := ~first;
+    LOOP
+      IF ~step >= 0 THEN
+        IF ~name > ~last THEN EXIT END
+      ELSE
+        IF ~name < ~last THEN EXIT END
+      END;
+      ~body
+      ~name := ~name + ~step
+    END
+  END;
+
+  RETURN transformed
+END FOR;
+
+MACRO CASE(value: Node; arms: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    CASE_EXPAND(~value, ~arms)
+  END;
+
+  RETURN transformed
+END CASE;
+
+MACRO ELSIF(condition: Node; body: Node; rest: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    ELSE
+      IF ~condition THEN
+        ~body
+      ~rest
+      END
+  END;
+
+  RETURN transformed
+END ELSIF;
+
+MACRO ELSE(body: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    ELSE
+      ~body
+  END;
+
+  RETURN transformed
+END ELSE;
+
+MACRO CONST(name: Node; value: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    DEFINE_CONST(~name, ~value)
+  END;
+
+  RETURN transformed
+END CONST;
+
+MACRO TYPE(name: Node; definition: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    DEFINE_TYPE(~name, ~definition)
+  END;
+
+  RETURN transformed
+END TYPE;
+
+MACRO VAR(name: Node; typeName: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    DECLARE_VAR(~name, ~typeName)
+  END;
+
+  RETURN transformed
+END VAR;
+
+MACRO VAR_REF(name: Node; typeName: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    DECLARE_REF_VAR(~name, ~typeName)
+  END;
+
+  RETURN transformed
+END VAR_REF;

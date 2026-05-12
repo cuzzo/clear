@@ -1,0 +1,8 @@
+# Primitive-core Puck smoke file.
+
+x := 0;
+LOOP
+  Print(x);
+  x := x + 1;
+  IF x > 2 THEN EXIT END;
+END;

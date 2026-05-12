@@ -1,0 +1,13 @@
+MACRO WHILE(condition: Node; body: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    LOOP
+      IF NOT ~condition THEN EXIT END;
+      ~body
+    END
+  END;
+
+  RETURN transformed
+END WHILE;
