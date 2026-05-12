@@ -656,6 +656,8 @@ class RegisterBcEmitter
       compile_inline_zig_stmt(stmt)
     when MIR::Call
       compile_call_stmt(stmt)
+    when MIR::DeferStmt
+      compile_defer_stmt(stmt)
     when MIR::ShardedMapPut
       compile_sharded_map_put(stmt)
     when MIR::IndexInsert
@@ -697,6 +699,13 @@ class RegisterBcEmitter
     else
       raise Unsupported, "register emitter does not support #{stmt.class.name} yet"
     end
+  end
+
+  def compile_defer_stmt(stmt)
+    body = stmt.body
+    return nil if body.is_a?(MIR::Call) && body.callee.to_s.match?(/\A(?:CheatLib\.)?(?:rcRelease|arcRelease|weakRcRelease|weakArcRelease)\z/)
+
+    raise Unsupported, "register emitter does not support MIR::DeferStmt yet"
   end
 
   # Lower `MIR::ForStmt iter=ListItems(<list>) capture=<name> body=...`
@@ -3323,6 +3332,10 @@ class RegisterBcEmitter
       compile_cap_wrap_value(expr)
     when MIR::RcRetain
       compile_rc_retain_value(expr)
+    when MIR::RcDowngrade
+      compile_rc_downgrade_value(expr)
+    when MIR::WeakUpgrade
+      compile_weak_upgrade_value(expr)
     when MIR::BgBlock
       compile_bg_block_value(expr)
     when MIR::FnRef
@@ -4003,7 +4016,8 @@ class RegisterBcEmitter
 
   def append_struct_to_fields(fields, type_name, source_expr)
     value = compile_value_expr(source_expr)
-    unless value && value.is_a?(Hash) && value[:kind] == :struct
+    cap_struct_kinds = %i[struct rc_struct arc_struct locked_struct write_locked_struct local_struct versioned_struct atomic_ptr_struct]
+    unless value && value.is_a?(Hash) && cap_struct_kinds.include?(value[:kind])
       raise Unsupported, "register emitter expected a struct value for struct_list append, got #{value.inspect[0..80]}"
     end
     unless value[:type] == type_name
@@ -4029,7 +4043,7 @@ class RegisterBcEmitter
   def compile_struct_list_index_get(list_name, idx_expr)
     info = (@struct_list_info || {})[list_name]
     raise Unsupported, "register emitter lost struct_list info for #{list_name.inspect}" unless info
-    compile_struct_list_value_index_get({ type: info[:type], fields: info[:fields] }, idx_expr)
+    compile_struct_list_value_index_get({ type: info[:type], fields: info[:fields], element_kind: info[:element_kind] }, idx_expr)
   end
 
   def compile_struct_list_value_index_get(info, idx_expr)
@@ -4063,7 +4077,7 @@ class RegisterBcEmitter
         fields[fname] = { type: :string, reg: reg }
       end
     end
-    { kind: :struct, type: info[:type], fields: fields }
+    { kind: info[:element_kind] || :struct, type: info[:type], fields: fields }
   end
 
   def index_get_list_name(object)
@@ -4111,7 +4125,7 @@ class RegisterBcEmitter
       cloned = clone_scalar_list_value(finfo)
       cloned_fields[fname] = finfo.merge(reg: cloned.fetch(:reg))
     end
-    { kind: :struct_list, type: value.fetch(:type), fields: cloned_fields }
+    { kind: :struct_list, type: value.fetch(:type), fields: cloned_fields, element_kind: value[:element_kind] }
   end
 
   def emit_clone_loop(src_reg, dst_reg, len_op, get_op, append_op, fresh_fn)
@@ -4717,7 +4731,23 @@ class RegisterBcEmitter
     clone_value(src)
   end
 
-  def compile_struct_array_init(struct_type_name, items)
+  def compile_rc_downgrade_value(expr)
+    src = compile_value_expr(expr.source)
+    return nil unless src && %i[struct rc_struct arc_struct].include?(src[:kind])
+
+    { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), caps: { ownership: :weak, sync: :none } }
+  end
+
+  def compile_weak_upgrade_value(expr)
+    src = compile_value_expr(expr.source)
+    return nil unless src && %i[struct rc_struct arc_struct].include?(src[:kind])
+
+    alive_reg = fresh_ireg
+    emit(ICONST, alive_reg, add_const(1))
+    { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), alive_reg: alive_reg, caps: { ownership: :rc, sync: :none } }
+  end
+
+  def compile_struct_array_init(struct_type_name, items, element_kind: :struct)
     fields = @struct_fields[struct_type_name]
     raise Unsupported, "register emitter does not know struct #{struct_type_name.inspect} for ArrayInit" unless fields
 
@@ -4771,7 +4801,7 @@ class RegisterBcEmitter
       end
     end
 
-    { kind: :struct_list, type: struct_type_name, fields: field_lists }
+    { kind: :struct_list, type: struct_type_name, fields: field_lists, element_kind: element_kind }
   end
 
   # `~T[N]` bounded stream literal: lowering tags MakeList with
@@ -5326,6 +5356,12 @@ class RegisterBcEmitter
       inner = m[1]
       return compile_struct_array_init(inner, []) if @struct_fields.key?(inner)
     end
+    if (m = expr.zig_type.to_s.match(/\A(?:std\.)?ArrayListUnmanaged\((?:CheatLib\.)?(Rc|Arc|WeakRc|WeakArc)\(([A-Za-z_][A-Za-z0-9_]*)\)\)\z/))
+      wrapper = m[1]
+      inner = m[2]
+      element_kind = (wrapper == "Arc" || wrapper == "WeakArc") ? :arc_struct : :rc_struct
+      return compile_struct_array_init(inner, [], element_kind: element_kind) if @struct_fields.key?(inner)
+    end
     if (m = expr.zig_type.to_s.match(/\A(?:CheatLib\.)?SoaList\(([A-Za-z_][A-Za-z0-9_]*)\)\z/))
       inner = m[1]
       return compile_struct_array_init(inner, []) if @struct_fields.key?(inner)
@@ -5417,7 +5453,8 @@ class RegisterBcEmitter
     bindings.each do |binding|
       capture = binding[:capture].to_s
       expr = binding[:expr]
-      if (value = compile_value_expr(expr)) && value[:kind] == :struct && value[:alive_reg]
+      cap_struct_kinds = %i[struct rc_struct arc_struct locked_struct write_locked_struct local_struct versioned_struct atomic_ptr_struct]
+      if (value = compile_value_expr(expr)) && cap_struct_kinds.include?(value[:kind]) && value[:alive_reg]
         cond_reg = fresh_ireg
         emit(INEQ, cond_reg, value.fetch(:alive_reg), zero)
         emit(JF, cond_reg, 0)
@@ -5756,7 +5793,7 @@ class RegisterBcEmitter
       # / compile_i64_length consult it.
       @vkind_by_name[name] = :struct_list
       @struct_list_info ||= {}
-      @struct_list_info[name] = { type: value.fetch(:type), fields: value.fetch(:fields) }
+      @struct_list_info[name] = { type: value.fetch(:type), fields: value.fetch(:fields), element_kind: value[:element_kind] }
     when :pool
       # @pool: like struct_list but with an extra i64 alive-flags
       # array. The bc emitter implements insert/get/remove/length/
@@ -5873,14 +5910,18 @@ class RegisterBcEmitter
     # :arc_struct value already maps directly to the T fields. Skip
     # both unwrap layers when we see them.
     if expr.is_a?(MIR::FieldGet) && expr.field.to_s == "data" &&
-       expr.object.is_a?(MIR::FieldGet) && expr.object.field.to_s == "ctrl" &&
-       expr.object.object.is_a?(MIR::Ident)
-      handle = @value_by_name[expr.object.object.name.to_s]
+       expr.object.is_a?(MIR::FieldGet) && expr.object.field.to_s == "ctrl"
+      handle_source = expr.object.object
+      handle = if handle_source.is_a?(MIR::Ident)
+                 @value_by_name[handle_source.name.to_s]
+               else
+                 compile_value_expr(handle_source)
+               end
       capability_unwrap = %i[rc_struct arc_struct locked_struct write_locked_struct local_struct versioned_struct atomic_ptr_struct]
       if handle && capability_unwrap.include?(handle[:kind])
         # Loom groundwork: reading a field through `.ctrl.data` is a
         # shared-memory read on the handle's binding.
-        record_shared_event(:read, expr.object.object.name, handle[:kind], caps: caps_for_value(handle))
+        record_shared_event(:read, handle_source.name, handle[:kind], caps: caps_for_value(handle)) if handle_source.is_a?(MIR::Ident)
         return { kind: :struct, type: handle[:type], fields: handle[:fields] }
       end
     end
