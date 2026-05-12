@@ -81,7 +81,7 @@ class VM
     case expression.type
       when :Integer then expression.value
       when :Variable then memory.fetch(expression.name)
-      when :Add then run_expression(expression.left, memory) + run_expression(expression.right, memory)
+      when :Math then run_expression(expression.left, memory).send(expression.value, run_expression(expression.right, memory))
       when :Equal then run_expression(expression.left, memory) == run_expression(expression.right, memory)
       when :Call then raise "Nested procedure calls are compiled before VM execution."
     end

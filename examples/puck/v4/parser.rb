@@ -149,8 +149,7 @@ class Parser
     args
   end
 
-  # For now, we only support the + operator
-  # It is trivial to add the other operators, but we will take this one step at a time
+  # v4 supports all of our integer math operators.
   def parse_expression
 
     # Fisrt, grab the current term

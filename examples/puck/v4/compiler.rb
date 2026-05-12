@@ -87,11 +87,6 @@ class Compiler
         compile_expression(expression.right, codes, mem, procedures)
         codes << ByteCode.new(:MATH, expression.value)
 
-      when :Add
-        compile_expression(expression.left, codes, mem, procedures)
-        compile_expression(expression.right, codes, mem, procedures)
-        codes << ByteCode.new(:MATH, :+)
-
       when :Equal
         compile_expression(expression.left, codes, mem, procedures)
         compile_expression(expression.right, codes, mem, procedures)

@@ -140,10 +140,10 @@ class Parser
     # Fisrt, grab the current term
     expression = parse_term
 
-    # If we see the add operator, we translate to an :Add command for the Compiler
+    # If we see the add operator, we translate to a :Math command for the Compiler
     if @tokens[@pos]&.type == :OPERATOR && @tokens[@pos].value == "+"
       consume(:OPERATOR) # +
-      expression = ExprNode.new(type: :Add, left: expression, right: parse_term)
+      expression = ExprNode.new(type: :Math, value: :+, left: expression, right: parse_term)
     end
 
     if @tokens[@pos]&.type == :OPERATOR && @tokens[@pos].value == "="

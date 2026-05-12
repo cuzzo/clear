@@ -50,12 +50,12 @@ class Compiler
       when :Variable
         codes << ByteCode.new(:LOAD, mem.fetch(expression.name))
 
-      # When an Add command, load the two numbers, tell the VM to add them [:MATH, :+]:
-      when :Add
-        # Recursively compile the left and right sides, then add them:
+      # When a Math command, load the two numbers, tell the VM to send the math operator:
+      when :Math
+        # Recursively compile the left and right sides, then do math:
         compile_expression(expression.left, codes, mem, procedures)
         compile_expression(expression.right, codes, mem, procedures)
-        codes << ByteCode.new(:MATH, :+)
+        codes << ByteCode.new(:MATH, expression.value)
 
       when :Equal
         compile_expression(expression.left, codes, mem, procedures)

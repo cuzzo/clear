@@ -5,6 +5,13 @@ Token = Struct.new(:type, :value)
 
 # 1. Tokenizer: Break raw puck code into semantic tokens
 class Tokenizer
+  KEYWORDS = %w[
+    PROCEDURE RETURN
+    IF THEN
+    LOOP EXIT
+    END SYSCALL
+  ].freeze
+
   def initialize(code)
     @scanner = StringScanner.new(code)
   end
@@ -21,18 +28,8 @@ class Tokenizer
       elsif match = @scanner.scan(/:=|[()+\-*\/%=,;]/)
         tokens << Token.new(:OPERATOR, match)
 
-      elsif match = @scanner.scan(/PROCEDURE|RETURN|IF|THEN|LOOP|EXIT|END|SYSCALL|[a-zA-Z_]\w*/)
-        keywords = {
-          "PROCEDURE" => :PROCEDURE,
-          "RETURN" => :RETURN,
-          "IF" => :IF,
-          "THEN" => :THEN,
-          "LOOP" => :LOOP,
-          "EXIT" => :EXIT,
-          "END" => :END,
-          "SYSCALL" => :SYSCALL,
-        }
-        type = keywords.fetch(match, :SYMBOL)
+      elsif match = @scanner.scan(/[a-zA-Z_]\w*/)
+        type = KEYWORDS.include?(match) ? match.to_sym : :SYMBOL
         tokens << Token.new(type, match)
       else
         raise "Unexpected character #{@scanner.peek(1).inspect} at position #{@scanner.pos}"
