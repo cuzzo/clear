@@ -1143,6 +1143,12 @@ class RegisterBcEmitter
       dst = @sreg_by_name[name]
       src = compile_string_expr(stmt.value)
       emit(SMOV, dst, src) unless dst == src
+    elsif @value_by_name.key?(name)
+      value = compile_value_expr(stmt.value)
+      unless value && value.fetch(:kind) == @value_by_name[name].fetch(:kind)
+        raise Unsupported, "register emitter expected value assignment for #{name.inspect}"
+      end
+      @value_by_name[name] = value
     else
       raise Unsupported, "register emitter cannot assign unknown local #{name.inspect}"
     end
@@ -1992,6 +1998,16 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter expected borrows on with_block_bindings" unless borrows.is_a?(Array) && borrows.first
     src_name = borrows.first.to_s
     src = @value_by_name[src_name]
+    code = stmt.code.to_s
+    bound_names = extract_with_block_bound_names(code)
+    if @vreg_by_name.key?(src_name) && %i[int_list string_list].include?(@vkind_by_name[src_name])
+      bound_names.each do |bound|
+        @vreg_by_name[bound] = @vreg_by_name.fetch(src_name)
+        @vkind_by_name[bound] = @vkind_by_name.fetch(src_name)
+      end
+      return
+    end
+
     unless src && %i[locked_struct write_locked_struct rc_struct arc_struct struct].include?(src[:kind])
       raise Unsupported, "register emitter does not know with-block source #{src_name.inspect} (kind=#{src && src[:kind]})"
     end
@@ -2016,7 +2032,6 @@ class RegisterBcEmitter
     # the underlying cap-wrapped binding. The alias itself is a
     # plain :struct view; the back-pointer lives on a side map
     # (@cap_alias_source) so existing :struct dispatch is unchanged.
-    code = stmt.code.to_s
     @cap_alias_source ||= {}
     cap_kind = src[:kind]
     alias_caps = src_caps
@@ -2030,6 +2045,15 @@ class RegisterBcEmitter
       @value_by_name[bound] = { kind: :struct, type: src[:type], fields: src[:fields] }
       @cap_alias_source[bound] = { name: src_name, kind: cap_kind, caps: alias_caps }
     end
+  end
+
+  def extract_with_block_bound_names(code)
+    names = []
+    code.scan(/^\s*const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/) do |m|
+      name = m[0]
+      names << name unless name.start_with?("__")
+    end
+    names
   end
 
   def compile_i64_expr(expr)
@@ -2515,6 +2539,8 @@ class RegisterBcEmitter
   end
 
   def compile_i64_binop(expr)
+    return compile_i64_compare(expr) if %w[< > == != <= >=].include?(expr.op.to_s)
+
     opcode = case expr.op
              when "+" then IADD
              when "-" then ISUB
@@ -5345,6 +5371,8 @@ class RegisterBcEmitter
   end
 
   def compile_list_handle_expr(expr, expected_type = nil)
+    return compile_list_handle_expr(expr.expr, expected_type) if expr.is_a?(MIR::ItemsAccess)
+
     if expr.is_a?(MIR::Ident)
       name = resolve_ctx_name(expr.name)
       if (value = @value_by_name[name]) && list_handle_value?(value)
@@ -6374,6 +6402,14 @@ class RegisterBcEmitter
   end
 
   def compile_i64_index_get(expr)
+    unless expr.object.is_a?(MIR::Ident)
+      if (handle = compile_list_handle_expr(expr.object, :int_list_handle))
+        dst = fresh_ireg
+        emit(IHGET, dst, handle.fetch(:reg), compile_i64_expr(expr.index))
+        return dst
+      end
+    end
+
     unless expr.object.is_a?(MIR::Ident)
       raise Unsupported, "register emitter only supports local Int64 list indexing in this tranche"
     end
