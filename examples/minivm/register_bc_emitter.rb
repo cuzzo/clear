@@ -1534,11 +1534,7 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter does not support external call #{stmt.callee.inspect} yet" unless function
 
     return_type = normalize_type(function.ret_type)
-    unless return_type == :void
-      raise Unsupported, "register emitter does not support discarding #{return_type} call #{stmt.callee.inspect} yet"
-    end
-
-    compile_inline_function(function, :void, compile_call_args(stmt.callee, function, stmt.args || []))
+    compile_inline_function(function, return_type, compile_call_args(stmt.callee, function, stmt.args || []))
     nil
   end
 
