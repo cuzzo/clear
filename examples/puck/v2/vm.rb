@@ -51,7 +51,7 @@ class VM
 end
 
 if __FILE__ == $PROGRAM_NAME
-  code = "PROCEDURE add_one(x); RETURN x + 1; END; result := add_one(41); SYSCALL(1, result);"
+  code = File.read(File.expand_path("example.puck", __dir__))
   tokens = Tokenizer.new(code).tokenize
   ast = Parser.new(tokens).parse
   bc = Compiler.new.compile(ast)

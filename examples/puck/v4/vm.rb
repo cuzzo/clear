@@ -65,26 +65,7 @@ class VM
 end
 
 if __FILE__ == $PROGRAM_NAME
-  code = "
-    PROCEDURE fizzbuzz(limit);
-      i := 1;
-      LOOP
-        IF i % 3 = 0 THEN
-          IF i = 42 THEN
-            SYSCALL(1, i);
-          END;
-        END;
-
-        IF i = limit THEN
-          EXIT;
-        END;
-
-        i := i + 1;
-      END;
-    END;
-
-    fizzbuzz(100);
-  "
+  code = File.read(File.expand_path("example.puck", __dir__))
   tokens = Tokenizer.new(code).tokenize
   ast = Parser.new(tokens).parse
   program = Compiler.new.compile(ast)

@@ -16,58 +16,10 @@ TraceState = Struct.new(:frames, :stack, :output, :touched_memory, :halted, keyw
 TraceProgram = Struct.new(:version, :source, :codes, :procedures, keyword_init: true)
 
 class VersionLoader
-  DEFAULT_SOURCES = {
-    "v1" => "
-      result := 42;
-      SYSCALL(1, result);
-    ",
-    "v2" => "
-      PROCEDURE add_one(x);
-        RETURN x + 1;
-      END;
-
-      result := add_one(41);
-      SYSCALL(1, result);
-    ",
-    "v3" => "
-      PROCEDURE add(a, b);
-        RETURN a + b;
-      END;
-
-      PROCEDURE print_selectively(x);
-        IF x = 42 THEN
-          SYSCALL(1, x);
-        END;
-      END;
-
-      result := add(40, 2);
-      print_selectively(41);
-      print_selectively(result);
-    ",
-    "v4" => "
-      PROCEDURE fizzbuzz(limit);
-        i := 1;
-        LOOP
-          IF i % 3 = 0 THEN
-            IF i = 42 THEN
-              SYSCALL(1, i);
-            END;
-          END;
-
-          IF i = limit THEN
-            EXIT;
-          END;
-
-          i := i + 1;
-        END;
-      END;
-
-      fizzbuzz(100);
-    ",
-  }
+  VERSIONS = ["v1", "v2", "v3", "v4"]
 
   def self.load(version, source_path)
-    source = source_path ? File.read(source_path) : DEFAULT_SOURCES.fetch(version)
+    source = File.read(source_path || File.expand_path("#{version}/example.puck", __dir__))
     path = File.expand_path("#{version}/#{version == "v1" ? "puck.rb" : "vm.rb"}", __dir__)
 
     silence_stdout { Kernel.load path }
@@ -786,7 +738,7 @@ source_path = ARGV[0] unless ARGV[0]&.start_with?("--")
 steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
-unless VersionLoader::DEFAULT_SOURCES.key?(version)
+unless VersionLoader::VERSIONS.include?(version)
   abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4] [source.puck] [--steps=N]"
 end
 

@@ -1,0 +1,18 @@
+PROCEDURE fizzbuzz(limit);
+  i := 1;
+  LOOP
+    IF i % 3 = 0 THEN
+      IF i = 42 THEN
+        SYSCALL(1, i);
+      END;
+    END;
+
+    IF i = limit THEN
+      EXIT;
+    END;
+
+    i := i + 1;
+  END;
+END;
+
+fizzbuzz(100);

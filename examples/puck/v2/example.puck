@@ -1,0 +1,6 @@
+PROCEDURE add_one(x);
+  RETURN x + 1;
+END;
+
+result := add_one(41);
+SYSCALL(1, result);

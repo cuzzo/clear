@@ -89,21 +89,7 @@ class VM
 end
 
 if __FILE__ == $PROGRAM_NAME
-  code = "
-    PROCEDURE add(a, b);
-      RETURN a + b;
-    END;
-
-    PROCEDURE print_selectively(x);
-      IF x = 42 THEN
-        SYSCALL(1, x);
-      END;
-    END;
-
-    result := add(40, 2);
-    print_selectively(41);
-    print_selectively(result);
-  "
+  code = File.read(File.expand_path("example.puck", __dir__))
   tokens = Tokenizer.new(code).tokenize
   ast = Parser.new(tokens).parse
   bc = Compiler.new.compile(ast)
