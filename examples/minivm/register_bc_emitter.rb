@@ -721,6 +721,12 @@ class RegisterBcEmitter
     if iter.is_a?(MIR::Ident) && @vkind_by_name[iter.name.to_s] == :pool
       return compile_pool_for_stmt(iter.name.to_s, stmt)
     end
+    if iter.is_a?(MIR::FieldGet) &&
+       iter.field.to_s == "slots" &&
+       iter.object.is_a?(MIR::Ident) &&
+       @vkind_by_name[iter.object.name.to_s] == :pool
+      return compile_pool_slots_for_stmt(iter.object.name.to_s, stmt)
+    end
     if iter.is_a?(MIR::IterRange)
       return compile_iter_range_for_stmt(iter, stmt)
     end
@@ -3466,6 +3472,101 @@ class RegisterBcEmitter
     @loop_continue_patches = saved_continue_patches if defined?(saved_continue_patches)
   end
 
+  # Lowered pool iteration sometimes appears as:
+  #   FOR *slot IN pool.slots DO
+  #     IF !slot.alive THEN CONTINUE; END
+  #     item = slot.value;
+  #     ...
+  #   END
+  # Preserve that shape by binding the capture to a synthetic pool-slot
+  # value with `.alive` and `.value` fields backed by the pool's
+  # parallel arrays.
+  def compile_pool_slots_for_stmt(pool_name, stmt)
+    info = (@pool_info || {})[pool_name]
+    raise Unsupported, "register emitter lost pool info for #{pool_name.inspect}" unless info
+    capture = stmt.capture.to_s.sub(/\A\*+/, "")
+    raise Unsupported, "register emitter expected a capture for ForStmt over pool.slots" if capture.empty?
+
+    len_reg = fresh_ireg
+    emit(LLEN, len_reg, info[:alive_reg])
+    i_reg = fresh_ireg
+    emit(ICONST, i_reg, add_const(0))
+    one_reg = fresh_ireg
+    emit(ICONST, one_reg, add_const(1))
+
+    loop_start = @ops.length
+    cond_reg = fresh_ireg
+    emit(ILT, cond_reg, i_reg, len_reg)
+    emit(JF, cond_reg, 0)
+    exit_target_idx = @ops.length - 1
+
+    saved_continue = @loop_continue_target
+    saved_breaks = @loop_break_patches
+    saved_continue_patches = @loop_continue_patches
+    @loop_continue_target = :deferred_for_update
+    @loop_break_patches = []
+    @loop_continue_patches = []
+    saved_iregs = @ireg_by_name.dup
+    saved_fregs = @freg_by_name.dup
+    saved_sregs = @sreg_by_name.dup
+    saved_values = @value_by_name.dup
+    saved_vkinds = @vkind_by_name.dup
+
+    alive_reg = fresh_ireg
+    emit(LGETI, alive_reg, info[:alive_reg], i_reg)
+    @value_by_name[capture] = {
+      kind: :pool_slot,
+      alive_reg: alive_reg,
+      value: pool_struct_value_at(info, i_reg),
+    }
+    @ireg_by_name[capture] = alive_reg
+
+    semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
+
+    continue_target = @ops.length
+    @loop_continue_patches.each { |idx| @ops[idx] = continue_target }
+    new_i = fresh_ireg
+    emit(IADD, new_i, i_reg, one_reg)
+    emit(IMOV, i_reg, new_i)
+    emit(JMP, loop_start)
+    @loop_break_patches.each { |idx| @ops[idx] = @ops.length }
+    @ops[exit_target_idx] = @ops.length
+  ensure
+    @ireg_by_name = saved_iregs if saved_iregs
+    @freg_by_name = saved_fregs if saved_fregs
+    @sreg_by_name = saved_sregs if saved_sregs
+    @value_by_name = saved_values if saved_values
+    @vkind_by_name = saved_vkinds if saved_vkinds
+    @loop_continue_target = saved_continue if defined?(saved_continue)
+    @loop_break_patches = saved_breaks if defined?(saved_breaks)
+    @loop_continue_patches = saved_continue_patches if defined?(saved_continue_patches)
+  end
+
+  def pool_struct_value_at(info, idx_reg)
+    fields = {}
+    info[:fields].each do |fname, finfo|
+      case finfo[:kind]
+      when :int_list
+        r = fresh_ireg
+        emit(LGETI, r, finfo[:reg], idx_reg)
+        fields[fname] = { type: :i64, reg: r }
+      when :f64_list
+        r = fresh_freg
+        emit(LFGET, r, finfo[:reg], idx_reg)
+        fields[fname] = { type: :f64, reg: r }
+      when :string_list
+        r = fresh_sreg
+        emit(LSGET, r, finfo[:reg], idx_reg)
+        fields[fname] = { type: :string, reg: r }
+      when :handle_list
+        r = fresh_ireg
+        emit(LGETI, r, finfo[:reg], idx_reg)
+        fields[fname] = { type: finfo[:type], reg: r }
+      end
+    end
+    { kind: :struct, type: info[:type], fields: fields }
+  end
+
   # `<pool>[i]` -- read the struct view at slot i, plus the alive
   # flag. The body of `pool |> EACH` (and similar) typically does
   # `IF item == nil CONTINUE` then mutates the struct view, so the
@@ -5596,6 +5697,10 @@ class RegisterBcEmitter
       return nil unless field && value_register_type?(field.fetch(:type))
 
       field.fetch(:reg)
+    when :pool_slot
+      return object.fetch(:value) if expr.field.to_s == "value"
+
+      nil
     when :union
       variant = union_variant(object.fetch(:type), expr.field.to_s)
       return nil unless variant
@@ -5734,6 +5839,10 @@ class RegisterBcEmitter
       field = object.fetch(:fields).fetch(expr.field.to_s)
       raise Unsupported, "register emitter expected Int64 struct field #{expr.field.inspect}" unless field.fetch(:type) == :i64
       field.fetch(:reg)
+    when :pool_slot
+      return object.fetch(:alive_reg) if expr.field.to_s == "alive"
+
+      raise Unsupported, "register emitter does not support pool slot Int64 field #{expr.field.inspect}"
     when :union
       reg = object.fetch(:payloads)[expr.field.to_s]
       unless reg
