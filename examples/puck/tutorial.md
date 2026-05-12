@@ -1,6 +1,6 @@
 # So You Want To Build A Programming Language?
 
-You should start with an easy one to build!
+Why not start with the easiest one imaginable?
 
 Some well-known languages are *shockingly* easy to implement *partially*:
 
@@ -14,7 +14,7 @@ I would not start with trying to build Rust...
 ### What are the properties that make a language easy to build?
 
 * **Parsing difficulty:** Dependent on grammar and syntax.
-* **Annotation / Type difficulty:** You can typically trade annotation in the parser for type difficulty in the VM, but not eliminate both.
+* **Annotation / Type difficulty:** You can typically trade static annotation in the parser for dynamic type difficulty in the VM, but not eliminate both.
 * **Memory Management:** Easy mode = just leak memory, but RefCounting is nearly as easy.
 * **Compilation / Interpretation difficulty:** Can be as simple as 7 primitives.
 

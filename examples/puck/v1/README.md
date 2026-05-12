@@ -61,6 +61,8 @@ SYSCALL 1   # "Take that value and hand it to the Operating System to print."
 
 You can view the Ruby code for the compiler and VM in [puck.rb](v1/puck.rb).
 
+I recommend running it interactively with `ruby examples/puck/run.rb v1` while you read the section below:
+
 ### Step 0: User Code
 
 ```pascal
@@ -208,3 +210,5 @@ Your computer screen:
 ```
 
 Pat yourself on the back.  You just built a working VM!
+
+When you're ready, jump to [V2](v2/README.md), where we expand on this to lay the ground work for a real VM.

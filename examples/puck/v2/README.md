@@ -355,3 +355,11 @@ Once the parser can build trees and the compiler can recursively walk trees, the
 - Later, conditionals and loops.
 
 That recursive AST walk is the main new technique in V2.
+
+As with v1, I highly recommend running this interactively:
+
+```bash
+ruby examples/puck/run.rb v2
+```
+
+When you're ready, jump to [V3](v3/README.md), where we add conditionals and ~80 LOC, and *almost* reach a Turing-complete language.

@@ -39,10 +39,10 @@ END;
 fizzbuzz(100);
 ```
 
-Run it with:
+Run it interactively with:
 
 ```bash
-ruby examples/puck/v4/vm.rb
+ruby examples/puck/run.rb v4
 ```
 
 Output:
