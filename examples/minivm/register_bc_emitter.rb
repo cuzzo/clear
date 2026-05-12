@@ -1201,6 +1201,7 @@ class RegisterBcEmitter
     fields = object.fetch(:fields)
     field = fields[target.field.to_s]
     raise Unsupported, "register emitter does not know struct field #{target.field.inspect}" unless field
+    object[:dirty_fields][target.field.to_s] = true if object[:dirty_fields]
 
     field_type = field.fetch(:type)
     dst = field.fetch(:reg)
@@ -1419,11 +1420,11 @@ class RegisterBcEmitter
 
     semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
     continue_target = @ops.length
-    @loop_continue_patches.each { |idx| @ops[idx] = continue_target }
+    (@loop_continue_patches || []).each { |idx| @ops[idx] = continue_target }
     compile_stmt(stmt.update) if stmt.update
 
     emit(JMP, loop_start)
-    @loop_break_patches.each { |idx| @ops[idx] = @ops.length }
+    (@loop_break_patches || []).each { |idx| @ops[idx] = @ops.length }
     @ops[exit_target_idx] = @ops.length
   ensure
     @loop_continue_target = saved_continue
@@ -3943,12 +3944,14 @@ class RegisterBcEmitter
         fields[fname] = { type: :string, reg: r }
       end
     end
-    @value_by_name[capture] = { kind: :struct, type: info[:type], fields: fields }
+    dirty_fields = {}
+    @value_by_name[capture] = { kind: :struct, type: info[:type], fields: fields, dirty_fields: dirty_fields }
 
     semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
 
     continue_target = @ops.length
     @loop_continue_patches.each { |idx| @ops[idx] = continue_target }
+    write_struct_list_fields_back(info[:fields], fields, i_reg, dirty_fields: dirty_fields)
     new_i = fresh_ireg
     emit(IADD, new_i, i_reg, one_reg)
     emit(IMOV, i_reg, new_i)
@@ -3964,6 +3967,24 @@ class RegisterBcEmitter
     @loop_continue_target = saved_continue if defined?(saved_continue)
     @loop_break_patches = saved_breaks if defined?(saved_breaks)
     @loop_continue_patches = saved_continue_patches if defined?(saved_continue_patches)
+  end
+
+  def write_struct_list_fields_back(target_fields, source_fields, idx_reg, dirty_fields: nil)
+    target_fields.each do |fname, finfo|
+      next if dirty_fields && !dirty_fields[fname.to_s]
+
+      field = source_fields[fname.to_s] || source_fields[fname]
+      next unless field
+
+      case finfo[:kind]
+      when :int_list
+        emit(LSETI, finfo[:reg], idx_reg, field.fetch(:reg))
+      when :f64_list
+        emit(LFSET, finfo[:reg], idx_reg, field.fetch(:reg))
+      when :string_list
+        emit(LSSET, finfo[:reg], idx_reg, field.fetch(:reg))
+      end
+    end
   end
 
   # `<struct_list>.append(<struct value>)` -- decomposes the source
@@ -5302,6 +5323,10 @@ class RegisterBcEmitter
     # Allocate per-field empty parallel arrays via the existing
     # field-decomposed path so .append(T{...}) can decompose.
     if (m = expr.zig_type.to_s.match(/\A(?:std\.)?ArrayListUnmanaged\(([A-Za-z_][A-Za-z0-9_]*)\)\z/))
+      inner = m[1]
+      return compile_struct_array_init(inner, []) if @struct_fields.key?(inner)
+    end
+    if (m = expr.zig_type.to_s.match(/\A(?:CheatLib\.)?SoaList\(([A-Za-z_][A-Za-z0-9_]*)\)\z/))
       inner = m[1]
       return compile_struct_array_init(inner, []) if @struct_fields.key?(inner)
     end
