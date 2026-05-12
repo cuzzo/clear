@@ -5926,6 +5926,12 @@ class RegisterBcEmitter
 
     if expr.op == :"contains?" || expr.op == :contains
       args = expr.args || []
+      if args.length == 2 && string_expr?(args[0]) && string_expr?(args[1])
+        left = compile_string_expr(args[0])
+        right = compile_string_expr(args[1])
+        return emit_i64_ncall(N_STRING_CONTAINS, [[ARG_S, left], [ARG_S, right]])
+      end
+
       raise Unsupported, "register emitter expected contains?(set, key)" unless args.length == 2 && args[0].is_a?(MIR::Ident)
       name = args[0].name.to_s
       kind = @vkind_by_name[name]
@@ -6017,12 +6023,6 @@ class RegisterBcEmitter
     end
     if expr.op == :contains?
       args = expr.args || []
-      if args.length == 2 && string_expr?(args[0]) && string_expr?(args[1])
-        left = compile_string_expr(args[0])
-        right = compile_string_expr(args[1])
-        return emit_i64_ncall(N_STRING_CONTAINS, [[ARG_S, left], [ARG_S, right]])
-      end
-
       unless args.length >= 2 && args[0].is_a?(MIR::Ident)
         raise Unsupported, "register emitter only supports local HashMap<Int64> contains? in this tranche"
       end
