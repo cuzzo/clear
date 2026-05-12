@@ -32,7 +32,7 @@ Hard constraints for this experiment:
 
 Current files:
 
-- `core.cht`: self-contained tokenizer, primitive VM, and `.puck` runner.
+- `puck.cht`: self-contained tokenizer, primitive VM, and `.puck` runner.
 - `core.puck`: macro-level surface forms for realistic Oberon syntax.
 - `samples/primitive.puck`: primitive-core runnable smoke file.
 - `samples/point.puck`: record/procedure example.
@@ -41,7 +41,7 @@ Current files:
 Run the primitive `.puck` smoke file with:
 
 ```bash
-./clear run examples/puck/core.cht
+./clear run examples/puck/puck.cht
 ```
 
 Current VM execution supports the primitive core: assignment, procedure calls
