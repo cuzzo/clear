@@ -225,11 +225,11 @@ The loop that actually reads those instructions one by one and executes them on 
 
 1. **V1:** Minimal tokenizer, parser, compiler, VM. Prints "42" (~80 dense lines).
 2. **V2:** Define and call a function. Split into four files (~160 dense lines).
-3. **V3:** Add conditionals, print selectively. (~245 dense lines).
-4. **V4:** Add loops, all math, fizzBuzz (~275 dense lines).
-5. **V5:** Add GC/Strings (~310 dense lines).
-6. **V6:** Add `MODULE` for a standard library (~350 dense lines).
-7. **V7:** Add `MACRO` for Structs and advanced syntax (~425 dense lines).
+3. **V3:** Add conditionals, print selectively. (~230 dense lines).
+4. **V4:** Add loops, all math, fizzBuzz (~260 dense lines).
+5. **V5:** Add GC/Strings (~280 dense lines).
+6. **V6:** Add `MODULE` for a standard library (~325 dense lines).
+7. **V7:** Add `MACRO` for Structs and advanced syntax (~400 dense lines).
 
 ---
 
