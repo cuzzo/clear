@@ -222,10 +222,14 @@ The loop that actually reads those instructions one by one and executes them on 
 
 ## Roadmap: The Seven Versions
 
-1. **V1:** Minimal tokenizer, parser, compiler, VM. Prints "42" (~60 dense lines).
-2. **V2:** Define and call a function. Split into four files (~100 dense lines).
+1. **V1:** Minimal tokenizer, parser, compiler, VM. Prints "42" (~80 dense lines).
+2. **V2:** Define and call a function. Split into four files (~120 dense lines).
 3. **V3:** FizzBuzz program with a loop (~200 dense lines).
 4. **V4:** Add GC/RefCounting (~220 dense lines).
 5. **V5:** Add Strings (~230 dense lines).
 6. **V6:** Add `MODULE` for a standard library (~270 dense lines).
 7. **V7:** Add `MACRO` for Structs and advanced syntax (~350 dense lines).
+
+---
+
+You can jump to [V1](v1/README.md) to get started, and see how you can make a *very* minimal programming langauge in ~80 lines of code.
