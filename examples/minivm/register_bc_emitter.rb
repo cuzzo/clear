@@ -3681,6 +3681,12 @@ class RegisterBcEmitter
       return nil unless args.length == 1 && args[0].is_a?(MIR::Ident)
       return compile_map_values(args[0].name.to_s)
     end
+    if expr.op == :get
+      args = expr.args || []
+      if args.length == 2 && args[0].is_a?(MIR::Ident) && @vkind_by_name[args[0].name.to_s] == :pool
+        return compile_pool_index_get(args[0].name.to_s, args[1])
+      end
+    end
     return nil unless expr.op == :getAt
     args = expr.args || []
     return nil unless args.length >= 2 && args[0].is_a?(MIR::Ident)
@@ -5200,7 +5206,8 @@ class RegisterBcEmitter
                         text.include?("ArrayListUnmanaged(f64)")
     return :int_list if text == "[]i64" ||
                         text == "Int64[]" ||
-                        text.include?("ArrayListUnmanaged(i64)")
+                        text.include?("ArrayListUnmanaged(i64)") ||
+                        text.include?("ArrayListUnmanaged(u64)")
     return :string_list if text == "[][]const u8" ||
                            text == "String[]" ||
                            text.include?("ArrayListUnmanaged([]const u8)")
@@ -5375,13 +5382,26 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter expected at least one IfBindStmt binding" unless bindings && !bindings.empty?
 
     saved_iregs = @ireg_by_name.dup
+    saved_values = @value_by_name.dup
     minus_one = fresh_ireg
     emit(ICONST, minus_one, add_const(-1))
+    zero = fresh_ireg
+    emit(ICONST, zero, add_const(0))
     skip_to_else = []
 
     bindings.each do |binding|
       capture = binding[:capture].to_s
       expr = binding[:expr]
+      if (value = compile_value_expr(expr)) && value[:kind] == :struct && value[:alive_reg]
+        cond_reg = fresh_ireg
+        emit(INEQ, cond_reg, value.fetch(:alive_reg), zero)
+        emit(JF, cond_reg, 0)
+        skip_to_else << (@ops.length - 1)
+
+        @value_by_name[capture] = value
+        next
+      end
+
       # Compile the test expression. Today we only handle Int64
       # optionals (indexOf-style). Future: ?Float64, ?String, ?T.
       expr_reg = compile_i64_expr(expr)
@@ -5397,6 +5417,7 @@ class RegisterBcEmitter
 
     semantic_body(stmt.then_body || []).each { |s| compile_stmt(s) }
     @ireg_by_name = saved_iregs
+    @value_by_name = saved_values
 
     if stmt.else_body && !stmt.else_body.empty?
       emit(JMP, 0)
