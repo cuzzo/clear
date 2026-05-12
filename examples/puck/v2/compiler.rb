@@ -37,32 +37,31 @@ class Compiler
   # They are recursive structures
   # This can be hard to walk through
   def compile_expression(expression, codes, mem, procedures)
-    case expression[:type]
+    case expression.type
       # When a literal integer, our simple case from before `42`, push the value directly:
       when :Integer
-        codes << ByteCode.new(:PUSH, expression[:value])
+        codes << ByteCode.new(:PUSH, expression.value)
 
       # When a variable, load the value of the variable `result`:
       when :Variable
-        codes << ByteCode.new(:LOAD, mem.fetch(expression[:name]))
+        codes << ByteCode.new(:LOAD, mem.fetch(expression.name))
 
       # When an Add command, load the two numbers, tell the VM to add them [:MATH, :+]:
       when :Add
         # Recursively compile the left and right sides, then add them:
-        compile_expression(expression[:left], codes, mem, procedures)
-        compile_expression(expression[:right], codes, mem, procedures)
+        compile_expression(expression.left, codes, mem, procedures)
+        compile_expression(expression.right, codes, mem, procedures)
         codes << ByteCode.new(:MATH, :+)
 
       # When a call like `add_one(1)`, tell the VM to call the function.
       when :Call
         # `add_one(1)` could be `add_one(add_one(1))`
-        procedure = procedures.fetch(expression[:name])
+        procedure = procedures.fetch(expression.name)
 
         # We need to recursively compile each param
         # Params aren't guaranteed to be simple literals like `41`
-        compile_expression(expression[:arg], codes, mem, procedures)
+        compile_expression(expression.arg, codes, mem, procedures)
         codes << ByteCode.new(:CALL, procedure)
     end
   end
 end
-

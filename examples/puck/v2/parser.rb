@@ -2,6 +2,7 @@ require_relative 'tokenizer'
 
 # Our AST Node holds the semantic meaning of a GROUP of tokens
 AstNode = Struct.new(:type, :var, :val)
+ExprNode = Struct.new(:type, :name, :value, :left, :right, :arg, keyword_init: true)
 
 # 2. Parser: Parse semantic tokens into Language Constructs
 class Parser
@@ -81,7 +82,7 @@ class Parser
     # If we see the add operator, we translate to an :Add command for the Compiler
     if @tokens[@pos]&.type == :OPERATOR && @tokens[@pos].value == "+"
       consume(:OPERATOR) # +
-      expression = { type: :Add, left: expression, right: parse_term }
+      expression = ExprNode.new(type: :Add, left: expression, right: parse_term)
     end
 
     expression
@@ -90,7 +91,7 @@ class Parser
   def parse_term
     # If the current token is an Int:
     if @tokens[@pos].type == :INTEGER
-      { type: :Integer, value: consume(:INTEGER).value }
+      ExprNode.new(type: :Integer, value: consume(:INTEGER).value)
 
     # If the current token is a symbol (like `result`):
     elsif @tokens[@pos].type == :SYMBOL
@@ -101,11 +102,11 @@ class Parser
         consume(:OPERATOR) # (
         arg = parse_expression
         consume(:OPERATOR) # )
-        { type: :Call, name: name, arg: arg }
+        ExprNode.new(type: :Call, name: name, arg: arg)
 
       # Otherwise, it's a simple variable:
       else
-        { type: :Variable, name: name }
+        ExprNode.new(type: :Variable, name: name)
       end
 
     # If we see anything else, it's a syntax error for now:
@@ -114,4 +115,3 @@ class Parser
     end
   end
 end
-

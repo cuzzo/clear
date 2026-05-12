@@ -16,7 +16,7 @@ V2 keeps that same loop, but splits the implementation into four files:
 | `compiler.rb` | Turns AST nodes and expression trees into bytecode. |
 | `vm.rb` | Runs the bytecode. |
 
-The big new idea is that expressions are recursive.
+The big new idea is that expressions are recursive. V2 keeps `AstNode` for statements and adds `ExprNode` for expression trees.
 
 In V1, the value of an assignment was just an integer:
 
@@ -140,7 +140,7 @@ Then it checks whether that term is followed by `+`:
 ```ruby
 if @tokens[@pos]&.type == :OPERATOR && @tokens[@pos].value == "+"
   consume(:OPERATOR) # +
-  expression = { type: :Add, left: expression, right: parse_term }
+  expression = ExprNode.new(type: :Add, left: expression, right: parse_term)
 end
 ```
 
@@ -153,22 +153,22 @@ x + 1
 becomes:
 
 ```ruby
-{
+ExprNode.new(
   type: :Add,
-  left: { type: :Variable, name: "x" },
-  right: { type: :Integer, value: 1 }
-}
+  left: ExprNode.new(type: :Variable, name: "x"),
+  right: ExprNode.new(type: :Integer, value: 1)
+)
 ```
 
 ### parse_term
 
 `parse_term` handles the pieces expressions are made of:
 
-| Source | AST Shape |
+| Source | Expression Node |
 | --- | --- |
-| `40` | `{ type: :Integer, value: 40 }` |
-| `x` | `{ type: :Variable, name: "x" }` |
-| `add_one(40)` | `{ type: :Call, name: "add_one", arg: ... }` |
+| `40` | `ExprNode.new(type: :Integer, value: 40)` |
+| `x` | `ExprNode.new(type: :Variable, name: "x")` |
+| `add_one(40)` | `ExprNode.new(type: :Call, name: "add_one", arg: ...)` |
 
 The recursive part is here:
 
@@ -192,18 +192,18 @@ Output AST for the assignment:
 AstNode.new(
   :Assignment,
   "result",
-  {
+  ExprNode.new(
     type: :Call,
     name: "add_one",
-    arg: {
+    arg: ExprNode.new(
       type: :Call,
       name: "add_one",
-      arg: {
+      arg: ExprNode.new(
         type: :Integer,
         value: 40
-      }
-    }
-  }
+      )
+    )
+  )
 )
 ```
 
@@ -233,7 +233,7 @@ It dispatches based on expression type:
 The recursive call case is the important one:
 
 ```ruby
-compile_expression(expression[:arg], codes, mem, procedures)
+compile_expression(expression.arg, codes, mem, procedures)
 codes << ByteCode.new(:CALL, procedure)
 ```
 

@@ -42,10 +42,10 @@ class VM
   end
 
   def run_expression(expression, memory)
-    case expression[:type]
-      when :Integer then expression[:value]
-      when :Variable then memory.fetch(expression[:name])
-      when :Add then run_expression(expression[:left], memory) + run_expression(expression[:right], memory)
+    case expression.type
+      when :Integer then expression.value
+      when :Variable then memory.fetch(expression.name)
+      when :Add then run_expression(expression.left, memory) + run_expression(expression.right, memory)
     end
   end
 end
