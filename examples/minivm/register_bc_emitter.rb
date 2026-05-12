@@ -1207,8 +1207,7 @@ class RegisterBcEmitter
       record_shared_event(:write, alias_src[:name], alias_src[:kind], caps: alias_src[:caps])
     end
 
-    fields = object.fetch(:fields)
-    field = fields[target.field.to_s]
+    field = ensure_struct_field_loaded(object, target.field.to_s)
     raise Unsupported, "register emitter does not know struct field #{target.field.inspect}" unless field
     object[:dirty_fields][target.field.to_s] = true if object[:dirty_fields]
 
@@ -1251,8 +1250,13 @@ class RegisterBcEmitter
       src = compile_value_expr(value)
       raise Unsupported, "register emitter expected struct value for struct_list[i] = ..., got #{src.inspect[0..80]}" unless src && src[:kind] == :struct
       idx_reg = compile_i64_expr(target.index)
+      lazy = src[:lazy_struct_list]
+      same_lazy_slot = lazy && lazy[:list_name] == list_name && lazy[:idx_reg] == idx_reg
+      dirty_filter = src[:dirty_fields] if src[:dirty_fields] && (!src[:dirty_fields].empty? || same_lazy_slot)
       info[:fields].each do |fname, finfo|
-        field = src[:fields][fname.to_s] || src[:fields][fname]
+        next if dirty_filter && !dirty_filter[fname.to_s]
+
+        field = ensure_struct_field_loaded(src, fname.to_s)
         raise Unsupported, "register emitter missing field #{fname.inspect} in struct_list[i] assignment source" unless field
         case finfo[:kind]
         when :int_list    then emit(LSETI, finfo[:reg], idx_reg, field[:reg])
@@ -4025,7 +4029,7 @@ class RegisterBcEmitter
     end
 
     fields.each do |fname, finfo|
-      field = value[:fields][fname.to_s] || value[:fields][fname]
+      field = ensure_struct_field_loaded(value, fname.to_s)
       raise Unsupported, "register emitter missing field #{fname.inspect} in append source" unless field
       case finfo[:kind]
       when :int_list    then emit(LAPPENDI, finfo[:reg], field[:reg])
@@ -4043,41 +4047,61 @@ class RegisterBcEmitter
   def compile_struct_list_index_get(list_name, idx_expr)
     info = (@struct_list_info || {})[list_name]
     raise Unsupported, "register emitter lost struct_list info for #{list_name.inspect}" unless info
-    compile_struct_list_value_index_get({ type: info[:type], fields: info[:fields], element_kind: info[:element_kind] }, idx_expr)
+    compile_struct_list_value_index_get({ type: info[:type], fields: info[:fields], element_kind: info[:element_kind], list_name: list_name }, idx_expr)
   end
 
   def compile_struct_list_value_index_get(info, idx_expr)
     idx_reg = compile_i64_expr(idx_expr)
     fields = {}
-    info[:fields].each do |fname, finfo|
-      case finfo[:kind]
-      when :int_list
-        reg = fresh_ireg
-        emit(LGETI, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: :i64, reg: reg }
-      when :f64_list
-        reg = fresh_freg
-        emit(LFGET, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: :f64, reg: reg }
-      when :string_list
-        reg = fresh_sreg
-        emit(LSGET, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: :string, reg: reg }
-      when :handle_list
-        reg = fresh_ireg
-        emit(LGETI, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: finfo[:type], reg: reg }
-      when :int_handle_values
-        reg = fresh_ireg
-        emit(IHGET, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: :i64, reg: reg }
-      when :string_handle_values
-        reg = fresh_sreg
-        emit(SHGET, reg, finfo[:reg], idx_reg)
-        fields[fname] = { type: :string, reg: reg }
-      end
-    end
-    { kind: info[:element_kind] || :struct, type: info[:type], fields: fields }
+    {
+      kind: info[:element_kind] || :struct,
+      type: info[:type],
+      fields: fields,
+      lazy_struct_list: { fields: info[:fields], idx_reg: idx_reg, list_name: info[:list_name] },
+      dirty_fields: {},
+    }
+  end
+
+  def ensure_struct_field_loaded(value, fname)
+    fields = value.fetch(:fields)
+    return fields[fname] if fields.key?(fname)
+    return fields[fname.to_sym] if fields.key?(fname.to_sym)
+
+    lazy = value[:lazy_struct_list]
+    return nil unless lazy
+
+    finfo = lazy.fetch(:fields)[fname] || lazy.fetch(:fields)[fname.to_sym]
+    return nil unless finfo
+
+    idx_reg = lazy.fetch(:idx_reg)
+    field = case finfo[:kind]
+            when :int_list
+              reg = fresh_ireg
+              emit(LGETI, reg, finfo[:reg], idx_reg)
+              { type: :i64, reg: reg }
+            when :f64_list
+              reg = fresh_freg
+              emit(LFGET, reg, finfo[:reg], idx_reg)
+              { type: :f64, reg: reg }
+            when :string_list
+              reg = fresh_sreg
+              emit(LSGET, reg, finfo[:reg], idx_reg)
+              { type: :string, reg: reg }
+            when :handle_list
+              reg = fresh_ireg
+              emit(LGETI, reg, finfo[:reg], idx_reg)
+              { type: finfo[:type], reg: reg }
+            when :int_handle_values
+              reg = fresh_ireg
+              emit(IHGET, reg, finfo[:reg], idx_reg)
+              { type: :i64, reg: reg }
+            when :string_handle_values
+              reg = fresh_sreg
+              emit(SHGET, reg, finfo[:reg], idx_reg)
+              { type: :string, reg: reg }
+            end
+    fields[fname] = field if field
+    field
   end
 
   def index_get_list_name(object)
@@ -4735,7 +4759,10 @@ class RegisterBcEmitter
     src = compile_value_expr(expr.source)
     return nil unless src && %i[struct rc_struct arc_struct].include?(src[:kind])
 
-    { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), caps: { ownership: :weak, sync: :none } }
+    value = { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), caps: { ownership: :weak, sync: :none } }
+    value[:lazy_struct_list] = src[:lazy_struct_list] if src[:lazy_struct_list]
+    value[:dirty_fields] = src[:dirty_fields] if src[:dirty_fields]
+    value
   end
 
   def compile_weak_upgrade_value(expr)
@@ -4744,7 +4771,10 @@ class RegisterBcEmitter
 
     alive_reg = fresh_ireg
     emit(ICONST, alive_reg, add_const(1))
-    { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), alive_reg: alive_reg, caps: { ownership: :rc, sync: :none } }
+    value = { kind: :rc_struct, type: src.fetch(:type), fields: src.fetch(:fields), alive_reg: alive_reg, caps: { ownership: :rc, sync: :none } }
+    value[:lazy_struct_list] = src[:lazy_struct_list] if src[:lazy_struct_list]
+    value[:dirty_fields] = src[:dirty_fields] if src[:dirty_fields]
+    value
   end
 
   def compile_struct_array_init(struct_type_name, items, element_kind: :struct)
@@ -5819,7 +5849,7 @@ class RegisterBcEmitter
   def clone_value(value)
     case value.fetch(:kind)
     when :struct
-      {
+      cloned = {
         kind: :struct,
         type: value.fetch(:type),
         fields: value.fetch(:fields).transform_values do |field|
@@ -5828,6 +5858,9 @@ class RegisterBcEmitter
           cloned
         end,
       }
+      cloned[:lazy_struct_list] = value[:lazy_struct_list] if value[:lazy_struct_list]
+      cloned[:dirty_fields] = value[:dirty_fields].dup if value[:dirty_fields]
+      cloned
     when :union
       {
         kind: :union,
@@ -5847,7 +5880,7 @@ class RegisterBcEmitter
 
     case object.fetch(:kind)
     when :struct
-      field = object.fetch(:fields)[expr.field.to_s]
+      field = ensure_struct_field_loaded(object, expr.field.to_s)
       if field && list_handle_type?(field.fetch(:type))
         return { kind: field.fetch(:type), reg: field.fetch(:reg) }
       end
@@ -5922,7 +5955,10 @@ class RegisterBcEmitter
         # Loom groundwork: reading a field through `.ctrl.data` is a
         # shared-memory read on the handle's binding.
         record_shared_event(:read, handle_source.name, handle[:kind], caps: caps_for_value(handle)) if handle_source.is_a?(MIR::Ident)
-        return { kind: :struct, type: handle[:type], fields: handle[:fields] }
+        value = { kind: :struct, type: handle[:type], fields: handle[:fields] }
+        value[:lazy_struct_list] = handle[:lazy_struct_list] if handle[:lazy_struct_list]
+        value[:dirty_fields] = handle[:dirty_fields] if handle[:dirty_fields]
+        return value
       end
     end
 
@@ -5935,7 +5971,10 @@ class RegisterBcEmitter
       capability_struct_kinds = %i[rc_struct arc_struct locked_struct write_locked_struct local_struct versioned_struct atomic_ptr_struct]
       if v && capability_struct_kinds.include?(v[:kind])
         record_shared_event(:read, expr.name, v[:kind], caps: caps_for_value(v))
-        return { kind: :struct, type: v[:type], fields: v[:fields] }
+        value = { kind: :struct, type: v[:type], fields: v[:fields] }
+        value[:lazy_struct_list] = v[:lazy_struct_list] if v[:lazy_struct_list]
+        value[:dirty_fields] = v[:dirty_fields] if v[:dirty_fields]
+        return value
       end
       # Loom groundwork: a field read through a WITH-block alias
       # is a read on the underlying cap-wrapped source.
@@ -6000,7 +6039,8 @@ class RegisterBcEmitter
 
     case object.fetch(:kind)
     when :struct
-      field = object.fetch(:fields).fetch(expr.field.to_s)
+      field = ensure_struct_field_loaded(object, expr.field.to_s)
+      raise Unsupported, "register emitter does not know struct field #{expr.field.inspect}" unless field
       raise Unsupported, "register emitter expected Int64 struct field #{expr.field.inspect}" unless field.fetch(:type) == :i64
       field.fetch(:reg)
     when :pool_slot
@@ -6028,7 +6068,8 @@ class RegisterBcEmitter
 
     case object.fetch(:kind)
     when :struct
-      field = object.fetch(:fields).fetch(expr.field.to_s)
+      field = ensure_struct_field_loaded(object, expr.field.to_s)
+      raise Unsupported, "register emitter does not know struct field #{expr.field.inspect}" unless field
       raise Unsupported, "register emitter expected Float64 struct field #{expr.field.inspect}" unless field.fetch(:type) == :f64
       field.fetch(:reg)
     when :union
@@ -6052,7 +6093,8 @@ class RegisterBcEmitter
 
     case object.fetch(:kind)
     when :struct
-      field = object.fetch(:fields).fetch(expr.field.to_s)
+      field = ensure_struct_field_loaded(object, expr.field.to_s)
+      raise Unsupported, "register emitter does not know struct field #{expr.field.inspect}" unless field
       raise Unsupported, "register emitter expected String struct field #{expr.field.inspect}" unless field.fetch(:type) == :string
 
       field.fetch(:reg)
