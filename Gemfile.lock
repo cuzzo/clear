@@ -204,6 +204,12 @@ GEM
     thor (1.5.0)
     thread_safe (0.3.6)
     tsort (0.2.0)
+    tty-cursor (0.7.1)
+    tty-reader (0.9.0)
+      tty-cursor (~> 0.7)
+      tty-screen (~> 0.8)
+      wisper (~> 2.0)
+    tty-screen (0.8.2)
     tty-which (0.5.0)
     unicode-display_width (3.2.0)
       unicode-emoji (~> 4.1)
@@ -212,6 +218,7 @@ GEM
       axiom-types (~> 0.1)
       coercible (~> 1.0)
       descendants_tracker (~> 0.0, >= 0.0.3)
+    wisper (2.0.1)
     zeitwerk (2.7.5)
 
 PLATFORMS
@@ -236,6 +243,9 @@ DEPENDENCIES
   sorbet
   sorbet-runtime
   tapioca
+  tty-cursor
+  tty-reader
+  tty-screen
 
 BUNDLED WITH
    2.7.2

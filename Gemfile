@@ -6,6 +6,9 @@ group :development do
   gem 'byebug', '~> 12.0'
   gem 'rspec'
   gem 'parallel_rspec'
+  gem 'tty-cursor', require: false
+  gem 'tty-reader', require: false
+  gem 'tty-screen', require: false
 
   # Static analysis / quality
   gem 'rubycritic', require: false

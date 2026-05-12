@@ -137,10 +137,12 @@ class VM
   end
 end
 
-code = "result := 42; SYSCALL(1, result);"
-tokens = Tokenizer.new(code).tokenize
-ast = Parser.new(tokens).parse
-bc = Compiler.new.compile(ast)
+if __FILE__ == $PROGRAM_NAME
+  code = "result := 42; SYSCALL(1, result);"
+  tokens = Tokenizer.new(code).tokenize
+  ast = Parser.new(tokens).parse
+  bc = Compiler.new.compile(ast)
 
-VM.new.run(bc)
-# => OUTPUT: 42
+  VM.new.run(bc)
+  # => OUTPUT: 42
+end
