@@ -124,6 +124,8 @@ It simply needs to tranlate this into something the stack machine can do (the co
   [:PUSH, 42]  # Put the number 42 on top of the stack.
   [:STORE, 0]  # Take the top stack value and move it into Memory Cubby #0.
 
+
+
   # Line 2: `SYSCALL(1, result);`
   #    AST: SyscallNode(ID: 1, Argument: "result")
 
