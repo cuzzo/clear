@@ -227,6 +227,10 @@ module MiniVM
         Opcode.new(name: :SHAPPEND, code: 125, arity: 2, vm_name: "SHAppend"),
         Opcode.new(name: :SHGET,    code: 126, arity: 3, vm_name: "SHGet"),
         Opcode.new(name: :SHLEN,    code: 127, arity: 2, vm_name: "SHLen"),
+        # Int64-keyed Float64 map, used by numeric HashMap benchmarks.
+        Opcode.new(name: :NMFNEW,   code: 128, arity: 1, vm_name: "NMFNew"),
+        Opcode.new(name: :NMPUTF,   code: 129, arity: 3, vm_name: "NMPutF"),
+        Opcode.new(name: :NMGETF,   code: 130, arity: 4, vm_name: "NMGetF"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -341,6 +345,9 @@ module MiniVM
         SHAPPEND: [:i_use, :s_use],
         SHGET:    [:s_def, :i_use, :i_use],
         SHLEN:    [:i_def, :i_use],
+        NMFNEW:   [:m_def],
+        NMPUTF:   [:m_use, :i_use, :f_use],
+        NMGETF:   [:f_def, :m_use, :i_use, :f_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

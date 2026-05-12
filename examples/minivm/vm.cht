@@ -143,6 +143,9 @@ ENUM RegisterOp {
     SHAppend,
     SHGet,
     SHLen,
+    NMFNew,
+    NMPutF,
+    NMGetF,
     Operand,
 }
 
@@ -560,6 +563,9 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.SHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.SHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.SHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -696,6 +702,9 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.SHAppend -> RETURN 2_i64;,
         RegisterOp.SHGet -> RETURN 3_i64;,
         RegisterOp.SHLen -> RETURN 2_i64;,
+        RegisterOp.NMFNew -> RETURN 1_i64;,
+        RegisterOp.NMPutF -> RETURN 3_i64;,
+        RegisterOp.NMGetF -> RETURN 4_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -865,6 +874,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE nmap1: HashMap<Int64, Int64> = {};
     MUTABLE nmap2: HashMap<Int64, Int64> = {};
     MUTABLE nmap3: HashMap<Int64, Int64> = {};
+    MUTABLE nfmap0: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap1: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap2: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap3: HashMap<Int64, Float64> = {};
     MUTABLE intListHandles: RegisterIntListHandle[]@list = List[];
     MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
     MUTABLE frameIBases: Int64[]@list = List[];
@@ -1649,6 +1662,36 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = nmap1.length();
                     ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = nmap2.length();
                     ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = nmap3.length(); END,
+            RegisterOp.NMFNew ->
+                # NMFNEW dst -- allocate Int64-keyed Float64 map. Container kind tag = 4.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN nfmap0 = {};
+                    ELSE_IF dst == 1 THEN nfmap1 = {};
+                    ELSE_IF dst == 2 THEN nfmap2 = {};
+                    ELSE_IF dst == 3 THEN nfmap3 = {}; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.NMPutF ->
+                # NMPUTF map key_reg src
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN nfmap0[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 1 THEN nfmap1[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 2 THEN nfmap2[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 3 THEN nfmap3[iregs[iBase + keyReg]] = fregs[fBase + src]; END,
+            RegisterOp.NMGetF ->
+                # NMGETF dst map key_reg fallback
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    fallback = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN fregs[fBase + dst] = nfmap0[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 1 THEN fregs[fBase + dst] = nfmap1[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 2 THEN fregs[fBase + dst] = nfmap2[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 3 THEN fregs[fBase + dst] = nfmap3[iregs[iBase + keyReg]] OR fregs[fBase + fallback]; END,
             RegisterOp.JFLtF ->
                 # JFLTF left right target
                     left = ops[ip]; ip += 1;

@@ -487,6 +487,9 @@ class RegisterBcEmitter
         elsif numeric_int64_map_type?(effective_zig_type)
           @vreg_by_name[param.name.to_s] = fresh_vreg
           @vkind_by_name[param.name.to_s] = :numeric_int_map
+        elsif numeric_float64_map_type?(effective_zig_type)
+          @vreg_by_name[param.name.to_s] = fresh_vreg
+          @vkind_by_name[param.name.to_s] = :numeric_f64_map
         elsif (struct_map_type = string_struct_map_type?(effective_zig_type))
           @value_by_name[param.name.to_s] = compile_struct_map_init(struct_map_type)
         elsif effective_zig_type.to_s.match?(/\A(?:CheatLib\.)?(?:Sharded)?Pool\(/)
@@ -1265,6 +1268,10 @@ class RegisterBcEmitter
         key_reg = compile_i64_expr(target.index)
         value_reg = compile_i64_expr(value)
         emit(NMPUTI, reg, key_reg, value_reg)
+      when :numeric_f64_map
+        key_reg = compile_i64_expr(target.index)
+        value_reg = compile_f64_expr(value)
+        emit(NMPUTF, reg, key_reg, value_reg)
       when :int_list
         index_reg = compile_i64_expr(target.index)
         value_reg = compile_i64_expr(value)
@@ -2157,6 +2164,14 @@ class RegisterBcEmitter
       compile_f64_expr(expr.expr)
     when MIR::Orelse
       compile_f64_orelse(expr)
+    when MIR::ShardedMapGet
+      if numeric_f64_map_target?(expr.target)
+        fallback = fresh_freg
+        emit(FCONST, fallback, add_const([:f64, 0.0]))
+        compile_f64_sharded_map_get(expr, fallback_reg: fallback)
+      else
+        raise Unsupported, "register emitter does not support Float64 map get for #{expr.target.inspect}"
+      end
     when MIR::IndexGet
       compile_f64_index_get(expr)
     when MIR::Call
@@ -2832,6 +2847,11 @@ class RegisterBcEmitter
   end
 
   def compile_f64_orelse(expr)
+    if expr.expr.is_a?(MIR::ShardedMapGet) && numeric_f64_map_target?(expr.expr.target)
+      fallback_reg = compile_f64_expr(expr.fallback)
+      return compile_f64_sharded_map_get(expr.expr, fallback_reg: fallback_reg)
+    end
+
     if expr.expr.is_a?(MIR::InlineBc) && expr.expr.op == :toNumber
       args = expr.expr.args || []
       unless args.length == 1
@@ -2843,7 +2863,15 @@ class RegisterBcEmitter
       return emit_f64_ncall(N_STRING_TO_NUMBER_OR, [[ARG_S, str], [ARG_F, fallback]])
     end
 
-    raise Unsupported, "register emitter only supports OR fallback for toNumber in Float64 expressions in this tranche"
+    raise Unsupported, "register emitter only supports OR fallback for toNumber and HashMap<Int64, Float64> get in Float64 expressions in this tranche"
+  end
+
+  def compile_f64_sharded_map_get(expr, fallback_reg:)
+    dst = fresh_freg
+    map_reg = map_register_for(expr.target)
+    key_reg = compile_i64_expr(expr.key)
+    emit(NMGETF, dst, map_reg, key_reg, fallback_reg)
+    dst
   end
 
   def compile_scalar_try_catch(expr, type)
@@ -2929,6 +2957,8 @@ class RegisterBcEmitter
                :int_map
              elsif numeric_int64_map_type?(effective_zig_type)
                :numeric_int_map
+             elsif numeric_float64_map_type?(effective_zig_type)
+               :numeric_f64_map
              elsif (struct_map_type = string_struct_map_type?(effective_zig_type))
                [:struct_map, struct_map_type]
              elsif effective_zig_type.to_s.match?(/\A(?:CheatLib\.)?(?:Sharded)?Pool\(/)
@@ -2943,7 +2973,7 @@ class RegisterBcEmitter
             when :string then compile_string_expr(arg)
             when :int_list, :f64_list, :string_list then compile_list_arg(arg, type)
             when :value_string_map, :value_list then compile_value_container_arg(arg, type)
-            when :int_map, :numeric_int_map then compile_value_container_arg(arg, type)
+            when :int_map, :numeric_int_map, :numeric_f64_map then compile_value_container_arg(arg, type)
             when Array
               if type.first == :struct_map
                 compile_struct_map_arg(arg, type.last)
@@ -3140,7 +3170,7 @@ class RegisterBcEmitter
       when :string
         @sreg_by_name[name] = reg
         record_var_name(:s, reg, name)
-      when :int_list, :f64_list, :string_list, :int_map, :numeric_int_map
+      when :int_list, :f64_list, :string_list, :int_map, :numeric_int_map, :numeric_f64_map
         @vreg_by_name[name] = reg
         @vkind_by_name[name] = type
       when :value_string_map, :value_list
@@ -4943,6 +4973,10 @@ class RegisterBcEmitter
     target.is_a?(MIR::Ident) && @vkind_by_name.fetch(target.name.to_s, nil) == :numeric_int_map
   end
 
+  def numeric_f64_map_target?(target)
+    target.is_a?(MIR::Ident) && @vkind_by_name.fetch(target.name.to_s, nil) == :numeric_f64_map
+  end
+
   def int64_string_map_type?(type)
     text = type.to_s
     text.include?("StringMap(i64)") ||
@@ -4968,6 +5002,15 @@ class RegisterBcEmitter
       # `HashMap<Int64, Int64>@sharded(N)` lowers to
       # PartitionedNumericMap(K, V, N).
       text.match?(/\A(?:CheatLib\.)?PartitionedNumericMap\((?:i64|Int64),\s*(?:i64|Int64),\s*\d+\)\z/)
+  end
+
+  def numeric_float64_map_type?(type)
+    text = type.to_s
+    text == "HashMap<Int64, Float64>" ||
+      text == "HashMap<i64, f64>" ||
+      text.include?("NumericMapType(i64, f64)") ||
+      text.include?("NumericMapType(Int64, Float64)") ||
+      text.match?(/\A(?:CheatLib\.)?PartitionedNumericMap\((?:i64|Int64),\s*(?:f64|Float64),\s*\d+\)\z/)
   end
 
   def struct_list_map_type?(type)
@@ -5224,6 +5267,12 @@ class RegisterBcEmitter
       reg = fresh_vreg
       emit(NMNEW, reg)
       return { kind: :numeric_int_map, reg: reg }
+    end
+
+    if numeric_float64_map_type?(expr.zig_type)
+      reg = fresh_vreg
+      emit(NMFNEW, reg)
+      return { kind: :numeric_f64_map, reg: reg }
     end
 
     if (vinfo = value_string_map_type?(expr.zig_type))
@@ -5629,7 +5678,7 @@ class RegisterBcEmitter
     when :int_list, :f64_list, :string_list
       @vreg_by_name[name] = value.fetch(:reg)
       @vkind_by_name[name] = value.fetch(:kind)
-    when :int_map, :numeric_int_map
+    when :int_map, :numeric_int_map, :numeric_f64_map
       @vreg_by_name[name] = value.fetch(:reg)
       @vkind_by_name[name] = value.fetch(:kind)
       # @set is implemented as a presence-flag map; mark the binding
@@ -6568,6 +6617,7 @@ class RegisterBcEmitter
     elsif expr.is_a?(MIR::Deref)
       return inferred_expr_type(expr.expr)
     elsif expr.is_a?(MIR::ShardedMapGet)
+      return :f64 if numeric_f64_map_target?(expr.target)
       return :i64
     elsif expr.is_a?(MIR::ListLength)
       return :i64
@@ -6873,6 +6923,11 @@ class RegisterBcEmitter
     end
 
     prefix, names, suffixes = parse_debug_print_concat(stmt)
+    if names.length > 2
+      emit(SPRINT, compile_debug_print_concat_string(prefix, names, suffixes))
+      return nil
+    end
+
     regs = names.map do |name|
       @ireg_by_name.fetch(name) do
       raise Unsupported, "register emitter cannot print unknown Int64 local #{name.inspect}"
@@ -6887,6 +6942,36 @@ class RegisterBcEmitter
       emit(IPRINT, add_const(prefix), fresh_zero_ireg, add_const(""))
     end
     nil
+  end
+
+  def compile_debug_print_concat_string(prefix, names, suffixes)
+    parts = []
+    if prefix && !prefix.empty?
+      reg = fresh_sreg
+      emit(SCONST, reg, add_const(prefix))
+      parts << reg
+    end
+
+    names.each_with_index do |name, idx|
+      int_reg = @ireg_by_name.fetch(name) do
+        raise Unsupported, "register emitter cannot print unknown Int64 local #{name.inspect}"
+      end
+      parts << emit_string_ncall(N_INT_TO_STRING, [[ARG_I, int_reg]])
+      suffix = suffixes[idx] || ""
+      next if suffix.empty?
+
+      suffix_reg = fresh_sreg
+      emit(SCONST, suffix_reg, add_const(suffix))
+      parts << suffix_reg
+    end
+
+    return parts.first if parts.length == 1
+
+    parts.reduce do |acc, reg|
+      dst = fresh_sreg
+      emit(SCONCAT, dst, acc, reg)
+      dst
+    end
   end
 
   def fresh_zero_ireg
@@ -6988,9 +7073,6 @@ class RegisterBcEmitter
     strings = text.scan(/"((?:\\.|[^"\\])*)"/).flatten.map { |s| unescape_string(s) }
     vars = text.scan(/CheatLib\.intToString\(\{alloc\},\s*([A-Za-z_][A-Za-z0-9_]*)\)/).flatten
     return [strings.join, [], []] if vars.empty?
-    if vars.length > 2
-      raise Unsupported, "register emitter only supports up to two benchmark scalar print interpolations in Tranche 4"
-    end
 
     prefix = strings[0] || ""
     suffixes = strings[1..] || []
