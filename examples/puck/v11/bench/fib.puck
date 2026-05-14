@@ -1,0 +1,26 @@
+(* fib(35) benchmark for the v11 JIT.
+
+   Times one call to fib(35) end to end and prints the result + elapsed ms.
+   With PUCK_JIT=0 in the environment, the JIT is disabled and the
+   interpreter runs everything. Without it, the JIT compiles fib() to native
+   x86_64 and the interpreter calls into it through the bridge. *)
+
+MODULE FibBench;
+
+PROCEDURE fib(n);
+  IF n < 2 THEN
+    RETURN n;
+  END;
+  RETURN fib(n - 1) + fib(n - 2);
+END;
+
+BEGIN
+  start := TIME();
+  result := fib(35);
+  elapsed := TIME() - start;
+
+  SYSCALL(1, "fib(35) =");
+  SYSCALL(1, result);
+  SYSCALL(1, "elapsed ms =");
+  SYSCALL(1, elapsed);
+END.
