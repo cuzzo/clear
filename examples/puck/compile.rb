@@ -827,7 +827,7 @@ steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
 unless Puck::VersionLoader::VERSIONS.include?(version)
-  abort "Usage: ruby examples/puck/compile.rb [v1|v2|v3|v4|v5|v6|v7] [source.puck] [--steps=N]"
+  abort "Usage: ruby examples/puck/compile.rb [v1|v2|v3|v4|v5|v6|v7|v8|v9] [source.puck] [--steps=N]"
 end
 
 program = Pipeline.run(version, source_path)

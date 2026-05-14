@@ -85,8 +85,14 @@ end
 class TraceVM
   attr_reader :history, :state
 
+  # Versions from v9 onward store strings as codepoint arrays in the heap.
+  # The display path packs them back when printing so the SYSCALL output is
+  # unchanged from the user's perspective.
+  CODEPOINT_STRING_VERSIONS = %w[v9 v10].freeze
+
   def initialize(program)
     @program = program
+    @uses_codepoint_strings = CODEPOINT_STRING_VERSIONS.include?(program.version)
     @state = TraceState.new(
       frames: [Frame.new(name: "main", codes: program.codes, ip: 0, memory: [], last_ip: nil, scope: program.scopes["main"])],
       stack: [],
@@ -178,6 +184,10 @@ class TraceVM
         release(@state.heap[ref.id].value[index])
         @state.heap[ref.id].value[index] = value
         release(ref)
+      when :ARRAY_LEN
+        ref = @state.stack.pop
+        @state.stack.push(@state.heap[ref.id].value.length)
+        release(ref)
       when :MATH
         right = @state.stack.pop
         left = @state.stack.pop
@@ -199,10 +209,32 @@ class TraceVM
         @state.stack.push(result) unless result.nil?
         @state.halted = @state.frames.empty?
       when :SYSCALL
-        value = @state.stack.pop
-        @state.output << "OUTPUT: #{display(value)}"
-        release(value)
+        handle_syscall(code.arg)
     end
+  end
+
+  # The tracer mirrors the VM's SYSCALL ID dispatch. We don't actually open
+  # files in the visualizer (it would surprise users), but we do support
+  # stdin reading so v9's `INPUT()` example traces meaningfully.
+  def handle_syscall(id)
+    case id
+    when 1
+      value = @state.stack.pop
+      @state.output << "OUTPUT: #{display_for_print(value)}"
+      release(value)
+    when 2
+      line = $stdin.gets&.chomp || ""
+      @state.stack.push(allocate_string(line))
+    end
+  end
+
+  # For the SYSCALL output line: v9's strings are codepoint arrays in the
+  # heap, so we pack them back when printing. v5-v8 strings are stored as
+  # raw Ruby strings and pass through unchanged.
+  def display_for_print(value)
+    return value unless value.is_a?(TraceHeapRef)
+    payload = @state.heap[value.id].value
+    payload.is_a?(Array) ? payload.pack("U*") : payload
   end
 
   def call_procedure(procedure)
@@ -240,8 +272,10 @@ class TraceVM
   end
 
   def allocate_string(value)
+    # v9+ stores strings as codepoint arrays; v5-v8 keep the raw string.
+    payload = @uses_codepoint_strings ? value.codepoints : value
     id = @state.heap.length
-    @state.heap << TraceHeapValue.new(value, 1)
+    @state.heap << TraceHeapValue.new(payload, 1)
     TraceHeapRef.new(id)
   end
 
@@ -898,7 +932,7 @@ steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
 unless Puck::VersionLoader::VERSIONS.include?(version)
-  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7|v8] [source.puck] [--steps=N]"
+  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7|v8|v9] [source.puck] [--steps=N]"
 end
 
 program = VMLoader.load(version, source_path)

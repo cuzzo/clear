@@ -187,3 +187,5 @@ The important discards are:
 - A frame finishing and releasing its memory. After both `SYSCALL`s, the top-level frame is about to exit. `cleanup(memory)` releases everything in memory, so `"forty-two"` (the only value still in `M00`) drops to `refs = 0` and is freed.
 
 Nothing about `SYSCALL` or strings requires new parser complexity. The new concept is that the VM now manages the lifetime of heap values.
+
+> **Looking ahead:** V5 stores strings as a single scalar payload (a Ruby `String` inside `HeapValue.value`). V8 will add arrays of cells (another shape for `HeapValue.value`) — by V8 we'll have two heap shapes doing similar work. V9 unifies them: strings become arrays of codepoints, and this scalar-string special case goes away entirely. The same pattern showed up earlier in the tutorial (V3 renamed `:Add` to `:Math` because V4 was going to generalize to all integer operators). It's a recurring engineering moment: introduce a special case, use it for a few versions, then recognize it can be general.
