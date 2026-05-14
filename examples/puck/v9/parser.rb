@@ -280,6 +280,13 @@ class Parser
       consume(:OPERATOR) # )
       return ExprNode.new(type: :Input)
 
+    elsif @tokens[@pos].type == :TIME
+      # `TIME()` — monotonic clock in milliseconds.
+      consume(:TIME)
+      consume(:OPERATOR) # (
+      consume(:OPERATOR) # )
+      return ExprNode.new(type: :Time)
+
     # If the current token is an Int:
     elsif @tokens[@pos].type == :INTEGER
       ExprNode.new(type: :Integer, value: consume(:INTEGER).value)

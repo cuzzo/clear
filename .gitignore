@@ -51,6 +51,8 @@ benchmarks/**
 !benchmarks/**/*.zon
 !benchmarks/**/*.py
 !benchmarks/**/*.rb
+!benchmarks/**/*.puck
+!benchmarks/**/*.sh
 !benchmarks/**/*.md
 !benchmarks/**/*.toml
 !benchmarks/**/*.mod

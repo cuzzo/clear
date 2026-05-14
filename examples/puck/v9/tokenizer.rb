@@ -12,7 +12,7 @@ class Tokenizer
     IF THEN ELSE ELSIF
     LOOP EXIT
     ARRAY LEN
-    END SYSCALL INPUT
+    END SYSCALL INPUT TIME
   ].freeze
 
   def initialize(code)
@@ -24,6 +24,7 @@ class Tokenizer
     tokens = []
     until @scanner.eos?
       next if @scanner.skip(/\s+/) # Tokens are separated by whitespace
+      next if @scanner.skip(/\(\*.*?\*\)/m) # Oberon block comments
 
       if match = @scanner.scan(/\d+/)
         tokens << Token.new(:INTEGER, match.to_i)

@@ -109,6 +109,8 @@ class VM
     when 5  # close file (handle on stack)
       handle = stack.pop
       @files[handle].close
+    when 6  # current monotonic time in milliseconds
+      stack.push((Process.clock_gettime(Process::CLOCK_MONOTONIC) * 1000).to_i)
     else
       raise "Unknown SYSCALL id #{id}"
     end
@@ -175,7 +177,8 @@ class VM
 end
 
 if __FILE__ == $PROGRAM_NAME
-  code = File.read(File.expand_path("example.puck", __dir__))
+  source_path = ARGV[0] || File.expand_path("example.puck", __dir__)
+  code = File.read(source_path)
   tokens = Tokenizer.new(code).tokenize
   ast = Parser.new(tokens).parse
   ast = MacroExpander.new.expand(ast)

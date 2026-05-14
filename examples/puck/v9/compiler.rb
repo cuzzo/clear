@@ -287,6 +287,10 @@ class Compiler
       # `INPUT()` — no args. SYSCALL 2 reads a line and pushes a string ref.
       codes << ByteCode.new(:SYSCALL, 2)
 
+    when :Time
+      # `TIME()` — no args. SYSCALL 6 pushes the current ms timestamp.
+      codes << ByteCode.new(:SYSCALL, 6)
+
     when :Math
       compile_expression(expression.left, codes, scope, procedures)
       compile_expression(expression.right, codes, scope, procedures)

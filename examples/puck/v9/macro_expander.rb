@@ -134,8 +134,8 @@ class MacroExpander
       ExprNode.new(type: :ArrayGet, name: target_name, value: substitute_expression(expression.value, bindings))
     when :Length
       ExprNode.new(type: :Length, value: substitute_expression(expression.value, bindings))
-    when :Input
-      # No subexpressions; INPUT() has no args.
+    when :Input, :Time
+      # No subexpressions; these builtins take no args.
       expression
     else
       expression

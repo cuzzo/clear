@@ -1,0 +1,23 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE nums: Int64[] = [];
+    MUTABLE i = 0_i64;
+    WHILE i < 10000 DO
+        nums.append(i);
+        i = i + 1_i64;
+    END
+
+    MUTABLE total = 0_i64;
+    MUTABLE j = 0_i64;
+    WHILE j < nums.length() DO
+        n = nums[j];
+        IF n MOD 2 == 0 THEN
+            total = total + n;
+        END
+        j = j + 1_i64;
+    END
+    elapsed = timestampMs() - t0;
+    print("sum = ${total.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

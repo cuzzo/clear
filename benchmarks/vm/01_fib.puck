@@ -1,0 +1,16 @@
+MODULE Bench;
+
+PROCEDURE fib(n);
+  IF n <= 1 THEN
+    RETURN n;
+  END;
+  RETURN fib(n - 1) + fib(n - 2);
+END;
+
+BEGIN
+  t0 := TIME();
+  r := fib(25);
+  elapsed := TIME() - t0;
+  SYSCALL(1, r);
+  print_bench_result(elapsed);
+END.

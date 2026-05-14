@@ -1,0 +1,14 @@
+MODULE Bench;
+
+BEGIN
+  t0 := TIME();
+  total := 0;
+  i := 0;
+  WHILE(i < 1000000) DO
+    total := total + i;
+    i := i + 1;
+  END;
+  elapsed := TIME() - t0;
+  SYSCALL(1, total);
+  print_bench_result(elapsed);
+END.

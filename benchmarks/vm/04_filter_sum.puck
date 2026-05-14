@@ -1,0 +1,25 @@
+MODULE Bench;
+
+BEGIN
+  t0 := TIME();
+  nums := ARRAY(10000);
+  i := 0;
+  WHILE(i < 10000) DO
+    nums[i] := i;
+    i := i + 1;
+  END;
+
+  total := 0;
+  j := 0;
+  WHILE(j < 10000) DO
+    n := nums[j];
+    IF n % 2 = 0 THEN
+      total := total + n;
+    END;
+    j := j + 1;
+  END;
+  elapsed := TIME() - t0;
+
+  SYSCALL(1, total);
+  print_bench_result(elapsed);
+END.
