@@ -1,0 +1,33 @@
+MODULE Demo;
+
+MACRO WHILE(cond) DO body END;
+  LOOP
+    IF cond THEN body; ELSE EXIT; END;
+  END;
+END;
+
+PROCEDURE reverse(s);
+  n := LEN(s);
+  result := ARRAY(n);
+  i := 0;
+  WHILE(i < n) DO
+    result[i] := s[n - i - 1];
+    i := i + 1;
+  END;
+  RETURN result;
+END;
+
+PROCEDURE print_char_codes(s);
+  i := 0;
+  WHILE(i < LEN(s)) DO
+    c := s[i];
+    SYSCALL(1, c);
+    i := i + 1;
+  END;
+END;
+
+BEGIN
+  rev := reverse("puck");
+  SYSCALL(1, rev);
+  print_char_codes("hi");
+END.

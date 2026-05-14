@@ -1,0 +1,81 @@
+(* Tutorial Puck v9 standard library.
+
+   These declarations live inside a MODULE's declaration block. The benchmark
+   runner (benchmarks/vm/run_puck.rb) splices them in automatically; for
+   one-off programs you can paste the contents between MODULE Name; and BEGIN.
+
+   Everything here is written in pure Puck — no special VM support is needed
+   beyond what V9 already provides. *)
+
+(* WHILE — the LOOP / IF / ELSE / EXIT sandwich V7 introduced as the first
+   real macro. Same definition; this is the canonical copy. *)
+MACRO WHILE(condition) DO body END;
+  LOOP
+    IF condition THEN
+      body;
+    ELSE
+      EXIT;
+    END;
+  END;
+END;
+
+(* FOR — counted loop from start through finish inclusive. *)
+MACRO FOR(i, start, finish) DO body END;
+  i := start;
+  WHILE(i <= finish) DO
+    body;
+    i := i + 1;
+  END;
+END;
+
+(* Convert a non-negative integer to a heap-allocated codepoint array. *)
+PROCEDURE int_to_string(n);
+  IF n = 0 THEN
+    out := ARRAY(1);
+    out[0] := 48;
+    RETURN out;
+  END;
+
+  buf := ARRAY(20);
+  len := 0;
+  m := n;
+  WHILE(m > 0) DO
+    digit := m % 10;
+    buf[len] := 48 + digit;
+    len := len + 1;
+    m := m / 10;
+  END;
+
+  out := ARRAY(len);
+  i := 0;
+  WHILE(i < len) DO
+    out[i] := buf[len - i - 1];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+(* Concatenate two strings (codepoint arrays). *)
+PROCEDURE concat(a, b);
+  la := LEN(a);
+  lb := LEN(b);
+  out := ARRAY(la + lb);
+  i := 0;
+  WHILE(i < la) DO
+    out[i] := a[i];
+    i := i + 1;
+  END;
+  j := 0;
+  WHILE(j < lb) DO
+    out[la + j] := b[j];
+    j := j + 1;
+  END;
+  RETURN out;
+END;
+
+(* Print "BENCH_RESULT: <ms>" on a single line so benchmark runners
+   (which grep for /BENCH_RESULT: \d+/) can extract the timing. *)
+PROCEDURE print_bench_result(ms);
+  line := concat("BENCH_RESULT: ", int_to_string(ms));
+  SYSCALL(1, line);
+END;

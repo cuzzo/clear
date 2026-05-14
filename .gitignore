@@ -88,6 +88,10 @@ examples/**
 !examples/footguns/**/*.go
 !examples/footguns/**/*.rs
 !examples/footguns/**/*.h
+# puck v10 has a C VM and Makefile
+!examples/puck/v10/*.c
+!examples/puck/v10/*.h
+!examples/puck/v10/Makefile
 # minivm has its own *.cht test fixtures + the bc_runner alias
 !examples/minivm/_bc_runner.cht
 # web_crawler has a build.zig

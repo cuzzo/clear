@@ -28,6 +28,20 @@ run_one() {
     printf "%-12s %10s\n" "puck-rb" "${ms:-TIMEOUT}"
   fi
 
+  # Puck tutorial C VM (v10)
+  if [ -f "$DIR/${name}.puck" ]; then
+    V10_DIR="$DIR/../../examples/puck/v10"
+    [ -x "$V10_DIR/vm" ] || (cd "$V10_DIR" && make vm > /dev/null 2>&1)
+    if [ -x "$V10_DIR/vm" ]; then
+      tmpc=$(mktemp --suffix=.puckc 2>/dev/null || mktemp -t puckc)
+      ruby "$V10_DIR/compile.rb" "$DIR/${name}.puck" "$tmpc" > /dev/null 2>&1
+      out=$(timeout 60 "$V10_DIR/vm" "$tmpc" 2>&1)
+      ms=$(echo "$out" | extract_bench_ms)
+      printf "%-12s %10s\n" "puck-c" "${ms:-TIMEOUT}"
+      rm -f "$tmpc"
+    fi
+  fi
+
   # CLEAR Zig backend (for comparison; --release for ReleaseFast)
   if [ -f "$DIR/${name}.cht" ]; then
     "$(dirname "$DIR")/../clear" build "$DIR/${name}.cht" -o "$DIR/.bench_clear" --optimized > /dev/null 2>&1
