@@ -228,9 +228,13 @@ The loop that actually reads those instructions one by one and executes them on 
 2. **V2:** Define and call a function. Split into four files (~160 dense lines).
 3. **V3:** Add conditionals, print selectively. (~230 dense lines).
 4. **V4:** Add loops, all math, fizzBuzz (~260 dense lines).
-5. **V5:** Add strings, heap refs, and refcounting (~280 dense lines).
+5. **V5:** Add strings as *a* heap refs, and refcounting (~280 dense lines).
 6. **V6:** Add `MODULE` for a standard library (~325 dense lines).
 7. **V7:** Add `MACRO` for Structs and advanced syntax (~400 dense lines).
+8. **V8:** Replace strings with generalized arrays.
+9. **V9:** Replace special string ref with generalized REF.
+10. **V10:** C compiler + profiling
+11. **V11:** Add a JIT.
 
 ---
 
