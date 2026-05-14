@@ -294,11 +294,15 @@ These don't change what the JIT compiles, just how well:
 
 ### 5. Things worth knowing about but explicitly out of scope
 
-- **Type inference.** Puck's lack of declared types is the reason
-  eligibility is dynamic. A static-type pass on the AST would let the
-  JIT trust which procs are int-only at compile time, and would let
-  the bytecode use untagged integer slots throughout. But that's a
-  language-design change, not a JIT change.
+- **Source-level type *enforcement*.** Puck values are already typed —
+  every value carries a runtime tag (V_INT / V_FLOAT / V_REF), every
+  bytecode op deterministically produces one tag, and the eligibility
+  filter is already a static type analysis over bytecode shape. What's
+  missing is an AST pass that rejects type-incoherent *source* like
+  `LEN(5)` (currently compiles cleanly and segfaults at runtime when the
+  int gets dereferenced as a heap ref). That's a correctness win for
+  the language but wouldn't change the JIT — the JIT already infers
+  and trusts the same facts from bytecode shape.
 - **GC.** Refcounting is fine for the tutorial, but a moving collector
   would force a stack-walking discipline on the JIT (Sigil-rooted
   pointers, safepoints, etc.). Out of scope until/unless the language
