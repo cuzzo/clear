@@ -6,9 +6,15 @@ ExprNode = Struct.new(:type, :name, :value, :left, :right, :args, keyword_init: 
 
 # 2. Parser: Parse semantic tokens into Language Constructs
 class Parser
-  def initialize(tokens)
+  # `core_path`: if given, the file's tokens are auto-spliced into every
+  # MODULE's declaration block, so every program implicitly has the standard
+  # library available. See `auto_require_core`.
+  def initialize(tokens, core_path: nil)
     @tokens = tokens
     @pos = 0
+    @core_path = core_path
+    @core_inlined = false
+    @case_counter = 0  # used to generate fresh local names for CASE lowering
   end
 
   # Take a token off the list
@@ -30,10 +36,44 @@ class Parser
     stop_types = Array(stop_type)
 
     while @pos < @tokens.length && !stop_types.include?(@tokens[@pos].type)
-      nodes << parse_statement
+      if @tokens[@pos].type == :REQUIRE
+        handle_require_directive
+      else
+        nodes << parse_statement
+      end
     end
 
     nodes
+  end
+
+  # Explicit `REQUIRE "path";` — splice the named file's tokens at the
+  # current position. Same mechanism as auto_require_core, just user-driven.
+  def handle_require_directive
+    consume(:REQUIRE)
+    path = consume(:STRING).value
+    consume(:OPERATOR) # ;
+    inline_tokens_from(path)
+  end
+
+  # Auto-require: every MODULE implicitly has core.puck's declarations
+  # available. Called once, immediately after `MODULE Name;` is parsed.
+  def auto_require_core
+    return if @core_path.nil? || @core_inlined
+    return unless File.exist?(@core_path)
+    @core_inlined = true
+    inline_tokens(File.read(@core_path))
+  end
+
+  def inline_tokens_from(path)
+    base = @core_path ? File.dirname(@core_path) : "."
+    abs = File.expand_path(path, base)
+    raise "REQUIRE: cannot find #{path}" unless File.exist?(abs)
+    inline_tokens(File.read(abs))
+  end
+
+  def inline_tokens(source)
+    sub_tokens = Tokenizer.new(source).tokenize
+    @tokens = @tokens[0...@pos] + sub_tokens + @tokens[@pos..]
   end
 
   def parse_statement
@@ -45,6 +85,9 @@ class Parser
 
     elsif @tokens[@pos].type == :IF
       parse_if
+
+    elsif @tokens[@pos].type == :CASE
+      parse_case
 
     elsif @tokens[@pos].type == :LOOP
       parse_loop
@@ -114,6 +157,7 @@ class Parser
     consume(:MODULE)
     name = consume(:SYMBOL).value
     consume(:OPERATOR) # ;
+    auto_require_core   # core.puck's declarations get spliced in here
     declarations = parse_statements(:BEGIN)
     consume(:BEGIN)
     body = parse_statements(:END)
@@ -189,6 +233,65 @@ class Parser
     consume(:END)
     consume(:OPERATOR) # ;
     AstNode.new(:Loop, nil, body)
+  end
+
+  # CASE expr OF v1: stmts | v2: stmts ... ELSE stmts END;
+  #
+  # Lowered to: __case_N := expr; IF __case_N = v1 THEN stmts ELSE IF ...
+  # Wrapped in a :Block so a single statement-position parse can produce
+  # multiple statements. (The Block AST node is transparent — the compiler
+  # and macro_expander unwrap it.)
+  def parse_case
+    consume(:CASE)
+    subject = parse_expression
+    consume(:OF)
+
+    arms = []
+    loop do
+      val = parse_term
+      consume(:OPERATOR) # :
+      body = []
+      until @pos >= @tokens.length ||
+            @tokens[@pos].type == :ELSE ||
+            @tokens[@pos].type == :END ||
+            (@tokens[@pos].type == :OPERATOR && @tokens[@pos].value == "|")
+        body << parse_statement
+      end
+      arms << { value: val, body: body }
+      break unless @tokens[@pos].type == :OPERATOR && @tokens[@pos].value == "|"
+      consume(:OPERATOR) # |
+    end
+
+    else_body = []
+    if @tokens[@pos].type == :ELSE
+      consume(:ELSE)
+      else_body = parse_statements(:END)
+    end
+    consume(:END)
+    consume(:OPERATOR) # ;
+
+    temp_name = "__case_#{@case_counter}"
+    @case_counter += 1
+    init = AstNode.new(:Assignment, temp_name, subject)
+    if_chain = build_case_if_chain(temp_name, arms, else_body)
+    AstNode.new(:Block, nil, [init] + if_chain)
+  end
+
+  def build_case_if_chain(temp_name, arms, else_body)
+    return else_body if arms.empty?
+    first, *rest = arms
+    cond = ExprNode.new(
+      type: :Compare,
+      value: :"=",
+      left: ExprNode.new(type: :Variable, name: temp_name),
+      right: first[:value]
+    )
+    rest_chain = build_case_if_chain(temp_name, rest, else_body)
+    [AstNode.new(:If, nil, {
+      condition: cond,
+      body: first[:body],
+      else_body: rest_chain
+    })]
   end
 
   # Returns { names: ["a", "b", ...], var: ["a"] } — `var` is the subset of
@@ -286,6 +389,13 @@ class Parser
       consume(:OPERATOR) # (
       consume(:OPERATOR) # )
       return ExprNode.new(type: :Time)
+
+    # Parenthesized expression — grouping for precedence override.
+    elsif @tokens[@pos].type == :OPERATOR && @tokens[@pos].value == "("
+      consume(:OPERATOR) # (
+      expr = parse_expression
+      consume(:OPERATOR) # )
+      return expr
 
     # If the current token is an Int:
     elsif @tokens[@pos].type == :INTEGER

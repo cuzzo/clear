@@ -111,6 +111,15 @@ class VM
       @files[handle].close
     when 6  # current monotonic time in milliseconds
       stack.push((Process.clock_gettime(Process::CLOCK_MONOTONIC) * 1000).to_i)
+    when 7  # open file for write (path string on stack) -> push integer handle
+      name = display(stack.pop)
+      @files << File.open(name, "w")
+      stack.push(@files.length - 1)
+    when 8  # write string + newline (handle then string on stack)
+      string = stack.pop
+      handle = stack.pop
+      @files[handle].puts(display(string))
+      release(string)
     else
       raise "Unknown SYSCALL id #{id}"
     end
@@ -180,7 +189,8 @@ if __FILE__ == $PROGRAM_NAME
   source_path = ARGV[0] || File.expand_path("example.puck", __dir__)
   code = File.read(source_path)
   tokens = Tokenizer.new(code).tokenize
-  ast = Parser.new(tokens).parse
+  core_path = File.expand_path("core.puck", __dir__)
+  ast = Parser.new(tokens, core_path: core_path).parse
   ast = MacroExpander.new.expand(ast)
   program = Compiler.new.compile(ast)
 

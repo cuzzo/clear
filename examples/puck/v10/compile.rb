@@ -15,15 +15,8 @@ out_path = ARGV[1] or (warn "Usage: compile.rb <input.puck> <output.puckc>"; exi
 
 source = File.read(in_path)
 core_path = File.expand_path("core.puck", __dir__)
-if File.exist?(core_path)
-  core_src = File.read(core_path)
-  # Same splice trick as benchmarks/vm/run_puck.rb: drop core.puck into the
-  # MODULE's declaration block just before BEGIN.
-  source = source.sub(/^BEGIN\b/m) { "#{core_src}\nBEGIN" }
-end
-
 tokens  = Tokenizer.new(source).tokenize
-ast     = Parser.new(tokens).parse
+ast     = Parser.new(tokens, core_path: core_path).parse
 ast     = MacroExpander.new.expand(ast)
 program = Compiler.new.compile(ast)
 

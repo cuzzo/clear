@@ -14,6 +14,18 @@ class Compiler
     :">=" => :>=
   }.freeze
 
+  # Calls to these names are recognised as direct SYSCALL invocations rather
+  # than as regular procedure calls — `OPEN_READ(path)` compiles to
+  # `compile path; SYSCALL 3` without any procedure-table lookup. core.puck
+  # wraps each of these in a lowercase procedure for stylistic consistency.
+  BUILTIN_SYSCALLS = {
+    "OPEN_READ"      => 3,   # path -> handle
+    "READ_LINE_FROM" => 4,   # handle -> string
+    "CLOSE_FILE"     => 5,   # handle -> (none)
+    "OPEN_WRITE"     => 7,   # path -> handle
+    "WRITE_LINE"     => 8    # handle, string -> (none)
+  }.freeze
+
   # A Scope tracks (a) the variable -> slot mapping for one procedure body
   # and (b) which of those slots hold a heap-backed REF cell instead of a
   # plain value. Two reasons a slot becomes boxed:
@@ -54,6 +66,8 @@ class Compiler
       when :Module
         register_signatures(node.val[:declarations] || [], procedures)
         register_signatures(node.val[:body] || [], procedures)
+      when :Block
+        register_signatures(node.val, procedures)
       when :Procedure
         procedures[node.var] = {
           params: node.val[:params],
@@ -110,6 +124,10 @@ class Compiler
         walk_for_var_passes(node.val[:body] || [], names, procedures)
       when :Procedure
         # Don't recurse — inner procedures have their own scope.
+      when :Block
+        # Transparent wrapper (e.g. CASE lowering) — descend into its inner
+        # statements; they live in the surrounding scope.
+        walk_for_var_passes(node.val, names, procedures)
       when :CallStatement
         check_var_args(node.var, node.val, names, procedures)
         node.val.each { |arg| walk_expr_for_var_passes(arg, names, procedures) }
@@ -166,6 +184,11 @@ class Compiler
       if node[:type] == :Module
         compile_statements(node.val[:declarations], scope, procedures, loop_exits, codes)
         compile_statements(node.val[:body], scope, procedures, loop_exits, codes)
+
+      elsif node[:type] == :Block
+        # A transparent wrapper produced by parser lowering (e.g. CASE).
+        # Compile its inner statements in the current scope.
+        compile_statements(node.val, scope, procedures, loop_exits, codes)
 
       elsif node[:type] == :Procedure
         proc_scope = build_scope(node.val[:params], node.val[:var_params] || [], node.val[:body], procedures)
@@ -242,6 +265,15 @@ class Compiler
   # Emit args + CALL. Args bound to VAR params push the raw ref; all other
   # args compile as expressions (which dereferences boxed names).
   def emit_call(name, args, scope, procedures, codes)
+    if BUILTIN_SYSCALLS.key?(name)
+      # Direct-syscall builtins: push each arg, then SYSCALL the id. No
+      # procedure-table lookup; no VAR-param distinction (all args are
+      # ordinary values).
+      args.each { |a| compile_expression(a, codes, scope, procedures) }
+      codes << ByteCode.new(:SYSCALL, BUILTIN_SYSCALLS[name])
+      return
+    end
+
     procedure = procedures.fetch(name)
     procedure[:params].each_with_index do |param, i|
       arg = args[i]

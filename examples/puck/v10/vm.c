@@ -562,6 +562,38 @@ static Value handle_syscall(Value* stack, int32_t* sp, int32_t id) {
             stack[(*sp)++] = t;
             break;
         }
+        case 7: {
+            /* open for write — path string on stack, push integer handle. */
+            Value name = stack[--(*sp)];
+            HeapEntry* h = &heap[name.i];
+            char path[1024];
+            int32_t i;
+            for (i = 0; i < h->length && i < (int32_t)sizeof(path) - 1; i++) {
+                path[i] = (char)h->cells[i].i;
+            }
+            path[i] = '\0';
+            if (files_len == files_cap) {
+                files_cap = files_cap ? files_cap * 2 : 8;
+                files = realloc(files, sizeof(FILE*) * files_cap);
+            }
+            files[files_len] = fopen(path, "w");
+            Value handle = { V_INT, { .i = files_len++ } };
+            stack[(*sp)++] = handle;
+            release(name);
+            break;
+        }
+        case 8: {
+            /* write a string + newline to an open file. handle then string on stack. */
+            Value string = stack[--(*sp)];
+            int32_t handle = (int32_t)stack[--(*sp)].i;
+            HeapEntry* h = &heap[string.i];
+            for (int32_t i = 0; i < h->length; i++) {
+                fputc((int)h->cells[i].i, files[handle]);
+            }
+            fputc('\n', files[handle]);
+            release(string);
+            break;
+        }
         default:
             fprintf(stderr, "unknown SYSCALL id %d\n", id);
             exit(1);

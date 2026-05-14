@@ -76,6 +76,9 @@ class MacroExpander
       })
     when :Loop
       AstNode.new(:Loop, nil, expand_statements(node.val, bindings, body_binding, body, depth))
+    when :Block
+      # Transparent wrapper (e.g. CASE lowering); recurse into its body.
+      AstNode.new(:Block, nil, expand_statements(node.val, bindings, body_binding, body, depth))
     when :CallStatement
       AstNode.new(:CallStatement, node.var, node.val.map { |arg| substitute_expression(arg, bindings) })
     when :ArraySet

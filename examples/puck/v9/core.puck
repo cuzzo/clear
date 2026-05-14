@@ -1,14 +1,21 @@
-(* Tutorial Puck v9 standard library.
+(* core.puck — Tutorial Puck standard library.
 
-   These declarations live inside a MODULE's declaration block. The benchmark
-   runner (benchmarks/vm/run_puck.rb) splices them in automatically; for
-   one-off programs you can paste the contents between MODULE Name; and BEGIN.
+   Every Puck program implicitly REQUIRES this file (the parser splices it
+   between `MODULE Name;` and `BEGIN`). The file MUST sit beside the binary
+   so the parser can find it; V10's vm directory symlinks core.puck back to
+   this file.
 
-   Everything here is written in pure Puck — no special VM support is needed
-   beyond what V9 already provides. *)
+   Everything here is plain Puck on top of V9's primitives:
+     integers + floats + arrays + REF cells + macros + syscalls.
 
-(* WHILE — the LOOP / IF / ELSE / EXIT sandwich V7 introduced as the first
-   real macro. Same definition; this is the canonical copy. *)
+   Procedure names are lowercase_with_underscores. Builtin names that map
+   directly to SYSCALL ops (OPEN_READ, READ_LINE_FROM, ...) are UPPER and
+   are recognised by the compiler — see Compiler::BUILTIN_SYSCALLS.
+*)
+
+(* ============================================================ Macros *)
+
+(* WHILE — LOOP / IF / ELSE / EXIT sandwich. *)
 MACRO WHILE(condition) DO body END;
   LOOP
     IF condition THEN
@@ -28,34 +35,85 @@ MACRO FOR(i, start, finish) DO body END;
   END;
 END;
 
-(* Convert a non-negative integer to a heap-allocated codepoint array. *)
-PROCEDURE int_to_string(n);
-  IF n = 0 THEN
-    out := ARRAY(1);
-    out[0] := 48;
-    RETURN out;
-  END;
+(* ============================================================ Math *)
 
-  buf := ARRAY(20);
-  len := 0;
-  m := n;
-  WHILE(m > 0) DO
-    digit := m % 10;
-    buf[len] := 48 + digit;
-    len := len + 1;
-    m := m / 10;
+PROCEDURE abs(n);
+  IF n < 0 THEN
+    RETURN 0 - n;
   END;
-
-  out := ARRAY(len);
-  i := 0;
-  WHILE(i < len) DO
-    out[i] := buf[len - i - 1];
-    i := i + 1;
-  END;
-  RETURN out;
+  RETURN n;
 END;
 
-(* Concatenate two strings (codepoint arrays). *)
+PROCEDURE min(a, b);
+  IF a < b THEN
+    RETURN a;
+  END;
+  RETURN b;
+END;
+
+PROCEDURE max(a, b);
+  IF a > b THEN
+    RETURN a;
+  END;
+  RETURN b;
+END;
+
+(* ============================================================ Character predicates
+
+   Inputs are integer codepoints (what s[i] returns for any string s).
+   Outputs are 1 (true) or 0 (false). Note that V9 comparison ops produce
+   Ruby booleans on the Ruby VM, but the C VM converts to 0/1 — we return
+   explicit 0/1 here to be host-VM-agnostic. *)
+
+PROCEDURE is_digit(c);
+  IF c < 48 THEN RETURN 0; END;
+  IF c > 57 THEN RETURN 0; END;
+  RETURN 1;
+END;
+
+PROCEDURE is_letter(c);
+  IF c >= 65 THEN
+    IF c <= 90 THEN RETURN 1; END;
+  END;
+  IF c >= 97 THEN
+    IF c <= 122 THEN RETURN 1; END;
+  END;
+  RETURN 0;
+END;
+
+PROCEDURE is_whitespace(c);
+  IF c = 32 THEN RETURN 1; END;   (* space  *)
+  IF c = 9  THEN RETURN 1; END;   (* tab    *)
+  IF c = 10 THEN RETURN 1; END;   (* LF     *)
+  IF c = 13 THEN RETURN 1; END;   (* CR     *)
+  RETURN 0;
+END;
+
+PROCEDURE is_alpha_num(c);
+  IF is_letter(c) = 1 THEN RETURN 1; END;
+  IF is_digit(c)  = 1 THEN RETURN 1; END;
+  RETURN 0;
+END;
+
+(* ============================================================ Strings
+
+   Strings are codepoint arrays (V9). LEN(s) gives the count; s[i] returns
+   the codepoint at i.  *)
+
+(* Char-by-char equality. Returns 1 or 0. *)
+PROCEDURE equals(a, b);
+  la := LEN(a);
+  lb := LEN(b);
+  IF la # lb THEN RETURN 0; END;
+  i := 0;
+  WHILE(i < la) DO
+    IF a[i] # b[i] THEN RETURN 0; END;
+    i := i + 1;
+  END;
+  RETURN 1;
+END;
+
+(* a ++ b — produces a fresh array. *)
 PROCEDURE concat(a, b);
   la := LEN(a);
   lb := LEN(b);
@@ -73,8 +131,172 @@ PROCEDURE concat(a, b);
   RETURN out;
 END;
 
-(* Print "BENCH_RESULT: <ms>" on a single line so benchmark runners
-   (which grep for /BENCH_RESULT: \d+/) can extract the timing. *)
+(* s[start..start+len). Caller must keep indices in range. *)
+PROCEDURE substring(s, start, len);
+  out := ARRAY(len);
+  i := 0;
+  WHILE(i < len) DO
+    out[i] := s[start + i];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+(* Find target within s. Returns 0-based start index, or -1 if not found. *)
+PROCEDURE index_of(s, target);
+  ls := LEN(s);
+  lt := LEN(target);
+  IF lt = 0 THEN RETURN 0; END;
+  IF lt > ls THEN RETURN 0 - 1; END;
+  last := ls - lt;
+  i := 0;
+  WHILE(i <= last) DO
+    j := 0;
+    matched := 1;
+    WHILE(j < lt) DO
+      IF s[i + j] # target[j] THEN
+        matched := 0;
+        j := lt;       (* break inner loop *)
+      ELSE
+        j := j + 1;
+      END;
+    END;
+    IF matched = 1 THEN
+      RETURN i;
+    END;
+    i := i + 1;
+  END;
+  RETURN 0 - 1;
+END;
+
+(* Integer (signed) to decimal codepoint-array. *)
+PROCEDURE int_to_string(n);
+  IF n = 0 THEN
+    out := ARRAY(1);
+    out[0] := 48;       (* '0' *)
+    RETURN out;
+  END;
+
+  is_negative := 0;
+  m := n;
+  IF n < 0 THEN
+    is_negative := 1;
+    m := 0 - n;
+  END;
+
+  (* Collect digits low-first into a buffer. *)
+  buf := ARRAY(21);
+  len := 0;
+  WHILE(m > 0) DO
+    digit := m % 10;
+    buf[len] := 48 + digit;
+    len := len + 1;
+    m := m / 10;
+  END;
+
+  IF is_negative = 1 THEN
+    buf[len] := 45;     (* '-' *)
+    len := len + 1;
+  END;
+
+  (* Reverse into the output. *)
+  out := ARRAY(len);
+  i := 0;
+  WHILE(i < len) DO
+    out[i] := buf[len - i - 1];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+(* Parse a decimal integer from a codepoint array. Returns 0 on malformed
+   input (no error reporting at this layer). *)
+PROCEDURE string_to_int(s);
+  ls := LEN(s);
+  IF ls = 0 THEN RETURN 0; END;
+  i := 0;
+  sign := 1;
+  IF s[0] = 45 THEN     (* '-' *)
+    sign := 0 - 1;
+    i := 1;
+  END;
+  n := 0;
+  WHILE(i < ls) DO
+    c := s[i];
+    IF c < 48 THEN RETURN 0; END;
+    IF c > 57 THEN RETURN 0; END;
+    n := n * 10 + c - 48;
+    i := i + 1;
+  END;
+  RETURN n * sign;
+END;
+
+(* ============================================================ Arrays
+
+   Fixed-size arrays at V9; "growth" means allocating a bigger one, copying
+   the live entries over, and replacing the variable. This is what a real
+   compiler's growable list would do. The buf VAR is replaced in place. *)
+
+PROCEDURE grow_array(VAR buf, VAR cap);
+  new_cap := cap * 2;
+  new_buf := ARRAY(new_cap);
+  i := 0;
+  WHILE(i < cap) DO
+    new_buf[i] := buf[i];
+    i := i + 1;
+  END;
+  buf := new_buf;
+  cap := new_cap;
+END;
+
+(* ============================================================ I/O wrappers
+
+   The Compiler recognises the UPPER_CASE syscall builtins (OPEN_READ,
+   READ_LINE_FROM, CLOSE_FILE, OPEN_WRITE, WRITE_LINE) and emits the right
+   SYSCALL op without a regular procedure call. The wrappers here just give
+   them lowercase names for consistency with the rest of the stdlib. *)
+
+PROCEDURE print_line(s);
+  SYSCALL(1, s);
+END;
+
+PROCEDURE print_int(n);
+  s := int_to_string(n);
+  SYSCALL(1, s);
+END;
+
+PROCEDURE time_ms();
+  RETURN TIME();
+END;
+
+PROCEDURE open_read(path);
+  RETURN OPEN_READ(path);
+END;
+
+PROCEDURE read_line_from(handle);
+  RETURN READ_LINE_FROM(handle);
+END;
+
+PROCEDURE close_file(handle);
+  CLOSE_FILE(handle);
+END;
+
+PROCEDURE open_write(path);
+  RETURN OPEN_WRITE(path);
+END;
+
+PROCEDURE write_line(handle, line);
+  WRITE_LINE(handle, line);
+END;
+
+(* Read a single line from stdin. Same as the INPUT() builtin; the wrapper
+   exists so user code can stick to lowercase names. *)
+PROCEDURE read_line();
+  RETURN INPUT();
+END;
+
+(* ============================================================ Benchmark helper *)
+
 PROCEDURE print_bench_result(ms);
   line := concat("BENCH_RESULT: ", int_to_string(ms));
   SYSCALL(1, line);

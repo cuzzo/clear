@@ -10,8 +10,10 @@ class Tokenizer
     PROCEDURE RETURN VAR
     MACRO DO
     IF THEN ELSE ELSIF
+    CASE OF
     LOOP EXIT
     ARRAY LEN
+    REQUIRE
     END SYSCALL INPUT TIME
   ].freeze
 
@@ -37,7 +39,7 @@ class Tokenizer
       elsif match = @scanner.scan(/"[^"]*"/)
         tokens << Token.new(:STRING, match[1...-1])
 
-      elsif match = @scanner.scan(/:=|<=|>=|[()+\-*\/%=<>#,;.\[\]]/)
+      elsif match = @scanner.scan(/:=|<=|>=|[()+\-*\/%=<>#,;.\[\]:|]/)
         tokens << Token.new(:OPERATOR, match)
 
       elsif match = @scanner.scan(/[a-zA-Z_]\w*/)
