@@ -1,0 +1,34 @@
+MODULE Demo;
+
+MACRO WHILE(condition) DO body END;
+  LOOP
+    IF condition THEN
+      body;
+    ELSE
+      EXIT;
+    END;
+  END;
+END;
+
+MACRO FOR(i, start, finish) DO body END;
+  i := start;
+  WHILE(i <= finish) DO
+    body;
+    i := i + 1;
+  END;
+END;
+
+BEGIN
+  FOR(i, 1, 5) DO
+    IF i = 1 THEN
+      message := "one";
+      SYSCALL(1, message);
+    ELSIF i = 3 THEN
+      message := "three";
+      SYSCALL(1, message);
+    ELSE
+      message := "other";
+      SYSCALL(1, message);
+    END;
+  END;
+END.
