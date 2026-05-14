@@ -45,6 +45,7 @@ Milestone: A working CLEAR VM with debugger & time travel, that supports a decen
  ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
  - [ ] Design by Contract v2: PRE { } Comptime
+ - [ ] Implicit Logical TOCTAU made impossible via `@derivative` on `@shared` values and `@allowStale` to allow possible TOCTAU only *EXPLICITLY*.
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
