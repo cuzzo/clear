@@ -249,6 +249,18 @@ PROCEDURE grow_array(VAR buf, VAR cap);
   cap := new_cap;
 END;
 
+(* Append `item` to a growable list owned by the caller. The list is split
+   into three VARs (data buffer, current count, current capacity) so the
+   caller's variables stay in sync if we have to reallocate. Doubles the
+   capacity when full. *)
+PROCEDURE list_push(VAR data, VAR count, VAR cap, item);
+  IF count = cap THEN
+    grow_array(data, cap);
+  END;
+  data[count] := item;
+  count := count + 1;
+END;
+
 (* ============================================================ I/O wrappers
 
    The Compiler recognises the UPPER_CASE syscall builtins (OPEN_READ,
@@ -293,6 +305,13 @@ END;
    exists so user code can stick to lowercase names. *)
 PROCEDURE read_line();
   RETURN INPUT();
+END;
+
+(* Nth command-line argument, as a string. argv(0) is the first user-supplied
+   arg after the binary and program; argv(n) for an out-of-range n returns
+   the empty string. Used by tools like compiler.puck. *)
+PROCEDURE argv(n);
+  RETURN ARGV(n);
 END;
 
 (* ============================================================ Assertions

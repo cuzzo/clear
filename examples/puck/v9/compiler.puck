@@ -1,0 +1,1147 @@
+(* compiler.puck - A Puck-in-Puck compiler. *)
+(* *)
+(* Reads a Puck source file and produces a .puckc bytecode file in the *)
+(* same text format that examples/puck/v10/compile.rb emits and that *)
+(* examples/puck/v10/vm consumes. *)
+(* *)
+(* Usage: *)
+(*   ruby examples/puck/v10/compile.rb examples/puck/v9/compiler.puck \ *)
+(*        /tmp/c.puckc *)
+(*   examples/puck/v10/vm /tmp/c.puckc  input.puck  out.puckc *)
+(* *)
+(* Or via the Ruby v9 VM directly: *)
+(*   ruby examples/puck/v9/vm.rb examples/puck/v9/compiler.puck \ *)
+(*        input.puck out.puckc *)
+(* *)
+(* The subset it handles is intentionally smaller than what v9's Ruby *)
+(* compiler accepts. It compiles: *)
+(* - MODULE Name; with a BEGIN body END. tail *)
+(* - PROCEDURE name(p1, p2) by-value params only - no VAR or MUTABLE *)
+(* - Statements: assignment x := expr;  name(args);  SYSCALL(id, args...); *)
+(*               HALT(expr);  IF/THEN/ELSE/END;  LOOP/EXIT/END;  RETURN; *)
+(* - Expressions: integers, strings, identifiers, name(args) calls, *)
+(*                parenthesised groups, + - * / %, = # < <= > >=. *)
+(* It does NOT handle: arrays, REF/VAR, macros, REQUIRE, ELSIF, CASE OF, *)
+(* floats, embedded quotes in strings, escape sequences. *)
+(* *)
+(* Data is encoded as nested arrays since Puck has no records. Token *)
+(* shape and AST tags are documented below this header. *)
+
+MODULE Compiler;
+
+
+(* ============================================================ Token kinds *)
+
+(* TOK_INT     = 1   token from integer literal
+   TOK_STR     = 2   token from string literal
+   TOK_IDENT   = 3   identifier or keyword
+   TOK_OP      = 4   single- or multi-char operator/punctuation
+   TOK_EOF     = 5   end of token stream *)
+
+
+(* ============================================================ AST tags *)
+
+(* AST_INT     = 1   [1, int_value]
+   AST_STR     = 2   [2, pool_index]                        (string interned)
+   AST_VAR     = 3   [3, name]
+   AST_MATH    = 4   [4, op_code, left, right]              (+ - * / %)
+   AST_CMP     = 5   [5, op_code, left, right]              (= # < <= > >=)
+   AST_CALL    = 6   [6, name, args]                        expression
+   AST_SYSCALL = 7   [7, id, args]                          statement
+   AST_ASSIGN  = 8   [8, name, expr]                        statement
+   AST_IF      = 9   [9, cond, then_body, else_body]
+   AST_LOOP    = 10  [10, body]
+   AST_EXIT    = 11  [11]
+   AST_RETURN  = 12  [12, expr_or_0]                        expr_or_0 = 0 -> bare RETURN
+   AST_CALLSTM = 13  [13, name, args]
+   AST_PROC    = 14  [14, name, params, body]
+   AST_MODULE  = 15  [15, name, procs, body] *)
+
+
+(* ============================================================ Reading source
+
+   Read a whole file into a codepoint array. We use READ_LINE_FROM and join
+   results with newlines. O(n^2) due to repeated concat, but the inputs are
+   small. *)
+
+PROCEDURE read_file(path);
+  handle := OPEN_READ(path);
+  out := ARRAY(0);
+  nl := ARRAY(1);
+  nl[0] := 10;                                 (* '\n' *)
+  LOOP
+    line := READ_LINE_FROM(handle);
+    IF line = 0 THEN EXIT; END;
+    out := concat(out, line);
+    out := concat(out, nl);
+  END;
+  CLOSE_FILE(handle);
+  RETURN out;
+END;
+
+
+(* ============================================================ Small helpers *)
+
+(* Build a brand-new token [kind, int_value, str_value]. *)
+PROCEDURE mk_token(kind, n, s);
+  t := ARRAY(3);
+  t[0] := kind;
+  t[1] := n;
+  t[2] := s;
+  RETURN t;
+END;
+
+PROCEDURE empty_string();
+  RETURN ARRAY(0);
+END;
+
+(* Build a 1-element codepoint string from a single codepoint. *)
+PROCEDURE char_str(c);
+  s := ARRAY(1);
+  s[0] := c;
+  RETURN s;
+END;
+
+(* Build a 2-element codepoint string from two codepoints. *)
+PROCEDURE char2_str(a, b);
+  s := ARRAY(2);
+  s[0] := a;
+  s[1] := b;
+  RETURN s;
+END;
+
+
+(* ============================================================ Tokenizer
+
+   Walks the source codepoint array. Each token is a 3-element array.
+   Returns a single array holding all tokens (including a trailing TOK_EOF). *)
+
+PROCEDURE tokenize(src);
+  toks_data := ARRAY(64);
+  toks_count := 0;
+  toks_cap := 64;
+
+  src_len := LEN(src);
+  pos := 0;
+
+  LOOP
+    IF pos >= src_len THEN EXIT; END;
+    c := src[pos];
+
+    (* whitespace *)
+    IF is_whitespace(c) = 1 THEN
+      pos := pos + 1;
+    ELSE
+      (* block-comment opener — paren followed by star *)
+      IF c = 40 THEN
+        IF pos + 1 < src_len THEN
+          IF src[pos + 1] = 42 THEN
+            pos := pos + 2;
+            LOOP
+              IF pos + 1 >= src_len THEN EXIT; END;
+              IF src[pos] = 42 THEN
+                IF src[pos + 1] = 41 THEN
+                  pos := pos + 2;
+                  EXIT;
+                END;
+              END;
+              pos := pos + 1;
+            END;
+          ELSE
+            (* lone '(' is an operator *)
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(40)));
+            pos := pos + 1;
+          END;
+        ELSE
+          list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(40)));
+          pos := pos + 1;
+        END;
+      ELSE
+
+      (* integer literal *)
+      IF is_digit(c) = 1 THEN
+        n := 0;
+        WHILE(pos < src_len) DO
+          ch := src[pos];
+          IF is_digit(ch) = 1 THEN
+            n := n * 10 + ch - 48;
+            pos := pos + 1;
+          ELSE
+            EXIT;
+          END;
+        END;
+        list_push(toks_data, toks_count, toks_cap, mk_token(1, n, empty_string()));
+      ELSE
+
+      (* identifier / keyword *)
+      IF is_letter(c) = 1 THEN
+        start := pos;
+        LOOP
+          IF pos >= src_len THEN EXIT; END;
+          ch := src[pos];
+          IF is_alpha_num(ch) = 1 THEN
+            pos := pos + 1;
+          ELSE
+            IF ch = 95 THEN     (* '_' *)
+              pos := pos + 1;
+            ELSE
+              EXIT;
+            END;
+          END;
+        END;
+        word := substring(src, start, pos - start);
+        list_push(toks_data, toks_count, toks_cap, mk_token(3, 0, word));
+      ELSE
+
+      (* string literal: "..." with no escapes *)
+      IF c = 34 THEN
+        pos := pos + 1;
+        start := pos;
+        LOOP
+          IF pos >= src_len THEN EXIT; END;
+          IF src[pos] = 34 THEN EXIT; END;
+          pos := pos + 1;
+        END;
+        s := substring(src, start, pos - start);
+        IF pos < src_len THEN pos := pos + 1; END;          (* skip closing " *)
+        list_push(toks_data, toks_count, toks_cap, mk_token(2, 0, s));
+      ELSE
+
+      (* multi-char operator or single-char operator *)
+      IF c = 58 THEN           (* ':' — only valid as ':=' *)
+        IF pos + 1 < src_len THEN
+          IF src[pos + 1] = 61 THEN
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char2_str(58, 61)));
+            pos := pos + 2;
+          ELSE
+            SYSCALL(1, "tokenize: ':' must be followed by '='");
+            HALT(1);
+          END;
+        ELSE
+          SYSCALL(1, "tokenize: unexpected ':' at end of source");
+          HALT(1);
+        END;
+      ELSE
+      IF c = 60 THEN           (* '<' or '<=' *)
+        IF pos + 1 < src_len THEN
+          IF src[pos + 1] = 61 THEN
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char2_str(60, 61)));
+            pos := pos + 2;
+          ELSE
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(60)));
+            pos := pos + 1;
+          END;
+        ELSE
+          list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(60)));
+          pos := pos + 1;
+        END;
+      ELSE
+      IF c = 62 THEN           (* '>' or '>=' *)
+        IF pos + 1 < src_len THEN
+          IF src[pos + 1] = 61 THEN
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char2_str(62, 61)));
+            pos := pos + 2;
+          ELSE
+            list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(62)));
+            pos := pos + 1;
+          END;
+        ELSE
+          list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(62)));
+          pos := pos + 1;
+        END;
+      ELSE
+        (* Single-char op fallback: + - * / % = # ( ) ; , .  *)
+        list_push(toks_data, toks_count, toks_cap, mk_token(4, 0, char_str(c)));
+        pos := pos + 1;
+      END; END; END; END; END; END; END;
+    END;
+  END;
+
+  (* Append TOK_EOF. *)
+  list_push(toks_data, toks_count, toks_cap, mk_token(5, 0, empty_string()));
+
+  (* Shrink to the exact length so LEN(out) == token count. *)
+  out := ARRAY(toks_count);
+  i := 0;
+  WHILE(i < toks_count) DO
+    out[i] := toks_data[i];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+
+(* ============================================================ Parser
+
+   Token cursor is held in the small array `cur` = [pos]. A helper bumps
+   cur[0] each time we consume a token. Procedures that introduce a new
+   non-trivial subtree (parse_expression, parse_statement, parse_block) all
+   take `cur` as a VAR so the cursor advances in the caller. *)
+
+(* Convenience: read fields from a token. *)
+PROCEDURE tk_kind(t); RETURN t[0]; END;
+PROCEDURE tk_int(t);  RETURN t[1]; END;
+PROCEDURE tk_str(t);  RETURN t[2]; END;
+
+(* Look at the n-th token from `pos` without consuming. *)
+PROCEDURE peek(tokens, pos, n);
+  total := LEN(tokens);
+  i := pos + n;
+  IF i >= total THEN
+    RETURN tokens[total - 1];          (* always TOK_EOF at end *)
+  END;
+  RETURN tokens[i];
+END;
+
+(* True iff token at cur points at an operator with the given text. *)
+PROCEDURE at_op(tokens, cur, op_text);
+  t := peek(tokens, cur[0], 0);
+  IF tk_kind(t) # 4 THEN RETURN 0; END;
+  RETURN equals(tk_str(t), op_text);
+END;
+
+(* True iff token at cur is an identifier with the given text. *)
+PROCEDURE at_ident(tokens, cur, ident_text);
+  t := peek(tokens, cur[0], 0);
+  IF tk_kind(t) # 3 THEN RETURN 0; END;
+  RETURN equals(tk_str(t), ident_text);
+END;
+
+(* Consume the current token and advance the cursor. *)
+PROCEDURE eat(tokens, VAR cur);
+  t := tokens[cur[0]];
+  cur[0] := cur[0] + 1;
+  RETURN t;
+END;
+
+(* Expect and consume a specific operator. *)
+PROCEDURE eat_op(tokens, VAR cur, op_text);
+  IF at_op(tokens, cur, op_text) = 0 THEN
+    t := peek(tokens, cur[0], 0);
+    SYSCALL(1, concat("parse: expected operator ", op_text));
+    SYSCALL(1, concat("       got kind=", int_to_string(tk_kind(t))));
+    SYSCALL(1, concat("       text=", tk_str(t)));
+    HALT(1);
+  END;
+  cur[0] := cur[0] + 1;
+END;
+
+(* Expect and consume an identifier matching `ident_text`. *)
+PROCEDURE eat_ident(tokens, VAR cur, ident_text);
+  IF at_ident(tokens, cur, ident_text) = 0 THEN
+    SYSCALL(1, concat("parse: expected keyword ", ident_text));
+    HALT(1);
+  END;
+  cur[0] := cur[0] + 1;
+END;
+
+(* Build small AST node arrays. Three sizes is all we need. *)
+PROCEDURE mk1(tag);
+  n := ARRAY(1); n[0] := tag; RETURN n;
+END;
+PROCEDURE mk2(tag, a);
+  n := ARRAY(2); n[0] := tag; n[1] := a; RETURN n;
+END;
+PROCEDURE mk3(tag, a, b);
+  n := ARRAY(3); n[0] := tag; n[1] := a; n[2] := b; RETURN n;
+END;
+PROCEDURE mk4(tag, a, b, c);
+  n := ARRAY(4); n[0] := tag; n[1] := a; n[2] := b; n[3] := c; RETURN n;
+END;
+PROCEDURE mk5(tag, a, b, c, d);
+  n := ARRAY(5); n[0] := tag; n[1] := a; n[2] := b; n[3] := c; n[4] := d; RETURN n;
+END;
+
+(* Look up a compare-op code from operator text. -1 if not a compare op. *)
+PROCEDURE compare_op_code(s);
+  IF equals(s, "=")  = 1 THEN RETURN 0; END;
+  IF equals(s, "#")  = 1 THEN RETURN 1; END;
+  IF equals(s, "<")  = 1 THEN RETURN 2; END;
+  IF equals(s, "<=") = 1 THEN RETURN 3; END;
+  IF equals(s, ">")  = 1 THEN RETURN 4; END;
+  IF equals(s, ">=") = 1 THEN RETURN 5; END;
+  RETURN 0 - 1;
+END;
+
+(* Math-op code from operator text. -1 if not a math op. + and - are also
+   stripped out here so parse_expression's pratt-style routine can use this
+   uniformly. *)
+PROCEDURE math_op_code(s);
+  IF equals(s, "+") = 1 THEN RETURN 0; END;
+  IF equals(s, "-") = 1 THEN RETURN 1; END;
+  IF equals(s, "*") = 1 THEN RETURN 2; END;
+  IF equals(s, "/") = 1 THEN RETURN 3; END;
+  IF equals(s, "%") = 1 THEN RETURN 4; END;
+  RETURN 0 - 1;
+END;
+
+(* Forward references: Puck has no forward declarations, but procedure names
+   resolve at call time, so out-of-order definitions still work as long as
+   every procedure is defined before the module body that calls into them.
+   parse_primary calls parse_expression for grouping; that's fine. *)
+
+
+(* String pool: a growable list of unique strings. Returns the index. *)
+PROCEDURE pool_intern(VAR pool_data, VAR pool_count, VAR pool_cap, s);
+  i := 0;
+  WHILE(i < pool_count) DO
+    IF equals(pool_data[i], s) = 1 THEN
+      RETURN i;
+    END;
+    i := i + 1;
+  END;
+  idx := pool_count;
+  list_push(pool_data, pool_count, pool_cap, s);
+  RETURN idx;
+END;
+
+
+(* Parse one comma-separated args list `( e1, e2, ... )`. Returns an array of
+   AST nodes (which is itself a heap array). *)
+PROCEDURE parse_call_args(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  eat_op(tokens, cur, "(");
+  buf_data := ARRAY(4);
+  buf_count := 0;
+  buf_cap := 4;
+  IF at_op(tokens, cur, ")") = 1 THEN
+    eat_op(tokens, cur, ")");
+  ELSE
+    LOOP
+      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      list_push(buf_data, buf_count, buf_cap, e);
+      IF at_op(tokens, cur, ",") = 1 THEN
+        eat_op(tokens, cur, ",");
+      ELSE
+        EXIT;
+      END;
+    END;
+    eat_op(tokens, cur, ")");
+  END;
+  out := ARRAY(buf_count);
+  i := 0;
+  WHILE(i < buf_count) DO
+    out[i] := buf_data[i];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+(* Primary: literal / identifier / grouped expression / function call. *)
+PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  t := peek(tokens, cur[0], 0);
+  k := tk_kind(t);
+  IF k = 1 THEN
+    cur[0] := cur[0] + 1;
+    RETURN mk2(1, tk_int(t));
+  END;
+  IF k = 2 THEN
+    cur[0] := cur[0] + 1;
+    idx := pool_intern(pool_data, pool_count, pool_cap, tk_str(t));
+    RETURN mk2(2, idx);
+  END;
+  IF k = 3 THEN
+    name := tk_str(t);
+    cur[0] := cur[0] + 1;
+    (* function-call or bare variable *)
+    IF at_op(tokens, cur, "(") = 1 THEN
+      args := parse_call_args(tokens, cur, pool_data, pool_count, pool_cap);
+      RETURN mk3(6, name, args);
+    END;
+    RETURN mk2(3, name);
+  END;
+  IF k = 4 THEN
+    IF equals(tk_str(t), "(") = 1 THEN
+      eat_op(tokens, cur, "(");
+      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      eat_op(tokens, cur, ")");
+      RETURN e;
+    END;
+  END;
+  SYSCALL(1, "parse: unexpected primary token");
+  SYSCALL(1, concat("       kind=", int_to_string(k)));
+  HALT(1);
+END;
+
+(* Multiplicative tier: * / %, left-associative. *)
+PROCEDURE parse_mul(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  left := parse_primary(tokens, cur, pool_data, pool_count, pool_cap);
+  LOOP
+    t := peek(tokens, cur[0], 0);
+    IF tk_kind(t) # 4 THEN EXIT; END;
+    s := tk_str(t);
+    op := 0 - 1;
+    IF equals(s, "*") = 1 THEN op := 2; END;
+    IF equals(s, "/") = 1 THEN op := 3; END;
+    IF equals(s, "%") = 1 THEN op := 4; END;
+    IF op < 0 THEN EXIT; END;
+    cur[0] := cur[0] + 1;
+    right := parse_primary(tokens, cur, pool_data, pool_count, pool_cap);
+    left := mk4(4, op, left, right);
+  END;
+  RETURN left;
+END;
+
+(* Additive tier: + -, left-associative. *)
+PROCEDURE parse_add(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  left := parse_mul(tokens, cur, pool_data, pool_count, pool_cap);
+  LOOP
+    t := peek(tokens, cur[0], 0);
+    IF tk_kind(t) # 4 THEN EXIT; END;
+    s := tk_str(t);
+    op := 0 - 1;
+    IF equals(s, "+") = 1 THEN op := 0; END;
+    IF equals(s, "-") = 1 THEN op := 1; END;
+    IF op < 0 THEN EXIT; END;
+    cur[0] := cur[0] + 1;
+    right := parse_mul(tokens, cur, pool_data, pool_count, pool_cap);
+    left := mk4(4, op, left, right);
+  END;
+  RETURN left;
+END;
+
+(* Comparison tier — non-associative; we accept chains anyway (a < b < c
+   parses left-to-right) since the test programs never produce them. *)
+PROCEDURE parse_expression(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  left := parse_add(tokens, cur, pool_data, pool_count, pool_cap);
+  LOOP
+    t := peek(tokens, cur[0], 0);
+    IF tk_kind(t) # 4 THEN EXIT; END;
+    op := compare_op_code(tk_str(t));
+    IF op < 0 THEN EXIT; END;
+    cur[0] := cur[0] + 1;
+    right := parse_add(tokens, cur, pool_data, pool_count, pool_cap);
+    left := mk4(5, op, left, right);
+  END;
+  RETURN left;
+END;
+
+
+(* Parse a block of statements until a stopping keyword (END / ELSE). The
+   stopping keyword is *not* consumed. Returns a fresh array. *)
+PROCEDURE parse_block(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  buf_data := ARRAY(8);
+  buf_count := 0;
+  buf_cap := 8;
+  LOOP
+    t := peek(tokens, cur[0], 0);
+    IF tk_kind(t) = 5 THEN EXIT; END;                (* EOF *)
+    IF tk_kind(t) = 3 THEN
+      s := tk_str(t);
+      IF equals(s, "END")  = 1 THEN EXIT; END;
+      IF equals(s, "ELSE") = 1 THEN EXIT; END;
+    END;
+    stmt := parse_statement(tokens, cur, pool_data, pool_count, pool_cap);
+    list_push(buf_data, buf_count, buf_cap, stmt);
+  END;
+  out := ARRAY(buf_count);
+  i := 0;
+  WHILE(i < buf_count) DO
+    out[i] := buf_data[i];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
+PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  t := peek(tokens, cur[0], 0);
+  k := tk_kind(t);
+
+  IF k = 3 THEN
+    name := tk_str(t);
+
+    (* IF cond THEN body [ELSE body] END; *)
+    IF equals(name, "IF") = 1 THEN
+      cur[0] := cur[0] + 1;
+      cond := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      eat_ident(tokens, cur, "THEN");
+      then_body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+      else_body := ARRAY(0);
+      IF at_ident(tokens, cur, "ELSE") = 1 THEN
+        eat_ident(tokens, cur, "ELSE");
+        else_body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+      END;
+      eat_ident(tokens, cur, "END");
+      eat_op(tokens, cur, ";");
+      RETURN mk4(9, cond, then_body, else_body);
+    END;
+
+    (* LOOP body END; *)
+    IF equals(name, "LOOP") = 1 THEN
+      cur[0] := cur[0] + 1;
+      body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+      eat_ident(tokens, cur, "END");
+      eat_op(tokens, cur, ";");
+      RETURN mk2(10, body);
+    END;
+
+    (* EXIT; *)
+    IF equals(name, "EXIT") = 1 THEN
+      cur[0] := cur[0] + 1;
+      eat_op(tokens, cur, ";");
+      RETURN mk1(11);
+    END;
+
+    (* RETURN; or RETURN expr; *)
+    IF equals(name, "RETURN") = 1 THEN
+      cur[0] := cur[0] + 1;
+      IF at_op(tokens, cur, ";") = 1 THEN
+        eat_op(tokens, cur, ";");
+        RETURN mk2(12, 0);
+      END;
+      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      eat_op(tokens, cur, ";");
+      RETURN mk2(12, e);
+    END;
+
+    (* SYSCALL(id, args...); *)
+    IF equals(name, "SYSCALL") = 1 THEN
+      cur[0] := cur[0] + 1;
+      eat_op(tokens, cur, "(");
+      idTok := eat(tokens, cur);
+      id := tk_int(idTok);
+      buf_data := ARRAY(4);
+      buf_count := 0;
+      buf_cap := 4;
+      LOOP
+        IF at_op(tokens, cur, ")") = 1 THEN EXIT; END;
+        eat_op(tokens, cur, ",");
+        e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+        list_push(buf_data, buf_count, buf_cap, e);
+      END;
+      eat_op(tokens, cur, ")");
+      eat_op(tokens, cur, ";");
+      args := ARRAY(buf_count);
+      i := 0;
+      WHILE(i < buf_count) DO
+        args[i] := buf_data[i];
+        i := i + 1;
+      END;
+      RETURN mk3(7, id, args);
+    END;
+
+    (* HALT(code); — sugar for SYSCALL(9, code) *)
+    IF equals(name, "HALT") = 1 THEN
+      cur[0] := cur[0] + 1;
+      eat_op(tokens, cur, "(");
+      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      eat_op(tokens, cur, ")");
+      eat_op(tokens, cur, ";");
+      args := ARRAY(1);
+      args[0] := e;
+      RETURN mk3(7, 9, args);
+    END;
+
+    (* Otherwise: identifier — either assignment (x := ...) or call (x(...);). *)
+    (* Peek ahead to decide. *)
+    next := peek(tokens, cur[0], 1);
+    IF tk_kind(next) = 4 THEN
+      ns := tk_str(next);
+      IF equals(ns, ":=") = 1 THEN
+        cur[0] := cur[0] + 1;
+        eat_op(tokens, cur, ":=");
+        e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+        eat_op(tokens, cur, ";");
+        RETURN mk3(8, name, e);
+      END;
+      IF equals(ns, "(") = 1 THEN
+        cur[0] := cur[0] + 1;
+        args := parse_call_args(tokens, cur, pool_data, pool_count, pool_cap);
+        eat_op(tokens, cur, ";");
+        RETURN mk3(13, name, args);
+      END;
+    END;
+    SYSCALL(1, concat("parse: unexpected token after identifier ", name));
+    HALT(1);
+  END;
+
+  SYSCALL(1, "parse: unexpected statement token");
+  HALT(1);
+END;
+
+
+(* Parse a procedure declaration:  PROCEDURE name(p1, p2, ...);  body  END; *)
+PROCEDURE parse_procedure(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+  eat_ident(tokens, cur, "PROCEDURE");
+  name_tok := eat(tokens, cur);
+  IF tk_kind(name_tok) # 3 THEN
+    SYSCALL(1, "parse: expected procedure name");
+    HALT(1);
+  END;
+  pname := tk_str(name_tok);
+
+  eat_op(tokens, cur, "(");
+  pbuf := ARRAY(4);
+  pcount := 0;
+  pcap := 4;
+  IF at_op(tokens, cur, ")") = 1 THEN
+    eat_op(tokens, cur, ")");
+  ELSE
+    LOOP
+      pt := eat(tokens, cur);
+      IF tk_kind(pt) # 3 THEN
+        SYSCALL(1, "parse: expected param name");
+        HALT(1);
+      END;
+      list_push(pbuf, pcount, pcap, tk_str(pt));
+      IF at_op(tokens, cur, ",") = 1 THEN
+        eat_op(tokens, cur, ",");
+      ELSE
+        EXIT;
+      END;
+    END;
+    eat_op(tokens, cur, ")");
+  END;
+  eat_op(tokens, cur, ";");
+
+  body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+  eat_ident(tokens, cur, "END");
+  eat_op(tokens, cur, ";");
+
+  params := ARRAY(pcount);
+  i := 0;
+  WHILE(i < pcount) DO
+    params[i] := pbuf[i];
+    i := i + 1;
+  END;
+  RETURN mk4(14, pname, params, body);
+END;
+
+
+(* Top level: MODULE Name; <procedures>* BEGIN body END. *)
+PROCEDURE parse_module(tokens, VAR pool_data, VAR pool_count, VAR pool_cap);
+  cur := ARRAY(1);
+  cur[0] := 0;
+
+  eat_ident(tokens, cur, "MODULE");
+  name_tok := eat(tokens, cur);
+  mname := tk_str(name_tok);
+  eat_op(tokens, cur, ";");
+
+  procs_buf := ARRAY(4);
+  procs_count := 0;
+  procs_cap := 4;
+  LOOP
+    IF at_ident(tokens, cur, "PROCEDURE") = 1 THEN
+      p := parse_procedure(tokens, cur, pool_data, pool_count, pool_cap);
+      list_push(procs_buf, procs_count, procs_cap, p);
+    ELSE
+      EXIT;
+    END;
+  END;
+
+  eat_ident(tokens, cur, "BEGIN");
+  body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+  eat_ident(tokens, cur, "END");
+  eat_op(tokens, cur, ".");
+
+  procs := ARRAY(procs_count);
+  i := 0;
+  WHILE(i < procs_count) DO
+    procs[i] := procs_buf[i];
+    i := i + 1;
+  END;
+  RETURN mk4(15, mname, procs, body);
+END;
+
+
+(* ============================================================ Emitter
+
+   Walks the AST, building per-procedure lists of opcode lines. At the end
+   we serialize to the .puckc text format.
+
+   Per-procedure compile state is held in a 6-slot array `cs`:
+     cs[0] = codes_data   (array of strings, each one bytecode line)
+     cs[1] = codes_count
+     cs[2] = codes_cap
+     cs[3] = locals_data  (array of variable-name strings)
+     cs[4] = locals_count
+     cs[5] = locals_cap
+
+   A separate `procs` array (built up at emit time) holds, for each
+   procedure, [name, params_count, codes_data, codes_count]. Index 0 is main. *)
+
+PROCEDURE cs_emit(cs, line);
+  data := cs[0];
+  count := cs[1];
+  cap := cs[2];
+  list_push(data, count, cap, line);
+  cs[0] := data;
+  cs[1] := count;
+  cs[2] := cap;
+END;
+
+(* Look up a local slot index by name, allocating it on first use. *)
+PROCEDURE cs_local_index(cs, name);
+  data := cs[3];
+  count := cs[4];
+  cap := cs[5];
+  i := 0;
+  WHILE(i < count) DO
+    IF equals(data[i], name) = 1 THEN
+      RETURN i;
+    END;
+    i := i + 1;
+  END;
+  list_push(data, count, cap, name);
+  cs[3] := data;
+  cs[4] := count;
+  cs[5] := cap;
+  RETURN count;            (* old count is the new index *)
+END;
+
+(* Same lookup but does not allocate — used for function-call resolution. *)
+PROCEDURE find_proc_index(procs, count, name);
+  i := 0;
+  WHILE(i < count) DO
+    pn := procs[i];
+    IF equals(pn[0], name) = 1 THEN
+      RETURN i;
+    END;
+    i := i + 1;
+  END;
+  RETURN 0 - 1;
+END;
+
+
+(* Compile an expression: leaves its result on the stack at runtime. *)
+PROCEDURE emit_expr(node, cs, procs, procs_count);
+  tag := node[0];
+
+  IF tag = 1 THEN                                                  (* AST_INT *)
+    cs_emit(cs, concat("PUSH ", int_to_string(node[1])));
+  ELSE
+  IF tag = 2 THEN                                                  (* AST_STR *)
+    cs_emit(cs, concat("ALLOC ", int_to_string(node[1])));
+  ELSE
+  IF tag = 3 THEN                                                  (* AST_VAR *)
+    slot := cs_local_index(cs, node[1]);
+    cs_emit(cs, concat("LOAD ", int_to_string(slot)));
+  ELSE
+  IF tag = 4 THEN                                                  (* AST_MATH *)
+    emit_expr(node[2], cs, procs, procs_count);
+    emit_expr(node[3], cs, procs, procs_count);
+    op_str := "+";
+    IF node[1] = 1 THEN op_str := "-"; END;
+    IF node[1] = 2 THEN op_str := "*"; END;
+    IF node[1] = 3 THEN op_str := "/"; END;
+    IF node[1] = 4 THEN op_str := "%"; END;
+    cs_emit(cs, concat("MATH ", op_str));
+  ELSE
+  IF tag = 5 THEN                                                  (* AST_CMP *)
+    emit_expr(node[2], cs, procs, procs_count);
+    emit_expr(node[3], cs, procs, procs_count);
+    op_str := "==";
+    IF node[1] = 1 THEN op_str := "!="; END;
+    IF node[1] = 2 THEN op_str := "<";  END;
+    IF node[1] = 3 THEN op_str := "<="; END;
+    IF node[1] = 4 THEN op_str := ">";  END;
+    IF node[1] = 5 THEN op_str := ">="; END;
+    cs_emit(cs, concat("COMPARE ", op_str));
+  ELSE
+  IF tag = 6 THEN                                                  (* AST_CALL *)
+    args := node[2];
+    n := LEN(args);
+    i := 0;
+    WHILE(i < n) DO
+      emit_expr(args[i], cs, procs, procs_count);
+      i := i + 1;
+    END;
+    idx := find_proc_index(procs, procs_count, node[1]);
+    IF idx < 0 THEN
+      SYSCALL(1, concat("emit: unknown procedure ", node[1]));
+      HALT(1);
+    END;
+    cs_emit(cs, concat("CALL ", int_to_string(idx)));
+  ELSE
+    SYSCALL(1, concat("emit_expr: bad tag ", int_to_string(tag)));
+    HALT(1);
+  END; END; END; END; END; END;
+END;
+
+
+(* Compile a statement. *)
+PROCEDURE emit_stmt(node, cs, procs, procs_count);
+  tag := node[0];
+
+  IF tag = 7 THEN                                                  (* AST_SYSCALL *)
+    args := node[2];
+    n := LEN(args);
+    i := 0;
+    WHILE(i < n) DO
+      emit_expr(args[i], cs, procs, procs_count);
+      i := i + 1;
+    END;
+    cs_emit(cs, concat("SYSCALL ", int_to_string(node[1])));
+  ELSE
+  IF tag = 8 THEN                                                  (* AST_ASSIGN *)
+    emit_expr(node[2], cs, procs, procs_count);
+    slot := cs_local_index(cs, node[1]);
+    cs_emit(cs, concat("STORE ", int_to_string(slot)));
+  ELSE
+  IF tag = 9 THEN                                                  (* AST_IF *)
+    emit_expr(node[1], cs, procs, procs_count);
+    (* Emit JUMP_IF_FALSE with a placeholder, remember the slot to patch. *)
+    cs_emit(cs, "JUMP_IF_FALSE 0");
+    jfalse_idx := cs[1] - 1;
+
+    then_body := node[2];
+    bi := 0;
+    while_n := LEN(then_body);
+    WHILE(bi < while_n) DO
+      emit_stmt(then_body[bi], cs, procs, procs_count);
+      bi := bi + 1;
+    END;
+
+    else_body := node[3];
+    has_else := 0;
+    IF LEN(else_body) > 0 THEN has_else := 1; END;
+
+    IF has_else = 1 THEN
+      cs_emit(cs, "JUMP 0");
+      jend_idx := cs[1] - 1;
+
+      (* Patch JUMP_IF_FALSE to target start of else. *)
+      codes := cs[0];
+      codes[jfalse_idx] := concat("JUMP_IF_FALSE ", int_to_string(cs[1]));
+
+      ei := 0;
+      else_n := LEN(else_body);
+      WHILE(ei < else_n) DO
+        emit_stmt(else_body[ei], cs, procs, procs_count);
+        ei := ei + 1;
+      END;
+
+      codes := cs[0];
+      codes[jend_idx] := concat("JUMP ", int_to_string(cs[1]));
+    ELSE
+      codes := cs[0];
+      codes[jfalse_idx] := concat("JUMP_IF_FALSE ", int_to_string(cs[1]));
+    END;
+  ELSE
+  IF tag = 10 THEN                                                 (* AST_LOOP *)
+    loop_top := cs[1];
+
+    (* Body emission; EXIT statements append to a pending-exits list whose
+       elements are integer indices into cs[0]. Threaded through cs[6..8].
+       The compile state we built up at procedure start already reserves
+       slots 6/7/8 for an EXIT-fixup list. *)
+    body := node[1];
+    bi := 0;
+    body_n := LEN(body);
+    WHILE(bi < body_n) DO
+      emit_stmt(body[bi], cs, procs, procs_count);
+      bi := bi + 1;
+    END;
+
+    cs_emit(cs, concat("JUMP ", int_to_string(loop_top)));
+
+    (* Patch all pending EXIT JUMPs to point past the loop. *)
+    fixups := cs[6];
+    fc := cs[7];
+    end_pc := cs[1];
+    codes := cs[0];
+    fi := 0;
+    WHILE(fi < fc) DO
+      idx := fixups[fi];
+      codes[idx] := concat("JUMP ", int_to_string(end_pc));
+      fi := fi + 1;
+    END;
+    cs[7] := 0;          (* clear fixups for any enclosing loop *)
+  ELSE
+  IF tag = 11 THEN                                                 (* AST_EXIT *)
+    cs_emit(cs, "JUMP 0");
+    idx := cs[1] - 1;
+    fixups := cs[6];
+    fc := cs[7];
+    cap := cs[8];
+    list_push(fixups, fc, cap, idx);
+    cs[6] := fixups;
+    cs[7] := fc;
+    cs[8] := cap;
+  ELSE
+  IF tag = 12 THEN                                                 (* AST_RETURN *)
+    IF node[1] = 0 THEN
+      cs_emit(cs, "PUSH 0");
+    ELSE
+      emit_expr(node[1], cs, procs, procs_count);
+    END;
+    cs_emit(cs, "RETURN");
+  ELSE
+  IF tag = 13 THEN                                                 (* AST_CALLSTM *)
+    args := node[2];
+    n := LEN(args);
+    i := 0;
+    WHILE(i < n) DO
+      emit_expr(args[i], cs, procs, procs_count);
+      i := i + 1;
+    END;
+    idx := find_proc_index(procs, procs_count, node[1]);
+    IF idx < 0 THEN
+      SYSCALL(1, concat("emit: unknown procedure ", node[1]));
+      HALT(1);
+    END;
+    cs_emit(cs, concat("CALL ", int_to_string(idx)));
+  ELSE
+    SYSCALL(1, concat("emit_stmt: bad tag ", int_to_string(tag)));
+    HALT(1);
+  END; END; END; END; END; END; END;
+END;
+
+
+(* Build a fresh per-procedure compile state. Slots 0-2 hold the codes list,
+   3-5 the locals list, 6-8 a pending-EXITs fixup list used by AST_LOOP. *)
+PROCEDURE new_compile_state();
+  cs := ARRAY(9);
+  cs[0] := ARRAY(16);
+  cs[1] := 0;
+  cs[2] := 16;
+  cs[3] := ARRAY(8);
+  cs[4] := 0;
+  cs[5] := 8;
+  cs[6] := ARRAY(4);
+  cs[7] := 0;
+  cs[8] := 4;
+  RETURN cs;
+END;
+
+
+(* ============================================================ Serializer
+
+   Take the final procs table plus the string pool and write the .puckc file. *)
+
+PROCEDURE write_puckc(out_path, pool_data, pool_count, procs, procs_count);
+  handle := OPEN_WRITE(out_path);
+  WRITE_LINE(handle, "PUCKC 1");
+  WRITE_LINE(handle, concat("STRINGS ", int_to_string(pool_count)));
+  i := 0;
+  WHILE(i < pool_count) DO
+    WRITE_LINE(handle, pool_data[i]);
+    i := i + 1;
+  END;
+  WRITE_LINE(handle, concat("PROCS ", int_to_string(procs_count)));
+  j := 0;
+  WHILE(j < procs_count) DO
+    p := procs[j];           (* [name, params_count, codes_data, codes_count] *)
+    params_count := p[1];
+    codes_count := p[3];
+    line := concat("PROC ", int_to_string(params_count));
+    line := concat(line, " 0 ");
+    line := concat(line, int_to_string(codes_count));
+    WRITE_LINE(handle, line);
+    codes := p[2];
+    k := 0;
+    WHILE(k < codes_count) DO
+      WRITE_LINE(handle, codes[k]);
+      k := k + 1;
+    END;
+    j := j + 1;
+  END;
+  CLOSE_FILE(handle);
+END;
+
+
+(* ============================================================ Main *)
+
+BEGIN
+  in_path := argv(0);
+  out_path := argv(1);
+
+  IF LEN(in_path) = 0 THEN
+    SYSCALL(1, "usage: compiler.puck <input.puck> <output.puckc>");
+    HALT(1);
+  END;
+  IF LEN(out_path) = 0 THEN
+    SYSCALL(1, "usage: compiler.puck <input.puck> <output.puckc>");
+    HALT(1);
+  END;
+
+  (* ---- read + tokenize ---- *)
+  src := read_file(in_path);
+  tokens := tokenize(src);
+
+  (* ---- string pool used during parse + emit ---- *)
+  pool_data := ARRAY(8);
+  pool_count := 0;
+  pool_cap := 8;
+
+  (* ---- parse ---- *)
+  module := parse_module(tokens, pool_data, pool_count, pool_cap);
+  (* module = [15, name, procs_ast, body_ast] *)
+
+  (* ---- registration pass: build procs table so calls resolve.
+         Procedure 0 is always the module body (main).             *)
+  procs_ast := module[2];
+  body_ast := module[3];
+  proc_n := LEN(procs_ast);
+  total_procs := proc_n + 1;
+
+  procs := ARRAY(total_procs);
+  (* main entry stub *)
+  main_entry := ARRAY(4);
+  main_entry[0] := "main";
+  main_entry[1] := 0;
+  main_entry[2] := ARRAY(0);
+  main_entry[3] := 0;
+  procs[0] := main_entry;
+
+  pi := 0;
+  WHILE(pi < proc_n) DO
+    p_ast := procs_ast[pi];               (* [14, name, params, body] *)
+    entry := ARRAY(4);
+    entry[0] := p_ast[1];
+    entry[1] := LEN(p_ast[2]);
+    entry[2] := ARRAY(0);
+    entry[3] := 0;
+    procs[pi + 1] := entry;
+    pi := pi + 1;
+  END;
+  procs_count := total_procs;
+
+  (* ---- compile main (procedure 0) ---- *)
+  cs := new_compile_state();
+  body_n := LEN(body_ast);
+  bi := 0;
+  WHILE(bi < body_n) DO
+    emit_stmt(body_ast[bi], cs, procs, procs_count);
+    bi := bi + 1;
+  END;
+  (* Implicit terminal RETURN so the VM stops cleanly. *)
+  cs_emit(cs, "PUSH 0");
+  cs_emit(cs, "RETURN");
+  main_entry[2] := cs[0];
+  main_entry[3] := cs[1];
+
+  (* ---- compile every user-defined procedure ---- *)
+  pi := 0;
+  WHILE(pi < proc_n) DO
+    p_ast := procs_ast[pi];
+    params := p_ast[2];
+    body := p_ast[3];
+    pcs := new_compile_state();
+    (* Pre-register params so they occupy slots 0..N-1. *)
+    j := 0;
+    pn := LEN(params);
+    WHILE(j < pn) DO
+      slot := cs_local_index(pcs, params[j]);
+      j := j + 1;
+    END;
+    body_count := LEN(body);
+    k := 0;
+    WHILE(k < body_count) DO
+      emit_stmt(body[k], pcs, procs, procs_count);
+      k := k + 1;
+    END;
+    cs_emit(pcs, "PUSH 0");
+    cs_emit(pcs, "RETURN");
+    entry := procs[pi + 1];
+    entry[2] := pcs[0];
+    entry[3] := pcs[1];
+    pi := pi + 1;
+  END;
+
+  (* ---- write ---- *)
+  write_puckc(out_path, pool_data, pool_count, procs, procs_count);
+
+  SYSCALL(1, concat("compiled ", in_path));
+  SYSCALL(1, concat("    -> ", out_path));
+END.

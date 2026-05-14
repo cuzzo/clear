@@ -1,0 +1,29 @@
+(* A recursive Fibonacci, written in the subset that compiler.puck accepts.
+
+   Run with the Ruby VM:
+     ruby examples/puck/v9/vm.rb examples/puck/samples/fib.puck
+
+   Compile with compiler.puck and run with the C VM:
+     ruby examples/puck/v10/compile.rb examples/puck/v9/compiler.puck \
+          /tmp/compiler.puckc
+     examples/puck/v10/vm /tmp/compiler.puckc \
+          examples/puck/samples/fib.puck /tmp/fib.puckc
+     examples/puck/v10/vm /tmp/fib.puckc                                       *)
+
+MODULE Fib;
+
+PROCEDURE fib(n);
+  IF n < 2 THEN
+    RETURN n;
+  END;
+  RETURN fib(n - 1) + fib(n - 2);
+END;
+
+BEGIN
+  i := 0;
+  LOOP
+    IF i > 10 THEN EXIT; END;
+    SYSCALL(1, fib(i));
+    i := i + 1;
+  END;
+END.

@@ -102,6 +102,11 @@ static FILE**     files = NULL;
 static int32_t    files_cap = 0;
 static int32_t    files_len = 0;
 
+/* Program argv. argv[0]=vm, argv[1]=puckc file; argv[2..] is what the
+ * program sees through SYSCALL 10 (ARGV(n) -> argv[2+n]). */
+static int    g_argc = 0;
+static char** g_argv = NULL;
+
 static int32_t heap_alloc(Value* cells, int32_t length) {
     int32_t id;
     if (freelist_len > 0) {
@@ -599,6 +604,16 @@ static Value handle_syscall(Value* stack, int32_t* sp, int32_t id) {
             int32_t code = (int32_t)stack[--(*sp)].i;
             exit(code);
         }
+        case 10: {
+            /* argv(n) — push the (n+2)th argv as a codepoint string, or
+             * the empty string if n is out of range. argv[0] is the vm
+             * binary, argv[1] is the .puckc; the program sees argv[2..]. */
+            int64_t n = stack[--(*sp)].i;
+            const char* s =
+              (n >= 0 && n + 2 < (int64_t)g_argc) ? g_argv[n + 2] : "";
+            stack[(*sp)++] = alloc_codepoints(s);
+            break;
+        }
         default:
             fprintf(stderr, "unknown SYSCALL id %d\n", id);
             exit(1);
@@ -609,9 +624,11 @@ static Value handle_syscall(Value* stack, int32_t* sp, int32_t id) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s program.puckc\n", argv[0]);
+        fprintf(stderr, "Usage: %s program.puckc [program args...]\n", argv[0]);
         return 1;
     }
+    g_argc = argc;
+    g_argv = argv;
     program = load_program(argv[1]);
     Procedure* main_proc = &program->procs[0];
     Value main_mem[MAX_SLOTS] = {{ V_INT, { .i = 0 } }};

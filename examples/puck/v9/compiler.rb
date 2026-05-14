@@ -24,7 +24,8 @@ class Compiler
     "CLOSE_FILE"     => 5,   # handle -> (none)
     "OPEN_WRITE"     => 7,   # path -> handle
     "WRITE_LINE"     => 8,   # handle, string -> (none)
-    "HALT"           => 9    # exit code -> (program exits)
+    "HALT"           => 9,   # exit code -> (program exits)
+    "ARGV"           => 10   # index -> string (Nth command-line argument)
   }.freeze
 
   # A Scope tracks (a) the variable -> slot mapping for one procedure body

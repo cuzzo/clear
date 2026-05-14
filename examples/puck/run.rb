@@ -229,6 +229,10 @@ class TraceVM
       @state.stack.push(allocate_string(line))
     when 9
       exit(@state.stack.pop)
+    when 10
+      n = @state.stack.pop
+      s = ARGV[n + 1] || ""
+      @state.stack.push(allocate_string(s))
     end
   end
 

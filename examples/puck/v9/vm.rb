@@ -127,6 +127,12 @@ class VM
       release(string)
     when 9  # halt: pop exit code, exit immediately
       exit(stack.pop)
+    when 10 # argv(n): pop integer n, push ARGV[n+1] as codepoint-array
+            # (ARGV[0] is the source path consumed by the Ruby VM driver, so
+            # the program's "argv 0" is the next one)
+      n = stack.pop
+      s = ARGV[n + 1] || ""
+      stack.push(allocate_codepoints(s))
     else
       raise "Unknown SYSCALL id #{id}"
     end
