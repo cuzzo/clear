@@ -1,0 +1,35 @@
+MODULE Demo;
+
+PROCEDURE swap(VAR a, VAR b);
+  t := a;
+  a := b;
+  b := t;
+END;
+
+BEGIN
+  x := 1;
+  y := 2;
+  SYSCALL(1, x);
+  SYSCALL(1, y);
+
+  swap(x, y);
+
+  SYSCALL(1, x);
+  SYSCALL(1, y);
+
+  squares := ARRAY(5);
+  i := 0;
+  LOOP
+    IF i = 5 THEN EXIT; END;
+    squares[i] := i * i;
+    i := i + 1;
+  END;
+
+  i := 0;
+  LOOP
+    IF i = 5 THEN EXIT; END;
+    n := squares[i];
+    SYSCALL(1, n);
+    i := i + 1;
+  END;
+END.

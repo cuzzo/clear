@@ -144,13 +144,40 @@ class TraceVM
         @state.stack.push(code.arg)
       when :ALLOC
         @state.stack.push(allocate(code.arg))
+      when :ALLOC_CELL
+        @state.stack.push(allocate_cells([@state.stack.pop]))
+      when :ALLOC_ARRAY
+        size = @state.stack.pop
+        @state.stack.push(allocate_cells(Array.new(size, 0)))
       when :LOAD
         @state.touched_memory = code.arg
         @state.stack.push(retain(frame.memory[code.arg]))
+      when :LOAD_REF
+        @state.touched_memory = code.arg
+        ref = frame.memory[code.arg]
+        @state.stack.push(retain(@state.heap[ref.id].value[0]))
       when :STORE
         @state.touched_memory = code.arg
         release(frame.memory[code.arg])
         frame.memory[code.arg] = @state.stack.pop
+      when :STORE_REF
+        @state.touched_memory = code.arg
+        new_value = @state.stack.pop
+        ref = frame.memory[code.arg]
+        release(@state.heap[ref.id].value[0])
+        @state.heap[ref.id].value[0] = new_value
+      when :ARRAY_GET
+        index = @state.stack.pop
+        ref = @state.stack.pop
+        @state.stack.push(retain(@state.heap[ref.id].value[index]))
+        release(ref)
+      when :ARRAY_SET
+        value = @state.stack.pop
+        index = @state.stack.pop
+        ref = @state.stack.pop
+        release(@state.heap[ref.id].value[index])
+        @state.heap[ref.id].value[index] = value
+        release(ref)
       when :MATH
         right = @state.stack.pop
         left = @state.stack.pop
@@ -218,6 +245,14 @@ class TraceVM
     TraceHeapRef.new(id)
   end
 
+  # Allocate a heap entry holding an array of cells. Used for REF cells
+  # (size 1) and arrays (size N). v8+.
+  def allocate_cells(cells)
+    id = @state.heap.length
+    @state.heap << TraceHeapValue.new(cells, 1)
+    TraceHeapRef.new(id)
+  end
+
   def retain(value)
     @state.heap[value.id].refs += 1 if value.is_a?(TraceHeapRef)
     value
@@ -228,7 +263,13 @@ class TraceVM
     return unless @state.heap[value.id]
 
     @state.heap[value.id].refs -= 1
-    @state.heap[value.id] = nil if @state.heap[value.id].refs.zero?
+    if @state.heap[value.id].refs.zero?
+      # v8+: cell / array payloads may contain nested refs. Recurse so
+      # those release in turn before the entry is freed.
+      payload = @state.heap[value.id].value
+      payload.each { |v| release(v) } if payload.is_a?(Array)
+      @state.heap[value.id] = nil
+    end
   end
 
   def cleanup(memory)
@@ -857,7 +898,7 @@ steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
 unless Puck::VersionLoader::VERSIONS.include?(version)
-  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7] [source.puck] [--steps=N]"
+  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7|v8] [source.puck] [--steps=N]"
 end
 
 program = VMLoader.load(version, source_path)

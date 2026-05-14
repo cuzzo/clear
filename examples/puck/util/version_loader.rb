@@ -12,7 +12,7 @@ module Puck
   # or compiler from the outside (compile.rb) attaches TracePoints in
   # util/instrumenter.rb at runtime; the source files stay clean.
   module VersionLoader
-    VERSIONS = %w[v1 v2 v3 v4 v5 v6 v7].freeze
+    VERSIONS = %w[v1 v2 v3 v4 v5 v6 v7 v8].freeze
 
     # Returns the source text for `version`. After this returns, top-level
     # Tokenizer/Parser/Compiler/VM constants reflect the requested version.
