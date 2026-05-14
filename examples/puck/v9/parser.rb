@@ -107,11 +107,14 @@ class Parser
       consume(:SYSCALL)
       consume(:OPERATOR) # (
       syscall_id = consume(:INTEGER).value
-      consume(:OPERATOR) # ,
-      var = consume(:SYMBOL).value
+      args = []
+      while @tokens[@pos].value == ","
+        consume(:OPERATOR) # ,
+        args << parse_expression
+      end
       consume(:OPERATOR) # )
       consume(:OPERATOR) # ;
-      AstNode.new(:Syscall, var, syscall_id)
+      AstNode.new(:Syscall, nil, { id: syscall_id, args: args })
 
     elsif @tokens[@pos].type == :SYMBOL
       name = consume(:SYMBOL).value

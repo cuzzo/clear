@@ -2,7 +2,7 @@
 
 x := 0;
 LOOP
-  Print(x);
+  SYSCALL(1, x);
   x := x + 1;
   IF x > 2 THEN EXIT END;
 END;

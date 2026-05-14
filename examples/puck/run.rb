@@ -199,7 +199,9 @@ class TraceVM
       when :JUMP
         frame.ip = code.arg
       when :JUMP_IF_FALSE
-        frame.ip = code.arg unless @state.stack.pop
+        # v9+: 0 is treated as false (alongside Ruby's nil/false).
+        v = @state.stack.pop
+        frame.ip = code.arg if !v || v == 0
       when :CALL
         call_procedure(code.arg)
       when :RETURN
@@ -225,6 +227,8 @@ class TraceVM
     when 2
       line = $stdin.gets&.chomp || ""
       @state.stack.push(allocate_string(line))
+    when 9
+      exit(@state.stack.pop)
     end
   end
 

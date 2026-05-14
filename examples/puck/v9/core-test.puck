@@ -1,0 +1,118 @@
+(* core-test.puck — Puck-in-Puck test suite for core.puck.
+
+   Run with either VM:
+     ruby   examples/puck/v9/vm.rb     examples/puck/v9/core-test.puck
+     ruby   examples/puck/v10/compile.rb examples/puck/v9/core-test.puck /tmp/t.puckc
+     ./examples/puck/v10/vm /tmp/t.puckc
+
+   The test driver tallies passed / failed and exits non-zero if any
+   failure was seen. Every check below should pass; if one fails, the
+   final HALT(1) makes the failure visible to shells / CI. *)
+
+MODULE CoreTest;
+
+BEGIN
+  passed := 0;
+  failed := 0;
+
+  (* ---- abs / min / max ---- *)
+  check_int("abs(0)",     abs(0),       0,  passed, failed);
+  check_int("abs(5)",     abs(5),       5,  passed, failed);
+  check_int("abs(-3)",    abs(0 - 3),   3,  passed, failed);
+  check_int("abs(-1)",    abs(0 - 1),   1,  passed, failed);
+
+  check_int("min(3, 7)",  min(3, 7),    3,  passed, failed);
+  check_int("min(7, 3)",  min(7, 3),    3,  passed, failed);
+  check_int("min(4, 4)",  min(4, 4),    4,  passed, failed);
+
+  check_int("max(3, 7)",  max(3, 7),    7,  passed, failed);
+  check_int("max(7, 3)",  max(7, 3),    7,  passed, failed);
+  check_int("max(4, 4)",  max(4, 4),    4,  passed, failed);
+
+  (* ---- int_to_string ---- *)
+  check_string("int_to_string(0)",    int_to_string(0),       "0",        passed, failed);
+  check_string("int_to_string(7)",    int_to_string(7),       "7",        passed, failed);
+  check_string("int_to_string(123)",  int_to_string(123),     "123",      passed, failed);
+  check_string("int_to_string(-5)",   int_to_string(0 - 5),   "-5",       passed, failed);
+  check_string("int_to_string(-100)", int_to_string(0 - 100), "-100",     passed, failed);
+
+  (* ---- string_to_int ---- *)
+  check_int("string_to_int('0')",     string_to_int("0"),     0,          passed, failed);
+  check_int("string_to_int('42')",    string_to_int("42"),    42,         passed, failed);
+  check_int("string_to_int('1234')",  string_to_int("1234"),  1234,       passed, failed);
+  check_int("string_to_int('-7')",    string_to_int("-7"),    0 - 7,      passed, failed);
+  check_int("string_to_int('-100')",  string_to_int("-100"),  0 - 100,    passed, failed);
+
+  (* ---- equals ---- *)
+  check("equals('', '')",          equals("", ""),         passed, failed);
+  check("equals('abc', 'abc')",    equals("abc", "abc"),   passed, failed);
+  check_int("equals('abc', 'abd')",   equals("abc", "abd"),   0, passed, failed);
+  check_int("equals('abc', 'abcd')",  equals("abc", "abcd"),  0, passed, failed);
+  check_int("equals('a', '')",        equals("a", ""),        0, passed, failed);
+
+  (* ---- concat ---- *)
+  check_string("concat('a', 'b')",       concat("a", "b"),               "ab",          passed, failed);
+  check_string("concat('', 'abc')",      concat("", "abc"),              "abc",         passed, failed);
+  check_string("concat('abc', '')",      concat("abc", ""),              "abc",         passed, failed);
+  check_string("concat('hello', 'x')",   concat("hello", "x"),           "hellox",      passed, failed);
+  check_string("concat('hi ', 'world')", concat("hi ", "world"),         "hi world",    passed, failed);
+
+  (* ---- substring ---- *)
+  check_string("substring('hello', 0, 3)", substring("hello", 0, 3), "hel", passed, failed);
+  check_string("substring('hello', 2, 3)", substring("hello", 2, 3), "llo", passed, failed);
+  check_string("substring('hello', 0, 5)", substring("hello", 0, 5), "hello", passed, failed);
+  check_string("substring('hello', 0, 0)", substring("hello", 0, 0), "", passed, failed);
+  check_string("substring('hello', 5, 0)", substring("hello", 5, 0), "", passed, failed);
+
+  (* ---- index_of ---- *)
+  check_int("index_of('hello world', 'world')", index_of("hello world", "world"), 6, passed, failed);
+  check_int("index_of('hello', 'l')",           index_of("hello", "l"),           2, passed, failed);
+  check_int("index_of('hello', 'h')",           index_of("hello", "h"),           0, passed, failed);
+  check_int("index_of('hello', 'o')",           index_of("hello", "o"),           4, passed, failed);
+  check_int("index_of('abc', 'd')",             index_of("abc", "d"),             0 - 1, passed, failed);
+  check_int("index_of('abc', '')",              index_of("abc", ""),              0, passed, failed);
+  check_int("index_of('a', 'aa')",              index_of("a", "aa"),              0 - 1, passed, failed);
+
+  (* ---- character predicates ---- *)
+  check_int("is_digit('0')",  is_digit(48), 1, passed, failed);
+  check_int("is_digit('9')",  is_digit(57), 1, passed, failed);
+  check_int("is_digit('5')",  is_digit(53), 1, passed, failed);
+  check_int("is_digit('a')",  is_digit(97), 0, passed, failed);
+  check_int("is_digit('/')",  is_digit(47), 0, passed, failed);
+  check_int("is_digit(':')",  is_digit(58), 0, passed, failed);
+
+  check_int("is_letter('A')", is_letter(65),  1, passed, failed);
+  check_int("is_letter('Z')", is_letter(90),  1, passed, failed);
+  check_int("is_letter('a')", is_letter(97),  1, passed, failed);
+  check_int("is_letter('z')", is_letter(122), 1, passed, failed);
+  check_int("is_letter('5')", is_letter(53),  0, passed, failed);
+  check_int("is_letter('@')", is_letter(64),  0, passed, failed);
+
+  check_int("is_whitespace(' ')",  is_whitespace(32), 1, passed, failed);
+  check_int("is_whitespace(TAB)",  is_whitespace(9),  1, passed, failed);
+  check_int("is_whitespace(LF)",   is_whitespace(10), 1, passed, failed);
+  check_int("is_whitespace(CR)",   is_whitespace(13), 1, passed, failed);
+  check_int("is_whitespace('a')",  is_whitespace(97), 0, passed, failed);
+
+  check_int("is_alpha_num('a')", is_alpha_num(97), 1, passed, failed);
+  check_int("is_alpha_num('5')", is_alpha_num(53), 1, passed, failed);
+  check_int("is_alpha_num('!')", is_alpha_num(33), 0, passed, failed);
+  check_int("is_alpha_num(' ')", is_alpha_num(32), 0, passed, failed);
+
+  (* ---- assert (success path) ---- *)
+  assert(equals("hi", "hi"));
+  assert(7 > 3);
+  assert(1);
+  check("assert succeeded on three cases", 1, passed, failed);
+
+  (* ---- final tally ---- *)
+  SYSCALL(1, "---");
+  msg := concat("passed: ", int_to_string(passed));
+  SYSCALL(1, msg);
+  msg := concat("failed: ", int_to_string(failed));
+  SYSCALL(1, msg);
+
+  IF failed > 0 THEN
+    HALT(1);
+  END;
+END.

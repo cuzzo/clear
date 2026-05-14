@@ -67,7 +67,11 @@ class MacroExpander
     when :Assignment, :Return
       AstNode.new(node.type, substitute_name(node.var, bindings), substitute_expression(node.val, bindings))
     when :Syscall
-      AstNode.new(:Syscall, substitute_name(node.var, bindings), node.val)
+      # New SYSCALL AST: { id:, args: [expressions] }. Substitute each arg.
+      AstNode.new(:Syscall, nil, {
+        id: node.val[:id],
+        args: (node.val[:args] || []).map { |a| substitute_expression(a, bindings) }
+      })
     when :If
       AstNode.new(:If, nil, {
         condition: substitute_expression(node.val[:condition], bindings),

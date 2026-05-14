@@ -295,6 +295,80 @@ PROCEDURE read_line();
   RETURN INPUT();
 END;
 
+(* ============================================================ Assertions
+
+   `assert(cond)` halts the program with exit code 1 on failure.
+   `assert_named(label, cond)` is the same but prints `label` in the
+   failure message — useful when an assert fires deep inside a procedure.
+
+   cond is read as "true unless 0" — the v9 VM treats both Ruby `false`
+   and integer 0 as falsy. So both `assert(x = y)` (Boolean from COMPARE)
+   and `assert(equals(a, b))` (integer from our string equals) work. *)
+
+PROCEDURE assert(cond);
+  IF cond THEN
+  ELSE
+    SYSCALL(1, "ASSERTION FAILED");
+    HALT(1);
+  END;
+END;
+
+PROCEDURE assert_named(label, cond);
+  IF cond THEN
+  ELSE
+    SYSCALL(1, concat("ASSERTION FAILED: ", label));
+    HALT(1);
+  END;
+END;
+
+(* ============================================================ Test helpers
+
+   Lightweight non-halting checks for a test framework. Each helper prints
+   PASS or FAIL and updates passed/failed via VAR. The caller drives the
+   final tally. See core-test.puck for usage. *)
+
+PROCEDURE check(label, cond, VAR passed, VAR failed);
+  IF cond THEN
+    passed := passed + 1;
+    SYSCALL(1, concat("PASS: ", label));
+  ELSE
+    failed := failed + 1;
+    SYSCALL(1, concat("FAIL: ", label));
+  END;
+END;
+
+PROCEDURE check_int(label, actual, expected, VAR passed, VAR failed);
+  IF actual = expected THEN
+    passed := passed + 1;
+    SYSCALL(1, concat("PASS: ", label));
+  ELSE
+    failed := failed + 1;
+    msg := concat("FAIL: ", label);
+    msg := concat(msg, " (got ");
+    msg := concat(msg, int_to_string(actual));
+    msg := concat(msg, ", expected ");
+    msg := concat(msg, int_to_string(expected));
+    msg := concat(msg, ")");
+    SYSCALL(1, msg);
+  END;
+END;
+
+PROCEDURE check_string(label, actual, expected, VAR passed, VAR failed);
+  IF equals(actual, expected) THEN
+    passed := passed + 1;
+    SYSCALL(1, concat("PASS: ", label));
+  ELSE
+    failed := failed + 1;
+    msg := concat("FAIL: ", label);
+    msg := concat(msg, " (got '");
+    msg := concat(msg, actual);
+    msg := concat(msg, "', expected '");
+    msg := concat(msg, expected);
+    msg := concat(msg, "')");
+    SYSCALL(1, msg);
+  END;
+END;
+
 (* ============================================================ Benchmark helper *)
 
 PROCEDURE print_bench_result(ms);

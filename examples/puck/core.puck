@@ -134,3 +134,14 @@ BEGIN
 
   RETURN transformed
 END VAR_REF;
+
+MACRO Print(value: Node): Node;
+VAR
+  transformed: Node;
+BEGIN
+  transformed := QUOTE
+    SYSCALL(1, ~value)
+  END;
+
+  RETURN transformed
+END Print;

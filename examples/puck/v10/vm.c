@@ -594,6 +594,11 @@ static Value handle_syscall(Value* stack, int32_t* sp, int32_t id) {
             release(string);
             break;
         }
+        case 9: {
+            /* halt(code) — pop exit code and exit immediately. */
+            int32_t code = (int32_t)stack[--(*sp)].i;
+            exit(code);
+        }
         default:
             fprintf(stderr, "unknown SYSCALL id %d\n", id);
             exit(1);

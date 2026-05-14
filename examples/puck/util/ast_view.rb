@@ -145,7 +145,15 @@ module Puck
         when :If          then render_if(node, indent, mark, focus_node, lines, width)
         when :Exit        then lines << Terminal.truncate("#{mark}#{indent}[Exit]", width)
         when :Return      then lines << Terminal.truncate("#{mark}#{indent}[Return]  #{inline_expr(node.val)}", width)
-        when :Syscall     then lines << Terminal.truncate("#{mark}#{indent}[Syscall] SYSCALL(#{node.val}, #{node.var})", width)
+        when :Syscall
+          # v5-v8 stored Syscall as (var=name, val=id); v9+ uses
+          # (var=nil, val={id:, args:[exprs]}).
+          if node.val.is_a?(Hash)
+            args_str = (node.val[:args] || []).map { |a| inline_expr(a) }.join(", ")
+            lines << Terminal.truncate("#{mark}#{indent}[Syscall] SYSCALL(#{node.val[:id]}, #{args_str})", width)
+          else
+            lines << Terminal.truncate("#{mark}#{indent}[Syscall] SYSCALL(#{node.val}, #{node.var})", width)
+          end
         when :CallStatement
           args = (node.val || []).map { |a| inline_expr(a) }.join(", ")
           lines << Terminal.truncate("#{mark}#{indent}[Call]    #{node.var}(#{args})", width)

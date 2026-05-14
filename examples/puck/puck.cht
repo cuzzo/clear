@@ -47,6 +47,14 @@ METHOD printValue(v: PuckValue) RETURNS !Void ->
   RETURN;
 END
 
+METHOD syscall!(MUTABLE vm: PuckVm, id: Int64, arg: PuckValue) RETURNS !Void ->
+  IF id == 1 THEN
+    printValue(arg) OR RAISE;
+    RETURN;
+  END
+  RAISE "unsupported syscall " + id.toString();
+END
+
 METHOD isSpace?(c: String) RETURNS Bool ->
   RETURN c == " " || c == "\n" || c == "\r" || c == "\t";
 END
@@ -267,11 +275,13 @@ METHOD execBlock!(MUTABLE vm: PuckVm, tokens: String[]@list, start: Int64, endPo
       val = evalExpr!(vm, tokens, pos + 2, semi) OR RAISE;
       vm.vars[tok] = intValue(val);
       pos = semi + 1;
-    ELSE_IF tok == "Print" THEN
+    ELSE_IF tok == "SYSCALL" THEN
       expectToken(tokens, pos + 1, "(") OR RAISE;
-      close = findToken(tokens, pos + 2, ")") OR RAISE;
-      value = evalExpr!(vm, tokens, pos + 2, close) OR RAISE;
-      printValue(value) OR RAISE;
+      comma = findToken(tokens, pos + 2, ",") OR RAISE;
+      close = findToken(tokens, comma + 1, ")") OR RAISE;
+      idValue = evalExpr!(vm, tokens, pos + 2, comma) OR RAISE;
+      argValue = evalExpr!(vm, tokens, comma + 1, close) OR RAISE;
+      syscall!(vm, intValue(idValue), argValue) OR RAISE;
       pos = close + 1;
       IF tokenAt(tokens, pos) == ";" THEN pos += 1; END
     ELSE
@@ -304,7 +314,7 @@ END
 
 FN main() RETURNS !Void ->
   MUTABLE vm = newPuckVm("examples/puck/core.puck") OR RAISE;
-  ASSERT vm.macroCount == 10;
+  ASSERT vm.macroCount == 11;
 
   runFile!(vm, "examples/puck/samples/primitive.puck") OR RAISE;
   RETURN;

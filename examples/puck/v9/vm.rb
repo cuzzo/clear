@@ -44,7 +44,12 @@ class VM
         when :MATH       then math(code.arg, stack)
         when :COMPARE    then compare(code.arg, stack)
         when :JUMP       then ip = code.arg
-        when :JUMP_IF_FALSE then ip = code.arg unless stack.pop
+        when :JUMP_IF_FALSE
+          # Ruby treats 0 as truthy, but our compiled Puck programs (and the
+          # C VM) treat integer 0 as the "false" sentinel for booleans.
+          # Accept both Ruby falsy values (nil/false) and the integer 0.
+          v = stack.pop
+          ip = code.arg if !v || v == 0
 
         when :STORE
           release(memory[code.arg])
@@ -120,6 +125,8 @@ class VM
       handle = stack.pop
       @files[handle].puts(display(string))
       release(string)
+    when 9  # halt: pop exit code, exit immediately
+      exit(stack.pop)
     else
       raise "Unknown SYSCALL id #{id}"
     end

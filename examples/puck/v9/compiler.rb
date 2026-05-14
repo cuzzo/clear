@@ -23,7 +23,8 @@ class Compiler
     "READ_LINE_FROM" => 4,   # handle -> string
     "CLOSE_FILE"     => 5,   # handle -> (none)
     "OPEN_WRITE"     => 7,   # path -> handle
-    "WRITE_LINE"     => 8    # handle, string -> (none)
+    "WRITE_LINE"     => 8,   # handle, string -> (none)
+    "HALT"           => 9    # exit code -> (program exits)
   }.freeze
 
   # A Scope tracks (a) the variable -> slot mapping for one procedure body
@@ -134,7 +135,8 @@ class Compiler
       when :Assignment, :Return
         walk_expr_for_var_passes(node.val, names, procedures)
       when :Syscall
-        # nothing
+        # New SYSCALL shape carries args as expressions; walk each.
+        (node.val[:args] || []).each { |a| walk_expr_for_var_passes(a, names, procedures) }
       when :ArraySet
         walk_expr_for_var_passes(node.val[:index], names, procedures)
         walk_expr_for_var_passes(node.val[:val], names, procedures)
@@ -247,8 +249,9 @@ class Compiler
         codes << ByteCode.new(:RETURN)
 
       elsif node[:type] == :Syscall
-        emit_load_var(node.var, scope, codes)
-        codes << ByteCode.new(:SYSCALL, node.val)
+        # New shape: { id:, args: [expressions] }. Push each arg, then SYSCALL.
+        (node.val[:args] || []).each { |a| compile_expression(a, codes, scope, procedures) }
+        codes << ByteCode.new(:SYSCALL, node.val[:id])
       end
     end
 
