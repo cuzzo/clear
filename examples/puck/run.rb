@@ -11,14 +11,14 @@ rescue LoadError
   # The runner can still work without tty-* gems, but tmux/Linux behaves better with them.
 end
 
-Frame = Struct.new(:name, :codes, :ip, :memory, :last_ip, keyword_init: true)
+Frame = Struct.new(:name, :codes, :ip, :memory, :last_ip, :scope, keyword_init: true)
 TraceHeapValue = Struct.new(:value, :refs)
 TraceHeapRef = Struct.new(:id)
 TraceState = Struct.new(:frames, :stack, :output, :touched_memory, :heap, :halted, keyword_init: true)
-TraceProgram = Struct.new(:version, :source, :codes, :procedures, keyword_init: true)
+TraceProgram = Struct.new(:version, :source, :codes, :procedures, :scopes, keyword_init: true)
 
 class VersionLoader
-  VERSIONS = ["v1", "v2", "v3", "v4", "v5"]
+  VERSIONS = ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
 
   def self.load(version, source_path)
     source = File.read(source_path || File.expand_path("#{version}/example.puck", __dir__))
@@ -28,13 +28,22 @@ class VersionLoader
 
     tokens = Tokenizer.new(source).tokenize
     ast = Parser.new(tokens).parse
+    ast = MacroExpander.new.expand(ast) if defined?(MacroExpander)
+    scopes = ScopeCollector.new.collect(ast)
     compiled = Compiler.new.compile(ast)
 
+    # v1..v3 return a bare bytecode array (procedures are embedded in CALL.arg).
+    # v4+ return a {codes:, procedures:} hash. Normalize to the hash shape.
     if compiled.is_a?(Hash)
-      TraceProgram.new(version: version, source: source, codes: compiled[:codes], procedures: compiled[:procedures])
+      annotate_procedures(compiled[:procedures])
+      TraceProgram.new(version: version, source: source, codes: compiled[:codes], procedures: compiled[:procedures], scopes: scopes)
     else
-      TraceProgram.new(version: version, source: source, codes: TraceCompiler.new.compile_calls(compiled), procedures: {})
+      TraceProgram.new(version: version, source: source, codes: compiled, procedures: {}, scopes: scopes)
     end
+  end
+
+  def self.annotate_procedures(procedures)
+    procedures.each { |name, procedure| procedure[:__name] = name if procedure.is_a?(Hash) }
   end
 
   def self.silence_stdout
@@ -46,92 +55,39 @@ class VersionLoader
   end
 end
 
-class TraceCompiler
-  def compile_calls(codes)
-    codes.map do |code|
-      if code.op == :CALL && code.arg.is_a?(Hash)
-        ByteCode.new(:CALL, compile_procedure(code.arg))
-      else
-        code
-      end
-    end
+class ScopeCollector
+  def collect(ast)
+    @scopes = { "main" => [] }
+    collect_statements(ast, @scopes["main"])
+    @scopes
   end
 
-  def compile_procedure(procedure)
-    return procedure if procedure[:codes]
-
-    if procedure[:expression]
-      mem = { procedure[:param] => 0 }
-      codes = []
-      compile_expression(procedure[:expression], codes, mem)
-      codes << ByteCode.new(:RETURN)
-      { params: [procedure[:param]], codes: compile_calls(codes) }
-    elsif procedure[:body]
-      mem = {}
-      procedure[:params].each { |param| mem[param] ||= mem.length }
-      { params: procedure[:params], codes: compile_statements(procedure[:body], mem) }
-    else
-      procedure
-    end
-  end
-
-  def compile_statements(nodes, mem)
-    codes = []
-
+  def collect_statements(nodes, names)
     nodes.each do |node|
-      if node.type == :Assignment
-        compile_expression(node.val, codes, mem)
-        codes << ByteCode.new(:STORE, mem[node.var] ||= mem.length)
-
-      elsif node.type == :Return
-        compile_expression(node.val, codes, mem)
-        codes << ByteCode.new(:RETURN)
-
-      elsif node.type == :If
-        compile_expression(node.val[:condition], codes, mem)
-        jump = codes.length
-        codes << ByteCode.new(:JUMP_IF_FALSE)
-        codes.concat(compile_statements(node.val[:body], mem))
-        codes[jump].arg = codes.length
-
-      elsif node.type == :Syscall
-        codes << ByteCode.new(:LOAD, mem.fetch(node.var))
-        codes << ByteCode.new(:SYSCALL, node.val)
-
-      elsif node.type == :CallStatement
-        node.val.each { |arg| compile_expression(arg, codes, mem) }
-        raise "Nested call statements are not available in this visualizer path"
+      case node.type
+        when :Module
+          collect_statements(node.val[:declarations], names)
+          collect_statements(node.val[:body], names)
+        when :Procedure
+          # v2 uses the singular {param:, expression:} shape; v3+ uses {params:, body:}.
+          procedure_names = []
+          params = node.val[:params] || [node.val[:param]].compact
+          params.each { |param| remember(procedure_names, param) }
+          collect_statements(node.val[:body] || [], procedure_names)
+          @scopes[node.var] = procedure_names
+        when :Assignment
+          remember(names, node.var)
+        when :If
+          collect_statements(node.val[:body], names)
+          collect_statements(node.val[:else_body] || [], names)
+        when :Loop
+          collect_statements(node.val, names)
       end
     end
-
-    compile_calls(codes)
   end
 
-  def compile_expression(expression, codes, mem)
-    case expression.type
-      when :Integer
-        codes << ByteCode.new(:PUSH, expression.value)
-      when :String
-        codes << ByteCode.new(:ALLOC, { type: :String, value: expression.value })
-      when :Variable
-        codes << ByteCode.new(:LOAD, mem.fetch(expression.name))
-      when :Add
-        compile_expression(expression.left, codes, mem)
-        compile_expression(expression.right, codes, mem)
-        codes << ByteCode.new(:MATH, :+)
-      when :Math
-        compile_expression(expression.left, codes, mem)
-        compile_expression(expression.right, codes, mem)
-        codes << ByteCode.new(:MATH, expression.value)
-      when :Equal
-        compile_expression(expression.left, codes, mem)
-        compile_expression(expression.right, codes, mem)
-        codes << ByteCode.new(:COMPARE, :==)
-      when :Call
-        args = expression.respond_to?(:args) && expression.args ? expression.args : [expression.arg]
-        args.each { |arg| compile_expression(arg, codes, mem) }
-        raise "Nested calls are not available in this visualizer path"
-    end
+  def remember(names, name)
+    names << name unless names.include?(name)
   end
 end
 
@@ -141,7 +97,7 @@ class TraceVM
   def initialize(program)
     @program = program
     @state = TraceState.new(
-      frames: [Frame.new(name: "main", codes: program.codes, ip: 0, memory: [], last_ip: nil)],
+      frames: [Frame.new(name: "main", codes: program.codes, ip: 0, memory: [], last_ip: nil, scope: program.scopes["main"])],
       stack: [],
       output: [],
       touched_memory: nil,
@@ -211,7 +167,7 @@ class TraceVM
       when :COMPARE
         right = @state.stack.pop
         left = @state.stack.pop
-        @state.stack.push(left == right)
+        @state.stack.push(left.send(code.arg, right))
       when :JUMP
         frame.ip = code.arg
       when :JUMP_IF_FALSE
@@ -232,54 +188,14 @@ class TraceVM
   end
 
   def call_procedure(procedure)
-    if procedure[:codes]
-      args = @state.stack.pop(procedure[:params].length)
-      @state.frames << Frame.new(name: "procedure", codes: procedure[:codes], ip: 0, memory: args, last_ip: nil)
-    elsif procedure[:body]
-      result = run_ast_procedure(procedure)
-      @state.stack.push(result) unless result.nil?
-    else
-      arg = @state.stack.pop
-      @state.stack.push(run_expression(procedure[:expression], { procedure[:param] => arg }))
-    end
-  end
-
-  def run_ast_procedure(procedure)
     args = @state.stack.pop(procedure[:params].length)
-    memory = procedure[:params].zip(args).to_h
-    run_statements(procedure[:body], memory)
-  end
-
-  def run_statements(nodes, memory)
-    nodes.each do |node|
-      if node.type == :Assignment
-        memory[node.var] = run_expression(node.val, memory)
-      elsif node.type == :Return
-        return run_expression(node.val, memory)
-      elsif node.type == :If
-        run_statements(node.val[:body], memory) if run_expression(node.val[:condition], memory)
-      elsif node.type == :Syscall
-        @state.output << "OUTPUT: #{memory.fetch(node.var)}"
-      end
-    end
-
-    nil
-  end
-
-  def run_expression(expression, memory)
-    case expression.type
-      when :Integer then expression.value
-      when :Variable then memory.fetch(expression.name)
-      when :Add then run_expression(expression.left, memory) + run_expression(expression.right, memory)
-      when :Math then run_expression(expression.left, memory).send(expression.value, run_expression(expression.right, memory))
-      when :Equal then run_expression(expression.left, memory) == run_expression(expression.right, memory)
-      when :Call then raise "Nested calls in AST-only procedures are not visualized yet."
-    end
+    name = procedure[:__name] || procedure[:name] || "procedure"
+    @state.frames << Frame.new(name: name, codes: procedure[:codes], ip: 0, memory: args, last_ip: nil, scope: @program.scopes[name] || procedure[:params])
   end
 
   def snapshot
     TraceState.new(
-      frames: @state.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip) },
+      frames: @state.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip, scope: f.scope&.dup) },
       stack: @state.stack.dup,
       output: @state.output.dup,
       touched_memory: @state.touched_memory,
@@ -290,7 +206,7 @@ class TraceVM
 
   def restore(snap)
     @state = TraceState.new(
-      frames: snap.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip) },
+      frames: snap.frames.map { |f| Frame.new(name: f.name, codes: f.codes, ip: f.ip, memory: f.memory.dup, last_ip: f.last_ip, scope: f.scope&.dup) },
       stack: snap.stack.dup,
       output: snap.output.dup,
       touched_memory: snap.touched_memory,
@@ -336,10 +252,11 @@ class TraceVM
 end
 
 class Renderer
-  STACK_WIDTH = 10
+  STACK_WIDTH = 12
   MEMORY_WIDTH = 14
   HEAP_WIDTH = 18
   EFFECT_WIDTH = 20
+  SCOPE_WIDTH = 30
   MAX_SOURCE_HEIGHT = 10
   MAX_PANE_HEIGHT = 10
   MIN_WIDTH = 70
@@ -357,7 +274,7 @@ class Renderer
     width = [width - 2, MIN_WIDTH].max
     source_height, pane_height = layout_heights(height)
     rows = [
-      render_source(width, source_height),
+      render_source_area(width, source_height),
       render_panes(width, pane_height),
       render_output(width),
       "space: step  backspace: back  q: quit"
@@ -410,6 +327,19 @@ class Renderer
     end
   end
 
+  def render_source_area(width, source_height)
+    return render_source(width, source_height) if width < MIN_WIDTH
+
+    scope_width = [[SCOPE_WIDTH, width / 3].min, 20].max
+    source_width = width - scope_width - 3
+    source_rows = render_source(source_width, source_height).lines.map(&:chomp)
+    scope_rows = scope_lines(scope_width, source_height)
+
+    source_height.times.map do |idx|
+      "#{(source_rows[idx] || '').ljust(source_width)} | #{(scope_rows[idx] || '').ljust(scope_width)}"
+    end.join("\n")
+  end
+
   def render_source(width, source_height)
     focus = source_focus
     start_focus = focus || first_nonblank_line
@@ -420,6 +350,26 @@ class Renderer
       marker = line_no == focus ? ">" : " "
       truncate("#{marker} #{format('%03d', line_no + 1)}: #{line}", width)
     end.join("\n")
+  end
+
+  def scope_lines(width, source_height)
+    frame = @vm.current_frame
+    return ["SCOPE".ljust(width)] + Array.new(source_height - 1, "") unless frame
+
+    rows = ["SCOPE #{frame.name}".ljust(width)]
+    (frame.scope || []).each_with_index do |name, idx|
+      value = frame.memory[idx]
+      rows << truncate("#{name} M#{format('%02d', idx)}: #{display_value(value)}#{stack_locations(value)}", width)
+    end
+
+    rows.first(source_height) + Array.new([source_height - rows.length, 0].max, "")
+  end
+
+  def stack_locations(value)
+    slots = @vm.state.stack.each_index.select { |idx| @vm.state.stack[idx] == value }
+    return "" if slots.empty?
+
+    " (#{slots.map { |idx| stack_slot(idx) }.join(",")})"
   end
 
   def source_focus
@@ -438,21 +388,27 @@ class Renderer
     call_ip = upcoming_call_ip(frame, ip)
     return call_source_line(frame, call_ip) if call_ip
 
-    patterns = if frame.name == "procedure" && procedure_return_sequence?(frame, ip)
+    patterns = if frame.name != "main" && procedure_return_sequence?(frame, ip)
       [/RETURN/]
     else
       case code.op
       when :SYSCALL then [/SYSCALL/]
       when :LOAD
-        next_op(frame, ip) == :SYSCALL ? [/SYSCALL/] : condition_patterns(frame, ip)
+        if next_op(frame, ip) == :SYSCALL
+          [/SYSCALL/]
+        elsif assignment_sequence?(frame, ip)
+          store_patterns(frame, ip)
+        else
+          condition_patterns(frame, ip)
+        end
       when :PUSH, :MATH
-        upcoming_store?(frame, ip) ? store_patterns(frame, ip) : condition_patterns(frame, ip)
+        assignment_sequence?(frame, ip) ? store_patterns(frame, ip) : condition_patterns(frame, ip)
       when :ALLOC
         upcoming_store?(frame, ip) && code.arg[:type] == :String ? string_store_patterns(code.arg[:value]) : [/\S/]
       when :COMPARE, :JUMP_IF_FALSE
         condition_patterns(frame, ip)
       when :JUMP
-        [/\bLOOP\b/, /\bEXIT\b/]
+        jump_patterns
       when :STORE
         store_patterns(frame, ip)
       when :CALL then call_patterns(frame, ip)
@@ -460,16 +416,29 @@ class Renderer
       end
     end
 
-    find_source_line(patterns)
+    find_source_line(patterns, source_indexes(frame))
   end
 
   def first_nonblank_line
     @source_lines.index { |line| line.match?(/\S/) } || 0
   end
 
-  def find_source_line(patterns)
+  def source_indexes(frame)
+    return @source_lines.each_index.to_a unless ["v6", "v7"].include?(@program.version)
+
+    begin_idx = @source_lines.index { |line| line.match?(/^\s*BEGIN\b/) }
+    return @source_lines.each_index.to_a unless begin_idx
+
+    if frame&.name == "main"
+      (begin_idx...@source_lines.length).to_a
+    else
+      (0...begin_idx).to_a
+    end
+  end
+
+  def find_source_line(patterns, indexes = @source_lines.each_index.to_a)
     patterns.each do |pattern|
-      idx = @source_lines.index { |line| line.match?(pattern) }
+      idx = indexes.find { |line_idx| @source_lines[line_idx].match?(pattern) }
       return idx if idx
     end
 
@@ -478,13 +447,13 @@ class Renderer
 
   def syscall_source_line(frame, ip)
     syscall_idx = frame.codes[0..ip].count { |code| code.op == :SYSCALL } - 1
-    lines = @source_lines.each_index.select { |idx| @source_lines[idx].match?(/SYSCALL/) }
+    lines = source_indexes(frame).select { |idx| @source_lines[idx].match?(/SYSCALL/) }
     lines[syscall_idx] || first_nonblank_line
   end
 
   def call_source_line(frame, ip)
     call_idx = frame.codes[0..ip].count { |code| code.op == :CALL } - 1
-    lines = @source_lines.each_index.select do |idx|
+    lines = source_indexes(frame).select do |idx|
       @source_lines[idx].match?(/^\s*(?!PROCEDURE|SYSCALL)(?:\w+\s*:=\s*)?\w+\(.*\);/)
     end
     lines[call_idx] || first_nonblank_line
@@ -510,6 +479,9 @@ class Renderer
     if ops.include?(:JUMP_IF_FALSE)
       return [/\bIF\b.*%/, /\bIF\b/] if args.include?(:%)
       return [/\bIF\b.*42/, /\bIF\b/] if args.include?(42)
+      integer = args.find { |arg| arg.is_a?(Integer) }
+      return [/\bIF\b.*#{integer}/, /\bELSIF\b.*#{integer}/, /\bIF\b/] if args.include?(:==) && integer
+      return macro_loop_condition_patterns if args.include?(:<=)
       return [/\bIF\b.*limit/, /\bIF\b/]
     end
 
@@ -540,8 +512,29 @@ class Renderer
     (frame.codes[ip, 4] || []).any? { |code| code.op == :STORE }
   end
 
+  def assignment_sequence?(frame, ip)
+    (frame.codes[ip, 6] || []).each do |code|
+      return true if code.op == :STORE
+      return false if [:SYSCALL, :CALL, :RETURN, :JUMP, :JUMP_IF_FALSE].include?(code.op)
+    end
+
+    false
+  end
+
   def call_patterns(_frame, _ip)
     [/^\s*(?!PROCEDURE)\w+\s*:=.*\w+\(.*\);/, /^\s*(?!PROCEDURE|SYSCALL)\w+\(.*\);/]
+  end
+
+  def macro_loop_condition_patterns
+    return [/\bIF\b/] unless @program.version == "v7"
+
+    [/^\s*\w+\(.*<=/, /^\s*\w+\(.*\) DO/, /\bIF\b/]
+  end
+
+  def jump_patterns
+    return [/^\s*\w+\(.*\) DO/, /\bLOOP\b/, /\bEXIT\b/] if @program.version == "v7"
+
+    [/\bLOOP\b/, /\bEXIT\b/]
   end
 
   def procedure_return_sequence?(frame, ip)
@@ -551,15 +544,33 @@ class Renderer
   end
 
   def store_patterns(frame, ip)
-    previous = frame.codes[[ip - 4, 0].max, 4] || []
-    string = previous.find { |code| code.op == :ALLOC && code.arg[:type] == :String }&.arg&.fetch(:value)
+    window = store_window(frame, ip)
+    string = window.find { |code| code.op == :ALLOC && code.arg[:type] == :String }&.arg&.fetch(:value)
     return string_store_patterns(string) if string
 
-    if previous.any? { |code| code.op == :MATH && code.arg == :+ }
-      [/:=.*\+/, /:=/]
+    if window.any? { |code| code.op == :MATH && code.arg == :+ }
+      [/:=.*\+/, /^\s*\w+\(.*\) DO/, /:=/]
     else
+      integer = window.find { |code| code.op == :PUSH && code.arg.is_a?(Integer) }&.arg
+      return [/:=\s*#{integer}\s*;/, /^\s*\w+\(.*#{integer}/, /:=/] if integer
+
       [/:=/]
     end
+  end
+
+  def store_window(frame, ip)
+    boundary = [:STORE, :SYSCALL, :CALL, :RETURN, :JUMP, :JUMP_IF_FALSE]
+    start = ip
+    start -= 1 while start.positive? && !boundary.include?(frame.codes[start - 1].op)
+
+    finish = ip
+    while finish < frame.codes.length
+      code = frame.codes[finish]
+      finish += 1
+      break if code.op == :STORE || boundary.include?(code.op)
+    end
+
+    frame.codes[start...finish] || []
   end
 
   def string_store_patterns(value)
@@ -567,9 +578,9 @@ class Renderer
   end
 
   def render_panes(width, pane_height)
-    heap_width = @vm.state.heap.any? ? HEAP_WIDTH : 0
-    effect_width = heap_width.positive? ? 14 : EFFECT_WIDTH
-    byte_width = [width - effect_width - STACK_WIDTH - MEMORY_WIDTH - heap_width - (heap_width.positive? ? 8 : 6), 12].max
+    heap_width = HEAP_WIDTH
+    effect_width = EFFECT_WIDTH
+    byte_width = [width - effect_width - STACK_WIDTH - MEMORY_WIDTH - heap_width - 8, 12].max
     byte_rows = bytecode_lines(byte_width, pane_height)
     effect_rows = effect_lines(effect_width, pane_height)
     stack_rows = stack_lines(pane_height)
@@ -581,8 +592,8 @@ class Renderer
       "EFFECT".ljust(effect_width),
       "STACK".ljust(STACK_WIDTH),
       "MEMORY".ljust(MEMORY_WIDTH),
-      heap_width.positive? ? "HEAP".ljust(heap_width) : nil
-    ].compact.join("  ")
+      "HEAP".ljust(heap_width)
+    ].join("  ")
 
     rows = pane_height.times.map do |idx|
       [
@@ -590,8 +601,8 @@ class Renderer
         (effect_rows[idx] || "").ljust(effect_width),
         (stack_rows[idx] || "").ljust(STACK_WIDTH),
         (memory_rows[idx] || "").ljust(MEMORY_WIDTH),
-        heap_width.positive? ? (heap_rows[idx] || "").ljust(heap_width) : nil
-      ].compact.join("  ")[0, width]
+        (heap_rows[idx] || "").ljust(heap_width)
+      ].join("  ")[0, width]
     end
 
     ([truncate(header, width)] + rows).join("\n")
@@ -628,44 +639,45 @@ class Renderer
 
     case code.op
       when :PUSH
-        "push #{format_value(code.arg)}"
+        "push #{display_value(code.arg)} -> #{next_stack_slot}"
       when :ALLOC
-        "alloc #{code.arg[:value].inspect}"
+        "alloc #{code.arg[:value].inspect} -> #{next_stack_slot}"
       when :LOAD
-        "M#{format('%02d', code.arg)} -> #{format_value(frame.memory[code.arg])}"
+        "M#{format('%02d', code.arg)} -> #{next_stack_slot}"
       when :STORE
-        "#{format_value(stack[-1])} -> M#{format('%02d', code.arg)}"
+        "#{stack_slot(stack.length - 1)} -> M#{format('%02d', code.arg)}"
       when :MATH
-        "#{format_value(stack[-2])} #{code.arg} #{format_value(stack[-1])} -> #{format_value(stack_result(code.arg))}"
+        "#{stack_slot(stack.length - 2)} #{code.arg} #{stack_slot(stack.length - 1)} -> #{result_stack_slot}"
       when :COMPARE
-        "#{format_value(stack[-2])} == #{format_value(stack[-1])} -> #{format_value(compare_result)}"
+        "#{stack_slot(stack.length - 2)} #{code.arg} #{stack_slot(stack.length - 1)} -> #{result_stack_slot}"
       when :JUMP
         "jump #{code.arg}"
       when :JUMP_IF_FALSE
-        "#{format_value(stack[-1])} ? next : #{code.arg}"
+        "#{stack_slot(stack.length - 1)} ? next : #{code.arg}"
       when :CALL
         argc = code.arg.is_a?(Hash) ? (code.arg[:params]&.length || 1) : 0
-        args = stack.last(argc).map { |value| format_value(value) }.join(", ")
+        start = stack.length - argc
+        args = argc.times.map { |idx| stack_slot(start + idx) }.join(", ")
         "call(#{args})"
       when :RETURN
-        "return #{format_value(stack[-1])}"
+        "return #{stack_slot(stack.length - 1)}"
       when :SYSCALL
-        "print #{format_value(stack[-1])}"
+        "print #{stack_slot(stack.length - 1)}"
       else
         ""
     end
   end
 
   def stack_lines(pane_height)
-    values = @vm.state.stack.last(pane_height)
-    blanks = Array.new(pane_height - values.length, nil)
-    first_value_idx = @vm.state.stack.length - values.length
+    focus = [@vm.state.stack.length - 1, 0].max
+    start = [[focus - 4, 0].max, [@vm.state.stack.length - pane_height, 0].max].min
     active = active_stack_indexes
 
-    (blanks + values).each_with_index.map do |value, idx|
-      stack_idx = idx < blanks.length ? nil : first_value_idx + idx - blanks.length
+    pane_height.times.map do |idx|
+      stack_idx = start + idx
       marker = active.include?(stack_idx) ? "*" : " "
-      "#{marker}#{format_value(value).rjust(STACK_WIDTH - 2)}"
+      label = "#{stack_slot(stack_idx)}: #{display_value(@vm.state.stack[stack_idx])}"
+      "#{marker}#{label.rjust(STACK_WIDTH - 2)}"
     end
   end
 
@@ -689,17 +701,14 @@ class Renderer
   end
 
   def heap_lines(width, pane_height)
-    return [] unless width.positive?
-
-    rows = @vm.state.heap.each_with_index.map do |value, idx|
+    pane_height.times.map do |idx|
+      value = @vm.state.heap[idx]
       if value
-        "S#{format('%02d', idx)} r#{value.refs} #{value.value.inspect}"
+        "#{value.refs} H#{format('%02d', idx)} #{value.value.inspect}"
       else
-        "S#{format('%02d', idx)} free"
+        "  H#{format('%02d', idx)} xxx"
       end
     end
-
-    rows.first(pane_height)
   end
 
   def active_stack_indexes
@@ -734,11 +743,11 @@ class Renderer
     stack[-2].send(op, stack[-1])
   end
 
-  def compare_result
+  def compare_result(op)
     stack = @vm.state.stack
     return nil if stack.length < 2
 
-    stack[-2] == stack[-1]
+    stack[-2].send(op, stack[-1])
   end
 
   def render_output(width)
@@ -759,9 +768,31 @@ class Renderer
       when nil then "xxx"
       when true then "001"
       when false then "000"
-      when TraceHeapRef then "S#{format('%02d', value.id)}"
+      when TraceHeapRef then "H#{format('%02d', value.id)}"
       when Integer then format('%03d', value)
       else value.to_s[0, 3]
+    end
+  end
+
+  def stack_slot(idx)
+    idx && idx >= 0 ? "S#{format('%02d', idx)}" : "S??"
+  end
+
+  def next_stack_slot
+    stack_slot(@vm.state.stack.length)
+  end
+
+  def result_stack_slot
+    stack_slot(@vm.state.stack.length - 2)
+  end
+
+  def display_value(value)
+    case value
+      when nil then "xxx"
+      when true then "true"
+      when false then "false"
+      when TraceHeapRef then "H#{format('%02d', value.id)}"
+      else value.to_s
     end
   end
 
@@ -863,7 +894,7 @@ steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
 unless VersionLoader::VERSIONS.include?(version)
-  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5] [source.puck] [--steps=N]"
+  abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7] [source.puck] [--steps=N]"
 end
 
 program = VersionLoader.load(version, source_path)

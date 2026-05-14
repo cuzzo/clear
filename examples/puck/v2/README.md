@@ -280,12 +280,13 @@ SYSCALL 1
 
 The VM still executes one bytecode instruction at a time.
 
-V2 adds two instructions:
+V2 adds three instructions:
 
 | Instruction | What It Does |
 | --- | --- |
 | `MATH :+` | Pop two stack values, add them, push the result. |
-| `CALL procedure` | Pop one argument, run the procedure return expression, push the result. |
+| `CALL procedure` | Pop the argument, run the procedure's bytecode in a fresh memory frame, push whatever `RETURN` produces. |
+| `RETURN` | End the procedure. Pop the top of the stack and hand it back to the caller. |
 
 For now, procedures are deliberately tiny:
 
@@ -295,12 +296,23 @@ PROCEDURE add_one(x);
 END;
 ```
 
+A procedure compiles to its own little block of bytecode. For `add_one`:
+
+```text
+LOAD 0        # x lives in the procedure's memory slot 0
+PUSH 1
+MATH :+
+RETURN
+```
+
 The VM handles `CALL` by:
 
-1. Popping the argument from the stack.
-2. Binding it to the procedure parameter name.
-3. Evaluating the procedure return expression.
-4. Pushing the return value onto the stack.
+1. Popping the argument from the caller's stack into slot `0` of a new memory frame.
+2. Recursively running the procedure's bytecode against that frame.
+3. When `RETURN` fires, it ends the inner run and returns the top of the procedure's stack.
+4. The caller pushes that result back onto its own stack.
+
+There is no separate AST interpreter. The VM has exactly one execution mode: run bytecode.
 
 So `add_one(add_one(40))` runs like this:
 

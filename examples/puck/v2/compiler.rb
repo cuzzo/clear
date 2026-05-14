@@ -11,7 +11,7 @@ class Compiler
 
     ast.each do |node|
       if node[:type] == :Procedure
-        procedures[node.var] = node.val
+        procedures[node.var] = compile_procedure(node.val, procedures)
 
       elsif node[:type] == :Assignment
         # Push the current expression onto the VM's stack
@@ -30,6 +30,18 @@ class Compiler
     end
 
     return codes
+  end
+
+  # A procedure body is itself bytecode.
+  # Its first instructions read the single parameter from its own memory slot 0.
+  # Its last instruction is :RETURN, which pops the top of the stack and gives it
+  # back to the caller.
+  def compile_procedure(node_val, procedures)
+    procedure_mem = { node_val[:param] => 0 }
+    body = []
+    compile_expression(node_val[:expression], body, procedure_mem, procedures)
+    body << ByteCode.new(:RETURN)
+    { params: [node_val[:param]], codes: body }
   end
 
   # This is a recursive function

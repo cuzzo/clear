@@ -22,12 +22,13 @@ SYSCALL(1, result);
 ## compiler.rb
 
 - Owns `ByteCode`.
-- Stores procedure definitions by name.
+- Compiles procedure bodies to their own bytecode. A procedure is a `{params:, codes:}` hash; the body ends in `:RETURN`.
 - Compiles assignment values from expressions, including `add_one(41)`.
 - Emits `CALL` for procedure calls and keeps `SYSCALL(id, var)` behavior from V1.
 
 ## vm.rb
 
 - Owns the `VM`.
-- Adds `MATH` and `CALL`.
+- Adds `MATH`, `CALL`, and `RETURN`.
+- `CALL` recursively runs the procedure's bytecode in a fresh memory frame; `RETURN` exits that inner run and hands its result back to the caller.
 - Keeps the Ruby main block here, so running `ruby examples/puck/v2/vm.rb` executes the V2 demo.

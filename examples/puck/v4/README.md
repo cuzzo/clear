@@ -1,16 +1,16 @@
-# The V4 Implementation - Patching Jump Targets
+# The V4 Implementation - Patching Many Jumps At Once
 
-V3 introduced the idea of jumping with `IF`.
+V3 introduced patching: emit a forward jump with a placeholder target, then fill in the target once we know where to land.
 
-V4 makes that idea concrete by compiling procedure bodies into bytecode with real jump instructions:
+V3 only needed *one* placeholder per `IF`. V4 needs to patch *many* placeholders at the same target — one for every `EXIT` inside a `LOOP`. The new compiler concept is **deferred multi-target patching**.
+
+V4 also adds:
 
 ```text
-JUMP_IF_FALSE
-JUMP
-RETURN
+LOOP ... END;
+EXIT;
+JUMP        # the unconditional cousin of JUMP_IF_FALSE
 ```
-
-The new source feature is `LOOP` / `EXIT`, but the interesting compiler feature is **patching**.
 
 ---
 
@@ -57,49 +57,76 @@ V4 also sneaks in the basic math operators by using Ruby's `send`:
 stack.push(left.send(op, right))
 ```
 
-So the VM can run `+`, `-`, `*`, `/`, and `%` without adding a new branch for each operator.
+So the VM can run `+`, `-`, `*`, `/`, and `%` without adding a new branch for each operator. This replaces V3's hardcoded `if op == :+`.
 
 ---
 
-## Why Patching Exists
+## Why One-Patch Isn't Enough
 
-A loop needs to jump in two directions:
+V3's `IF` patching was symmetric: one placeholder, one patch. The placeholder and patch live in the same `compile_statement` call:
+
+```ruby
+jump = codes.length
+codes << ByteCode.new(:JUMP_IF_FALSE)
+compile_body(...)
+codes[jump].arg = codes.length
+```
+
+A `LOOP` needs two kinds of jumps:
 
 ```text
 loop_start:
   ... body ...
-  JUMP loop_start
+  JUMP loop_start         # backward — easy, we know loop_start
 loop_end:
 ```
 
-The backward jump is easy. When the compiler emits `JUMP loop_start`, it already knows where `loop_start` is.
+The backward jump is trivial. The compiler emits `JUMP loop_start` and `loop_start` is already an integer it captured before the body.
 
-`EXIT` is different:
+`EXIT` is the hard one:
 
 ```text
 loop_start:
   ...
-  EXIT
+  EXIT                    # ?
   ...
   JUMP loop_start
-loop_end:
+loop_end:                 # this address is unknown when EXIT is compiled
 ```
 
-When the compiler sees `EXIT`, it does not know where `loop_end` is yet. The loop body has not finished compiling.
+When the compiler sees `EXIT`, it has no idea where `loop_end` will be. And there can be many `EXIT`s scattered through the loop body, each wanting to land at the same `loop_end`.
 
-So the compiler emits a placeholder:
+So we need:
 
-```text
-JUMP nil
-```
+1. A way to emit each `EXIT` as a placeholder.
+2. A way to remember all those placeholder positions.
+3. A way to patch them all together once `loop_end` is known.
 
-Later, after the loop body is compiled, the compiler knows the loop-end address and patches the placeholder:
+---
+
+## Deferred Multi-Target Patching
+
+The compiler threads a stack of "open loops". Each open loop owns a list of `EXIT` placeholders waiting to be patched.
+
+`LOOP` pushes a new exit list. `EXIT` appends to the *innermost* list. After the body is compiled, the `LOOP` knows the final `loop_end` address and patches every placeholder in its list to that one target:
 
 ```ruby
-exits.each { |exit| codes[exit].arg = codes.length }
+elsif node[:type] == :Loop
+  loop_start = codes.length
+  exits = []
+  compile_statements(node.val, mem, procedures, loop_exits + [exits], codes)
+  codes << ByteCode.new(:JUMP, loop_start)
+  exits.each { |exit| codes[exit].arg = codes.length }   # patch them all
+
+elsif node[:type] == :Exit
+  raise "EXIT outside LOOP" if loop_exits.empty?
+  loop_exits.last << codes.length    # record placeholder position
+  codes << ByteCode.new(:JUMP)        # emit placeholder
 ```
 
-That is patching.
+Compare to V3, where `IF` only had to remember a single integer. Here we remember a *list* per loop, and patching is a sweep over that list.
+
+`loop_exits` is a stack of lists (not a single list) because loops can nest. An inner `EXIT` should bind to the innermost loop, which `loop_exits.last` selects.
 
 ---
 
@@ -117,90 +144,35 @@ LOOP
 END;
 ```
 
-the compiler wants bytecode shaped like:
+the compiler emits:
 
 ```text
 loop_start:
   LOAD i
   LOAD limit
   COMPARE :==
-  JUMP_IF_FALSE after_if
-  JUMP loop_end        # EXIT, patched later
+  JUMP_IF_FALSE after_if      # patched by V3's single-jump pattern
+  JUMP loop_end               # patched by V4's multi-exit sweep
 after_if:
   LOAD i
   PUSH 1
   MATH :+
   STORE i
-  JUMP loop_start
+  JUMP loop_start             # backward, no patching needed
 loop_end:
 ```
 
-There are two patching moments:
-
-1. `JUMP_IF_FALSE after_if`
-2. `JUMP loop_end` for `EXIT`
-
-Both targets are forward jumps. The compiler cannot know those addresses until it has emitted the bytecode in between.
-
----
-
-## The Compiler Trick
-
-V4 compiles nested statement bodies into the same bytecode array for that procedure.
-
-That matters because jump targets are instruction indexes:
-
-```ruby
-loop_start = codes.length
-```
-
-For `IF`, the compiler emits a placeholder:
-
-```ruby
-jump = codes.length
-codes << ByteCode.new(:JUMP_IF_FALSE)
-compile_statements(node.val[:body], mem, procedures, loop_exits, codes)
-codes[jump].arg = codes.length
-```
-
-For `LOOP`, it collects every `EXIT` placeholder:
-
-```ruby
-loop_start = codes.length
-exits = []
-compile_statements(node.val, mem, procedures, loop_exits + [exits], codes)
-codes << ByteCode.new(:JUMP, loop_start)
-exits.each { |exit| codes[exit].arg = codes.length }
-```
-
-For `EXIT`, it records the placeholder location:
-
-```ruby
-loop_exits.last << codes.length
-codes << ByteCode.new(:JUMP)
-```
-
-That is the core of v4.
+Two patching moments visible: the `IF`'s single placeholder (V3 lesson) and the `EXIT`'s entry in the loop's exit list (V4 lesson). Together they handle every forward jump in the program.
 
 ---
 
 ## Why This Matters
 
-Parsing `LOOP` is not the hard part. It is just another block:
+Once you can defer-and-patch a *list* of placeholders, the same machinery covers every other control-flow form a teaching language is likely to add:
 
-```pascal
-LOOP
-  ...
-END;
-```
+- `IF ... ELSE` — two patch sites: one for the `JUMP_IF_FALSE` past the then-branch, one for the `JUMP` past the else-branch.
+- `WHILE` — desugars to `LOOP` + `IF` + `EXIT`.
+- `BREAK` / `CONTINUE` — additional named lists on the loop stack.
+- `CASE` / `SWITCH` — N placeholders, one per arm.
 
-The important part is that flat bytecode cannot point to labels that do not exist yet.
-
-Patching solves that:
-
-1. Emit a jump with no target.
-2. Remember where it is.
-3. Compile the body.
-4. Fill in the target once the destination address exists.
-
-That same trick is used for `IF`, `ELSE`, `LOOP`, `EXIT`, `WHILE`, `CASE`, and eventually more serious control flow.
+V3 taught the idea. V4 turns it into a pattern you can apply to any forward-jump form.

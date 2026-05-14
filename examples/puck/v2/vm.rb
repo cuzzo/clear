@@ -3,9 +3,8 @@ require_relative 'compiler'
 # Our VM is a Stack Machine
 # ip = instruction pointer (where on the stack we are)
 class VM
-  def run(codes)
+  def run(codes, memory = [])
     stack = []
-    memory = []
     ip = 0
 
     while ip < codes.length
@@ -19,11 +18,16 @@ class VM
         # TAKE the value off the top of the stack, then store it in memory
         when :STORE then memory[code.arg] = stack.pop
 
-        # For now, call one-argument procedures by popping the argument and pushing the return value.
+        # CALL runs a procedure's bytecode in its own memory frame.
+        # The procedure's params live in slots 0..N-1 of the new memory, populated
+        # from the top of the caller's stack. We push back whatever :RETURN gives us.
         when :CALL
-          arg = stack.pop
-          procedure_memory = { code.arg[:param] => arg }
-          stack.push(run_expression(code.arg[:expression], procedure_memory))
+          procedure = code.arg
+          args = stack.pop(procedure[:params].length)
+          stack.push(run(procedure[:codes], args))
+
+        # :RETURN ends the inner `run` and hands the top of the stack back to the caller.
+        when :RETURN then return stack.pop
 
         # For now, hardcode all SYSCALLs to PRINT / Ruby's `puts`.
         # We only support print for now, so we ignore the argument SYSCALL(1, x).
@@ -38,14 +42,6 @@ class VM
       stack.push(stack.pop + stack.pop)
     else
       raise "Unexpected Math Operator."
-    end
-  end
-
-  def run_expression(expression, memory)
-    case expression.type
-      when :Integer then expression.value
-      when :Variable then memory.fetch(expression.name)
-      when :Add then run_expression(expression.left, memory) + run_expression(expression.right, memory)
     end
   end
 end

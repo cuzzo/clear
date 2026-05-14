@@ -276,27 +276,35 @@ COMPARE :==
 
 `COMPARE :==` pops two values, compares them, and pushes `true` or `false`.
 
-That boolean is what a flattened bytecode VM would feed into `JUMP_IF_FALSE`:
+That boolean is what `JUMP_IF_FALSE` consumes:
 
 ```text
 JUMP_IF_FALSE after_if
 ```
 
-This v3 keeps the implementation smaller: procedure bodies remain AST, and the VM branches directly in `run_statements`:
+## Patching the Jump Target
+
+There is one problem with emitting `JUMP_IF_FALSE after_if`. When the compiler emits the jump, it does not yet know where `after_if` is. The body hasn't been compiled yet.
+
+So the compiler emits the jump with a missing target, remembers where the jump lives, compiles the body, and then **patches** the target to point past the body:
 
 ```ruby
-elsif node.type == :If
-  run_statements(node.val[:body], memory) if run_expression(node.val[:condition], memory)
+elsif node[:type] == :If
+  compile_expression(node.val[:condition], codes, mem, procedures)
+  jump = codes.length              # remember where the placeholder will live
+  codes << ByteCode.new(:JUMP_IF_FALSE)  # placeholder, no target yet
+  node.val[:body].each { |stmt| compile_statement(stmt, codes, mem, procedures) }
+  codes[jump].arg = codes.length   # patch: target is "right after the body"
 end
 ```
 
-That line is the same control-flow decision:
+That is the entire pattern. The VM is correspondingly small:
 
-```text
-if condition is false, skip the body
+```ruby
+when :JUMP_IF_FALSE then ip = code.arg unless stack.pop
 ```
 
-So v3 teaches the jump idea without yet adding explicit jump-address patching to the compiler.
+V4 reuses this pattern when one block needs many forward jumps at once (`LOOP` / `EXIT`).
 
 I highly recommend running this interactively as you follow along with the section below:
 

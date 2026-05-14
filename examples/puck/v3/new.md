@@ -35,12 +35,13 @@ Only `42` prints.
 
 ## compiler.rb
 
+- Compiles procedure bodies to their own bytecode, including multi-statement bodies.
 - Compiles multiple call arguments before `CALL`.
-- Keeps procedure bodies as AST for the VM to execute when called.
 - Adds `COMPARE :==` for equality expressions.
+- Adds `JUMP_IF_FALSE` for `IF`, with the first instance of **patching**: emit the jump with no target, compile the body, then fill in the target as "past the body".
 
 ## vm.rb
 
-- Calls procedures with any number of arguments.
-- Runs multi-statement procedure bodies.
-- Runs `IF` bodies only when their condition is true.
+- Calls procedures with any number of arguments. The recursive `run` from V2 is unchanged; each `CALL` opens a new memory frame.
+- Adds `JUMP_IF_FALSE` (pop the top of the stack; if false, move `ip` to the patched target).
+- Adds `RETURN` (already needed in V2 — multi-statement bodies make its role obvious here).
