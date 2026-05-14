@@ -11,20 +11,19 @@ rescue LoadError
   # The runner can still work without tty-* gems, but tmux/Linux behaves better with them.
 end
 
+require_relative 'util/version_loader'
+require_relative 'util/terminal'
+require_relative 'util/source_view'
+
 Frame = Struct.new(:name, :codes, :ip, :memory, :last_ip, :scope, keyword_init: true)
 TraceHeapValue = Struct.new(:value, :refs)
 TraceHeapRef = Struct.new(:id)
 TraceState = Struct.new(:frames, :stack, :output, :touched_memory, :heap, :halted, keyword_init: true)
 TraceProgram = Struct.new(:version, :source, :codes, :procedures, :scopes, keyword_init: true)
 
-class VersionLoader
-  VERSIONS = ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
-
+class VMLoader
   def self.load(version, source_path)
-    source = File.read(source_path || File.expand_path("#{version}/example.puck", __dir__))
-    path = File.expand_path("#{version}/#{version == "v1" ? "puck.rb" : "vm.rb"}", __dir__)
-
-    silence_stdout { Kernel.load path }
+    source = Puck::VersionLoader.load_version(version, source_path)
 
     tokens = Tokenizer.new(source).tokenize
     ast = Parser.new(tokens).parse
@@ -44,14 +43,6 @@ class VersionLoader
 
   def self.annotate_procedures(procedures)
     procedures.each { |name, procedure| procedure[:__name] = name if procedure.is_a?(Hash) }
-  end
-
-  def self.silence_stdout
-    old_stdout = $stdout
-    $stdout = StringIO.new
-    yield
-  ensure
-    $stdout = old_stdout
   end
 end
 
@@ -270,61 +261,38 @@ class Renderer
   end
 
   def render
-    height, width = terminal_size
+    height, width = Puck::Terminal.size
     width = [width - 2, MIN_WIDTH].max
     source_height, pane_height = layout_heights(height)
-    rows = [
+
+    body = [
       render_source_area(width, source_height),
       render_panes(width, pane_height),
-      render_output(width),
-      "space: step  backspace: back  q: quit"
+      render_output(width)
     ].join("\n").lines.map(&:chomp)
 
-    rows = rows.first(height)
-    rows += Array.new([height - rows.length, 0].max, "")
+    controls = Puck::Terminal.controls_block("space: step  backspace: back  q: quit", width)
 
-    clear_and_home + rows.map { |row| truncate(row, width).ljust(width) }.join("\r\n")
+    # Reserve the bottom rows for the CONTROLS block. Trim body if it would
+    # overflow into them.
+    body_height = [height - Puck::Terminal::CONTROLS_HEIGHT, 1].max
+    body = body.first(body_height)
+    body += Array.new(body_height - body.length, "")
+    rows = body + controls
+
+    Puck::Terminal.clear_and_home(@interactive) + rows.map { |row| Puck::Terminal.truncate(row, width).ljust(width) }.join("\r\n")
   end
 
   private
 
-  def terminal_size
-    if defined?(TTY::Screen)
-      return [TTY::Screen.height, TTY::Screen.width]
-    end
-
-    [STDOUT, STDIN, IO.console].compact.each do |io|
-      rows, cols = io.winsize
-      return [rows, cols] if rows.positive? && cols.positive?
-    rescue SystemCallError, IOError
-      next
-    end
-
-    rows, cols = `stty size 2>/dev/null`.split.map(&:to_i)
-    return [rows, cols] if rows&.positive? && cols&.positive?
-
-    rows = (ENV["LINES"] || 24).to_i
-    cols = (ENV["COLUMNS"] || 80).to_i
-    [[rows, 10].max, [cols, MIN_WIDTH].max]
-  end
-
   def layout_heights(height)
-    fixed_rows = 1 + 1 + 1 # pane header, output/padding, prompt
+    # Body has the source area, pane block, an output line. The CONTROLS
+    # block (3 rows) is pinned separately by `render` and excluded here.
+    fixed_rows = 1 + 1 + Puck::Terminal::CONTROLS_HEIGHT # pane header, output, controls
     available = [height - fixed_rows, 6].max
     source_height = [[MAX_SOURCE_HEIGHT, available / 2].min, 3].max
     pane_height = [[MAX_PANE_HEIGHT, available - source_height].min, 3].max
     [source_height, pane_height]
-  end
-
-  def clear_and_home
-    return "" unless @interactive
-    return "" if ENV["TERM"] == "dumb"
-
-    if @cursor
-      @cursor.clear_screen + @cursor.move_to(0, 0)
-    else
-      "\e[2J\e[H"
-    end
   end
 
   def render_source_area(width, source_height)
@@ -797,8 +765,7 @@ class Renderer
   end
 
   def truncate(text, width)
-    text = text.to_s
-    text.length > width ? text[0, width] : text
+    Puck::Terminal.truncate(text, width)
   end
 end
 
@@ -864,27 +831,11 @@ class Runner
   end
 
   def setup_terminal
-    return unless STDOUT.tty?
-    return if ENV["TERM"] == "dumb"
-
-    if defined?(TTY::Cursor)
-      print TTY::Cursor.hide
-    else
-      print "\e[?25l\e[0m"
-    end
+    Puck::Terminal.setup_cursor
   end
 
   def restore_terminal
-    return unless STDOUT.tty?
-    return if ENV["TERM"] == "dumb"
-
-    if defined?(TTY::Cursor)
-      print TTY::Cursor.show
-    else
-      print "\e[?25h\e[0m"
-    end
-    print "\n"
-    STDOUT.flush
+    Puck::Terminal.restore_cursor
   end
 end
 
@@ -893,11 +844,11 @@ source_path = ARGV[0] unless ARGV[0]&.start_with?("--")
 steps_arg = ARGV.find { |arg| arg.start_with?("--steps=") }
 steps = steps_arg&.split("=", 2)&.last&.to_i
 
-unless VersionLoader::VERSIONS.include?(version)
+unless Puck::VersionLoader::VERSIONS.include?(version)
   abort "Usage: ruby examples/puck/run.rb [v1|v2|v3|v4|v5|v6|v7] [source.puck] [--steps=N]"
 end
 
-program = VersionLoader.load(version, source_path)
+program = VMLoader.load(version, source_path)
 runner = Runner.new(program)
 
 if steps
