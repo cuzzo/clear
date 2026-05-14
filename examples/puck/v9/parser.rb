@@ -291,6 +291,10 @@ class Parser
     elsif @tokens[@pos].type == :INTEGER
       ExprNode.new(type: :Integer, value: consume(:INTEGER).value)
 
+    # If the current token is a Float (e.g. 3.14):
+    elsif @tokens[@pos].type == :FLOAT
+      ExprNode.new(type: :Float, value: consume(:FLOAT).value)
+
     # If the current token is a string:
     elsif @tokens[@pos].type == :STRING
       ExprNode.new(type: :String, value: consume(:STRING).value)

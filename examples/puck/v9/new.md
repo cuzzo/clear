@@ -7,6 +7,7 @@ V9 branches from V8 and finishes the VM. The destination since V5 has been a sin
 - New op: `ARRAY_LEN` — works on any heap value (string or array).
 - New parser builtins: `LEN(x)` (compiles to `ARRAY_LEN`) and `INPUT()` (compiles to `SYSCALL 2`).
 - SYSCALL gains a dispatch table: ID 1 print, ID 2 stdin, ID 3 open file, ID 4 read line from file, ID 5 close file. Each ID is ~5 lines of Ruby; cross-platform comes from Ruby's standard library.
+- Float literals: source like `3.14` parses as `:Float`; the compiler emits `PUSH 3.14`. Math/compare ops use `Numeric#send`, which Ruby already does the right thing with for mixed Int/Float operands. No new bytecode op in V9 (V10's C VM adds `PUSH_FLOAT` and explicit int/float promotion).
 
 After V9 the value model is just **integers and arrays**. Everything else (string equals/concat/substring, int↔string, records as arrays, the self-hosted compiler) is plain Puck code.
 

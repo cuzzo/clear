@@ -26,7 +26,12 @@ class Tokenizer
       next if @scanner.skip(/\s+/) # Tokens are separated by whitespace
       next if @scanner.skip(/\(\*.*?\*\)/m) # Oberon block comments
 
-      if match = @scanner.scan(/\d+/)
+      # Float regex must come BEFORE the integer regex; otherwise `3.14`
+      # tokenizes as INTEGER(3) followed by `.` + INTEGER(14).
+      if match = @scanner.scan(/\d+\.\d+/)
+        tokens << Token.new(:FLOAT, match.to_f)
+
+      elsif match = @scanner.scan(/\d+/)
         tokens << Token.new(:INTEGER, match.to_i)
 
       elsif match = @scanner.scan(/"[^"]*"/)

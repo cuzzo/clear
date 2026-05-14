@@ -262,6 +262,11 @@ class Compiler
     when :Integer
       codes << ByteCode.new(:PUSH, expression.value)
 
+    when :Float
+      # PUSH carries any literal value; the VM just pushes it onto the stack.
+      # Math/compare ops use `send`, which works the same for Float as Int.
+      codes << ByteCode.new(:PUSH, expression.value)
+
     when :String
       codes << ByteCode.new(:ALLOC, expression.value)
 

@@ -49,6 +49,13 @@ program[:procedures].each_value do |pr|
   procs << { params: pr[:params].length, var_params: pr[:var_params].length, codes: pr[:codes] }
 end
 
+# Float-typed PUSH ops get a distinct mnemonic so the C VM's bytecode parser
+# can tell at a glance whether to fill the int or double payload.
+def normalize_op(code)
+  return :PUSH_FLOAT if code.op == :PUSH && code.arg.is_a?(Float)
+  code.op
+end
+
 # Rewrite each ALLOC.arg to a string-table index. CALL.arg becomes the
 # proc-table index. Other args pass through.
 def serialize_arg(code, intern_string, proc_index)
@@ -56,7 +63,10 @@ def serialize_arg(code, intern_string, proc_index)
   when :ALLOC then intern_string.call(code.arg).to_s
   when :CALL then proc_index.fetch(code.arg.object_id).to_s
   when :MATH, :COMPARE then code.arg.to_s
-  when :PUSH, :LOAD, :LOAD_REF, :STORE, :STORE_REF, :JUMP, :JUMP_IF_FALSE, :SYSCALL
+  when :PUSH
+    # Float gets ("%.17g") for round-trippable text; int stays as decimal.
+    code.arg.is_a?(Float) ? format("%.17g", code.arg) : code.arg.to_s
+  when :LOAD, :LOAD_REF, :STORE, :STORE_REF, :JUMP, :JUMP_IF_FALSE, :SYSCALL
     code.arg.to_s
   else
     ""  # no-arg ops: ALLOC_CELL/ALLOC_ARRAY/ARRAY_GET/ARRAY_SET/ARRAY_LEN/RETURN
@@ -77,8 +87,9 @@ File.open(out_path, "w") do |f|
   procs.each do |p|
     f.puts "PROC #{p[:params]} #{p[:var_params]} #{p[:codes].length}"
     p[:codes].each do |code|
+      op_name = normalize_op(code)
       arg = serialize_arg(code, intern_string, proc_index)
-      f.puts arg.empty? ? code.op.to_s : "#{code.op} #{arg}"
+      f.puts arg.empty? ? op_name.to_s : "#{op_name} #{arg}"
     end
   end
 end
