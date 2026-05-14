@@ -12,7 +12,11 @@ class Compiler
 
   def compile_statements(ast, mem, procedures, loop_exits, codes)
     ast.each do |node|
-      if node[:type] == :Procedure
+      if node[:type] == :Module
+        compile_statements(node.val[:declarations], mem, procedures, loop_exits, codes)
+        compile_statements(node.val[:body], mem, procedures, loop_exits, codes)
+
+      elsif node[:type] == :Procedure
         procedure_mem = {}
         node.val[:params].each { |param| procedure_mem[param] ||= procedure_mem.length }
         procedures[node.var] = {

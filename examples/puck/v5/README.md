@@ -67,10 +67,10 @@ The parser turns them into expression nodes:
 ExprNode.new(type: :String, value: consume(:STRING).value)
 ```
 
-The compiler emits a new bytecode instruction:
+The compiler emits a new bytecode instruction whose argument is the literal string:
 
 ```text
-ALLOC :String, "hello"
+ALLOC "hello"
 ```
 
 The VM allocates the string in the heap and pushes a reference:
@@ -92,7 +92,7 @@ message := "hello";
 The compiler emits:
 
 ```text
-ALLOC :String, "hello"
+ALLOC "hello"
 STORE 0
 ```
 
@@ -177,13 +177,13 @@ That is the whole point of refcounting in this version.
 V5 uses three small ownership rules:
 
 1. `ALLOC` creates a heap object with `refs = 1`.
-2. `LOAD` copies a ref, so it calls `retain`.
+2. `LOAD` copies a ref, so it calls `retain` and bumps `refs` (e.g. memory still has `S00`, and so does the stack — `refs = 2`).
 3. Anything that discards a ref calls `release`.
 
 The important discards are:
 
-- `STORE` overwriting a memory slot
-- `SYSCALL` popping a stack value
-- a frame finishing and releasing its memory
+- `STORE` overwriting a memory slot (e.g. `message := "forty-two"` — the old `"hello"` ref is dropped before the new ref is written).
+- `SYSCALL` popping a stack value (e.g. after the first `SYSCALL(1, message)` — the stack ref is released, dropping `refs` from 2 back to 1; the variable still holds the other reference).
+- A frame finishing and releasing its memory. After both `SYSCALL`s, the top-level frame is about to exit. `cleanup(memory)` releases everything in memory, so `"forty-two"` (the only value still in `M00`) drops to `refs = 0` and is freed.
 
 Nothing about `SYSCALL` or strings requires new parser complexity. The new concept is that the VM now manages the lifetime of heap values.

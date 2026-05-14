@@ -207,9 +207,9 @@ class TraceVM
   end
 
   def allocate(arg)
-    return allocate_string(arg[:value]) if arg[:type] == :String
-
-    raise "Unexpected allocation type."
+    # v5/v6 pass the literal string; v7 still wraps as { type: :String, value: ... }.
+    value = arg.is_a?(Hash) ? arg[:value] : arg
+    allocate_string(value)
   end
 
   def allocate_string(value)
@@ -372,7 +372,8 @@ class Renderer
       when :PUSH, :MATH
         assignment_sequence?(frame, ip) ? store_patterns(frame, ip) : condition_patterns(frame, ip)
       when :ALLOC
-        upcoming_store?(frame, ip) && code.arg[:type] == :String ? string_store_patterns(code.arg[:value]) : [/\S/]
+        s = alloc_string_value(code.arg)
+        upcoming_store?(frame, ip) && s ? string_store_patterns(s) : [/\S/]
       when :COMPARE, :JUMP_IF_FALSE
         condition_patterns(frame, ip)
       when :JUMP
@@ -513,7 +514,7 @@ class Renderer
 
   def store_patterns(frame, ip)
     window = store_window(frame, ip)
-    string = window.find { |code| code.op == :ALLOC && code.arg[:type] == :String }&.arg&.fetch(:value)
+    string = window.map { |code| code.op == :ALLOC ? alloc_string_value(code.arg) : nil }.compact.first
     return string_store_patterns(string) if string
 
     if window.any? { |code| code.op == :MATH && code.arg == :+ }
@@ -543,6 +544,14 @@ class Renderer
 
   def string_store_patterns(value)
     [/:=.*"#{Regexp.escape(value)}"/, /:=/]
+  end
+
+  # Backwards-compat: v5/v6 emit ALLOC with the plain string; v7 still uses
+  # `{ type: :String, value: "..." }`. Normalize both.
+  def alloc_string_value(arg)
+    return arg if arg.is_a?(String)
+    return arg[:value] if arg.is_a?(Hash) && arg[:type] == :String
+    nil
   end
 
   def render_panes(width, pane_height)
@@ -609,7 +618,7 @@ class Renderer
       when :PUSH
         "push #{display_value(code.arg)} -> #{next_stack_slot}"
       when :ALLOC
-        "alloc #{code.arg[:value].inspect} -> #{next_stack_slot}"
+        "alloc #{alloc_string_value(code.arg).inspect} -> #{next_stack_slot}"
       when :LOAD
         "M#{format('%02d', code.arg)} -> #{next_stack_slot}"
       when :STORE
@@ -726,7 +735,10 @@ class Renderer
 
   def format_code(code)
     arg = code.arg
-    arg = "#{arg[:type]} #{arg[:value].inspect}" if code.op == :ALLOC
+    if code.op == :ALLOC
+      s = alloc_string_value(arg)
+      arg = s ? "String #{s.inspect}" : arg.inspect
+    end
     arg = "proc" if arg.is_a?(Hash)
     [code.op, arg].compact.join(" ")
   end

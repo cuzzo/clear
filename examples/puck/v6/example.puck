@@ -1,0 +1,28 @@
+MODULE Demo;
+
+PROCEDURE print_if_target(i);
+  IF i = 3 THEN
+    hit := "hit";
+    SYSCALL(1, hit);
+    SYSCALL(1, i);
+  END;
+END;
+
+BEGIN
+  label := "starting";
+  SYSCALL(1, label);
+
+  i := 1;
+  LOOP
+    print_if_target(i);
+
+    IF i = 5 THEN
+      EXIT;
+    END;
+
+    i := i + 1;
+  END;
+
+  label := "done";
+  SYSCALL(1, label);
+END.
