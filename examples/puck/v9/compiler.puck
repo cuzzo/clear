@@ -58,28 +58,6 @@ MODULE Compiler;
    AST_MODULE  = 15  [15, name, procs, body] *)
 
 
-(* ============================================================ Reading source
-
-   Read a whole file into a codepoint array. We use READ_LINE_FROM and join
-   results with newlines. O(n^2) due to repeated concat, but the inputs are
-   small. *)
-
-PROCEDURE read_file(path);
-  handle := OPEN_READ(path);
-  out := ARRAY(0);
-  nl := ARRAY(1);
-  nl[0] := 10;                                 (* '\n' *)
-  LOOP
-    line := READ_LINE_FROM(handle);
-    IF line = 0 THEN EXIT; END;
-    out := concat(out, line);
-    out := concat(out, nl);
-  END;
-  CLOSE_FILE(handle);
-  RETURN out;
-END;
-
-
 (* ============================================================ Small helpers *)
 
 (* Build a brand-new token [kind, int_value, str_value]. *)

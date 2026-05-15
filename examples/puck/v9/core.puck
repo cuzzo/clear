@@ -301,6 +301,37 @@ PROCEDURE write_line(handle, line);
   WRITE_LINE(handle, line);
 END;
 
+(* Read an entire file into a single codepoint array, joining lines with
+   newlines as a real file reader would. Backed by a doubling buffer so the
+   cost is O(n) in total, not O(n^2) like a chain of concat() calls. *)
+PROCEDURE read_file(path);
+  handle := OPEN_READ(path);
+  data := ARRAY(256);
+  count := 0;
+  cap := 256;
+  LOOP
+    line := READ_LINE_FROM(handle);
+    IF line = 0 THEN EXIT; END;
+    line_len := LEN(line);
+    j := 0;
+    WHILE(j < line_len) DO
+      list_push(data, count, cap, line[j]);
+      j := j + 1;
+    END;
+    list_push(data, count, cap, 10);     (* trailing newline *)
+  END;
+  CLOSE_FILE(handle);
+
+  (* Shrink to the exact length the caller observes via LEN(). *)
+  out := ARRAY(count);
+  i := 0;
+  WHILE(i < count) DO
+    out[i] := data[i];
+    i := i + 1;
+  END;
+  RETURN out;
+END;
+
 (* Read a single line from stdin. Same as the INPUT() builtin; the wrapper
    exists so user code can stick to lowercase names. *)
 PROCEDURE read_line();
