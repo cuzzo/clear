@@ -247,9 +247,14 @@ The benchmark runner picks this up automatically; `bash benchmarks/vm/run.sh` sh
 
 ## What Ships Next
 
-V10 closes the tutorial sequence. The remaining artifacts ship as files in the repo, not as new versions:
+V10 keeps the bytecode interpreter shape and gets us within 10x of native code. V11 closes the rest of the gap on the hottest workloads:
 
-- `examples/puck/core.puck` — the V9-version standard library (string ops, int↔string, helpers).
-- `examples/puck/compiler.puck` — a self-hosting Puck compiler, written in Puck itself, running on top of either the Ruby VM (V9) or the C VM (V10).
+- **[V11](../v11/README.md)** layers a minimal x86_64 JIT (~380 lines of C) on top of this VM. It scans each procedure at load time, decides which ones are pure-integer arithmetic (no heap, no SYSCALL), and emits native machine code into an `mmap`'d page. `fib(35)` drops from 80ms (this VM) to under 1ms with the JIT enabled, and core-test still runs every string/syscall procedure through this interpreter unchanged.
 
-Both will be code-to-read rather than incremental lessons. The language is done; everything from here is application code.
+And these ship as application code on top of V9's frontend, runnable by either this VM or V11's:
+
+- [`../v9/core.puck`](../v9/core.puck) — the standard library: string ops, int↔string conversion, growable lists, an open-addressed hash table, `assert` / `check` test helpers.
+- [`../v9/compiler.puck`](../v9/compiler.puck) — a self-hosting Puck compiler written in Puck itself.
+- [`../v9/core-test.puck`](../v9/core-test.puck) — a 78-case test suite for the standard library.
+
+These are code-to-read rather than incremental lessons. The language is done; everything from here is application code or alternate VM strategies.

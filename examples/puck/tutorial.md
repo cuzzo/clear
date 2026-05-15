@@ -152,20 +152,21 @@ This is all you need to build a *shockingly* usable language.
 
 ## The Scope
 
-First, over 6 stages we will implement the prototype in Ruby, so that it's incredibly easy to understand, and only about ~325 lines of code.
+The tutorial builds the language up across **eleven versions**:
 
-Finally, we will add `MACRO` to the parser, which will nearly double the size of the Ruby parser, but will make our language quite usable!
+* **V1-V6** bring up the Ruby prototype: tokenizer, parser, bytecode compiler, stack-machine VM, conditionals, loops, refcounted strings, and `MODULE` plus a small standard library. ~325 dense lines by V6.
+* **V7** adds `MACRO` to the parser. It roughly doubles the parser size but turns the language into something quite usable - `WHILE`, `FOR`, struct-like records all become library-level macros instead of new keywords.
+* **V8-V9** finish the value model: `VAR` pass-by-reference, general arrays, then collapsing strings into arrays-of-codepoints. After V9 the Ruby VM is done.
+* **V10** rewrites the VM in C. Same bytecode, ~100-200x faster.
+* **V11** adds a minimal x86_64 JIT (~380 lines) on top of V10. Another ~120x on int-heavy code.
 
-You can probably follow all of this in an evening or two.
+You can probably follow V1-V9 in an evening or two; V10 adds another day; V11 another two. Each version is a single focused change with its own directory and README.
 
- * Add on another to support macros.
- * Add in another day or two to write a C VM that's ~100x faster, and to self-host Oberon.
- * And another two to understand JIT.
-
-The first version will be slow, but very understandable. 
+The first versions will be slow, but very understandable.
 
  * We will re-implement the VM in C.
- * That will take our Ruby VM from ~75 lines of code ~300, and nearly double the project size, but speed up runtimes by 100x.
+ * That will take our Ruby VM from ~75 lines of code to ~400 lines of C, and nearly double the project size, but speed up runtimes by 100x.
+ * Then ~380 more lines of C in V11 adds a JIT that gets another ~120x on tight integer-arithmetic loops.
  * In this process you'll learn how and why things can be slow, a lot about how computers actually work, and - trust me - it'll be more fun than it sounds.
 
 ### What's not in Scope
@@ -173,7 +174,7 @@ The first version will be slow, but very understandable.
 Our language will not do a number of things:
 
  * Have nice, helpful errors
- * Optimize aggressively (without JIT)
+ * Optimize aggressively beyond the V11 JIT (no register allocator, no inline caches, no tiering)
  * Support concurrency
  * Prevent memory leaks (RefCounting can easily leak in graphs)
 
@@ -222,20 +223,20 @@ The loop that actually reads those instructions one by one and executes them on 
 
 ---
 
-## Roadmap: The Seven Versions
+## Roadmap: The Eleven Versions
 
 1. **V1:** Minimal tokenizer, parser, compiler, VM. Prints "42" (~80 dense lines).
 2. **V2:** Define and call a function. Split into four files (~160 dense lines).
-3. **V3:** Add conditionals, print selectively. (~230 dense lines).
-4. **V4:** Add loops, all math, fizzBuzz (~260 dense lines).
-5. **V5:** Add strings as *a* heap refs, and refcounting (~280 dense lines).
+3. **V3:** Add conditionals, print selectively (~230 dense lines).
+4. **V4:** Add loops, all math, FizzBuzz (~260 dense lines).
+5. **V5:** Add strings as heap refs, and refcounting (~280 dense lines).
 6. **V6:** Add `MODULE` for a standard library (~325 dense lines).
-7. **V7:** Add `MACRO` for Structs and advanced syntax (~400 dense lines).
-8. **V8:** Replace strings with generalized arrays.
-9. **V9:** Replace special string ref with generalized REF.
-10. **V10:** C compiler + profiling
-11. **V11:** Add a JIT.
+7. **V7:** Add `MACRO` for records and advanced surface syntax (~400 dense lines).
+8. **V8:** Add `VAR` pass-by-reference plus generalized arrays.
+9. **V9:** Strings *are* arrays of codepoints; real SYSCALLs (stdin/file/time/exit/argv). Ruby VM is done. Self-hosted `compiler.puck` ships alongside.
+10. **V10:** Same bytecode reimplemented in C. ~100-200x faster (~400 lines of C).
+11. **V11:** A minimal x86_64 JIT on top of V10. ~380 lines, ~120x more on `fib(35)`.
 
 ---
 
-You can jump to [V1](v1/README.md) to get started, and see how you can make a *very* minimal programming langauge in ~80 lines of code.
+You can jump to [V1](v1/README.md) to get started, and see how you can make a *very* minimal programming language in ~80 lines of code.

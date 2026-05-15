@@ -110,11 +110,16 @@ We promoted SYSCALL to a small dispatch table. Each ID is one host primitive:
 |---|---|---|---|
 | 1 | `puts` value (the existing print) | `[value]` | `[]` |
 | 2 | `INPUT()` — read a line from stdin | `[]` | `[string_ref]` |
-| 3 | open file by name; push integer handle | `[name_ref]` | `[handle]` |
+| 3 | open file for reading; push integer handle | `[name_ref]` | `[handle]` |
 | 4 | read a line from open file | `[handle]` | `[string_ref]` or `[0]` at EOF |
 | 5 | close open file | `[handle]` | `[]` |
+| 6 | current monotonic time in milliseconds | `[]` | `[ms]` |
+| 7 | open file for writing; push integer handle | `[name_ref]` | `[handle]` |
+| 8 | write a line + newline to open file | `[handle, string_ref]` | `[]` |
+| 9 | halt — exit the program with the given code | `[code]` | (program exits) |
+| 10 | argv(n) — push the Nth command-line argument as a string | `[n]` | `[string_ref]` |
 
-`INPUT()` has its own source-level form (an expression) because it's the most common one. The others can be called as ordinary procedures if we add stubs to `core.puck`, but they're not exercised by the V9 demo.
+`INPUT()` has its own source-level form (an expression) because it's the most common one. The others can be called as ordinary procedures via the `core.puck` lowercase wrappers (`open_read`, `read_line_from`, `close_file`, `time_ms`, `open_write`, `write_line`, `argv`).
 
 ```ruby
 def handle_syscall(id, stack)
@@ -149,6 +154,11 @@ All of that lives in `core.puck` and `compiler.puck` — files alongside this tu
 
 ---
 
-## V10 Preview
+## What's Next
 
-V9 is the last time the Ruby VM changes. V10 takes the same bytecode shape and reimplements the VM in C for speed, with a profiling lesson showing how to identify what the Ruby VM spent its time on. After V10 the tutorial ends. The Puck source for the standard library and the self-hosted compiler ships alongside the tutorial as plain files, not as new versions.
+V9 is the last time the Ruby VM changes. The remaining versions keep V9's frontend (tokenizer / parser / macro expander / bytecode compiler) and only swap the VM:
+
+- **V10** takes the same bytecode shape and reimplements the VM in C for speed, with a profiling lesson showing how to identify what the Ruby VM spent its time on.
+- **V11** layers a minimal x86_64 JIT on top of V10's C VM — ~380 lines that translate pure-integer procedures to native machine code, getting another ~120x on tight loops like `fib(35)`.
+
+The standard library (`core.puck`) and the self-hosted Puck-in-Puck compiler (`compiler.puck`) ship alongside V9 as plain files - they are application code on top of the V9 frontend, not new versions, and they run unchanged under V10 and V11.
