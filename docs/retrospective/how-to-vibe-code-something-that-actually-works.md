@@ -26,7 +26,7 @@ If you rely on LLMs to blindly fix bugs in a system that is not *extremely* well
     * A line covered means nothing, but critically a branch taken does not imply all possible paths to that branch were taken
     * All possible paths in a non-trivial program is typically an undecidable halting problem: it is essentially infinite
       - This is exactly why writing non-trivial *working* code is hard!
- 4. **Cyclomatic complexity scores**
+ 3. **Cyclomatic complexity scores**
     * Some functions are inherently complex.
     * Breaking them up for the sake of satisfying cyclomatic complexity often makes your code worse, not better.
 
@@ -124,4 +124,14 @@ You do not need to solve the halting problem to vibe code with LLMs and get *rea
     * At a *BARE* minimum, get the LLMs to converge on how *YOU* can be convinced the code actually works. Check that it works! Even at this stage, you should not be surprised if it is completely broken…
     * At a *REASONABLE* minimum, review the final integration testing to make sure it’s not mocking everything important.
 
-Here is my [Review Process](what-I-learned-the-hard-way.md), complete with the magic words at different stages of development that have led to far better outcomes.
+### What is Convergence?
+
+ * If one LLM tells you something, there's some unknown probability that it's wrong.
+ * If 2-3 tell you the same thing, it certainly does not mean it's right, but it does mean it's more likely to be right.
+ * If they all agree and something *and* it makes sense to you, that's *probably* the best you're going to do on your own.
+ * Never take **DESIGN** from LLMs blindly - i.e. just one.
+    * This is letting the car pick where to drive.
+ * If you personally don't know where to go, have the LLMs first agree, and then **use your brain** to make sure it makes sense.
+ * Then, and only then, should you proceed.
+
+Here is my [Review Process](what-I-learned-the-hard-way.md), complete with the magic words I use at different stages of development that have led to far better outcomes.
