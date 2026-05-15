@@ -1,0 +1,39 @@
+# Puck bytecode VM, in CLEAR.
+#
+# This file is the seed for a CLEAR-language port of `v10/vm.c`. The point
+# is to give us a third reference implementation of Puck's bytecode VM
+# (next to v10's C and v11's C+JIT) so the upcoming Go and Rust ports have
+# something to diff against, all benched against each other from
+# `benchmarks/sequential`.
+#
+# Status: scaffold. It reads the .puckc header (PUCKC version, strings
+# table size, procedure table size) and prints what it found. The
+# interpreter loop itself is intentionally left for the next pass: CLEAR's
+# strict MIR ownership rules (frame rewinding inside loops, refcounted
+# heap, value-tag unions) make the full port a non-trivial follow-up that
+# is better done as its own commit alongside the benchmark harness.
+
+FN bytecodePath() RETURNS String ->
+  RETURN "examples/puck/v11/bench/fib.puckc";
+END
+
+FN parseInt(s: String) RETURNS Int64 ->
+  RETURN (s.toNumber() OR 0.0).toInt();
+END
+
+FN main() RETURNS !Void ->
+  path = bytecodePath();
+  raw = readFile(path) OR RAISE;
+  lines = raw.split("\n");
+
+  IF lines.length() < 1 THEN RAISE "vm: empty puckc"; END
+
+  # Header line: "PUCKC <version>"
+  print("vm.cht: " + path);
+  print("vm.cht: header=" + lines[0]);
+  print("vm.cht: total lines=" + lines.length().toString());
+  print("vm.cht: interpreter loop is the next milestone; run the same " +
+        ".puckc through examples/puck/v10/vm or examples/puck/v11/vm to " +
+        "execute it.");
+  RETURN;
+END
