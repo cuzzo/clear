@@ -46,7 +46,9 @@ end
 
 md = Prick::Report.new(
   files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
-  ffi_boundary: opts[:ffi], top: opts[:top]
+  ffi_boundary: opts[:ffi], top: opts[:top],
+  # links must resolve from wherever the report is written.
+  link_base: (opts[:output] ? File.dirname(opts[:output]) : nil)
 ).to_markdown
 
 if opts[:output]

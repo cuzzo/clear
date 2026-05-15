@@ -1,16 +1,29 @@
 # frozen_string_literal: true
 
 require_relative "rollup"
+require "pathname"
 
 module Prick
   # Markdown report. Leads with the actionable artifact: the top true
   # gaps, repo-relative + linked, ranked by fix-cache churn score.
   class Report
-    def initialize(files:, repo:, resultset:, ffi_boundary: [], top: 50)
-      @repo = repo
+    # link_base: the directory the markdown will be SAVED in, so link
+    # hrefs resolve correctly (a report at gems/prick/report.md must
+    # link ../../src/x.rb, not src/x.rb). Defaults to repo root
+    # (correct for stdout / a root-level report).
+    def initialize(files:, repo:, resultset:, ffi_boundary: [], top: 50,
+                   link_base: nil)
+      @repo = File.realpath(repo)
       @top = top
+      @link_root = Pathname.new(File.expand_path(link_base || @repo))
       @r = Rollup.run(files: files, repo: repo, resultset: resultset,
                       ffi_boundary: ffi_boundary)
+    end
+
+    # href from the report's directory to a repo-relative source file.
+    def href(rel_file)
+      Pathname.new(File.join(@repo, rel_file))
+              .relative_path_from(@link_root).to_s
     end
 
     def to_markdown
@@ -28,7 +41,7 @@ module Prick
       else
         o << "| # | gap | method | churn |\n|---|---|---|---|\n"
         gaps.first(@top).each_with_index do |x, i|
-          link = "[`#{x[:file]}:#{x[:line]}`](#{x[:file]}#L#{x[:line]})"
+          link = "[`#{x[:file]}:#{x[:line]}`](#{href(x[:file])}#L#{x[:line]})"
           o << "| #{i + 1} | #{link} | `#{x[:method]}` | #{x[:churn]} |\n"
         end
         o << "\n- ...(+#{gaps.size - @top} more genuine gaps)\n" if gaps.size > @top
