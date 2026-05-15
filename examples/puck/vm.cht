@@ -1,39 +1,357 @@
 # Puck bytecode VM, in CLEAR.
 #
-# This file is the seed for a CLEAR-language port of `v10/vm.c`. The point
-# is to give us a third reference implementation of Puck's bytecode VM
-# (next to v10's C and v11's C+JIT) so the upcoming Go and Rust ports have
-# something to diff against, all benched against each other from
-# `benchmarks/sequential`.
+# A CLEAR-language port of v10/vm.c restricted to the integer-only subset
+# the JIT in v11 also accepts: PUSH, LOAD, STORE, MATH, COMPARE, JUMP,
+# JUMP_IF_FALSE, CALL, RETURN, SYSCALL (1 = print int, 6 = monotonic ms,
+# 9 = halt). Same bytecode format and opcode numbering as v10 so a .puckc
+# produced for v10 loads here unchanged - as long as the program is
+# int-only. ALLOC and the array / ref family are not handled (CLEAR's
+# heap-ownership model makes them their own port chapter); a .puckc that
+# uses them raises at the first such op.
 #
-# Status: scaffold. It reads the .puckc header (PUCKC version, strings
-# table size, procedure table size) and prints what it found. The
-# interpreter loop itself is intentionally left for the next pass: CLEAR's
-# strict MIR ownership rules (frame rewinding inside loops, refcounted
-# heap, value-tag unions) make the full port a non-trivial follow-up that
-# is better done as its own commit alongside the benchmark harness.
+# Compiler frictions and workarounds applied here are catalogued in
+# docs/agents/puck-clear-bugs.md.
+#
+# The point is to give the upcoming Go and Rust ports a CLEAR baseline to
+# diff against from benchmarks/sequential.
 
-FN bytecodePath() RETURNS String ->
-  RETURN "examples/puck/v11/bench/fib.puckc";
+# ---------------------------------------------------------------------------
+# Opcode + op-kind constants. Mirrored from v10/vm.c's Op enum by integer
+# value so .puckc files emitted for v10 load here unchanged.
+# ---------------------------------------------------------------------------
+
+FN opPush()         RETURNS Int64 -> RETURN  0; END
+FN opPushFloat()    RETURNS Int64 -> RETURN  1; END
+FN opAlloc()        RETURNS Int64 -> RETURN  2; END
+FN opAllocCell()    RETURNS Int64 -> RETURN  3; END
+FN opAllocArray()   RETURNS Int64 -> RETURN  4; END
+FN opLoad()         RETURNS Int64 -> RETURN  5; END
+FN opLoadRef()      RETURNS Int64 -> RETURN  6; END
+FN opArrayLen()     RETURNS Int64 -> RETURN  7; END
+FN opStore()        RETURNS Int64 -> RETURN  8; END
+FN opStoreRef()     RETURNS Int64 -> RETURN  9; END
+FN opArrayGet()     RETURNS Int64 -> RETURN 10; END
+FN opArraySet()     RETURNS Int64 -> RETURN 11; END
+FN opMath()         RETURNS Int64 -> RETURN 12; END
+FN opCompare()      RETURNS Int64 -> RETURN 13; END
+FN opJump()         RETURNS Int64 -> RETURN 14; END
+FN opJumpIfFalse()  RETURNS Int64 -> RETURN 15; END
+FN opCall()         RETURNS Int64 -> RETURN 16; END
+FN opReturn()       RETURNS Int64 -> RETURN 17; END
+FN opSyscall()      RETURNS Int64 -> RETURN 18; END
+
+FN kAdd() RETURNS Int64 -> RETURN  0; END
+FN kSub() RETURNS Int64 -> RETURN  1; END
+FN kMul() RETURNS Int64 -> RETURN  2; END
+FN kDiv() RETURNS Int64 -> RETURN  3; END
+FN kMod() RETURNS Int64 -> RETURN  4; END
+FN kEq()  RETURNS Int64 -> RETURN  5; END
+FN kNeq() RETURNS Int64 -> RETURN  6; END
+FN kLt()  RETURNS Int64 -> RETURN  7; END
+FN kLe()  RETURNS Int64 -> RETURN  8; END
+FN kGt()  RETURNS Int64 -> RETURN  9; END
+FN kGe()  RETURNS Int64 -> RETURN 10; END
+FN kNone() RETURNS Int64 -> RETURN 11; END
+
+FN parseOpName(s: String) RETURNS !Int64 ->
+  IF s == "PUSH"          THEN RETURN opPush();        END
+  IF s == "PUSH_FLOAT"    THEN RETURN opPushFloat();   END
+  IF s == "ALLOC"         THEN RETURN opAlloc();       END
+  IF s == "ALLOC_CELL"    THEN RETURN opAllocCell();   END
+  IF s == "ALLOC_ARRAY"   THEN RETURN opAllocArray();  END
+  IF s == "LOAD"          THEN RETURN opLoad();        END
+  IF s == "LOAD_REF"      THEN RETURN opLoadRef();     END
+  IF s == "ARRAY_LEN"     THEN RETURN opArrayLen();    END
+  IF s == "STORE"         THEN RETURN opStore();       END
+  IF s == "STORE_REF"     THEN RETURN opStoreRef();    END
+  IF s == "ARRAY_GET"     THEN RETURN opArrayGet();    END
+  IF s == "ARRAY_SET"     THEN RETURN opArraySet();    END
+  IF s == "MATH"          THEN RETURN opMath();        END
+  IF s == "COMPARE"       THEN RETURN opCompare();     END
+  IF s == "JUMP"          THEN RETURN opJump();        END
+  IF s == "JUMP_IF_FALSE" THEN RETURN opJumpIfFalse(); END
+  IF s == "CALL"          THEN RETURN opCall();        END
+  IF s == "RETURN"        THEN RETURN opReturn();      END
+  IF s == "SYSCALL"       THEN RETURN opSyscall();     END
+  RAISE "vm: unknown op `" + s + "`";
 END
+
+FN parseKindName(s: String) RETURNS Int64 ->
+  IF s == "+"  THEN RETURN kAdd(); END
+  IF s == "-"  THEN RETURN kSub(); END
+  IF s == "*"  THEN RETURN kMul(); END
+  IF s == "/"  THEN RETURN kDiv(); END
+  IF s == "%"  THEN RETURN kMod(); END
+  IF s == "==" THEN RETURN kEq();  END
+  IF s == "!=" THEN RETURN kNeq(); END
+  IF s == "<"  THEN RETURN kLt();  END
+  IF s == "<=" THEN RETURN kLe();  END
+  IF s == ">"  THEN RETURN kGt();  END
+  IF s == ">=" THEN RETURN kGe();  END
+  RETURN kNone();
+END
+
+
+# ---------------------------------------------------------------------------
+# Data shapes. Note the flat-array layout (per puck-clear-bugs.md #9): a
+# single `allOps` list owns every procedure's bytecode, and each Procedure
+# carries indices into it. The natural per-proc `codes: ByteCode[]@list`
+# field gets clobbered across loop iterations on this CLEAR build, so we
+# work around with index pairs.
+# ---------------------------------------------------------------------------
+
+STRUCT ByteCode {
+  op: Int64,
+  arg: Int64,
+  kind: Int64
+}
+
+STRUCT Procedure {
+  params: Int64,
+  opStart: Int64,
+  opCount: Int64
+}
+
+STRUCT Program {
+  procs:  Procedure[]@list,
+  allOps: ByteCode[]@list
+}
+
+
+# ---------------------------------------------------------------------------
+# Loader.
+# ---------------------------------------------------------------------------
 
 FN parseInt(s: String) RETURNS Int64 ->
   RETURN (s.toNumber() OR 0.0).toInt();
 END
 
-FN main() RETURNS !Void ->
-  path = bytecodePath();
+FN tailAfterFirstSpace(line: String) RETURNS !String ->
+  parts = line.split(" ");
+  IF parts.length() <= 1 THEN RETURN ""; END
+  IF parts.length() == 2 THEN RETURN COPY parts[1]; END
+  MUTABLE rest: String = COPY parts[1];
+  MUTABLE i = 2;
+  WHILE i < parts.length() DO
+    rest = rest + " " + parts[i];
+    i += 1;
+  END
+  RETURN rest;
+END
+
+FN firstToken(line: String) RETURNS !String ->
+  parts = line.split(" ");
+  IF parts.length() == 0 THEN RETURN ""; END
+  RETURN COPY parts[0];
+END
+
+FN loadProgram(path: String) RETURNS !Program ->
   raw = readFile(path) OR RAISE;
   lines = raw.split("\n");
 
-  IF lines.length() < 1 THEN RAISE "vm: empty puckc"; END
+  IF lines.length() < 4 THEN RAISE "vm: truncated puckc"; END
+  IF lines[0] != "PUCKC 1" THEN RAISE "vm: not a puckc file"; END
 
-  # Header line: "PUCKC <version>"
-  print("vm.cht: " + path);
-  print("vm.cht: header=" + lines[0]);
-  print("vm.cht: total lines=" + lines.length().toString());
-  print("vm.cht: interpreter loop is the next milestone; run the same " +
-        ".puckc through examples/puck/v10/vm or examples/puck/v11/vm to " +
-        "execute it.");
+  # Workaround for puck-clear-bugs.md #1: bind the OR-defaulted expression
+  # to a named local so the lifted temp lands in the right scope.
+  stringsTok = firstToken(lines[1]) OR "";
+  IF stringsTok != "STRINGS" THEN RAISE "vm: missing STRINGS header"; END
+  stringsTail = tailAfterFirstSpace(lines[1]) OR "";
+  stringCount = parseInt(stringsTail);
+  MUTABLE pos: Int64 = 2 + stringCount;
+
+  procsTok = firstToken(lines[pos]) OR "";
+  IF procsTok != "PROCS" THEN RAISE "vm: missing PROCS header"; END
+  procsTail = tailAfterFirstSpace(lines[pos]) OR "";
+  procCount = parseInt(procsTail);
+  pos += 1;
+
+  MUTABLE procs:  Procedure[]@list = [];
+  MUTABLE allOps: ByteCode[]@list  = [];
+  # Workaround for puck-clear-bugs.md #2: hoist every loop-body temporary
+  # into an outer MUTABLE so the WHILE body never frame-allocates.
+  MUTABLE p = 0;
+  MUTABLE head: String = "";
+  MUTABLE tail: String = "";
+  MUTABLE opcode: Int64 = 0;
+  MUTABLE argInt: Int64 = 0;
+  MUTABLE kind: Int64 = kNone();
+  MUTABLE header: String[] = [];
+  MUTABLE params: Int64 = 0;
+  MUTABLE codesLen: Int64 = 0;
+  WHILE p < procCount DO
+    header = lines[pos].split(" ");
+    IF header.length() < 4 THEN RAISE "vm: bad PROC header"; END
+    IF header[0] != "PROC" THEN RAISE "vm: bad PROC header"; END
+    params   = parseInt(header[1]);
+    codesLen = parseInt(header[3]);
+    pos += 1;
+
+    opStart = allOps.length();
+    MUTABLE i = 0;
+    WHILE i < codesLen DO
+      head = firstToken(lines[pos]) OR "";
+      tail = tailAfterFirstSpace(lines[pos]) OR "";
+      opcode = parseOpName(head) OR RAISE;
+      argInt = 0;
+      kind = kNone();
+      IF opcode == opMath() || opcode == opCompare() THEN
+        kind = parseKindName(tail);
+      ELSE
+        argInt = parseInt(tail);
+      END
+      allOps.append(ByteCode{ op: opcode, arg: argInt, kind: kind });
+      pos += 1;
+      i += 1;
+    END
+
+    procs.append(Procedure{ params: params, opStart: opStart, opCount: codesLen });
+    p += 1;
+  END
+
+  RETURN Program{ procs: procs, allOps: allOps };
+END
+
+
+# ---------------------------------------------------------------------------
+# Pure-integer interpreter. Each procedure invocation has its own stack
+# (Int64[]@list) and locals frame (Int64[]@list). RETURN pops one value
+# from the local stack; CALL recursively invokes a callee with fresh
+# stack + locals.
+# ---------------------------------------------------------------------------
+
+FN doMath(kind: Int64, a: Int64, b: Int64) RETURNS Int64 ->
+  IF kind == kAdd() THEN RETURN a + b; END
+  IF kind == kSub() THEN RETURN a - b; END
+  IF kind == kMul() THEN RETURN a * b; END
+  IF kind == kDiv() THEN
+    IF b == 0 THEN RETURN 0; END
+    RETURN a / b;
+  END
+  IF kind == kMod() THEN
+    IF b == 0 THEN RETURN 0; END
+    RETURN a MOD b;
+  END
+  RETURN 0;
+END
+
+FN doCompare(kind: Int64, a: Int64, b: Int64) RETURNS Int64 ->
+  IF kind == kEq()  THEN IF a == b THEN RETURN 1; END RETURN 0; END
+  IF kind == kNeq() THEN IF a != b THEN RETURN 1; END RETURN 0; END
+  IF kind == kLt()  THEN IF a <  b THEN RETURN 1; END RETURN 0; END
+  IF kind == kLe()  THEN IF a <= b THEN RETURN 1; END RETURN 0; END
+  IF kind == kGt()  THEN IF a >  b THEN RETURN 1; END RETURN 0; END
+  IF kind == kGe()  THEN IF a >= b THEN RETURN 1; END RETURN 0; END
+  RETURN 0;
+END
+
+FN handleSyscall!(
+    MUTABLE stack: Int64[]@list,
+    id: Int64,
+    startMs: Int64
+) RETURNS !Void ->
+  IF id == 1 THEN
+    v = stack.pop() OR 0_i64;
+    print("OUTPUT: " + v.toString());
+    RETURN;
+  END
+  IF id == 6 THEN
+    now = timestampMs();
+    stack.append(now - startMs);
+    RETURN;
+  END
+  IF id == 9 THEN
+    v = stack.pop() OR 0_i64;
+    RAISE "halt(" + v.toString() + ")";
+  END
+  RAISE "vm.cht: SYSCALL " + id.toString() + " not implemented";
+END
+
+FN runProc!(
+    program: Program,
+    procIdx: Int64,
+    MUTABLE memory: Int64[]@list,
+    startMs: Int64
+) RETURNS !Int64 EFFECTS REENTRANT ->
+
+  proc = program.procs[procIdx];
+  MUTABLE stack: Int64[]@list = [];
+  MUTABLE ip: Int64 = 0;
+
+  WHILE ip < proc.opCount DO
+    c = program.allOps[proc.opStart + ip];
+    ip += 1;
+
+    IF c.op == opPush() THEN
+      stack.append(c.arg);
+    ELSE_IF c.op == opLoad() THEN
+      WHILE memory.length() <= c.arg DO memory.append(0_i64); END
+      stack.append(memory[c.arg]);
+    ELSE_IF c.op == opStore() THEN
+      v = stack.pop() OR 0_i64;
+      WHILE memory.length() <= c.arg DO memory.append(0_i64); END
+      memory[c.arg] = v;
+    ELSE_IF c.op == opMath() THEN
+      b = stack.pop() OR 0_i64;
+      a = stack.pop() OR 0_i64;
+      stack.append(doMath(c.kind, a, b));
+    ELSE_IF c.op == opCompare() THEN
+      b = stack.pop() OR 0_i64;
+      a = stack.pop() OR 0_i64;
+      stack.append(doCompare(c.kind, a, b));
+    ELSE_IF c.op == opJump() THEN
+      ip = c.arg;
+    ELSE_IF c.op == opJumpIfFalse() THEN
+      v = stack.pop() OR 0_i64;
+      IF v == 0 THEN ip = c.arg; END
+    ELSE_IF c.op == opCall() THEN
+      callee = program.procs[c.arg];
+      MUTABLE calleeMem: Int64[]@list = [];
+      MUTABLE m = 0;
+      WHILE m < callee.params DO
+        calleeMem.append(0_i64);
+        m += 1;
+      END
+      MUTABLE j: Int64 = callee.params - 1;
+      WHILE j >= 0 DO
+        calleeMem[j] = stack.pop() OR 0_i64;
+        j -= 1;
+      END
+      res = runProc!(program, c.arg, calleeMem, startMs) OR RAISE;
+      stack.append(res);
+    ELSE_IF c.op == opReturn() THEN
+      RETURN stack.pop() OR 0_i64;
+    ELSE_IF c.op == opSyscall() THEN
+      handleSyscall!(stack, c.arg, startMs) OR RAISE;
+    ELSE
+      RAISE "vm: op " + c.op.toString() + " not supported by vm.cht (use v10 or v11)";
+    END
+  END
+
+  RETURN 0_i64;
+END
+
+
+# ---------------------------------------------------------------------------
+# Entry point.
+# ---------------------------------------------------------------------------
+
+FN bytecodePath() RETURNS String ->
+  RETURN "examples/puck/v11/bench/fib_int_small.puckc";
+END
+
+FN main() RETURNS !Void ->
+  program = loadProgram(bytecodePath()) OR RAISE;
+  startMs = timestampMs();
+
+  IF program.procs.length() <= 0 THEN RAISE "vm: program has no procs"; END
+  mainProc = program.procs[0];
+  MUTABLE mainMem: Int64[]@list = [];
+  MUTABLE i = 0;
+  WHILE i < mainProc.params DO
+    mainMem.append(0_i64);
+    i += 1;
+  END
+  runProc!(program, 0, mainMem, startMs) OR RAISE;
   RETURN;
 END

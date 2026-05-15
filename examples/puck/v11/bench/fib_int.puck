@@ -1,0 +1,20 @@
+(* Integer-only fib(35) bench. No string literals so the .puckc has no
+   ALLOC ops, which keeps the CLEAR-side vm.cht runnable on it. v10 and
+   v11 produce identical output. *)
+
+MODULE FibIntBench;
+
+PROCEDURE fib(n);
+  IF n < 2 THEN
+    RETURN n;
+  END;
+  RETURN fib(n - 1) + fib(n - 2);
+END;
+
+BEGIN
+  start := TIME();
+  result := fib(35);
+  elapsed := TIME() - start;
+  SYSCALL(1, result);
+  SYSCALL(1, elapsed);
+END.

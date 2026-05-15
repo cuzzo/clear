@@ -1,0 +1,19 @@
+(* Small fib benchmark for vm.cht testing - fib(20) keeps the recursion
+   depth inside CLEAR's default 64KB fiber stack. *)
+
+MODULE FibIntSmall;
+
+PROCEDURE fib(n);
+  IF n < 2 THEN
+    RETURN n;
+  END;
+  RETURN fib(n - 1) + fib(n - 2);
+END;
+
+BEGIN
+  start := TIME();
+  result := fib(20);
+  elapsed := TIME() - start;
+  SYSCALL(1, result);
+  SYSCALL(1, elapsed);
+END.
