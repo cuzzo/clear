@@ -6678,9 +6678,20 @@ class MIRLowering
     end
 
     cond = lower(node.condition)
+    # Bug #1 (docs/agents/clear-bug123-forensic.md): lowering the condition
+    # may push hoisted Lets onto the shared @pending_stmts (e.g. a
+    # `maybe() OR ""` whose result is heap). If we don't drain them here,
+    # the FIRST statement of then_branch's lower_body flushes them into
+    # the then-body — after the cond that references them. Drain now and
+    # wrap [pending..., IfStmt] in a transparent ScopeBlock so the temp's
+    # Let precedes the cond that uses it and its Cleanup still scopes
+    # tightly around the IfStmt.
+    cond_pending = flush_pending
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
-    MIR::IfStmt.new(cond, then_body, else_body)
+    if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
+    return if_stmt if cond_pending.empty?
+    MIR::ScopeBlock.new(cond_pending + [if_stmt])
   end
 
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
