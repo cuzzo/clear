@@ -19,6 +19,8 @@ module Decomplex
   #     conjunct/case." This is the Chang-Podgurski-Yang neglected-
   #     condition / likely-bug signal. Ranked by support of T.
   class Miner
+    attr_reader :sites
+
     def initialize(sites)
       @sites = sites
     end

@@ -2,6 +2,8 @@
 
 require_relative "decomplex/site_extractor"
 require_relative "decomplex/miner"
+require_relative "decomplex/co_update"
+require_relative "decomplex/predicate_alias"
 
 # Decomplex: decision-level duplication + neglected-condition detector.
 # See decomplex.gemspec for the rationale. v0 scope is exact-match

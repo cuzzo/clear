@@ -49,3 +49,34 @@ nc.first(40).each do |h|
   puts "  full pattern: #{h[:pattern].join(' | ')}"
   puts "  MISSING here: #{h[:missing]}"
 end
+
+cu = Decomplex::CoUpdate.scan(files)
+nu = cu.neglected_updates
+puts "\n\n=== NEGLECTED UPDATES (#{nu.size}) " \
+     "-- co-written state, one write missing (redundant-state desync) ==="
+nu.first(40).each do |h|
+  puts format("\n[support=%d] %s writes .%s but NOT .%s",
+              h[:support], h[:at], h[:has], h[:missing])
+  puts "  same-receiver write: #{h[:recv]}.#{h[:has]} = ..."
+  puts "  pair co-written elsewhere: .#{h[:pair][0]} + .#{h[:pair][1]}"
+end
+
+pa = Decomplex::PredicateAlias.scan(files)
+ac = pa.alias_clusters
+puts "\n\n=== PREDICATE ALIASES (#{ac.size}) " \
+     "-- one decision under multiple names (re-derived state) ==="
+ac.first(30).each do |h|
+  puts "\n  names: #{h[:names].join(' = ')}"
+  puts "  body : #{h[:body]}"
+  h[:sites].each { |s| puts "    #{s}" }
+end
+
+rm = pa.reification_misses(miner.sites)
+unless rm.empty?
+  puts "\n\n=== REIFICATION MISSES (#{rm.size}) " \
+       "-- existing predicate reinvented inline ==="
+  rm.first(30).each do |h|
+    puts "\n  predicate ##{h[:predicate]} == #{h[:body]}"
+    puts "  reinvented inline at #{h[:inline_at]}"
+  end
+end
