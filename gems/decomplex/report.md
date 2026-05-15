@@ -9,6 +9,7 @@
 
 ## Table of Contents
 - [Project Prioritization](#project-prioritization)
+- [Decision Pressure (256)](#decision-pressure-256)
 - [Missing Abstractions (217)](#missing-abstractions-217)
 - [Reification Misses (129)](#reification-misses-129)
 - [Semantic Predicate Aliases (3)](#semantic-predicate-aliases-3)
@@ -24,6 +25,7 @@
 ## Project Prioritization
 _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 
+- **[tier 1]** [Decision Pressure (256)](#decision-pressure-256): loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)
 - **[tier 1]** [Missing Abstractions (217)](#missing-abstractions-217): guard tuple recomputed across >=2 decision units
 - **[tier 1]** [Reification Misses (129)](#reification-misses-129): an existing predicate reinvented inline -- invariant #16
 - **[tier 1]** [Exact Predicate Aliases (7)](#exact-predicate-aliases-7): identical one-line predicate body under >=2 names
@@ -34,6 +36,61 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 - **[tier 2]** [Type-3 Clones (missed rename) (14)](#type3-clones-missed-rename-14): pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug
 - **[tier 3]** [Neglected Path Conditions (2203)](#neglected-path-conditions-2203): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
 - **[tier 3]** [Broken Protocols (1730)](#broken-protocols-1730): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
+
+## Decision Pressure (256)
+_loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)_
+
+- `.type_info` drives **274** defensive type/nil decisions across 94 method(s)
+  - `src/annotator-helpers/function_analysis.rb:243` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:247` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:248` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:248` (resolve_call)
+- `.value` drives **110** defensive type/nil decisions across 54 method(s)
+  - `src/annotator-helpers/auto_inference.rb:760` (walk_binops) ; `src/annotator-helpers/capabilities.rb:1055` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1059` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1067` (_unified_capture_walk)
+- `.symbol` drives **63** defensive type/nil decisions across 44 method(s)
+  - `src/annotator-helpers/capabilities.rb:93` (cap_var_sync) ; `src/annotator-helpers/capabilities.rb:118` (cap_var_layout) ; `src/annotator-helpers/capabilities.rb:142` (validate_capability) ; `src/annotator-helpers/capabilities.rb:164` (validate_capability)
+- `.target` drives **60** defensive type/nil decisions across 35 method(s)
+  - `src/annotator-helpers/auto_inference.rb:655` (record_index_assign) ; `src/annotator-helpers/capabilities.rb:746` (cap_var_name) ; `src/annotator-helpers/function_analysis.rb:909` (verify_return) ; `src/annotator-helpers/generic_analysis.rb:645` (find_container_source)
+- `.name` drives **55** defensive type/nil decisions across 37 method(s)
+  - `src/annotator-helpers/auto_inference.rb:653` (record_index_assign) ; `src/annotator-helpers/capabilities.rb:1040` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1292` (_bg_walk) ; `src/annotator-helpers/generic_analysis.rb:630` (register_container_borrow!)
+- `.right` drives **53** defensive type/nil decisions across 17 method(s)
+  - `src/annotator-helpers/pipe_analysis.rb:24` (visit_Smooth) ; `src/annotator-helpers/pipe_analysis.rb:26` (visit_Smooth) ; `src/annotator-helpers/pipe_analysis.rb:263` (analyze_select_family_op) ; `src/annotator-helpers/pipe_analysis.rb:263` (analyze_select_family_op)
+- `.current_fn_ctx` drives **35** defensive type/nil decisions across 23 method(s)
+  - `src/annotator-helpers/capabilities.rb:1148` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1185` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1329` (record_capability_binding) ; `src/annotator-helpers/capabilities.rb:1337` (record_capability_binding)
+- `.full_type` drives **33** defensive type/nil decisions across 20 method(s)
+  - `src/annotator-helpers/capabilities.rb:95` (cap_var_sync) ; `src/annotator-helpers/capabilities.rb:104` (cap_var_storage) ; `src/annotator-helpers/capabilities.rb:120` (cap_var_layout) ; `src/annotator-helpers/capabilities.rb:186` (validate_capability)
+- `[:type]` drives **29** defensive type/nil decisions across 20 method(s)
+  - `src/annotator-helpers/function_analysis.rb:326` (verify_function_signature!) ; `src/annotator-helpers/function_analysis.rb:553` (atomic_cell_to_atomic_param?) ; `src/annotator-helpers/function_analysis.rb:693` (verify_lifetime_source!) ; `src/annotator-helpers/function_analysis.rb:726` (declare_and_verify_params)
+- `.left` drives **29** defensive type/nil decisions across 18 method(s)
+  - `src/annotator-helpers/pipe_analysis.rb:63` (stamp_observable_terminal!) ; `src/annotator-helpers/pipe_analysis.rb:240` (analyze_collect_op) ; `src/annotator-helpers/pipe_analysis.rb:588` (analyze_limit_op) ; `src/annotator-helpers/pipe_analysis.rb:1335` (analyze_shard_op)
+- `.type` drives **28** defensive type/nil decisions across 21 method(s)
+  - `src/annotator-helpers/auto_inference.rb:210` (record_local) ; `src/annotator-helpers/auto_inference.rb:504` (stamp_map_pairs!) ; `src/annotator-helpers/auto_inference.rb:505` (stamp_map_pairs!) ; `src/annotator-helpers/auto_inference.rb:572` (walk_for_shape_decls)
+- `.return_type` drives **27** defensive type/nil decisions across 15 method(s)
+  - `src/annotator-helpers/capabilities.rb:566` (visit_post_clauses!) ; `src/annotator-helpers/function_analysis.rb:170` (resolve_call) ; `src/annotator-helpers/reentrance.rb:162` (validate_not_logical_return!) ; `src/annotator-helpers/reentrance.rb:164` (validate_not_logical_return!)
+- `.last` drives **25** defensive type/nil decisions across 6 method(s)
+  - `src/annotator.rb:5619` (expr_result_type) ; `src/annotator.rb:5621` (expr_result_type) ; `src/annotator.rb:5628` (expr_result_type) ; `src/annotator.rb:5628` (expr_result_type)
+- `.token` drives **22** defensive type/nil decisions across 19 method(s)
+  - `src/annotator-helpers/capabilities.rb:1341` (record_capability_binding) ; `src/annotator-helpers/capabilities.rb:1342` (record_capability_binding) ; `src/mir/concurrency_checks.rb:73` (check_hold_across_yield!) ; `src/mir/concurrency_checks.rb:171` (check_reentrant!)
+- `.capture_analysis` drives **22** defensive type/nil decisions across 17 method(s)
+  - `src/mir/control_flow.rb:675` (transfer_stmt) ; `src/mir/control_flow.rb:755` (collect_ownership_transfers) ; `src/mir/control_flow.rb:841` (_walk_bg_captures_in_expr) ; `src/mir/control_flow.rb:870` (collect_bg_body_gives)
+- `[name]` drives **21** defensive type/nil decisions across 20 method(s)
+  - `src/annotator-helpers/effects.rb:985` (max_tier_for_calls) ; `src/annotator-helpers/fixable_helpers.rb:310` (emit_use_of_moved_error!) ; `src/annotator-helpers/fixable_helpers.rb:997` (emit_with_materialized_needs_tense!) ; `src/annotator-helpers/fixable_helpers.rb:1200` (build_decl_cap_insert_fix)
+- `.tail` drives **21** defensive type/nil decisions across 6 method(s)
+  - `src/mir/fsm_transform/emit.rb:341` (build_recursive) ; `src/mir/fsm_transform/emit.rb:375` (build_recursive) ; `src/mir/fsm_transform/emit.rb:376` (build_recursive) ; `src/mir/fsm_transform/emit.rb:444` (build_recursive)
+- `.element_type` drives **19** defensive type/nil decisions across 15 method(s)
+  - `src/annotator-helpers/generic_analysis.rb:182` (validate_type_annotation!) ; `src/annotator-helpers/method_analysis.rb:42` (narrow_collection_type!) ; `src/annotator-helpers/method_analysis.rb:121` (resolve_typed_method) ; `src/annotator.rb:4305` (infer_element_type)
+- `@union_schemas` drives **18** defensive type/nil decisions across 13 method(s)
+  - `src/mir/mir_lowering.rb:262` (owned_value_temp_needs_cleanup?) ; `src/mir/mir_lowering.rb:263` (owned_value_temp_needs_cleanup?) ; `src/mir/mir_lowering.rb:291` (copy_container_borrow_if_needed) ; `src/mir/mir_lowering.rb:1297` (lower_function_def)
+- `[:var_node]` drives **18** defensive type/nil decisions across 12 method(s)
+  - `src/annotator-helpers/capabilities.rb:668` (acquire_capability!) ; `src/annotator-helpers/capabilities.rb:679` (acquire_capability!) ; `src/annotator-helpers/capabilities.rb:709` (acquire_capability!) ; `src/annotator-helpers/capabilities.rb:714` (acquire_capability!)
+- `.payload_type` drives **17** defensive type/nil decisions across 5 method(s)
+  - `src/annotator-helpers/function_analysis.rb:192` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:195` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:199` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:200` (resolve_call)
+- `.reg` drives **15** defensive type/nil decisions across 11 method(s)
+  - `src/annotator-helpers/fixable_helpers.rb:1000` (emit_with_materialized_needs_tense!) ; `src/annotator-helpers/fixable_helpers.rb:1201` (build_decl_cap_insert_fix) ; `src/annotator-helpers/fixable_helpers.rb:1229` (build_decl_cap_replace_fix) ; `src/annotator-helpers/function_analysis.rb:970` (return_is_borrow?)
+- `.arms` drives **14** defensive type/nil decisions across 8 method(s)
+  - `src/annotator-helpers/capabilities.rb:1221` (_unified_capture_walk) ; `src/annotator-helpers/effects.rb:1178` (scan_for_raises) ; `src/annotator.rb:4523` (visit_WithBlock) ; `src/annotator.rb:4682` (visit_WithBlock)
+- `@og` drives **14** defensive type/nil decisions across 6 method(s)
+  - `src/annotator.rb:1199` (analyze_control_flow_branches) ; `src/annotator.rb:1206` (analyze_control_flow_branches) ; `src/annotator.rb:1212` (analyze_control_flow_branches) ; `src/annotator.rb:1223` (analyze_control_flow_branches)
+- `.sync` drives **13** defensive type/nil decisions across 12 method(s)
+  - `src/annotator-helpers/function_analysis.rb:204` (resolve_call) ; `src/annotator-helpers/generic_analysis.rb:453` (generic_type_has_capabilities?) ; `src/annotator-helpers/pipe_analysis.rb:1147` (collect_sharded_names) ; `src/annotator-helpers/pipe_analysis.rb:1170` (pre_scan_node_for_sharded)
+- ...(+231 more)
 
 ## Missing Abstractions (217)
 _guard tuple recomputed across >=2 decision units_
@@ -343,6 +400,6 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 
 ## Run Summary
 - Files analyzed: 93
-- Detectors: 10 (all shipped, self-tested)
-- Total candidates: 10662
+- Detectors: 11 (all shipped, self-tested)
+- Total candidates: 10918
 - Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to (see docs/agents/design.md)

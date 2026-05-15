@@ -32,6 +32,7 @@ module Decomplex
       @broken = sm.broken_protocol
       @derived = DerivedState.scan(@files)
       @clones  = Type3Clone.scan(@files)
+      @pressure = DecisionPressure.scan(@files).ranked
     end
 
     # tier = signal quality (1 = highest signal / lowest false-positive,
@@ -40,6 +41,7 @@ module Decomplex
     # must not outrank a precise one. Within a section, items are
     # frequency-ranked (support / scatter / confidence, descending).
     SECTIONS = [
+      ["Decision Pressure",      :@pressure, 1, "loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)"],
       ["Missing Abstractions",   :@miss,   1, "guard tuple recomputed across >=2 decision units"],
       ["Reification Misses",     :@reif,   1, "an existing predicate reinvented inline -- invariant #16"],
       ["Semantic Predicate Aliases", :@salias, 1, "one decision, multiple names (receiver/polarity folded)"],
@@ -126,6 +128,10 @@ module Decomplex
     def render(out, title, v)
       v.first(25).each do |h|
         out << case title
+               when "Decision Pressure"
+                 "- `#{h[:contract]}` drives **#{h[:decisions]}** defensive " \
+                 "type/nil decisions across #{h[:methods]} method(s)\n" \
+                 "  - #{h[:sites].first(4).map { |s| nav(s) }.join(' ; ')}\n"
                when "Missing Abstractions"
                  "- **[#{h[:kind]}]** support=#{h[:support]} scatter=#{h[:scatter]} " \
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \
