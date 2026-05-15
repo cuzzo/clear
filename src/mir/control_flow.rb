@@ -1372,45 +1372,35 @@ module LoopFrameAnalysis
   # Only includes types that actually make frame-arena allocations (collections,
   # arrays, strings) -- primitives like Int64 are excluded even when
   # frame_provenance? is set.
+  # A collection/string/array/map binding lives in the frame arena unless
+  # EscapeAnalysis promoted it to the heap, or it's a rodata symbol. That
+  # is the actual definition of "needs per-iteration mark/rewind".
+  #
+  # The old code keyed on `frame_provenance?` (== `@provenance == :frame`),
+  # but `:frame` is the implicit default and is left unstamped (nil) — so
+  # the check only ever fired for the rare explicitly-located case and
+  # missed every ordinary frame collection (`split` result, `@list`
+  # literal, ...). This is the correct general predicate: it READS the
+  # EscapeAnalysis heap stamp (invariant #16, no use-site re-derivation)
+  # and the static Type shape — no per-allocator heuristics.
+  sig { params(ti: T.untyped).returns(T::Boolean) }
+  def self.frame_local_collection?(ti)
+    return false unless ti
+    collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
+    collection_shaped && !ti.heap? && !ti.rodata?
+  end
+
   sig { params(body: T::Array[T.untyped], _local_names: T::Set[String]).returns(T::Array[T.untyped]) }
   def self.local_frame_decls(body, _local_names)
     decls = []
     scan_direct(body) do |s|
       case s
       when AST::VarDecl
-        ti = Type.from_node(s)
-        next unless ti
-        collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
-        # Bug #2: same unresolved-provenance-from-frame-stdlib-call case
-        # as the BindExpr branch below, for `MUTABLE x = split(...)`.
-        rhs_frame_stdlib =
-          ti.provenance.nil? &&
-          !ti.heap? &&
-          s.respond_to?(:value) && s.value.respond_to?(:stdlib_allocates) &&
-          s.value.stdlib_allocates == true
-        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
-        decls << s if is_frame && s.name.is_a?(String)
+        next unless frame_local_collection?(Type.from_node(s)) && s.name.is_a?(String)
+        decls << s
       when AST::BindExpr
-        ti = Type.from_node(s)
-        next unless ti
-        collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
-        # Bug #2 (docs/agents/clear-bug123-forensic.md): a stdlib call with
-        # `allocates: true` and `:node_storage` (split / substr / concat /
-        # toString / ...) lands its result in the frame arena, but the
-        # binding's type_info provenance is left unresolved (nil), so
-        # `frame_provenance?` is false and the decl was invisible here —
-        # mark_per_iter never got set and the MIR checker fired
-        # FRAME_NO_REWIND with no way for the lowering to satisfy it.
-        # Treat an unresolved-provenance collection bound from a
-        # frame-allocating stdlib call as frame-local. Explicit :heap /
-        # owned bindings are excluded (they don't need per-iter rewind).
-        rhs_frame_stdlib =
-          ti.provenance.nil? &&
-          !ti.heap? &&
-          s.value.respond_to?(:stdlib_allocates) &&
-          s.value.stdlib_allocates == true
-        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
-        decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
+        next unless s.mode == :decl && s.name.is_a?(String)
+        decls << s if frame_local_collection?(Type.from_node(s))
       end
     end
     decls
