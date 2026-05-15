@@ -1394,6 +1394,12 @@ module LoopFrameAnalysis
 
   # Does var_name appear as a value arg to a mutates_receiver call on an outer
   # container anywhere in the loop body (including nested loops)?
+  #
+  # The match walks transitively through struct/union/list initialisers so
+  # `outer.append(Wrap{ field: var_name })` and `outer.append([var_name])`
+  # are recognised — the variable still escapes into the outer container,
+  # the wrapping layer is just where the move ends up. See
+  # docs/agents/bug9-forensic.md for the bug class.
   sig { params(var_name: String, body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
   def self.escapes_to_outer?(var_name, body, local_names)
     found = T.let(false, T::Boolean)
@@ -1403,14 +1409,36 @@ module LoopFrameAnalysis
       when AST::MethodCall
         receiver = node.object
         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+        found = true if node.args.any? { |a| expr_references_var?(a, var_name) }
       when AST::FuncCall
         receiver = node.args.first
         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args.drop(1).any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+        found = true if node.args.drop(1).any? { |a| expr_references_var?(a, var_name) }
       end
     end
     found
+  end
+
+  # Does `expr` (or any sub-expression nested in a struct/union/list literal)
+  # reference an Identifier with the given name? Used by escapes_to_outer?
+  # so that a frame-local captured into `outer.append(Wrap{ field: name })`
+  # is still recognised as escaping.
+  sig { params(expr: T.untyped, var_name: String).returns(T::Boolean) }
+  def self.expr_references_var?(expr, var_name)
+    return false if expr.nil?
+    case expr
+    when AST::Identifier
+      expr.name == var_name
+    when AST::StructLit, AST::UnionVariantLit
+      (expr.fields || {}).any? { |_, v| expr_references_var?(v, var_name) }
+    when AST::ListLit
+      (expr.items || []).any? { |item| expr_references_var?(item, var_name) }
+    when AST::MoveNode, AST::CopyNode
+      # GIVE / COPY pass the inner value through — keep walking.
+      expr_references_var?(expr.value, var_name)
+    else
+      false
+    end
   end
 
   # Walk the loop body subtree once. For each mutates_receiver call, ask the
