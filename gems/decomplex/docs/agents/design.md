@@ -151,6 +151,47 @@ deliberate:
   guarded-pair sequence, path-condition, type-3 clone: none exist in
   nil-kill.
 
+## Why no whole-program CFG or pointer aliasing
+
+This is a deliberate boundary, not an unbuilt feature.
+
+"Aliasing" splits in two. **Pointer/memory aliasing** (do `x` and `y`
+reference the same object) is the undecidable-in-practice points-to
+problem needing interprocedural CFG + Andersen/Steensgaard — decomplex
+**never** needs it. **Decision/predicate aliasing** (`frame?` ≡
+`provenance == :frame`) is solved by *canonicalization* over a
+predicate-definition graph — definitional substitution, not points-to.
+That is the only aliasing decomplex needs, and it is bounded and
+dependency-free.
+
+No detector on the roadmap needs an interprocedural CFG. The heaviest
+planned machinery is (a) a *guard stack* accumulated during AST descent
+for the path-condition normal form (~30 lines, not a CFG), (b) a call
+graph restricted to one-line boolean predicates for semantic alias,
+(c) *intra-procedural* reaching-defs for derived-state. All bounded,
+all single-method or single-purpose, none whole-program.
+
+Three reasons this is correct, not a compromise:
+
+1. **Engler's thesis, reconfirmed here.** Lightweight, unsound,
+   statistical intra-procedural mining beats heavyweight sound
+   analysis on bug-finding ROI. decomplex rediscovered the
+   branch-coverage P0 cluster *and* the `.storage`/`.provenance`
+   desync with zero CFG and zero alias — the exact target bugs, by
+   set arithmetic.
+2. **The sound version exists at the right layer already.** "Every
+   AllocMark has a Cleanup on every path" is a whole-program-flow
+   property, and `MIRChecker`'s 7 invariants already enforce it on the
+   compiled language's MIR. decomplex targets the *Ruby compiler
+   source*, where the defect is re-derivation / half-application of a
+   decision — a statistical-duplication problem, not a dataflow one.
+   A CFG here would reimplement MIRChecker at the wrong level.
+3. **The discipline keeps it shippable.** When a detector seems to
+   "need whole-program alias to avoid false positives," that is the
+   signal to accept the FP and rank (principle 2), or defer to a tool
+   that already owns that machinery (Sorbet / nil-kill) — never to
+   grow a points-to engine inside a zero-dep AST tool.
+
 ## Design principles
 
 1. **Zero runtime deps.** stdlib `RubyVM::AbstractSyntaxTree` only.
