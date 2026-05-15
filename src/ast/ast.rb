@@ -24,6 +24,32 @@ module AST
     end
   end
 
+  # The immediately-nested *value* children of a transparent wrapper
+  # expression: struct/union-literal field values, list-literal items,
+  # and the inner value of a MOVE/COPY/CLONE/SHARE/FREEZE/CapabilityWrap
+  # pass-through. For anything else: [].
+  #
+  # This is the single source of truth for "what values does a stored /
+  # moved expression actually carry through". Before this existed, every
+  # site that needed to descend a stored expression (escape detection,
+  # frame-concat promotion, ...) hand-maintained its own `case node`
+  # recursion, and those drifted apart — e.g. one handled UnionVariantLit
+  # and another didn't (docs/agents/bug9-forensic.md). Add a new wrapper
+  # shape here once and every consumer descends it consistently.
+  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  def self.wrapped_children(expr)
+    case expr
+    when StructLit, UnionVariantLit
+      (expr.fields&.values || []).compact
+    when ListLit
+      (expr.items || []).compact
+    when MoveNode, CopyNode, CloneNode, ShareNode, FreezeNode, CapabilityWrap
+      expr.value ? [expr.value] : []
+    else
+      []
+    end
+  end
+
   # Yield every BgBlock / BgStreamBlock reachable from `body`, including
   # nested ones inside control flow (WHILE/MATCH/IF/FOR/WITH/DO),
   # expression positions (VarDecl.value, FuncCall.args), and inside

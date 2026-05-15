@@ -408,16 +408,15 @@ module EscapeAnalysis
       node.storage = :heap
       node.parts&.each { |p| e2_promote_frame_concats!(p) }
       true
-    when AST::StructLit, AST::UnionVariantLit
-      promoted = T.let(false, T::Boolean)
-      node.fields&.each_value { |v| promoted |= e2_promote_frame_concats!(v) }
-      promoted
-    when AST::ListLit
-      promoted = T.let(false, T::Boolean)
-      node.items.each { |it| promoted |= e2_promote_frame_concats!(it) }
-      promoted
     else
-      false
+      # Descend transparent value wrappers via the single canonical
+      # AST.wrapped_children definition (struct/union/list literals,
+      # GIVE/COPY/...). Keeping this in lock-step with escape detection
+      # is the whole point of the shared helper — see
+      # docs/agents/bug9-forensic.md.
+      promoted = T.let(false, T::Boolean)
+      AST.wrapped_children(node).each { |c| promoted |= e2_promote_frame_concats!(c) }
+      promoted
     end
   end
 

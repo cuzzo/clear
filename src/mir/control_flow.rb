@@ -1443,26 +1443,16 @@ module LoopFrameAnalysis
     found
   end
 
-  # Does `expr` (or any sub-expression nested in a struct/union/list literal)
-  # reference an Identifier with the given name? Used by escapes_to_outer?
-  # so that a frame-local captured into `outer.append(Wrap{ field: name })`
-  # is still recognised as escaping.
+  # Does `expr` reference an Identifier named `var_name`, directly or
+  # through any transparent value wrapper (struct/union/list literal,
+  # GIVE/COPY/CLONE/SHARE/FREEZE)? Descends via the single canonical
+  # AST.wrapped_children definition so escape detection can never drift
+  # out of sync with the other consumers (docs/agents/bug9-forensic.md).
   sig { params(expr: T.untyped, var_name: String).returns(T::Boolean) }
   def self.expr_references_var?(expr, var_name)
     return false if expr.nil?
-    case expr
-    when AST::Identifier
-      expr.name == var_name
-    when AST::StructLit, AST::UnionVariantLit
-      (expr.fields || {}).any? { |_, v| expr_references_var?(v, var_name) }
-    when AST::ListLit
-      (expr.items || []).any? { |item| expr_references_var?(item, var_name) }
-    when AST::MoveNode, AST::CopyNode
-      # GIVE / COPY pass the inner value through — keep walking.
-      expr_references_var?(expr.value, var_name)
-    else
-      false
-    end
+    return true if expr.is_a?(AST::Identifier) && expr.name == var_name
+    AST.wrapped_children(expr).any? { |c| expr_references_var?(c, var_name) }
   end
 
   # Walk the loop body subtree once. For each mutates_receiver call, ask the
