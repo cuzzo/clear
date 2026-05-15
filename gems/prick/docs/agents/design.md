@@ -1,68 +1,78 @@
 # prick — design
 
-## Why this exists (and why it IS a gem)
+## What it is (and why it is a general gem)
 
-A flat "673/2732 uncovered" is unactionable: gaps are not equal.
-prick is the **capstone** — it turns the raw coverage gap into a
-prioritised, categorical answer. It was promoted from the one-off
-`tools/branch_prick.rb` probe because it is a coherent, reusable,
-versioned product with its own identity, exactly like fix-cache (which
-is itself an aggregation gem). "It's an aggregation" is an argument to
-*consume* the other tools, not against gem status.
+A flat uncovered-count is unactionable: gaps are not equal. prick is
+a **general engine**: it categorizes every dark branch arm by
+reachability class and ranks the genuine ones by consumed fix-cache
+churn — "the top true gaps to test, in order." It is a gem for the
+same reason fix-cache is: a coherent, reusable, versioned product
+with its own identity. "It's an aggregation" argues for *consuming*
+the others, not against gem status.
+
+## Generality / no baked-in lexicon
+
+The earlier objection was correct: the first cut baked CLEAR jargon
+(`.cht`, `fuzz`, `nil-kill`) and CLEAR's FFI method names into the
+gem. Fixed:
+
+- **Vocabulary is generic.** Category actions are
+  testing-strategy-neutral ("error/raise path — invalid input only",
+  "external/boundary — integration test"). No project jargon.
+- **The project lexicon is caller-supplied.** `ffi_boundary:` (the
+  external/boundary method names) defaults to empty in the gem; the
+  consuming project passes its own (CLEAR's set lives in the CLI
+  `exe/prick`, not the library). `DIAGNOSTIC_MIDS` is general Ruby
+  (`raise`/`fail`/`abort`).
+
+The *engine* — categorize uncovered branches, rank genuine by churn —
+is general to any Ruby project with branch coverage + git history.
 
 ## Boundary
 
-OWNS the gap-categorization analysis (the per-arm classifier, the
-dead/live decision split, the categorical rollup). CONSUMES
-`fix-cache` (churn) via the sibling gem; CONSUMES an optional nil-kill
-verdict for type_norm removability. Re-derives nothing.
+OWNS gap-categorization (AST-structural per-arm classifier, dead/live
+decision split, category rollup, the gap ranking). CONSUMES the
+sibling `fix-cache` gem for churn (require_relative, not re-derived)
+and an optional nil-kill verdict for `type_norm`. Re-derives nothing.
 
-## Categories (the user's model: not all gaps equal)
+## Categories
 
-| category | meaning | action |
+| category | meaning | not a test target? |
 |---|---|---|
-| `type_norm` | arm/decision guards a type/nil check (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | likely removable — CONFIRM with nil-kill; a typed contract kills the whole cluster |
-| `dead` | no sibling arm of the decision ever taken: decision never executes | audit as dead code → delete (complexity down) |
-| `defensive` | live decision, inert/invariant-pinned (empty else, `nil`) | accept + annotate, drop from denominator |
-| `ffi` | extern/require/module boundary | a few targeted `.cht` |
-| `diagnostic` | arm raises/diagnoses | one negative unit spec (fuzz cannot reach) |
-| `genuine` | live, reachable, input-determined, none of the above | the REAL gap — test it |
+| `type_norm` | type/nil guard (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | yes — likely dead if the contract were strictly typed |
+| `dead` | no sibling arm ever taken: decision never executes | yes — audit/delete |
+| `defensive` | live, inert/invariant-pinned | yes — accept |
+| `ffi` | caller-declared external/boundary method | special — integration test |
+| `diagnostic` | arm raises/diagnoses | special — invalid-input only |
+| `genuine` | live, reachable, input-determined | **NO — this is the gap; ranked by churn** |
 
-The one genuinely-new signal: **`genuine` arms × fix-cache churn =
-"bugs highly likely HERE"** — the small actionable slice.
+## Report shape (per the user's ask)
 
-## Classification is AST-structural
+Leads with **Top True Gaps**: every `genuine` arm, repo-relative +
+markdown-linked (`[src/x.rb:226](src/x.rb#L226)`), ranked by the
+file's normalized fix-cache churn. Then a compact category summary
+(not a per-file %-table — that was unhelpful). The actionable list
+is the headline; the rest is context.
 
-Never a regex over the arm line. The SimpleCov parent tuple gives the
-decision kind; the arm's `(line,col)` span is matched to an AST node;
-the decision's CONDITION (parent node's first child — where a
-type-guard lives) and the arm body are inspected. The FFI-boundary
-method set and diagnostic message names are the only per-project
-lexicon.
+## AST-structural, never a line regex
 
-## Honest v0 precision caveats (Engler discipline: ranked, refine)
+SimpleCov parent tuple → decision kind; arm `(line,col)` span → AST
+node; the decision's *condition* (parent first child, where a
+type-guard lives) and the arm body are inspected.
 
-- `diagnostic` is **over-greedy**: it tags any arm whose subtree
-  contains `raise`/`fail`/`abort` *anywhere*, not "the arm IS
-  primarily a raise". Over-counts vs the older probe (305 vs 16).
-  Refinement: require the raise to be the arm's dominant outcome.
-- `type_norm` is **under-counted**: the classifier does not do
-  decomplex's intra-procedural `local = recv.accessor` resolution, so
-  a guard on a local that came from `.type_info` is missed unless the
-  guard is syntactically on the accessor. Refinement: fold in
-  decomplex's local→contract resolution (consume, don't re-derive).
-- Net: the *shape* and the bug-likely join are sound and empirically
-  validated (top genuine sites are the exact cleanup/ownership
-  methods that produced bugs B1–B4); the per-category percentages are
-  candidates to tighten, not verdicts.
+## Honest v0 precision caveats (Engler: ranked, refine)
 
-## Validated result (src/mir/{mir_lowering,control_flow,escape_analysis})
-
-935 dark arms: diagnostic 305 (32.6%), genuine 273 (29.2%), type_norm
-229 (24.5%), dead 68 (7.3%), ffi 46 (4.9%), defensive 14 (1.5%).
-Bugs-highly-likely #1: `src/mir/mir_lowering.rb` — 187 genuine arms ×
-churn 1.0; top sites `hoist_alloc`, `owned_value_temp_needs_cleanup?`
-— the exact methods behind B1–B4. The synthesis points at real bugs.
+- `diagnostic` over-greedy: tags any arm whose subtree contains
+  `raise`/`fail`/`abort` anywhere, not "the arm IS primarily a
+  raise." Over-counts. Refine: require it to be the dominant outcome.
+- `type_norm` under-counted: no intra-procedural `local =
+  recv.accessor` resolution, so a guard on a local sourced from
+  `.type_info` is missed unless syntactically on the accessor. Refine
+  by consuming decomplex's local→contract resolution (don't re-derive).
+- The Top-True-Gaps ranking and the categorization *shape* are sound
+  and validated (top genuine sites are the exact cleanup/ownership
+  methods that produced real bugs B1–B4); the per-category
+  percentages are candidates to tighten, not verdicts.
 
 ## Self-tested
 

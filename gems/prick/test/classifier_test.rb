@@ -33,7 +33,7 @@ class ClassifierTest < Minitest::Test
   def test_categorize_priority_order
     g = node("x.is_a?(Type)")
     # FFI method name wins first
-    assert_equal :ffi, C.categorize("lower_require", :if, g, true)
+    assert_equal :ffi, C.categorize("lower_require", :if, g, true, nil, ["lower_require"])
     # diagnostic (raise) before type_norm
     assert_equal :diagnostic, C.categorize("m", :if, node("raise 'x'"), true)
     # type_norm before dead/defensive

@@ -1,57 +1,58 @@
-# prick: not all coverage gaps are equal.
+# prick: pricks holes in your codebase.
 
- * A flat "673/2732 uncovered" is unactionable. prick categorizes
-   every dark branch arm and tells you which to delete, which to
-   accept, which nil-kill should resolve, and which are GENUINE gaps
-   where bugs are highly likely.
- * The capstone over decomplex / fix-cache / nil-kill: it OWNS gap
-   categorization and CONSUMES fix-cache's churn (and an optional
-   nil-kill verdict). It re-derives nothing.
+A flat "673/2732 uncovered" is unactionable. **prick** categorizes
+every dark branch arm and gives you the one thing you want: **the top
+true gaps to test, ranked by fix-churn.**
 
-## The categories
+It is a **general engine** — it categorizes uncovered branches and
+ranks the genuine ones by consumed fix-cache churn. It ships **no
+project lexicon**; the only project-specific input (your
+external/boundary method names) is caller-supplied via `--ffi`.
 
-| category | what to do |
+## The report
+
+1. **Top True Gaps** — every genuine reachable gap, repo-relative +
+   linked, ranked by the file's fix-cache churn score. This is the
+   list: "test these, in this order."
+2. **Category Summary** — the rest of the dark arms, so you can see
+   why most are *not* test targets:
+
+| category | meaning |
 |---|---|
-| `type_norm` | likely removable — confirm with nil-kill (a typed contract kills the cluster) |
-| `dead` | decision never executes — audit & delete (complexity down) |
-| `defensive` | inert / invariant-pinned — accept, drop from the denominator |
-| `ffi` | extern/require/module — a few targeted `.cht` |
-| `diagnostic` | raises — one negative unit spec |
-| `genuine` | the REAL gap — test it; in churn-hot code = **bug highly likely** |
-
-The headline signal: **`genuine` × fix-churn = "bugs highly likely
-HERE"** — the small slice actually worth your time.
+| `type_norm` | type/nil guard — likely dead if the contract were strictly typed |
+| `dead` | decision never executes — audit as dead code |
+| `defensive` | inert / invariant-pinned — accept, exclude from denominator |
+| `ffi` | a caller-declared external/boundary call — needs an integration test |
+| `diagnostic` | error/raise path — reachable only by invalid input |
+| `genuine` | the real reachable gap — **test it** (these are ranked above) |
 
 ## Usage
 
 ```
 prick report --repo=. --coverage=coverage/.resultset.json \
-                  --output=report.md
-prick report --files=src/mir/mir_lowering.rb     # specific files
+             --output=report.md \
+             --files=src/a.rb,src/b.rb \
+             --ffi=my_extern_call,my_boundary_method
 ```
 
 Needs `coverage/.resultset.json` (SimpleCov `enable_coverage :branch`)
 and a git repo (for the fix-cache churn overlay). See
-[report.md](report.md) for a demo over CLEAR's lowering passes.
+[report.md](report.md) for a demo.
 
-## What it found on CLEAR
+## Boundary
 
-935 dark arms across the 3 lowering passes: only ~29% genuine, ~33%
-diagnostic, ~24% type_norm (→ nil-kill), ~7% dead (→ delete). The
-"bugs highly likely" #1 is `src/mir/mir_lowering.rb` (187 genuine ×
-top churn) — and its top sites are `hoist_alloc` /
-`owned_value_temp_needs_cleanup?`, the exact methods that produced
-real bugs B1–B4. The synthesis points at real bugs.
+prick **owns** gap-categorization. It **consumes** the sibling
+`fix-cache` gem for churn (it does not compute churn itself) and an
+optional nil-kill verdict for the `type_norm` bucket. It re-derives
+nothing.
 
-## What it is NOT
+## Not a verdict
 
- * Not a re-implementation. It consumes fix-cache; it does not compute
-   churn or type pressure itself.
- * Not a verdict. Categories are ranked candidates (Engler
-   discipline). v0 precision caveats — `diagnostic` over-greedy,
-   `type_norm` under-counted (no intra-proc local resolution yet) —
-   are documented in [docs/agents/design.md](docs/agents/design.md).
-   The bug-likely join is the sound, validated part.
+Categories are ranked candidates (Engler discipline). v0 precision
+caveats — `diagnostic` is over-greedy, `type_norm` under-counted (no
+intra-procedural local→accessor resolution yet) — are documented in
+[docs/agents/design.md](docs/agents/design.md). The Top-True-Gaps
+ranking is the sound, validated part.
 
 ## Links
 

@@ -56,7 +56,7 @@ class RollupTest < Minitest::Test
       out = Prick::Rollup.run(files: ["nope.rb"], repo: dir,
                                   resultset: "#{dir}/rs.json")
       assert_empty out[:per_file]
-      assert_empty out[:bug_likely]
+      assert_empty out[:top_gaps]
     end
   end
 end

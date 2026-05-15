@@ -4,30 +4,28 @@ require "json"
 
 module Prick
   # Classifies every never-taken branch arm in a target file into ONE
-  # actionable category. Ported + extended from tools/branch_prick
-  # (which was the one-off probe this gem promotes). AST-structural,
-  # never a regex over the arm line.
+  # actionable category. AST-structural, never a regex over the arm
+  # line. General -- no project lexicon baked in (see ffi_boundary:).
   #
-  # Categories (the user's model -- not all gaps are equal):
-  #   :type_norm  arm guards a type/nil check (is_a?/kind_of?/nil?/
-  #               respond_to?/safe-nav). Likely removable -- the loose
-  #               contract should be typed; CONFIRM with nil-kill.
+  # Categories (not all gaps are equal):
+  #   :type_norm  arm/decision guards a type/nil check (is_a?/kind_of?/
+  #               nil?/respond_to?/safe-nav). Likely dead if the
+  #               contract were strictly typed.
   #   :dead       no sibling arm of the decision is ever taken: the
-  #               decision never executes. Dead/internal path -> audit
-  #               for deletion (complexity down).
+  #               decision never executes. Audit as dead code.
   #   :defensive  live decision, inert/pinned polarity (empty else,
-  #               nil, invariant-guaranteed). Accept + annotate.
-  #   :ffi        extern/require/module boundary -> targeted .cht.
-  #   :diagnostic arm raises/diagnoses -> invalid-input only -> spec.
+  #               nil, invariant-guaranteed). Accept.
+  #   :ffi        a caller-declared external/boundary method -> needs
+  #               an integration test.
+  #   :diagnostic arm raises/diagnoses -> invalid-input only.
   #   :genuine    live, reachable, input-determined, none of the above.
-  #               The real gap. Overlaid with fix-churn = "bug-likely".
+  #               The real gap. Ranked by fix-churn downstream.
   module Classifier
-    FFI_BOUNDARY = %w[
-      build_extern_trampoline_call build_extern_trampoline_method
-      build_extern_trampoline_common lower_extern_direct_call
-      lower_require lower_module
-    ].freeze
-    DIAGNOSTIC_MIDS = %i[raise fail abort].freeze
+    # The gem ships NO project lexicon -- it is general. The consuming
+    # project supplies its external/boundary method names via
+    # `ffi_boundary:` (CLEAR passes its set from the CLI). Empty here
+    # by design.
+    DIAGNOSTIC_MIDS = %i[raise fail abort].freeze # general Ruby
     GUARD_MIDS = %i[is_a? kind_of? instance_of? nil? respond_to?].freeze
 
     Arm = Struct.new(:file, :defn, :line, :category, keyword_init: true)
@@ -121,7 +119,7 @@ module Prick
     end
 
     # -> [Arm, ...] for every dark arm in abspath.
-    def classify_file(resultset, abspath)
+    def classify_file(resultset, abspath, ffi_boundary: [])
       branches = merged_branches(resultset, abspath)
       return [] if branches.empty?
 
@@ -149,15 +147,15 @@ module Prick
           sl, sc, el, ec = a[2].to_i, a[3].to_i, a[4].to_i, a[5].to_i
           meth = midx[sl] || "(top-level)"
           anode = node_for(nodes, sl, sc, el, ec)
-          cat = categorize(meth, pkind, anode, any_taken, cond)
+          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary)
           out << Arm.new(file: abspath, defn: meth, line: sl, category: cat)
         end
       end
       out
     end
 
-    def categorize(method, pkind, anode, sibling_taken, cond = nil)
-      return :ffi if FFI_BOUNDARY.include?(method)
+    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [])
+      return :ffi if ffi_boundary.include?(method)
       return :diagnostic if anode && subtree(anode, mids: DIAGNOSTIC_MIDS)
       # type/nil guard family: check the decision's CONDITION and the
       # arm body -> the decomplex DecisionPressure class.
