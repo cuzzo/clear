@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/decomplex"
+
+if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
+  warn <<~USAGE
+    decomplex -- decision-level duplication + neglected-condition detector
+
+      decomplex FILE_OR_DIR [FILE_OR_DIR ...]
+
+    Reports:
+      MISSING ABSTRACTION  identical guard tuple recomputed across >=2
+                           decision units, ranked support x scatter.
+      NEGLECTED CONDITION  a site that is a high-support pattern minus
+                           one element -- a likely bug.
+
+    v0 mines exact-match case/when dispatch + && conjunction only.
+  USAGE
+  exit 1
+end
+
+files = ARGV.flat_map do |a|
+  if File.directory?(a)
+    Dir.glob(File.join(a, "**", "*.rb"))
+  else
+    [a]
+  end
+end.select { |f| File.file?(f) }
+
+miner = Decomplex::Miner.scan(files)
+
+ma = miner.missing_abstractions
+puts "=== MISSING ABSTRACTIONS (#{ma.size}) " \
+     "-- guard tuple recomputed across >=2 decision units ==="
+ma.first(40).each do |h|
+  puts format("\n[%s] support=%d scatter=%d rank=%d",
+              h[:kind], h[:support], h[:scatter], h[:rank])
+  puts "  tuple: #{h[:members].join(' | ')}"
+  h[:sites].first(8).each { |s| puts "    #{s}" }
+  puts "    ...(+#{h[:sites].size - 8} more)" if h[:sites].size > 8
+end
+
+nc = miner.neglected_conditions
+puts "\n\n=== NEGLECTED CONDITIONS (#{nc.size}) " \
+     "-- pattern minus one element, likely bug ==="
+nc.first(40).each do |h|
+  puts format("\n[support=%d] at %s", h[:support], h[:at])
+  puts "  full pattern: #{h[:pattern].join(' | ')}"
+  puts "  MISSING here: #{h[:missing]}"
+end
