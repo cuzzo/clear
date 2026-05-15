@@ -57,7 +57,7 @@ Status: [x] shipped (v0/v0.1), [ ] planned.
 | **polarity canonicalization** — `if x..else` / `unless x` / `if !x` folded before mining | 1,2,3 | normalization pre-pass in all spec miners | [ ] |
 | **derived-state def-use** — `b = f(a)`, both feed decisions; flag when only one is refreshed | 1 | program slicing; DynaMine | [ ] |
 | **Type-3 clone + divergence** — pasted block, one variable inconsistently renamed/dropped | 3 | CP-Miner (Li et al. OSDI'04); DECKARD; CCFinder | [ ] |
-| **data-clump → value object** — the 3-5 fields that always co-occur in guards = a missing struct | 1,2 | Fowler smells, computed (vs Reek's weak heuristic) | [ ] |
+| ~~data-clump → value object~~ — **DROPPED**, owned by `nil-kill` (see below) | 1,2 | — | ⊘ |
 
 ## Existing systems and why they do not cover this
 
@@ -116,6 +116,40 @@ proposition here.
 - **Csmith / EMI** — generative differential testing; complementary,
   not overlapping (they find miscompiles given inputs; decomplex finds
   design defects given source).
+
+## Relationship to nil-kill (no overlap by construction)
+
+`gems/nil-kill` (branch `nil-kill-prod`) is a **type-inference and
+nilability-elimination** system: Sorbet + z3 static analysis plus
+runtime tracing, ranked by *pressure* (resolve one source → N
+downstream `&.` / guards / signatures collapse). nil-kill reasons
+about **types and nils**; decomplex reasons about **duplicated and
+half-applied decisions**. They are complementary, and the boundary is
+deliberate:
+
+- **nil-kill owns "a hash/array is secretly a struct/tuple."** Its
+  Latent Schema Recovery / Hash-Record Promotion already does this
+  decisively — runtime-assisted, pressure-ranked, with producer/
+  consumer rewrites and safety blockers. decomplex therefore **does
+  not** ship a data-clump → value-object detector; a weaker static-
+  only reimplementation would be wasted effort and divergent tooling.
+  When decomplex's mining points at "these fields always co-occur,"
+  the action is *run nil-kill*, not extend decomplex.
+- **Shared philosophy, different objects.** Both rank by blast radius
+  (nil-kill *pressure*, decomplex *scatter*). This is intentional
+  alignment, not duplication: pressure ranks type/nil sources by how
+  many guards vanish; scatter ranks *decisions* by how many methods
+  recompute them. A missing-abstraction's value in decomplex *is* its
+  scatter (resolve once → N re-derivations collapse) — the same
+  prioritisation idea applied to a disjoint target.
+- **No shared dependency.** nil-kill pulls Sorbet + z3 + a runtime
+  tracer. decomplex stays stdlib-AST-only on purpose (principle 1);
+  it must never inherit that weight. If a third tool appears, factor
+  a shared AST/site-extraction layer then — not before.
+- **Everything else is decomplex-unique.** Neglected condition,
+  co-update / inconsistent-update, predicate-alias, reification-miss,
+  guarded-pair sequence, path-condition, type-3 clone: none exist in
+  nil-kill.
 
 ## Design principles
 
