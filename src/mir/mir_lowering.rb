@@ -121,6 +121,41 @@ class MIRLowering
     MIR::BlockExpr.new(label, scoped + [MIR::BreakStmt.new(label, result)])
   end
 
+  # The eager sibling of lower_scoped, for control-flow HEAD positions
+  # (if/while/for/match condition, subject, iterable, range bounds).
+  #
+  # A head always executes, so its hoist temps must run BEFORE the
+  # construct — never wrapped in a conditionally-entered block, and
+  # never left in the shared @pending_stmts buffer where the construct's
+  # own child-body lower_body would steal them into the body (declared
+  # AFTER the head that references them — bug #1).
+  #
+  # Returns [mir, pending]: the lowered head plus the hoist stmts it
+  # produced, isolated from the shared buffer. The caller pairs it with
+  # `with_pending` on the finished construct node so the temps precede
+  # the head and their cleanup scopes tightly around the construct. This
+  # is the single place the head/body pending boundary is enforced — no
+  # per-construct flush discipline to forget.
+  sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
+  def lower_head(&blk)
+    prev = @pending_stmts
+    @pending_stmts = []
+    result = blk.call
+    produced = @pending_stmts
+    @pending_stmts = prev
+    [result, produced]
+  end
+
+  # Attach head pending (from lower_head) to a finished control-flow MIR
+  # node. Wraps [pending..., node] in a transparent ScopeBlock so the
+  # temps are declared before the node's head expression and their
+  # Cleanup defers scope tightly around the construct. No-op when there
+  # was no pending.
+  sig { params(pending: T::Array[T.untyped], node: T.untyped).returns(T.untyped) }
+  def with_pending(pending, node)
+    pending.empty? ? node : MIR::ScopeBlock.new(pending + [node])
+  end
+
   # Lower `parent.<field>` and apply lower_scoped iff parent declares the
   # field as lazy via AST::Node#lazy_fields. Single entry point so callers
   # never write the save/restore pattern by hand. New lazy positions are
@@ -6668,30 +6703,19 @@ class MIRLowering
 
   sig { params(node: AST::IfStatement).returns(T.untyped) }
   def lower_if(node)
+    cond, cond_pending = lower_head { lower(node.condition) }
     if node.expr_mode
       @block_expr_counter += 1
       label = "__if_#{@block_expr_counter}"
-      cond = lower(node.condition)
       then_body = lower_body_with_break(node.then_branch, label)
       else_body = lower_body_with_break(node.else_branch || [], label)
-      return MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+      block = MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+      return with_pending(cond_pending, block)
     end
 
-    cond = lower(node.condition)
-    # Bug #1 (docs/agents/clear-bug123-forensic.md): lowering the condition
-    # may push hoisted Lets onto the shared @pending_stmts (e.g. a
-    # `maybe() OR ""` whose result is heap). If we don't drain them here,
-    # the FIRST statement of then_branch's lower_body flushes them into
-    # the then-body — after the cond that references them. Drain now and
-    # wrap [pending..., IfStmt] in a transparent ScopeBlock so the temp's
-    # Let precedes the cond that uses it and its Cleanup still scopes
-    # tightly around the IfStmt.
-    cond_pending = flush_pending
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
-    if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
-    return if_stmt if cond_pending.empty?
-    MIR::ScopeBlock.new(cond_pending + [if_stmt])
+    with_pending(cond_pending, MIR::IfStmt.new(cond, then_body, else_body))
   end
 
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
