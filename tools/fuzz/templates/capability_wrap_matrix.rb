@@ -1,58 +1,99 @@
-# Template: capability-wrap composition matrix.
+# Template: capability-wrap composition matrix — ENUMERATED.
 #
-# Targets src/mir/mir_lowering.rb#compose_capability_wrap +
-# #lower_with_block + the cap path of #lower_var_decl. Dark arms = the
-# sync_fn case (lockedCreate / rwLockedCreate / refCellCreate /
-# versionedCreate) and the WITH access form per modality -- the corpus
-# only ever declared @locked. Each cell declares a wrapped binding,
-# enters the matching WITH, mutates/reads, asserts.
-#
-# Confirmed syntax (access_gate.rb): @locked/@writeLocked/@versioned +
-# WITH EXCLUSIVE/SNAPSHOT. @alwaysMutable / @atomic / storage wraps are
-# reserved :in_dev (WITH form not yet confirmed -- reserving matrix
-# space, not emitting invalid noise).
+# Targets src/mir/mir_lowering.rb#compose_capability_wrap. The
+# discriminant set is read from the dispatch itself:
+#   sync_fn  = case ft.sync  {locked, write_locked, always_mutable,
+#                             versioned, atomic}
+#   own_fn   = case ft.ownership {shared->arc, multiowned->rc}
+#   + the 4-way sync_fn&&own_fn / sync_only / own_only / else.
+# One cell per sync mode + one per ownership wrap = exhaustive over
+# the dispatch labels. Every surface form is CONFIRMED from
+# transpile-tests (all sigils occur there); nothing is :in_dev.
 #
 # expected :pass; a failing/leaking :pass cell is a SURFACED bug.
 
-CWM_CELLS = []
-# [sync, with_head, expected]
-CWM_MODES = [
-  [:locked,         "WITH EXCLUSIVE c AS ref", :pass],
-  [:write_locked,   "WITH EXCLUSIVE c AS ref", :pass],
-  [:versioned,      "WITH SNAPSHOT c AS ref",  :pass],
-  [:always_mutable, nil,                       :in_dev],
-  [:atomic,         nil,                       :in_dev],
-  [:shared_locked,  nil,                       :in_dev],
-]
-CWM_MODES.each do |sync, head, exp|
-  CWM_CELLS << { sync: sync, head: head, expected: exp }
-end
-
-def cwm_sync_decl(sync)
-  case sync
-  when :locked       then "@locked"
-  when :write_locked then "@writeLocked"
-  when :versioned    then "@versioned"
-  end
-end
+CWM_CELLS = %i[
+  locked write_locked always_mutable versioned atomic
+  multiowned shared_locked
+].map { |m| { mode: m } }
 
 FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
-  # :in_dev cells render a placeholder; the harness emits them as
-  # comments and never runs them.
-  if p[:expected] == :in_dev
-    next "# in_dev: capability wrap #{p[:sync]} (WITH form unconfirmed)\n"
+  case p[:mode]
+  when :locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 } @locked;
+          WITH EXCLUSIVE c AS r {
+              ASSERT r.value == 1_i64, "locked wrap read";
+          }
+          RETURN;
+      END
+    CHT
+  when :write_locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 } @writeLocked;
+          WITH EXCLUSIVE c AS r {
+              ASSERT r.value == 1_i64, "writeLocked wrap read";
+          }
+          RETURN;
+      END
+    CHT
+  when :always_mutable
+    # Interior mutability: immutable binding, mutable data, direct.
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @alwaysMutable;
+          c.value = 2_i64;
+          ASSERT c.value == 2_i64, "alwaysMutable interior mutate";
+          RETURN;
+      END
+    CHT
+  when :versioned
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 } @versioned;
+          WITH SNAPSHOT c AS r {
+              ASSERT r.value == 1_i64, "versioned snapshot read";
+          }
+          RETURN;
+      END
+    CHT
+  when :atomic
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+          WITH EXCLUSIVE c AS x {
+              x.value = 2_i64;
+              ASSERT x.value == 2_i64, "atomic-ptr exclusive mutate";
+          }
+          RETURN;
+      END
+    CHT
+  when :multiowned
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          p = Counter{ value: 1_i64 } @multiowned;
+          ASSERT p.value == 1_i64, "multiowned (rc) read";
+          RETURN;
+      END
+    CHT
+  when :shared_locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE t = Counter{ value: 1_i64 } @shared:locked;
+          WITH EXCLUSIVE t AS r {
+              ASSERT r.value == 1_i64, "shared:locked (arc+lock) read";
+          }
+          RETURN;
+      END
+    CHT
   end
-
-  <<~CHT
-    STRUCT Counter { value: Int64 }
-
-    FN main() RETURNS Void ->
-        MUTABLE c = Counter{ value: 1_i64 } #{cwm_sync_decl(p[:sync])};
-        #{p[:head]} {
-            x: Int64 = ref.value;
-            ASSERT x == 1_i64, "#{p[:sync]} wrap read";
-        }
-        RETURN;
-    END
-  CHT
 end

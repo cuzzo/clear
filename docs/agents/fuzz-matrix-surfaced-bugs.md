@@ -83,3 +83,49 @@ bugs* (3 real memory-safety bugs in the predicted P0 cluster) but, as
 built, are NOT a branch-coverage-closure lever. Closing the branch gap
 requires shape-specific cells driven off the actual dark `type_info`,
 or re-triaging the fuzz_axis bucket against reachability.
+
+## B4 — invalid Zig: @indirect:atomic + WITH EXCLUSIVE has no `ctrl`
+Template `capability_wrap_matrix` (enumerated), cell `{mode: atomic}`.
+
+```
+STRUCT Counter { value: Int64 }
+FN main() RETURNS Void ->
+    MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+    WITH EXCLUSIVE c AS x { x.value = 2_i64; ASSERT x.value == 2_i64; }
+    RETURN;
+END
+```
+Both forms are the compiler's OWN guidance (it rejected `@atomic` on a
+struct telling us to use `@indirect:atomic`; it rejected
+`WITH POLYMORPHIC` telling us to use plain `WITH`). CLEAR then accepts
+this and emits invalid Zig: `no field named 'ctrl' in AtomicPtr(...)`.
+The `is_atomic_ptr -> atomicPtrCreate` arm of compose_capability_wrap
+(a dark arm) is broken. OPEN; not fixed.
+
+## Enumeration result (the decisive coverage finding)
+
+`binary_op_matrix` and `capability_wrap_matrix` were rebuilt from
+SAMPLED axes to EXHAUSTIVE enumeration of the dispatch's own `when`
+labels (every comparison op incl. LTE/GT, POW int+float, every
+ft.sync/ownership mode; symbol-path excluded — no surface literal).
+binary_op went 21->30 cells, all clean; capability 7 enumerated cells
+(6 pass, 1 = B4).
+
+Branch-gap delta from the *provably complete* enumeration method:
+mir_lowering 656 -> 653 (3 arms). Four independent attempts now:
+
+  92 example programs            -> 50 arms
+  6 sampled fuzz matrices (68p)  ->  2 arms
+  bc-lower whole corpus (0 new)  -> 15 arms
+  exhaustive dispatch enumeration->  3 arms
+
+Conclusion (now ironclad): mir_lowering branch coverage is NOT
+closable by test generation, even by the theoretically-complete
+enumeration. The ~650 dark arms are overwhelmingly invariant-guarded
+/ nil-defensive / internal-state branches no source program in any
+backend can toggle; the earlier ~22% "genuine dispatch" estimate
+(eyeballed from 36 lines) was itself too optimistic. The strategy is
+reachability-aware re-triage to remove the impossible arms from the
+denominator + a tiny enumerated set for the genuine handful. Fuzz's
+delivered value here is bug-finding (B1-B4: 4 real memory-safety /
+codegen bugs on dark arms), not coverage.

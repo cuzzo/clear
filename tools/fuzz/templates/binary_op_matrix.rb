@@ -1,33 +1,38 @@
-# Template: binary-operator lowering matrix.
+# Template: binary-operator lowering matrix — ENUMERATED, not sampled.
 #
 # Targets src/mir/mir_lowering.rb#lower_binary_op + #lower_or_rescue.
-# The dark arms are the operator x operand-type combinations the corpus
-# never wrote: MOD on i64, string comparison (eql / strcmp branches),
-# heap-string operands (the hoist_alloc path), concat, and the
-# OR-rescue fallback. Operands come from a fn so constant-folding does
-# not erase the decision.
+# The cell set is the dispatch's OWN discriminant set read from the
+# source: the string-compare `case node.op` has arms
+# {EQ,NEQ,LT,LTE,GT,GTE}; POW (**), MOD, concat (+), OR (OR_RESCUE)
+# are the other op branches. Every comparison arm x every operand
+# type is emitted -- exhaustive by construction, not a guessed axis.
 #
-# expected :pass; a failing/leaking :pass cell is a SURFACED bug.
+# Surface syntax confirmed from lexer/transpile-tests:
+#   == != < <= > >=  ;  **=POW  ;  MOD  ;  + (concat)  ;  OR (rescue).
+# The symbol-path `case node.op {EQ,NEQ}` is EXCLUDED: CLEAR has no
+# surface symbol literal (only a union *variant* named Symbol), so
+# those 2 arms are not source-reachable -> accept/invariant_guarded,
+# correctly not chased here.
+#
+# lhs() is ALWAYS strictly less than rhs() for every type, so the
+# oracle is uniform: EQ false, NEQ true, LT true, LTE true, GT false,
+# GTE false. expected :pass; a failing :pass cell is a SURFACED bug.
 
 BOM_CELLS = []
-BOM_OPS    = %i[eq neq lt gte mod concat or_fallback]
-BOM_TYPES  = %i[int float str_lit heap_str]
+BOM_CMP   = %i[eq neq lt lte gt gte]
+BOM_TYPES = %i[int float str_lit heap_str]
 
-BOM_OPS.each do |op|
-  BOM_TYPES.each do |t|
-    # MOD: integers only. concat / or_fallback: strings only.
-    next if op == :mod    && t != :int
-    next if op == :concat && !%i[str_lit heap_str].include?(t)
-    next if op == :or_fallback && !%i[str_lit heap_str].include?(t)
-    # float ordering only exercises lt/gte/eq/neq.
-    next if t == :float && %i[concat or_fallback mod].include?(op)
-    BOM_CELLS << { op: op, type: t }
-  end
+BOM_CMP.each do |op|
+  BOM_TYPES.each { |t| BOM_CELLS << { op: op, type: t } }
 end
+# Non-comparison op branches, each at its valid operand type(s).
+BOM_CELLS << { op: :mod,    type: :int }
+BOM_CELLS << { op: :pow,    type: :int }
+BOM_CELLS << { op: :pow,    type: :float }
+BOM_CELLS << { op: :concat, type: :str_lit }
+BOM_CELLS << { op: :concat, type: :heap_str }
+BOM_CELLS << { op: :or_fallback, type: :heap_str }
 
-# lhs is ALWAYS the strictly-smaller operand and rhs the larger, for
-# every type, so the oracle is uniform: lt true, gte false, eq false,
-# neq true. (MOD has its own dedicated operands below.)
 def bom_provider(t)
   case t
   when :int      then "FN lhs() RETURNS Int64 -> RETURN 3_i64; END\nFN rhs() RETURNS Int64 -> RETURN 10_i64; END"
@@ -47,21 +52,22 @@ def bom_body(op, t)
   when :eq   then "    ASSERT (#{l} == #{r}) == FALSE, \"eq #{t}\";"
   when :neq  then "    ASSERT (#{l} != #{r}), \"neq #{t}\";"
   when :lt   then "    ASSERT (#{l} < #{r}), \"lt #{t}\";"
+  when :lte  then "    ASSERT (#{l} <= #{r}), \"lte #{t}\";"
+  when :gt   then "    ASSERT (#{l} > #{r}) == FALSE, \"gt #{t}\";"
   when :gte  then "    ASSERT (#{l} >= #{r}) == FALSE, \"gte #{t}\";"
-  when :mod  then "    ASSERT (10_i64 MOD 3_i64) == 1_i64, \"mod #{t}\";"
+  when :mod  then "    ASSERT (10_i64 MOD 3_i64) == 1_i64, \"mod\";"
+  when :pow
+    t == :int ? "    ASSERT (2_i64 ** 3_i64) == 8_i64, \"pow int\";" \
+              : "    ASSERT (2.0 ** 3.0) == 8.0, \"pow float\";"
   when :concat
     "    t: String = #{l} + #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
   when :or_fallback
-    # lhs() is non-fallible here; exercise the OR fallback shape with a
-    # fallible callee so lower_or_rescue lowers.
-    "    v: String = mightFail() OR \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback #{t}\";"
+    "    v: String = mightFail() OR \"fb\";\n    ASSERT v.length() >= 2_i64, \"or fallback\";"
   end
 end
 
 def bom_extra_fn(op)
-  return "" unless op == :or_fallback
-
-  "FN mightFail() RETURNS !String ->\n    RETURN COPY \"ok\";\nEND\n"
+  op == :or_fallback ? "FN mightFail() RETURNS !String ->\n    RETURN COPY \"ok\";\nEND\n" : ""
 end
 
 FuzzGenerator.register(:binary_op_matrix, cells: BOM_CELLS) do |p|
