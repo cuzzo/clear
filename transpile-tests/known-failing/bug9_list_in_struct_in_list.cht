@@ -1,0 +1,34 @@
+# Regression for docs/agents/puck-clear-bugs.md #9.
+#
+# A `@list` field inside a STRUCT that itself lives in a `@list` must
+# survive across outer-loop iterations. The original failure: a per-
+# iteration MUTABLE-declared inner `data` list shared storage across all
+# iterations, so `items[0].data[0]` returned whatever the last iteration
+# wrote, not what its own iteration appended.
+#
+# This test produces three Items whose `data` lists each hold one
+# element: [0], [10], [20]. Reading them back must match.
+
+STRUCT Item {
+  data: Int64[]@list
+}
+
+FN main() RETURNS !Void ->
+  MUTABLE items: Item[]@list = [];
+  MUTABLE p: Int64 = 0;
+  WHILE p < 3 DO
+    MUTABLE data: Int64[]@list = [];
+    data.append(p * 10);
+    items.append(Item{ data: data });
+    p += 1;
+  END
+
+  ASSERT items.length() == 3,        "items length";
+  ASSERT items[0].data.length() == 1, "items[0].data length";
+  ASSERT items[1].data.length() == 1, "items[1].data length";
+  ASSERT items[2].data.length() == 1, "items[2].data length";
+  ASSERT items[0].data[0] == 0,       "items[0].data[0]";
+  ASSERT items[1].data[0] == 10,      "items[1].data[0]";
+  ASSERT items[2].data[0] == 20,      "items[2].data[0]";
+  RETURN;
+END

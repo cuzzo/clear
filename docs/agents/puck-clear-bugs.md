@@ -5,8 +5,14 @@ Bugs and rough edges discovered while building `examples/puck/vm.cht`
 from a small piece of the VM during the same session, and every one is
 worked around in `vm.cht` so the file compiles today.
 
-Regression tests are deferred until the workarounds collapse into proper
-fixes.
+Minimal reproducers live in
+[`transpile-tests/known-failing/`](../../transpile-tests/known-failing/).
+They are deliberately kept out of `transpile-tests/gen.rb`'s glob so the
+standard CI run isn't blocked; when a bug is fixed, move its reproducer
+up into `transpile-tests/<NNN>_<name>.cht` to make the fix gate.
+
+See also [`puck-clear-retrospective.md`](puck-clear-retrospective.md) for
+the post-mortem on how these slipped through to this stage.
 
 ---
 

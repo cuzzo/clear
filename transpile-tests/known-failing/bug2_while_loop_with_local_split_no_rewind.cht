@@ -1,0 +1,21 @@
+# Regression for docs/agents/puck-clear-bugs.md #2.
+#
+# A plain WHILE loop whose body computes a local heap-shaped temporary
+# (here: `parts = haystack.split(" ")`) trips
+# `[FRAME_NO_REWIND] ... loop body frame-allocates but has no
+# restoreLoopMark defer`. The temp is per-iteration-local (no use after
+# the loop), so the MIR pipeline should synthesise the rewind defer
+# automatically; it currently doesn't.
+
+FN main() RETURNS !Void ->
+  haystack = "a b c d e";
+  MUTABLE matches: Int64 = 0;
+  MUTABLE i = 0;
+  WHILE i < 3 DO
+    parts = haystack.split(" ");
+    IF parts.length() == 5 THEN matches += 1; END
+    i += 1;
+  END
+  ASSERT matches == 3, "every iteration should see 5 parts";
+  RETURN;
+END

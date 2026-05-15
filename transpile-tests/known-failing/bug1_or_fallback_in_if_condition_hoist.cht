@@ -1,0 +1,27 @@
+# Regression for docs/agents/puck-clear-bugs.md #1.
+#
+# A fallible expression combined with `OR fallback` inside an IF
+# condition must lift its anonymous temp into the parent scope, not the
+# IF body. The original failure emitted Zig where the temp's `const`
+# declaration landed inside the body block while the condition that
+# uses it ran first:
+#
+#   if (!CheatLib.eql(__tmp_2, "STRINGS")) {       // uses __tmp_2
+#   const __tmp_2 = (firstToken(...) catch "");    // declared too late
+#
+# Zig rejects with "use of undeclared identifier '__tmp_2'".
+
+FN maybe(s: String) RETURNS !String ->
+  IF s.length() == 0 THEN RAISE "empty"; END
+  RETURN COPY s;
+END
+
+FN main() RETURNS !Void ->
+  IF (maybe("STRINGS") OR "") != "STRINGS" THEN
+    RAISE "vm: missing STRINGS header";
+  END
+  IF (maybe("FOO") OR "default") != "FOO" THEN
+    RAISE "wrong";
+  END
+  RETURN;
+END
