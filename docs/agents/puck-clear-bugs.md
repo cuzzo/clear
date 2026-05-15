@@ -142,131 +142,17 @@ when it should be reset to "infallible" by the `OR` consumer.
 
 ---
 
-## 4. Ownership of struct-field stores requires explicit `COPY` from
-`@list` index
-
-Reading a String out of a `String[]@list` via `list[i]` and storing it
-into a struct field on the same line fails:
-
-```cht
-strings.append(lines[pos]);
-```
-
-```
-Cannot pass container index access to TAKES parameter. Index access
-returns a borrow. Use .remove(i) to take ownership, or COPY to
-deep-copy.
-```
-
-**Workaround**: write `strings.append(COPY lines[pos])`. Same issue
-for `Value{ StrVal: lines[i] }` style struct literals (needs
-`Value{ StrVal: COPY lines[i] }`).
-
-**Note**: this is documented behaviour per CLAUDE.md ("Zero implicit
-copies. All copies of non-Copy types must be explicit"), not a bug.
-It's listed here because it's the friction a port from C hits first —
-the same pattern in v10 is just `strings[strings_len++] = lines[pos]`
-with no ceremony.
+> **Entries #4–#7 removed.** They were CLEAR working as designed
+> (zero-implicit-copy on container-index → struct-field stores, the
+> borrow→move restriction on two-step `@list` pop, the mutate-and-
+> write-back-across-index rule, and exclusive-mutability aliasing).
+> Friction for a C-port author, but not compiler bugs and nothing is
+> owed back. Numbering of the remaining real bugs (#8, #9) is left
+> unchanged so existing references (forensics, mutants, fuzz READMEs,
+> `transpile-tests/known-failing/bug{8,9}_*`) stay valid.
 
 ---
 
-## 5. Two-step pop on `@list` rejects the borrow→move pattern
-
-Stack-machine code naturally writes:
-
-```cht
-v = stack[stack.length() - 1];
-stack.pop();
-useThe(v);
-```
-
-This is rejected:
-
-```
-Cannot move borrowed value 'v'. Parameters are implicit borrows
-unless TAKES.
-```
-
-`stack[stack.length() - 1]` is a borrow; storing it into `v` (which
-then needs ownership semantics to feed something else) doesn't work.
-
-**Workaround**: `stack.pop()` returns an `Optional` that *does*
-transfer ownership, so use:
-
-```cht
-v = stack.pop() OR <default>;
-useThe(v);
-```
-
-This is fine for `Int64` stacks (the default is `0_i64`) but forces a
-sentinel for any user-defined type and changes the meaning of "empty
-stack" from a controllable error into a silent fallback.
-
----
-
-## 6. `vm.heap[id] = HeapEntry{ refs: ..., cells: cells }` rejected
-when `cells` came from `vm.heap[id].cells`
-
-The classic "mutate-and-write-back" pattern is forbidden across an
-index access:
-
-```cht
-MUTABLE cells = vm.heap[id].cells;
-cells[idx] = newVal;
-vm.heap[id] = HeapEntry{ refs: vm.heap[id].refs, cells: cells };
-```
-
-```
-Cannot store borrowed value 'cells' into HeapEntry.cells. Use COPY for
-an explicit deep-copy.
-```
-
-Both `MUTABLE cells = vm.heap[id].cells` (borrow) and
-`HeapEntry{ ..., cells: cells }` (move into owning field) are
-individually fine; the combination is rejected.
-
-The chained ArraySet that would side-step it
-(`vm.heap[id].cells[idx] = newVal`) is also rejected — CLEAR's
-ArraySet only accepts a bare identifier on the left, not a
-`name.field` or `name[i]` prefix. (Same restriction holds in Puck
-itself, which is fine, but in CLEAR it forces a copy-out / copy-back
-of the whole cells list.)
-
-**Workaround**: redesign the heap so cells are owned by a separate
-mutable container the VM keeps a long-lived reference to. The
-two-level-array shape v10/vm.c uses (HeapEntry → cells pointer) does
-not translate cleanly.
-
----
-
-## 7. Aliasing rejected for `f!(MUTABLE vm, vm.heap[id].cells[idx])`
-
-```cht
-stack.append(heapRetain!(vm, vm.heap[id].cells[idx]));
-```
-
-```
-Aliasing Error: Argument 2 ('vm') conflicts with argument 1. Cannot
-pass the same variable defined at 'vm' twice if one usage is MUTABLE.
-This violates exclusive mutability.
-```
-
-Even though the second occurrence is a read-only borrow into `vm`,
-having `MUTABLE vm` as one argument and any expression rooted at `vm`
-as another is rejected.
-
-**Workaround**: bind the inner expression to a local first.
-
-```cht
-inner = vm.heap[id].cells[idx];
-stack.append(heapRetain!(vm, inner));
-```
-
-This is documented CLEAR behaviour for exclusive mutability, again not
-a bug. Worth listing because it makes one-line ports from C two or
-three lines.
-
----
 
 ## 8. `splitOnce` flagged as fallible because it touches `parts[1]`
 
@@ -351,15 +237,14 @@ the language's normal cost.
 
 The pragmatic choice for `vm.cht` today is:
 
-- Restrict the value type to bare `Int64` (drops bugs #4, #6, #7 by
-  making the union and heap unnecessary).
+- Restrict the value type to bare `Int64` (sidesteps the now-removed
+  by-design friction around unions/heap entirely).
 - Hoist every loop-local out of the body (works around #2).
 - Add `OR ""` / `OR 0` everywhere a string or int helper appears
   (works around #3 and #8).
-- Use `.pop() OR default` for stack pops (works around #5).
 - Bind every "`condition` over a fallible expression" to a named local
   (works around #1).
 
 That subset runs an integer-only `.puckc` (e.g. `fib(35)` with no
 `SYSCALL 1` on a string). Adding strings and arrays back is gated on
-fixes for at least #1, #2, #4, and #6.
+fixes for #1, #2, and #3/#8 (the real bugs); the rest was by-design.
