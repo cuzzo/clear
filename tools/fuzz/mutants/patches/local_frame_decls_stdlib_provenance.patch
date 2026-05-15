@@ -1,0 +1,22 @@
+diff --git a/src/mir/control_flow.rb b/src/mir/control_flow.rb
+index ff45a56cb..f081487f2 100644
+--- a/src/mir/control_flow.rb
++++ b/src/mir/control_flow.rb
+@@ -1388,7 +1388,7 @@ module LoopFrameAnalysis
+           !ti.heap? &&
+           s.respond_to?(:value) && s.value.respond_to?(:stdlib_allocates) &&
+           s.value.stdlib_allocates == true
+-        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
++        is_frame = ti.frame_provenance? && collection_shaped
+         decls << s if is_frame && s.name.is_a?(String)
+       when AST::BindExpr
+         ti = Type.from_node(s)
+@@ -1409,7 +1409,7 @@ module LoopFrameAnalysis
+           !ti.heap? &&
+           s.value.respond_to?(:stdlib_allocates) &&
+           s.value.stdlib_allocates == true
+-        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
++        is_frame = ti.frame_provenance? && collection_shaped
+         decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
+       end
+     end
