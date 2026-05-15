@@ -86,6 +86,8 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `branch_cleanup`            | 48              | INV-2: alloc-cleanup pairing across IF/ELSE branches with optional early-return |
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
 | `fsm_lowering`              | 42              | FSM lowering cross-product — suspend × control-flow × placement (CLAUDE.md invariant #13) |
+| `cond_or_fallback`          | 8               | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
+| `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
 
 ### `stream_into_boundary` matrix
 
