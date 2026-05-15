@@ -283,11 +283,6 @@ These don't change what the JIT compiles, just how well:
   scanning the pool. A hash table - or even a sorted vector with binary
   search - turns this into O(log n). ~50 LOC.
 
-- **v9 compiler.rb has multiple AST walks.** Three passes (annotate, var-
-  pass detection, codegen) that could be folded into two without changing
-  output. Not on any hot path, but the current structure makes adding
-  new front-end features awkward.
-
 - **Bytecode is plain text.** `.puckc` parses ~3 MB/s because every line
   goes through `sscanf`. A length-prefixed binary format (still a
   one-page spec) would load >100x faster. ~150 LOC each side.
