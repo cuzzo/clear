@@ -41,7 +41,10 @@ output is triaged by a human, never auto-applied.
 
 ## Detector catalogue
 
-Status: [x] shipped (v0/v0.1), [ ] planned.
+Status: [x] shipped & self-tested, ⊘ dropped. All planned detectors
+are now built; polarity canonicalization ships as a shared normalizer
+(`Ast.canon_polarity`) applied inside path-condition and semantic
+alias rather than as a standalone report.
 
 | Detector | Plague | Prior art | Status |
 |---|---|---|---|
@@ -51,12 +54,12 @@ Status: [x] shipped (v0/v0.1), [ ] planned.
 | **co-update / neglected update** — attributes co-written in ≥N methods; a method writes one without the other | 1 | DynaMine (Livshits/Zimmermann, FSE'05); "inconsistent updates" Lu et al. | [x] |
 | **predicate-alias cluster** — one-line boolean methods with identical body under ≥2 names | 2 | predicate abstraction, SLAM/BLAST | [x] |
 | **reification miss** — an inline expression equal to an existing predicate's body, not calling it | 2 | constructive predicate abstraction | [x] |
-| **predicate-alias (semantic)** — `frame?` ≡ `provenance==:frame` via definitional unfolding + co-variation, not exact text | 2 | alias analysis; equivalence by definitional substitution | [ ] |
-| **path-condition normal form** — `if x; if y; if z` ≡ `if x && y && z`; mine guarded program points, not syntactic ifs | 2,3 | symbolic execution; Chang'07 graph-minor implicants | [ ] |
-| **guarded-pair / sequence mining** — "after AllocMark, a Cleanup must follow on every path"; the one site that breaks it | 3 | Engler "Bugs as Deviant Behavior" SOSP'01; PR-Miner; JADET (Wasylkowski'07); GrouMiner | [ ] |
-| **polarity canonicalization** — `if x..else` / `unless x` / `if !x` folded before mining | 1,2,3 | normalization pre-pass in all spec miners | [ ] |
-| **derived-state def-use** — `b = f(a)`, both feed decisions; flag when only one is refreshed | 1 | program slicing; DynaMine | [ ] |
-| **Type-3 clone + divergence** — pasted block, one variable inconsistently renamed/dropped | 3 | CP-Miner (Li et al. OSDI'04); DECKARD; CCFinder | [ ] |
+| **predicate-alias (semantic)** — `frame?` ≡ `provenance==:frame` via definitional unfolding + co-variation, not exact text | 2 | alias analysis; equivalence by definitional substitution | [x] |
+| **path-condition normal form** — `if x; if y; if z` ≡ `if x && y && z`; mine guarded program points, not syntactic ifs | 2,3 | symbolic execution; Chang'07 graph-minor implicants | [x] |
+| **guarded-pair / sequence mining** — "after AllocMark, a Cleanup must follow on every path"; the one site that breaks it | 3 | Engler "Bugs as Deviant Behavior" SOSP'01; PR-Miner; JADET (Wasylkowski'07); GrouMiner | [x] |
+| **polarity canonicalization** — `if x..else` / `unless x` / `if !x` folded before mining | 1,2,3 | normalization pre-pass in all spec miners | [x] |
+| **derived-state def-use** — `b = f(a)`, both feed decisions; flag when only one is refreshed | 1 | program slicing; DynaMine | [x] |
+| **Type-3 clone + divergence** — pasted block, one variable inconsistently renamed/dropped | 3 | CP-Miner (Li et al. OSDI'04); DECKARD; CCFinder | [x] |
 | ~~data-clump → value object~~ — **DROPPED**, owned by `nil-kill` (see below) | 1,2 | — | ⊘ |
 
 ## Existing systems and why they do not cover this

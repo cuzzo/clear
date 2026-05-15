@@ -3,6 +3,25 @@
 
 require_relative "../lib/decomplex"
 
+if ARGV[0] == "report"
+  require_relative "../lib/decomplex/report"
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = args.flat_map do |a|
+    File.directory?(a) ? Dir.glob(File.join(a, "**", "*.rb")) : [a]
+  end.select { |f| File.file?(f) }
+  abort "no .rb files" if files.empty?
+  md = Decomplex::Report.new(files).to_markdown
+  if out_path
+    File.write(out_path, md)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts md
+  end
+  exit 0
+end
+
 if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
   warn <<~USAGE
     decomplex -- decision-level duplication + neglected-condition detector
