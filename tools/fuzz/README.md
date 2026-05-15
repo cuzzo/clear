@@ -74,7 +74,7 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `escape_via_return`         | 18           | E2 :always_returned, :heap_ptr_return |
 | `loop_carry_collection`     | 8            | E2 :loop_carry_string + frame-rewind invariant |
 | `mutable_collection_param`  | 8            | E2 :mutable_list_param_escape, INV-CROSS-FRAME-PARAM-ALLOC |
-| `nested_loop_escape`        | 8            | Loop-local list/map escape -> outer container (commit 9fa21926) |
+| `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
