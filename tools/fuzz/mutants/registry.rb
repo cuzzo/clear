@@ -53,14 +53,13 @@ module FuzzMutants
       kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
-      name: :local_frame_decls_stdlib_provenance,
-      description: 'Drop the rhs_frame_stdlib recognition in ' \
-                   'LoopFrameAnalysis.local_frame_decls (both VarDecl and ' \
-                   'BindExpr branches). A `temp = haystack.split(" ")` ' \
-                   'loop-local stops being seen as a frame decl, so ' \
-                   'mark_per_iter is never set and the MIR checker fires ' \
-                   'FRAME_NO_REWIND on loop_local_method_temp\'s :split ' \
-                   'cells.',
+      name: :local_frame_decls_frame_predicate,
+      description: 'Revert frame_local_collection? to the old ' \
+                   'never-stamped `ti.frame?` check. A loop-local ' \
+                   '`temp = haystack.split(" ")` (provenance left nil) ' \
+                   'stops being seen as a frame decl, mark_per_iter is ' \
+                   'never set, and the MIR checker fires FRAME_NO_REWIND ' \
+                   'on loop_local_method_temp\'s :split cells.',
       invariant: :bug2_frame_no_rewind,
       patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
       templates: [:loop_local_method_temp],
