@@ -34,48 +34,72 @@ module Decomplex
       @clones  = Type3Clone.scan(@files)
     end
 
+    # tier = signal quality (1 = highest signal / lowest false-positive,
+    # 3 = high-recall but noisy). Sections are ordered by tier, NOT by
+    # raw volume -- a noisy detector with thousands of low-value hits
+    # must not outrank a precise one. Within a section, items are
+    # frequency-ranked (support / scatter / confidence, descending).
     SECTIONS = [
-      ["Missing Abstractions",   :@miss,   "guard tuple recomputed across >=2 decision units"],
-      ["Neglected Conditions",   :@negc,   "dispatch/conjunction minus one element -- likely bug"],
-      ["Neglected Updates",      :@negu,   "co-written state, one write missing -- redundant-state desync"],
-      ["Semantic Predicate Aliases", :@salias, "one decision, multiple names (receiver/polarity folded)"],
-      ["Reification Misses",     :@reif,   "an existing predicate reinvented inline -- invariant #16"],
-      ["Neglected Path Conditions", :@pcneg, "nested-if/&& guard set minus one atom"],
-      ["Broken Protocols",       :@broken, "co-called pair, one site does A without B"],
-      ["Derived-State Staleness", :@derived, "b = f(a); a later reassigned, b not recomputed"],
-      ["Type-3 Clones (missed rename)", :@clones, "pasted block, one identifier inconsistently renamed"],
-      ["Exact Predicate Aliases", :@palias, "identical one-line predicate body under >=2 names"]
+      ["Missing Abstractions",   :@miss,   1, "guard tuple recomputed across >=2 decision units"],
+      ["Reification Misses",     :@reif,   1, "an existing predicate reinvented inline -- invariant #16"],
+      ["Semantic Predicate Aliases", :@salias, 1, "one decision, multiple names (receiver/polarity folded)"],
+      ["Exact Predicate Aliases", :@palias, 1, "identical one-line predicate body under >=2 names"],
+      ["Type-3 Clones (missed rename)", :@clones, 2, "pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug"],
+      ["Neglected Updates",      :@negu,   2, "co-written state, one write missing -- *POSSIBLE* redundant-state desync"],
+      ["Derived-State Staleness", :@derived, 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug"],
+      ["Neglected Conditions",   :@negc,   2, "dispatch/conjunction minus one element -- *POSSIBLE* bug"],
+      ["Neglected Path Conditions", :@pcneg, 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)"],
+      ["Broken Protocols",       :@broken, 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)"]
     ].freeze
 
     def slug(t)
       t.downcase.gsub(/[^a-z0-9 ]/, "").tr(" ", "-")
     end
 
+    # `file:method:line` is not a navigable link; editors want
+    # `file:line`. Split from the right (line numeric, method has no
+    # colon, file path may) and render `file:line (method)`.
+    def nav(loc)
+      parts = loc.to_s.split(":")
+      return loc if parts.size < 3
+
+      line = parts.pop
+      meth = parts.pop
+      file = parts.join(":")
+      "`#{file}:#{line}` (#{meth})"
+    end
+
     def to_markdown
       out = +"# Decomplex Report\n\n"
       out << "> Decision-level duplication and neglected-condition analysis.\n" \
-              "> Every count is a ranked **candidate** list (Engler's discipline),\n" \
-              "> not a verdict. Triage top-of-list first.\n\n"
+              "> Every entry is a ranked **candidate** (Engler's discipline),\n" \
+              "> never a verdict -- *POSSIBLE* findings, triaged by a human.\n" \
+              "> Sections are ordered by SIGNAL TIER (1 = lowest false\n" \
+              "> positive), not by volume. Items within a section are\n" \
+              "> frequency-ranked. Triage tier 1, top-of-list, first.\n\n"
 
       out << "## Table of Contents\n"
       out << "- [Project Prioritization](#project-prioritization)\n"
-      SECTIONS.each do |title, ivar, _|
+      SECTIONS.each do |title, ivar, _tier, _|
         n = instance_variable_get(ivar).size
         out << "- [#{title} (#{n})](##{slug(title)}-#{n})\n"
       end
       out << "- [Run Summary](#run-summary)\n\n"
 
       out << "## Project Prioritization\n"
-      ranked = SECTIONS.map { |t, iv, d| [t, instance_variable_get(iv), d] }
-                       .reject { |_, v, _| v.empty? }
-                       .sort_by { |_, v, _| -v.size }
-      ranked.each do |title, v, desc|
-        out << "- [#{title} (#{v.size})](##{slug(title)}-#{v.size}): #{desc}\n"
+      out << "_Ordered by signal tier (1 = highest signal / lowest FP), " \
+             "then by volume._\n\n"
+      ranked = SECTIONS.map { |t, iv, tier, d| [t, instance_variable_get(iv), tier, d] }
+                       .reject { |_, v, _, _| v.empty? }
+                       .sort_by { |_, v, tier, _| [tier, -v.size] }
+      ranked.each do |title, v, tier, desc|
+        out << "- **[tier #{tier}]** [#{title} (#{v.size})]" \
+               "(##{slug(title)}-#{v.size}): #{desc}\n"
       end
       out << "\nNothing flagged.\n" if ranked.empty?
       out << "\n"
 
-      SECTIONS.each do |title, ivar, desc|
+      SECTIONS.each do |title, ivar, _tier, desc|
         v = instance_variable_get(ivar)
         out << "## #{title} (#{v.size})\n"
         out << "_#{desc}_\n\n"
@@ -105,28 +129,29 @@ module Decomplex
                when "Missing Abstractions"
                  "- **[#{h[:kind]}]** support=#{h[:support]} scatter=#{h[:scatter]} " \
                  "rank=#{h[:rank]}\n  - tuple: `#{h[:members].join(' | ')}`\n" \
-                 "  - #{h[:sites].first(6).join(' ; ')}\n"
+                 "  - #{h[:sites].first(6).map { |s| nav(s) }.join(' ; ')}\n"
                when "Neglected Conditions", "Neglected Path Conditions"
-                 "- support=#{h[:support]} at `#{h[:at]}` -- MISSING " \
+                 "- *POSSIBLE* (support=#{h[:support]}) #{nav(h[:at])} -- MISSING " \
                  "`#{h[:missing]}` from `#{(h[:pattern] || h[:guards]).join(' | ')}`\n"
                when "Neglected Updates"
-                 "- support=#{h[:support]} `#{h[:at]}` writes `.#{h[:has]}` " \
+                 "- *POSSIBLE* (support=#{h[:support]}) #{nav(h[:at])} writes `.#{h[:has]}` " \
                  "but NOT `.#{h[:missing]}` (recv `#{h[:recv]}`)\n"
                when "Semantic Predicate Aliases", "Exact Predicate Aliases"
                  "- `#{h[:names].join(' = ')}` == `#{h[:canon] || h[:body]}`\n" \
-                 "  - #{h[:sites].join(' ; ')}\n"
+                 "  - #{h[:sites].map { |s| nav(s) }.join(' ; ')}\n"
                when "Reification Misses"
                  "- predicate `#{h[:predicate]}` reinvented inline at " \
-                 "`#{h[:at]}` (`#{h[:raw]}`)\n"
+                 "#{nav(h[:at])} (`#{h[:raw]}`)\n"
                when "Broken Protocols"
-                 "- conf=#{h[:confidence]} support=#{h[:support]} `#{h[:at]}` " \
-                 "does `#{h[:has]}` without `#{h[:missing]}`\n"
+                 "- *POSSIBLE* conf=#{h[:confidence]} support=#{h[:support]} " \
+                 "#{nav(h[:at])} does `#{h[:has]}` without `#{h[:missing]}`\n"
                when "Derived-State Staleness"
-                 "- `#{h[:at]}`: `#{h[:derived]}` derived from `#{h[:source]}` " \
-                 "(line #{h[:derived_at]}); `#{h[:source]}` reassigned line " \
-                 "#{h[:source_reassigned_at]}, `#{h[:derived]}` not recomputed\n"
+                 "- *POSSIBLE* #{nav(h[:at])}: `#{h[:derived]}` derived from " \
+                 "`#{h[:source]}` (line #{h[:derived_at]}); `#{h[:source]}` " \
+                 "reassigned line #{h[:source_reassigned_at]}, `#{h[:derived]}` " \
+                 "not recomputed\n"
                when "Type-3 Clones (missed rename)"
-                 "- `#{h[:at]}` clone of `#{h[:ref_at]}`: ref var " \
+                 "- *POSSIBLE* #{nav(h[:at])} clone of #{nav(h[:ref_at])}: ref var " \
                  "`#{h[:ref_name]}` spelled #{h[:divergent].inspect} here\n"
                end
       end
