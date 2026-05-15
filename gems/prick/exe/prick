@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/prick"
+
+def usage
+  warn <<~U
+    prick -- categorical coverage-gap synthesis
+
+      prick report [--repo=.] [--coverage=coverage/.resultset.json] \\
+                        [--output=report.md] [--files=a.rb,b.rb]
+
+    --files  repo-relative .rb to triage; default: the src/mir lowering
+             passes (the fix-cache hotspots).
+  U
+  exit 1
+end
+
+usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
+usage unless ARGV[0] == "report"
+
+opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
+         files: %w[src/mir/mir_lowering.rb src/mir/control_flow.rb
+                   src/mir/escape_analysis.rb] }
+ARGV[1..].each do |a|
+  case a
+  when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
+  when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
+  when /\A--output=(.+)/   then opts[:output] = Regexp.last_match(1)
+  when /\A--files=(.+)/    then opts[:files] = Regexp.last_match(1).split(",")
+  else usage
+  end
+end
+
+md = Prick::Report.new(
+  files: opts[:files], repo: opts[:repo], resultset: opts[:coverage]
+).to_markdown
+
+if opts[:output]
+  File.write(opts[:output], md)
+  warn "wrote #{opts[:output]}"
+else
+  puts md
+end
