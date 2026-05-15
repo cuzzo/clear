@@ -1,0 +1,17 @@
+diff --git a/src/mir/control_flow.rb b/src/mir/control_flow.rb
+--- a/src/mir/control_flow.rb
++++ b/src/mir/control_flow.rb
+@@ -1410,11 +1410,11 @@ module LoopFrameAnalysis
+       when AST::MethodCall
+         receiver = node.object
+         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+-        found = true if node.args.any? { |a| expr_references_var?(a, var_name) }
++        found = true if node.args.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+       when AST::FuncCall
+         receiver = node.args.first
+         next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+-        found = true if node.args.drop(1).any? { |a| expr_references_var?(a, var_name) }
++        found = true if node.args.drop(1).any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+       end
+     end
+     found
