@@ -10,20 +10,37 @@ module FixCache
   # top-down, NOT a verdict -- a hotspot is "look here first," not
   # "this is a bug."
   class Report
-    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40)
+    # only: array of repo-relative path prefixes (e.g. ["src/"]). The
+    # global fix-history time span is deliberately UNCHANGED -- recency
+    # weighting stays consistent with the whole project; we only filter
+    # WHICH files are ranked. Empty = whole repo.
+    def initialize(repo:, resultset:, fix_re: Bugspots::FIX_RE, top: 40, only: [])
       @repo = ::File.realpath(repo)
       @top = top
+      @only = Array(only).map { |p| p.sub(%r{\A\./}, "").chomp("/") }.reject(&:empty?)
       events = Bugspots.events_from_git(@repo, fix_re: fix_re)
       @fix_commits = events.size
-      scores = Bugspots.score(events)
+      scores = filter_paths(Bugspots.score(events))
       gaps =
         if resultset && ::File.exist?(resultset)
-          CoverageGap.from_resultset(resultset, root: @repo)
+          filter_paths(CoverageGap.from_resultset(resultset, root: @repo))
         else
           {}
         end
       @have_cov = !gaps.empty?
       @ranked, @unmeasured = Hotspot.rank(scores, gaps)
+    end
+
+    def in_scope?(rel)
+      return true if @only.empty?
+
+      @only.any? { |p| rel == p || rel.start_with?("#{p}/") }
+    end
+
+    def filter_paths(hash)
+      return hash if @only.empty?
+
+      hash.select { |rel, _| in_scope?(rel) }
     end
 
     def to_markdown
@@ -91,14 +108,16 @@ module FixCache
 
       o << "## Run Summary\n"
       o << "- Repo: `#{@repo}`\n"
-      o << "- Fix commits matched: #{@fix_commits}\n"
+      o << "- Scope: #{@only.empty? ? 'whole repo' : @only.map { |p| "`#{p}/`" }.join(', ')}\n"
+      o << "- Fix commits matched: #{@fix_commits} (time span over whole history, unfiltered)\n"
       o << "- Files ranked: #{@ranked.size}; fixed-but-unmeasured: " \
            "#{@unmeasured.size}\n"
       o << "- Branch-coverage resultset: " \
            "#{@have_cov ? 'present' : 'ABSENT (fix-churn only)'}\n"
-      o << "- Method: vendored bugspots (Google ICSE'13 time-decay) x " \
-           "SimpleCov branch gap; file granularity; zero deps " \
-           "(see docs/agents/design.md)\n"
+      o << "- Method: vendored bugspots " \
+           "([Google ICSE'13 time-decay](docs/agents/design.md#prior-art)) " \
+           "x SimpleCov branch gap; file granularity; zero deps " \
+           "(see [docs/agents/design.md](docs/agents/design.md))\n"
       o
     end
   end

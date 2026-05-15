@@ -72,6 +72,38 @@ class ReportTest < Minitest::Test
     end
   end
 
+  def test_only_filters_ranking_to_the_scoped_path
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      FileUtils.mkdir_p("#{dir}/lib")
+      File.write("#{dir}/src/in.rb", "1\n")
+      File.write("#{dir}/lib/out.rb", "1\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix both in and out", date: "2024-01-01T00:00:00")
+      rs = { "RSpec" => { "coverage" => {
+        "#{dir}/src/in.rb" => { "branches" => {
+          "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 0 } } },
+        "#{dir}/lib/out.rb" => { "branches" => {
+          "[:if,0,1,0,1,9]" => { "[:then,1,1,0,1,4]" => 0 } } }
+      } } }
+      path = "#{dir}/.resultset.json"
+      File.write(path, JSON.dump(rs))
+
+      full = FixCache::Report.new(repo: dir, resultset: path).to_markdown
+      assert_includes full, "`src/in.rb`"
+      assert_includes full, "`lib/out.rb`"
+
+      scoped = FixCache::Report.new(repo: dir, resultset: path,
+                                    only: ["src/"]).to_markdown
+      assert_includes scoped, "`src/in.rb`"
+      refute_includes scoped, "`lib/out.rb`"
+      assert_includes scoped, "Scope: `src/`"
+    end
+  end
+
   def test_no_fix_commits_yields_no_hotspots
     Dir.mktmpdir do |dir|
       git(dir, "init", "-q")

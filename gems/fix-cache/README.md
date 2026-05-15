@@ -38,9 +38,21 @@ third direction, with no static analysis.
 fix-cache report --repo=. --coverage=coverage/.resultset.json \
                  --output=report.md
 
+# Restrict ranking to part of the codebase (repeatable). The
+# committed report.md is generated with --only=src/ -- the fix
+# time-decay baseline still spans the WHOLE history; only which
+# files are ranked is filtered:
+fix-cache report --only=src/
+fix-cache report --only=src/ --only=lib/
+
 # No coverage data? It degrades to fix-churn-only, loudly flagged:
 fix-cache report --repo=.
 ```
+
+`--only=PATH` takes a repo-relative path prefix and is repeatable.
+Scoping to `src/` is the recommended default for this repo: it
+removes test/tooling/example noise so the hotspot ranking is the
+production compiler only.
 
 The resultset is SimpleCov's `coverage/.resultset.json` with
 `enable_coverage :branch` (the repo already produces this; see
