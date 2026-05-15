@@ -101,9 +101,12 @@ FuzzGenerator.register(:loop_local_method_temp, cells: LOOP_LOCAL_METHOD_TEMP_CE
   setup  = llmt_setup(p[:method])
   bind   = llmt_binding(p[:method], p[:binding])
   peek   = llmt_peek(p[:method])
+  # Use `temp` via `peek` so the binding isn't dead, but never actually
+  # raise — the cell is testing per-iteration frame rewind, not error
+  # paths. (`peek` is a non-negative length, so the guard never fires.)
   inner  = <<~BODY.chomp
     #{bind}
-              IF #{peek} == 0_i64 THEN _ = 1_i64; END
+              IF #{peek} < 0_i64 THEN RAISE "unreached"; END
   BODY
   loop = llmt_loop(p, inner)
 

@@ -1380,12 +1380,36 @@ module LoopFrameAnalysis
       when AST::VarDecl
         ti = Type.from_node(s)
         next unless ti
-        is_frame = ti.frame_provenance? && (ti.list_collection? || ti.map? || ti.array? || ti.string?)
+        collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
+        # Bug #2: same unresolved-provenance-from-frame-stdlib-call case
+        # as the BindExpr branch below, for `MUTABLE x = split(...)`.
+        rhs_frame_stdlib =
+          ti.provenance.nil? &&
+          !ti.heap? &&
+          s.respond_to?(:value) && s.value.respond_to?(:stdlib_allocates) &&
+          s.value.stdlib_allocates == true
+        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
         decls << s if is_frame && s.name.is_a?(String)
       when AST::BindExpr
         ti = Type.from_node(s)
         next unless ti
-        is_frame = ti.frame_provenance? && (ti.list_collection? || ti.map? || ti.array? || ti.string?)
+        collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
+        # Bug #2 (docs/agents/clear-bug123-forensic.md): a stdlib call with
+        # `allocates: true` and `:node_storage` (split / substr / concat /
+        # toString / ...) lands its result in the frame arena, but the
+        # binding's type_info provenance is left unresolved (nil), so
+        # `frame_provenance?` is false and the decl was invisible here —
+        # mark_per_iter never got set and the MIR checker fired
+        # FRAME_NO_REWIND with no way for the lowering to satisfy it.
+        # Treat an unresolved-provenance collection bound from a
+        # frame-allocating stdlib call as frame-local. Explicit :heap /
+        # owned bindings are excluded (they don't need per-iter rewind).
+        rhs_frame_stdlib =
+          ti.provenance.nil? &&
+          !ti.heap? &&
+          s.value.respond_to?(:stdlib_allocates) &&
+          s.value.stdlib_allocates == true
+        is_frame = (ti.frame_provenance? || rhs_frame_stdlib) && collection_shaped
         decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
       end
     end
