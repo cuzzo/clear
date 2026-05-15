@@ -1,7 +1,7 @@
 # What I learned (the hard way) Building a Memory Safe Programming Language with LLMs over the last 6 months
 
 ## Background
-I wanted a language like Rust, but substantially safer and more intuitive.
+For years, I dreamed up a language like Rust, but substantially safer and more intuitive.
 
 I thought outsourcing this to LLMs was reasonable. The goal was primarily to understand their capabilities and limitations. My initial expectations were low.
 
@@ -80,7 +80,7 @@ A hammer is great for hitting nails but terrible for knitting sweaters.
 
 | Model | Implementation | Speed | Design | Review Signal |
 | :--- | :--- | :--- | :--- | :--- |
-| **Codex** | B+ | A+ | C | D |
+| **Codex** | B | A+ | C | D |
 | **Claude Code** | A- | D | B | B |
 | **Gemini CLI** | C | D | B | B+ |
 
@@ -148,3 +148,5 @@ In six months of part-time tinkering, I’ve built a competitive runtime and lan
 I can "code" while walking the dog, at the gym, during lunch, instead of doom scrolling before bed, etc.
 
 While LLMs can be frustratingly inconsistent, they are the most amazing tools I’ve used. I’ve never been more excited about the future of engineering.
+
+You can see my full [Development Process](how-to-vibe-code-something-that-actually-works.md) for how I built a complex language that competes with Rust and Go on concurrent performance and *nearly* works.

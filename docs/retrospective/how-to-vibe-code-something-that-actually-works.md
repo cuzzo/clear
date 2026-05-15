@@ -124,5 +124,4 @@ You do not need to solve the halting problem to vibe code with LLMs and get *rea
     * At a *BARE* minimum, get the LLMs to converge on how *YOU* can be convinced the code actually works. Check that it works! Even at this stage, you should not be surprised if it is completely broken…
     * At a *REASONABLE* minimum, review the final integration testing to make sure it’s not mocking everything important.
 
-
-
+Here is my [Review Process](what-I-learned-the-hard-way.md), complete with the magic words at different stages of development that have led to far better outcomes.
