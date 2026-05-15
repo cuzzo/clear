@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/fix_cache"
+
+def usage
+  warn <<~U
+    fix-cache -- defect-risk hotspots (bugspots fix-churn x branch gap)
+
+      fix-cache report [--repo=.] [--coverage=coverage/.resultset.json] \\
+                       [--output=report.md] [--top=40]
+
+    With no --coverage (or a missing file) only fix-churn is shown.
+  U
+  exit 1
+end
+
+usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
+usage unless ARGV[0] == "report"
+
+opts = { repo: ".", coverage: "coverage/.resultset.json",
+         output: nil, top: 40 }
+ARGV[1..].each do |a|
+  case a
+  when /\A--repo=(.+)/      then opts[:repo] = Regexp.last_match(1)
+  when /\A--coverage=(.+)/  then opts[:coverage] = Regexp.last_match(1)
+  when /\A--output=(.+)/    then opts[:output] = Regexp.last_match(1)
+  when /\A--top=(\d+)/      then opts[:top] = Regexp.last_match(1).to_i
+  else usage
+  end
+end
+
+md = FixCache::Report.new(
+  repo: opts[:repo],
+  resultset: opts[:coverage],
+  top: opts[:top]
+).to_markdown
+
+if opts[:output]
+  File.write(opts[:output], md)
+  warn "wrote #{opts[:output]}"
+else
+  puts md
+end

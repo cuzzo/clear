@@ -12,6 +12,7 @@
 --ignore=docs/
 --ignore=tools/
 --ignore=gems/decomplex/
+--ignore=gems/fix-cache/
 
 # Suppress dead-code/unreachable warnings on defensive guards.
 # The autogen tracer captures observation-tight types, so methods'
