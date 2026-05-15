@@ -359,24 +359,54 @@ END;
    parse_primary calls parse_expression for grouping; that's fine. *)
 
 
-(* String pool: a growable list of unique strings. Returns the index. *)
-PROCEDURE pool_intern(VAR pool_data, VAR pool_count, VAR pool_cap, s);
-  i := 0;
-  WHILE(i < pool_count) DO
-    IF equals(pool_data[i], s) = 1 THEN
-      RETURN i;
+(* String pool. Internally:
+     pool[0] = data ARRAY (one cell per interned string, indexed by id)
+     pool[1] = count
+     pool[2] = cap (capacity of pool[0])
+     pool[3] = ht  (string -> id, from core.puck's HashTable)
+   The HT turns interning from O(n) per call (linear scan of the data
+   array) into amortised O(1). The data array is still needed because the
+   bytecode emitter writes strings out in id order, so it needs the
+   reverse mapping. *)
+
+PROCEDURE pool_new();
+  p := ARRAY(4);
+  p[0] := ARRAY(16);
+  p[1] := 0;
+  p[2] := 16;
+  p[3] := ht_new(32);
+  RETURN p;
+END;
+
+PROCEDURE pool_intern(pool, s);
+  existing := ht_get(pool[3], s);
+  IF existing >= 0 THEN RETURN existing; END;
+
+  data := pool[0];
+  count := pool[1];
+  cap := pool[2];
+  IF count = cap THEN
+    new_cap := cap * 2;
+    new_data := ARRAY(new_cap);
+    i := 0;
+    WHILE(i < count) DO
+      new_data[i] := data[i];
+      i := i + 1;
     END;
-    i := i + 1;
+    pool[0] := new_data;
+    pool[2] := new_cap;
+    data := new_data;
   END;
-  idx := pool_count;
-  list_push(pool_data, pool_count, pool_cap, s);
-  RETURN idx;
+  data[count] := s;
+  pool[1] := count + 1;
+  ht_set(pool[3], s, count);
+  RETURN count;
 END;
 
 
 (* Parse one comma-separated args list `( e1, e2, ... )`. Returns an array of
    AST nodes (which is itself a heap array). *)
-PROCEDURE parse_call_args(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_call_args(tokens, VAR cur, pool);
   eat_op(tokens, cur, "(");
   buf_data := ARRAY(4);
   buf_count := 0;
@@ -385,7 +415,7 @@ PROCEDURE parse_call_args(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
     eat_op(tokens, cur, ")");
   ELSE
     LOOP
-      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      e := parse_expression(tokens, cur, pool);
       list_push(buf_data, buf_count, buf_cap, e);
       IF at_op(tokens, cur, ",") = 1 THEN
         eat_op(tokens, cur, ",");
@@ -405,7 +435,7 @@ PROCEDURE parse_call_args(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
 END;
 
 (* Primary: literal / identifier / grouped expression / function call. *)
-PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_primary(tokens, VAR cur, pool);
   t := peek(tokens, cur[0], 0);
   k := tk_kind(t);
   IF k = 1 THEN
@@ -414,7 +444,7 @@ PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool
   END;
   IF k = 2 THEN
     cur[0] := cur[0] + 1;
-    idx := pool_intern(pool_data, pool_count, pool_cap, tk_str(t));
+    idx := pool_intern(pool, tk_str(t));
     RETURN mk2(2, idx);
   END;
   IF k = 3 THEN
@@ -422,7 +452,7 @@ PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool
     cur[0] := cur[0] + 1;
     (* function-call or bare variable *)
     IF at_op(tokens, cur, "(") = 1 THEN
-      args := parse_call_args(tokens, cur, pool_data, pool_count, pool_cap);
+      args := parse_call_args(tokens, cur, pool);
       RETURN mk3(6, name, args);
     END;
     RETURN mk2(3, name);
@@ -430,7 +460,7 @@ PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool
   IF k = 4 THEN
     IF equals(tk_str(t), "(") = 1 THEN
       eat_op(tokens, cur, "(");
-      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      e := parse_expression(tokens, cur, pool);
       eat_op(tokens, cur, ")");
       RETURN e;
     END;
@@ -441,8 +471,8 @@ PROCEDURE parse_primary(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool
 END;
 
 (* Multiplicative tier: * / %, left-associative. *)
-PROCEDURE parse_mul(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
-  left := parse_primary(tokens, cur, pool_data, pool_count, pool_cap);
+PROCEDURE parse_mul(tokens, VAR cur, pool);
+  left := parse_primary(tokens, cur, pool);
   LOOP
     t := peek(tokens, cur[0], 0);
     IF tk_kind(t) # 4 THEN EXIT; END;
@@ -453,15 +483,15 @@ PROCEDURE parse_mul(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap
     IF equals(s, "%") = 1 THEN op := 4; END;
     IF op < 0 THEN EXIT; END;
     cur[0] := cur[0] + 1;
-    right := parse_primary(tokens, cur, pool_data, pool_count, pool_cap);
+    right := parse_primary(tokens, cur, pool);
     left := mk4(4, op, left, right);
   END;
   RETURN left;
 END;
 
 (* Additive tier: + -, left-associative. *)
-PROCEDURE parse_add(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
-  left := parse_mul(tokens, cur, pool_data, pool_count, pool_cap);
+PROCEDURE parse_add(tokens, VAR cur, pool);
+  left := parse_mul(tokens, cur, pool);
   LOOP
     t := peek(tokens, cur[0], 0);
     IF tk_kind(t) # 4 THEN EXIT; END;
@@ -471,7 +501,7 @@ PROCEDURE parse_add(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap
     IF equals(s, "-") = 1 THEN op := 1; END;
     IF op < 0 THEN EXIT; END;
     cur[0] := cur[0] + 1;
-    right := parse_mul(tokens, cur, pool_data, pool_count, pool_cap);
+    right := parse_mul(tokens, cur, pool);
     left := mk4(4, op, left, right);
   END;
   RETURN left;
@@ -479,15 +509,15 @@ END;
 
 (* Comparison tier — non-associative; we accept chains anyway (a < b < c
    parses left-to-right) since the test programs never produce them. *)
-PROCEDURE parse_expression(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
-  left := parse_add(tokens, cur, pool_data, pool_count, pool_cap);
+PROCEDURE parse_expression(tokens, VAR cur, pool);
+  left := parse_add(tokens, cur, pool);
   LOOP
     t := peek(tokens, cur[0], 0);
     IF tk_kind(t) # 4 THEN EXIT; END;
     op := compare_op_code(tk_str(t));
     IF op < 0 THEN EXIT; END;
     cur[0] := cur[0] + 1;
-    right := parse_add(tokens, cur, pool_data, pool_count, pool_cap);
+    right := parse_add(tokens, cur, pool);
     left := mk4(5, op, left, right);
   END;
   RETURN left;
@@ -496,7 +526,7 @@ END;
 
 (* Parse a block of statements until a stopping keyword (END / ELSE). The
    stopping keyword is *not* consumed. Returns a fresh array. *)
-PROCEDURE parse_block(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_block(tokens, VAR cur, pool);
   buf_data := ARRAY(8);
   buf_count := 0;
   buf_cap := 8;
@@ -508,7 +538,7 @@ PROCEDURE parse_block(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_c
       IF equals(s, "END")  = 1 THEN EXIT; END;
       IF equals(s, "ELSE") = 1 THEN EXIT; END;
     END;
-    stmt := parse_statement(tokens, cur, pool_data, pool_count, pool_cap);
+    stmt := parse_statement(tokens, cur, pool);
     list_push(buf_data, buf_count, buf_cap, stmt);
   END;
   out := ARRAY(buf_count);
@@ -520,7 +550,7 @@ PROCEDURE parse_block(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_c
   RETURN out;
 END;
 
-PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_statement(tokens, VAR cur, pool);
   t := peek(tokens, cur[0], 0);
   k := tk_kind(t);
 
@@ -530,13 +560,13 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
     (* IF cond THEN body [ELSE body] END; *)
     IF equals(name, "IF") = 1 THEN
       cur[0] := cur[0] + 1;
-      cond := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      cond := parse_expression(tokens, cur, pool);
       eat_ident(tokens, cur, "THEN");
-      then_body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+      then_body := parse_block(tokens, cur, pool);
       else_body := ARRAY(0);
       IF at_ident(tokens, cur, "ELSE") = 1 THEN
         eat_ident(tokens, cur, "ELSE");
-        else_body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+        else_body := parse_block(tokens, cur, pool);
       END;
       eat_ident(tokens, cur, "END");
       eat_op(tokens, cur, ";");
@@ -546,7 +576,7 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
     (* LOOP body END; *)
     IF equals(name, "LOOP") = 1 THEN
       cur[0] := cur[0] + 1;
-      body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+      body := parse_block(tokens, cur, pool);
       eat_ident(tokens, cur, "END");
       eat_op(tokens, cur, ";");
       RETURN mk2(10, body);
@@ -566,7 +596,7 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
         eat_op(tokens, cur, ";");
         RETURN mk2(12, 0);
       END;
-      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      e := parse_expression(tokens, cur, pool);
       eat_op(tokens, cur, ";");
       RETURN mk2(12, e);
     END;
@@ -583,7 +613,7 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
       LOOP
         IF at_op(tokens, cur, ")") = 1 THEN EXIT; END;
         eat_op(tokens, cur, ",");
-        e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+        e := parse_expression(tokens, cur, pool);
         list_push(buf_data, buf_count, buf_cap, e);
       END;
       eat_op(tokens, cur, ")");
@@ -601,7 +631,7 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
     IF equals(name, "HALT") = 1 THEN
       cur[0] := cur[0] + 1;
       eat_op(tokens, cur, "(");
-      e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+      e := parse_expression(tokens, cur, pool);
       eat_op(tokens, cur, ")");
       eat_op(tokens, cur, ";");
       args := ARRAY(1);
@@ -617,13 +647,13 @@ PROCEDURE parse_statement(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
       IF equals(ns, ":=") = 1 THEN
         cur[0] := cur[0] + 1;
         eat_op(tokens, cur, ":=");
-        e := parse_expression(tokens, cur, pool_data, pool_count, pool_cap);
+        e := parse_expression(tokens, cur, pool);
         eat_op(tokens, cur, ";");
         RETURN mk3(8, name, e);
       END;
       IF equals(ns, "(") = 1 THEN
         cur[0] := cur[0] + 1;
-        args := parse_call_args(tokens, cur, pool_data, pool_count, pool_cap);
+        args := parse_call_args(tokens, cur, pool);
         eat_op(tokens, cur, ";");
         RETURN mk3(13, name, args);
       END;
@@ -638,7 +668,7 @@ END;
 
 
 (* Parse a procedure declaration:  PROCEDURE name(p1, p2, ...);  body  END; *)
-PROCEDURE parse_procedure(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_procedure(tokens, VAR cur, pool);
   eat_ident(tokens, cur, "PROCEDURE");
   name_tok := eat(tokens, cur);
   IF tk_kind(name_tok) # 3 THEN
@@ -671,7 +701,7 @@ PROCEDURE parse_procedure(tokens, VAR cur, VAR pool_data, VAR pool_count, VAR po
   END;
   eat_op(tokens, cur, ";");
 
-  body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+  body := parse_block(tokens, cur, pool);
   eat_ident(tokens, cur, "END");
   eat_op(tokens, cur, ";");
 
@@ -686,7 +716,7 @@ END;
 
 
 (* Top level: MODULE Name; <procedures>* BEGIN body END. *)
-PROCEDURE parse_module(tokens, VAR pool_data, VAR pool_count, VAR pool_cap);
+PROCEDURE parse_module(tokens, pool);
   cur := ARRAY(1);
   cur[0] := 0;
 
@@ -700,7 +730,7 @@ PROCEDURE parse_module(tokens, VAR pool_data, VAR pool_count, VAR pool_cap);
   procs_cap := 4;
   LOOP
     IF at_ident(tokens, cur, "PROCEDURE") = 1 THEN
-      p := parse_procedure(tokens, cur, pool_data, pool_count, pool_cap);
+      p := parse_procedure(tokens, cur, pool);
       list_push(procs_buf, procs_count, procs_cap, p);
     ELSE
       EXIT;
@@ -708,7 +738,7 @@ PROCEDURE parse_module(tokens, VAR pool_data, VAR pool_count, VAR pool_cap);
   END;
 
   eat_ident(tokens, cur, "BEGIN");
-  body := parse_block(tokens, cur, pool_data, pool_count, pool_cap);
+  body := parse_block(tokens, cur, pool);
   eat_ident(tokens, cur, "END");
   eat_op(tokens, cur, ".");
 
@@ -987,7 +1017,9 @@ END;
 
    Take the final procs table plus the string pool and write the .puckc file. *)
 
-PROCEDURE write_puckc(out_path, pool_data, pool_count, procs, procs_count);
+PROCEDURE write_puckc(out_path, pool, procs, procs_count);
+  pool_data := pool[0];
+  pool_count := pool[1];
   handle := OPEN_WRITE(out_path);
   WRITE_LINE(handle, "PUCKC 1");
   WRITE_LINE(handle, concat("STRINGS ", int_to_string(pool_count)));
@@ -1038,12 +1070,10 @@ BEGIN
   tokens := tokenize(src);
 
   (* ---- string pool used during parse + emit ---- *)
-  pool_data := ARRAY(8);
-  pool_count := 0;
-  pool_cap := 8;
+  pool := pool_new();
 
   (* ---- parse ---- *)
-  module := parse_module(tokens, pool_data, pool_count, pool_cap);
+  module := parse_module(tokens, pool);
   (* module = [15, name, procs_ast, body_ast] *)
 
   (* ---- registration pass: build procs table so calls resolve.
@@ -1118,7 +1148,7 @@ BEGIN
   END;
 
   (* ---- write ---- *)
-  write_puckc(out_path, pool_data, pool_count, procs, procs_count);
+  write_puckc(out_path, pool, procs, procs_count);
 
   SYSCALL(1, concat("compiled ", in_path));
   SYSCALL(1, concat("    -> ", out_path));

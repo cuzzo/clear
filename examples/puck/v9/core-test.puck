@@ -105,6 +105,35 @@ BEGIN
   assert(1);
   check("assert succeeded on three cases", 1, passed, failed);
 
+  (* ---- HashTable ---- *)
+  ht := ht_new(8);
+  check_int("ht_new starts empty", ht_count(ht), 0, passed, failed);
+  check_int("ht_get on empty -> -1", ht_get(ht, "x"), 0 - 1, passed, failed);
+  check_int("ht_has on empty -> 0", ht_has(ht, "x"), 0, passed, failed);
+
+  ht_set(ht, "alice", 1);
+  ht_set(ht, "bob", 2);
+  ht_set(ht, "carol", 3);
+  check_int("ht_count after 3 inserts", ht_count(ht), 3, passed, failed);
+  check_int("ht_get alice", ht_get(ht, "alice"), 1, passed, failed);
+  check_int("ht_get bob",   ht_get(ht, "bob"),   2, passed, failed);
+  check_int("ht_get carol", ht_get(ht, "carol"), 3, passed, failed);
+  check_int("ht_has alice", ht_has(ht, "alice"), 1, passed, failed);
+  check_int("ht_has missing", ht_has(ht, "nope"), 0, passed, failed);
+
+  (* update existing key keeps count *)
+  ht_set(ht, "alice", 100);
+  check_int("update keeps count", ht_count(ht), 3, passed, failed);
+  check_int("update changes value", ht_get(ht, "alice"), 100, passed, failed);
+
+  (* force resize and confirm everything survives *)
+  ht_set(ht, "d", 4); ht_set(ht, "e", 5);  ht_set(ht, "f", 6);
+  ht_set(ht, "g", 7); ht_set(ht, "h", 8);  ht_set(ht, "i", 9);
+  ht_set(ht, "j", 10); ht_set(ht, "k", 11); ht_set(ht, "l", 12);
+  check_int("count after grow", ht_count(ht), 12, passed, failed);
+  check_int("alice survives grow", ht_get(ht, "alice"), 100, passed, failed);
+  check_int("j survives grow", ht_get(ht, "j"), 10, passed, failed);
+
   (* ---- final tally ---- *)
   SYSCALL(1, "---");
   msg := concat("passed: ", int_to_string(passed));

@@ -279,10 +279,6 @@ These don't change what the JIT compiles, just how well:
   LOC; dominates wall-clock for any compiler.puck run over more than a few
   hundred lines.
 
-- **String-pool intern is O(n²).** Each new string interns by linearly
-  scanning the pool. A hash table - or even a sorted vector with binary
-  search - turns this into O(log n). ~50 LOC.
-
 - **Bytecode is plain text.** `.puckc` parses ~3 MB/s because every line
   goes through `sscanf`. A length-prefixed binary format (still a
   one-page spec) would load >100x faster. ~150 LOC each side.

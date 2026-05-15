@@ -261,6 +261,120 @@ PROCEDURE list_push(VAR data, VAR count, VAR cap, item);
   count := count + 1;
 END;
 
+(* ============================================================ HashTable
+
+   Open-addressed hash table with linear probing. String keys (codepoint
+   arrays); values are arbitrary cells (ints or refs). The table itself is
+   a 4-cell array:
+     ht[0] = count            number of occupied slots
+     ht[1] = cap              size of the bucket arrays (kept >= 2*count)
+     ht[2] = keys             ARRAY(cap); cell holds the key string, or 0
+                              for "empty slot"
+     ht[3] = values           ARRAY(cap); valid when keys[i] != 0
+
+   Keys cannot be empty strings (they hash to slot 0 just fine but the
+   sentinel for "empty" is the integer 0, which is distinguishable from
+   any heap ref). For "not found" ht_get returns -1; callers that may
+   legitimately store -1 as a value should use ht_has instead. *)
+
+(* djb2 string hash. Wraps in int64 on the C VM, grows unbounded on the
+   Ruby VM - both are fine because we take it mod cap below. *)
+PROCEDURE str_hash(s);
+  h := 5381;
+  i := 0;
+  n := LEN(s);
+  WHILE(i < n) DO
+    h := h * 33 + s[i];
+    i := i + 1;
+  END;
+  IF h < 0 THEN h := 0 - h; END;
+  RETURN h;
+END;
+
+PROCEDURE ht_new(initial_cap);
+  ht := ARRAY(4);
+  ht[0] := 0;
+  ht[1] := initial_cap;
+  ht[2] := ARRAY(initial_cap);     (* cells start as integer 0 - "empty" *)
+  ht[3] := ARRAY(initial_cap);
+  RETURN ht;
+END;
+
+PROCEDURE ht_count(ht);
+  RETURN ht[0];
+END;
+
+(* Probe for `key`. Returns the slot index where `key` lives, OR the slot
+   where it would be inserted (a slot whose key is the integer 0). The
+   caller decides which by reading keys[slot]. *)
+PROCEDURE ht_find_slot(ht, key);
+  cap := ht[1];
+  keys := ht[2];
+  slot := str_hash(key) % cap;
+  LOOP
+    k := keys[slot];
+    IF k = 0 THEN RETURN slot; END;
+    IF equals(k, key) = 1 THEN RETURN slot; END;
+    slot := slot + 1;
+    IF slot >= cap THEN slot := 0; END;
+  END;
+END;
+
+PROCEDURE ht_has(ht, key);
+  slot := ht_find_slot(ht, key);
+  keys := ht[2];
+  IF keys[slot] = 0 THEN RETURN 0; END;
+  RETURN 1;
+END;
+
+(* Returns the value for `key`, or -1 if absent. *)
+PROCEDURE ht_get(ht, key);
+  slot := ht_find_slot(ht, key);
+  keys := ht[2];
+  IF keys[slot] = 0 THEN RETURN 0 - 1; END;
+  values := ht[3];
+  RETURN values[slot];
+END;
+
+(* Insert / replace. Doubles cap and rehashes when the load factor crosses
+   50%, which keeps probe chains short. *)
+PROCEDURE ht_set(ht, key, value);
+  count := ht[0];
+  cap := ht[1];
+  IF count * 2 >= cap THEN
+    ht_resize(ht);
+    cap := ht[1];
+  END;
+  slot := ht_find_slot(ht, key);
+  keys := ht[2];
+  values := ht[3];
+  IF keys[slot] = 0 THEN
+    keys[slot] := key;
+    ht[0] := count + 1;
+  END;
+  values[slot] := value;
+END;
+
+PROCEDURE ht_resize(ht);
+  old_cap := ht[1];
+  old_keys := ht[2];
+  old_values := ht[3];
+  new_cap := old_cap * 2;
+  ht[1] := new_cap;
+  ht[2] := ARRAY(new_cap);
+  ht[3] := ARRAY(new_cap);
+  ht[0] := 0;
+  i := 0;
+  WHILE(i < old_cap) DO
+    k := old_keys[i];
+    IF k # 0 THEN
+      v := old_values[i];
+      ht_set(ht, k, v);
+    END;
+    i := i + 1;
+  END;
+END;
+
 (* ============================================================ I/O wrappers
 
    The Compiler recognises the UPPER_CASE syscall builtins (OPEN_READ,
