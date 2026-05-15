@@ -1,12 +1,19 @@
 diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
+index 30ed5224f..f82912676 100644
 --- a/src/mir/mir_lowering.rb
 +++ b/src/mir/mir_lowering.rb
-@@ -6688,7 +6688,7 @@ class MIRLowering
-     # wrap [pending..., IfStmt] in a transparent ScopeBlock so the temp's
-     # Let precedes the cond that uses it and its Cleanup still scopes
-     # tightly around the IfStmt.
--    cond_pending = flush_pending
-+    cond_pending = []  # MUTANT: don't drain — let cond hoists leak into then-body
-     then_body = lower_body(node.then_branch)
-     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
-     if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
+@@ -138,12 +138,8 @@ class MIRLowering
+   # per-construct flush discipline to forget.
+   sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
+   def lower_head(&blk)
+-    prev = @pending_stmts
+-    @pending_stmts = []
+-    result = blk.call
+-    produced = @pending_stmts
+-    @pending_stmts = prev
+-    [result, produced]
++    result = blk.call  # MUTANT: no isolation — head pending leaks into the construct body
++    [result, []]
+   end
+ 
+   # Attach head pending (from lower_head) to a finished control-flow MIR
