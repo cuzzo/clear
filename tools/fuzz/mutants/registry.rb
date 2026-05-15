@@ -39,6 +39,19 @@ module FuzzMutants
       templates: [:nested_loop_escape],
       kill: { bucket: :fail, min_delta: 1 }
     ),
+    Mutant.new(
+      name: :lower_if_cond_pending_leak,
+      description: 'Stop lower_if draining the condition\'s @pending_stmts ' \
+                   'before lowering the then-body. Hoisted temps from a ' \
+                   '`maybe() OR ""` cond then leak into the then-body, ' \
+                   'declared after the cond that references them. The ' \
+                   'cond_or_fallback :if cells fail to compile (Zig: ' \
+                   'use of undeclared identifier __tmp_N).',
+      invariant: :bug1_hoist_ordering,
+      patch: File.join(PATCH_DIR, 'lower_if_cond_pending_leak.patch'),
+      templates: [:cond_or_fallback],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
   ].freeze
 
   def self.find(name)

@@ -1,0 +1,12 @@
+diff --git a/src/mir/mir_lowering.rb b/src/mir/mir_lowering.rb
+--- a/src/mir/mir_lowering.rb
++++ b/src/mir/mir_lowering.rb
+@@ -6688,7 +6688,7 @@ class MIRLowering
+     # wrap [pending..., IfStmt] in a transparent ScopeBlock so the temp's
+     # Let precedes the cond that uses it and its Cleanup still scopes
+     # tightly around the IfStmt.
+-    cond_pending = flush_pending
++    cond_pending = []  # MUTANT: don't drain — let cond hoists leak into then-body
+     then_body = lower_body(node.then_branch)
+     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
+     if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
