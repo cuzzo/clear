@@ -106,20 +106,20 @@ You do not need to solve the halting problem to vibe code with LLMs and get *rea
     * Without fuzzing / formal verification, it is difficult to explore all the necessary paths to ensure your code actually works.
     * Integration tests are a minimal first line of defense.
     * The reason fuzz testing is great to combine with integration testing, implemented separately - is diversity.
-    * You will find several bugs here - often times the first bugs will be that the LLM wrote the fuzz testing incorrectly. But almost always they will find the gaps in you unit tests and integration tests.
+    * You will find several bugs here - often times the first bugs will be that the LLM wrote the fuzz testing incorrectly. But almost always they will find the gaps in your unit tests and integration tests.
  6. Mutant Tests
     * Fuzz tests are valuable on their own, but mutant testing is how you know they are load bearing.
     * When combined with Fuzz testing, written independently, looking only at your docs, you are unlikely to arrive at a situation where 5 layers of code and testing **all** test that your code either 1) does nothing or 2) fails successfully.
     * Though LLMs can do it!
  7. Tooling
     * You need reports that show all the common pitfalls LLMs have:
-       a. **Code Duplication - especially PARTIAL:** where they checked some invariant in slightly different ways - more times than not a bug when working with LLMs - have them review each case.
-       b. **Branch coverage - especially DECISION based:** where you have untested branches specifically on key decision points - the pillars of your system / product.
-       c. **Afferent and Efferent Reporting:** to give you insights into where LLMs inevitably turned your code into spaghetti.
+      - **Code Duplication - especially PARTIAL:** where they checked some invariant in slightly different ways - more times than not a bug when working with LLMs - have them review each case.
+      - **Branch coverage - especially DECISION based:** where you have untested branches specifically on key decision points - the pillars of your system / product.
+      - **Afferent and Efferent Reporting:** to give you insights into where LLMs inevitably turned your code into spaghetti.
  8. **Review!!!**
     * Even with 6 layers of protection and tooling & reporting on code health specifically for LLM pitfalls, you need to review their work after they’ve screamed done and written all the tests.
     * Have 2-3 LLMs review on 1) architecture, 2) bugs, 3) gaps, 4) tech debt. Have them converge on which of the feedbacks are actually worth doing, and which are hallucinations or moving in the wrong direction.
-       a. Save this plan to docs/agents/*.md design doc.
+       - Save this plan to docs/agents/*.md design doc.
     * Have one LLM implement the plan until the 2-3 others converge on the plan being done correctly.
     * At a *BARE* minimum, get the LLMs to converge on how *YOU* can be convinced the code actually works. Check that it works! Even at this stage, you should not be surprised if it is completely broken…
     * At a *REASONABLE* minimum, review the final integration testing to make sure it’s not mocking everything important.
