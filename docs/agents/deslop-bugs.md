@@ -198,3 +198,41 @@ made unilaterally under "gates green" (gates green != provably
 correct for semantic change). #48/#49/#50/#51/#53/#57/#59 share this
 shape. Recommended: do #47 as a focused reviewed PR using this
 section as the spec; do not auto-run it.
+
+## EPIC #65 stdlib_def migration — measured scope & execution finding
+
+Steps 1-2 landed (IntrinsicEmit T::Struct + total converter +
+idempotent IntrinsicRegistry.fs), all gate-clean, inert. Step 3+
+(actually wiring it) was fully measured before changing consumers:
+
+`stdlib_def`/`matched_stdlib_def` is a pervasive untyped-Hash contract,
+NOT a per-registry or single-seam thing:
+- ~6 stamp sites (method_analysis:114 `defn.merge(zig:).merge(alloc:)`
+  — override-by-merge semantics; pipeline_rewriter x4; pipeline_host
+  forwarding).
+- carried on InlineBc/InlineZig/RawZig/RawBc/ShardedMapPut/Get.
+- ~15 ad-hoc literal writes (`iz.stdlib_def = {allocates:false,
+  borrows:[]}` etc. in mir_lowering/test_lowering).
+- ~26 matched_stdlib_def + ~24 stdlib_def reads across mir_emitter,
+  mir_checker, mir_lowering, fsm_transform x3, annotator-helpers x4,
+  mir_pass, pipeline_host — as [:zig]/[:return]/.dig(:allocates)/
+  [:return_alloc]/[:bc_op]/op[kind]/op.keys/.merge.
+
+Total ~100 edits, ~12 files, including the 40k-line mir_lowering
+codegen core, with per-site semantic adaptation (`:return` Symbol ->
+Type.void?; dynamic `op[kind]`; `.merge` override; `.dig` chains).
+
+FINDING: a no-shim flag-day (rewrite all ~60 readers + all writers in
+one commit, suite as only net) is not correctly/reviewably executable
+in one pass on this hot path — the exact "huge change, tests pass,
+compiler subtly broken" anti-pattern this repo's retrospective and
+CLAUDE.md forbid. At ~100 sites the scale makes the no-shim flag-day
+qualitatively infeasible, not merely "riskier".
+
+RECOMMENDED execution (contract-level "whole stdlib at once", landed
+safely): (a) writes -> IntrinsicRegistry.fs uniformly; (b)
+FunctionSignature transiently exposes typed-delegating []/dig/merge so
+the flip is atomic and green in one commit; (c) readers migrated to
+the pure typed API in gated batches; (d) the delegating scaffold
+deleted as the epic's final commit (so it is a migration scaffold,
+not a permanent band-aid). Awaiting direction on adopting (b).
