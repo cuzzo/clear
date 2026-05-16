@@ -101,4 +101,26 @@ module IntrinsicRegistry
       out[name] = convert_entry(name, entry, registries) if entry.is_a?(Hash)
     end
   end
+
+  # Memoized registry map (built lazily from the std_lib constants so
+  # there is no load-order coupling). Used by `fs` so call sites need
+  # not thread the map.
+  def registries
+    @registries ||= %i[STD_LIB POOL_METHODS SET_METHODS MAP_METHODS
+                       INDEX_OPS BUILTIN_OPS].each_with_object({}) do |c, h|
+      h[c] = Object.const_get(c) if Object.const_defined?(c)
+    end
+  end
+
+  # Idempotent normalizer for the flag-day migration: returns a
+  # FunctionSignature for a registry/ad-hoc entry Hash, passes a
+  # FunctionSignature through unchanged, and maps nil -> nil. Every
+  # `*.stdlib_def = X` / `matched_stdlib_def = X` site routes through
+  # this so the carried value is always a FunctionSignature.
+  def fs(x, name = "_inline")
+    return nil if x.nil?
+    return x if x.is_a?(FunctionSignature)
+
+    convert_entry(name, x, registries) if x.is_a?(Hash)
+  end
 end
