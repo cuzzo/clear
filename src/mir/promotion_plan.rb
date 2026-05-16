@@ -596,7 +596,6 @@ module CleanupClassifier
       ti = nil unless ti.is_a?(Type)
       inner_ti = ti&.wrapped_type
       next unless inner_ti
-      inner_ti = Type.new(inner_ti) unless inner_ti.is_a?(Type)
       e = classify_binding(node.binding_name.to_s, inner_ti, node, promoted_fns, schema_lookup)
       next unless e
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
@@ -621,7 +620,6 @@ module CleanupClassifier
         ti = nil unless ti.is_a?(Type)
         inner_ti = ti&.wrapped_type
         next unless inner_ti
-        inner_ti = Type.new(inner_ti) unless inner_ti.is_a?(Type)
         e = classify_binding(b[:name].to_s, inner_ti, node, promoted_fns, schema_lookup)
         next unless e
         e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
