@@ -7,6 +7,7 @@
 # need for code generation and cleanup planning.
 require "sorbet-runtime"
 require_relative "intrinsic_emit"
+require_relative "function_return"
 
 class FunctionSignature
     extend T::Sig
@@ -39,6 +40,11 @@ class FunctionSignature
   # best-effort static view; consumers needing the full dispatch read
   # this. Strongly-typed sum, not T.untyped.
   attr_accessor :return_spec
+  # Strongly-typed return (FunctionReturn). Non-nil; defaults to
+  # Fixed(Void). Supersedes return_spec/return_resolver/the Symbol|nil
+  # return_type union -- resolve(receiver,args,host) always yields a
+  # concrete Type.
+  attr_accessor :return_def
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
@@ -111,6 +117,8 @@ class FunctionSignature
     @arity             = T.let(nil, T.nilable(Integer))
     @emit              = T.let(nil, T.nilable(IntrinsicEmit))
     @return_spec       = T.let(nil, T.untyped)
+    @return_def        = T.let(FunctionReturn.fixed(Type.new(:Void)),
+                               FunctionReturn)
   end
 
   sig { returns(FunctionSignature) }
@@ -136,6 +144,7 @@ class FunctionSignature
       s.arity = @arity
       s.emit = @emit
       s.return_spec = @return_spec
+      s.return_def = @return_def
     end
   end
 end

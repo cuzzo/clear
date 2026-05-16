@@ -1,8 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "../annotator-helpers/function_signature"
-
 # Result struct for binary operation type resolution
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
@@ -2332,3 +2330,11 @@ module TypeHelper
   end
 
 end
+
+# Loaded after `class Type` is fully defined so the
+# function_signature -> function_return -> type require cycle resolves
+# with `Type` already present (function_return's `const :fixed,
+# T.nilable(Type)` evaluates at class-body time). All Type refs to
+# FunctionSignature are runtime-lazy (method bodies), so deferring
+# this require is safe.
+require_relative "../annotator-helpers/function_signature"
