@@ -10,10 +10,10 @@ I dreamed of a programming language for 10 years. After Gemini 3.1-pro, I figure
 
 I set on a 6-month journey to build a programming language.
 
- * Within 2-months, I had a custom runtime built in Zig competitive with Go & Tokio.
- * Within 3-months, I had an Affine Ownership-based memory safe language like Rust - but (in my opinion) much more intuitive.
+ * Within 2-months, I had a custom runtime built in Zig "competitive" with Go & Tokio.
+ * Within 3-months, I had an Affine Ownership-based "memory safe" language like Rust - but (in my opinion) much more intuitive.
 
-The problem is: this only *barely* worked, and no one wants a *barely* working programming language.
+The problem is: this only *barely* worked, and no one wants a *barely* working programming language!
 
 ## What didn’t work
 
@@ -82,7 +82,9 @@ I’m used to developing... like myself.  LLMs are different.  It’s sort of li
 
 How do you learn to work with this crazy partner?
 
-I rarely need to think to implement code, and I type quite fast... So LLMs are not that much faster than me at implementation. But they do *scale*, whereas I do not. 
+I rarely need to think to implement code, and I type quite fast... So LLMs are not that much faster than me at implementation.  They are faster at design, but definitely not better. 
+
+Regardless, the enormous benefit they have is that they *scale*, whereas I do not. 
 
 If I have to review all of their code line-by-line, I’d rather just write it myself. 
 
@@ -140,11 +142,17 @@ If you’re using a report to give out a billion dollars, you probably want a re
 
 But if you want a report that just gives you a probability of how much AI slop there is in a commit, and how dangerous that AI slop might be... something is far better than nothing.
 
-LLMs typically change ~20k lines of code per week on my codebase. I cannot (and have no intention ever to) review every single line.
+The buzz phrase going around is: 
 
-That entirely defeats the purpose of trying to use LLMs to scale.
+> LLMs increase implementaiton throughput far faster than they increase vefication throughput.
 
-Instead, I will continue to invest in layers of defense to protect myself from their common pitfalls and accept that 1) almost no software is perfect, even compilers, and 2) the system I have in place with LLMs is doing at least 10x better than I could do on my own.
+What does that mean?
+
+Invest in verification throughput!
+
+I will continue to invest in layers of defense to protect myself from their common pitfalls and accept that 1) almost no software is perfect, even compilers, and 2) the system I have in place with LLMs is doing at least 10x better than I could do on my own.
+
+## Conclusion
 
 Interestingly, I’m trying to build a language that has the syntax to make the vast majority of bugs simply impossible to represent, and - when possible - the compiler can autogenerate all the failure methods that might unfold, so you can see exactly where a bug *might* be.
 
