@@ -144,7 +144,7 @@ But if you want a report that just gives you a probability of how much AI slop t
 
 The buzz phrase going around is: 
 
-> LLMs increase implementaiton throughput far faster than they increase vefication throughput.
+> LLMs increase implementation throughput far faster than they increase verification throughput.
 
 What does that mean?
 
