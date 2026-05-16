@@ -2647,7 +2647,7 @@ private
     # only the fold's analyzer knows whether this is :sum/:count/:max/...
     # Copying it onto node.type also propagates the kind to the binding's
     # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
-    if pipe.full_type.is_a?(Type) && T.must(pipe.full_type).observable_terminal
+    if pipe.full_type&.observable_terminal
       pipe_terminal = T.must(pipe.full_type).observable_terminal
       target_t = node.type.is_a?(Type) ? node.type : Type.new(node.type)
       # The pipe is the authority on terminal kind: only the fold's
@@ -2671,7 +2671,7 @@ private
       # OBSERVABLE_WRAPPERS can find it. Without this, the binding's
       # emitted Zig wrapper would default-or-raise. Same mismatch
       # check as above.
-      if node.full_type.is_a?(Type) && node.full_type.observable?
+      if node.full_type&.observable?
         if node.full_type.observable_terminal && node.full_type.observable_terminal != pipe_terminal
           raise CompilerError.new(
             node.token,

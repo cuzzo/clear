@@ -359,7 +359,7 @@ module EffectTracker
     @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
-      raw = fn_node.full_type.is_a?(Type) ? fn_node.full_type.raw : fn_node.full_type
+      raw = fn_node.full_type&.raw
       ret_type = raw.is_a?(FunctionSignature) ? raw.return_type : nil
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params&.any? { |p|

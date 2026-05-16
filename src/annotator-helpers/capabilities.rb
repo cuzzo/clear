@@ -92,7 +92,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_sync = var_node.symbol&.sync
     return sym_sync if sym_sync
-    return var_node.full_type.sync if var_node.full_type.is_a?(Type)
+    return var_node.full_type.sync if var_node.full_type
     nil
   end
 
@@ -101,7 +101,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    if var_node.full_type.is_a?(Type)
+    if var_node.full_type
       case T.must(var_node.full_type).ownership
       when :shared     then return :shared
       when :multiowned then return :multiowned
@@ -117,7 +117,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
-    return T.must(var_node.full_type).layout if var_node.full_type.is_a?(Type)
+    return var_node.full_type.layout if var_node.full_type
     nil
   end
 

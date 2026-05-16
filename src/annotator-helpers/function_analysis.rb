@@ -178,7 +178,7 @@ module FunctionAnalysis
         # The original `!T` is stashed on `error_union_type` so
         # OR-RESCUE handlers (which read the LHS's union to pick
         # `catch`/`orelse`) can still see the un-stripped form.
-        if node.full_type.is_a?(Type) && node.full_type.respond_to?(:error_union?) &&
+        if node.full_type.respond_to?(:error_union?) &&
            node.full_type.error_union?
           node.error_union_type = node.full_type if node.respond_to?(:error_union_type=)
           outer = node.full_type

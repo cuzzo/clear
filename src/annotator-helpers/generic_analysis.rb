@@ -577,7 +577,7 @@ module GenericAnalysis
       node.type_info.provenance  = :heap if coll_src.collection == :pool || coll_src.collection == :set
       node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
       node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-      if node.full_type.is_a?(Type)
+      if node.full_type
         node.full_type.collection  = coll_src.collection unless node.full_type.collection
         node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
         node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
@@ -587,22 +587,22 @@ module GenericAnalysis
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
     if !coll_src && (decl_t = node.type).is_a?(Type) && decl_t.soa
       node.type_info.soa = true if node.type_info
-      node.full_type.soa = true if node.full_type.is_a?(Type)
+      node.full_type&.soa = true
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
     if (decl_t = node.type).is_a?(Type)
       if decl_t.shard_count && !node.type_info&.shard_count
         node.type_info.shard_count = decl_t.shard_count if node.type_info
-        node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count) if node.full_type.is_a?(Type)
+        node.full_type&.instance_variable_set(:@shard_count, decl_t.shard_count)
       end
       if decl_t.sync && node.type_info && !node.type_info.sync
         node.type_info.sync = decl_t.sync
-        node.full_type.sync = decl_t.sync if node.full_type.is_a?(Type)
+        node.full_type&.sync = decl_t.sync
       end
       if decl_t.ownership != :affine && node.type_info
         node.type_info.instance_variable_set(:@ownership, decl_t.ownership)
-        node.full_type.instance_variable_set(:@ownership, decl_t.ownership) if node.full_type.is_a?(Type)
+        node.full_type&.instance_variable_set(:@ownership, decl_t.ownership)
       end
     end
   end

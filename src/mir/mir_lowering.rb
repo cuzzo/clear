@@ -2512,7 +2512,7 @@ class MIRLowering
   # only works for non-Arc parameters.
   sig { params(var_node: AST::Identifier).returns(T::Array[T.nilable(Symbol)]) }
   def with_cap_sync_storage(var_node)
-    if var_node.is_a?(AST::GetField) && var_node.full_type.is_a?(Type)
+    if var_node.is_a?(AST::GetField) && var_node.full_type
       ft = var_node.full_type
       sync = ft.sync
       storage = case ft.ownership
@@ -5010,11 +5010,7 @@ class MIRLowering
     # COLLECT only needs to call .next() to read the final value.
     if rhs.is_a?(AST::CollectOp)
       left = lower(node.left)
-      ft = if node.left.full_type
-        node.left.full_type.is_a?(Type) ? node.left.full_type : Type.new(node.left.full_type)
-      else
-        nil
-      end
+      ft = node.left.full_type
       # Collection observable (DISTINCT producing `~T[]@set:observable`):
       # COLLECT must yield an owned ArrayList(T), not the StreamSetSnapshot
       # that `next()` returns. Mirrors lower_next_expr's collection branch
