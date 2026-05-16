@@ -168,6 +168,13 @@ class MIRChecker
     return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
+      # Receiver-dependent (Proc-resolved) returns -- collection
+      # intrinsics like pool.insert/get -- are not a static owned-
+      # return declaration; their ownership is governed by
+      # allocates/borrows, handled elsewhere. Only a static return
+      # type counts here (matches pre-FS behavior, which read only
+      # the static `:return` key).
+      return false if init.stdlib_def.return_resolver
       ret = init.stdlib_def.return_type
       return !ret.void?
     end
@@ -390,7 +397,8 @@ class MIRChecker
       leaks << error(:HPT_LEAK, "try-catch",
         "heap-returning try/catch result not bound to variable (leak)")
     end
-    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node)
+    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
+       !node.stdlib_def.return_resolver
       ret = node.stdlib_def.return_type
       unless ret.void?
         label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"

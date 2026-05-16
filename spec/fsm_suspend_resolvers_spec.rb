@@ -7,6 +7,7 @@ require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
 require_relative '../src/mir/fsm_transform/segments'
 require_relative '../src/mir/fsm_transform/suspend_resolvers'
+require_relative '../src/annotator-helpers/intrinsic_registry'
 
 # Tests for FsmTransform::SuspendResolvers, the per-suspend-kind
 # resolvers that turn a Segments::*Suspend tail into a
@@ -27,8 +28,10 @@ RSpec.describe FsmTransform::SuspendResolvers do
 
   describe "resolve_io" do
     # Build a fake stdlib_def with a sleep-like fsm_setup template.
+    # Production stamps go through IntrinsicRegistry.fs -> a typed
+    # FunctionSignature; this unit test constructs the same shape.
     let(:stdlib_def) {
-      {
+      IntrinsicRegistry.fs({
         suspends: true,
         fsm_setup: [
           FsmOps::StmtCall.new(
@@ -43,7 +46,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
         fsm_state_decls: [
           FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
         ],
-      }
+      })
     }
 
     let(:call_node) {
