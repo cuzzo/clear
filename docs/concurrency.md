@@ -210,6 +210,8 @@ items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 | Option | Type | Default | Effect |
 |---|---|---|---|
 | `workers` | Number | 8 | Number of persistent worker fibers |
+| `batch` | Number | 1 | Items each worker pulls per fetch from the shared index (larger = less index contention) |
+| `capacity` | Number | auto (worker count rounded up to a power of 2, clamped 4-64) | Bounded channel ring-buffer size; only valid with a streaming / `SHARD` / range source |
 | `parallel` | Bool | FALSE | TRUE = distribute workers across schedulers (multi-core) |
 | `size` | Identifier | STANDARD | Stack size: MICRO, STANDARD, LARGE, XL |
 
@@ -235,13 +237,13 @@ results = items
 
 CONCURRENT spawns N persistent worker fibers that pull items from a shared atomic index. Zero per-item allocation — workers reuse their stack and context across all items. This is fundamentally different from spawning one fiber per item (which is what BG does).
 
-```
+```ruby clear
 results = items
   |> SELECT BG { risky_fn(_) OR RAISE };
 # this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
 ```
 
-```
+```text
 Default (workers on local scheduler):
   CONCURRENT(workers: 8) SELECT transform(_)
   → 8 fibers on one thread, cooperative scheduling
@@ -292,7 +294,7 @@ The compiler enforces these at compile time:
 
 | Goal | Construct |
 |---|---|
-| Process a batch of items | `|> CONCURRENT(workers: N) SELECT/WHERE/EACH` |
+| Process a batch of items | `\|> CONCURRENT(workers: N) SELECT/WHERE/EACH` |
 | Fire off a background task | `BG { work(); }` |
 | Run independent tasks concurrently | `DO { task1(), task2(), task3() }` |
 | Generate values lazily | `BG STREAM { YIELD ...; }` |
@@ -301,6 +303,6 @@ The compiler enforces these at compile time:
 
 ## Known Limitations (v0.1)
 
-**Dynamic spawn overhead**: Individual BG blocks cost ~60μs each due to GPA allocation for Fiber/Task structs. This makes CLEAR ~30x slower than Go for spawn-heavy microbenchmarks. Workaround: use `CONCURRENT(workers: N)` for bulk workloads. Fix planned by the v0.1 release.
+**Dynamic spawn overhead**: spawning many individual `BG` tasks is competitive with Go at moderate thread counts (roughly parity at 8 threads on the 100K-spawn benchmark) but slower at high core counts — about 1.6x Go at small scale, up to ~3.5x at 32 threads. The remaining gap is idle schedulers spinning on the work-stealing deque instead of parking, not per-spawn allocation. Workaround: use `CONCURRENT(workers: N)` for bulk workloads. Scheduler parking (the fix) is tracked for post-v0.1.
 
-**No bounded channels**: CLEAR has Promises (one-shot) and Streams (unbounded). There is no bounded producer/consumer channel. CONCURRENT provides backpressure for pipeline workloads. General bounded channels are in progress, and will be available by v0.1 or v0.2 release.
+**No general bounded channel**: CLEAR has Promises (one-shot) and Streams (unbounded). `CONCURRENT` streaming uses an internal bounded ring-buffer channel for backpressure (tunable via the `capacity:` option), but there is no general user-facing bounded producer/consumer channel primitive yet.

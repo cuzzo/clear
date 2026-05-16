@@ -1,5 +1,8 @@
 # STRICT EXTREME: The Path to High-Integrity CLEAR (@strict:extreme)
 
+> [!NOTE]
+> `STRICT` and `STRICT EXTREME` mode are not yet available. `DEFAULT` mode is the focus for the v0.1 release.
+
 ## Overview
 The "CLEAR Story" is a transition from **Productivity** (Ruby-like ease) to **Performance** (C-like speed) to **Integrity** (Ada/SPARK-level safety). While standard CLEAR provides memory and concurrency safety, **STRICT EXTREME** is a compilation mode designed for mission-critical systems (HFT, Aerospace, Medical) where runtime failures (Panics) are unacceptable.
 

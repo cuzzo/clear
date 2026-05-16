@@ -104,14 +104,14 @@ bill = users AS $u
 
 | Fold | Example |
 |---|---|
-| SUM | `|> SUM _.price * $u.discount` |
-| COUNT | `|> COUNT TRUE` |
-| AVERAGE | `|> AVERAGE _.price` |
-| MIN | `|> MIN _.price` |
-| MAX | `|> MAX _.price` |
-| ANY | `|> ANY _.price > 50.0` |
-| ALL | `|> ALL $u.discount > 0.0` |
-| FIND | `|> FIND _.price > 10.0` (returns `?ElemType`) |
+| SUM | `\|> SUM _.price * $u.discount` |
+| COUNT | `\|> COUNT TRUE` |
+| AVERAGE | `\|> AVERAGE _.price` |
+| MIN | `\|> MIN _.price` |
+| MAX | `\|> MAX _.price` |
+| ANY | `\|> ANY _.price > 50.0` |
+| ALL | `\|> ALL $u.discount > 0.0` |
+| FIND | `\|> FIND _.price > 10.0` (returns `?ElemType`) |
 
 Intermediate `WHERE` stages filter the inner elements before the fold:
 
@@ -128,13 +128,13 @@ total = users AS $u
 
 | Operator | Example |
 |---|---|
-| CONCURRENT SELECT | `AS $u |> CONCURRENT SELECT $u.val * 2.0` |
-| CONCURRENT SUM | `AS $u |> CONCURRENT SUM $u.score` |
-| CONCURRENT COUNT | `AS $u |> CONCURRENT COUNT $u.active` |
-| CONCURRENT MIN | `AS $u |> CONCURRENT MIN $u.score` |
-| CONCURRENT MAX | `AS $u |> CONCURRENT MAX $u.score` |
-| CONCURRENT AVERAGE | `AS $u |> CONCURRENT AVERAGE $u.score` |
-| CONCURRENT WHERE | `AS $u |> CONCURRENT WHERE $u.score > 50.0` |
+| CONCURRENT SELECT | `AS $u \|> CONCURRENT SELECT $u.val * 2.0` |
+| CONCURRENT SUM | `AS $u \|> CONCURRENT SUM $u.score` |
+| CONCURRENT COUNT | `AS $u \|> CONCURRENT COUNT $u.active` |
+| CONCURRENT MIN | `AS $u \|> CONCURRENT MIN $u.score` |
+| CONCURRENT MAX | `AS $u \|> CONCURRENT MAX $u.score` |
+| CONCURRENT AVERAGE | `AS $u \|> CONCURRENT AVERAGE $u.score` |
+| CONCURRENT WHERE | `AS $u \|> CONCURRENT WHERE $u.score > 50.0` |
 
 In all concurrent cases, `$u` resolves to the item being processed by the current worker.
 
@@ -178,14 +178,14 @@ pool
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **SELECT** | `list |> SELECT expr` | `ExprType[]` | Project each element through an expression |
-| **WHERE** | `list |> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
-| **ORDER_BY** | `list |> ORDER_BY key` | `ElemType[]` | Sort by key expression |
-| **LIMIT** | `list |> LIMIT n` | `ElemType[]` | First N elements |
-| **SKIP** | `list |> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
-| **DISTINCT** | `list |> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
-| **UNNEST** | `list |> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
-| **INDEX** | `list |> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
+| **SELECT** | `list \|> SELECT expr` | `ExprType[]` | Project each element through an expression |
+| **WHERE** | `list \|> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
+| **ORDER_BY** | `list \|> ORDER_BY key` | `ElemType[]` | Sort by key expression |
+| **LIMIT** | `list \|> LIMIT n` | `ElemType[]` | First N elements |
+| **SKIP** | `list \|> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
+| **DISTINCT** | `list \|> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
+| **UNNEST** | `list \|> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
+| **INDEX** | `list \|> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
 
 SELECT accepts any expression, including struct literals. This lets you project into a different struct type in one step:
 
@@ -207,13 +207,19 @@ The result type is inferred from the expression - `Summary[]` above, not `Raw[]`
 
 ```ruby clear
 # WHERE before SELECT: filter on the raw element (efficient)
-high = raws |> WHERE _.score > 75.0 |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
+high = raws
+  |> WHERE _.score > 75.0
+  |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
 
 # SELECT before aggregate: project then sum/min/max a field
-total = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> SUM _.normalized;
+total = raws
+  |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 }
+  |> SUM _.normalized;
 
 # SELECT before WHERE: build struct first, then filter on a struct field (less efficient)
-norm_high = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> WHERE _.normalized > 0.75;
+norm_high = raws
+  |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 }
+  |> WHERE _.normalized > 0.75;
 ```
 
 When SELECT precedes a fold or WHERE, the compiler binds the projected value to a temp variable per iteration. This avoids the Zig restriction on struct literals in arithmetic/boolean expression positions, so the generated code is always valid without changing semantics.
@@ -222,11 +228,11 @@ When SELECT precedes a fold or WHERE, the compiler binds the projected value to 
 
 | Operator | Syntax | Returns | Empty list |
 |---|---|---|---|
-| **SUM** | `list |> SUM expr` | Int64 / UInt64 / Float32 / Float64 | 0 |
-| **AVERAGE** | `list |> AVERAGE expr` | `Float64` | 0 |
-| **MIN** | `list |> MIN expr` | matches expr type | panics |
-| **MAX** | `list |> MAX expr` | matches expr type | panics |
-| **REDUCE** | `list |> REDUCE(init) expr` | type of init | init |
+| **SUM** | `list \|> SUM expr` | Int64 / UInt64 / Float32 / Float64 | 0 |
+| **AVERAGE** | `list \|> AVERAGE expr` | `Float64` | 0 |
+| **MIN** | `list \|> MIN expr` | matches expr type | panics |
+| **MAX** | `list \|> MAX expr` | matches expr type | panics |
+| **REDUCE** | `list \|> REDUCE(init) expr` | type of init | init |
 
 The return type is driven by the expression type. SUM widens small integers to `Int64`/`UInt64`; floats stay at their original width (`Float32` stays `Float32`). AVERAGE always returns `Float64`. MIN and MAX preserve the exact expression type. REDUCE is the general fold - `acc` is the mutable accumulator, `_` is the current element:
 
@@ -243,17 +249,17 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **COUNT** | `list |> COUNT pred` | `Int64` | Number of matches |
-| **ANY** | `list |> ANY pred` | `Bool` | True if any match (short-circuits) |
-| **ALL** | `list |> ALL pred` | `Bool` | True if all match (short-circuits) |
-| **FIND** | `list |> FIND pred` | `?ElemType` | First match or null |
+| **COUNT** | `list \|> COUNT pred` | `Int64` | Number of matches |
+| **ANY** | `list \|> ANY pred` | `Bool` | True if any match (short-circuits) |
+| **ALL** | `list \|> ALL pred` | `Bool` | True if all match (short-circuits) |
+| **FIND** | `list \|> FIND pred` | `?ElemType` | First match or null |
 
 ### Side Effects
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **EACH** | `list |> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
-| **TAP** | `list |> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
+| **EACH** | `list \|> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
+| **TAP** | `list \|> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
 
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 

@@ -83,7 +83,7 @@ gone = enemies.get(id1) OR Enemy{ hp: 0, name: "removed" };
 
 Each pool slot stores a generation counter alongside the data:
 
-```
+```ruby clear
 Slot: { generation: u32, alive: bool, value: T }
 Handle (Id<T>): u64 = [generation: upper 32 bits][index: lower 32 bits]
 ```
@@ -244,9 +244,9 @@ n = 1000000;
 
 # SHARD routes each key to the scheduler that owns its shard.
 # CONCURRENT EACH runs one fiber per shard — zero locks, zero routing.
-(0..<n) |> SHARD("key:${toString(_)}", map) |> CONCURRENT EACH {
-    map[_] = "value";
-};
+(0..<n)
+  |> SHARD("key:${toString(_)}", map)
+  |> CONCURRENT EACH { map[_] = "value"; };
 ```
 
 **How it works**:
@@ -311,7 +311,7 @@ This follows CLEAR's "Correct > Scalable > Fast" ordering: the default is safe a
 
 For performance-critical internal infrastructure where keys are not attacker-controlled (e.g., internal service meshes, compiler symbol tables, game engine registries), CLEAR plans to offer an opt-in unsalted hash:
 
-```
+```ruby clear
 # Planned syntax (not yet implemented):
 MUTABLE symbols: HashMap<SymbolInfo>@fastTrusted = {};
 MUTABLE fast_sharded: HashMap<Int64>@sharded(8):fastTrusted = {};

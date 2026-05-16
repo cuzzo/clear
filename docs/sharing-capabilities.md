@@ -1,24 +1,29 @@
-# Sharing Capabilities: @local, @multiowned, @shared
+# Shared Data in CLEAR
 
-CLEAR separates **what data is** (Types) from **how it's accessed** (Gates & Boundaries) from the **strategy it uses** (Capabilities).
+CLEAR separates:
+
+1. **what data is** (Types) from
+2. **how it's accessed** (Gates & Boundaries) from
+3. **the strategy it uses** (Capabilities) from
+4. **when it's available** (Tense: `~T`)
 
 ## Types, Capabilities, and Execution Boundaries
 Rust is not inherently complicated, nor is its type system much more complex than C++'s. The actual friction comes from Rust using a 'God-like' type system forced to handle too many things at once.
 
-CLEAR breaks these into 3 separate components:
+CLEAR breaks these into 4 separate components:
 
  * **Types:** The actual data / memory (User)
- * **Capabilities:** What you’re allowed to do with that data (User @shared:locked)
+ * **Capabilities:** What you’re allowed to do with that data (User `@shared:locked`)
  * **Execution Boundaries:** When you're do things concurrently or in parallel (`BG/DO/CONCURRENT`)
  * **Synchronization Gates:** Where you explicitly mutate state concurrently (`WITH sharedUser AS user { … }`)
 
 In CLEAR, concurrency is a property of the execution boundary, not the data type. CLEAR requires explicit `WITH` blocks for synchronization. While slightly less ergonomic than Rust for a simple Mutex, this design choice yields key structural dividends:
 
  * **Zero-Friction Pass-Through:** ~85% of your codebase handles shared data without a single synchronization annotation, making code substantially more maintainable / refactorable to optimize for different synchronization strategies.
- * **Polymorphic Synchronization:** A single function can gracefully handle any of LOCKED,  SNAPSHOTTED, ACTOR, BUFFERED etc data using a single block of code.
+ * **Polymorphic Synchronization:** A single function can gracefully handle any of `LOCKED`, `SNAPSHOTTED`, `ACTOR`, `BUFFERED` etc data using a single block of code.
  * **Pinpoint Cost Visibility:** You know exactly where and when your code blocks, yields, retries and the associated failure methods. Latency costs are isolated to the 15% of functions that actually mutate state, rather than hidden in a type signature 10 levels up the stack.
 
-You do not need to worry about a developer accidentally “sneaking” a slow actor synchronization into a hot loop. The costs are enforced ONLY at the synchronization boundaries (WITH blocks). The compiler will simply reject incompatible synchronization strategies inside hot loops.
+You do not need to worry about a developer accidentally “sneaking” a slow actor synchronization into a hot loop. The costs are enforced ONLY at the synchronization boundaries (`WITH` blocks). The compiler will simply reject incompatible synchronization strategies inside hot loops.
 
 ```ruby clear illustrative
 FN transact(
@@ -97,7 +102,7 @@ The `WITH` block acts as this gate to safe access as the BG/DO blocks act as the
 |---|---|---|---|---|
 | @shared (any cores) | BG {} | @locked, @writeLocked | WITH {} | EXCLUSIVE |
 | @local (pinned to a core) | DO {} | @versioned, @atomic | | SNAPSHOT |
-| | CONCURRENT {} | @actor, @buffered | EVENTUAL |
+| | CONCURRENT {} | @actor, @buffered | | EVENTUAL |
 
 `@multiOwned` is an ownership capability, but it does not grant access through Execution Boundaries.  It allows an object to have multiple aliases (multiple owners - i.e. for a graph), but it does NOT grant permission to cross Execution Boundaries.
 
@@ -199,6 +204,9 @@ BG { @parallel -> WITH node AS val { ... } }
 **When to use it**: Graphs, trees, and shared ownership patterns where all fibers run on the same scheduler and data is read-only. If you need mutation, use `@local`. If you need cross-scheduler sharing, use `@shared`.
 
 ## @shared — Atomic Reference Counting (Arc)
+
+> [!NOTE]
+> Technically `@shared` means permission to cross an execution boundary. Atomics and atomic pointers (`@shared:atomic`) are NOT wrapped in Arc.
 
 ```ruby clear illustrative
 config = AppConfig{ port: 8080 } @shared;
