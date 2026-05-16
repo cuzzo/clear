@@ -1742,8 +1742,8 @@ class Type
   # Structural match for function/lambda types. Called by accepts? when self.fn_type?.
   sig { params(other_type: Type).returns(T::Boolean) }
   def accepts_fn_type?(other_type)
-    return true if other_type.is_a?(Type) && other_type.any?
-    return false unless other_type.is_a?(Type) && other_type.fn_type?
+    return true if other_type.any?
+    return false unless other_type.fn_type?
     other_raw = other_type.raw
 
     self_params  = @raw.params || []
