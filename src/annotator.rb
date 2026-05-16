@@ -2331,7 +2331,7 @@ private
     end
 
     static_methods = schema[:static_methods] || {}
-    method_def     = static_methods[node.method_name]
+    method_def     = IntrinsicRegistry.sig(static_methods, node.method_name)
 
     unless method_def
       available = static_methods.keys.join(", ")
@@ -2354,7 +2354,7 @@ private
       end
     end
 
-    expected_args = method_def[:args]
+    expected_args = method_def.arg_spec
     if node.args.length != expected_args.length
       error!(node, :STATIC_ARITY, type: type_name, method: node.method_name, expected: expected_args.length, got: node.args.length)
     end
@@ -2366,17 +2366,17 @@ private
       end
     end
 
-    node.zig_pattern = method_def[:zig]
-    node.full_type   = method_def[:return]
+    node.zig_pattern = method_def.emit&.zig
+    node.full_type   = method_def.return_spec
     node.matched_stdlib_def = method_def
-    node.stdlib_allocates = true if method_def[:allocates]
-    node.mutates_receiver = true if method_def[:mutates_receiver]
-    node.can_fail = true if method_def[:can_fail]
-    node.error_kind = method_def[:error_kind] if method_def[:error_kind]
-    node.error_type = method_def[:error_type] if method_def[:error_type]
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def[:allocates] || method_def[:can_fail])
+    node.stdlib_allocates = true if method_def.emit&.allocates
+    node.mutates_receiver = true if method_def.emit&.mutates_receiver
+    node.can_fail = true if method_def.can_fail
+    node.error_kind = method_def.emit&.error_kind if method_def.emit&.error_kind
+    node.error_type = method_def.emit&.error_type if method_def.emit&.error_type
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def.emit&.allocates || method_def.can_fail)
 
-    if method_def[:mutates_receiver] && node.is_a?(AST::MethodCall)
+    if method_def.emit&.mutates_receiver && node.is_a?(AST::MethodCall)
       root = chain_root_name(node.object)
       mark_var_mutated(root) if root
     end
