@@ -2547,8 +2547,8 @@ private
     # `u32_val.negative?()` where Int64 autocast would otherwise mask
     # the bug. Generic — keyed by symbol so std_lib.rb stays
     # declarative and annotator.rb has no per-function logic.
-    if matched_def[:reject_when] && reject_arg_type_matches?(args.first, matched_def[:reject_when])
-      reason = matched_def[:reject_error] ||
+    if matched_def.emit&.reject_when && reject_arg_type_matches?(args.first, matched_def.emit.reject_when)
+      reason = matched_def.emit&.reject_error ||
                "#{node.name}() is not valid for #{args.first.resolved_type}"
       error!(node, :INTRINSIC_REJECTED, message: reason)
       return
@@ -2557,7 +2557,7 @@ private
     # 3. Resolve return type (may be dynamic via method call).
     # Dynamic resolver methods are named `infer_*` to avoid collisions with
     # Ruby Kernel conversion methods (Integer, String, Array, etc.).
-    ret = matched_def[:return]
+    ret = matched_def.return_spec
     if ret.is_a?(Hash) && ret[:type]
       # Structured return: { type: :String, sync: :raw } etc. — preserves capabilities.
       node.full_type = Type.new(ret[:type], sync: ret[:sync], ownership: ret[:ownership])
@@ -2570,21 +2570,21 @@ private
     end
 
     # 4. Store Zig pattern and stdlib metadata for transpiler
-    node.zig_pattern = matched_def[:zig]
+    node.zig_pattern = matched_def.emit&.zig
     node.matched_stdlib_def = matched_def
-    node.stdlib_allocates = true if matched_def[:allocates]
-    node.mutates_receiver = true if matched_def[:mutates_receiver]
-    node.can_fail = true if matched_def[:can_fail] || matched_def[:allocates]
-    node.error_kind = matched_def[:error_kind] if matched_def[:error_kind]
-    node.error_type = matched_def[:error_type] if matched_def[:error_type]
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail] || matched_def[:needs_rt])
-    record_effect(EffectTracker::SUSPENDS) if matched_def[:suspends]
+    node.stdlib_allocates = true if matched_def.emit&.allocates
+    node.mutates_receiver = true if matched_def.emit&.mutates_receiver
+    node.can_fail = true if matched_def.can_fail || matched_def.emit&.allocates
+    node.error_kind = matched_def.emit&.error_kind if matched_def.emit&.error_kind
+    node.error_type = matched_def.emit&.error_type if matched_def.emit&.error_type
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def.emit&.allocates || matched_def.can_fail || matched_def.needs_rt)
+    record_effect(EffectTracker::SUSPENDS) if matched_def.emit&.suspends
 
     # 5. Flag mutable access through list indexing.
     #    When a mutating intrinsic (e.g., append, remove) is called on a receiver
     #    that chains through a GetIndex, the GetIndex must emit pointer access
     #    instead of by-value getAt().
-    if matched_def[:mutates_receiver] && node.is_a?(AST::MethodCall)
+    if matched_def.emit&.mutates_receiver && node.is_a?(AST::MethodCall)
       mark_chain_needs_mut_ref!(node.object)
       root = chain_root_name(node.object)
       mark_var_mutated(root) if root

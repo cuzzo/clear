@@ -266,12 +266,12 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(config: T::Hash[Symbol, T.untyped]).returns(T.nilable(FunctionSignature)) }
+  sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }
   def normalize_intrinsic_signature(config)
     T.bind(self, SemanticAnnotator) rescue nil
-    return nil if config[:args] == :Varargs
+    return nil if config.arg_spec == :Varargs
 
-    params = config[:args].each_with_index.map do |arg_def, i|
+    params = config.arg_spec.each_with_index.map do |arg_def, i|
       if arg_def.is_a?(Hash)
         # Extended format: { type: :Int64, mutable: true, takes: false }
         {
@@ -295,9 +295,9 @@ module FunctionAnalysis
 
     FunctionSignature.new(
       params: params,
-      return_type: config[:return],
+      return_type: config.return_spec,
       intrinsic: true,
-      zig_pattern: config[:zig]
+      zig_pattern: config.emit&.zig
     )
   end
 
@@ -1003,10 +1003,10 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.untyped) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    definitions.find do |config|
+    matched = definitions.find do |config|
       next true if config[:args] == :Varargs  # Varargs accepts anything
 
       # Arity check
@@ -1031,6 +1031,7 @@ module FunctionAnalysis
         end
       end
     end
+    matched && IntrinsicRegistry.fs(matched)
   end
 
   # Formats intrinsic args for error messages

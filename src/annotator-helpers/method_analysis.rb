@@ -28,10 +28,10 @@ module MethodAnalysis
   #
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
-  sig { params(matched_def: T::Hash[Symbol, T.untyped], args: T::Array[T.untyped]).returns(T.nilable(Type)) }
+  sig { params(matched_def: FunctionSignature, args: T::Array[T.untyped]).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless matched_def[:narrows_collection] && args.size >= 2
+    return unless matched_def.emit&.narrows_collection && args.size >= 2
 
     list_arg = args[0]
     val_arg  = args[1]
@@ -57,7 +57,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
-    defn = registry[node.name]
+    defn = IntrinsicRegistry.sig(registry, node.name)
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(
@@ -70,52 +70,57 @@ module MethodAnalysis
     end
 
     # Arity check
-    if defn[:arity] >= 0 && node.args.length != defn[:arity]
-      if defn[:arity] == 0
+    if defn.arity && defn.arity >= 0 && node.args.length != defn.arity
+      if defn.arity == 0
         error!(node, :STDLIB_METHOD_NO_ARGS, label: type_label, method: node.name, got: node.args.length)
       else
-        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: defn[:arity], got: node.args.length)
+        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: defn.arity, got: node.args.length)
       end
       return true
     end
 
     # Type validation (optional)
-    if defn[:validate]
-      defn[:validate].call(node, node.args, obj_type, method(:error!))
+    if defn.arg_validator
+      defn.arg_validator.call(node, node.args, obj_type, method(:error!))
     end
 
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
-    node.full_type = defn[:return_type].call(obj_type)
+    node.full_type = defn.return_resolver.call(obj_type)
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
-    zig = if (obj_type.sharded? || obj_type.striped?) && defn[:sharded_zig]
-      defn[:sharded_zig]
-    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && defn[:numeric_zig]
-      defn[:numeric_zig]
+    em = defn.emit
+    zig = if (obj_type.sharded? || obj_type.striped?) && em&.sharded_zig
+      em.sharded_zig
+    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && em&.numeric_zig
+      em.numeric_zig
     else
-      defn[:zig]
+      em&.zig
     end
 
     # Resolve alloc variant for sharded types
-    alloc = if (obj_type.sharded? || obj_type.striped?) && defn[:sharded_alloc]
-      defn[:sharded_alloc]
+    alloc = if (obj_type.sharded? || obj_type.striped?) && em&.sharded_alloc
+      em.sharded_alloc
     else
-      defn[:alloc]
+      em&.alloc
     end
 
-    # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles emission
+    # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles
+    # emission. Override the zig/alloc on a dup'd FS (+ its emit) so
+    # the shared registry FS is never mutated.
     if zig
-      resolved_defn = defn.merge(zig: zig)
-      resolved_defn = resolved_defn.merge(alloc: alloc) if alloc
+      resolved_defn = defn.dup
+      resolved_defn.emit = (resolved_defn.emit ? resolved_defn.emit.dup : IntrinsicEmit.new)
+      resolved_defn.emit.zig = zig
+      resolved_defn.emit.alloc = alloc if alloc
       node.zig_pattern = zig
       node.matched_stdlib_def = resolved_defn
     end
 
-    node.stdlib_allocates = true if defn[:allocates]
-    node.mutates_receiver = true if defn[:mutates_receiver]
+    node.stdlib_allocates = true if em&.allocates
+    node.mutates_receiver = true if em&.mutates_receiver
 
     # Narrow Set element type on first insert (Any[] -> T[])
     if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
@@ -132,8 +137,8 @@ module MethodAnalysis
     end
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
-    if defn[:takes_args]
-      defn[:takes_args].each do |arg_idx|
+    if defn.emit&.takes_args
+      defn.emit.takes_args.each do |arg_idx|
         arg_node = node.args[arg_idx]
         next unless arg_node
         if arg_node.is_a?(AST::Identifier)
@@ -144,12 +149,12 @@ module MethodAnalysis
     end
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.
-    if defn[:allocates] && current_fn_ctx
+    if defn.emit&.allocates && current_fn_ctx
       current_fn_ctx.heap_count += 1
     end
-    node.can_fail = true if defn[:can_fail] || defn[:allocates]
-    node.error_kind = defn[:error_kind] if defn[:error_kind]
-    node.error_type = defn[:error_type] if defn[:error_type]
+    node.can_fail = true if defn.can_fail || defn.emit&.allocates
+    node.error_kind = defn.emit&.error_kind if defn.emit&.error_kind
+    node.error_type = defn.emit&.error_type if defn.emit&.error_type
 
     true
   end

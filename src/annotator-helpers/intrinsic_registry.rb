@@ -72,9 +72,16 @@ module IntrinsicRegistry
   # Symbol/String type-name -> Type. Inference/macro directives
   # (:infer_*, :macro_*) are not type names -> polymorphic placeholder
   # (the real resolution is a later, consumer-side concern).
+  # Best-effort STATIC view of the return spec. The verbatim spec is
+  # kept on fs.return_spec for the full host dispatch.
   def to_return_type(v)
     return Type.new(:Void) if v.nil?
     return Type.new(:Any) if v.is_a?(Proc)
+    if v.is_a?(Hash) && v[:type]
+      return Type.new(v[:type], sync: v[:sync], ownership: v[:ownership])
+    end
+    return Type.new(:Any) if v.is_a?(Hash)
+
     s = v.to_s
     return Type.new(:Any) if s.start_with?("infer_", "macro_")
     v.is_a?(Type) ? v : Type.new(v)
@@ -87,6 +94,7 @@ module IntrinsicRegistry
       return_type: to_return_type(ret),
       intrinsic: true
     )
+    fs.return_spec     = ret
     fs.return_resolver = ret if ret.is_a?(Proc)
     fs.arg_validator   = h[:validate] if h[:validate].is_a?(Proc)
     fs.arg_spec        = h[:args]

@@ -32,6 +32,13 @@ class FunctionSignature
   # codegen/dispatch metadata (IntrinsicEmit). Keeps `return_type` a
   # pure Type even for receiver-dependent intrinsics.
   attr_accessor :return_resolver, :arg_validator, :arg_spec, :arity, :emit
+  # Verbatim registry return spec (the authoring DSL's polymorphic
+  # return facility): a static Type, a type Symbol, an `infer_*`
+  # directive Symbol (host-dispatched via send), a Proc, or a
+  # { type:, sync:, ownership: } Hash. `return_type` is the
+  # best-effort static view; consumers needing the full dispatch read
+  # this. Strongly-typed sum, not T.untyped.
+  attr_accessor :return_spec
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
@@ -103,6 +110,7 @@ class FunctionSignature
     @arg_spec          = T.let(nil, T.untyped)
     @arity             = T.let(nil, T.nilable(Integer))
     @emit              = T.let(nil, T.nilable(IntrinsicEmit))
+    @return_spec       = T.let(nil, T.untyped)
   end
 
   sig { returns(FunctionSignature) }
@@ -127,6 +135,7 @@ class FunctionSignature
       s.arg_spec = @arg_spec
       s.arity = @arity
       s.emit = @emit
+      s.return_spec = @return_spec
     end
   end
 end
