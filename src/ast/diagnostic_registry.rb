@@ -2456,7 +2456,7 @@ module DiagnosticRegistry
     INTRINSIC_REJECTED: {
       severity: :error, category: :type,
       template: "%{message}",
-      summary:  "Stdlib intrinsic rejected this call (matched_def[:reject_when] fired).",
+      summary:  "Stdlib intrinsic rejected this call (the matched signature's reject_when fired).",
       cause: "A stdlib intrinsic (`.negative?`, `.zero?`, ...) rejected this call because the argument type isn't allowed. The stdlib uses `reject_when` patterns to rule out call shapes that look valid but produce wrong results — e.g. `.negative?` on an unsigned int.",
       fix_hint: "Check the message for the specific reject reason. Often the fix is to remove the call entirely (the answer is statically known) or use a different intrinsic.",
     },
