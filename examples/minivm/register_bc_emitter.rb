@@ -921,15 +921,15 @@ class RegisterBcEmitter
       return if promise && promise.fetch(:payload_kind) == :void
     end
 
-    if expr.is_a?(MIR::MethodCall) && expr.receiver.is_a?(MIR::Ident) &&
-       %w[store fetchAdd fetchSub].include?(expr.method.to_s)
+    if expr.is_a?(MIR::MethodCall) &&
+       %w[store fetchAdd fetchSub].include?(expr.method.to_s) &&
+       (atomic_target = atomic_receiver_ident(expr.receiver))
       # Atomic mutation on a scalar binding. Single-threaded VM:
       # equivalent to plain assignment / += / -=.
-      target = expr.receiver
       val = (expr.args || []).reject { |a| a.is_a?(MIR::AllocatorRef) }.first
       raise Unsupported, "register emitter expected one value arg for #{expr.method}" unless val
       method = expr.method.to_s
-      name = target.name.to_s
+      name = atomic_target.name.to_s
       record_shared_event(:write, name, :atomic_primitive,
                           caps: { ownership: :none, sync: :atomic_primitive })
       if @ireg_by_name.key?(name)
@@ -4547,10 +4547,20 @@ class RegisterBcEmitter
   # = mutate. `fetchAdd` returns the old value -- but the bc VM's
   # tests use it for the side effect, so returning the new value
   # is also fine for the tests we have.
+  # `@shared:atomic` is lowered as Arc<Atomic<T>>, so an atomic op's
+  # receiver arrives wrapped in MIR::Deref (the `.ctrl.data.*` unwrap),
+  # not as a bare Ident. Peel any Deref layers to recover the binding
+  # Ident; return nil if it does not bottom out at an Ident.
+  def atomic_receiver_ident(node)
+    node = node.expr while node.is_a?(MIR::Deref)
+    node.is_a?(MIR::Ident) ? node : nil
+  end
+
   def compile_atomic_method(expr, type)
     return nil unless expr.is_a?(MIR::MethodCall)
-    return nil unless expr.receiver.is_a?(MIR::Ident)
-    name = expr.receiver.name.to_s
+    recv = atomic_receiver_ident(expr.receiver)
+    return nil unless recv
+    name = recv.name.to_s
     case expr.method.to_s
     when "load"
       record_shared_event(:read, name, :atomic_primitive,
