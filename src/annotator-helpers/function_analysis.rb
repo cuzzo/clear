@@ -737,7 +737,7 @@ module FunctionAnalysis
               error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param[:name], type: param[:type], missing: missing.join(', '))
             end
           end
-          param[:default].full_type = param[:type].to_sym rescue param[:type]
+          param[:default].full_type = Type.new((param[:type].to_sym rescue param[:type]))
         else
           visit(param[:default])
           def_type = param[:default].resolved_type
