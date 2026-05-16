@@ -3453,7 +3453,7 @@ private
     end
   end
 
-  sig { params(node: AST::Slice).returns(Symbol) }
+  sig { params(node: AST::Slice).void }
   def visit_Slice(node)
     visit(node.target)
     visit(node.start) if node.start
@@ -3464,7 +3464,7 @@ private
     target_type = node.target.type_info
     if target_type&.array?
       element = target_type.element_type.resolved
-      node.full_type = :"#{element}[]"
+      node.full_type = Type.new(:"#{element}[]")
     else
       node.full_type = :Any
     end
@@ -3523,7 +3523,7 @@ private
       end
     end
 
-    node.full_type = :"HashMap<#{first_val_type}>"
+    node.full_type = Type.new(:"HashMap<#{first_val_type}>")
     node.storage = :heap
     current_fn_ctx.heap_count += 1 if current_fn_ctx
     record_effect(EffectTracker::HEAP)
@@ -3744,7 +3744,7 @@ private
       if inner_types.size > 1
         error!(node, :BOUNDED_STREAM_MIXED_TYPES, types: inner_types.join(', '))
       end
-      node.full_type = :"~#{inner_types.first}[#{node.items.size}]"
+      node.full_type = Type.new(:"~#{inner_types.first}[#{node.items.size}]")
       node.storage   = :stack
       return
     end
@@ -3787,7 +3787,7 @@ private
     end
 
     if node.storage == :stack
-      node.full_type = :"#{base_type}[#{node.items.size}]"
+      node.full_type = Type.new(:"#{base_type}[#{node.items.size}]")
     else
       t = Type.new(:"#{base_type}[]", location: :heap)
       t.provenance = :frame  # makeList uses frameAlloc for backing
@@ -3837,8 +3837,8 @@ private
   def visit_Literal(node)
     node.full_type =
       case node.type
-      when :NUMBER then :Float64
-      when :INT64 then :Int64
+      when :NUMBER then Type.new(:Float64)
+      when :INT64 then Type.new(:Int64)
       when :STRING
         # provenance auto-inferred from location: :rodata in Type constructor
         if node.storage == :stack
@@ -3849,17 +3849,17 @@ private
       when :SYMBOL
         # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
         Type.new(Type::STRING_TYPE, sync: :symbol)
-      when :BYTE         then :Byte
-      when :PREFIXED_INT then :Byte  # Default; overflows checked after coercion context is known
-      when :INT8    then :Int8
-      when :INT16   then :Int16
-      when :INT32   then :Int32
-      when :UINT16  then :UInt16
-      when :UINT32  then :UInt32
-      when :UINT64  then :UInt64
-      when :FLOAT32 then :Float32
-      when :BOOLEAN then :Bool
-      when :NIL then :NIL
+      when :BYTE         then Type.new(:Byte)
+      when :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
+      when :INT8    then Type.new(:Int8)
+      when :INT16   then Type.new(:Int16)
+      when :INT32   then Type.new(:Int32)
+      when :UINT16  then Type.new(:UInt16)
+      when :UINT32  then Type.new(:UInt32)
+      when :UINT64  then Type.new(:UInt64)
+      when :FLOAT32 then Type.new(:Float32)
+      when :BOOLEAN then Type.new(:Bool)
+      when :NIL then Type.new(:NIL)
       else
         error!(node, :UNKNOWN_LITERAL)
       end
@@ -5140,7 +5140,7 @@ private
       error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: elem_syms.join(', '))
     end
 
-    node.full_type = :"~?#{elem_syms.first}[]"
+    node.full_type = Type.new(:"~?#{elem_syms.first}[]")
 
     # Detect YIELD of frame strings: when any YIELD expression is frame-allocated,
     # the MIR pass will heap-dupe it before push. NEXT callers own the duped copy.
@@ -5186,7 +5186,7 @@ private
       error!(node, :YIELD_OUTSIDE_BG_STREAM)
     end
     visit(node.expr)
-    node.full_type = node.expr.full_type || :Void
+    node.full_type = Type.new(node.expr.full_type || :Void)
     T.must(@stream_yield_types) << Type.new(node.full_type)
     record_effect(EffectTracker::SUSPENDS)
   end
@@ -5221,7 +5221,7 @@ private
     if last_type_str.start_with?('!')
       last_type = T.must(last_type_str[1..]).to_sym
     end
-    node.full_type = :"~#{last_type}"
+    node.full_type = Type.new(:"~#{last_type}")
 
     # Propagate returns_promoted through BG blocks: if the last expression
     # calls a function with returns_promoted, the BG block's promise carries
@@ -5369,7 +5369,7 @@ private
       node.storage   = :heap
     elsif promise_type.dynamic_stream?
       elem_sym = promise_type.tense_type.element_type.to_sym
-      node.full_type = :"?#{elem_sym}"
+      node.full_type = Type.new(:"?#{elem_sym}")
     elsif promise_type.bounded_stream?
       # NEXT on ~T[N]: returns T (the element type).
       # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
@@ -5382,12 +5382,12 @@ private
       # NEXT on ~?T[]@split: returns ?T — each handle advances independently through
       # the shared memoized sequence until exhaustion.
       elem_sym = promise_type.open_stream_element_type.to_sym
-      node.full_type = :"?#{elem_sym}"
+      node.full_type = Type.new(:"?#{elem_sym}")
     elsif promise_type.open_stream?
       # NEXT on ~?T[]: returns ?T — null signals stream exhaustion.
       # Does NOT mark as moved — stream is a resource cleaned up via deinit.
       elem_sym = promise_type.open_stream_element_type.to_sym
-      node.full_type = :"?#{elem_sym}"
+      node.full_type = Type.new(:"?#{elem_sym}")
     elsif promise_type.inf_stream?
       # NEXT on ~T[INF]: returns T (never nil — stream is infinite, rendezvous-style).
       # Does NOT mark as moved — stream is a resource cleaned up via deinit.
