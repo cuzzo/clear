@@ -178,8 +178,8 @@ class MIREmitter
   sig { params(node: MIR::InlineBc).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
-    pattern = entry[:zig].dup
+    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry.emit&.zig
+    pattern = entry.emit.zig.to_s.dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -216,7 +216,7 @@ class MIREmitter
   def sharded_map_template(node)
     op = node.stdlib_def
     kind = node.template_kind || :zig
-    op[kind] or raise "ShardedMap: op has no :#{kind} template (op keys=#{op.keys})"
+    op.emit&.public_send(kind) or raise "ShardedMap: op has no :#{kind} template (emit=#{op.emit.inspect})"
   end
 
   sig { params(pattern: String, node: T.untyped).returns(String) }
@@ -242,8 +242,8 @@ class MIREmitter
   sig { params(node: T.untyped).returns(String) }
   def emit_raw_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry[:zig]
-    pattern = entry[:zig].dup
+    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry.emit&.zig
+    pattern = entry.emit.zig.to_s.dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end

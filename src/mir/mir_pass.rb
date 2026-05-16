@@ -551,7 +551,7 @@ class MIRPass
     return true  if t.frame?
     # No explicit provenance: check the stdlib def for frame allocation.
     msd = expr.matched_stdlib_def
-    msd.is_a?(Hash) && msd[:return_alloc] == :frame
+    !!(msd && msd.emit&.return_alloc == :frame)
   end
 
   # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.

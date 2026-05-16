@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
+require_relative "../annotator-helpers/intrinsic_registry"
 
 # ==========================================
 # AST
@@ -220,7 +221,9 @@ module AST
     sig { returns(T.untyped) }
     def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def matched_stdlib_def=(val); @matched_stdlib_def = T.let(val, T.untyped); end
+    def matched_stdlib_def=(val)
+      @matched_stdlib_def = T.let(IntrinsicRegistry.fs(val), T.untyped)
+    end
 
     sig { void }
     def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end

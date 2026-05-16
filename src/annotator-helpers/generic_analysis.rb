@@ -706,7 +706,7 @@ module GenericAnalysis
     # Check stdlib def for explicit frame allocation (provenance not yet set on expr).
     if expr.respond_to?(:matched_stdlib_def)
       msd = expr.matched_stdlib_def
-      return true if msd.is_a?(Hash) && msd[:return_alloc] == :frame
+      return true if msd && msd.emit&.return_alloc == :frame
     end
     false
   end

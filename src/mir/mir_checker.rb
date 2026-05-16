@@ -168,16 +168,16 @@ class MIRChecker
     return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
-      ret = init.stdlib_def[:return]
-      return !(ret == :Void || ret.nil?)
+      ret = init.stdlib_def.return_type
+      return !ret.void?
     end
     false
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
-    return false unless node.stdlib_def&.dig(:allocates)
-    return true if node.stdlib_def[:return_alloc] == :heap
+    return false unless node.stdlib_def&.emit&.allocates
+    return true if node.stdlib_def.emit&.return_alloc == :heap
     return false unless node.is_a?(MIR::InlineZig)
 
     allocs = node.allocs
@@ -391,8 +391,8 @@ class MIRChecker
         "heap-returning try/catch result not bound to variable (leak)")
     end
     if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node)
-      ret = node.stdlib_def[:return]
-      unless ret == :Void || ret.nil?
+      ret = node.stdlib_def.return_type
+      unless ret.void?
         label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
         leaks << error(:HPT_LEAK, node.reason,
           "#{label} with allocates:true result not bound to variable (leak)")
@@ -750,7 +750,7 @@ class MIRChecker
     return false unless expr
     case expr
     when MIR::InlineZig
-      return false if expr.stdlib_def&.dig(:mutates_receiver)
+      return false if expr.stdlib_def&.emit&.mutates_receiver
       expr.allocs&.any? { |_k, v| v == :frame }
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap

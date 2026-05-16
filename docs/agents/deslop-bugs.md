@@ -236,3 +236,45 @@ the flip is atomic and green in one commit; (c) readers migrated to
 the pure typed API in gated batches; (d) the delegating scaffold
 deleted as the epic's final commit (so it is a migration scaffold,
 not a permanent band-aid). Awaiting direction on adopting (b).
+
+## EPIC #65 — stdlib_def FLAG-DAY executed (no backdoor), 267 -> 20
+
+Per explicit direction ("rather have all tests fail and we know what's
+left than a backdoor; do it all now"), the hard flip was executed in
+one coordinated change -- NO compatibility/delegation shim:
+
+WRITE SEAM (single point): AST `matched_stdlib_def=` + a prepended
+`StdlibDefFsCoercion` on RawZig/InlineZig/InlineBc/RawBc/ShardedMap*
+coerce via `IntrinsicRegistry.fs` on both setter AND positional
+`initialize` (Struct ctor bypasses setters). Every carried stdlib_def
+is now a FunctionSignature (+ typed IntrinsicEmit).
+
+READERS migrated to the typed API (~25 sites): capabilities, effects,
+generic_analysis, mir_pass, fsm_transform(+segments), mir_checker
+(`:return` -> `return_type.void?`), mir_lowering, suspend_resolvers,
+mir_emitter. Two silent-regression `matched_def.is_a?(Hash)` guards
+(annotator resolve_borrow_source / cleanup provenance) fixed.
+CONVERTER totality completed: added IntrinsicEmit props bc_op,
+error_kind, error_type, elem, fallible_clauses; fsm_* are FsmOps
+op-object arrays -> passthrough (not stringified). 5 specs asserting
+the old Hash shape migrated to the typed shape.
+
+Result: 4786 examples, 267 -> **20 failures** (-92.5%), no shim.
+
+REMAINING 20 (the precise "properly finish" worklist):
+1. Pool/sharded codegen (~7): Pool#insert/get/remove, @pool:sharded,
+   @pool.contains? -- the InlineBc/`pool_get_def` Zig emit path.
+2. FSM-IO SuspendResolvers (4): resolve_io / fsm_setup /
+   fsm_state_decls rendering -- verify FsmOps op-objects flow through
+   `emit.fsm_*` correctly into `lower_stmts`.
+3. ZigTranspiler OG move-emission / COPY-union / heap-cleanup (~6):
+   the mir_checker `stdlib_owned_return?` / `return_type.void?`
+   semantic migration shifted some cleanup/move decisions -- audit
+   owned_return_init? vs the old `:return == :Void` logic.
+4. collections.md doc example (1, downstream of #1); FmtVerifier (1,
+   pre-existing parallel flake, not from this work).
+
+These are bounded and categorized; transpile-tests/fuzz NOT yet run
+(blocked until #1/#3 resolved). This is the intended honest state:
+the contract is genuinely flipped with zero backdoor, and exactly
+what remains to finish is enumerated above.

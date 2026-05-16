@@ -17,6 +17,7 @@
 # New nodes here use distinct names to coexist during migration.
 
 require "sorbet-runtime"
+require_relative "../annotator-helpers/intrinsic_registry"
 
 module MIR
   # Common interface for all MIR nodes.
@@ -1793,5 +1794,26 @@ module MIR
                               :map_kind, :stdlib_def, :key_zig, :val_zig,
                               :resolved_allocs, :template_kind) do
     include Expr
+  end
+
+  # Hard flip (EPIC #65): every stdlib_def carrier coerces its payload
+  # to a FunctionSignature on write. No Hash backdoor -- readers still
+  # doing entry[:zig]/.dig(:...) will fail loudly, which is the
+  # intended map of remaining reader-migration work.
+  module StdlibDefFsCoercion
+    def stdlib_def=(v)
+      super(IntrinsicRegistry.fs(v))
+    end
+
+    # Struct positional construction (`InlineBc.new(op, args, hash)`)
+    # assigns the member directly, bypassing the setter -- re-run it
+    # through the coercing setter so the carrier is always FS.
+    def initialize(*)
+      super
+      self.stdlib_def = stdlib_def
+    end
+  end
+  [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
+    k.prepend(StdlibDefFsCoercion)
   end
 end

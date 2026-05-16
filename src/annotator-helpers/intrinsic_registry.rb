@@ -15,12 +15,14 @@ module IntrinsicRegistry
   EMIT_BOOL = %i[bc is_method suspends narrows_collection mutates_receiver
                  allocates takes_value container_borrow].freeze
   EMIT_STRSYM = %i[zig numeric_zig sharded_zig shard_direct_zig].freeze
-  EMIT_STR    = %i[lifetime reject_error fsm_finish_value].freeze
-  EMIT_STRARR = %i[fsm_setup fsm_state_decls fsm_finish_block
-                   fsm_state_finalize].freeze
+  EMIT_STR    = %i[lifetime reject_error fsm_finish_value elem].freeze
   EMIT_SYM    = %i[tag builtin alloc return_alloc val_alloc key_alloc
-                   shard_alloc sharded_alloc borrows reject_when
-                   bc_op].freeze
+                   shard_alloc sharded_alloc reject_when bc_op
+                   error_kind error_type].freeze
+  # Passthrough (no coercion): borrows (:all|Array), fallible_clauses
+  # (internal), fsm_* (FsmOps op-object arrays, not strings).
+  EMIT_PASS   = %i[borrows fallible_clauses fsm_setup fsm_state_decls
+                   fsm_finish_block fsm_state_finalize].freeze
   EMIT_SYMARR = %i[value_transforms shard_direct_value_transforms].freeze
   EMIT_INTARR = %i[takes_args].freeze
   EMIT_PROC   = %i[label].freeze
@@ -39,8 +41,8 @@ module IntrinsicRegistry
       when *EMIT_BOOL   then e.public_send("#{k}=", !!v)
       when *EMIT_STRSYM then e.public_send("#{k}=", v)
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
-      when *EMIT_STRARR then e.public_send("#{k}=", Array(v).map(&:to_s))
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
+      when *EMIT_PASS   then e.public_send("#{k}=", v)
       when *EMIT_SYMARR then e.public_send("#{k}=", Array(v).map(&:to_sym))
       when *EMIT_INTARR then e.public_send("#{k}=", Array(v).map(&:to_i))
       when *EMIT_PROC   then e.public_send("#{k}=", v)

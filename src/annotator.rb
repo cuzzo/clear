@@ -5554,14 +5554,14 @@ private
   def resolve_borrow_source(call_node)
     # Path 1: stdlib functions with lifetime: "self"
     matched_def = call_node.matched_stdlib_def
-    if matched_def.is_a?(Hash) && matched_def[:lifetime]
-      lifetime = matched_def[:lifetime]
+    if matched_def && matched_def.emit&.lifetime
+      lifetime = matched_def.emit.lifetime
       if lifetime == "self" && call_node.is_a?(AST::MethodCall)
         return call_node.object
       end
       # Named param lifetime -- find by index in args list
       args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
-      arg_types = matched_def[:args]
+      arg_types = matched_def.arg_spec
       if arg_types.is_a?(Array)
         idx = arg_types.index { |a| a.is_a?(Hash) && a[:name] == lifetime }
         return args[idx] if idx && args[idx]
@@ -6491,16 +6491,16 @@ private
     val = node.value
     if val && (val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall))
       matched_def = val.matched_stdlib_def
-      if matched_def.is_a?(Hash)
+      if matched_def
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
-        if matched_def[:lifetime]
+        if matched_def.emit&.lifetime
           ti.provenance = :borrow
           return
         end
-        ret_alloc = matched_def[:return_alloc]
+        ret_alloc = matched_def.emit&.return_alloc
         # For allocating methods without explicit return_alloc, the method's
         # alloc IS the return alloc (e.g. map.values() on sharded maps).
-        ret_alloc ||= matched_def[:alloc] if matched_def[:allocates]
+        ret_alloc ||= matched_def.emit&.alloc if matched_def.emit&.allocates
         if ret_alloc
           ti.provenance ||= ret_alloc if [:heap, :frame].include?(ret_alloc)
           return

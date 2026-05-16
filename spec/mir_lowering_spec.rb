@@ -437,7 +437,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :ADD, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.intAdd(a, b)")
     end
 
@@ -456,7 +456,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :EQ, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to include("CheatLib.eql(name,")
     end
 
@@ -474,7 +474,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :WRAP_ADD, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.wrapAdd(a, b)")
     end
 
@@ -923,7 +923,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ExprStmt)
       expect(result.expr).to be_a(MIR::InlineZig)
-      expect(result.expr.stdlib_def).to include(:value_transforms)
+      expect(result.expr.stdlib_def.emit.value_transforms).not_to be_nil
       expect(emit(result)).to include("CheatLib.setAt(items, 0,")
     end
 
@@ -1467,7 +1467,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to include("CheatLib.assert(true,")
     end
 

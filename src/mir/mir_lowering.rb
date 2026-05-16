@@ -200,7 +200,7 @@ class MIRLowering
     when MIR::InlineZig
       # Only hoist if the node heap-allocates (stdlib_def allocates: true AND
       # allocs contains a :heap entry -- frame-only intrinsics are excluded).
-      return false unless node.stdlib_def&.dig(:allocates)
+      return false unless node.stdlib_def&.emit&.allocates
       return true unless node.allocs
       node.allocs.any? { |_k, v| v == :heap }
     else
@@ -1943,8 +1943,8 @@ class MIRLowering
     # When the entry has an explicit :bc_op, prefer it over the AST name so
     # the BC dispatch key is decoupled from CLEAR's surface naming
     # (e.g. fileReadAll -> :file_read_all).
-    if @target == :bc && node.matched_stdlib_def&.dig(:bc)
-      op_name = node.matched_stdlib_def[:bc_op] || node.name.to_s.to_sym
+    if @target == :bc && node.matched_stdlib_def&.emit&.bc
+      op_name = node.matched_stdlib_def.emit&.bc_op || node.name.to_s.to_sym
       return MIR::InlineBc.new(op_name, mir_args, node.matched_stdlib_def)
     end
 
@@ -1954,7 +1954,7 @@ class MIRLowering
     # The {alloc} PLACEHOLDER stays in the pattern -- the emitter substitutes it.
     resolved_allocs = {}
     if pattern.include?("{alloc}")
-      alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
+      alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
       # Resolve receiver type: MethodCall -> receiver object; UFCS FuncCall -> first arg
       receiver_type = if node.is_a?(AST::MethodCall)
         ti = node.object.type_info rescue nil
@@ -1967,7 +1967,7 @@ class MIRLowering
       resolved_allocs[:alloc] = resolved
 
       # Wrap non-heap strings at TAKES positions in DupeSlice (visible to MIR checker)
-      stdlib_args = node.matched_stdlib_def&.dig(:args)
+      stdlib_args = node.matched_stdlib_def&.arg_spec
       if stdlib_args.is_a?(Array)
         raw_args = node.is_a?(AST::MethodCall) ? node.args : node.args[1..]
         raw_args&.each_with_index do |arg_node, ai|
@@ -1999,7 +1999,7 @@ class MIRLowering
     # non-literal args pay nothing. We skip it for `:Any` (anytype) and
     # for arg specs without a concrete declared type (Hash forms whose
     # `:type` is missing or :Any).
-    stdlib_args = node.matched_stdlib_def&.dig(:args)
+    stdlib_args = node.matched_stdlib_def&.arg_spec
     if stdlib_args.is_a?(Array)
       args_zig = args_zig.each_with_index.map do |arg_zig, i|
         coerce_stdlib_arg(arg_zig, stdlib_args[i])
@@ -4327,9 +4327,9 @@ class MIRLowering
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
     # BC dispatches by op symbol in compile_inline_bc.
-    if node.matched_stdlib_def&.dig(:bc)
+    if node.matched_stdlib_def&.emit&.bc
       mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
-      return MIR::InlineBc.new(node.matched_stdlib_def[:bc_op],
+      return MIR::InlineBc.new(node.matched_stdlib_def.emit&.bc_op,
                                 mir_args, node.matched_stdlib_def)
     end
 
@@ -6203,8 +6203,8 @@ class MIRLowering
     end
 
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
-      return false unless init.stdlib_def&.dig(:allocates)
-      return true if init.stdlib_def[:return_alloc] == :heap
+      return false unless init.stdlib_def&.emit&.allocates
+      return true if init.stdlib_def.emit&.return_alloc == :heap
       return false unless init.is_a?(MIR::InlineZig)
 
       allocs = init.allocs

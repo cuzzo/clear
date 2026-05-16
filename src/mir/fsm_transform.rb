@@ -257,7 +257,7 @@ module FsmTransform
     return true if value.is_a?(AST::NextExpr)
     return false unless value.is_a?(AST::FuncCall) || value.is_a?(AST::MethodCall)
     md = value.matched_stdlib_def
-    !!(md && md[:suspends] && md[:fsm_setup])
+    !!(md && md.emit&.suspends && md.emit&.fsm_setup)
   end
 
   sig { params(name: T.untyped, type_obj: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }

@@ -25,10 +25,11 @@ class IntrinsicEmit < T::Struct
   prop :shard_direct_zig,  T.nilable(StrOrSym),              default: nil
 
   # --- FSM emission fragments ---
-  prop :fsm_setup,           T.nilable(T::Array[String]),    default: nil
-  prop :fsm_state_decls,     T.nilable(T::Array[String]),    default: nil
-  prop :fsm_finish_block,    T.nilable(T::Array[String]),    default: nil
-  prop :fsm_state_finalize,  T.nilable(T::Array[String]),    default: nil
+  # FsmOps DSL op-objects, not strings -- passthrough, no coercion.
+  prop :fsm_setup,           T.nilable(T::Array[T.untyped]), default: nil
+  prop :fsm_state_decls,     T.nilable(T::Array[T.untyped]), default: nil
+  prop :fsm_finish_block,    T.nilable(T::Array[T.untyped]), default: nil
+  prop :fsm_state_finalize,  T.nilable(T::Array[T.untyped]), default: nil
   prop :fsm_finish_value,    T.nilable(String),              default: nil
 
   # --- Dispatch flags ---
@@ -50,10 +51,19 @@ class IntrinsicEmit < T::Struct
   prop :key_alloc,       T.nilable(Symbol),                  default: nil
   prop :shard_alloc,     T.nilable(Symbol),                  default: nil
   prop :sharded_alloc,   T.nilable(Symbol),                  default: nil
-  prop :borrows,         T.nilable(Symbol),                  default: nil
+  prop :borrows,         T.nilable(T.any(Symbol, T::Array[T.untyped])),
+       default: nil
   prop :reject_when,     T.nilable(Symbol),                  default: nil
   prop :bc_op,           T.nilable(Symbol),                  default: nil
+  prop :error_kind,     T.nilable(Symbol),                   default: nil
+  prop :error_type,     T.nilable(Symbol),                   default: nil
   prop :registry,        T.nilable(Symbol),                  default: nil
+
+  # elem: transient element-type-name hint (merged at lowering, e.g.
+  # pool_get_def). fallible_clauses: internal with-block clause
+  # structure injected at lowering (not authoring DSL).
+  prop :elem,            T.nilable(String),                  default: nil
+  prop :fallible_clauses, T.untyped,                         default: nil
 
   # --- Strings ---
   prop :lifetime,        T.nilable(String),                  default: nil

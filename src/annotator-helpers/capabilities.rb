@@ -409,10 +409,10 @@ module CapabilityHelper
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
     if call.matched_stdlib_def
       md = call.matched_stdlib_def
-      return "allocates" if md[:allocates]
-      return "can fail" if md[:can_fail]
-      return "suspends" if md[:suspends]
-      return "mutates its receiver" if md[:mutates_receiver]
+      return "allocates" if md.emit&.allocates
+      return "can fail" if md.can_fail
+      return "suspends" if md.emit&.suspends
+      return "mutates its receiver" if md.emit&.mutates_receiver
       return nil
     end
 
