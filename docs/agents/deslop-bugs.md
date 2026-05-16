@@ -156,3 +156,45 @@ is the major blocker: forcing these collapses to "finish 20" would
 ship compiler bugs (the exact anti-pattern in docs/retrospective).
 They are left as pending, scoped, with this rationale, rather than
 faked. No CLEAR transpiler bugs were introduced anywhere in the pass.
+
+## #47 `.type` -- deep analysis (user-directed re-attack)
+
+The user correctly rejected the first "blocker" framing. Full
+analysis confirms their model AND pins the real obstacle:
+
+- VALIDATED: target contract for `VarDecl#type` / `BindExpr#type` is
+  `nil | Type | FunctionSignature`; `String`/`Symbol` are slop;
+  consumers should be `T.any(Type, FunctionSignature)` not
+  `T.untyped`.
+- The `.type` accessor is overloaded across Structs. `Literal#type`
+  is a lexical token kind (`:NUMBER`/`:STRING`) -- a Symbol by
+  design, a *different field*. Every `case node.type` / `node.type
+  == :Sym` reader in src is on `Literal` (lower_literal,
+  int_lit_value, literal_source_length, visit_Literal), NOT on
+  VarDecl/BindExpr. So there is no Symbol-comparison blast radius on
+  the declared-type carrier -- the earlier fear was unfounded.
+- Clean seam: a memoizing-normalizing reader on VarDecl/BindExpr
+  (`Symbol|String -> Type.new`, pass nil/Type/FunctionSignature
+  through). No `FunctionSignature` constant reference needed.
+
+REAL obstacle (semantic, not mechanical): the 11
+`node.type.is_a?(Type)` sites tangle two roles:
+  1. pure laundering (`is_a?(Type) ? t : Type.new(t)`) -- collapses
+     cleanly once the seam normalizes;
+  2. a *resolved-vs-unresolved gate* (`return unless
+     node.type.is_a?(Type) && node.type.future?`) -- normalizing the
+     seam changes which declarations get processed (a previously
+     skipped unresolved/Symbol-typed decl now proceeds). That is a
+     behavior change, and `is_a?(Type)` also still legitimately
+     discriminates `Type` from `FunctionSignature` (which has no
+     `.future?`).
+
+Therefore #47 is a reviewed *semantic* refactor: per-site decide
+whether an unresolved / fn-typed decl should proceed or skip, add
+the seam, retype `T.untyped -> T.any(Type, FunctionSignature)`. It
+is bounded and the analysis above is its spec, but it requires
+intent decisions across annotator/escape-analysis that must not be
+made unilaterally under "gates green" (gates green != provably
+correct for semantic change). #48/#49/#50/#51/#53/#57/#59 share this
+shape. Recommended: do #47 as a focused reviewed PR using this
+section as the spec; do not auto-run it.
