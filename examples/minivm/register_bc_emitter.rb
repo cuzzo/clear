@@ -626,7 +626,7 @@ class RegisterBcEmitter
     when MIR::Comment, MIR::Suppress, MIR::Noop
       nil
     when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt, MIR::EscapePromote,
-         MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark
+         MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark
       nil
     when MIR::ScopeBlock
       compile_scope_block(stmt)
