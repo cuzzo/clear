@@ -104,3 +104,55 @@ safe to convert) vs other carriers (raw-Symbol contract, must
 instead be typed at *their* definition or left). That per-receiver
 discrimination is the actual program -- the mechanical transform is
 not a substitute for it.
+
+## Outcome of the 20-item pass
+
+**Done (11 items), all gate-verified standalone commits** (specs:
+pre-existing flaky fmt only; transpile 548/548 0 leaks; fuzz 141/141
+0 fail/leak/mir-error):
+
+- #45 `.type_info` -- 22 producers -> Type at the Locatable seam +
+  `visit_Slice` returns(Symbol)->.void slop fix + 14 reader guards
+  collapsed. (3b90fd4b6, aba4b1f26, c79bf07d6, 6544881b4)
+- #46 `.full_type` -- same @type_object seam; 14 reader guards
+  collapsed. (b8e60bab8)
+- #52(partial),#58,#60,#61,#62,#63 -- `.type_info`-sourced
+  single-method locals; dead coercions removed, guards -> nil-safe.
+  (e658b0622)
+- #54 `.wrapped_type` -- structurally nil|Type; 2 dead coercions
+  removed. (c5749215e)
+- #55,#56 -- nil-kill "always Type" param collapses. (d4507ea99,
+  916cd5caf)
+
+The unifying safe pattern: a contract whose **producer is
+structurally `nil|Type`** (the `Locatable#full_type=` laundering
+seam, or `wrapped_type`'s own ctor) -- there the `is_a?(Type)` is a
+redundant nil-check and collapses behavior-preservingly.
+
+**MAJOR BLOCKER -- remaining 9 (#47,#48,#49,#50,#51,#53,#57,#59,#64).**
+These contracts are *genuinely heterogeneous*; `is_a?(Type)` is a
+real, load-bearing discriminator, NOT a redundant nil-check:
+
+- `.type` (#47): producers `{Type, Symbol, NilClass,
+  T.nilable(Type), FunctionSignature, String}`. `node.type.is_a?(Type)
+  ? node.type : Type.new(node.type)` legitimately coerces a Symbol;
+  `FunctionSignature`/`String` are NOT `Type.new`-able. Collapsing
+  changes behavior / crashes.
+- `.return_type` (#48): `{T.nilable(Type), Type, Symbol, Hash, Proc}`
+  -- `Hash`/`Proc` are not Types.
+- `final_type` (#50): `Symbol|Type` *by design* -- finalize_storage!
+  normalizes a raw type spec; the discriminator is the whole point.
+- `:type`/`:resolved_type` hash-keys (#49,#53), match-binding
+  (#51): heterogeneous hash values.
+- `expected_type` (#57), `source_type` (#59): genuinely nilable /
+  no runtime evidence of always-Type.
+
+Collapsing any of these is **not behavior-preserving**. Each needs
+its own deep per-contract retype program (find the `@ivar=` / hash
+writer, give it a real `Type`, handle the non-Type members like
+`FunctionSignature`/`Proc`/`Hash` explicitly) -- a #45-scale-or-larger
+*semantic* change per contract, with real miscompilation risk. That
+is the major blocker: forcing these collapses to "finish 20" would
+ship compiler bugs (the exact anti-pattern in docs/retrospective).
+They are left as pending, scoped, with this rationale, rather than
+faked. No CLEAR transpiler bugs were introduced anywhere in the pass.
