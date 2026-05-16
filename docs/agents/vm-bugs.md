@@ -313,3 +313,78 @@ the existing seven can act on, or refuse at lowering time.
 
 When fixes land, the specs flip from "assert broken" to "assert
 diagnostic" or "assert correct runtime result".
+
+---
+
+## Register VM: guest frame-arena lifetime not modeled (frame_peak / loop-arena cluster)
+
+Discovered 2026-05-16 during Phase 0 gate stabilization on the
+`register-machine` branch.
+
+**Not a CLEAR compiler bug.** Native CLEAR compiles and runs all
+affected tests correctly (`./clear run transpile-tests/66_list_loop_arena.cht`
+exits 0). This is a `register_bc_emitter.rb` / `vm.cht` runner design
+gap.
+
+### Symptom
+
+6 allowlist tests ERROR (silent corruption, not honest PENDING):
+
+| Test | Panic |
+|------|-------|
+| `66_list_loop_arena` | `index out of bounds: index 0xAAAA..., len 358` in `flist0.append` -> `ensureTotalCapacityPrecise` |
+| `189_string_concat_loop_growth` | General protection exception (no address) |
+| `190_frame_peak_string_loop` | (arena accounting) |
+| `197_frame_peak_nested_while_server` | `integer does not fit in destination type` |
+| `200_frame_peak_large_alloc_loop` | `integer overflow` |
+| `205_frame_peak_list_build_in_fn` | General protection exception (no address) |
+
+### Root cause
+
+- The guest's per-iteration frame rewind ops are **no-ops** in the
+  register emitter:
+  - `MIR::FrameSave` / `MIR::FrameRestore` -> `nil`
+    (`register_bc_emitter.rb:628-630`).
+  - `rt.saveLoopMark` / `rt.restoreLoopMark` detected by
+    `runtime_loop_mark?` / `runtime_loop_mark_restore?` and skipped
+    (`register_bc_emitter.rb:533-534`).
+- But guest frame-allocated collections (`vals: Float64[]@list`) are
+  still emitted as LFNEW/LFAPPEND that allocate on the **runner's
+  real** `rt.frameAlloc()` arena (`vm.cht` dispatch).
+- A guest loop that frame-allocates per iteration therefore
+  **accumulates unbounded memory in the runner's arena** instead of
+  being rewound each iteration. The runner's arena overflows; the
+  ArrayList struct (`flist0`) is corrupted (`items.len` reads the
+  `0xAAAA...` Zig undefined poison) and faults.
+- `framePeakBytes()` (native id 16) returns the **runner's** arena
+  peak, not the guest's simulated arena, so the `frame_peak`
+  assertions are measuring the wrong thing even when they don't
+  crash.
+
+### Invariant violated
+
+README "Core Design Principle" / `register-vm.md` "Semantic
+Invariants": *"Any operation not yet supported in the bytecode path
+should error NOT_SUPPORTED, not fall back to a shadow
+implementation."* No-oping the guest's frame-rewind contract while
+still frame-allocating is a semantically-different shortcut that
+silently corrupts.
+
+### Fix options (not yet done — acked, deferred)
+
+1. **Faithful (correct, large):** model a guest frame arena distinct
+   from the runner's. Guest LNEW/LFAPPEND allocate from a
+   VM-maintained guest arena; `saveLoopMark`/`restoreLoopMark` and
+   `FrameSave`/`FrameRestore` actually save/rewind that guest arena;
+   `framePeakBytes()` reports the guest arena's peak.
+2. **Honest (small, invariant-aligned):** detect guest programs that
+   depend on per-iteration frame rewind (loop body frame-allocates a
+   collection while runtime loop marks are present) or call
+   `framePeakBytes()`, and raise `Unsupported` -> PENDING instead of
+   emitting silently-corrupting code. Risk: must be scoped precisely
+   so it does not flip currently-passing tests to PENDING.
+
+Status: **OPEN**, acked. Contained cluster (6 tests); does not block
+the language-coverage roadmap. Revisit as its own commit; option 2 is
+the right next step (stops silent corruption, aligns with the
+NOT_SUPPORTED invariant) before option 1's faithful arena modeling.
