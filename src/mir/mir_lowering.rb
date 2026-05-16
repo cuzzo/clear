@@ -5364,7 +5364,9 @@ class MIRLowering
       # `IF pool[id] AS env`.
       elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
-      pool_get_def = POOL_METHODS["get"].merge(elem: elem_name)
+      pool_get_def = IntrinsicRegistry.sig(POOL_METHODS, "get").dup
+      pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
+      pool_get_def.emit.elem = elem_name
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
     elsif ti&.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)
@@ -7388,12 +7390,12 @@ class MIRLowering
   # with stdlib_def attached so the MIR checker can verify ownership.
   sig { params(name: Symbol, args: T::Array[T.untyped]).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
   def emit_builtin(name, args)
-    entry = BUILTIN_OPS[name]
+    entry = IntrinsicRegistry.sig(BUILTIN_OPS, name)
     raise "emit_builtin: unknown builtin :#{name}" unless entry
-    if @target == :bc && entry[:bc]
+    if @target == :bc && entry.emit&.bc
       return MIR::InlineBc.new(name, args, entry)
     end
-    pattern = entry[:zig].dup
+    pattern = entry.emit&.zig.to_s.dup
     # Use block form of gsub so backslashes in Zig code (e.g. "\\" for a literal
     # backslash) are not interpreted as replacement specials by String#gsub.
     args.each_with_index { |a, i| code = emit_expr(a); pattern = pattern.gsub("{#{i}}") { code } }
