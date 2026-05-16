@@ -1,8 +1,8 @@
-# prick — design
+# SlopCop — design
 
 ## What it is (and why it is a general gem)
 
-A flat uncovered-count is unactionable: gaps are not equal. prick is
+A flat uncovered-count is unactionable: gaps are not equal. SlopCop is
 a **general engine**: it categorizes every dark branch arm by
 reachability class and ranks the genuine ones by consumed fix-cache
 churn — "the top true gaps to test, in order." It is a gem for the
@@ -22,7 +22,7 @@ gem. Fixed:
 - **The project lexicon is caller-supplied.** `ffi_boundary:` (the
   external/boundary method names) defaults to empty in the gem; the
   consuming project passes its own (CLEAR's set lives in the CLI
-  `exe/prick`, not the library). `DIAGNOSTIC_MIDS` is general Ruby
+  `exe/slopcop`, not the library). `DIAGNOSTIC_MIDS` is general Ruby
   (`raise`/`fail`/`abort`).
 
 The *engine* — categorize uncovered branches, rank genuine by churn —

@@ -12,7 +12,7 @@
 --ignore=docs/
 --ignore=tools/
 --ignore=gems/decomplex/
---ignore=gems/prick/
+--ignore=gems/slopcop/
 --ignore=gems/fix-cache/
 --ignore=gems/nil-kill/
 

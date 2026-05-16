@@ -1,13 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require_relative "../lib/prick"
+require_relative "../lib/slopcop"
 
 def usage
   warn <<~U
-    prick -- top true coverage gaps, ranked by fix-churn
+    slopcop -- top true coverage gaps, ranked by fix-churn
 
-      prick report [--repo=.] [--coverage=coverage/.resultset.json] \\
+      slopcop report [--repo=.] [--coverage=coverage/.resultset.json] \\
                    [--output=report.md] [--files=a.rb,b.rb] \\
                    [--ffi=meth1,meth2] [--top=N]
 
@@ -44,7 +44,7 @@ ARGV[1..].each do |a|
   end
 end
 
-md = Prick::Report.new(
+md = SlopCop::Report.new(
   files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
   ffi_boundary: opts[:ffi], top: opts[:top],
   # links must resolve from wherever the report is written.

@@ -3,12 +3,12 @@
 require_relative "rollup"
 require "pathname"
 
-module Prick
+module SlopCop
   # Markdown report. Leads with the actionable artifact: the top true
   # gaps, repo-relative + linked, ranked by fix-cache churn score.
   class Report
     # link_base: the directory the markdown will be SAVED in, so link
-    # hrefs resolve correctly (a report at gems/prick/report.md must
+    # hrefs resolve correctly (a report at gems/slopcop/report.md must
     # link ../../src/x.rb, not src/x.rb). Defaults to repo root
     # (correct for stdout / a root-level report).
     def initialize(files:, repo:, resultset:, ffi_boundary: [], top: 50,
@@ -29,7 +29,7 @@ module Prick
     def to_markdown
       gaps = @r[:top_gaps]
       g = @r[:grand]
-      o = +"# Prick Report\n\n"
+      o = +"# SlopCop Report\n\n"
       o << "> Top true coverage gaps to test, ranked by fix-churn.\n" \
            "> Every dark branch arm is categorized; only the GENUINE\n" \
            "> reachable ones are gaps worth testing. Owns\n" \

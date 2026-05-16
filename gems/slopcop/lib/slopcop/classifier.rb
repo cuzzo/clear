@@ -2,7 +2,7 @@
 
 require "json"
 
-module Prick
+module SlopCop
   # Classifies every never-taken branch arm in a target file into ONE
   # actionable category. AST-structural, never a regex over the arm
   # line. General -- no project lexicon baked in (see ffi_boundary:).

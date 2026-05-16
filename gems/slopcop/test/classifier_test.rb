@@ -4,10 +4,10 @@ require "minitest/autorun"
 require "tempfile"
 require "json"
 require "coverage"
-require_relative "../lib/prick"
+require_relative "../lib/slopcop"
 
 class ClassifierTest < Minitest::Test
-  C = Prick::Classifier
+  C = SlopCop::Classifier
 
   def node(expr)
     RubyVM::AbstractSyntaxTree.parse(expr).children.last

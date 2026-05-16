@@ -1,6 +1,6 @@
-# prick: pricks holes in your codebase.
+# SlopCop: catches the slop your tests miss.
 
-A flat "673/2732 uncovered" is unactionable. **prick** categorizes
+A flat "673/2732 uncovered" is unactionable. **SlopCop** categorizes
 every dark branch arm and gives you the one thing you want: **the top
 true gaps to test, ranked by fix-churn.**
 
@@ -29,7 +29,7 @@ external/boundary method names) is caller-supplied via `--ffi`.
 ## Usage
 
 ```
-prick report --repo=. --coverage=coverage/.resultset.json \
+slopcop report --repo=. --coverage=coverage/.resultset.json \
              --output=report.md \
              --files=src/a.rb,src/b.rb \
              --ffi=my_extern_call,my_boundary_method
@@ -41,7 +41,7 @@ and a git repo (for the fix-cache churn overlay). See
 
 ## Boundary
 
-prick **owns** gap-categorization. It **consumes** the sibling
+SlopCop **owns** gap-categorization. It **consumes** the sibling
 `fix-cache` gem for churn (it does not compute churn itself) and an
 optional nil-kill verdict for the `type_norm` bucket. It re-derives
 nothing.

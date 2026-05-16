@@ -1,4 +1,4 @@
-# Prick Report
+# SlopCop Report
 
 > Top true coverage gaps to test, ranked by fix-churn.
 > Every dark branch arm is categorized; only the GENUINE

@@ -5,7 +5,7 @@ require_relative "classifier"
 # re-derive it (boundary: own categorization, consume churn).
 require_relative "../../../fix-cache/lib/fix_cache"
 
-module Prick
+module SlopCop
   # Per-file categorical totals + the headline artifact: every GENUINE
   # reachable gap, repo-relative, ranked by the file's fix-cache churn
   # score. "Here are the top N true gaps to test."
