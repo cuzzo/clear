@@ -154,7 +154,7 @@ I will continue to invest in layers of defense to protect myself from their comm
 
 ## Conclusion
 
-Interestingly, I’m trying to build a language that has the syntax to make the vast majority of bugs simply impossible to represent, and - when possible - the compiler can autogenerate all the failure methods that might unfold, so you can see exactly where a bug *might* be.
+Interestingly, I'm building a language that syntically makes the vast majority of bugs simply impossible to represent, and - when possible - the compiler autogenerates all the failure methods that might unfold, so you can see exactly where a bug *might* be.
 
 I wanted to do this *before* working with LLMs.  Now I want it more than ever before!
 
