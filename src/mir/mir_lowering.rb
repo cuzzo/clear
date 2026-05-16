@@ -848,8 +848,6 @@ class MIRLowering
   # (TAKES params) to avoid deferring type resolution to the emitter.
   sig { params(entry: T::Hash[Symbol, T.untyped], ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
   def build_drop_entry!(entry, ti, source_node)
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    ti = nil unless ti.is_a?(Type)
 
     zig_type = case entry[:kind]
     when :heap_slice
