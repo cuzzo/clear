@@ -1,0 +1,74 @@
+# deslop-bugs
+
+Findings from the nil-kill / SlopCop complexity-reduction pass
+(tracker items #45-#64). Records CLEAR transpiler bugs encountered and
+methodological findings.
+
+## CLEAR transpiler bugs encountered
+
+None. Every change made (and every change considered) was validated
+against `bundle exec prspec spec/`, `./clear test transpile-tests/`
+(548/548, 0 leaks), and the stable fuzz matrix (141/141, 0 fail / 0
+leak / 0 mir-error). No transpiler miscompilation, leak, or
+MIR-checker regression was observed.
+
+## Pre-existing flaky spec (not introduced here)
+
+`spec/fmt_verifier_spec.rb` fails exactly one (nondeterministic)
+example under parallel `prspec` but passes 12/12 when run serially
+(`bundle exec rspec spec/fmt_verifier_spec.rb`). Pre-exists on the
+`origin/nil-kill-prod` base. Out of scope for this pass; flagged so it
+is not mistaken for a regression. The per-item gate used here is
+"prspec failures confined to that one flaky fmt example; serial run of
+related specs green; transpile-tests + fuzz unchanged."
+
+## Methodological finding: only "always Type" verdicts are safe blind collapses
+
+nil-kill's Union Decomplexity list ranks contracts by how many
+`is_a?(Type)` guards collapse if the contract is given a concrete
+type. Two distinct verdict classes appear, and only one is a safe
+*standalone* deslop commit:
+
+1. **"always `Type`: collapse, all N die"** (runtime evidence: the
+   producer is non-nilable `Type`). The guards are provably dead;
+   deleting them is behavior-preserving. SAFE standalone commit.
+   - #56 `Type#accepts_fn_type?` (`other_type`) -- done, commit
+     916cd5caf.
+   - #55 `MIRLowering#build_drop_entry!` (`ti`) -- done, commit
+     d4507ea99.
+
+2. **Nilable / union producers** (`{NilClass, Type}`,
+   `T.nilable(Type)`, heterogeneous) **or "producers unattributed"**
+   (no runtime trace). The `is_a?(Type)` check is a *correct
+   nil/Type discriminator* or a *load-bearing coercion*, NOT a dead
+   guard. Verified by static inspection -- these sites source from the
+   nilable `.type_info` / `.full_type` contract, e.g.:
+   - `ti = node.type_info rescue nil; ti.provenance = :heap if
+     ti.is_a?(Type)` (EscapeAnalysis#per_fn_scan!, #52)
+   - `ti = source.type_info rescue nil; ti = Type.new(ti) if ti &&
+     !ti.is_a?(Type)` (BorrowChecker#_collect_share_moves, #58)
+   - `inner_ti = Type.new(inner_ti) unless inner_ti.is_a?(Type)`
+     (CleanupClassifier, #54 -- the guard IS the coercion)
+
+   Deleting these guards introduces NoMethodError-on-nil at compile
+   time. They are NOT standalone deslop commits.
+
+### Why #45-#54, #57-#64 are deferred (not done)
+
+These reduce to a single root: the `.type_info` / `.full_type` /
+`.type` / `.return_type` / `:type` contracts are legitimately
+`T.nilable` (a node has no `type_info` before Pass 1 annotation). The
+guards are correct. The genuine complexity reduction is to **tighten
+the producer** so the contract is non-nilable at every post-annotation
+read site -- nil-kill's PropagationGap program. That is a multi-commit
+*typing program per contract* (make every producer assign a `Type`,
+prove no pre-annotation read, then the guards become provably dead and
+collapse mechanically), not 18 quick guard deletions. Forcing the
+deletions to "complete 20 items" would be metric-gaming that ships
+compiler bugs -- precisely the anti-pattern in
+`docs/retrospective`.
+
+Recommended next step for these: run them as the dedicated
+contract-tightening program (one contract at a time: `.type_info`
+first, 59 guards), each contract its own series of producer-side
+commits ending in the mechanical guard collapse, full gates between.
