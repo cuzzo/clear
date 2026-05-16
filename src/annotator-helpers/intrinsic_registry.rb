@@ -104,6 +104,29 @@ module IntrinsicRegistry
     end
   end
 
+  # Startup conversion (memoized, built once per registry on first
+  # access — the registries are frozen constants). The typed view of
+  # a whole registry: name -> FunctionSignature, or
+  # Array[FunctionSignature] for overload sets (e.g.
+  # STD_LIB["charAt"]). Consumers read THIS, never the raw Hash.
+  def sigs(reg)
+    (@sigs ||= {})[reg.object_id] ||=
+      reg.each_with_object({}) do |(name, entry), out|
+        out[name] =
+          if entry.is_a?(Array)
+            entry.map { |e| convert_entry(name, e, registries) }
+          elsif entry.is_a?(Hash)
+            convert_entry(name, entry, registries)
+          end
+      end
+  end
+
+  # Typed lookup into a registry: reg[name] as FunctionSignature
+  # (or Array[FS] for overloads, or nil if absent).
+  def sig(reg, name)
+    sigs(reg)[name]
+  end
+
   # Memoized registry map (built lazily from the std_lib constants so
   # there is no load-order coupling). Used by `fs` so call sites need
   # not thread the map.
