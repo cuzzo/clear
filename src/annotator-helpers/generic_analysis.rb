@@ -269,7 +269,7 @@ module GenericAnalysis
       arg = actual_args[i]
       next unless arg
       param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
-      actual_type = if arg.respond_to?(:type_info) && arg.type_info.is_a?(Type)
+      actual_type = if arg.respond_to?(:type_info) && arg.type_info
         arg.type_info
       else
         Type.new(arg.resolved_type || :Any)
@@ -294,7 +294,7 @@ module GenericAnalysis
       next unless arg
       param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
-      actual_type = if arg.respond_to?(:type_info) && arg.type_info.is_a?(Type)
+      actual_type = if arg.respond_to?(:type_info) && arg.type_info
         arg.type_info
       else
         Type.new(arg.resolved_type || :Any)
@@ -615,7 +615,7 @@ module GenericAnalysis
   def propagate_call_flags!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if has_heap_promoted_call?(node.value)
-      node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+      node.type_info&.provenance = :heap
     end
   end
 

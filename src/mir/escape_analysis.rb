@@ -670,10 +670,10 @@ module EscapeAnalysis
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          T.must(node.type_info).provenance = :heap if node.type_info.is_a?(Type)
+          node.type_info&.provenance = :heap
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             decl = e3_find_decl(fn.body, node.name)
-            decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
+            decl&.type_info&.provenance = :heap
           end
         when AST::Assignment
           val = node.value
@@ -681,7 +681,7 @@ module EscapeAnalysis
           next unless callee_name && heap_fns.include?(callee_name)
           sym = node.name.symbol
           decl = sym&.reg
-          decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
+          decl&.type_info&.provenance = :heap
         end
       end
     end

@@ -240,13 +240,13 @@ module FunctionAnalysis
     # String returns only get heap_promoted_call from callee.returns_promoted
     # (not from type alone) because stdlib string functions like readFile use
     # frameAlloc internally — the caller shouldn't try to free those.
-    if node.type_info.is_a?(Type)
+    if node.type_info
       callee_node = @fn_nodes[func_name]
       sig_return_heap = func_type.is_a?(FunctionSignature) && func_type.return_provenance == :heap
       if callee_node&.return_provenance == :heap || sig_return_heap
-        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+        node.type_info&.provenance = :heap
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
-        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+        node.type_info&.provenance = :heap
       else
         # Union return types with heap variants need heap_promoted_call
         # when the callee allocates at all (frame, heap, or alloc).
@@ -258,7 +258,7 @@ module FunctionAnalysis
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             if has_heap && callee_allocates
-              node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+              node.type_info&.provenance = :heap
             end
           end
         end
@@ -1022,7 +1022,7 @@ module FunctionAnalysis
           expected = spec[:type]
           next false unless is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.type_info.is_a?(Type) ? arg.type_info : nil
+          arg_type = arg.type_info
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true

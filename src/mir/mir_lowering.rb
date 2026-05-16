@@ -5406,7 +5406,7 @@ class MIRLowering
         # err_cleanup: struct owns its fields on success; only clean up on error.
         hoist_alloc(lower(v), v, err_cleanup: true)
       end
-      vt = v.type_info.is_a?(Type) ? v.type_info : nil
+      vt = v.type_info
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
                     !(v.respond_to?(:target_is_list_field) && v.target_is_list_field)
       # BORROWED fields: source may be ArrayList but field expects slice
@@ -6075,8 +6075,7 @@ class MIRLowering
         lower(node.value)
       elsif (rhs_unwrapped.is_a?(AST::CopyNode) || rhs_unwrapped.is_a?(AST::CloneNode)) &&
             rhs_unwrapped.value.respond_to?(:type_info) &&
-            rhs_unwrapped.value.type_info.is_a?(Type) &&
-            rhs_unwrapped.value.type_info.list_collection?
+            rhs_unwrapped.value.type_info&.list_collection?
         # `let dest: T[]@list = COPY src;` where src is also @list.
         # The default lower_copy path returns a slice (via :list_shallow +
         # ItemsAccess), which doesn't match the @list destination. Use
