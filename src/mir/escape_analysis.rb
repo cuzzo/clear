@@ -235,7 +235,7 @@ module EscapeAnalysis
                     end
       if callee_name && heap_fns.include?(callee_name)
         ti = node.type_info rescue nil
-        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+        ti.provenance = :heap if ti && !ti.heap_provenance?
       end
     end
 
@@ -541,8 +541,7 @@ module EscapeAnalysis
             next unless (local_decl.is_a?(AST::VarDecl) || (local_decl.is_a?(AST::BindExpr) && local_decl.mode == :decl)) && local_decl.name.to_s == rhs.name
             local_decl.storage = :heap
             decl_ti = local_decl.type_info rescue nil
-            decl_ti = Type.new(decl_ti) if decl_ti && !decl_ti.is_a?(Type)
-            decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+            decl_ti&.provenance = :heap
             if rhs.symbol
               rhs.symbol.storage = :heap
               sym_reg = rhs.symbol.reg
@@ -555,8 +554,7 @@ module EscapeAnalysis
             next unless (outer_decl.is_a?(AST::VarDecl) || (outer_decl.is_a?(AST::BindExpr) && outer_decl.mode == :decl)) && outer_decl.name.to_s == outer_name
             outer_decl.storage = :heap
             outer_ti = outer_decl.type_info rescue nil
-            outer_ti = Type.new(outer_ti) if outer_ti && !outer_ti.is_a?(Type)
-            outer_ti.provenance = :heap if outer_ti.is_a?(Type)
+            outer_ti&.provenance = :heap
             outer_decl.symbol.storage = :heap if outer_decl.symbol
           end
         end
@@ -903,13 +901,13 @@ module EscapeAnalysis
     when AST::FuncCall
       if carry_fns.include?(node.name.to_s)
         ti = node.type_info rescue nil
-        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+        ti.provenance = :heap if ti && !ti.heap_provenance?
       end
       node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }
     when AST::MethodCall
       if carry_fns.include?(node.name.to_s)
         ti = node.type_info rescue nil
-        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+        ti.provenance = :heap if ti && !ti.heap_provenance?
       end
       e3_mark_carry_expr!(node.object, carry_fns)
       node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }

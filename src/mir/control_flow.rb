@@ -1970,8 +1970,7 @@ class BorrowChecker
 
     if source.is_a?(AST::Identifier)
       ti = source.type_info rescue nil
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      return if ti.is_a?(Type) && ti.shared?
+      return if ti&.shared?
       names << source.name.to_s
       return
     end

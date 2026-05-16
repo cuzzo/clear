@@ -320,8 +320,6 @@ module CleanupClassifier
       target_node = stmt.name.target
 
       field_ti = stmt.name.type_info rescue nil
-      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-      field_ti = nil unless field_ti.is_a?(Type)
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
