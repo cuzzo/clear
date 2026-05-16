@@ -80,7 +80,8 @@ FAQ:
     * `FN foo(x: T@shared)` does not accept a `@distributed:actor`.
     * `FN foo(x: T@distributed)` does not accept a `@shared:actor` (it may not exist on the machine!)
 
-NOTE: `@actor` and `@buffered` are in scope for v0.3.  They are not currently available.  `@distributed` is in scope for v0.4.
+> [!NOTE]
+> `@actor` and `@buffered` are in scope for v0.3.  They are not currently available.  `@distributed` is in scope for v0.4.
 
 ### Analogy
 

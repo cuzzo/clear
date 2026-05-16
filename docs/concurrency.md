@@ -4,7 +4,8 @@ CLEAR uses cooperative fibers for concurrency.
 
 Fibers are lightweight threads managed by the CLEAR runtime — each has its own stack (4-256KB) and runs until it yields. No OS threads are created per fiber; the scheduler multiplexes fibers onto a thread pool.
 
-NOTE: CLEAR will support limited Finite State Machines in v0.2, and by v0.4 - full support for Finite State Machines is planned.
+> [!NOTE]
+> CLEAR will support limited Finite State Machines in v0.2, and by v0.4 - full support for Finite State Machines is planned.
 
 ## BG — Background Fibers
 
@@ -18,7 +19,8 @@ result = NEXT p;  # block until the fiber finishes
 
 The last expression in the body becomes the promise's value. `NEXT` consumes the promise and returns the value.
 
-NOTE: By v0.4 Finite State Machines will be the default, and you will opt-in to stack-based fibers for re-entrant tasks or tasks that use FFI.
+> [!NOTE]
+> By v0.4 Finite State Machines will be the default, and you will opt-in to stack-based fibers for re-entrant tasks or tasks that use FFI.
 
 ### Modifiers
 
@@ -236,7 +238,7 @@ CONCURRENT spawns N persistent worker fibers that pull items from a shared atomi
 ```
 results = items
   |> SELECT BG { risky_fn(_) OR RAISE };
--- this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
+# this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
 ```
 
 ```

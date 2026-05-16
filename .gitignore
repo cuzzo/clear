@@ -16,7 +16,6 @@
 !/ONE-PAGER.md
 !/README.md
 !/TODO.md
-!/WALKTHROUGH.md
 !/clear
 !/bin/
 !/benchmarks/
@@ -24,6 +23,7 @@
 !/examples/
 !/gems/
 !/manifesto/
+!/site/
 !/sorbet/
 !/spec/
 !/src/

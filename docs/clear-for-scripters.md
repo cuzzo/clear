@@ -1,4 +1,4 @@
-# WHY CLEAR
+# CLEAR for Scripters
 
 If you already know Logic (JavaScript/Python), the only thing stopping you from writing System-Level code is Memory.
 
@@ -21,7 +21,7 @@ In CLEAR, binding a name for the first time creates an **immutable** variable. R
 
 ```ruby
 name = "Bob";
-name = "Alice";             -- COMPILER ERROR! `name` is immutable.
+name = "Alice";             # COMPILER ERROR! `name` is immutable.
 ```
 
  * `x = value` = **READ** Only (immutable, no keyword needed).
@@ -31,7 +31,7 @@ name = "Alice";             -- COMPILER ERROR! `name` is immutable.
 
 ```ruby
 MUTABLE name = "Bob";
-name = "Alice";             -- OK
+name = "Alice";             # OK
 ```
 
 ### 2. Physics of SHAPE: TYPES
@@ -40,7 +40,7 @@ In CLEAR, variables have types to ensure safety and speed.
 
 ```ruby
 MUTABLE name = "Bob";
-name = 1;                   -- COMPILER ERROR: `name` is a String, cannot assign a Float64.
+name = 1;                   # COMPILER ERROR: `name` is a String, cannot assign a Float64.
 ```
 
 ### 3. Physics of Size: FIXED vs. DYNAMIC
@@ -89,8 +89,8 @@ The "Gotcha": If you try to `.push!` or `.pop!` to a fixed-size array, the compi
 
 ```ruby
 x = [1, 2, 3];
--- ... do something, now I need to add to `x`, what do I do?
-x.append!(4);                  -- COMPILER ERROR! `x` is immutable.
+# ... do something, now I need to add to `x`, what do I do?
+x.append!(4);                  # COMPILER ERROR! `x` is immutable.
 ```
 
 ### 5. Physics of Capability: Capabilities vs Types
@@ -169,7 +169,7 @@ Functions can ONLY see what is explicitly passed into them:
 ```ruby
 x = 10;
 FN add() ->
-  RETURN x + 5;                 -- COMPILER ERROR: I don't know what 'x' is.
+  RETURN x + 5;                 # COMPILER ERROR: I don't know what 'x' is.
 END
 ```
 
@@ -178,7 +178,7 @@ Use `USE` for upvalues:
 ```ruby
 x = 10;
 FN add(n) USE (x) ->
-  RETURN n + x;                 -- OK
+  RETURN n + x;                 # OK
 END
 ```
 
@@ -195,14 +195,14 @@ When a function starts, it opens a clean ARENA (A bank of memory). Any variable 
 In 99% of cases, when you pass a variable to a function, you are just letting that function **Borrow** it. If a function needs to store that object in a long-lived structure (like a Tree or Global List), it must explicitly **TAKE** responsibility for it.
 
 ```ruby
--- This function promises to adopt the 'child'
+# This function promises to adopt the 'child'
 FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
   parent.list.push!(GIVE child);
 END
 
 node = Node{val: 1};
-addChild!(root, GIVE node);   -- I surrender ownership.
-node.print();                 -- COMPILER ERROR: Variable 'node' is dead.
+addChild!(root, GIVE node);   # I surrender ownership.
+node.print();                 # COMPILER ERROR: Variable 'node' is dead.
 ```
 
 ### 10. Simplified Lifetimes: `WITH RESTRICT`

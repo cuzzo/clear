@@ -1,0 +1,103 @@
+:root {
+  --fg: #1a1a1a;
+  --muted: #666;
+  --bg: #fefefe;
+  /* Diamond blue (the logo's deep sky tone). Nothing is red. */
+  --accent: #0284C7;
+  /* CLEAR wordmark + headings: dark slate grey (the SVG title fill). */
+  --ink: #1E293B;
+  --code-bg: #f4f4f4;
+  --border: #e2e2e2;
+
+  /* Title: the system-UI stack from the supplied SVG. */
+  --title-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                Helvetica, Arial, sans-serif;
+  /* Body: a native serif pairs best with a system-sans title for
+     long-form reading. No web font needed. */
+  --body-font: Charter, "Bitstream Charter", "Iowan Old Style",
+               "Sitka Text", Cambria, Georgia, "Times New Roman", serif;
+  --mono-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+               Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  color: var(--fg);
+  background: var(--bg);
+  font: 17px/1.7 var(--body-font);
+}
+main { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 4rem; }
+.site-header {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 46rem; margin: 0 auto; padding: 1.25rem;
+}
+.site-header .brand {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-family: var(--title-font);
+  font-weight: 800; letter-spacing: .16em; text-decoration: none;
+  color: var(--ink);
+}
+.brand-logo { display: block; }
+.site-header nav a {
+  margin-left: 1rem; text-decoration: none; color: var(--muted);
+  font-family: var(--title-font);
+}
+.site-header nav a:hover { color: var(--accent); }
+h1, h2, h3 {
+  font-family: var(--title-font);
+  font-weight: 800; color: var(--ink);
+}
+h1 { font-size: 2rem; line-height: 1.2; margin: .5rem 0 1rem; letter-spacing: .01em; }
+h2 { margin-top: 2.25rem; }
+h3 { margin-top: 1.75rem; }
+a { color: var(--accent); }
+.post-list { list-style: none; padding: 0; }
+.post-list li {
+  display: flex; justify-content: space-between; gap: 1rem;
+  padding: .65rem 0; border-bottom: 1px solid var(--border);
+}
+.post-list time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meta { color: var(--muted); margin-top: -.5rem; }
+.source { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
+blockquote {
+  margin: 1.25rem 0; padding: .25rem 1rem; border-left: 3px solid var(--accent);
+  color: var(--muted);
+}
+code {
+  font-family: var(--mono-font);
+  background: var(--code-bg); padding: .15em .35em; border-radius: 3px;
+  font-size: .85em;
+}
+pre {
+  background: var(--code-bg); padding: 1rem; overflow-x: auto;
+  border-radius: 5px;
+}
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1.25rem 0; }
+th, td { border: 1px solid var(--border); padding: .5rem .75rem; text-align: left; }
+.site-footer {
+  max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem;
+  color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border);
+}
+img { max-width: 100%; }
+
+/* GitHub-style alerts (generated from `> [!NOTE]` etc.) */
+.gh-alert {
+  margin: 1.25rem 0; padding: .5rem 1rem;
+  border-left: .25rem solid var(--gh-c, #0969da);
+  border-radius: 4px; background: var(--bg);
+}
+.gh-alert > :first-child { margin-top: 0; }
+.gh-alert > :last-child { margin-bottom: 0; }
+.gh-alert-title {
+  display: flex; align-items: center; gap: .4rem;
+  font-weight: 700; color: var(--gh-c, #0969da);
+  font-family: var(--title-font); margin: .25rem 0 .5rem;
+}
+.gh-alert-icon { fill: currentColor; flex: 0 0 auto; }
+.gh-alert-note      { --gh-c: #0969da; }
+.gh-alert-tip       { --gh-c: #1a7f37; }
+.gh-alert-important { --gh-c: #8250df; }
+.gh-alert-warning   { --gh-c: #9a6700; }
+.gh-alert-caution   { --gh-c: #cf222e; }

@@ -48,7 +48,7 @@ DEFAULT
 END
 ```
 
-See the [Walkthrough](WALKTHROUGH.md) for more details.
+See the [Walkthrough](docs/WALKTHROUGH.md) for more details.
 
 ## WHY CLEAR?
 

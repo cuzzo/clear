@@ -1,0 +1,10 @@
+# Zola build output
+public/
+
+# Content generated from docs/ by tools/gen_site.rb. docs/ is the
+# source of truth; these are build artifacts. Section _index.md
+# files are authored here and kept.
+content/blog/*.md
+!content/blog/_index.md
+content/docs/*.md
+!content/docs/_index.md

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)" transform="translate(0, -20)">
+    <polygon points="160,70 240,70 220,120 180,120" fill="#F0F9FF"/>
+
+    <polygon points="160,70 180,120 120,120" fill="#BAE6FD"/>
+
+    <polygon points="240,70 280,120 220,120" fill="#E0F2FE"/>
+
+    <polygon points="120,120 180,120 200,210" fill="#0284C7"/>
+
+    <polygon points="180,120 220,120 200,210" fill="#38BDF8"/>
+
+    <polygon points="220,120 280,120 200,210" fill="#0EA5E9"/>
+  </g>
+</svg>

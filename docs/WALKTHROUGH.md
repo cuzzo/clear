@@ -164,7 +164,8 @@ MUTABLE logs: String[]@list:sharded(2) = [];
 # data skew if keys/items are not uniformly distributed.
 ```
 
-NOTE: shared-nothing architectures present problems if your workloads can be heavily skewed.
+> [!NOTE]
+> Shared-nothing architectures present problems if your workloads can be heavily skewed.
 
 ## 6. Function Signatures
 
@@ -467,7 +468,7 @@ Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignmen
 ```ruby clear
 x = "hello";
 y = x;                         # x is moved (strings are owned, non-Copy)
-# z = x;                      -- would be use-after-move error
+# z = x;                       # would be use-after-move error
 z = COPY y;                    # OK: explicit deep-copy
 
 # String concatenation
@@ -679,7 +680,8 @@ TIGHT FOR i IN (1..<1000) -> ...
 
 CLEAR will also warn you when you're using a `TIGHT` loop and you should not.  
 
-NOTE: misusing `TIGHT` loops can destroy your p99 latency.
+> [!NOTE]
+> Misusing `TIGHT` loops can destroy your p99 latency.
 
 ## 18. The Reality of Concurrency
 
@@ -702,7 +704,7 @@ See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages
 
 ## 19. Function Lifetimes
 
-Functions cannot returned borrowed data freely, but can with a lifetime.  This is simplified from Rust.
+Functions cannot return borrowed data freely, but can with a lifetime.  This is simplified from Rust.
 
 ```ruby clear illustrative
 STRUCT Node { left: ?Node, right: ?Node }
@@ -738,9 +740,9 @@ WITH RESTRICT node AS n {
 
 It's sometimes useful to define a STRUCT with a borrowed field (iterators are a prime example):
 
-```
+```ruby clear
 STRUCT SliceIter {
-    source: BORROWED Int64[], -- Allows `source` to be a BORROW, must be initialized in a scope.
+    source: BORROWED Int64[], # Allows `source` to be a BORROW, must be initialized in a scope.
     pos: Int64,
     len: Int64
 }
@@ -750,13 +752,13 @@ FN hasNext(iter: SliceIter) RETURNS Bool ->
 END
 
 FN iterExample() RETURNS Void ->
-  WITH BORROWED data AS ref { -- create a borrowed version
+  WITH BORROWED data AS ref { # create a borrowed version
     MUTABLE iter = SliceIter{ source: ref, pos: 0, len: n };
     WHILE hasNext(iter) DO
       total += currentVal(iter);
       iter = advance(iter);
     END
-    RETURN iter;       -- COMPILER ERROR: You can't return `iter`.  It's BORROWED.  You don't own it.
+    RETURN iter;       # COMPILER ERROR: You can't return `iter`.  It's BORROWED.  You don't own it.
   }
 END
 ```
@@ -782,10 +784,10 @@ END
 
 | Sigil | Meaning | Example |
 |---|---|---|
-| `@` | Capability / pipeline binding | `value @shared`, `|> process AS @p` |
+| `@` | Capability / pipeline binding | `value @shared`, `\|> process AS @p` |
 | `!` | Mutation suffix | `FN increment!(...)` |
-| `|>` | Smooth operator (pipeline) | `items |> WHERE _ > 5` |
-| `_` | Pipeline element placeholder | `|> SELECT _.name` |
+| `\|>` | Smooth operator (pipeline) | `items \|> WHERE _ > 5` |
+| `_` | Pipeline element placeholder | `\|> SELECT _.name` |
 | `!T` | Error union type | `RETURNS !Float64` |
 | `?T` | Optional type | `RETURNS ?User` |
 | `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |
@@ -798,33 +800,33 @@ CLEAR uses fixed-width integers (Int64, Int32, etc.) that can overflow. Three ti
 
 Panics on overflow in **debug** builds, wraps silently in **release** builds. This matches Rust's semantics - catches accidental overflow during development, zero overhead in production.
 
-```
+```ruby clear
 a: Int64 = 9223372036854775807_i64;
-b = a + 1_i64;  -- debug: PANIC!  release: wraps to -9223372036854775808
+b = a + 1_i64;  # debug: PANIC!  release: wraps to -9223372036854775808
 ```
 
 ### Wrapping: `%+`, `%-`, `%*`
 
 Always wraps on overflow in **all** build modes. Use for hash functions, random number generators, checksums, and any code that intentionally overflows.
 
-```
--- LCG random number generator (intentional overflow)
+```ruby clear
+# LCG random number generator (intentional overflow)
 MUTABLE state: Int64 = seed;
 state = state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
 
--- Max + 1 wraps to min
+# Max + 1 wraps to min
 max: Int64 = 9223372036854775807_i64;
-min = max %+ 1_i64;  -- always -9223372036854775808, never panics
+min = max %+ 1_i64;  # always -9223372036854775808, never panics
 ```
 
 ### Checked: `!+`, `!-`, `!*`
 
 Always panics on overflow in **all** build modes, including release. Use for financial calculations, safety-critical code, and anywhere overflow indicates a logic error.
 
-```
--- Financial calculation: overflow means a bug, even in production
-balance = balance !+ deposit;  -- panics if result exceeds Int64 range
-total = quantity !* price;     -- panics on overflow, even in release
+```ruby clear
+# Financial calculation: overflow means a bug, even in production
+balance = balance !+ deposit;  # panics if result exceeds Int64 range
+total = quantity !* price;     # panics on overflow, even in release
 ```
 
 ### Summary

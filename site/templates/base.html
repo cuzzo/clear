@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ config.title }}{% endblock title %}</title>
+  <meta name="description" content="{{ config.description }}">
+  <link rel="stylesheet" href="{{ get_url(path='style.css') | safe }}">
+  {% if config.generate_feeds %}
+  <link rel="alternate" type="application/atom+xml" title="{{ config.title }}" href="{{ get_url(path='atom.xml') | safe }}">
+  {% endif %}
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{{ get_url(path='@/_index.md') | safe }}">
+      <img class="brand-logo" src="{{ get_url(path='clear.svg') | safe }}" alt="" width="32" height="24">
+      <span>CLEAR</span>
+    </a>
+    <nav>
+      <a href="{{ get_url(path='@/blog/_index.md') | safe }}">Posts</a>
+      <a href="{{ get_url(path='@/docs/_index.md') | safe }}">Docs</a>
+      <a href="{{ config.extra.repo }}">GitHub</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock content %}</main>
+  <footer class="site-footer">
+    <p>Built from <code>docs/retrospective</code> with
+      <a href="https://www.getzola.org">Zola</a>.</p>
+  </footer>
+</body>
+</html>

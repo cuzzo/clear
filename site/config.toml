@@ -1,0 +1,21 @@
+# GitHub Pages project site: https://cuzzo.github.io/clear
+base_url = "https://cuzzo.github.io/clear"
+title = "CLEAR — Retrospective"
+description = "Field notes from building a memory-safe language with LLMs."
+
+compile_sass = false
+build_search_index = false
+generate_feeds = true
+feed_filenames = ["atom.xml"]
+default_language = "en"
+
+# Generated posts (tools/gen_blog.rb) are git-ignored, so a clean
+# checkout has no blog content until the generator runs. Don't fail
+# the build on that.
+[markdown]
+highlight_code = true
+highlight_theme = "boron"
+render_emoji = false
+
+[extra]
+repo = "https://github.com/cuzzo/clear"
