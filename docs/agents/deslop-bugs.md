@@ -72,3 +72,35 @@ Recommended next step for these: run them as the dedicated
 contract-tightening program (one contract at a time: `.type_info`
 first, 59 guards), each contract its own series of producer-side
 commits ending in the mechanical guard collapse, full gates between.
+
+## Source-fix attempt: producers passing bare Symbols to full_type=
+
+The correct strategy (per the user) is to fix the *source*: 120
+sites across 5 files do `node.full_type = :Sym`, which `full_type=`
+(ast.rb:309) silently launders via `Type.new(val)`. Passing `Type`
+at the producer is runtime-identical *iff* the receiver's
+`full_type=` is the laundering `AST::Locatable` setter.
+
+- **SAFE / landed**: `src/backends/pipeline_rewriter.rb` (62 sites).
+  Receivers are uniformly freshly-built `AST::Locatable` nodes ->
+  `.full_type = :Sym` -> `.full_type = Type.new(:Sym)` is provably
+  identical. All gates green. Commit f29524a10.
+- **UNSAFE / reverted**: `annotator.rb` (35), `pipe_analysis.rb`
+  (14), `test_annotation.rb` (8), `function_analysis.rb` (1). A
+  blanket `:Sym -> Type.new(:Sym)` here regressed 1799 specs +
+  collapsed transpile-tests. Root cause: `.full_type` in these files
+  has **heterogeneous receivers** and many readers compare the value
+  with `== :Sym` / `case ... when :Sym`. (Note `full_type=` already
+  normalized symbols, so symbol-equality readers were *already*
+  reading a `Type` for Locatable nodes -- meaning the breaking sites
+  are receivers whose `full_type`/`full_type=` is NOT the laundering
+  setter: a plain accessor / Struct / Hash-shape that genuinely
+  stores and reads the raw Symbol.)
+
+Conclusion: the source fix is correct in principle but cannot be a
+blanket caller rewrite. It requires per-receiver typing: identify
+which `full_type` carriers are `AST::Locatable` (laundering setter,
+safe to convert) vs other carriers (raw-Symbol contract, must
+instead be typed at *their* definition or left). That per-receiver
+discrimination is the actual program -- the mechanical transform is
+not a substitute for it.
