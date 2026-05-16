@@ -16,11 +16,13 @@ require "sorbet-runtime"
 class IntrinsicEmit < T::Struct
   extend T::Sig
 
-  # --- Zig codegen templates ---
-  prop :zig,               T.nilable(String),                default: nil
-  prop :numeric_zig,       T.nilable(String),                default: nil
-  prop :sharded_zig,       T.nilable(String),                default: nil
-  prop :shard_direct_zig,  T.nilable(String),                default: nil
+  # --- Zig codegen templates (String template, or Symbol macro
+  #     directive like :macro_map in STD_LIB) ---
+  StrOrSym = T.type_alias { T.any(String, Symbol) }
+  prop :zig,               T.nilable(StrOrSym),              default: nil
+  prop :numeric_zig,       T.nilable(StrOrSym),              default: nil
+  prop :sharded_zig,       T.nilable(StrOrSym),              default: nil
+  prop :shard_direct_zig,  T.nilable(StrOrSym),              default: nil
 
   # --- FSM emission fragments ---
   prop :fsm_setup,           T.nilable(T::Array[String]),    default: nil
@@ -37,6 +39,7 @@ class IntrinsicEmit < T::Struct
   prop :mutates_receiver,    T::Boolean,                     default: false
   prop :allocates,           T::Boolean,                     default: false
   prop :takes_value,         T::Boolean,                     default: false
+  prop :container_borrow,    T::Boolean,                     default: false
 
   # --- Symbol-valued dispatch / allocation ---
   prop :tag,             T.nilable(Symbol),                  default: nil
@@ -49,6 +52,7 @@ class IntrinsicEmit < T::Struct
   prop :sharded_alloc,   T.nilable(Symbol),                  default: nil
   prop :borrows,         T.nilable(Symbol),                  default: nil
   prop :reject_when,     T.nilable(Symbol),                  default: nil
+  prop :bc_op,           T.nilable(Symbol),                  default: nil
   prop :registry,        T.nilable(Symbol),                  default: nil
 
   # --- Strings ---
