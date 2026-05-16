@@ -6,6 +6,7 @@
 # computed metadata (needs_rt, can_fail, return_provenance) that callers
 # need for code generation and cleanup planning.
 require "sorbet-runtime"
+require_relative "intrinsic_emit"
 
 class FunctionSignature
     extend T::Sig
@@ -23,6 +24,14 @@ class FunctionSignature
 
   # Intrinsic marker
   attr_accessor :intrinsic, :zig_pattern
+
+  # Intrinsic signature semantics (set by the registry converter; nil
+  # for ordinary user functions). `return_resolver` is the polymorphic
+  # return Proc (receiver-type -> Type); `arg_validator` the custom
+  # arg type-checker; `arg_spec` the raw args shape; `emit` the typed
+  # codegen/dispatch metadata (IntrinsicEmit). Keeps `return_type` a
+  # pure Type even for receiver-dependent intrinsics.
+  attr_accessor :return_resolver, :arg_validator, :arg_spec, :arity, :emit
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
@@ -89,6 +98,11 @@ class FunctionSignature
     @return_strategy   = T.let(nil, T.untyped)
     @stack_tier        = T.let(nil, T.untyped)
     @requires          = T.let(nil, T.untyped)
+    @return_resolver   = T.let(nil, T.nilable(Proc))
+    @arg_validator     = T.let(nil, T.nilable(Proc))
+    @arg_spec          = T.let(nil, T.untyped)
+    @arity             = T.let(nil, T.nilable(Integer))
+    @emit              = T.let(nil, T.nilable(IntrinsicEmit))
   end
 
   sig { returns(FunctionSignature) }
@@ -108,6 +122,11 @@ class FunctionSignature
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier
       s.requires = @requires
+      s.return_resolver = @return_resolver
+      s.arg_validator = @arg_validator
+      s.arg_spec = @arg_spec
+      s.arity = @arity
+      s.emit = @emit
     end
   end
 end
