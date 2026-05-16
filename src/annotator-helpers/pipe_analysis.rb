@@ -300,11 +300,11 @@ module PipeAnalysis
     when AST::IndexOp
       # INDEX returns HashMap<KeyType, ElementType[]>
       key_type = node.right.expression.resolved_type
-      node.full_type = :"HashMap<#{item_type}[]>"
+      node.full_type = Type.new(:"HashMap<#{item_type}[]>")
       node.right.full_type = key_type
     when AST::OrderByOp
       # ORDER_BY returns the same list type, sorted
-      node.full_type = :"#{item_type}[]"
+      node.full_type = Type.new(:"#{item_type}[]")
       node.right.full_type = node.right.expression.resolved_type
     end
 
@@ -365,7 +365,7 @@ module PipeAnalysis
 
     # Result is a list of whatever the expression produces
     expr_type = node.right.expression.full_type || node.right.expression.resolved_type
-    node.full_type = :"#{expr_type}[]"
+    node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -442,7 +442,7 @@ module PipeAnalysis
     end
 
     expr_type = bw.expression.full_type || bw.expression.resolved_type
-    node.full_type = :"#{expr_type}[]"
+    node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -500,7 +500,7 @@ module PipeAnalysis
       }))
     end
 
-    node.full_type = :"#{join_type_name}[]"
+    node.full_type = Type.new(:"#{join_type_name}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -608,7 +608,7 @@ module PipeAnalysis
     end
 
     # Result type is a materialized list of the element type
-    node.full_type = :"#{item_type}[]"
+    node.full_type = Type.new(:"#{item_type}[]")
     node.storage = :frame
   end
 
@@ -642,7 +642,7 @@ module PipeAnalysis
 
     # Result type is the element type of the nested array
     nested_element_type = T.must(expr_type.element_type).resolved
-    node.full_type = :"#{nested_element_type}[]"
+    node.full_type = Type.new(:"#{nested_element_type}[]")
     node.right.full_type = node.right.expression.full_type
     node.storage = :frame
 
@@ -908,7 +908,7 @@ module PipeAnalysis
       error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "FIND", got: node.right.expression.resolved_type)
     end
 
-    node.full_type = :"?#{item_type}"
+    node.full_type = Type.new(:"?#{item_type}")
     node.storage   = :stack
     mark_observable_terminal!(node, terminal: :find, raw: :"~?#{item_type}")
   end
@@ -1620,12 +1620,12 @@ module PipeAnalysis
       error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
-    node.full_type = case node.right.op
+    node.full_type = Type.new(case node.right.op
     when AST::SelectOp
       :"#{node.right.op.expression.full_type}[]"
     when AST::WhereOp
       :"#{item_type}[]"
-    end
+    end)
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -1683,10 +1683,10 @@ module PipeAnalysis
       error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
-    node.full_type = case node.right.op
+    node.full_type = Type.new(case node.right.op
     when AST::SelectOp then :"#{node.right.op.expression.full_type}[]"
     when AST::WhereOp  then :"#{item_type}[]"
-    end
+    end)
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
