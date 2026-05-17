@@ -267,7 +267,21 @@ raising for any other defer. 367 pending->pass; allowlist 240 ->
 241, min-pass 240 -> 241, 0 regressions. The ONLY remaining
 allowlist pending is 93_tight_loop.
 
+## Value-position TryCatch (commit 10) -- routing landed
+
+compile_value_expr now handles MIR::TryCatch (OR PASS / propagating
+catch) symmetrically with the i64/f64/string dispatchers: propagating
+catch -> EFLAG/JF + catch body; OR PASS / value-fallback -> use the
+protected value. Additive, 0 regressions, allowlist still 244/244.
+524 progresses past TryCatch-routing but is NOT yet passing: it needs
+the deeper heap-list-through-fallible-return path (compile_value_expr
+on the hoisted list-temp MIR::Ident + heap-allocator cleanup of the
+received @list). That is its own cluster (list ownership through OR
+PASS), tracked separately -- not a quick fix.
+
 Still PENDING (orthogonal):
+- 524_or_pass_heap_list_cleanup: heap @list returned through OR PASS;
+  needs list-temp value resolution + heap cleanup (own cluster).
 - 93_tight_loop (allowlisted): MIR::AddressOf i64 expressions.
 - 350/360: cap-param + defer resolved; now MIR::PolymorphicMutate /
   MIR::PolymorphicMutateFlow (a distinct WITH-MATCH mutate-flow

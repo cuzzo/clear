@@ -3824,6 +3824,22 @@ class RegisterBcEmitter
       r = compile_value_expr(expr.expr)
       emit(EGUARD)
       r
+    when MIR::TryCatch
+      if propagating_catch?(expr.catch_body)
+        r = compile_value_expr(expr.expr)
+        e = fresh_ireg
+        emit(EFLAG, e)
+        emit(JF, e, 0)
+        done = @ops.length - 1
+        semantic_body(expr.catch_body.body || []).each { |s| compile_stmt(s) }
+        @ops[done] = @ops.length
+        r
+      else
+        # OR PASS / value fallback: use the protected value. (OR PASS
+        # on a raised error yields undefined in Zig; the supported
+        # bc cases don't dynamically raise at this site.)
+        compile_value_expr(expr.expr)
+      end
     when MIR::Call
       compile_value_call(expr)
     when MIR::Orelse
