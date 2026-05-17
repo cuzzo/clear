@@ -25,7 +25,7 @@ module FsmTransform
     # (e.g. "__rt_bg0").
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
-    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(T.untyped) }
+    sig { params(seg: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
     def resolve(seg, ctx, lowering, susp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       case seg.tail
@@ -52,7 +52,7 @@ module FsmTransform
     #   ctx_field_decls: rendered fsm_state_decls
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
-    sig { params(io_tail: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(io_tail: T.untyped, ctx: T.untyped, lowering: T.untyped).returns(MIR::SuspendDescriptor) }
     def resolve_io(io_tail, ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
@@ -131,7 +131,7 @@ module FsmTransform
     # The dispatch arm already registered/yielded or observed count==0,
     # so finishFsmNext consumes the settled result and destroys Inner
     # without blocking the scheduler thread.
-    sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(T.untyped) }
+    sig { params(next_tail: T.untyped, ctx: T.untyped, lowering: T.untyped, susp_idx: T.untyped).returns(MIR::SuspendDescriptor) }
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
       T.bind(self, T.untyped) rescue nil
       id = ctx[:id]

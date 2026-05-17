@@ -84,7 +84,7 @@ module FsmTransform
         @current_alias_overrides = prev
       end
 
-      sig { params(idx: Integer).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+      sig { params(idx: Integer).returns(T.nilable(T::Hash[String, String])) }
       def stamp_overrides(idx)
         T.bind(self, T.untyped) rescue nil
         return if @current_alias_overrides.nil? || @current_alias_overrides.empty?
@@ -94,7 +94,7 @@ module FsmTransform
       # Synthetic ctx field decls produced by control-flow-form
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
-      sig { params(decl: String).returns(T.nilable(T::Array[T.untyped])) }
+      sig { params(decl: String).returns(T.nilable(T::Array[String])) }
       def add_synthetic_field(decl)
         T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)
@@ -129,7 +129,7 @@ module FsmTransform
         idx
       end
 
-      sig { returns(T::Array[T.untyped]) }
+      sig { returns(T::Array[FsmTransform::Segments::Segment]) }
       def finalize
         T.bind(self, T.untyped) rescue nil
         unfilled = @segments.each_with_index.select { |s, _| s == :placeholder }
@@ -149,7 +149,7 @@ module FsmTransform
     # `lowering` is used inside emit_*_fragment for cond-rendering
     # (loop / if conditions are lowered to Zig text at split time
     # since they appear in CondBranch tails as raw Zig).
-    sig { params(body: T.untyped, lowering: T.untyped, ctx: BasicObject).returns(T.untyped) }
+    sig { params(body: T.untyped, lowering: T.untyped, ctx: BasicObject).returns(T.nilable(T::Array[T.untyped])) }
     def split(body, lowering, ctx: nil)
       T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
@@ -243,7 +243,7 @@ module FsmTransform
 
     # Suspend with pre-stmts in the same segment. The pre's locals
     # live in the same Zig fn as the descriptor's setup_stmts.
-    sig { params(susp_tail: T.untyped, pre: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(T.untyped) }
+    sig { params(susp_tail: T.untyped, pre: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(Integer) }
     def emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
@@ -268,7 +268,7 @@ module FsmTransform
     # Does this stmt introduce a segment split? True for top-level
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
-    sig { params(stmt: T.anything).returns(T.untyped) }
+    sig { params(stmt: T.anything).returns(T::Boolean) }
     def stmt_introduces_split?(stmt)
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
@@ -396,7 +396,7 @@ module FsmTransform
     end
 
     # Dispatch to the appropriate fragment emitter.
-    sig { params(stmt: T.untyped, after_idx: T.untyped, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(stmt: T.untyped, after_idx: T.untyped, builder: T.untyped, lowering: T.untyped).returns(Integer) }
     def emit_pivot(stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
@@ -421,7 +421,7 @@ module FsmTransform
     # Suspend fragment: a single segment whose tail is the suspend.
     # The tail's next_index is set to after_idx so the resume
     # transitions to wherever this fragment exits.
-    sig { params(susp_tail: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(T.untyped) }
+    sig { params(susp_tail: T.untyped, after_idx: BasicObject, builder: T.untyped).returns(Integer) }
     def emit_suspend(susp_tail, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
@@ -447,7 +447,7 @@ module FsmTransform
     #
     #   cond_seg: [], CondBranch(cond_zig, body_entry, after_idx)
     #   body_segs (recursive): exit to cond_seg's index
-    sig { params(while_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(while_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
     def emit_while_fragment(while_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       cond_idx = builder.reserve_index
@@ -475,7 +475,7 @@ module FsmTransform
     #   cond_seg: [], CondBranch(ctx.__for_X < end, body_entry, after_idx)
     #   body_segs: exit to incr_seg
     #   incr_seg: [ctx.__for_X += 1; ctx.var = ctx.__for_X], Goto(cond)
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
     def emit_for_range_fragment(for_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       var_name = for_stmt.var_name
@@ -521,7 +521,7 @@ module FsmTransform
     # fsm_foreach_descriptor (defined on Type) so adding a new
     # collection = one new branch on Type#fsm_foreach_descriptor.
     # The splitter never inspects the type directly.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
     def emit_for_each_fragment(for_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       coll_ast = for_stmt.collection
@@ -564,7 +564,7 @@ module FsmTransform
       end
     end
 
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.untyped, var_name: T.untyped, ctx_var: T.untyped, elem_zig: T.untyped, counter: T.untyped, desc: T.untyped, ct: T.untyped).returns(T.untyped) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, desc: T.untyped, ct: T.untyped).returns(Integer) }
     def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
@@ -612,7 +612,7 @@ module FsmTransform
 
     # Indexed slice: list / array. ctx.__feidx walks 0..len; body_init
     # assigns ctx.var from the slice; incr bumps the idx.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.untyped, var_name: T.untyped, ctx_var: T.untyped, elem_zig: T.untyped, counter: T.untyped, slice_suffix: T.untyped).returns(T.untyped) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer, slice_suffix: T.untyped).returns(Integer) }
     def emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
                               coll_zig, var_name, ctx_var, elem_zig,
                               counter, slice_suffix)
@@ -645,7 +645,7 @@ module FsmTransform
     # Pool indexed: like :indexed_slice but body_init has a skip-dead
     # branch that Gotos straight to incr when the slot's `alive` flag
     # is false.
-    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.untyped, var_name: T.untyped, ctx_var: T.untyped, elem_zig: T.untyped, counter: T.untyped).returns(T.untyped) }
+    sig { params(for_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped, coll_zig: T.nilable(String), var_name: T.untyped, ctx_var: String, elem_zig: T.untyped, counter: Integer).returns(Integer) }
     def emit_for_each_pool(for_stmt, after_idx, builder, lowering,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
       T.bind(self, T.untyped) rescue nil
@@ -683,7 +683,7 @@ module FsmTransform
 
     # IF fragment: pre + CondBranch to then-entry / else-entry. Both
     # branches Goto to after_idx (the convergence point).
-    sig { params(if_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(if_stmt: T.untyped, after_idx: BasicObject, builder: T.untyped, lowering: T.untyped).returns(Integer) }
     def emit_if_fragment(if_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       then_branch = if_stmt.then_branch.is_a?(Array) ?

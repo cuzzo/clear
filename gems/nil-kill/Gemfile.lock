@@ -1,0 +1,90 @@
+PATH
+  remote: .
+  specs:
+    nil-kill (0.1.0)
+      parlour
+      prism (>= 1.6)
+      rbs-trace
+      sorbet-runtime
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    ast (2.4.3)
+    base64 (0.3.0)
+    commander (5.0.0)
+      highline (~> 3.0.0)
+    diff-lcs (1.6.2)
+    docile (1.4.1)
+    highline (3.0.1)
+    logger (1.7.0)
+    ostruct (0.6.3)
+    parallel_rspec (3.0.1)
+      rake (> 10.0)
+      rspec
+    parlour (9.1.2)
+      commander (~> 5.0)
+      parser
+      rainbow (~> 3.0)
+      sorbet-runtime (>= 0.5)
+    parser (3.3.11.1)
+      ast (~> 2.4.1)
+      racc
+    prism (1.9.0)
+    racc (1.8.1)
+    rainbow (3.1.1)
+    rake (13.4.2)
+    rbs (4.0.2)
+      logger
+      prism (>= 1.6.0)
+      tsort
+    rbs-trace (0.7.0)
+      prism (>= 0.3.0)
+      rbs (>= 3.5.0)
+    rexml (3.4.4)
+    rspec (3.13.2)
+      rspec-core (~> 3.13.0)
+      rspec-expectations (~> 3.13.0)
+      rspec-mocks (~> 3.13.0)
+    rspec-core (3.13.6)
+      rspec-support (~> 3.13.0)
+    rspec-expectations (3.13.5)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.13.0)
+    rspec-mocks (3.13.8)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.13.0)
+    rspec-support (3.13.7)
+    ruby-prof (2.0.4)
+      base64
+      ostruct
+    simplecov (0.22.0)
+      docile (~> 1.1)
+      simplecov-html (~> 0.11)
+      simplecov_json_formatter (~> 0.1)
+    simplecov-cobertura (3.1.0)
+      rexml
+      simplecov (~> 0.19)
+    simplecov-html (0.13.2)
+    simplecov_json_formatter (0.1.4)
+    sorbet-runtime (0.6.13210)
+    stackprof (0.2.28)
+    tsort (0.2.0)
+    vernier (1.10.1)
+
+PLATFORMS
+  ruby
+  x86_64-linux-gnu
+
+DEPENDENCIES
+  nil-kill!
+  parallel_rspec
+  rspec
+  ruby-prof
+  simplecov
+  simplecov-cobertura
+  stackprof
+  vernier
+
+BUNDLED WITH
+   2.7.2

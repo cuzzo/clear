@@ -35,7 +35,7 @@ You can solve many problems by having LLMs generate scripts to produce and sift 
 * I’m planning to release a tool that allows LLMs to loop until they fully type a Ruby codebase.
   - They did this for a ~40k line transpiler in a day after tooling was built.
   - The tooling took another 1-2 days to develop.
-  - You can see it in [nil-kill](https://github.com/cuzzo/clear/blob/master/tools/nil-kill.rb); I’ll release this as a standalone Gem shortly.
+  - You can see it in [nil-kill](https://github.com/cuzzo/clear/blob/master/tools/nil-kill); I’ll release this as a standalone Gem shortly.
 * I could never find the signal in that data without spending significant time on tooling.
   - Without LLMs, I wouldn’t have spent the time to build that tooling by hand.
 * LLMs will miss things, but they can find a shocking amount of signal in data that is easy to generate but impossible for me to derive value from manually.

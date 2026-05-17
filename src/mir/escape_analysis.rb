@@ -599,7 +599,7 @@ module EscapeAnalysis
   end
 
   # Find the first Identifier matching var_name across all return node values.
-  sig { params(return_nodes: T::Array[T.untyped], var_name: String).returns(T.untyped) }
+  sig { params(return_nodes: T::Array[T.untyped], var_name: String).returns(T.nilable(AST::Identifier)) }
   private_class_method def self.e2_find_return_ident(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value
@@ -702,7 +702,7 @@ module EscapeAnalysis
   # value. Params with declared sync (legacy) are not overwritten.
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
-  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T.untyped) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).void }
   def self.propagate_caller_sync!(fn_nodes)
     return if fn_nodes.empty?
 
@@ -765,7 +765,7 @@ module EscapeAnalysis
 
   # Walk every Locatable descendant (incl. expression sub-trees), record
   # FuncCalls.
-  sig { params(body: T::Array[T.untyped], callsites: T::Hash[String, T::Array[T.untyped]]).returns(T.untyped) }
+  sig { params(body: T::Array[T.untyped], callsites: T::Hash[String, T::Array[T.untyped]]).returns(NilClass) }
   private_class_method def self.collect_callsites_deep(body, callsites)
     stack = body.is_a?(Array) ? body.dup : [body]
     until stack.empty?

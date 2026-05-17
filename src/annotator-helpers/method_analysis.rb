@@ -54,7 +54,7 @@ module MethodAnalysis
 
   private
 
-  sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T.untyped], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
+  sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
     defn = registry[node.name]

@@ -204,7 +204,7 @@ module AST
     def line; token.line; end
     sig { returns(Integer) }
     def column; token.column; end
-    sig { returns(T.untyped) }
+    sig { void }
     def token_value; token.value; end
 
     sig { returns(T.nilable(Type)) }
@@ -222,7 +222,7 @@ module AST
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val); @matched_stdlib_def = T.let(val, T.untyped); end
 
-    sig { returns(T.untyped) }
+    sig { void }
     def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def stdlib_allocates=(val); @stdlib_allocates = T.let(val, T.untyped); end
@@ -257,9 +257,9 @@ module AST
     sig { params(val: T.untyped).returns(T.untyped) }
     def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
 
-    sig { returns(T.untyped) }
+    sig { void }
     def collection_return; @collection_return = T.let(@collection_return, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.untyped).void }
     def collection_return=(val); @collection_return = T.let(val, T.untyped); end
 
     sig { returns(T.nilable(Integer)) }
@@ -279,12 +279,12 @@ module AST
 
     sig { returns(T.untyped) }
     def error_kind; @error_kind = T.let(@error_kind, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.untyped).void }
     def error_kind=(val); @error_kind = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
     def error_type; @error_type = T.let(@error_type, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.untyped).void }
     def error_type=(val); @error_type = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
@@ -844,13 +844,13 @@ module AST
     attr_accessor :is_assignment_lhs
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
-    sig { returns(T.untyped) }
+    sig { returns(String) }
     def name; target.name end
   end
   GetIndex     = Struct.new(:token, :target, :index) do
     extend T::Sig
     include Locatable
-    sig { returns(T.untyped) }
+    sig { returns(String) }
     def name; target.name end
   end
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
@@ -972,7 +972,7 @@ module AST
   OptionalUnwrap = Struct.new(:token, :target) do
     extend T::Sig
     include Locatable
-    sig { returns(T.untyped) }
+    sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
   end
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)

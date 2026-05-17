@@ -636,7 +636,7 @@ module CapabilityHelper
   # @param node [AST::WithBlock] the WITH block (for error reporting)
   # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
   # @param expanded [Array] accumulator for resolved capabilities
-  sig { params(node: AST::WithBlock, cap: T::Hash[Symbol, T.untyped], expanded: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, cap: T::Hash[Symbol, T.untyped], expanded: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.untyped) }
   def acquire_capability!(node, cap, expanded)
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
@@ -1026,7 +1026,7 @@ module CapabilityHelper
   private
 
   # One recursive walk that checks each outer-scope identifier for ALL properties.
-  sig { params(nodes: T::Array[T.untyped], locally_bound: T::Set[String], result: CapabilityHelper::CaptureAnalysis, is_parallel: T.nilable(T::Boolean)).returns(T::Array[T.untyped]) }
+  sig { params(nodes: T::Array[T.untyped], locally_bound: T::Set[String], result: CapabilityHelper::CaptureAnalysis, is_parallel: T.nilable(T::Boolean)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def _unified_capture_walk(nodes, locally_bound, result, is_parallel)
     T.bind(self, SemanticAnnotator) rescue nil
     @capability_audit = T.let(@capability_audit, T.untyped)
@@ -1314,7 +1314,7 @@ end
 module CapabilityAudit
     extend T::Sig
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
   def capability_audit_init!
     T.bind(self, SemanticAnnotator) rescue nil
     @capability_audit = T.let({}, T.untyped)
@@ -1360,12 +1360,12 @@ module CapabilityAudit
 
   # No longer needed — audit marking is handled by _unified_capture_walk.
   # Kept as a no-op for call-site compatibility.
-  sig { params(body_exprs: T.untyped, is_parallel: T.untyped).returns(T.untyped) }
+  sig { params(body_exprs: T.untyped, is_parallel: T.untyped).void }
   def audit_mark_bg_captures(body_exprs, is_parallel)
     T.bind(self, SemanticAnnotator) rescue nil
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
   def finalize_capability_audit!
     T.bind(self, SemanticAnnotator) rescue nil
     @capability_audit = T.let(@capability_audit, T.untyped)

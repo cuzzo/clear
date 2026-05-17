@@ -12,7 +12,7 @@ class FunctionContext
                 :loop_depth, :conditional_depth, :returns,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
 
-  sig { params(name: String, return_type: T.untyped, lifetime: T.nilable(T::Array[T.untyped]), type_params: T::Array[Symbol]).void }
+  sig { params(name: String, return_type: T.untyped, lifetime: T.nilable(T::Array[String]), type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type:, lifetime: nil, type_params: [])
     @name = name
     @return_type = return_type

@@ -84,7 +84,7 @@ module FsmWrapperEmitter
     parts.join("\n")
   end
 
-  sig { params(s: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(s: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_b1_ctx_struct(s, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     parts = []
@@ -104,7 +104,7 @@ module FsmWrapperEmitter
     parts.join("\n")
   end
 
-  sig { params(step: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_run_body(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = (step.body_stmts || []).filter_map do |stmt|
@@ -177,7 +177,7 @@ module FsmWrapperEmitter
 
   # ----- struct decl with member fns ----------------------------------------
 
-  sig { params(s: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(s: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_ctx_struct(s, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     parts = []
@@ -210,7 +210,7 @@ module FsmWrapperEmitter
   # come back empty / nil so verification-only nodes (AllocMark,
   # ReturnMark, ...) don't leave blank lines in the output.
 
-  sig { params(step: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(step: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_step(step, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = (step.body_stmts || []).filter_map do |stmt|
@@ -264,7 +264,7 @@ module FsmWrapperEmitter
     parts.join("\n")
   end
 
-  sig { params(s: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(s: MIR::FsmGenericCtxStruct, mir_emitter: MIREmitter).returns(String) }
   def render_generic_ctx_struct(s, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     parts = []
@@ -502,7 +502,7 @@ module FsmWrapperEmitter
     end
   end
 
-  sig { params(fn: T.untyped, mir_emitter: T.untyped).returns(String) }
+  sig { params(fn: T.untyped, mir_emitter: MIREmitter).returns(String) }
   def render_member_fn(fn, mir_emitter)
     T.bind(self, T.untyped) rescue nil
     rendered = (fn.body_stmts || []).filter_map do |stmt|
@@ -524,7 +524,7 @@ module FsmWrapperEmitter
 
   # ----- post-struct alloc + spawn + break ----------------------------------
 
-  sig { params(s: T.untyped, blk_label: T.untyped).returns(String) }
+  sig { params(s: MIR::FsmSpawnSetup, blk_label: T.untyped).returns(String) }
   def render_spawn_setup(s, blk_label)
     T.bind(self, T.untyped) rescue nil
     parts = []

@@ -833,7 +833,7 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { returns(T.nilable(T::Array[T.untyped])) }
+  sig { returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def parse_argument_list()
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
@@ -1516,7 +1516,7 @@ class Parser
   # into `requires_clauses` so they don't pollute the capability-family hash.
   REQUIRES_REENTRANCE_KINDS = T.let(%w[NON_REENTRANT].to_set.freeze, T::Set[String])
 
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(T::Hash[String, T::Set[Symbol]])) }
   def parse_requires_clause
     requires_hash = {}
     @last_requires_clauses = {}
@@ -2001,7 +2001,7 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
-  sig { params(if_token: Lexer::Token, bindings: T::Array[T::Hash[T.untyped, T.untyped]]).returns(AST::IfBind) }
+  sig { params(if_token: Lexer::Token, bindings: T::Array[T::Hash[Symbol, T.untyped]]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
@@ -2411,7 +2411,7 @@ class Parser
     parse_block_body(['END'])
   end
 
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
@@ -2439,7 +2439,7 @@ class Parser
 
   # Cross-callsite type inference into named aggregates is intentionally not
   # supported; aggregate field types must be concrete.
-  sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).returns(T.untyped) }
+  sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).void }
   def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
     return unless type.is_a?(Type) && type.auto?
     auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
@@ -3036,7 +3036,7 @@ class Parser
   # Parses an optional `:sharded(N)` or `:soa` suffix after @pool or @list.
   # Returns { shard_count:, soa: } hash with parsed values.
   # Raises a ParserError if the syntax is malformed or N < 2.
-  sig { params(cap_tok: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(cap_tok: Lexer::Token).returns(T::Hash[Symbol, T.untyped]) }
   def parse_collection_modifiers!(cap_tok)
     result = T.let({ shard_count: nil, soa: false }, T::Hash[Symbol, T.untyped])
     return result unless match?(:CHAR, ':')
@@ -3484,7 +3484,7 @@ class Parser
   #   RETRY(N) THEN <action>                  -- sugar for ON Transient
   # Returns a Hash { selectors:, kinds:, types:, action:, retries:, ... } or nil.
   # Selector validation (existence, retry-is-Transient) runs in the annotator.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(T::Hash[Symbol, T::Array[T.untyped]])) }
   def parse_lock_error_clause
     if match?(:KEYWORD, 'ON')
       consume(:KEYWORD, 'ON')
@@ -3521,7 +3521,7 @@ class Parser
   # selector; anything else is a type selector. Types are enum values
   # (no `:` prefix) per the unified error-system design; the 6 kind
   # names are effectively reserved.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def parse_error_selectors
     selectors = [parse_error_selector]
     while match!(:CHAR, ',')
@@ -3678,7 +3678,7 @@ class Parser
   # Returns { pinned: Bool, stack_size: Symbol|nil }.
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(T::Hash[Symbol, T.nilable(FalseClass)])) }
   def parse_branch_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)

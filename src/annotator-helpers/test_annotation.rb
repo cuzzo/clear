@@ -106,7 +106,7 @@ module TestAnnotation
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).void }
   def visit_AssertRaises(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
@@ -156,7 +156,7 @@ module TestAnnotation
   # has been stubbed in the enclosing WHEN block. Both runtime-level
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
-  sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[T.untyped]).returns(T.untyped) }
+  sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[T.untyped]).returns(NilClass) }
   def validate_strict_io!(test_that, stubbed_fns)
     T.bind(self, SemanticAnnotator) rescue nil
     calls = scan_for_calls(test_that.body).first

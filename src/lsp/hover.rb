@@ -27,7 +27,7 @@ module LSP
 
     # Build a hover response for the document at `position`. Returns
     # nil when no diagnostic overlaps the cursor.
-    sig { params(document: T.untyped, position: T.untyped).returns(T.untyped) }
+    sig { params(document: T.untyped, position: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
     def render(document, position)
       return nil unless document
       result = document.cached_findings

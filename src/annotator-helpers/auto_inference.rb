@@ -274,7 +274,7 @@ class AutoConstraintCollector
     node.is_a?(AST::HashLit) && node.pairs.empty?
   end
 
-  sig { params(decl_node: T.untyped).returns(T.untyped) }
+  sig { params(decl_node: T.untyped).void }
   def register_list_shape_slot(decl_node)
     slot_id = [:list_element, decl_node.object_id]
     @slots[slot_id] ||= Slot.new(
@@ -285,7 +285,7 @@ class AutoConstraintCollector
     @local_decls[decl_node.name] = slot_id if @local_decls
   end
 
-  sig { params(decl_node: T.untyped).returns(T.untyped) }
+  sig { params(decl_node: T.untyped).void }
   def register_map_shape_slots(decl_node)
     key_id = [:map_key, decl_node.object_id]
     val_id = [:map_value, decl_node.object_id]

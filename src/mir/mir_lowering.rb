@@ -37,7 +37,7 @@ class MIRLowering
   attr_reader :fn_sigs
   attr_accessor :shard_context
 
-  sig { params(struct_schemas: T::Hash[Symbol, T.untyped], enum_schemas: T::Hash[Symbol, T::Array[T.untyped]], union_schemas: T::Hash[Symbol, T.untyped], fn_sigs: T::Hash[T.untyped, T.untyped], moved_guard_info: T::Hash[String, T::Hash[T.untyped, T.untyped]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
+  sig { params(struct_schemas: T::Hash[Symbol, Schemas::StructSchema], enum_schemas: T::Hash[Symbol, T::Array[String]], union_schemas: T::Hash[Symbol, Schemas::UnionSchema], fn_sigs: T::Hash[String, FunctionSignature], moved_guard_info: T::Hash[String, T::Hash[String, TrueClass]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
                  importer: nil, source_dir: nil,
@@ -2072,7 +2072,7 @@ class MIRLowering
     MIR::Call.new("#{mod_prefix}#{node.name}", args, false)
   end
 
-  sig { params(node: T.untyped).returns(MIR::MethodCall) }
+  sig { params(node: AST::MethodCall).returns(MIR::MethodCall) }
   def lower_extern_direct_method(node)
     obj = lower(node.object)
     args = node.args.map { |a| lower(a) }
@@ -2558,14 +2558,14 @@ class MIRLowering
   # field), else the bare value. The same fn body then works for both
   # `Locked(T)` and `Arc(Locked(T))` callers without runtime overhead.
   # Mutable parameters arrive as `*T`, so probe and deref through `*`.
-  sig { params(zig_var: T.untyped).returns(String) }
+  sig { params(zig_var: String).returns(String) }
   def comptime_arc_unwrap_expr(zig_var)
     "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
   end
 
   # Recursively build the Zig string for a (possibly nested) field path.
   # Stops at the root Identifier; intermediate GetFields chain via `.`.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(String) }
   def build_field_path_zig(node)
     case node
     when AST::Identifier
@@ -3019,7 +3019,7 @@ class MIRLowering
   # Both VERSIONED and LOCKED arms produce `const <alias>: *T = ...`
   # so the body's `<alias>.field` access lowers identically across
   # families. The Guard's `defer release()` handles teardown.
-  sig { params(family: Symbol, zig_var: String, alias_name: String, node: AST::WithBlock).returns(T.untyped) }
+  sig { params(family: Symbol, zig_var: String, alias_name: String, node: AST::WithBlock).returns(T.nilable(String)) }
   def with_match_arm_prelude(family, zig_var, alias_name, node)
     safe_alias = zig_safe_name(alias_name)
     unwrap = with_match_unwrap_value(zig_var)
@@ -3406,7 +3406,7 @@ class MIRLowering
   # Emit the user's snapshot-conflict action using the conflict error chosen
   # for the cell family. Retry loops are handled around the transaction call,
   # not inside this action.
-  sig { params(clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(String) }
+  sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]], with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(String) }
   def emit_conflict_action_zig(clause, with_label, with_node, conflict_error = :MvccConflict)
     line = with_node.token&.line.to_s
     err_name = conflict_error.to_s
@@ -3422,7 +3422,7 @@ class MIRLowering
     emit_error_action_zig(clause, with_label, with_node, :LockTimeout, "lock acquire timed out")
   end
 
-  sig { params(clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(String) }
+  sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]], with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(String) }
   def emit_error_action_zig(clause, with_label, with_node, error_type, default_msg)
     line = with_node.token&.line.to_s
     err_name = error_type.to_s
@@ -3455,7 +3455,7 @@ class MIRLowering
   # in its own labeled block today, so collisions are impossible in
   # practice, but the suffix makes the property defensible against
   # future lowering changes.
-  sig { params(fallible_caps: T::Array[T::Hash[T.untyped, T.untyped]], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
+  sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     suffix = with_node ? "_#{with_node.object_id.abs}" : ""
     fallible_caps.each_with_index.map do |cap, i|
@@ -3494,7 +3494,7 @@ class MIRLowering
   #   - const alias = __guardN.get() aliases
   # Uses panic-variant acquire methods (acquire / read / write); no
   # ON-clause handling. The fallible-variant emitter sits beside this.
-  sig { params(fallible_caps: T::Array[T.untyped], with_node: T.nilable(AST::WithBlock)).returns(String) }
+  sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], with_node: T.nilable(AST::WithBlock)).returns(String) }
   def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
     n = fallible_caps.length
     entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
@@ -4081,7 +4081,7 @@ class MIRLowering
   # producing silent UAFs. Users must write GIVE / COPY / CLONE inside
   # the BG body to transfer ownership, or wrap the container in
   # @shared:locked / @multiowned for shared access.
-  sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), _captured: T::Hash[String, T.untyped]).returns(T.untyped) }
+  sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), _captured: T::Hash[String, Type]).void }
   def enforce_bg_capture_strategies!(node, _captured)
     refused = (node.capture_analysis&.strategies || {}).select do |_name, strat|
       strat.is_a?(CaptureStrategy::Refuse)
@@ -4552,7 +4552,7 @@ class MIRLowering
     result.join
   end
 
-  sig { params(source: String, names: T::Set[T.untyped]).returns(String) }
+  sig { params(source: String, names: T::Set[String]).returns(String) }
   def filter_zig_blocks(source, names)
     lines = source.lines
     result = []

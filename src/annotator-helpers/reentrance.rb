@@ -622,7 +622,7 @@ module ReentranceBridge
   #
   # When FixCollector is disabled (i.e. `clear build` / normal compile)
   # `fixable!` is a no-op; this method does nothing user-visible.
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def offer_legacy_reentrant_migration!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless fn_node.reentrant_token
@@ -680,7 +680,7 @@ module ReentranceBridge
   #   - the function declares ANY reentrance kind (REENTRANT plain,
   #     :THUNK, or :TAIL_CALL) -- the user has already taken a stance
   #     on reentrance and constraining the param is not their choice
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def offer_unconstrained_fn_param_fix!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if [:reentrant, :reentrant_thunk, :reentrant_tail_call, :reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)

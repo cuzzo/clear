@@ -79,7 +79,7 @@ module LockHelper
     T.must(@lock_type_ranks)[t]
   end
 
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def record_lock_clause_site!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
@@ -97,7 +97,7 @@ module LockHelper
   # same-name; does not chase aliases or cross function boundaries (Phase
   # 2 handles cross-function type-level cycles). Opt-outs downgrade to a
   # [Note].
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def check_nested_lock_reacquire!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_locks = T.let(@held_locks, T.untyped)
@@ -126,7 +126,7 @@ module LockHelper
   # cycle detection covers those). POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE
   # on the inner WITH downgrades the error to a [Note] so the risk is
   # visible but not blocking.
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def check_lock_rank_ordering!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_lock_types = T.let(@held_lock_types, T.untyped)
@@ -175,7 +175,7 @@ module LockHelper
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
-  sig { params(fn_name: String, cap: T::Hash[Symbol, T.untyped], held_stack: T::Array[T::Hash[T.untyped, T.untyped]], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn_name: String, cap: T::Hash[Symbol, T.untyped], held_stack: T::Array[T::Hash[Symbol, T.untyped]], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
     T.bind(self, SemanticAnnotator) rescue {}
     t = lock_identity_of(cap)
@@ -192,7 +192,7 @@ module LockHelper
     end
   end
 
-  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[T::Hash[T.untyped, T.untyped]], site_token: Lexer::Token).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
+  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[T::Hash[Symbol, T.untyped]], site_token: Lexer::Token).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
     T.bind(self, SemanticAnnotator) rescue nil
     held_stack.each do |held|
@@ -207,7 +207,7 @@ module LockHelper
   # fn's "transitive acquires" set contains every lock type it or any
   # transitive callee takes. Mirrors compute_needs_rt! / compute_can_fail!
   # structure.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def propagate_lock_acquires!
     T.bind(self, SemanticAnnotator) rescue nil
     @call_graph = T.let(@call_graph, T.untyped)
@@ -234,7 +234,7 @@ module LockHelper
     transitive
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Array[T::Hash[Symbol, T.untyped]]]) }
   def resolve_held_calls!
     T.bind(self, SemanticAnnotator) rescue nil
     T.must(@lock_held_calls).each do |fn, sites|
@@ -274,7 +274,7 @@ module LockHelper
   end
 
   # Iterative Tarjan SCC. Returns array of SCCs (each an array of nodes).
-  sig { params(nodes: T::Set[T.untyped], adj: T::Hash[T.untyped, T::Set[T.untyped]]).returns(T::Array[T::Array[T.untyped]]) }
+  sig { params(nodes: T::Set[Symbol], adj: T::Hash[T.untyped, T::Set[T.untyped]]).returns(T::Array[T::Array[Symbol]]) }
   def tarjan_scc(nodes, adj)
     T.bind(self, SemanticAnnotator) rescue nil
     index = {}
@@ -377,7 +377,7 @@ module LockHelper
   #   - :Deadlock       iff any of the WITH's cap types has a graph self-loop
   # Each selector in the clause must expand to at least one type in this
   # set. A selector that expands to the empty set here is dead code.
-  sig { params(site: T::Hash[Symbol, T.untyped], types_in_cycle: T::Set[Symbol], types_with_self: T::Set[T.untyped]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(site: T::Hash[Symbol, T.untyped], types_in_cycle: T::Set[Symbol], types_with_self: T::Set[T.untyped]).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def verify_handler_reachability!(site, types_in_cycle, types_with_self)
     T.bind(self, SemanticAnnotator) rescue nil
     node    = site[:node]
@@ -432,7 +432,7 @@ module LockHelper
     T.must(adj[T.must(node)]).include?(node)
   end
 
-  sig { params(scc: T::Array[T.untyped], edges: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(scc: T::Array[T.untyped], edges: T::Array[T.untyped]).returns(T.noreturn) }
   def report_lock_cycle!(scc, edges)
     T.bind(self, SemanticAnnotator) rescue nil
     @current_fn_node = T.let(@current_fn_node, T.untyped)

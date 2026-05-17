@@ -138,7 +138,7 @@ module PipelineGenerator
   # Returns [min_sentinel, max_sentinel] for a given Zig numeric type.
   # min_sentinel is the initial value for a MIN accumulator (highest possible).
   # max_sentinel is the initial value for a MAX accumulator (lowest possible).
-  sig { params(zig_t: String, resolved_sym: Symbol).returns(T::Array[T.untyped]) }
+  sig { params(zig_t: String, resolved_sym: Symbol).returns(T::Array[String]) }
   def agg_minmax_sentinels(zig_t, resolved_sym)
     T.bind(self, T.untyped) rescue nil
     if [:Float32, :Float64].include?(resolved_sym)

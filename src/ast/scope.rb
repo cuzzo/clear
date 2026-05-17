@@ -20,7 +20,7 @@ class Scope
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[T.untyped], _borrowed_paths: T::Array[T.untyped], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
+  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[T.untyped], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
@@ -241,7 +241,7 @@ class Scope
     path
   end
 
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).void }
   def check_validity!(name)
     entry = @locals[name]
     return unless entry

@@ -174,7 +174,7 @@ module LSP
 
     # `exit` notification — terminate. Per LSP, exit code 0 if a
     # `shutdown` was received first, 1 otherwise.
-    sig { returns(T.untyped) }
+    sig { returns(T.noreturn) }
     def handle_exit
       @logger.info("exit (clean=#{@shutdown_requested})")
       Kernel.exit(@shutdown_requested ? 0 : 1)
@@ -214,7 +214,7 @@ module LSP
 
     # `textDocument/didSave` — re-analyze immediately (save is an
     # explicit user action; no need to debounce).
-    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(IO)) }
     def handle_did_save(params)
       uri = params["textDocument"]["uri"]
       @logger.debug("didSave #{uri}")
@@ -224,7 +224,7 @@ module LSP
 
     # `textDocument/didClose` — drop the document and clear any
     # pending diagnostics on the client.
-    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
+    sig { params(params: T::Hash[T.untyped, T.untyped]).returns(T.nilable(IO)) }
     def handle_did_close(params)
       uri = params["textDocument"]["uri"]
       cancel_timer(uri)
@@ -278,7 +278,7 @@ module LSP
     end
 
     # Send a `textDocument/publishDiagnostics` notification.
-    sig { params(uri: String, diagnostics: T::Array[T.untyped]).returns(T.untyped) }
+    sig { params(uri: String, diagnostics: T::Array[T.untyped]).returns(T.nilable(IO)) }
     def publish_diagnostics(uri, diagnostics)
       send_message(
         jsonrpc: "2.0",

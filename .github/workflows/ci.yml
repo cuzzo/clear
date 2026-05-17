@@ -44,6 +44,19 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  nil-kill-unit:
+    name: nil-kill gem specs
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - run: bundle exec rspec gems/nil-kill/spec
+
   sorbet:
     name: Sorbet type-check (typed:true files only)
     runs-on: ubuntu-latest
@@ -307,13 +320,20 @@ jobs:
             --adapter json
             --file "$BENCHER_JSON"
             --err
-            --github-actions "$GITHUB_TOKEN"
-            --ci-id "benchmark-leak-shard-${{ matrix.shard }}"
           )
+
+          if [ "${{ matrix.shard }}" = "0" ]; then
+            args+=(
+              --github-actions "$GITHUB_TOKEN"
+              --ci-id "benchmark-leak"
+            )
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+              args+=(--ci-number "${{ github.event.pull_request.number }}")
+            fi
+          fi
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             args+=(
-              --ci-number "${{ github.event.pull_request.number }}"
               --start-point "$GITHUB_BASE_REF"
               --start-point-hash "${{ github.event.pull_request.base.sha }}"
               --start-point-clone-thresholds

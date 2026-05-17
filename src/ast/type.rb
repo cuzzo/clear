@@ -436,7 +436,7 @@ class Type
   end
 
   # Used specifically to check if assigning an array too large to a fixed array
-  sig { params(other_type: Type).returns(T.untyped) }
+  sig { params(other_type: Type).returns(T.nilable(T::Boolean)) }
   def array_overflow?(other_type)
     return false if !other_type.array? || !self.array?
     return false if self.base_type != other_type.base_type
@@ -1096,7 +1096,7 @@ class Type
   # class references resolve at first-call time, after src/ast/ast.rb
   # has finished loading. type.rb is required from inside ast.rb, so
   # AST::SumOp is not yet defined while type.rb's class body evaluates.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.observable_terminals
     @observable_terminals ||= T.let({
       sum: {
@@ -1170,7 +1170,7 @@ class Type
   # (and the existing observable_wrapper_zig method) can continue to
   # work without rewriting. Lazy via class method for the same load-order
   # reason as observable_terminals.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Symbol, Proc]) }
   def self.observable_wrappers
     T.must(@observable_wrappers = T.let(observable_terminals.transform_values { |e| e[:wrapper] }.freeze, T.nilable(T::Hash[T.untyped, T.untyped])))
   end
@@ -2301,7 +2301,7 @@ module TypeHelper
   # Called after coercion context is known for integer literals and constant-foldable
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
   # target type. No-op for non-integer or non-literal nodes.
-  sig { params(node: T.untyped, effective_type: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, effective_type: T.untyped).returns(NilClass) }
   def check_prefixed_int_range!(node, effective_type)
     T.bind(self, SemanticAnnotator) rescue nil
     val = if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)

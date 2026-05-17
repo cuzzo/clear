@@ -709,7 +709,7 @@ module FixableHelper
   # `RETURNS` annotation. :auto fix inserts `RETURNS :Any ` immediately
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
-  sig { params(fn_node: AST::FunctionDef, found_returns: T::Array[T.untyped]).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef, found_returns: T::Array[T.untyped]).void }
   def emit_ambiguous_return_error!(fn_node, found_returns)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
@@ -802,7 +802,7 @@ module FixableHelper
   # - The enclosing function may need `RETURNS !T` (the WITH acquire
   #   can fail). The user's next compile catches that with its own
   #   fixable error.
-  sig { params(node: T.untyped, code: Symbol, name: T.untyped, field: T.untyped, cap: T.untyped, perm: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::GetField, code: Symbol, name: T.untyped, field: String, cap: String, perm: String).void }
   def emit_cap_field_needs_with!(node, code, name:, field:, cap:, perm:)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
@@ -844,7 +844,7 @@ module FixableHelper
   # the var's own name with `_v` appended (matches the convention used
   # by emit_cap_field_needs_with!). Falls back to plain `error!`
   # when no var token is locatable.
-  sig { params(node: T.untyped, missing_caps: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, missing_caps: T.untyped).returns(T.untyped) }
   def emit_with_guard_all_bindings_need_as!(node, missing_caps)
     T.bind(self, SemanticAnnotator) rescue nil
     edits = []
@@ -879,7 +879,7 @@ module FixableHelper
   # The actual mutation site stays in place — the user reviews and
   # decides whether dropping MUTABLE is the right call (vs removing
   # the mutation, vs moving it outside the guarded WITH).
-  sig { params(node: T.untyped, names: T.untyped, verb: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, names: T.untyped, verb: String).returns(T.untyped) }
   def emit_with_guard_mutable_mutated!(node, names, verb)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
@@ -931,7 +931,7 @@ module FixableHelper
   # - x has no sync (plain or otherwise) -> :auto fix inserts
   #   `@writeLocked` at the declaration.
   # Falls back to plain `error!` when no fix is locatable.
-  sig { params(node: T.untyped, name: T.untyped, var_node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, name: T.untyped, var_node: T.untyped).returns(T.untyped) }
   def emit_with_read_needs_write_lock!(node, name, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     syn = cap_var_sync(var_node)
@@ -959,7 +959,7 @@ module FixableHelper
   # (multiowned / shared / locked / writeLocked). Each is shown with
   # a one-line semantic difference. Falls through to plain `error!`
   # when no fixes are locatable.
-  sig { params(node: T.untyped, name: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, name: T.untyped).void }
   def emit_with_cannot_infer_cap!(node, name)
     T.bind(self, SemanticAnnotator) rescue nil
     candidates = [
@@ -989,7 +989,7 @@ module FixableHelper
   # declaration line. Only handles single-line decls with a `: T`
   # annotation — bare-inferred declarations fall back to plain
   # `error!`.
-  sig { params(node: T.untyped, name: String, got: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, name: String, got: T.untyped).returns(T.untyped) }
   def emit_with_materialized_needs_tense!(node, name, got)
     T.bind(self, SemanticAnnotator) rescue nil
     @source_code = T.let(@source_code, T.untyped)
@@ -1047,7 +1047,7 @@ module FixableHelper
   # in `!`. :auto fix appends `!` immediately after the function name.
   # Falls back to plain error! when the name token isn't available
   # (e.g. synthesized fns).
-  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).void }
   def emit_style_mutable_param_needs_bang!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     name = fn_node.name
@@ -1104,7 +1104,7 @@ module FixableHelper
   # the value is a literal whose source span is precisely known
   # (Literal nodes carry a token for the start; the value's textual
   # length is known from the parsed token's value).
-  sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).returns(T.untyped) }
+  sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).void }
   def emit_type_mismatch_assign_error!(node, target_type, value_type)
     T.bind(self, SemanticAnnotator) rescue nil
     kw = { got: value_type, expected: target_type }
@@ -1247,7 +1247,7 @@ module FixableHelper
   # generated per candidate via `build_decl_cap_insert_fix`. Falls
   # back to plain `error!` (registry-formatted) when no candidate
   # is locatable (e.g. WITH target is a GetField / param).
-  sig { params(node: T.untyped, name: T.untyped, code: Symbol, candidates: T::Array[T.untyped], confidence: Symbol, kw: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, name: T.untyped, code: Symbol, candidates: T::Array[T.untyped], confidence: Symbol, kw: T.untyped).returns(T.untyped) }
   def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
     T.bind(self, SemanticAnnotator) rescue nil
     fixes = candidates.filter_map do |c|

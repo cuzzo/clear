@@ -141,7 +141,7 @@ class SymbolEntry
 
   # Build a tied lifetime from source SymbolEntries. Empty / nil input returns
   # nil so callers can pass collected captures through without a guard.
-  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
   def self.tied_lifetime(sources)
     return nil if sources.nil? || sources.empty?
     { sources: sources.uniq }

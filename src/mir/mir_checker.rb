@@ -927,7 +927,7 @@ class MIRChecker
   # Yield each immediate sub-expression of expr.
   # Stops at opaque boundaries (RawZig, InlineZig, BgBlock).
   # BlockExpr bodies are walked separately by check_stmts_for_unhoisted.
-  sig { params(expr: T.anything, blk: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.anything, blk: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def each_sub_expr(expr, &blk)
     return unless expr
     case expr

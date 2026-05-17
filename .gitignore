@@ -9,9 +9,12 @@
 !/.vscode/
 !/CLAUDE.md
 !/CONTRIBUTING.md
+!/codecov.yml
 !/GEMINI.md
 !/Gemfile
 !/Gemfile.lock
+!/gems/
+!/gems/**
 !/LICENSE
 !/ONE-PAGER.md
 !/README.md

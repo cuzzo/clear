@@ -29,8 +29,9 @@ group :development do
   gem 'sorbet', require: false
   gem 'sorbet-runtime'
   gem 'tapioca', require: false
-  gem 'rbs-trace', require: false
-  gem 'parlour', require: false
+
+  # Local path while nil-kill is extracted as a standalone gem.
+  gem 'nil-kill', path: 'gems/nil-kill', require: false
 
   # Rubocop with the rubocop-sorbet plugin. We don't run general
   # Rubocop style — only the `Sorbet/EnforceSignatures` cop, which

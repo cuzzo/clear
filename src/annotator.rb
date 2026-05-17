@@ -138,7 +138,7 @@ class SemanticAnnotator
     setup_builtins
   end
 
-  sig { params(node: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::Program).returns(T.nilable(T::Hash[String, T::Hash[Symbol, T.untyped]])) }
   def annotate!(node)
     # Reset user-registered error types so state from prior runs (rspec
     # parallel, multi-program test harness) doesn't leak in. Stdlib
@@ -196,7 +196,7 @@ private
   # Auto inference runs after the body walk has populated type_info on
   # every constraint source. It mutates successful Auto declarations to
   # concrete types and uses operator evidence to rank ambiguous fixes.
-  sig { params(program_node: AST::Program).returns(T.untyped) }
+  sig { params(program_node: AST::Program).void }
   def run_auto_inference!(program_node)
     collector = AutoConstraintCollector.new(@fn_nodes)
     slots = collector.collect!(program_node)
@@ -290,7 +290,7 @@ private
     @deferred_with_validations.clear
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def setup_builtins
     STD_LIB.each do |name, config|
       current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)
@@ -482,7 +482,7 @@ private
     end
   end
 
-  sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::RequireNode).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
   def visit_RequireNode(node)
     unless @importer
       error!(node, :REQUIRE_NEEDS_IMPORTER, hint: "Pass importer: and source_dir: to SemanticAnnotator.new.")
@@ -860,7 +860,7 @@ private
   # The baked-in default applied when the user writes no SYNC POLICY.
   # Synthesized as a hash matching the parser's lock_error_clause
   # shape so the resolver can use it interchangeably.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def baked_in_default_sync_policy
     [
       { selectors: [{ form: :type, name: :LockTimeout, token: nil }],
@@ -905,7 +905,7 @@ private
   # SYNC POLICY is allowed to handle (LockTimeout, MvccConflict,
   # AtomicConflict); Deadlock / LockCycle are explicitly forbidden;
   # the union of named errors must cover the required set exactly.
-  sig { params(decl: AST::SyncPolicyDecl).returns(T.untyped) }
+  sig { params(decl: AST::SyncPolicyDecl).void }
   def validate_sync_policy_body!(decl)
     seen = []
     (decl.handlers || []).each do |clause|
@@ -1194,7 +1194,7 @@ private
   #
   # @param branches [Array<Proc>] Procs that execute branch logic
   # @return [Array<Array<Hash>>] Array of drops for each branch
-  sig { params(branches: T::Array[Proc], merge_to_parent: T::Boolean).returns(T.nilable(T::Array[T.nilable(T::Array[T.untyped])])) }
+  sig { params(branches: T::Array[Proc], merge_to_parent: T::Boolean).returns(T.nilable(T::Array[T::Array[T::Hash[Symbol, T.untyped]]])) }
   def analyze_control_flow_branches(branches, merge_to_parent: true)
     og_snapshot = @og&.fork_lightweight
     og_branch_snapshots = []
@@ -2059,7 +2059,7 @@ private
   #   - kind nil   + type nil    : no-op (legacy message-only form).
   # On collision, emits a diagnostic anchored at the second site,
   # naming the first registration line for context.
-  sig { params(node: T.untyped, kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(T.untyped) }
+  sig { params(node: T.untyped, kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
   def resolve_error_registration!(node, kind_sym, type_name_str, site_tok)
     return if type_name_str.nil?
     type_sym = type_name_str.to_sym
@@ -2315,7 +2315,7 @@ private
     collect_implicit_type_params(type.element_type, out, explicit) if type.respond_to?(:array?) && type.array?
   end
 
-  sig { params(node: AST::StaticCall).returns(T.untyped) }
+  sig { params(node: AST::StaticCall).void }
   def visit_StaticCall(node)
     node.args.each { |arg| visit(arg) }
 
@@ -2382,7 +2382,7 @@ private
     end
   end
 
-  sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::FuncCall).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def visit_FuncCall(node)
     # Mark struct literal args as call arguments so ensure_owned_value!
     # skips CopyNode wrapping for rodata strings. The struct is a temporary
@@ -2435,7 +2435,7 @@ private
     end
   end
 
-  sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::MethodCall).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
   def visit_MethodCall(node)
     visit(node.object)
     node.args.each { |arg| visit(arg) }
@@ -2608,7 +2608,7 @@ private
   # Safety: CLEAR uses value semantics for structs (pass/return by copy).  A large
   # struct on the stack cannot have its address escape the loop body through normal
   # CLEAR operations, so :stack is always safe here.
-  sig { params(node: AST::VarDecl).returns(T.untyped) }
+  sig { params(node: AST::VarDecl).void }
   def visit_VarDecl(node)
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
       node.value.storage = :stack
@@ -2869,7 +2869,7 @@ private
   # If x is not yet in scope → immutable declaration (like old VAR x = val).
   # If x is in scope and mutable → assignment (like old SET x = val).
   # If x is in scope and immutable → error.
-  sig { params(node: AST::BindExpr).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::BindExpr).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
   def visit_BindExpr(node)
     # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
@@ -3083,7 +3083,7 @@ private
   # flag is what post-annotation passes (like
   # validate_with_guard_no_body_mutation!) read to detect any mutation,
   # direct or indirect.
-  sig { params(name: String).returns(T.untyped) }
+  sig { params(name: String).returns(T.nilable(T::Boolean)) }
   def mark_var_mutated_via_call(name)
     scope = lookup_scope_for(name)
     return unless scope
@@ -3190,7 +3190,7 @@ private
     T.must(mark_var_mutated(var_name))
   end
 
-  sig { params(index_node: AST::GetIndex, assignment_node: AST::Assignment).returns(T.untyped) }
+  sig { params(index_node: AST::GetIndex, assignment_node: AST::Assignment).returns(NilClass) }
   def visit_assignment_index(index_node, assignment_node)
     visit(index_node)
 
@@ -3472,7 +3472,7 @@ private
 
   # Call-site recursion overrides are parsed but not lowered yet; emit a
   # precise diagnostic instead of silently generating wrong code.
-  sig { params(node: AST::CallSiteOverride).returns(T.untyped) }
+  sig { params(node: AST::CallSiteOverride).void }
   def visit_CallSiteOverride(node)
     sigil = node.kind == :thunk ? "@thunk" : "@maxDepth"
     variant_hint = node.kind == :thunk ? "'EFFECTS REENTRANT:THUNK'" : "'EFFECTS REENTRANT:MAX_DEPTH(#{node.n})'"
@@ -3497,7 +3497,7 @@ private
   # ==========================================
   # LITERALS & BINARY OPS
   # ==========================================
-  sig { params(node: AST::HashLit).returns(T.untyped) }
+  sig { params(node: AST::HashLit).void }
   def visit_HashLit(node)
     # 1. Analyze values to find the Value Type (V)
     #    Assumption: Maps are homogeneous for now (e.g. all Int64)
@@ -4364,7 +4364,7 @@ private
     node.storage   = :frozen
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).void }
   def visit_Give(node)
     visit(node.value)
 
@@ -4385,7 +4385,7 @@ private
     node.full_type = node.value.resolved_type
   end
 
-  sig { params(node: AST::Copy).returns(T.untyped) }
+  sig { params(node: AST::Copy).void }
   def visit_Copy(node)
     visit(node.value)
 
@@ -4416,7 +4416,7 @@ private
     current_fn_ctx.needs_rt = true if current_fn_ctx && type&.any_rc?
   end
 
-  sig { params(node: AST::ShareNode).returns(T.untyped) }
+  sig { params(node: AST::ShareNode).void }
   def visit_ShareNode(node)
     visit(node.value)
     source_type = node.value.type_info
@@ -4796,14 +4796,14 @@ private
     is_param && !has_req
   end
 
-  sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, with_name: String, sources: T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))).void }
   def retryable_with_fallible_body_error!(node, with_name, sources)
     detail = T.must(sources).first(3).join(", ")
     detail += ", ..." if T.must(sources).length > 3
     error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
   end
 
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[T.untyped, T.untyped]]).void }
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
     is_snapshot_txn = node.snapshot_mode == :transaction
@@ -4888,7 +4888,7 @@ private
   # GetField / GetIndex chains rooted at an @indirect:atomic
   # binding, fires the rejection. Other chain shapes (param
   # passing, etc.) are handled elsewhere.
-  sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).returns(T.untyped) }
+  sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).void }
   def reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
     root = T.let(field_node, AST::GetField)
     root = root.target while root.respond_to?(:target) && !root.is_a?(AST::Identifier)
@@ -4925,7 +4925,7 @@ private
   #     literally, or `:SNAPSHOTTED` (which expands to {VERSIONED, ATOMIC}).
   # The fix: narrow REQUIRES to a non-ATOMIC family
   # (e.g. `LOCKED | VERSIONED`), or refactor to single-cell WITHs.
-  sig { params(node: AST::WithBlock).returns(T.untyped) }
+  sig { params(node: AST::WithBlock).void }
   def validate_no_multi_object_atomic!(node)
     caps = (node.capabilities || []).select { |c| sync_constrained_cap?(c) }
     return if caps.size < 2
@@ -5113,7 +5113,7 @@ private
     node.full_type = :Void
   end
 
-  sig { params(node: AST::BgStreamBlock).returns(T.untyped) }
+  sig { params(node: AST::BgStreamBlock).void }
   def visit_BgStreamBlock(node)
     # Effect tracking: generators are inherently unbounded (run until exhausted or cancelled).
     record_effect(EffectTracker::LOOP_UNBOUND)
@@ -5180,7 +5180,7 @@ private
     end
   end
 
-  sig { params(node: AST::YieldExpr).returns(T.untyped) }
+  sig { params(node: AST::YieldExpr).void }
   def visit_YieldExpr(node)
     unless @current_stream_context
       error!(node, :YIELD_OUTSIDE_BG_STREAM)
@@ -5293,7 +5293,7 @@ private
     @current_bg_pinned = prev_bg_pinned
   end
 
-  sig { params(node: AST::ThenChain).returns(T.untyped) }
+  sig { params(node: AST::ThenChain).void }
   def visit_ThenChain(node)
     # Sequential chaining: each step runs in order inside the same fiber.
     # Steps with AS bindings declare a local variable accessible to later steps.
@@ -5526,7 +5526,7 @@ private
     end
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).void }
   def handle_assign_borrow(node)
     return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
     call_node = node.value
@@ -5599,7 +5599,7 @@ private
     args[param_index]
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).void }
   def verify_unrestricted!(node)
     path = get_path_to_root(node.name)
     return if path.nil?
@@ -5720,7 +5720,7 @@ private
     match_node.full_type = (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type
   end
 
-  sig { params(node: T.untyped, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: T.untyped, branch: T.nilable(Symbol)).returns(T.nilable(T::Hash[String, SymbolEntry])) }
   def finalize_scope(node, branch: nil)
     drops = []
     current_scope.locals.each do |name, info|
@@ -5791,7 +5791,7 @@ private
     end
   end
 
-  sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
+  sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def collect_scope_drops(node: nil)
     drops = []
     current_scope.locals.each do |name, info|
@@ -5817,7 +5817,7 @@ private
   # mutable pointer access.  Called when the chain leads to mutation
   # (field assignment, mutating method call, etc.) so the transpiler can
   # emit `.items[idx]` instead of by-value `getAt(list, idx)`.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).void }
   def mark_chain_needs_mut_ref!(node)
     curr = node
     while curr
@@ -5841,7 +5841,7 @@ private
 
   # A tied-lifetime value cannot be stored where it would outlive any
   # source. Nil-lifetime bindings flow through unchanged.
-  sig { params(assign_node: AST::Assignment).returns(T.untyped) }
+  sig { params(assign_node: AST::Assignment).void }
   def verify_tied_assignment!(assign_node)
     val = assign_node.value
     sym = val.respond_to?(:symbol) ? val.symbol : nil
@@ -5878,7 +5878,7 @@ private
 
   # Returning a tied-lifetime value is legal only when the function declares
   # a matching `RETURNS <source>:T`; wildcard accepts any source.
-  sig { params(return_node: AST::ReturnNode).returns(T.untyped) }
+  sig { params(return_node: AST::ReturnNode).void }
   def verify_tied_return!(return_node)
     val = return_node.value
     return unless val.is_a?(AST::Identifier)
@@ -5945,7 +5945,7 @@ private
 
   # Look up the binding name of a SymbolEntry by scanning scope.locals.
   # Returns the String name or nil if not found.
-  sig { params(sym: SymbolEntry).returns(T.untyped) }
+  sig { params(sym: SymbolEntry).returns(T.nilable(String)) }
   def lookup_source_name(sym)
     sc = sym.scope
     return nil unless sc
@@ -6028,7 +6028,7 @@ private
   #   - Captures whose binding has no SymbolEntry on capture_symbols
   #     (e.g. observable view aliases); those are already errored at
   #     visit_BgBlock via has_non_escaping_capture.
-  sig { params(decl_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(decl_node: T.untyped).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
   def stamp_bg_handle_lifetime!(decl_node)
     sources = collect_bg_sources_in_expr(decl_node.value).uniq
     return if sources.empty?
@@ -6336,7 +6336,7 @@ private
 
   # Plain `EFFECTS REENTRANT` callees require explicit `@service` on the
   # spawn site so OS-thread cost is an explicit user choice.
-  sig { params(node: T.untyped, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).returns(T.untyped) }
+  sig { params(node: T.untyped, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).void }
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
     if can_smash
       emit_can_smash_unsupported_error!(node)
@@ -6424,7 +6424,7 @@ private
 
   # Emit @service-required as a fixable when the spawn-site span is known;
   # DO branches fall back to a plain error because their span is ambiguous.
-  sig { params(node: T.untyped, reentrant_fn: String, user_size: T.nilable(Symbol)).returns(T.untyped) }
+  sig { params(node: T.untyped, reentrant_fn: String, user_size: T.nilable(Symbol)).void }
   def emit_service_required_error!(node, reentrant_fn, user_size)
     msg = "Stack safety: this fiber transitively calls '#{reentrant_fn}' which is " \
           "`EFFECTS REENTRANT` (plain) -- the call chain is unbounded and MUST run on " \
@@ -6579,7 +6579,7 @@ private
 
   # Reject storing a borrowed value into an owned container (struct, union, TAKES param).
   # Borrows can't outlive the scope they reference. Use COPY for owned data.
-  sig { params(val_node: T.untyped, container_desc: String).returns(T.untyped) }
+  sig { params(val_node: T.untyped, container_desc: String).returns(NilClass) }
   def reject_borrowed_value!(val_node, container_desc)
     borrowed_name = nil
     if val_node.is_a?(AST::GetIndex)

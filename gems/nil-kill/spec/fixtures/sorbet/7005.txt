@@ -1,0 +1,7 @@
+lib/example.rb:12: Expected `String` but found `T.nilable(String)` for method result type https://srb.help/7005
+    12 |  end
+          ^^^
+  Expected `String` for result type of method `name`:
+    lib/example.rb:8:
+     8 | sig { returns(String) }
+

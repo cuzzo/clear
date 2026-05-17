@@ -754,7 +754,7 @@ class PipelineHost
     build_soa_scalar_fold_block(site, fold_node, label, source_mir, expr_mir, fields, needs_whole_item)
   end
 
-  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped, label: String, source_mir: T.untyped, expr_mir: T.untyped, fields: T::Array[T.untyped], needs_whole_item: T::Boolean).returns(MIR::BlockExpr) }
+  sig { params(site: PipelineHost::PipelineSite, fold_node: T.untyped, label: String, source_mir: T.untyped, expr_mir: T.untyped, fields: T::Array[String], needs_whole_item: T::Boolean).returns(MIR::BlockExpr) }
   def build_soa_scalar_fold_block(site, fold_node, label, source_mir, expr_mir, fields, needs_whole_item)
     list_node = site.list
     lhs_type = list_node.type_info
@@ -2618,7 +2618,7 @@ class PipelineHost
   # opcode path drives iteration. The fusion stage_stmts (BreakStmt for
   # TAKE_WHILE/LIMIT, ContinueStmt for WHERE/SKIP) compose cleanly inside
   # a ForStmt, so semantics are preserved.
-  sig { params(range_lit: T.untyped, capture_name: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(range_lit: T.untyped, capture_name: T.nilable(String)).returns(T::Array[T.untyped]) }
   def bc_for_iter_range(range_lit, capture_name)
     start_mir = visit_mir(range_lit.start)
     end_mir   = visit_mir(range_lit.finish)
@@ -3427,7 +3427,7 @@ class PipelineHost
   # data source. This makes `users AS $u |> CONCURRENT SELECT $u.field`
   # work: substitute_placeholders rewrites $u to it inside the inner
   # expression at MIR-build time.
-  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(T.untyped) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(FsmOps::CallExpr) }
   def lower_concurrent_bc(lhs, conc_op, smooth_node)
     inner = conc_op.op
 
@@ -3783,7 +3783,7 @@ class PipelineHost
   # the failable expression, checks for an error sentinel, and only appends
   # on success. Result list element type is the SUCCESS type of the
   # failable expression (smooth_node.full_type).
-  sig { params(lhs: T.untyped, inner_expr: T.untyped, smooth_node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(lhs: T.untyped, inner_expr: T.untyped, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_bc_concurrent_select_prune(lhs, inner_expr, smooth_node)
     res_zig = transpile_type(T.must(T.must(smooth_node.full_type).element_type).resolved.to_s)
     alloc = pipeline_alloc(smooth_node)
@@ -3810,7 +3810,7 @@ class PipelineHost
   # CONCURRENT WHERE ... OR PRUNE: predicate evaluation that raises is
   # treated as "false" (item skipped). Same loop shape as lower_where but
   # the truthiness check is gated by !isError.
-  sig { params(lhs: T.untyped, inner_expr: T.untyped, smooth_node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(lhs: T.untyped, inner_expr: T.untyped, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_bc_concurrent_where_prune(lhs, inner_expr, smooth_node)
     elem_type = lhs.full_type.element_type.resolved.to_s
     elem_zig = transpile_type(elem_type)

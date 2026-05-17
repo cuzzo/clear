@@ -1,3 +1,12 @@
+PATH
+  remote: gems/nil-kill
+  specs:
+    nil-kill (0.1.0)
+      parlour
+      prism (>= 1.6)
+      rbs-trace
+      sorbet-runtime
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -230,9 +239,8 @@ DEPENDENCIES
   flay
   flog
   msgpack (~> 1.7, >= 1.7.2)
+  nil-kill!
   parallel_rspec
-  parlour
-  rbs-trace
   reek
   rspec
   rubocop

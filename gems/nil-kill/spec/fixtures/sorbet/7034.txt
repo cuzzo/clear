@@ -1,0 +1,7 @@
+lib/example.rb:25: Used `&.` operator on `String`, which can never be nil https://srb.help/7034
+    25 |    user&.name
+             ^^
+  Got `String` originating from:
+    lib/example.rb:18:
+    18 | sig { returns(String) }
+

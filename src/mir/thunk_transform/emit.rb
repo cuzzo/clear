@@ -75,7 +75,7 @@ module ThunkTransform
 
     # Synthesize a structural MIR trampoline body for a function whose
     # AST::FunctionDef has a thunk_plan (set by Phase 4c detection).
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(MIR::ThunkTrampoline) }
     def build_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       plan = fn_node.thunk_plan
@@ -136,14 +136,14 @@ module ThunkTransform
       lowering.send(:emit_expr, mir)
     end
 
-    sig { params(param: T.untyped, _lowering: T.untyped).returns(T.untyped) }
+    sig { params(param: T.untyped, _lowering: T.untyped).returns(String) }
     def param_zig_type(param, _lowering)
       T.bind(self, T.untyped) rescue nil
       type = param[:type]
       type.respond_to?(:zig_type) ? type.zig_type : type.to_s
     end
 
-    sig { params(fn_node: T.untyped, _lowering: T.untyped).returns(T.untyped) }
+    sig { params(fn_node: T.untyped, _lowering: T.untyped).returns(String) }
     def ret_zig_type(fn_node, _lowering)
       T.bind(self, T.untyped) rescue nil
       rt = fn_node.return_type
@@ -164,7 +164,7 @@ module ThunkTransform
     # an `errdefer` chain-walk in the emitted body is the surgical
     # fix; this guard fails loudly so the extension can't ship the
     # leak silently.
-    sig { params(fn_node: T.untyped, ret_zig: T.untyped).returns(T.untyped) }
+    sig { params(fn_node: T.untyped, ret_zig: T.untyped).returns(NilClass) }
     def assert_non_fallible_ret!(fn_node, ret_zig)
       T.bind(self, T.untyped) rescue nil
       return unless ret_zig.start_with?("!")
@@ -219,7 +219,7 @@ module ThunkTransform
     # Each cycle member emits its own trampoline (same union layout,
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
-    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(fn_node: T.untyped, lowering: T.untyped).returns(MIR::MutualThunkTrampoline) }
     def build_mutual_trampoline(fn_node, lowering)
       T.bind(self, T.untyped) rescue nil
       mtp = fn_node.mutual_thunk_plan
@@ -262,7 +262,7 @@ module ThunkTransform
     # One switch arm: handle the variant whose payload is `cf`'s
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
-    sig { params(cf: T.untyped, _mtp: T.untyped, ret_zig: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(cf: T.untyped, _mtp: T.untyped, ret_zig: String, lowering: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def build_mutual_arm(cf, _mtp, ret_zig, lowering)
       T.bind(self, T.untyped) rescue nil
       own_plan = cf.mutual_thunk_plan.own_plan
@@ -295,7 +295,7 @@ module ThunkTransform
       }
     end
 
-    sig { params(cf: T.untyped, name: T.untyped).returns(T.untyped) }
+    sig { params(cf: T.untyped, name: T.untyped).returns(T.noreturn) }
     def find_cycle_member(cf, name)
       T.bind(self, T.untyped) rescue nil
       cf.mutual_thunk_plan.cycle_fns.find { |x| x.name == name } or

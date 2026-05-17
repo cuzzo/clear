@@ -35,7 +35,7 @@ module SyntaxTypoScanner
     { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
   ].freeze, T::Array[T.untyped])
 
-  sig { params(source: String).returns(T.untyped) }
+  sig { params(source: String).returns(NilClass) }
   def self.scan!(source)
     return unless FixCollector.enabled?
     return unless source && !source.empty?

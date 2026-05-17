@@ -28,7 +28,7 @@ module ConcurrencyChecks
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
   # type appears here participate in the rank-DAG protocol; the rank-cycle
   # analysis owns ordering for those bindings.
-  sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
+  sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).void }
   def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
     fn_nodes.each_value do |fn|
       next unless fn&.body
@@ -43,7 +43,7 @@ module ConcurrencyChecks
   # this WITH body. The yield property itself is read from the existing
   # annotator-stamped effect set (fn.effects, populated by record_effect
   # at visit_BgBlock / visit_NextExpr and propagated by compute_effects!).
-  sig { params(fn: T.untyped, fn_nodes: T.untyped, error_handler: T.untyped).returns(T.untyped) }
+  sig { params(fn: T.untyped, fn_nodes: T.untyped, error_handler: T.untyped).void }
   def check_hold_across_yield!(fn, fn_nodes, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|
       walk_scope_no_nested_with(scope) do |node|
@@ -84,7 +84,7 @@ module ConcurrencyChecks
   # checks; reentrant detection covers the dangerous case).
   LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
 
-  sig { params(fn: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).returns(T.untyped) }
+  sig { params(fn: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).void }
   def check_naked_nested_with!(fn, error_handler, lock_ranks = {})
     walk_with_blocks(fn.body) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
@@ -132,7 +132,7 @@ module ConcurrencyChecks
 
   # Names of bindings that the WithBlock acquires a LOCK on (vs.
   # borrow-only captures).
-  sig { params(with_block: T.untyped).returns(T.untyped) }
+  sig { params(with_block: T.untyped).returns(T::Set[T.untyped]) }
   def lock_holding_names(with_block)
     out = Set.new
     (with_block.capabilities || []).each do |cap|
@@ -195,7 +195,7 @@ module ConcurrencyChecks
 
   # Walk a WithBlock's scope. Descend into IF/WHILE/FOR/ etc., but stop
   # at nested WithBlocks (they own their own checks) and lambdas.
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(T.untyped) }
+  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
   def walk_scope_no_nested_with(stmts, &blk)
     stack = stmts.is_a?(Array) ? stmts.dup : [stmts]
     until stack.empty?
@@ -218,7 +218,7 @@ module ConcurrencyChecks
 
   # Find nested WithBlocks within a scope (no recursion into them; we
   # only care about the topmost nested one per branch).
-  sig { params(stmts: T.untyped, blk: T.untyped).returns(T.untyped) }
+  sig { params(stmts: T.untyped, blk: T.untyped).returns(NilClass) }
   def walk_scope_for_nested_with(stmts, &blk)
     walk_scope_no_nested_with(stmts) do |node|
       yield(node) if node.is_a?(AST::WithBlock)
@@ -226,7 +226,7 @@ module ConcurrencyChecks
   end
 
   # Names of function parameters held by a WithBlock's bindings.
-  sig { params(with_block: T.untyped, fn: T.untyped).returns(T.untyped) }
+  sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[T.untyped]) }
   def collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p[:name].to_s }.to_set

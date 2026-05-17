@@ -1,0 +1,7 @@
+lib/example.rb:20: Expected `String` but found `T.nilable(String)` for argument `name` https://srb.help/7002
+    20 |    save(maybe_name)
+                 ^^^^^^^^^^
+  Expected `String` for argument `name` of method `Example#save`:
+    lib/example.rb:8:
+     8 | sig { params(name: String).void }
+

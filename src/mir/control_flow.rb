@@ -45,7 +45,7 @@ class BasicBlock
     block.predecessors << self unless block.predecessors.include?(self)
   end
 
-  sig { returns(T.untyped) }
+  sig { void }
   def terminator
     @stmts.last
   end
@@ -327,7 +327,7 @@ class OwnershipDataflow
   # needs_cleanup are immutable properties set at declaration, never change).
   OwnerEntry = Struct.new(:state, :allocator, :needs_cleanup, keyword_init: true) do
     extend T::Sig
-    sig { params(other: T.anything).returns(T.untyped) }
+    sig { params(other: T.anything).returns(T::Boolean) }
     def ==(other)
       case other
       when OwnerEntry then state == other.state
@@ -405,14 +405,14 @@ class OwnershipDataflow
   end
 
   # Ownership state at function exit (join of all paths reaching exit_block).
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def exit_states
     @block_in[@cfg.exit_block.id] || {}
   end
 
   # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
   # Backward-compatible: reads .state from OwnerEntry.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Hash[Symbol, T::Boolean]]) }
   def cleanup_summary
     summary = {}
     exit_states.each do |name, entry|
@@ -443,7 +443,7 @@ class OwnershipDataflow
   #      error unwind) -> no defer needed.
   #   3. Exception: MATCH TAKES unions that are moved on all paths still need
   #      a guard because non-AS branches don't extract ownership.
-  sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T::Hash[String, T::Hash[T.untyped, T.untyped]]) }
+  sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, T::Hash[Symbol, T.untyped]]).returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
 
@@ -503,7 +503,7 @@ class OwnershipDataflow
 
   # TAKES params start as :owned (callee must clean them up).
   # TAKES params are always heap-allocated (caller passes heap ownership).
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def init_entry_state
     state = {}
     (@fn_node.params || []).each do |p|
@@ -833,7 +833,7 @@ class OwnershipDataflow
     consumed
   end
 
-  sig { params(expr: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry], consumed: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(expr: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry], consumed: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def _walk_bg_captures_in_expr(expr, state, consumed)
     return unless expr
     case expr
@@ -1283,7 +1283,7 @@ module LoopFrameAnalysis
     stmts.each { |s| walk_stmt!(s) }
   end
 
-  sig { params(stmt: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def self.walk_stmt!(stmt)
     case stmt
     when AST::WhileLoop, AST::WhileBindLoop
@@ -1489,7 +1489,7 @@ module LoopFrameAnalysis
   # Used to detect outer-string-reassignment patterns like
   # `resp = resp + i.toString()` or `last = makePrefix(i)` where the RHS creates
   # a frame string that would be freed by the loop's per-iteration rewind.
-  sig { params(expr: T.untyped, names: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.untyped, names: T.untyped).returns(T::Boolean) }
   def self.rhs_references_any?(expr, names)
     return false unless expr
     # COPY/CLONE produce a detached value/handle -- carry var doesn't need promotion
@@ -1594,7 +1594,7 @@ module LoopFrameAnalysis
   end
 
   # Promote a container Identifier's declaration to heap.
-  sig { params(ident_node: AST::Identifier).returns(T.untyped) }
+  sig { params(ident_node: AST::Identifier).returns(T.nilable(Symbol)) }
   def self.promote_to_heap!(ident_node)
     decl_node = ident_node.symbol&.reg
     return unless decl_node
@@ -1609,7 +1609,7 @@ module LoopFrameAnalysis
   end
 
   # Promote a frame-allocated declaration whose value escapes this loop.
-  sig { params(decl_node: T.untyped).returns(T.untyped) }
+  sig { params(decl_node: T.untyped).returns(T.nilable(Symbol)) }
   def self.promote_decl_to_heap!(decl_node)
     decl_ti = Type.from_node(decl_node)
     return unless decl_ti.is_a?(Type)
@@ -1883,7 +1883,7 @@ class BorrowChecker
 
   # Check if any identifier being moved in a binding RHS is currently borrowed.
   # Mirrors OwnershipDataflow#collect_binding_moves.
-  sig { params(expr: T.untyped, token: Lexer::Token).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(expr: T.untyped, token: Lexer::Token).returns(T.nilable(T::Set[String])) }
   def check_binding_moves(expr, token)
     return unless expr
     moved = collect_moved_names(expr)

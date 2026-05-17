@@ -84,7 +84,7 @@ module Pprof
     # Declare a sample value column. `type` is the metric (e.g.
     # `"alloc_space"`); `unit` is the unit (`"bytes"`, `"count"`,
     # `"nanoseconds"`). The column index matches the order of calls.
-    sig { params(type: String, unit: String).returns(T.untyped) }
+    sig { params(type: String, unit: String).void }
     def add_sample_type(type, unit)
       @sample_types << [intern(type), intern(unit)]
     end

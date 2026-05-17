@@ -683,7 +683,7 @@ class Formatter::Emitter
   # Preserves source NLs inside nested blocks so expand_then_do_blocks
   # still sees the user's multi-line shape; collapses redundant NLs at
   # arm-body top-level since `;` already inserts one.
-  sig { params(out: Array, toks: Array, s: Integer, e: Integer).returns(T.untyped) }
+  sig { params(out: Array, toks: Array, s: Integer, e: Integer).void }
   def emit_match_body(out, toks, s, e)
     bdepth = 0
     kdepth = 0
@@ -893,7 +893,7 @@ class Formatter::Emitter
   #     p2: T
   #   )
   #   RETURNS T ->
-  sig { params(out: Array, sig: Formatter::Emitter::FnSig).returns(T.untyped) }
+  sig { params(out: Array, sig: Formatter::Emitter::FnSig).void }
   def emit_fn_signature_wrapped(out, sig)
     toks = sig.toks
     # Tokens from FN through and including `(`.

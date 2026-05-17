@@ -1,0 +1,6 @@
+flags:
+  nil-kill:
+    paths:
+      - gems/nil-kill/
+    carryforward: false
+    joined: false

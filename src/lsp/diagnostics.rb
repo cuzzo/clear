@@ -69,7 +69,7 @@ module LSP
     # prefix, or a type suffix). When `source_text` is provided, scan
     # the source line at tok.column to recover the true byte span;
     # otherwise fall back to a quote-aware heuristic.
-    sig { params(tok: T.untyped, source_text: T.untyped).returns(T.untyped) }
+    sig { params(tok: T.untyped, source_text: T.untyped).returns(Integer) }
     def token_length(tok, source_text = nil)
       val = tok.respond_to?(:value) ? tok.value : nil
       if source_text && tok.respond_to?(:line) && tok.line && tok.respond_to?(:column) && tok.column
@@ -88,7 +88,7 @@ module LSP
     # Scan a source slice (starting at the token's column) for the
     # token's textual span. Returns nil when the slice doesn't begin
     # with a recognizable literal — caller falls back.
-    sig { params(rest: T.untyped).returns(T.untyped) }
+    sig { params(rest: T.untyped).returns(T.nilable(Integer)) }
     def literal_span_in(rest)
       return nil if rest.nil? || rest.empty?
       if rest.start_with?('"""')
@@ -109,7 +109,7 @@ module LSP
       m ? m[0].length : nil
     end
 
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: T.untyped).returns(Integer) }
     def fallback_token_length(val)
       case val
       when String
@@ -131,7 +131,7 @@ module LSP
     # start with "Cannot read field '"), so a prefix-only match would
     # mis-stamp; full-template matching disambiguates on the trailing
     # literal segments.
-    sig { params(finding: T.untyped).returns(T.untyped) }
+    sig { params(finding: T.untyped).returns(T.nilable(String)) }
     def code_for(finding)
       msg = finding.message.to_s
       return nil if msg.empty?

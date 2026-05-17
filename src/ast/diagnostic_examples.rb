@@ -60,12 +60,12 @@ module DiagnosticExamples
     @all ||= load!
   end
 
-  sig { params(code: T.untyped).returns(T.untyped) }
+  sig { params(code: T.untyped).returns(T.nilable(OwnershipGraph::Node)) }
   def lookup(code)
     all[code.to_sym]
   end
 
-  sig { params(spec_files: T.untyped).returns(T.untyped) }
+  sig { params(spec_files: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
   def load!(spec_files = DEFAULT_SPEC_FILES)
     out = {}
     spec_files.each do |path|
@@ -77,7 +77,7 @@ module DiagnosticExamples
 
   # ---- internals ----
 
-  sig { params(path: T.untyped, out: T.untyped).returns(T.untyped) }
+  sig { params(path: T.untyped, out: T.untyped).returns(NilClass) }
   def scan_file(path, out)
     lines = File.readlines(path)
     i = T.let(0, Integer)
@@ -150,7 +150,7 @@ module DiagnosticExamples
   # body satisfies `expecting_raise` (true == contains `raise_error`,
   # false == does not). Extract the first `<<~CLEAR ... CLEAR` heredoc
   # body within that `it`.
-  sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.untyped) }
+  sig { params(block_lines: T.untyped, expecting_raise: T.untyped).returns(T.nilable(String)) }
   def extract_first_heredoc_in_it(block_lines, expecting_raise:)
     block_lines.each_with_index do |line, i|
       next unless line =~ /^(\s*)it\b/
@@ -170,7 +170,7 @@ module DiagnosticExamples
   # The heredoc body starts on the line AFTER the `<<~CLEAR` (or
   # legacy `<<~FLUX`) marker and ends at the next line whose only
   # non-whitespace is the matching marker name.
-  sig { params(body: T.untyped).returns(T.untyped) }
+  sig { params(body: T.untyped).returns(T.nilable(String)) }
   def extract_heredoc(body)
     return nil unless body =~ /<<~(CLEAR|FLUX)\b/
     marker = $~[1]

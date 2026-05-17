@@ -34,7 +34,7 @@ module LSP
     # Result with the FixCollector findings and an optional
     # `fatal_error` (a synthetic FixableFinding) if the parser or
     # annotator raised.
-    sig { params(source: String).returns(T.untyped) }
+    sig { params(source: String).returns(Result) }
     def run(source)
       FixCollector.enable!
       findings = []
@@ -78,7 +78,7 @@ module LSP
       end
     end
 
-    sig { params(err: T.untyped).returns(T.untyped) }
+    sig { params(err: T.untyped).returns(SyntheticFinding) }
     def synthetic_finding_from(err)
       tok = err.token ? err.token : SyntheticToken.new(line: 1, column: 1, value: "")
       SyntheticFinding.new(

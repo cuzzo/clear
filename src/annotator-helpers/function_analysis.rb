@@ -64,7 +64,7 @@ module FunctionAnalysis
     return_type
   end
 
-  sig { params(params: T::Array[T.untyped], return_type: Symbol).returns(FunctionSignature) }
+  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
@@ -715,7 +715,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def declare_and_verify_params(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.params.each do |param|
@@ -868,7 +868,7 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(node: T.untyped, found_returns: T::Array[T.untyped], declared_return: T.nilable(Type)).returns(T.untyped) }
+  sig { params(node: T.untyped, found_returns: T::Array[T::Hash[Symbol, T.nilable(Symbol)]], declared_return: T.nilable(Type)).void }
   def verify_returns(node, found_returns, declared_return)
     T.bind(self, SemanticAnnotator) rescue nil
     if found_returns.size > 1
@@ -1003,7 +1003,7 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
     definitions.find do |config|

@@ -48,7 +48,7 @@ module WithMatchCheck
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[T::Hash[Symbol, T.untyped]])).returns(T.nilable(T::Array[T.untyped])) }
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
@@ -184,7 +184,7 @@ module WithMatchCheck
   #
   # The check only runs for plain WITH. WITH MATCH, VIEW, MATERIALIZED VIEW,
   # and SNAPSHOT have their own dispatch shapes.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], fn: AST::FunctionDef, error_handler: Proc).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], fn: AST::FunctionDef, error_handler: Proc).returns(T.nilable(FsmOps::CallExpr)) }
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
     return if node.view_kind || node.snapshot_mode
@@ -329,7 +329,7 @@ module WithMatchCheck
   # downstream readers (effect resolution, mir lowering) see concrete
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
-  sig { params(arg: T.untyped).returns(T::Set[T.untyped]) }
+  sig { params(arg: T.untyped).returns(T::Set[Symbol]) }
   def self.family_of_arg_set(arg)
     sym = arg.symbol
     return Set.new unless sym
@@ -383,7 +383,7 @@ module WithMatchCheck
   # remainder is empty and no warning fires. The check exists so a
   # user-written partial-coverage scenario (or a future strict-mode
   # build) surfaces unhandled polymorphic errors at the WITH site.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T.untyped], policy_handlers: T::Array[T.untyped], warn_handler: Proc).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[T::Hash[Symbol, T.untyped]], warn_handler: Proc).returns(T.nilable(T::Set[T.untyped])) }
   def self.warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                               policy_handlers, warn_handler)
     return unless warn_handler && node.polymorphic

@@ -2,7 +2,7 @@
 set -u
 
 status=0
-tracer="tools/nil-kill/runtime_trace.rb"
+tracer="gems/nil-kill/lib/nil_kill/runtime_trace.rb"
 
 should_skip_live_data_file() {
   case "$1" in

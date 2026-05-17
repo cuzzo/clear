@@ -100,7 +100,7 @@ module EffectTracker
   end
 
   # Called at the start of visit_FunctionDef to prepare a fresh effect set.
-  sig { params(fn_name: String).returns(T::Set[T.untyped]) }
+  sig { params(fn_name: String).returns(T::Set[Symbol]) }
   def effects_begin_function(fn_name)
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
@@ -161,7 +161,7 @@ module EffectTracker
 
   # Record a call site's context so transitive propagation can promote the
   # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
-  sig { params(callee_name: String).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(callee_name: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
   def record_call_site(callee_name)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_context = T.let(@call_site_context, T.untyped)
@@ -182,7 +182,7 @@ module EffectTracker
   # length as node.args). compute_effects! reads this to resolve callee
   # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
   # families are concrete, or keeps them MAYBE when polymorphism propagates.
-  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(callee_name: String, arg_family_sets: T::Array[T::Set[Symbol]]).returns(T.nilable(T::Array[T::Array[T::Set[Symbol]]])) }
   def record_call_arg_families(callee_name, arg_family_sets)
     T.bind(self, SemanticAnnotator) rescue nil
     @call_site_arg_families = T.let(@call_site_arg_families, T.untyped)
@@ -326,7 +326,7 @@ module EffectTracker
 
   # Merge callee's effects into caller, applying context-sensitive
   # SUSPENDS promotion based on the call site's loop/cond bits.
-  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: T.nilable(T::Hash[Symbol, T.untyped])).returns(T::Set[Symbol]) }
+  sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: T.nilable(T::Hash[Symbol, T::Boolean])).returns(T::Set[Symbol]) }
   def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
     T.bind(self, SemanticAnnotator) rescue {}
     in_loop = site_ctx && site_ctx[:loop]
@@ -667,7 +667,7 @@ module EffectTracker
     end
   end
 
-  sig { params(node: T.untyped, fn_node: T.untyped, points: T::Array[T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
+  sig { params(node: T.untyped, fn_node: T.untyped, points: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.untyped) }
   def scan_suspend_points(node, fn_node, points)
     T.bind(self, SemanticAnnotator) rescue nil
     case node
@@ -795,7 +795,7 @@ module EffectTracker
 
   # Walk a BG body and collect its suspend points using the same rules as
   # enumerate_fsm_suspend_points!, but anchored to the BgBlock scope.
-  sig { params(bg_node: T.untyped).returns(T::Array[T::Hash[T.untyped, T.untyped]]) }
+  sig { params(bg_node: T.untyped).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def collect_bg_suspend_points(bg_node)
     T.bind(self, SemanticAnnotator) rescue nil
     points = []
@@ -1085,7 +1085,7 @@ module EffectTracker
   # Post-pass: detect indirect mutual recursion in the call graph.
   # DFS reachability: for each function F, walk F's callees transitively
   # and report an error if F is reachable from itself.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { returns(T.nilable(T::Hash[String, T::Set[String]])) }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
     @call_graph = T.let(@call_graph, T.untyped)

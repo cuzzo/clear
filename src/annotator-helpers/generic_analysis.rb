@@ -503,7 +503,7 @@ module GenericAnalysis
 
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
-  sig { params(signature: FunctionSignature, subst: T::Hash[Symbol, T.untyped]).returns(FunctionSignature) }
+  sig { params(signature: FunctionSignature, subst: T::Hash[Symbol, Symbol]).returns(FunctionSignature) }
   def substitute_type_params(signature, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(

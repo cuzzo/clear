@@ -726,7 +726,7 @@ module PipeAnalysis
     node.full_type = result_type
   end
 
-  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp).void }
   def analyze_pipe_to_identifier(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # Case 2: x |> f  => f(x)
@@ -751,7 +751,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: AST::BinaryOp, sig: FunctionSignature, func_name: String).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp, sig: FunctionSignature, func_name: String).void }
   def analyze_pipe_to_named_function(node, sig, func_name)
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
@@ -1116,7 +1116,7 @@ module PipeAnalysis
   # Pre-scan: check if the EACH body references any @sharded map variable
   # by scanning for identifiers that are in scope as @sharded (without :locked).
   # This runs BEFORE visiting the body, so we only check unvisited AST.
-  sig { params(conc: T.untyped, sharded_names: T.untyped).returns(T.untyped) }
+  sig { params(conc: T.untyped, sharded_names: T.untyped).void }
   def emit_multi_map_warning(conc, sharded_names)
     T.bind(self, SemanticAnnotator) rescue nil
     shard_counts = sharded_names.map do |name|
@@ -1185,7 +1185,7 @@ module PipeAnalysis
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
   # Accepts range inputs (unlike analyze_each_op which requires collections).
   # Visits the body, then extracts the key expression and sets shard_context.
-  sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: T.untyped).returns(T.untyped) }
+  sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: AST::BinaryOp).void }
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = smooth_node.left.type_info
@@ -1218,7 +1218,7 @@ module PipeAnalysis
   # Walks the body AST looking for map[key_expr] patterns where map is @sharded.
   # If found, sets shard_context on the ConcurrentOp so the transpiler emits
   # routed sharding instead of the normal worker pool.
-  sig { params(smooth_node: T.untyped, conc: T.untyped).returns(T.untyped) }
+  sig { params(smooth_node: T.untyped, conc: T.untyped).void }
   def auto_detect_sharded_access(smooth_node, conc)
     T.bind(self, SemanticAnnotator) rescue nil
     each_op = conc.op
@@ -1387,7 +1387,7 @@ module PipeAnalysis
   VALID_CONCURRENT_OPTIONS = %w[workers capacity batch parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
-  sig { params(name: String, expr: T.untyped).returns(T.untyped) }
+  sig { params(name: String, expr: T.untyped).void }
   def validate_positive_numeric_concurrent_option!(name, expr)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(expr)
@@ -1797,7 +1797,7 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::BinaryOp, item_type: T.untyped, blk: T.untyped).returns(T.nilable(T::Array[String])) }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
     @pipeline_accessed_fields = T.let(Set.new, T.nilable(T::Set[String]))

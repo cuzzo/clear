@@ -56,7 +56,7 @@ module LSP
 
     # ---- internals ----
 
-    sig { params(fix: T.untyped, _finding: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T.untyped) }
+    sig { params(fix: T.untyped, _finding: T.untyped, diag: T.untyped, document: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def build_action(fix, _finding, diag, document, source)
       kind = fix.confidence == :auto ? KIND_QUICKFIX : KIND_REFACTOR
       edits = fix.edits.map { |e| build_text_edit(e, source) }
@@ -80,7 +80,7 @@ module LSP
 
     # Convert a Fix's Edit (line/col/length-based) into an LSP
     # TextEdit (range/newText).
-    sig { params(edit: T.untyped, source: T.untyped).returns(T.untyped) }
+    sig { params(edit: T.untyped, source: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def build_text_edit(edit, source)
       {
         range:   Position.range_for_span(edit.span, source),

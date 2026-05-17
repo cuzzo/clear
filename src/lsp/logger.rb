@@ -15,11 +15,11 @@ module LSP
       @io    = T.let(io, IO)
     end
 
-    sig { params(msg: String).returns(T.untyped) }
+    sig { params(msg: String).returns(T.nilable(IO)) }
     def debug(msg); log(:debug, msg); end
-    sig { params(msg: String).returns(T.untyped) }
+    sig { params(msg: String).returns(T.nilable(IO)) }
     def info(msg);  log(:info,  msg); end
-    sig { params(msg: String).returns(T.untyped) }
+    sig { params(msg: String).returns(T.nilable(IO)) }
     def warn(msg);  log(:warn,  msg); end
     sig { params(msg: String).returns(IO) }
     def error(msg); T.must(log(:error, msg)); end

@@ -1,0 +1,127 @@
+# Nil-kill: fix `nil`s and type ambiguity at the source, automatically.
+
+ * Nil-kill is the easiest way to eliminate `nil`s and strongly type your codebase.
+ * It combines *static anlysis* with *runtime observations*.
+ * Nil-kill autofixes where possible and surfaces which `nil`s and `untyped` vars in your codebase have the most outward *pressure*.
+
+## What is *pressure*?
+
+You can often times resolve one `nil` or type ambiguity and remove hundreds nil guards (`&.`, `.present?`) and type checks: `x.is_a?(MyType)`.
+
+Nil-kill helps you prioritize your efforts by *pressure*.
+
+## How well does it work?
+
+CLEAR's codebase was only ~50k dense lines of Ruby (production code, not including test code).
+
+ * ~50% of T.nilable() removed, ~50% of `&.` and `.present?` removed.
+ * ~80% of signature parameters could be inferred automatically combining runtime and static analysis and auto-rewrite.
+ * ~90% of signature returns could be inferred automatically.
+
+Nil-kill starts by giving you an overall report of your codebase, so you can figure out how well it *might* help you before you invest much in trying it out.
+
+### The long tail problem
+
+There's still thousands of issues that need to be resolved semi-manually. Nil-kill prioritizes those by which will have the biggest impact.
+
+ * If you resolve the type for `x[:name]` -> that will unlock N signature param slots, M signature returns, L class/struct fields, K hashmap/array types.
+ * LLMs can typically work well with data like this.
+
+## How do I use it?
+
+In short, Nil-kill has 9 uses, but the 4 major ones are:
+
+ 1. `nil-kill infer`: this mainly outsources to Sorbet and z3 to do static analysis and type your codebase as much as possible without runtime analysis.
+ 2. `nil-kill collect -- <command>`: this does runtime data collection. The `<command>` could be just `bundle exec rspec` -> but you'll get much better results if you run it on your production code on *REAL* replay logs.
+ 3. `nil-kill loop -- <comand>`: this will recursively resolve types and the new types unlocked. The `<command>` is your entire test suite, which may be just `bundle exec rspec`.
+ 4. `nil-kill report`: generates a report of action items by priority. You can use this to prioritize efforts manually, or - like CLEAR - feed this to an LLM to do it for you.
+
+> WARNING: the `<command>` for `nil-kill loop` MUST include your host project's behavioral test suite (e.g. `bundle exec rspec spec/`). Running with `srb tc` alone is NOT enough: Sorbet typecheck cannot see runtime call paths that flow through `||` fallthrough, `T.unsafe`, or dynamic dispatch, so a narrowing the proposer derives from static evidence can be accepted by Sorbet while still violating the runtime contract on those paths. If the loop's verifier doesn't exercise the code, the autofix can land changes that pass typecheck but break callers.
+
+> NOTE: the first time you run `nil-kill collect -- <command>` may be up to 100x slower than just running `<command>`.  This is because the runtime tracing *WITHOUT* any types does *A LOT* of work.  Pease run `nil-kill infer` first. You should resolve ~50% of types and make your first `nil-kill collect` considerably faster.
+
+> SUBPROCESSES: `nil-kill collect` instruments your target source **in place** for the duration of the collect (the pristine tree is snapshotted and restored automatically, including after a crash). There is exactly one copy of every target file, at its real path, and it is always instrumented -- so the wrapped code runs regardless of how it is loaded: `require`, `require_relative`, `Kernel#load`, autoload, an absolute-path require, a bare `ruby file.rb` entrypoint, a re-exec, or any Ruby subprocess your tests/runner spawn. Subprocess collection is therefore **in scope and guaranteed**: a method body that executes is recorded, whatever process or load path reached it. (Non-Ruby subprocesses still execute no Ruby and so produce no Ruby evidence -- there is nothing to record there.)
+
+### How do I know how much it might help?
+
+```
+nil-kill report --with-links --output-to=<my-path>
+```
+
+You can see a [demo](report.md) of what it looks like.
+
+To determine how much it could help you automatically, the key things you might want to consider are:
+
+### Control Shape
+
+Example:
+
+```
+Control shape: branchless: 1086 (50.2%); typed 1034 (95.2%); untyped 52 (4.8%)
+```
+
+The higher your branchless control shape is for returns, the more likely you are to be able to *easily* type your codebase.  If this is high, you can expect much of it to be automated.
+
+### Hash Shapes That May Want Data/Struct
+
+Example:
+
+```
+- {category, severity, summary, template} appears 274 time(s); first site src/ast/diagnostic_registry.rb:60
+  - local hash record `category` at src/tools/doctor.rb: total pressure 87; return 0, param 20, ivar 0, collection 67
+```
+
+If you have a lot of these types of recrods, and their keys have high pressure, under Sorbet today - those will be `T.untyped`.
+
+Nil-kill can autofix most of these, prioritize the rest for manual resolution.
+
+### Full details:
+
+Here's a list of options for nil-kill:
+
+```
+Usage:
+  bundle exec tools/nil-kill collect -- <command...>
+  bundle exec tools/nil-kill collect --commands runtime-commands.txt
+  bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
+  bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"
+  bundle exec tools/nil-kill collect --append-runtime --commands more-runtime-commands.txt
+  bundle exec tools/nil-kill collect --instrument-source -- <command...>
+  bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
+  bundle exec tools/nil-kill infer [--no-sorbet]
+  bundle exec tools/nil-kill apply [--dry-run]
+  bundle exec tools/nil-kill review [--kind replace_nil_with_default]
+  bundle exec tools/nil-kill loop [--defaults] [--try-levenshtein] -- <verify command...>
+  bundle exec tools/nil-kill report
+  bundle exec tools/nil-kill struct-rbi [--complete] [--output sorbet/rbi/nil-kill-structs.rbi]
+  bundle exec tools/nil-kill guarded-autocorrect [--max-iterations N]
+  bundle exec tools/nil-kill doctor
+
+Config:
+  NIL_KILL_TARGETS=src[:other_dir]   target Ruby source roots
+  NIL_KILL_EXCLUDE_TARGETS=src/tools  exclude Ruby source roots
+  NIL_KILL_MIN_CALLS=20              runtime confidence threshold
+  NIL_KILL_UNION_POLICY=untyped|any  default: untyped
+  NIL_KILL_AUTO_DEFAULTS=1           promote safe nil default rewrites into loop/apply
+  NIL_KILL_LEVENSHTEIN_DISTANCE=2    max param-name/class-name distance for speculative narrowing
+  NIL_KILL_LEVENSHTEIN_LIMIT=50      max speculative actions per loop iteration; 0 = unlimited
+  NIL_KILL_PRESSURE_SORT=priority|slots|hotness
+  NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
+  NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect
+  NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
+```
+
+## FAQ
+
+ 1. But what if I'm not on Sorbet?
+     * You don't need to be.  Nil-kill copies your code, rewrites it for Sorbet, and runs Sorbet on the copied code.
+ 2. But what if I like my Ruby code to be "clean" and not have `sig {}` and `T.let()` polution?
+     * See above.  CLEAR / Nil-kill think that `sig {}` is very useful, but that `T.let()` is polution.
+     * It defaults to generating `sig {}` if you have Sorbet installed in your main repository, and keeping `T.let()` out.
+     * You can include `T.let()`s if you want to, and you can exclude `sig {}` if you want to.
+         * Though we're not sure why you would have Sorbet installed and not want `sig {}`.
+
+## Links
+
+ * [How Does Nil-kill Work](docs/how-it-works.md).
+ * [Comparison to Existing Tools](docs/comparison.md)

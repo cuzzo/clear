@@ -691,7 +691,7 @@ module FsmTransform
     #
     # Returns nil on metadata / error-arm failure (caller falls
     # back to stackful).
-    sig { params(spec: T.untyped, ctx: T.untyped, capture_map: T.untyped, lowering: T.untyped, base_idx: T.untyped).returns(T.untyped) }
+    sig { params(spec: T.untyped, ctx: T.untyped, capture_map: T.untyped, lowering: T.untyped, base_idx: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
     def expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
       T.bind(self, T.untyped) rescue nil
       tail      = spec[:tail]
@@ -856,7 +856,7 @@ module FsmTransform
     # encountered. Returns { seg.index => sp_N }. Suspends that are
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
-    sig { params(segments: T.untyped).returns(T.untyped) }
+    sig { params(segments: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def compute_sp_indices(segments)
       T.bind(self, T.untyped) rescue nil
       out = {}
@@ -896,7 +896,7 @@ module FsmTransform
 
     # Shared spawn/init/break setup. Identical across all FSM
     # body shapes.
-    sig { params(ctx: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(ctx: T.untyped, lowering: T.untyped).returns(MIR::FsmSpawnSetup) }
     def build_spawn_setup(ctx, lowering)
       T.bind(self, T.untyped) rescue nil
       is_local_pin = (ctx[:pin_mode] == true || ctx[:pin_mode] == :local)
@@ -939,7 +939,7 @@ module FsmTransform
       )
     end
 
-    sig { params(dispatch: T.untyped).returns(T.untyped) }
+    sig { params(dispatch: T.untyped).returns(Integer) }
     def profile_dispatch_id(dispatch)
       T.bind(self, T.untyped) rescue nil
       case dispatch
@@ -950,7 +950,7 @@ module FsmTransform
       end
     end
 
-    sig { params(ctx: T.untyped, dispatch: T.untyped, form: T.untyped).returns(T.untyped) }
+    sig { params(ctx: T.untyped, dispatch: T.untyped, form: T.untyped).returns(String) }
     def bg_profile_site_comment(ctx, dispatch, form)
       T.bind(self, T.untyped) rescue nil
       "// CLEAR_PROFILE_TASK_SITE id=#{ctx[:profile_site_id]} kind=BG line=#{ctx[:profile_line]} column=#{ctx[:profile_column]} dispatch=#{dispatch} form=#{form}"

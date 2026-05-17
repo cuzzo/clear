@@ -48,7 +48,7 @@ class OwnershipGraph
     @completed_nodes = T.let({}, T::Hash[T.untyped, T.untyped])
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, OwnershipGraph::Node]) }
   def nodes
     @nodes.empty? ? @completed_nodes : @nodes
   end
@@ -77,7 +77,7 @@ class OwnershipGraph
   # ── Core Operations ───────────────────────────────────────────────
 
   # Declare a new variable or field path.
-  sig { params(path: String, kind: Symbol, type_info: T.nilable(Type), scope_depth: Integer, line: Integer).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(path: String, kind: Symbol, type_info: T.nilable(Type), scope_depth: Integer, line: Integer).returns(T.nilable(T::Set[String])) }
   def declare(path, kind: :affine, type_info: nil, scope_depth: 0, line: 0)
     @nodes[path] = Node.new(
       path: path, kind: kind, state: :live,
@@ -208,7 +208,7 @@ class OwnershipGraph
 
   # Lightweight snapshot: only saves node states, not full graph.
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[Symbol, T::Hash[String, T::Hash[Symbol, T.untyped]]]) }
   def fork_lightweight
     states = {}
     @nodes.each do |k, v|
@@ -223,7 +223,7 @@ class OwnershipGraph
   end
 
   # Restore from lightweight snapshot: reset states and truncate edges.
-  sig { params(snapshot: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(snapshot: T::Hash[Symbol, T.untyped]).void }
   def restore_lightweight(snapshot)
     snapshot[:node_states].each do |path, saved|
       node = @nodes[path]

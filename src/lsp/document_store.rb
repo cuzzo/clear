@@ -25,7 +25,7 @@ module LSP
       # after each `analyze_and_publish` pass.
       sig { returns(T.untyped) }
       def cached_findings;          @cached_findings = T.let(@cached_findings, T.untyped); end
-      sig { params(value: T.untyped).returns(T.untyped) }
+      sig { params(value: T.untyped).void }
       def cached_findings=(value);  @cached_findings = value; end
       sig { returns(T.nilable(Integer)) }
       def cached_version;           @cached_version = T.let(@cached_version, T.nilable(Integer)); end

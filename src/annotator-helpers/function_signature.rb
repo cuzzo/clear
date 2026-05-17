@@ -62,7 +62,7 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[T::Hash[T.untyped, T.untyped]], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[T.untyped]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, T.untyped]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
+  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
   def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,

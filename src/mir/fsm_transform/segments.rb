@@ -113,7 +113,7 @@ module FsmTransform
     #
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
-    sig { params(body: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(body: T.untyped, lowering: T.untyped).returns(T.nilable(T::Array[Segment])) }
     def split(body, lowering)
       # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
@@ -158,7 +158,7 @@ module FsmTransform
     #   2  loop_pre         -- NextSuspend / IoSuspend -> 3
     #   3  loop_post        -- LoopBack(1)
     #   4  post             -- Done
-    sig { params(body: T.untyped).returns(T.untyped) }
+    sig { params(body: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
     def split_while_loop_next(body)
       T.bind(self, T.untyped) rescue nil
       return nil unless body.is_a?(Array)
@@ -351,7 +351,7 @@ module FsmTransform
     #     (suspending pipeline as the value of a bind)
     #   - Multi-stage chains where the suspend isn't at the LHS-most
     #     position
-    sig { params(body: T.untyped).returns(T.untyped) }
+    sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
     def rewrite_pipeline_io(body)
       T.bind(self, T.untyped) rescue nil
       return body unless body.is_a?(Array)
