@@ -1380,9 +1380,20 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+
+    def initialize(*args)
+      super
+      self[:cases] = (self[:cases] || []).map { |c| MatchCase.coerce(c) }
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def cases=(val)
+      self[:cases] = (val || []).map { |c| MatchCase.coerce(c) }
+    end
+
     sig { returns(T::Array[T.untyped]) }
     def child_bodies
-      bodies = cases.filter_map { |c| c[:body] }
+      bodies = cases.map(&:body)
       bodies << default_case if default_case
       bodies
     end

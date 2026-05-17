@@ -427,7 +427,7 @@ module CleanupClassifier
       when AST::WhileLoop
         walk_expression_bg_bodies(stmt.do_branch, promoted_fns, schema_lookup, bindings)
       when AST::MatchStatement
-        stmt.cases.each { |c| walk_expression_bg_bodies(c[:body], promoted_fns, schema_lookup, bindings) }
+        stmt.cases.each { |c| walk_expression_bg_bodies(c.body, promoted_fns, schema_lookup, bindings) }
         walk_expression_bg_bodies(stmt.default_case, promoted_fns, schema_lookup, bindings)
       when AST::WithBlock
         walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
@@ -533,10 +533,10 @@ module CleanupClassifier
       next unless (schema = Schemas.as_union_schema(schema))
 
       node.cases.each do |c|
-        next unless c[:binding]
-        variant_name = case c[:value]
-                       when AST::GetField then c[:value].field
-                       when AST::MethodCall then c[:value].name
+        next unless c.binding
+        variant_name = case c.value
+                       when AST::GetField then c.value.field
+                       when AST::MethodCall then c.value.name
                        else nil
                        end
         next unless variant_name
@@ -548,7 +548,7 @@ module CleanupClassifier
           has_heap = Type.variant_has_heap?(variant_type)
           if has_heap
             union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
-            bindings[c[:binding]] = {
+            bindings[c.binding] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
               has_moved_guard: true, match_as: true,
               zig_type: "#{union_zig}_#{variant_name}"
@@ -562,14 +562,14 @@ module CleanupClassifier
           pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
           if pt.array? && !pt.string?
             elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
-            bindings[c[:binding]] = {
+            bindings[c.binding] = {
               needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
               has_moved_guard: true, match_as: true,
               elem_zig_type: elem_zig
             }
           elsif pt.collection? || pt.map?
             zig_type = pt.zig_type rescue pt.resolved.to_s
-            bindings[c[:binding]] = {
+            bindings[c.binding] = {
               needs_cleanup: true, alloc: :heap, kind: pt.map? ? :string_map : :list,
               has_moved_guard: true, match_as: true,
               zig_type: zig_type

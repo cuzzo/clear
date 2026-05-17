@@ -1670,7 +1670,7 @@ class MIRLowering
         walk_catch_body_for_reassigns(stmt.then_branch, reassigns)
         walk_catch_body_for_reassigns(stmt.else_branch, reassigns)
       when AST::MatchStatement
-        stmt.cases.each { |c| walk_catch_body_for_reassigns(c[:body], reassigns) }
+        stmt.cases.each { |c| walk_catch_body_for_reassigns(c.body, reassigns) }
         walk_catch_body_for_reassigns(stmt.default_case, reassigns)
       end
     end
@@ -7007,14 +7007,14 @@ class MIRLowering
     is_int_match = !is_union && !node.string_match &&
       (expr_type == :Int64 || expr_type == :Int32 || expr_type == :Int16 || expr_type == :Int8 ||
        (expr_type.is_a?(Type) && expr_type.integer?)) &&
-      node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
-                            [c[:value], *(c[:extra_values] || [])].all? { |p|
+      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
+                            [c.value, *(c.extra_values || [])].all? { |p|
                               p.is_a?(AST::Literal) && (p.type == :INT64 || p.type == :NUMBER)
                             } }
 
     is_enum_match = !is_union && !node.string_match && @enum_schemas&.key?(expr_type_sym) &&
-      node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
-                            [c[:value], *(c[:extra_values] || [])].all? { |p| p.is_a?(AST::GetField) } }
+      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
+                            [c.value, *(c.extra_values || [])].all? { |p| p.is_a?(AST::GetField) } }
 
     lower_branch = ->(stmts) {
       expr_label ? lower_body_with_break(stmts, expr_label) : lower_body(stmts)
@@ -7022,15 +7022,15 @@ class MIRLowering
 
     if is_int_match || is_enum_match
       arms = node.cases.map { |c|
-        body = lower_branch.call(c[:body])
+        body = lower_branch.call(c.body)
         # Multi-pattern arm: emit `.A, .B, .C` (Zig switch supports
         # comma-separated prongs natively; the body is shared).
         head_pat = if is_enum_match
-          ".#{c[:value].field}"
+          ".#{c.value.field}"
         else
-          emit_expr(lower(c[:value]))
+          emit_expr(lower(c.value))
         end
-        extras_pats = (c[:extra_values] || []).map { |ev|
+        extras_pats = (c.extra_values || []).map { |ev|
           if is_enum_match
             ".#{ev.field}"
           else
@@ -7047,7 +7047,7 @@ class MIRLowering
       if is_enum_match && !default
         all_variants = @enum_schemas[expr_type_sym]&.map(&:to_s)&.sort || []
         covered = node.cases.flat_map { |c|
-          [c[:value].field.to_s, *((c[:extra_values] || []).map { |ev| ev.field.to_s })]
+          [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
         }.sort
         default = [] unless covered == all_variants
       end
@@ -7056,12 +7056,12 @@ class MIRLowering
       # If-chain for unions, strings, and complex patterns
       tag_eq = ->(v) { MIR::BinOp.new("==", MIR::Call.new("std.meta.activeTag", [subject], false), MIR::Ident.new(".#{v}")) }
       union_bindings = ->(c, v, is_mutable) {
-        if c[:binding]
+        if c.binding
           payload = MIR::FieldGet.new(subject, v.to_s)
-          payload = MIR::Deref.new(payload) if c[:indirect_payload_as]
-          [MIR::Let.new(c[:binding], payload, is_mutable, nil, "_ = &#{c[:binding]};")]
-        elsif c[:destructure]
-          c[:destructure].fields.filter_map do |f|
+          payload = MIR::Deref.new(payload) if c.indirect_payload_as
+          [MIR::Let.new(c.binding, payload, is_mutable, nil, "_ = &#{c.binding};")]
+        elsif c.destructure
+          c.destructure.fields.filter_map do |f|
             next if f[:value] == :wildcard
             next unless f[:value] == :bind
             field = MIR::FieldGet.new(MIR::FieldGet.new(subject, v.to_s), f[:name].to_s)
@@ -7072,21 +7072,21 @@ class MIRLowering
         end
       }
       branches = node.cases.flat_map { |c|
-        body = lower_branch.call(c[:body])
+        body = lower_branch.call(c.body)
         # WHEN-arms are subject-independent guard expressions, even on
         # union subjects. Dispatch them BEFORE the union/string/eq
-        # paths or the union path will treat c[:value] (a Bool expr)
+        # paths or the union path will treat c.value (a Bool expr)
         # as a variant tag and emit `tag == .true`-style invalid Zig.
-        if c[:kind] == :when
-          [{ cond: lower(c[:value]), body: body }]
+        if c.kind == :when
+          [{ cond: lower(c.value), body: body }]
         elsif is_union
-          variant = case c[:value]
-                    when AST::GetField then c[:value].field
-                    when AST::MethodCall then c[:value].name
+          variant = case c.value
+                    when AST::GetField then c.value.field
+                    when AST::MethodCall then c.value.name
                     # PURE: fallback case value for union/string match is a literal or identifier.
-                    else emit_expr(lower(c[:value]))
+                    else emit_expr(lower(c.value))
                     end
-          extra_variants = (c[:extra_values] || []).map { |ev|
+          extra_variants = (c.extra_values || []).map { |ev|
             case ev
             when AST::GetField then ev.field
             when AST::MethodCall then ev.name
@@ -7104,23 +7104,23 @@ class MIRLowering
           # so sharing references inside the array is safe; if any
           # downstream pass starts mutating MIR nodes in place this
           # invariant must be revisited.
-          if (c[:binding] || c[:destructure]) && arm_variants.length > 1
+          if (c.binding || c.destructure) && arm_variants.length > 1
             arm_variants.map { |v|
               { cond: tag_eq.call(v), body: union_bindings.call(c, v, is_mutable) + body.dup }
             }
           else
-            body = union_bindings.call(c, variant, is_mutable) + T.must(body) if c[:binding] || c[:destructure]
+            body = union_bindings.call(c, variant, is_mutable) + T.must(body) if c.binding || c.destructure
             cond = arm_variants.map { |v| tag_eq.call(v) }.reduce { |acc, x| MIR::BinOp.new("or", acc, x) }
             [{ cond: cond, body: body }]
           end
         else
           cond = if node.string_match
-            head_eql = emit_builtin(:strEql, [subject, lower(c[:value])])
-            (c[:extra_values] || []).reduce(head_eql) do |acc, ev|
+            head_eql = emit_builtin(:strEql, [subject, lower(c.value)])
+            (c.extra_values || []).reduce(head_eql) do |acc, ev|
               MIR::BinOp.new("or", acc, emit_builtin(:strEql, [subject, lower(ev)]))
             end
-          elsif c[:kind] == :struct_pattern
-            pat = c[:value]
+          elsif c.kind == :struct_pattern
+            pat = c.value
             cond_parts, bind_stmts = lower_struct_pattern(subject, pat)
             body = bind_stmts + body if bind_stmts.any?
             if cond_parts.empty?
@@ -7128,12 +7128,12 @@ class MIRLowering
             else
               cond_parts.reduce { |acc, part| MIR::BinOp.new("and", acc, part) }
             end
-          elsif c[:kind] == :when
+          elsif c.kind == :when
             # WHEN guard: condition IS the guard expression, not subject == guard
-            lower(c[:value])
+            lower(c.value)
           else
-            head_eq = MIR::BinOp.new("==", subject, lower(c[:value]))
-            (c[:extra_values] || []).reduce(head_eq) do |acc, ev|
+            head_eq = MIR::BinOp.new("==", subject, lower(c.value))
+            (c.extra_values || []).reduce(head_eq) do |acc, ev|
               MIR::BinOp.new("or", acc, MIR::BinOp.new("==", subject, lower(ev)))
             end
           end
