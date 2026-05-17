@@ -373,6 +373,23 @@ module AST
       @type_object ||= Type.new(:Untyped)
     end
 
+    # full_type, or `default` when it is the :Untyped sentinel (the
+    # node was never stamped). Single home for the "type, else
+    # fallback" decision -- pass a value or a block for a lazy default.
+    sig { params(default: T.untyped, blk: T.untyped).returns(T.untyped) }
+    def full_type_or(default = nil, &blk)
+      ft = full_type
+      return ft unless ft.untyped?
+      blk ? blk.call : default
+    end
+
+    # True when the node carries a real (stamped) type, i.e. full_type
+    # is not the :Untyped sentinel.
+    sig { returns(T::Boolean) }
+    def typed?
+      !full_type.untyped?
+    end
+
     sig { params(val: T.untyped).returns(T.nilable(Type)) }
     def coerced_type=(val)
       return @coerced_type_object = T.let(nil, T.nilable(Type)) if val.nil?
@@ -799,7 +816,7 @@ module AST
         if BOOL_BINOPS.include?(op)
           Type.new(:Bool)
         else
-          Type.new(left&.full_type&.resolved || right&.full_type&.resolved || :Any)
+          Type.new(left&.full_type.resolved || right&.full_type.resolved || :Any)
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
@@ -825,7 +842,7 @@ module AST
     include Locatable
     # Derived: NOT -> Bool; otherwise the operand's type.
     def full_type
-      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right&.full_type&.resolved || :Any)
+      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right&.full_type.resolved || :Any)
     end
   end
   # Parser-only placeholder for call-site override syntax; the annotator

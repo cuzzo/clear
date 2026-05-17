@@ -373,7 +373,7 @@ class PipelineHost
 
   sig { params(src: T.untyped, dst: T.untyped).returns(T.nilable(T::Boolean)) }
   def copy_type_info(src, dst)
-    dst.full_type = src.full_type if !src.full_type.untyped? && dst.respond_to?(:full_type=)
+    dst.full_type = src.full_type if src.typed? && dst.respond_to?(:full_type=)
     dst.full_type = src.full_type if src.respond_to?(:full_type) && src.full_type && dst.respond_to?(:full_type=)
     dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
     dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)

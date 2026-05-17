@@ -1420,9 +1420,7 @@ private
 
     # A destructuring pattern's type IS the subject it destructures
     # (the MATCH expr) — not a guess.
-    pat.full_type = match_node.expr.full_type.untyped? ?
-                    Type.new(match_node.expr.resolved_type || :Any) :
-                    match_node.expr.full_type
+    pat.full_type = match_node.expr.full_type_or { Type.new(match_node.expr.resolved_type || :Any) }
     nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
   end
 
@@ -1661,7 +1659,7 @@ private
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
             c[:destructure].full_type =
-              node.expr.full_type.untyped? ? Type.new(node.expr.resolved_type || :Any) : node.expr.full_type
+              node.expr.full_type_or { Type.new(node.expr.resolved_type || :Any) }
             variant_name = case c[:value]
                            when AST::GetField   then c[:value].field
                            when AST::MethodCall then c[:value].name
@@ -2159,7 +2157,7 @@ private
     if inline_bg_sources.any?
       source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
       error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-             type: node.value.full_type.untyped? ? "BG handle" : node.value.full_type,
+             type: node.value.full_type_or("BG handle"),
              hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
     end
 
@@ -2881,7 +2879,7 @@ private
       end
     end
     classify_ownership!(node.symbol)
-    og_declare(node.name, node, node.full_type.untyped? ? final_type : node.full_type)
+    og_declare(node.name, node, node.full_type_or(final_type))
     register_container_borrow!(node)
     # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
     ti = node.full_type
@@ -5239,7 +5237,7 @@ private
       error!(node, :YIELD_OUTSIDE_BG_STREAM)
     end
     visit(node.expr)
-    node.full_type = Type.new(node.expr.full_type.untyped? ? :Void : node.expr.full_type)
+    node.full_type = Type.new(node.expr.full_type_or(:Void))
     T.must(@stream_yield_types) << Type.new(node.full_type)
     record_effect(EffectTracker::SUSPENDS)
   end
@@ -5257,7 +5255,7 @@ private
     last_type = T.let(:Void, Symbol)
     node.body.each do |expr|
       visit(expr)
-      last_type = expr.respond_to?(:full_type) && !expr.full_type.untyped? ? expr.full_type : :Void
+      last_type = expr.respond_to?(:full_type) ? expr.full_type_or(:Void) : :Void
       # Track names declared inside the body so we don't treat them as outer captures.
       if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
         locally_bound << expr.name
@@ -5358,7 +5356,7 @@ private
     last_type = T.let(:Void, Symbol)
     node.steps.each do |step|
       visit(step[:expr])
-      step_type = step[:expr].respond_to?(:full_type) && !step[:expr].full_type.untyped? ? step[:expr].full_type : :Void
+      step_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type_or(:Void) : :Void
 
       if step[:binding]
         # Unwrap error union for the binding: !T -> T
@@ -5386,7 +5384,7 @@ private
   def visit_NextExpr(node)
     record_effect(EffectTracker::YIELD)
     visit(node.expr)
-    promise_type = Type.new(node.expr.full_type.untyped? ? :Void : node.expr.full_type)
+    promise_type = Type.new(node.expr.full_type_or(:Void))
 
     unless promise_type.future?
       error!(node, :NEXT_NEEDS_FUTURE, got: node.expr.full_type)
