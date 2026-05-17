@@ -13,9 +13,9 @@ require_relative "../src/backends/transpiler"
 #   END
 #
 # AS / { destructure } apply to the whole arm; per-pattern AS is not a
-# thing. Single-pattern arms keep their existing AST shape (no
-# :extra_values) for back-compat. Multi-arm AS / destructure require
-# every variant to share payload shape (post-generic-substitution).
+# thing. Single-pattern arms carry an empty :extra_values (the field is
+# never nil). Multi-arm AS / destructure require every variant to share
+# payload shape (post-generic-substitution).
 RSpec.describe "MATCH multi-pattern arm" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
@@ -46,7 +46,7 @@ RSpec.describe "MATCH multi-pattern arm" do
   # ============================================================================
 
   describe "parser — statement-position" do
-    it "single-pattern arms have no :extra_values key (back-compat)" do
+    it "single-pattern arms have an empty :extra_values" do
       src = <<~CLEAR
         UNION Op { A, B, C }
         FN main() RETURNS Void ->
@@ -59,7 +59,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(1)
-      expect(m.cases[0].extra_values).to be_nil
+      expect(m.cases[0].extra_values).to eq([])
     end
 
     it "two-pattern arm collects the second pattern under :extra_values" do
@@ -142,8 +142,8 @@ RSpec.describe "MATCH multi-pattern arm" do
       m = find_match(parse(src))
       expect(m.cases.size).to eq(3)
       expect(m.cases[0][:extra_values].map(&:field)).to eq(["B"])
-      expect(m.cases[1].extra_values).to be_nil
-      expect(m.cases[2].extra_values).to be_nil
+      expect(m.cases[1].extra_values).to eq([])
+      expect(m.cases[2].extra_values).to eq([])
     end
 
     it "arm-separator comma after body is still consumed (not as multi-pattern)" do
@@ -161,7 +161,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(2)
-      m.cases.each { |c| expect(c.extra_values).to be_nil }
+      m.cases.each { |c| expect(c.extra_values).to eq([]) }
     end
   end
 
@@ -185,7 +185,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(2)
-      expect(m.cases[0].extra_values).to be_nil
+      expect(m.cases[0].extra_values).to eq([])
       expect(m.cases[1][:kind]).to eq(:when)
     end
 
@@ -202,7 +202,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(1)
-      expect(m.cases[0].extra_values).to be_nil
+      expect(m.cases[0].extra_values).to eq([])
       expect(m.default_case).not_to be_nil
     end
 

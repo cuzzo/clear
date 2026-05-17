@@ -1047,7 +1047,7 @@ RSpec.describe MIRLowering do
       case_val.full_type = :Direction
       case_body = [make_lit(:NUMBER, 1.0)]
 
-      cases = [{ kind: :eq, value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1066,7 +1066,7 @@ RSpec.describe MIRLowering do
       case_val.full_type = :Result
       case_body = [make_lit(:NUMBER, 1.0)]
 
-      cases = [{ kind: :eq, value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1084,7 +1084,7 @@ RSpec.describe MIRLowering do
       case_val = make_lit(:STRING, "quit")
       case_body = [make_lit(:NUMBER, 0, full_type: :Int64)]
 
-      cases = [{ kind: :eq, value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
       node.string_match = true
@@ -1102,7 +1102,7 @@ RSpec.describe MIRLowering do
       case_body = [make_lit(:STRING, "one")]
       default_body = [make_lit(:STRING, "other")]
 
-      cases = [{ kind: :eq, value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, default_body, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1114,12 +1114,12 @@ RSpec.describe MIRLowering do
 
     it "lowers integer match arms with extra values into a shared switch prong" do
       expr = make_id("x", full_type: :Int64)
-      cases = [{
+      cases = [AST::MatchCase.new(
         kind: :eq,
         value: make_lit(:INT64, 1, full_type: :Int64),
         extra_values: [make_lit(:INT64, 2, full_type: :Int64), make_lit(:INT64, 3, full_type: :Int64)],
         body: [make_lit(:STRING, "small")]
-      }]
+      )]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1134,7 +1134,7 @@ RSpec.describe MIRLowering do
       expr = make_id("dir", full_type: :Direction)
       north = AST::GetField.new(tok, make_id("Direction"), "North")
       north.full_type = :Direction
-      node = AST::MatchStatement.new(tok, expr, [{ kind: :eq, value: north, body: [make_lit(:NUMBER, 1.0)] }], nil, nil, nil, false, nil)
+      node = AST::MatchStatement.new(tok, expr, [AST::MatchCase.new(kind: :eq, value: north, body: [make_lit(:NUMBER, 1.0)])], nil, nil, nil, false, nil)
       node.full_type = :Void
 
       result = lowering(enum_schemas: { Direction: [:North, :South] }).lower(node)
@@ -1145,7 +1145,7 @@ RSpec.describe MIRLowering do
 
     it "lowers expression-mode match to a BlockExpr" do
       expr = make_id("x", full_type: :Int64)
-      cases = [{ kind: :eq, value: make_lit(:INT64, 1, full_type: :Int64), body: [make_lit(:INT64, 10, full_type: :Int64)] }]
+      cases = [AST::MatchCase.new(kind: :eq, value: make_lit(:INT64, 1, full_type: :Int64), body: [make_lit(:INT64, 10, full_type: :Int64)])]
       node = AST::MatchStatement.new(tok, expr, cases, [make_lit(:INT64, 0, full_type: :Int64)], nil, nil, true, nil)
       node.full_type = :Int64
       node.expr_mode = true
@@ -1162,13 +1162,13 @@ RSpec.describe MIRLowering do
       ok.full_type = :Result
       err = AST::GetField.new(tok, make_id("Result"), "Err")
       err.full_type = :Result
-      cases = [{
+      cases = [AST::MatchCase.new(
         kind: :eq,
         value: ok,
         extra_values: [err],
         binding: "payload",
         body: [make_lit(:NUMBER, 1.0)]
-      }]
+      )]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1184,7 +1184,7 @@ RSpec.describe MIRLowering do
     it "lowers WHEN guard arms before subject equality dispatch" do
       expr = make_id("x", full_type: :Int64)
       guard = make_lit(:BOOLEAN, true, full_type: :Boolean)
-      cases = [{ kind: :when, value: guard, body: [make_lit(:STRING, "guarded")] }]
+      cases = [AST::MatchCase.new(kind: :when, value: guard, body: [make_lit(:STRING, "guarded")])]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 

@@ -3263,7 +3263,7 @@ class Parser
         guard_expr = parse_expression
       end
 
-      capabilities << { capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable, guard_expr: guard_expr }
+      capabilities << AST::Capability.new(capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable, guard_expr: guard_expr)
 
       # Check for comma (continue) or opening brace (done)
       break unless match!(:CHAR, ',')
@@ -3331,13 +3331,13 @@ class Parser
       alias_mutable = true if match!(:KEYWORD, 'MUTABLE')
       alias_name = T.must(consume(:VAR_ID)).value
 
-      capabilities << {
+      capabilities << AST::Capability.new(
         capability: :SNAPSHOT,
         var_node: var_node,
         alias: alias_name,
         alias_mutable: alias_mutable,
         snapshot_token: snapshot_tok,
-      }
+      )
       any_mutable ||= alias_mutable
 
       break unless match!(:CHAR, ',')
@@ -3412,13 +3412,13 @@ class Parser
 
     # `view_token` lets fixable errors replace VIEW with MATERIALIZED VIEW
     # using the exact source span.
-    node = AST::WithBlock.new(with_token, [{
+    node = AST::WithBlock.new(with_token, [AST::Capability.new(
       capability: capability,
       var_node: var_node,
       alias: alias_name,
       alias_mutable: false,
       view_token: view_token,
-    }], body)
+    )], body)
     node.view_kind = view_kind
     node
   end

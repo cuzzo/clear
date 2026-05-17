@@ -77,6 +77,7 @@ module AST
     def initialize(**kw)
       super
       self[:body] = [] if self[:body].nil?
+      self[:extra_values] = [] if self[:extra_values].nil?
     end
 
     sig { returns(Symbol) }
@@ -94,9 +95,9 @@ module AST
       self[:body]
     end
 
-    sig { params(val: T.nilable(T::Array[AST::Locatable])).void }
+    sig { params(val: T::Array[AST::Locatable]).void }
     def body=(val)
-      self[:body] = val.nil? ? [] : val
+      self[:body] = val
     end
 
     sig { returns(T.nilable(String)) }
@@ -109,7 +110,7 @@ module AST
       self[:destructure]
     end
 
-    sig { returns(T.nilable(T::Array[AST::Locatable])) }
+    sig { returns(T::Array[AST::Locatable]) }
     def extra_values
       self[:extra_values]
     end
@@ -124,13 +125,6 @@ module AST
       self[:indirect_payload_as] = val
     end
 
-    # Idempotent normalizer for the parser seam: passthrough a MatchCase,
-    # build one from a legacy clause Hash.
-    sig { params(c: T.any(MatchCase, T::Hash[Symbol, T.untyped])).returns(MatchCase) }
-    def self.coerce(c)
-      return c if c.is_a?(MatchCase)
-      new(**c.slice(*members))
-    end
   end
 
   # One paren-binding of an IF...AS (AST::IfBind#bindings element):
@@ -170,9 +164,9 @@ module AST
       self[:unwrapped_type]
     end
 
-    sig { params(val: T.nilable(Type)).void }
+    sig { params(val: Type).void }
     def unwrapped_type=(val)
-      self[:unwrapped_type] = val.nil? ? Type.new(:Untyped) : val
+      self[:unwrapped_type] = val
     end
 
   end
@@ -204,16 +198,11 @@ module AST
       self[:resolved_type]
     end
 
-    sig { params(val: T.nilable(Type)).void }
+    sig { params(val: Type).void }
     def resolved_type=(val)
-      self[:resolved_type] = val.nil? ? Type.new(:Untyped) : val
+      self[:resolved_type] = val
     end
 
-    sig { params(c: T.any(Capability, T::Hash[Symbol, T.untyped])).returns(Capability) }
-    def self.coerce(c)
-      return c if c.is_a?(Capability)
-      new(**c.slice(*members))
-    end
   end
 
   # The value of a struct-pattern field: the :wildcard sentinel
@@ -236,7 +225,7 @@ module AST
       self[:name]
     end
 
-    sig { returns(T.nilable(Lexer::Token)) }
+    sig { returns(Lexer::Token) }
     def name_token
       self[:name_token]
     end
@@ -269,11 +258,6 @@ module AST
       v.is_a?(AST::Locatable) ? v : nil
     end
 
-    sig { params(f: T.any(PatternField, T::Hash[Symbol, T.untyped])).returns(PatternField) }
-    def self.coerce(f)
-      return f if f.is_a?(PatternField)
-      new(**f.slice(*members))
-    end
   end
 
   # Walk all statements in a body, recursing into control flow branches.
@@ -864,9 +848,9 @@ module AST
       self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { params(val: T::Array[T.untyped]).void }
     def params=(val)
-      self[:params] = (val || []).map { |p| Param.coerce(p) }
+      self[:params] = val.map { |p| Param.coerce(p) }
     end
 
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
@@ -1153,9 +1137,9 @@ module AST
       self[:bindings] = [] if self[:bindings].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[AST::Binding])).void }
+    sig { params(val: T::Array[AST::Binding]).void }
     def bindings=(val)
-      self[:bindings] = val || []
+      self[:bindings] = val
     end
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
@@ -1277,12 +1261,12 @@ module AST
 
     def initialize(*args)
       super
-      self[:capabilities] = (self[:capabilities] || []).map { |c| Capability.coerce(c) }
+      self[:capabilities] = [] if self[:capabilities].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { params(val: T::Array[AST::Capability]).void }
     def capabilities=(val)
-      self[:capabilities] = (val || []).map { |c| Capability.coerce(c) }
+      self[:capabilities] = val
     end
 
     sig { returns(T::Array[T::Array[T.untyped]]) }
@@ -1450,12 +1434,12 @@ module AST
 
     def initialize(*args)
       super
-      self[:fields] = (self[:fields] || []).map { |f| PatternField.coerce(f) }
+      self[:fields] = [] if self[:fields].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { params(val: T::Array[AST::PatternField]).void }
     def fields=(val)
-      self[:fields] = (val || []).map { |f| PatternField.coerce(f) }
+      self[:fields] = val
     end
   end
   # RangeLit: a range expression (start..<end) or (start..<=end).
@@ -1608,12 +1592,12 @@ module AST
 
     def initialize(*args)
       super
-      self[:cases] = (self[:cases] || []).map { |c| MatchCase.coerce(c) }
+      self[:cases] = [] if self[:cases].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { params(val: T::Array[AST::MatchCase]).void }
     def cases=(val)
-      self[:cases] = (val || []).map { |c| MatchCase.coerce(c) }
+      self[:cases] = val
     end
 
     sig { returns(T::Array[T.untyped]) }
