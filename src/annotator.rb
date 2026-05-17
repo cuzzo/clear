@@ -1120,7 +1120,7 @@ private
     # visitor, so type them here.
     node.fields.each do |_, f|
       d = f[:default]
-      next unless d && d.respond_to?(:full_type=) && d.full_type.nil?
+      next unless d && d.full_type.nil?
       d.full_type = f[:type].is_a?(Type) ? f[:type] : Type.new(f[:type] || :Any)
     end
 
@@ -1422,7 +1422,7 @@ private
 
     # A destructuring pattern's type IS the subject it destructures
     # (the MATCH expr) — not a guess.
-    if pat.respond_to?(:full_type=) && pat.full_type.nil?
+    if pat.full_type.nil?
       pat.full_type = match_node.expr.full_type ||
                       Type.new(match_node.expr.resolved_type || :Any)
     end
@@ -1663,7 +1663,7 @@ private
             # destructures (the MATCH union expr) — same principle as
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
-            if c[:destructure].respond_to?(:full_type=) && c[:destructure].full_type.nil?
+            if c[:destructure].full_type.nil?
               c[:destructure].full_type =
                 node.expr.full_type || Type.new(node.expr.resolved_type || :Any)
             end
@@ -2360,7 +2360,7 @@ private
     # value. The codebase's established marker for a type-position
     # identifier is :Type (cf. comptime type args in function_analysis)
     # — not a guess.
-    if node.type_name.respond_to?(:full_type=) && node.type_name.full_type.nil?
+    if node.type_name.full_type.nil?
       node.type_name.full_type = Type.new(:Type)
     end
 
@@ -3987,7 +3987,7 @@ private
 
     # The bound identifier ($u) IS the per-element binding — type it
     # exactly as it was declared (binding_type), not a guess.
-    if node.right.respond_to?(:full_type=) && node.right.full_type.nil?
+    if node.right.full_type.nil?
       node.right.full_type = binding_type
     end
 

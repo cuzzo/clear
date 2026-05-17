@@ -226,7 +226,7 @@ module PipeAnalysis
     # (a transform op -> the post-op stream type; a terminal -> its
     # result / Void). Stamp it so no pipeline op reaches MIR untyped.
     op = node.right
-    if op.respond_to?(:full_type=) && op.full_type.nil? && node.full_type
+    if op.full_type.nil? && node.full_type
       op.full_type = node.full_type
     end
   end
@@ -489,7 +489,7 @@ module PipeAnalysis
       # The JOIN key lambda IS a predicate ((left,right)->Bool). Type
       # the LambdaLit via the standard lambda-signature builder (same
       # as visit_LambdaLit) — its return is the Bool just validated.
-      if key_expr.respond_to?(:full_type=) && key_expr.full_type.nil?
+      if key_expr.full_type.nil?
         key_expr.full_type = build_lambda_signature(params, :Bool)
       end
     else
@@ -1505,10 +1505,10 @@ module PipeAnalysis
     # category as a type-name ident; stamp the codebase's :Type marker
     # (not a guess: it is not an evaluatable value).
     options.each_value do |v|
-      if v.is_a?(AST::Identifier) && v.respond_to?(:full_type) && v.full_type.nil?
+      if v.is_a?(AST::Identifier) && v.full_type.nil?
         # Keyword selector (MICRO/STANDARD/...): compile-time marker.
         v.full_type = Type.new(:Type)
-      elsif v.respond_to?(:full_type) && v.full_type.nil?
+      elsif v.full_type.nil?
         # A real value option (workers: 2, parallel: TRUE) — annotate
         # it normally so it gets its true type, not a marker.
         visit(v)
@@ -1633,7 +1633,7 @@ module PipeAnalysis
     # type just computed here — stamp it (and its WHERE/SELECT
     # expression sub-node) so no wrapped op reaches MIR untyped.
     inner = conc.op
-    if inner.respond_to?(:full_type=) && inner.full_type.nil?
+    if inner.full_type.nil?
       inner.full_type = node.full_type || proxy.full_type
     end
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment

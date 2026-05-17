@@ -757,7 +757,7 @@ class PipelineRewriter
       inner_it = AST::Identifier.new(token, inner_it_var)
       # inner_it iterates inner_expr's elements — its type IS that
       # element type (not a guess; derived from the flattened array).
-      if inner_expr.respond_to?(:full_type) && inner_expr.full_type
+      if inner_expr.full_type
         et = Type.new(inner_expr.full_type).element_type
         inner_it.full_type = et if et
       end
