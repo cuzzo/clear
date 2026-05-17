@@ -156,14 +156,24 @@ MIR::DupeSlice (string slice dupe) -> unblocks the
 76_catch_blocks + 78_snapshot_ambiguous pass; allowlisted. 271 still
 green; 0 regressions (238/0-fail).
 
+Commit 4 LANDED: MIR::TryExpr at statement position (`call() OR
+RAISE;`, result discarded) -> compile_try_stmt + emit_err_propagate;
+381_mutable_list_indexed_set passes (allowlisted).
+
+Commit 5 LANDED: MIR::TryCatch at statement position (`call() OR
+{...};`) -> compile_try_catch_stmt (EFLAG/JF + ECLR + catch body).
+Correct + 0 regressions but no test flips yet: the 4 TryCatch tests
+each hit an orthogonal downstream blocker, now cleanly PENDING:
+- 216/217: MIR::InlineZig stmt "or_exit_line" (OR EXIT line marker).
+- 350: cap-param helper cluster.
+- 524: TryCatch in let-init position (inferred_expr_type /
+  compile_let lacks MIR::TryCatch).
+
 Remaining (next commits), all cleanly PENDING with accurate reasons:
-- 77_error_snapshot -- a different DupeSlice site (snapshot path),
-  not the binding-type one; orthogonal to error-union.
-- OR EXIT error_reassigns (272).
-- MIR::TryCatch / MIR::TryExpr at stmt position (216/217/350/360/
-  381/519/524).
-- 352 (Bool-return CatchWrapper inside concurrent) / cap-param
-  raise wrappers (335) -- need the cap-param cluster.
+- OR EXIT error_reassigns + "or_exit_line" InlineZig (272/216/217).
+- TryCatch as let-init / expression value (524).
+- 77_error_snapshot -- snapshot-path DupeSlice site (orthogonal).
+- 352 / 335 / 360 -- cap-param helper cluster (orthogonal).
 
 ## Invariants
 

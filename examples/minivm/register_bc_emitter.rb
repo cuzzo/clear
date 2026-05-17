@@ -706,6 +706,10 @@ class RegisterBcEmitter
       # `call() OR RAISE;` at statement position (result discarded).
       # Compile the inner call, then propagate if it raised.
       compile_try_stmt(stmt)
+    when MIR::TryCatch
+      # `call() OR { ... };` at statement position -- run the catch
+      # body if the call raised (ECLR first), else fall through.
+      compile_try_catch_stmt(stmt)
     else
       raise Unsupported, "register emitter does not support #{stmt.class.name} yet"
     end
@@ -3083,6 +3087,25 @@ class RegisterBcEmitter
   def compile_try_stmt(try_expr)
     compile_expr_stmt(MIR::ExprStmt.new(try_expr.expr, false))
     emit_err_propagate
+  end
+
+  # `call() OR { ...catch... };` at statement position. Compile the
+  # call (value discarded); if it raised, ECLR and run the catch
+  # body; else skip the catch.
+  def compile_try_catch_stmt(stmt)
+    compile_expr_stmt(MIR::ExprStmt.new(stmt.expr, false))
+    e = fresh_ireg
+    emit(EFLAG, e)
+    emit(JF, e, 0)
+    skip = @ops.length - 1
+    emit(ECLR)
+    cb = stmt.catch_body
+    if cb.is_a?(MIR::ScopeBlock)
+      semantic_body(cb.body || []).each { |c| compile_stmt(c) }
+    elsif cb
+      compile_stmt(cb)
+    end
+    @ops[skip] = @ops.length
   end
 
   # Wrapper fn whose body is a single MIR::CatchWrapper. Calls
