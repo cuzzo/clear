@@ -1640,7 +1640,7 @@ class Type
   sig { params(node: T.untyped).returns(T.untyped) }
   def self.from_node(node)
     return nil unless node
-    t = node.respond_to?(:full_type) ? (node.full_type rescue nil) : node
+    t = node.respond_to?(:full_type) ? node.full_type : node
     return nil unless t
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
   end

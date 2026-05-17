@@ -132,8 +132,7 @@ module FunctionAnalysis
 
       if func_type.extern
         args.each do |arg|
-          ti = arg.full_type rescue nil
-          if ti&.respond_to?(:soa?) && ti.soa?
+          if arg.full_type.soa?
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end

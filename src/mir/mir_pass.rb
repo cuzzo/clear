@@ -660,9 +660,7 @@ class MIRPass
   def or_rescue_needs_fallback_dupe?(or_node)
     return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
     left = or_node.left
-    ti = left.full_type rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
+    return true if left.full_type.heap_provenance?
     if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(left)
     end
@@ -672,9 +670,7 @@ class MIRPass
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def or_rescue_needs_fallback_dupe_left?(expr)
     return false unless expr
-    ti = expr.full_type rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
+    return true if expr.full_type.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(expr.left)
     end
@@ -700,9 +696,7 @@ class MIRPass
             # consumed -- its cleanup defer must fire normally.
             lhs = stmt.name
             if lhs.is_a?(AST::GetIndex)
-              target_ti = (lhs.target.full_type rescue nil)
-              target_ti = target_ti.is_a?(Type) ? target_ti : (target_ti ? Type.new(target_ti) : nil)
-              target_ti&.map? ? nil : stmt.value
+              lhs.target.full_type.map? ? nil : stmt.value
             else
               stmt.value
             end
@@ -877,17 +871,14 @@ class MIRPass
     target_node = stmt.name.target
 
     # Look up the INDEX_OPS :set entry for this container type.
-    target_ti = target_node.full_type rescue nil
-    target_ti = Type.new(target_ti) if target_ti && !target_ti.is_a?(Type)
+    target_ti = target_node.full_type
     set_op = resolve_container_set_op(target_ti)
     return unless set_op && set_op[:takes_value]
 
     # Check if the value type needs frame-to-heap promotion.
     # Strings are handled by the :dupe_string_literal transform in the lowerer;
     # :container_promote only fires for !string? values.
-    val_ti = stmt.value.full_type rescue nil
-    return unless val_ti
-    val_ti = Type.new(val_ti) unless val_ti.is_a?(Type)
+    val_ti = stmt.value.full_type
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
     # Annotate directly on Assignment node (no MIR::Promote needed).

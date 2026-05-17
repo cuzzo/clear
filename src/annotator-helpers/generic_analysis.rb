@@ -658,9 +658,8 @@ module GenericAnalysis
         target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
         return nil if target_schema.is_a?(Hash) && (target_schema[:kind] == :enum || target_schema[:kind] == :union)
       end
-      field_ti = expr.full_type rescue nil
-      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-      if field_ti && !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+      field_ti = expr.full_type
+      if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         return root_variable_name(expr.target)
       end
     end
@@ -682,9 +681,7 @@ module GenericAnalysis
   def has_heap_promoted_call?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
-    ti = expr.full_type rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
+    return true if expr.full_type.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return has_heap_promoted_call?(expr.left)
     end
@@ -698,9 +695,8 @@ module GenericAnalysis
   def bg_exit_frame_string?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
-    ti = expr.full_type rescue nil
-    t = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)
-    return false unless t&.string?
+    t = expr.full_type
+    return false unless t.string?
     return false if t.heap? || t.rodata?
     return true  if t.frame?
     # Check stdlib def for explicit frame allocation (provenance not yet set on expr).

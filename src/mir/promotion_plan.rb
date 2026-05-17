@@ -317,7 +317,7 @@ module CleanupClassifier
       next unless stmt.name.is_a?(AST::GetField)
       target_node = stmt.name.target
 
-      field_ti = stmt.name.full_type rescue nil
+      field_ti = stmt.name.full_type
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
