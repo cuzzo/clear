@@ -59,7 +59,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(1)
-      expect(m.cases[0]).not_to have_key(:extra_values)
+      expect(m.cases[0].extra_values).to be_nil
     end
 
     it "two-pattern arm collects the second pattern under :extra_values" do
@@ -142,8 +142,8 @@ RSpec.describe "MATCH multi-pattern arm" do
       m = find_match(parse(src))
       expect(m.cases.size).to eq(3)
       expect(m.cases[0][:extra_values].map(&:field)).to eq(["B"])
-      expect(m.cases[1]).not_to have_key(:extra_values)
-      expect(m.cases[2]).not_to have_key(:extra_values)
+      expect(m.cases[1].extra_values).to be_nil
+      expect(m.cases[2].extra_values).to be_nil
     end
 
     it "arm-separator comma after body is still consumed (not as multi-pattern)" do
@@ -161,7 +161,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(2)
-      m.cases.each { |c| expect(c).not_to have_key(:extra_values) }
+      m.cases.each { |c| expect(c.extra_values).to be_nil }
     end
   end
 
@@ -185,7 +185,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(2)
-      expect(m.cases[0]).not_to have_key(:extra_values)
+      expect(m.cases[0].extra_values).to be_nil
       expect(m.cases[1][:kind]).to eq(:when)
     end
 
@@ -202,7 +202,7 @@ RSpec.describe "MATCH multi-pattern arm" do
       CLEAR
       m = find_match(parse(src))
       expect(m.cases.size).to eq(1)
-      expect(m.cases[0]).not_to have_key(:extra_values)
+      expect(m.cases[0].extra_values).to be_nil
       expect(m.default_case).not_to be_nil
     end
 

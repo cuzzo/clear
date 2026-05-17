@@ -2105,11 +2105,11 @@ class Parser
         consume(:KEYWORD, 'WHEN')
         condition = parse_expression
         consume(:ARROW)
-        cases << { kind: :when, value: condition, body: [parse_expression] }
+        cases << AST::MatchCase.new(kind: :when, value: condition, body: [parse_expression])
       elsif match?(:CHAR, '{')
         pattern = parse_struct_pattern
         consume(:ARROW)
-        cases << { kind: :struct_pattern, value: pattern, body: [parse_expression] }
+        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: [parse_expression])
       else
         @suppress_struct_lit = true
         first_pattern = parse_expression
@@ -2134,10 +2134,10 @@ class Parser
         end
         consume(:ARROW)
         if extra_patterns.empty?
-          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression] }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression])
         else
-          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: [parse_expression] }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: [parse_expression])
         end
       end
       match!(:CHAR, ',')
@@ -2206,12 +2206,12 @@ class Parser
         condition = parse_expression
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :when, value: condition, body: body }
+        cases << AST::MatchCase.new(kind: :when, value: condition, body: body)
       elsif match?(:CHAR, '{')
         pattern = parse_struct_pattern
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :struct_pattern, value: pattern, body: body }
+        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: body)
       else
         # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
         # consumed as a constructor — the { starts a destructuring pattern.
@@ -2241,10 +2241,10 @@ class Parser
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
         if extra_patterns.empty?
-          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body)
         else
-          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: body }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: body)
         end
       end
       match!(:CHAR, ',')  # consume comma separator between cases if present

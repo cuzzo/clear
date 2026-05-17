@@ -61,6 +61,39 @@ module AST
     end
   end
 
+  # One arm of a MATCH statement (MatchStatement#cases element).
+  # Replaces the untyped clause hash {kind,value,body,binding,
+  # destructure,extra_values}. MATCH-only (WITH MATCH uses a separate
+  # parse_with_match_arms shape). `body` is ALWAYS an Array -- an empty
+  # array means "no body", never nil (no nil-vs-[] ambiguity). `value`
+  # is a heterogeneous AST pattern node (genuinely T.untyped).
+  # `indirect_payload_as` is an annotator-stamped flag (not from the
+  # parser): set when a union-variant destructure needs the transpiler
+  # to emit `subject.Variant.*` through an indirect (*T) payload.
+  MatchCase = Struct.new(:kind, :value, :body, :binding, :destructure, :extra_values,
+                         :indirect_payload_as,
+                         keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      self[:body] = [] if self[:body].nil?
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def body=(val)
+      self[:body] = val.nil? ? [] : val
+    end
+
+    # Idempotent normalizer for the parser seam: passthrough a MatchCase,
+    # build one from a legacy clause Hash.
+    sig { params(c: T.any(MatchCase, T::Hash[Symbol, T.untyped])).returns(MatchCase) }
+    def self.coerce(c)
+      return c if c.is_a?(MatchCase)
+      new(**c.slice(*members))
+    end
+  end
+
   # Walk all statements in a body, recursing into control flow branches.
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
