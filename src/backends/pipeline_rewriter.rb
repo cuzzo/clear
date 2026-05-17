@@ -72,7 +72,7 @@ class PipelineRewriter
       node.else_branch&.map! { |s| rewrite!(s) }
     when AST::MatchStatement
       node.expr = rewrite!(node.expr)
-      node.cases.each { |c| c[:body]&.map! { |s| rewrite!(s) } }
+      node.cases.each { |c| c.body&.map! { |s| rewrite!(s) } }
       node.default_case.map! { |s| rewrite!(s) } if node.default_case
     when AST::WhileLoop
       node.condition = rewrite!(node.condition)

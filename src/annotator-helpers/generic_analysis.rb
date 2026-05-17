@@ -569,7 +569,7 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     coll_src = if (decl_t = node.type) && decl_t.collection
       decl_t
-    elsif node.value.full_type&.collection
+    elsif node.value.full_type.collection
       node.value.full_type
     end
     if coll_src
@@ -587,22 +587,22 @@ module GenericAnalysis
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
     if !coll_src && (decl_t = node.type) && decl_t.soa
       node.full_type.soa = true if node.full_type
-      node.full_type&.soa = true
+      node.full_type.soa = true
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
     if (decl_t = node.type)
-      if decl_t.shard_count && !node.full_type&.shard_count
+      if decl_t.shard_count && !node.full_type.shard_count
         node.full_type.shard_count = decl_t.shard_count if node.full_type
-        node.full_type&.instance_variable_set(:@shard_count, decl_t.shard_count)
+        node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count)
       end
       if decl_t.sync && node.full_type && !node.full_type.sync
         node.full_type.sync = decl_t.sync
-        node.full_type&.sync = decl_t.sync
+        node.full_type.sync = decl_t.sync
       end
       if decl_t.ownership != :affine && node.full_type
         node.full_type.instance_variable_set(:@ownership, decl_t.ownership)
-        node.full_type&.instance_variable_set(:@ownership, decl_t.ownership)
+        node.full_type.instance_variable_set(:@ownership, decl_t.ownership)
       end
     end
   end
@@ -615,7 +615,7 @@ module GenericAnalysis
   def propagate_call_flags!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if has_heap_promoted_call?(node.value)
-      node.full_type&.provenance = :heap
+      node.full_type.provenance = :heap
     end
   end
 

@@ -1299,7 +1299,7 @@ module LoopFrameAnalysis
       walk_stmts!(stmt.then_branch)
       walk_stmts!(stmt.else_branch)
     when AST::MatchStatement
-      stmt.cases.each { |c| walk_stmts!(c[:body]) }
+      stmt.cases.each { |c| walk_stmts!(c.body) }
       walk_stmts!(stmt.default_case)
     when AST::WithBlock
       walk_stmts!(stmt.body)
@@ -1637,7 +1637,7 @@ module LoopFrameAnalysis
         scan_direct(s.then_branch, &block)
         scan_direct(s.else_branch, &block)
       when AST::MatchStatement
-        s.cases.each { |c| scan_direct(c[:body], &block) }
+        s.cases.each { |c| scan_direct(c.body, &block) }
         scan_direct(s.default_case, &block)
       when AST::WithBlock
         scan_direct(s.body, &block)
@@ -1823,7 +1823,7 @@ class BorrowChecker
       check_stmts(stmt.body)
 
     when AST::MatchStatement
-      stmt.cases.each { |c| check_stmts(c[:body]) }
+      stmt.cases.each { |c| check_stmts(c.body) }
       check_stmts(stmt.default_case)
 
     when AST::DoBlock

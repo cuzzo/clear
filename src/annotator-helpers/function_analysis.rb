@@ -251,9 +251,9 @@ module FunctionAnalysis
       callee_node = @fn_nodes[func_name]
       sig_return_heap = fsig && fsig.return_provenance == :heap
       if callee_node&.return_provenance == :heap || sig_return_heap
-        node.full_type&.provenance = :heap
-      elsif node.full_type&.needs_escape_promotion? && !node.full_type&.string?
-        node.full_type&.provenance = :heap
+        node.full_type.provenance = :heap
+      elsif node.full_type.needs_escape_promotion? && !node.full_type.string?
+        node.full_type.provenance = :heap
       else
         # Union return types with heap variants need heap_promoted_call
         # when the callee allocates at all (frame, heap, or alloc).
@@ -265,7 +265,7 @@ module FunctionAnalysis
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             if has_heap && callee_allocates
-              node.full_type&.provenance = :heap
+              node.full_type.provenance = :heap
             end
           end
         end

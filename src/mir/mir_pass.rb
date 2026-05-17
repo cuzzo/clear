@@ -245,7 +245,7 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         walk_for_bg_captures(stmt.body, bindings)
       when AST::MatchStatement
-        stmt.cases.each { |c| walk_for_bg_captures(c[:body], bindings) }
+        stmt.cases.each { |c| walk_for_bg_captures(c.body, bindings) }
         walk_for_bg_captures(stmt.default_case, bindings)
       when AST::WithBlock
         walk_for_bg_captures(stmt.body, bindings)
@@ -347,7 +347,7 @@ class MIRPass
     when AST::ForRange, AST::ForEach
       stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::MatchStatement
-      stmt.cases.each { |c| c[:body] = transform_body(c[:body], ctx) if c[:body] }
+      stmt.cases.each { |c| c.body = transform_body(c.body, ctx) if c.body }
       if stmt.default_case
         stmt.default_case = transform_body(stmt.default_case, ctx)
       end
@@ -502,7 +502,7 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         annotate_bg_exits_in_body!(stmt.body)
       when AST::MatchStatement
-        stmt.cases.each { |c| annotate_bg_exits_in_body!(c[:body]) }
+        stmt.cases.each { |c| annotate_bg_exits_in_body!(c.body) }
         annotate_bg_exits_in_body!(stmt.default_case)
       when AST::WithBlock
         annotate_bg_exits_in_body!(stmt.body)
