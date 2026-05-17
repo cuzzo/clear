@@ -1464,10 +1464,10 @@ private
       # heap ownership with the source. Strings are Copy in CLEAR, so
       # extracting a string variant doesn't require consuming the source.
       has_non_copy_as = node.cases&.any? { |c|
-        next false unless c[:binding]
-        vn = case c[:value]
-             when AST::GetField then c[:value].field
-             when AST::MethodCall then c[:value].name
+        next false unless c.binding
+        vn = case c.value
+             when AST::GetField then c.value.field
+             when AST::MethodCall then c.value.name
              end
         next false unless vn
         vt = (schema[:variants] || {})[vn]
@@ -1484,7 +1484,7 @@ private
       if has_non_copy_as
         source_name = node.expr.name
         # Check no case lacks a binding (all cases extract payloads).
-        all_cases_bind = node.cases&.all? { |c| c[:binding] }
+        all_cases_bind = node.cases&.all? { |c| c.binding }
         # Check DEFAULT doesn't reference the source value.
         # walk_body only visits statement-level nodes; we need to check
         # expression sub-trees too (e.g. RETURN input; has input inside).
@@ -1533,23 +1533,23 @@ private
 
     branch_logic = node.cases.map do |c|
       proc {
-        if c[:kind] == :when
-          visit(c[:value])
-          unless c[:value].resolved_type == :Bool
-            error!(node, :WHEN_NEEDS_BOOL, got: c[:value].resolved_type)
+        if c.kind == :when
+          visit(c.value)
+          unless c.value.resolved_type == :Bool
+            error!(node, :WHEN_NEEDS_BOOL, got: c.value.resolved_type)
           end
-        elsif c[:kind] == :struct_pattern
-          annotate_struct_pattern!(node, c[:value])
+        elsif c.kind == :struct_pattern
+          annotate_struct_pattern!(node, c.value)
         else
           # Suppress inline-struct "needs braces" error: variant names in MATCH cases are
           # patterns (tag identifiers), not constructors — they don't need field values.
           @match_pattern_context = true
-          visit(c[:value])
+          visit(c.value)
           # Multi-pattern arm: visit + type-check each extra pattern
           # too. A `{ field }` destructure goes through the SAME
           # handler as a single :struct_pattern arm so it is typed
           # (and its binds declared), not just visited.
-          c[:extra_values]&.each do |ev|
+          c.extra_values&.each do |ev|
             if ev.is_a?(AST::StructPattern)
               annotate_struct_pattern!(node, ev)
             else
@@ -1560,7 +1560,7 @@ private
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
           # Type-check the head pattern, then each extra. Patterns share
           # the arm's body so they must all have the same subject type.
-          [c[:value], *(c[:extra_values] || [])].each do |pat|
+          [c.value, *(c.extra_values || [])].each do |pat|
             case_t2 = Type.new(pat.resolved_type || :Any)
             base_match = expr_t2.generic_instance? && expr_t2.generic_base == pat.resolved_type
             string_match = expr_t2.string? && case_t2.string?
@@ -1572,20 +1572,20 @@ private
               error!(node, :MATCH_CASE_TYPE_MISMATCH, case: pat.resolved_type, expr: node.expr.resolved_type)
             end
           end
-          case_t2 = Type.new(c[:value].resolved_type || :Any)
+          case_t2 = Type.new(c.value.resolved_type || :Any)
 
           # Payload capture: `Shape.Circle AS r ->` (or multi-pattern
           # arm: `R.Ok, R.Other AS r ->`). For multi-arm bindings, every
           # variant in the arm must produce a payload of the SAME shape
           # (same payload type, or same inline-struct fields), since one
           # binding `r` is shared across all patterns in the body.
-          if c[:binding]
+          if c.binding
             if is_enum
-              error!(node, :MATCH_ENUM_CAPTURE, binding: c[:binding])
+              error!(node, :MATCH_ENUM_CAPTURE, binding: c.binding)
             elsif is_union
-              variant_name = case c[:value]
-                             when AST::GetField   then c[:value].field
-                             when AST::MethodCall then c[:value].name
+              variant_name = case c.value
+                             when AST::GetField   then c.value.field
+                             when AST::MethodCall then c.value.name
                              end
               # Verify each extra variant's payload matches the head's.
               # Apply union_subst before comparing so generic instances
@@ -1603,7 +1603,7 @@ private
                   p
                 end
               }
-              c[:extra_values]&.each do |ev|
+              c.extra_values&.each do |ev|
                 ev_name = case ev
                           when AST::GetField   then ev.field
                           when AST::MethodCall then ev.name
@@ -1613,36 +1613,36 @@ private
                 ev_payload   = normalize_payload.call(schema[:variants][ev_name])
                 if head_payload != ev_payload
                   error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
-                    head: variant_name, other: ev_name, kind: 'AS', name: c[:binding])
+                    head: variant_name, other: ev_name, kind: 'AS', name: c.binding)
                 end
               end
               if variant_name
                 raw_payload = schema[:variants][variant_name]
                 if raw_payload.nil?
-                  error!(node, :MATCH_UNIT_CAPTURE, binding: c[:binding], variant: variant_name)
+                  error!(node, :MATCH_UNIT_CAPTURE, binding: c.binding, variant: variant_name)
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
                   synthetic_type = :"#{type_name}_#{variant_name}"
-                  current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
-                  og_declare(c[:binding], nil, Type.new(synthetic_type))
-                  classify_ownership!(current_scope.locals[c[:binding]])
+                  current_scope.declare(c.binding, nil, Type.new(synthetic_type), false, false, nil, :stack)
+                  og_declare(c.binding, nil, Type.new(synthetic_type))
+                  classify_ownership!(current_scope.locals[c.binding])
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :indirect_payload
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                   inner_type = raw_payload[:type].is_a?(Type) ? raw_payload[:type] : Type.new(raw_payload[:type])
                   inner_type = union_subst.any? ? apply_type_subst(inner_type, union_subst) : inner_type
-                  current_scope.declare(c[:binding], nil, inner_type, false, false, nil, :stack)
-                  og_declare(c[:binding], nil, inner_type)
-                  classify_ownership!(current_scope.locals[c[:binding]])
-                  c[:indirect_payload_as] = true  # transpiler must emit subject.Variant.* (deref *T)
+                  current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
+                  og_declare(c.binding, nil, inner_type)
+                  classify_ownership!(current_scope.locals[c.binding])
+                  c.indirect_payload_as = true  # transpiler must emit subject.Variant.* (deref *T)
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
-                  current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
-                  og_declare(c[:binding], nil, payload_type)
-                  classify_ownership!(current_scope.locals[c[:binding]])
+                  current_scope.declare(c.binding, nil, payload_type, false, false, nil, :stack)
+                  og_declare(c.binding, nil, payload_type)
+                  classify_ownership!(current_scope.locals[c.binding])
                 end
                 # MATCH AS: borrow view into the source union's payload.
                 # MATCH TAKES: owned extraction - source is consumed.
                 unless node.takes
-                  @og[c[:binding]]&.kind = :borrowed
+                  @og[c.binding]&.kind = :borrowed
                 end
               end
             end
@@ -1653,16 +1653,16 @@ private
           # For multi-arm `R.A, R.B { x } ->`, every variant must carry
           # the SAME payload (same inline-struct fields and types) — the
           # destructured names are shared across all patterns' bodies.
-          if c[:destructure] && is_union
+          if c.destructure && is_union
             # The destructure pattern's type IS the subject it
             # destructures (the MATCH union expr) — same principle as
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
-            c[:destructure].full_type =
+            c.destructure.full_type =
               node.expr.full_type_or { Type.new(node.expr.resolved_type || :Any) }
-            variant_name = case c[:value]
-                           when AST::GetField   then c[:value].field
-                           when AST::MethodCall then c[:value].name
+            variant_name = case c.value
+                           when AST::GetField   then c.value.field
+                           when AST::MethodCall then c.value.name
                            end
             normalize_payload_d = ->(p) {
               if p.is_a?(Type)
@@ -1674,7 +1674,7 @@ private
                 p
               end
             }
-            c[:extra_values]&.each do |ev|
+            c.extra_values&.each do |ev|
               ev_name = case ev
                         when AST::GetField   then ev.field
                         when AST::MethodCall then ev.name
@@ -1697,7 +1697,7 @@ private
               end
 
               if payload_schema.is_a?(Hash) && !payload_schema[:kind]
-                c[:destructure].fields.each do |f|
+                c.destructure.fields.each do |f|
                   next unless f[:value] == :bind
                   unless payload_schema.key?(f[:name])
                     name_tok = f[:name_token]
@@ -1723,7 +1723,7 @@ private
             end
           end
         end
-        with_conditional_context { visit_stmts(c[:body]) }
+        with_conditional_context { visit_stmts(c.body) }
         collect_scope_drops(node: node)
       }
     end
@@ -1749,8 +1749,8 @@ private
     if is_enum || is_union
       seen = {}
       node.cases.each do |c|
-        next if c[:kind] == :when || c[:kind] == :struct_pattern
-        [c[:value], *(c[:extra_values] || [])].each do |pat|
+        next if c.kind == :when || c.kind == :struct_pattern
+        [c.value, *(c.extra_values || [])].each do |pat|
           name = case pat
                  when AST::GetField   then pat.field
                  when AST::MethodCall then pat.name
@@ -1785,7 +1785,7 @@ private
 
       # MATCH forbids WHEN guards — they're runtime conditions that break
       # static exhaustiveness. Use `PARTIAL MATCH` for guard-style cases.
-      if node.cases.any? { |c| c[:kind] == :when }
+      if node.cases.any? { |c| c.kind == :when }
         error!(node, :MATCH_FORBIDS_WHEN)
       end
 
@@ -1794,7 +1794,7 @@ private
       # exhaustiveness like single arms would.
       covered = node.cases.flat_map do |c|
         names = []
-        [c[:value], *(c[:extra_values] || [])].each do |pat|
+        [c.value, *(c.extra_values || [])].each do |pat|
           name = case pat
                  when AST::GetField   then pat.field
                  when AST::MethodCall then pat.name
@@ -1814,7 +1814,7 @@ private
     end
 
     # Store case result types so use sites can promote to expression mode.
-    node.case_result_types = node.cases.map { |c| expr_result_type(c[:body]) }
+    node.case_result_types = node.cases.map { |c| expr_result_type(c.body) }
     node.default_result_type = expr_result_type(node.default_case)
 
     node.full_type = :Void

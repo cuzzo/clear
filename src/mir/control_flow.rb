@@ -152,7 +152,7 @@ class FunctionCFG
         stmt.cases.each do |c|
           case_block = cfg.new_block
           current_block.add_successor(case_block)
-          case_exit = build_body(c[:body] || [], case_block, exit_target, cfg)
+          case_exit = build_body(c.body, case_block, exit_target, cfg)
           case_exit.add_successor(join_block) if case_exit
         end
         if stmt.default_case

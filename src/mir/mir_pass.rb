@@ -819,8 +819,8 @@ class MIRPass
     has_as_cleanup = T.let(false, T::Boolean)
 
     stmt.cases.each do |c|
-      next unless c[:binding]
-      as_entry = bindings[c[:binding].to_s]
+      next unless c.binding
+      as_entry = bindings[c.binding.to_s]
       next unless as_entry && as_entry[:needs_cleanup]
 
       has_as_cleanup = true
@@ -831,14 +831,14 @@ class MIRPass
       if src_entry && src_entry[:needs_cleanup]
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
-      mir_prefix << MIR::Alloc.new(stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc])
+      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry[:kind], as_entry[:alloc])
       drop = MIR::Drop.new(
-        stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc],
+        stmt.token, c.binding.to_s, as_entry[:kind], as_entry[:alloc],
         true, nil, nil, nil
       )
       drop.cleanup_entry = as_entry
       mir_prefix << drop
-      c[:body] = mir_prefix + (c[:body] || [])
+      c.body = mir_prefix + c.body
     end
 
     # Ensure source has moved guard so _moved variable exists for suppression.
