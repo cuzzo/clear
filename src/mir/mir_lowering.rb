@@ -3365,7 +3365,9 @@ class MIRLowering
       # *Arc<Versioned>, and Arc<Versioned> by value (the BG-capture
       # case). Mirrors the read-mode SNAPSHOT path.
       source_unwrap = with_match_unwrap_value(T.must(source_zig))
-      st = cap[:resolved_type].is_a?(Type) ? cap[:resolved_type] : Type.new(cap[:resolved_type])
+      # cap[:resolved_type] sole producer is var_node.full_type
+      # (Type|nil via the full_type seam; never a Symbol).
+      st = cap[:resolved_type] || Type.new(:Any)
       bare_t_zig = st.bare_data_type.zig_type
       # AtomicPtr commits surface AtomicConflict; Versioned commits surface
       # MvccConflict.

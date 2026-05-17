@@ -1322,7 +1322,9 @@ private
         # Declare each binding in the then-scope with the unwrapped type.
         node.bindings.each do |b|
           unwrapped = b[:unwrapped_type]
-          sym = unwrapped.is_a?(Type) ? unwrapped.resolved : unwrapped
+          # Sole producer sets this from ti.wrapped_type (Type|nil;
+          # never a Symbol) — see the binding-annotation loop above.
+          sym = unwrapped&.resolved
           current_scope.declare(b[:name], nil, unwrapped, false, false, nil, :stack)
           entry = current_scope.locals[b[:name]]
           b[:symbol] = entry
