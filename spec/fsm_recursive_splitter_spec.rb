@@ -201,7 +201,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
   describe "WithBlock with lock-suspending capability" do
     it "produces a LockSuspend segment for a single-cap EXCLUSIVE WITH" do
-      cap = { capability: :EXCLUSIVE, var_node: ident("lock") }
+      cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       with_node = AST::WithBlock.new(nil, [cap], [])
       segs = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
@@ -216,8 +216,8 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     end
 
     it "produces N LockSuspend segments for an N-cap WITH" do
-      cap1 = { capability: :EXCLUSIVE, var_node: ident("a") }
-      cap2 = { capability: :EXCLUSIVE, var_node: ident("b") }
+      cap1 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("a"))
+      cap2 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("b"))
       with_node = AST::WithBlock.new(nil, [cap1, cap2], [])
       segs = FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)
@@ -238,15 +238,15 @@ RSpec.describe FsmTransform::RecursiveSplitter do
     end
 
     it "rejects multi-cap WITH where any cap is non-lock-suspending" do
-      cap1 = { capability: :EXCLUSIVE, var_node: ident("a") }
-      cap2 = { capability: :infer, var_node: ident("b") }
+      cap1 = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("a"))
+      cap2 = AST::Capability.new(capability: :infer, var_node: ident("b"))
       with_node = AST::WithBlock.new(nil, [cap1, cap2], [])
       expect(FsmTransform::RecursiveSplitter.split(
         [with_node], lowering, ctx: default_ctx)).to be_nil
     end
 
     it "supports WITH whose CS body contains a suspend (held flags + destroyTask release)" do
-      cap = { capability: :EXCLUSIVE, var_node: ident("lock") }
+      cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident("lock"))
       next_expr = AST::NextExpr.new(nil, ident("p"))
       with_node = AST::WithBlock.new(nil, [cap], [next_expr])
       segs = FsmTransform::RecursiveSplitter.split(

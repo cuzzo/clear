@@ -704,11 +704,8 @@ module EffectTracker
   sig { params(node: AST::WithBlock).returns(T::Boolean) }
   def with_block_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    caps = node.capabilities
-    return false unless caps.is_a?(Array)
-    caps.any? do |c|
-      cap = c.is_a?(Hash) ? c[:capability] : nil
-      cap == :EXCLUSIVE || cap == :write_locked_read
+    node.capabilities.any? do |c|
+      c.capability == :EXCLUSIVE || c.capability == :write_locked_read
     end
   end
 

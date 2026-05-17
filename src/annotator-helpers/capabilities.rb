@@ -636,7 +636,7 @@ module CapabilityHelper
   # @param node [AST::WithBlock] the WITH block (for error reporting)
   # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
   # @param expanded [Array] accumulator for resolved capabilities
-  sig { params(node: AST::WithBlock, cap: T::Hash[Symbol, T.untyped], expanded: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: T::Array[AST::Capability]).returns(T.untyped) }
   def acquire_capability!(node, cap, expanded)
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
@@ -722,11 +722,11 @@ module CapabilityHelper
       fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
       fields.each do |field_name, _|
         field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
-        expanded << {
+        expanded << AST::Capability.new(
           capability: cap[:capability],
           var_node: field_node,
           old_scope: cap[:old_scope]
-        }
+        )
       end
     else
       expanded << cap
@@ -748,7 +748,7 @@ module CapabilityHelper
     end
   end
 
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T.nilable(String)) }
+  sig { params(cap: AST::Capability).returns(T.nilable(String)) }
   def declare_capability_scope!(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     @og = T.let(@og, T.untyped)

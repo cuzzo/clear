@@ -182,6 +182,35 @@ module AST
     end
   end
 
+  # One capability of a WITH block (AST::WithBlock#capabilities
+  # element): `WITH @locked c AS a`. Parser builds
+  # {capability,var_node,alias,alias_mutable,guard_expr}; the annotator
+  # stamps resolved_type (= var_node.full_type, ALWAYS a Type) and
+  # old_scope. Distinct from the BG-capture record (also named `cap`
+  # in capture analysis) -- that has name/type/storage keys and is NOT
+  # this struct. Replaces the anonymous hash.
+  Capability = Struct.new(:capability, :var_node, :alias, :alias_mutable, :guard_expr,
+                          :snapshot_token, :view_token, :resolved_type, :old_scope,
+                          keyword_init: true) do
+    extend T::Sig
+
+    # resolved_type is T.nilable(Type) for now: it is stamped lazily
+    # (capabilities.rb:644 = var_node.full_type) and a live fallback
+    # chain (cap.resolved_type || old_scope.resolve_type) depends on
+    # nil meaning "not yet stamped". Making it always-Type requires an
+    # eager producer first -- tracked as the #53 tightening follow-up.
+    sig { returns(T.nilable(Type)) }
+    def resolved_type
+      self[:resolved_type]
+    end
+
+    sig { params(c: T.any(Capability, T::Hash[Symbol, T.untyped])).returns(Capability) }
+    def self.coerce(c)
+      return c if c.is_a?(Capability)
+      new(**c.slice(*members))
+    end
+  end
+
   # The value of a struct-pattern field: the :wildcard sentinel
   # (`c: _`), the :bind sentinel (bare `a`), or the bound expression /
   # nested pattern AST node (`b: x`). A real 3-way typed sum -- NOT
@@ -1236,6 +1265,17 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+
+    def initialize(*args)
+      super
+      self[:capabilities] = (self[:capabilities] || []).map { |c| Capability.coerce(c) }
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def capabilities=(val)
+      self[:capabilities] = (val || []).map { |c| Capability.coerce(c) }
+    end
+
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :lock_error_clause

@@ -247,7 +247,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: T::Hash[Symbol, T.untyped], with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
+  sig { params(cap: AST::Capability, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||

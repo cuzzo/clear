@@ -4994,7 +4994,7 @@ private
 
   # A capability is sync-constrained only when it synchronizes against a
   # runtime cell. Pure borrows and observable reads do not count.
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T::Boolean) }
+  sig { params(cap: AST::Capability).returns(T::Boolean) }
   def sync_constrained_cap?(cap)
     case cap[:capability]
     when :BORROWED, :RESTRICT, :VIEW, :MATERIALIZED_VIEW, :multiowned, :shared
@@ -5017,7 +5017,7 @@ private
   #     by sym.sync == :atomic);
   #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
   #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T::Boolean) }
+  sig { params(cap: AST::Capability).returns(T::Boolean) }
   def cap_admits_atomic?(cap)
     sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
     return false unless sym

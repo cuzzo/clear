@@ -71,7 +71,7 @@ module LockHelper
 
   # For the Phase 3 ordering check: return the rank of a WITH capability's
   # lock type, or nil if the type has no rank declared anywhere.
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T.nilable(Integer)) }
+  sig { params(cap: AST::Capability).returns(T.nilable(Integer)) }
   def rank_of_cap(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     t = lock_identity_of(cap)
@@ -160,7 +160,7 @@ module LockHelper
   # Extract the lock-identity symbol for a WITH capability. Returns the
   # inner type's base symbol (:Counter for Locked(Counter) or
   # @shared:locked Counter), or nil if we can't determine it.
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T.nilable(Symbol)) }
+  sig { params(cap: AST::Capability).returns(T.nilable(Symbol)) }
   def lock_identity_of(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     ti = cap[:resolved_type]
@@ -175,7 +175,7 @@ module LockHelper
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
-  sig { params(fn_name: String, cap: T::Hash[Symbol, T.untyped], held_stack: T::Array[T::Hash[Symbol, T.untyped]], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
+  sig { params(fn_name: String, cap: AST::Capability, held_stack: T::Array[T::Hash[Symbol, T.untyped]], escape: T.nilable(T::Hash[Symbol, T.untyped])).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
     T.bind(self, SemanticAnnotator) rescue {}
     t = lock_identity_of(cap)
