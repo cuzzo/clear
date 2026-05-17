@@ -137,9 +137,20 @@ ErrorName registry id resolution) must both land before any error
 test flips. Plan the increments accordingly (foundation -> Int64
 kind+name+message vertical slice -> string via option 1 -> OR EXIT).
 
-Status: foundation committed (63723816). Commit-2 emitter wiring
-reverted pending the option-1 decision; the inlining incompatibility
-must be resolved first.
+Status: foundation committed (63723816). Commit 2 LANDED: Int64-return
+error-union (RAISE -> ERAISE+EGUARD; OR RAISE -> TryExpr+EGUARD;
+CatchWrapper full clause matching via EFLAG/EMATCHK/EMATCHN/EMATCHM,
+predicate accumulated with IADD/IGT/IMUL since there is no JT
+opcode). `271_catch_unified` passes (every CATCH form); allowlisted.
+Zero regressions (237/0-fail).
+
+Remaining (next commits), all cleanly PENDING with accurate reasons:
+- String/Bool-return CatchWrapper (76/77/78/352) -- blocked on the
+  inlining-vs-EGUARD decision (option 1: don't inline fallible fns).
+- OR EXIT error_reassigns (272).
+- MIR::TryCatch / MIR::TryExpr at stmt position (216/217/350/360/
+  381/519/524).
+- Cap-param raise wrappers (335) -- needs the cap-param cluster.
 
 ## Invariants
 

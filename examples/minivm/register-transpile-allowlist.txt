@@ -264,11 +264,17 @@
 # annotations decorate every fn with a `safety.StackGuard.enter` /
 # push / defer pop prologue; the bc VM is single-threaded with its
 # own stack-frame management, so these three statements are
-# detected and elided. CatchWrapper / RAISE / OR EXIT (full error-
-# union runtime) remain pending -- they need new opcodes for error
-# state in the VM.
+# detected and elided.
+#
+# Error-union runtime (commit 2): RAISE / OR RAISE / CATCH for
+# Int64-return wrappers now lower to ERAISE/EGUARD/ECLR/EMATCHK/
+# EMATCHN/EMATCHM/EFLAG (see docs/agents/register-error-union.md).
+# 271 exercises every CATCH form (kind, type, WITH-filter, multi,
+# message). OR EXIT, String/Bool-return wrappers, and
+# MIR::TryCatch/TryExpr-at-stmt remain pending for follow-up commits.
 88_reentrant
 299_thunk_not_logical
+271_catch_unified
 
 # Tranche 10: side-effect-only BG bodies and bare MethodCall
 # statements. A BG body whose last statement is not an expression

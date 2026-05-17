@@ -150,6 +150,9 @@ ENUM RegisterOp {
     EGuard,
     EClr,
     EMatchK,
+    EFlag,
+    EMatchN,
+    EMatchM,
     Operand,
 }
 
@@ -574,6 +577,9 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.EGuard -> PASS;,
             RegisterOp.EClr -> PASS;,
             RegisterOp.EMatchK -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EFlag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchN -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchM -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -717,6 +723,9 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.EGuard -> RETURN 0_i64;,
         RegisterOp.EClr -> RETURN 0_i64;,
         RegisterOp.EMatchK -> RETURN 2_i64;,
+        RegisterOp.EFlag -> RETURN 1_i64;,
+        RegisterOp.EMatchN -> RETURN 2_i64;,
+        RegisterOp.EMatchM -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -1101,6 +1110,39 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     IF errored == 1_i64 && errKind == getRegisterConstInt(consts, kc) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EFlag ->
+                # EFLAG dst -- dst = errored ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = errored;
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EMatchN ->
+                # EMATCHN dst nameConst -> dst = (errored and
+                # errName == name) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errName == getRegisterConstInt(consts, nc) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EMatchM ->
+                # EMATCHM dst msgConst -> dst = (errored and
+                # errMsg == msg) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errMsg == (getRegisterConstString(consts, mc) OR RAISE) THEN
                         iregs[slot] = 1_i64;
                     ELSE
                         iregs[slot] = 0_i64;

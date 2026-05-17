@@ -2,6 +2,7 @@
 
 require "set"
 require_relative "../../src/mir/mir"
+require_relative "../../src/ast/error_registry"
 require_relative "register_opcode_layout"
 require_relative "register_pipeline"
 
@@ -317,6 +318,8 @@ class RegisterBcEmitter
 
     @compiled_functions[function.name.to_s] = true
     saved_function_name = @current_function_name
+    saved_fn = @current_fn
+    @current_fn = function
     @current_function_name = function.name.to_s
     saved_iregs = @ireg_by_name
     saved_fregs = @freg_by_name
@@ -376,6 +379,7 @@ class RegisterBcEmitter
     @current_source_line = saved_source_line if defined?(saved_source_line)
     @bindings_in_function = saved_var_names if defined?(saved_var_names)
     @current_function_name = saved_function_name if defined?(saved_function_name)
+    @current_fn = saved_fn if defined?(saved_fn)
   end
 
   # Records a (kind, virtual_reg) -> name binding. Called from the same
@@ -628,6 +632,8 @@ class RegisterBcEmitter
     when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt, MIR::EscapePromote,
          MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark
       nil
+    when MIR::CatchWrapper
+      compile_catch_wrapper(stmt)
     when MIR::ScopeBlock
       compile_scope_block(stmt)
     when MIR::Let
@@ -949,12 +955,17 @@ class RegisterBcEmitter
       end
     end
 
+    if set_error_stmt?(stmt)
+      # RAISE -> `rt.setError(kind, name, msg, line)`. Emit ERAISE
+      # (sets VM error state). The following `RETURN error.CheatError`
+      # becomes EGUARD. See docs/agents/register-error-union.md.
+      compile_set_error(expr)
+      return
+    end
+
     if expr.is_a?(MIR::MethodCall) && expr.receiver.is_a?(MIR::Ident) && runtime_arg?(expr.receiver)
-      # `rt.setError(...)`, `rt.checkYield()`, `rt.freeSnapshot()`,
-      # etc. are runtime hooks that the bc VM has no analogue for.
-      # The error-union runtime is missing entirely, so setError is
-      # a no-op; the test relies on the catch arm not firing in the
-      # success path it actually exercises.
+      # `rt.checkYield()`, `rt.freeSnapshot()`, etc. are runtime hooks
+      # the bc VM has no analogue for -- no-op.
       return
     end
 
@@ -1026,6 +1037,13 @@ class RegisterBcEmitter
   end
 
   def compile_return(stmt)
+    if returns_cheat_error?(stmt)
+      # `RETURN error.CheatError` -- preceding ERAISE set the VM error
+      # state; EGUARD propagates (return-from-fn since errored).
+      emit(EGUARD)
+      return
+    end
+
     return compile_inline_return(stmt) if @inline_return
 
     unless stmt.value
@@ -2147,11 +2165,9 @@ class RegisterBcEmitter
     when MIR::Pipeline
       compile_i64_expr(expr.inner)
     when MIR::TryExpr
-      # Zig `try expr`. The bc VM has no error-union runtime, so a
-      # successful path strips the wrapper. If the inner expression
-      # actually raises, the bc VM will fault inside the callee --
-      # acceptable for tests that don't dynamically trigger errors.
-      compile_i64_expr(expr.expr)
+      # `try expr` / OR RAISE. Compile inner (its call emitted), then
+      # EGUARD: if the callee raised, propagate (return-from-fn).
+      compile_try_expr(compile_i64_expr(expr.expr))
     when MIR::TryCatch
       compile_i64_try_catch(expr)
     when MIR::Orelse
@@ -2199,7 +2215,7 @@ class RegisterBcEmitter
     when MIR::Pipeline
       compile_f64_expr(expr.inner)
     when MIR::TryExpr
-      compile_f64_expr(expr.expr)
+      compile_try_expr(compile_f64_expr(expr.expr))
     when MIR::TryCatch
       compile_f64_try_catch(expr)
     when MIR::DeepCopy
@@ -2271,7 +2287,7 @@ class RegisterBcEmitter
     when MIR::InlineZig
       compile_string_inline_zig(expr)
     when MIR::TryExpr
-      compile_string_expr(expr.expr)
+      compile_try_expr(compile_string_expr(expr.expr))
     when MIR::TryCatch
       compile_string_try_catch(expr)
     when MIR::FieldGet
@@ -2972,6 +2988,156 @@ class RegisterBcEmitter
       stmt.value.name.to_s == "error.CheatError"
   end
 
+  # ErrorKind ids -- fixed enum, must match zig/runtime/runtime.zig
+  # `ErrorKind` and AST::ERROR_KINDS order.
+  ERROR_KIND_IDS = {
+    "Transient" => 0, "Input" => 1, "System" => 2, "NotFound" => 3,
+    "Permission" => 4, "Canceled" => 5, "Unknown" => 6
+  }.freeze
+
+  def error_kind_id(node)
+    unless node.is_a?(MIR::Ident)
+      raise Unsupported, "register emitter expected error-kind ident, got #{node.class.name}"
+    end
+
+    name = node.name.to_s.sub(/\A\./, "")
+    ERROR_KIND_IDS.fetch(name) do
+      raise Unsupported, "register emitter unknown error kind #{name.inspect}"
+    end
+  end
+
+  # Resolve an ErrorName type symbol/string to its per-program u32 id
+  # via the same registry the Zig backend's @intFromEnum uses.
+  def error_name_id(type_name)
+    sym = type_name.to_s.to_sym
+    AST.id_of_type(sym) ||
+      (raise Unsupported, "register emitter unknown error type #{type_name.inspect}")
+  end
+
+  def string_lit_text(lit)
+    text = lit.is_a?(MIR::Lit) ? lit.value.to_s : lit.to_s
+    return unescape_string(text[1...-1]) if text.start_with?('"') && text.end_with?('"')
+
+    text
+  end
+
+  # RAISE -> `rt.setError(kind, @intFromEnum(ErrorName.T)|0, msg, line)`.
+  def compile_set_error(expr)
+    args = expr.args || []
+    unless args.length >= 4
+      raise Unsupported, "register emitter expected 4 args for rt.setError"
+    end
+
+    kind_id = error_kind_id(args[0])
+    name_arg = args[1]
+    name_id =
+      if name_arg.is_a?(MIR::Ident) && name_arg.name.to_s =~ /ErrorName\.(\w+)/
+        error_name_id(Regexp.last_match(1))
+      else
+        0
+      end
+    msg = args[2].is_a?(MIR::Lit) ? string_lit_text(args[2]) : ""
+    line = args[3].is_a?(MIR::Lit) ? parse_i64_literal(args[3].value) : 0
+    emit(ERAISE, add_const(kind_id), add_const(name_id), add_const(msg), add_const(line))
+  end
+
+  # OR RAISE: inner already compiled (its call emitted); EGUARD
+  # propagates if the callee set the error state.
+  def compile_try_expr(inner_reg)
+    emit(EGUARD)
+    inner_reg
+  end
+
+  # Wrapper fn whose body is a single MIR::CatchWrapper. Calls
+  # __<fn>_body(rt, params...); on success returns its value; on error
+  # dispatches by clause_meta (kinds/types OR, narrowed by
+  # filter_types/filter_messages), else DEFAULT, else propagate.
+  # Uses clause_bodies/clause_meta only -- never the Zig `code`.
+  # Int64-return only in this commit (string returns are inlined ->
+  # no frame -> EGUARD invalid; see register-error-union.md).
+  def compile_catch_wrapper(stmt)
+    unless @return_type == :i64
+      raise Unsupported, "register emitter CatchWrapper supports Int64-return wrappers in this commit (got #{@return_type.inspect})"
+    end
+
+    inner = "__#{@current_function_name}_body"
+    unless @functions_by_name.key?(inner)
+      raise Unsupported, "register emitter CatchWrapper inner body #{inner.inspect} not found"
+    end
+
+    call_args = [MIR::Ident.new("rt")] +
+                callable_params(@current_fn).map { |p| MIR::Ident.new(p.name) }
+    resreg = compile_i64_expr(MIR::Call.new(inner, call_args, false, nil))
+
+    eflag = fresh_ireg
+    emit(EFLAG, eflag)
+    emit(JF, eflag, 0)
+    succ_patch = @ops.length - 1
+
+    meta = stmt.clause_meta || []
+    bodies = stmt.clause_bodies || []
+    zero = fresh_ireg
+    emit(ICONST, zero, add_const(0))
+    meta.each_with_index do |cm, i|
+      kinds = cm[:kinds] || []
+      types = cm[:types] || []
+      ftypes = cm[:filter_types] || []
+      fmsgs = cm[:filter_messages] || []
+
+      # primary = (any kind matches) OR (any type matches), as a
+      # nonzero count. No JT opcode -> accumulate with IADD and
+      # compare > 0 with IGT.
+      pcount = fresh_ireg
+      emit(IMOV, pcount, zero)
+      (kinds.map { |k| [EMATCHK, ERROR_KIND_IDS.fetch(k.to_s)] } +
+       types.map { |t| [EMATCHN, error_name_id(t)] }).each do |op, cst|
+        m = fresh_ireg
+        emit(op, m, add_const(cst))
+        emit(IADD, pcount, pcount, m)
+      end
+      matched = fresh_ireg
+      if kinds.empty? && types.empty?
+        emit(ICONST, matched, add_const(1))
+      else
+        emit(IGT, matched, pcount, zero)
+      end
+
+      unless ftypes.empty? && fmsgs.empty?
+        fcount = fresh_ireg
+        emit(IMOV, fcount, zero)
+        ftypes.each do |t|
+          m = fresh_ireg
+          emit(EMATCHN, m, add_const(error_name_id(t)))
+          emit(IADD, fcount, fcount, m)
+        end
+        fmsgs.each do |lit|
+          m = fresh_ireg
+          emit(EMATCHM, m, add_const(string_lit_text(lit)))
+          emit(IADD, fcount, fcount, m)
+        end
+        fok = fresh_ireg
+        emit(IGT, fok, fcount, zero)
+        emit(IMUL, matched, matched, fok)
+      end
+
+      emit(JF, matched, 0)
+      skip = @ops.length - 1
+      emit(ECLR)
+      semantic_body(bodies[i] || []).each { |c| compile_stmt(c) }
+      @ops[skip] = @ops.length
+    end
+
+    if stmt.has_default
+      emit(ECLR)
+      semantic_body(bodies[meta.length] || []).each { |c| compile_stmt(c) }
+    else
+      emit(EGUARD)
+    end
+
+    @ops[succ_patch] = @ops.length
+    emit(IRET, resreg)
+  end
+
   def compile_call_args(callee, function, args)
     params = callable_params(function)
     args = args.drop(1) if args.length == params.length + 1 && runtime_arg?(args.first)
@@ -3442,10 +3608,10 @@ class RegisterBcEmitter
       # is transparent.
       compile_value_expr(expr.expr)
     when MIR::TryExpr
-      # `try expr` -- bc VM has no error-union runtime, strip the
-      # wrapper. If the inner actually raises, the bc VM faults
-      # inside the callee.
-      compile_value_expr(expr.expr)
+      # `try expr` / OR RAISE -- compile inner, then EGUARD propagate.
+      r = compile_value_expr(expr.expr)
+      emit(EGUARD)
+      r
     when MIR::Call
       compile_value_call(expr)
     when MIR::Orelse

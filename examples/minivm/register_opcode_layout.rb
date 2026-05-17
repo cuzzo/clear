@@ -238,6 +238,9 @@ module MiniVM
         Opcode.new(name: :EGUARD,   code: 132, arity: 0, vm_name: "EGuard"),
         Opcode.new(name: :ECLR,     code: 133, arity: 0, vm_name: "EClr"),
         Opcode.new(name: :EMATCHK,  code: 134, arity: 2, vm_name: "EMatchK"),
+        Opcode.new(name: :EFLAG,    code: 135, arity: 1, vm_name: "EFlag"),
+        Opcode.new(name: :EMATCHN,  code: 136, arity: 2, vm_name: "EMatchN"),
+        Opcode.new(name: :EMATCHM,  code: 137, arity: 2, vm_name: "EMatchM"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -359,6 +362,9 @@ module MiniVM
         EGUARD:   [],
         ECLR:     [],
         EMATCHK:  [:i_def, :const],
+        EFLAG:    [:i_def],
+        EMATCHN:  [:i_def, :const],
+        EMATCHM:  [:i_def, :const],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],
