@@ -234,8 +234,8 @@ module EscapeAnalysis
                     when AST::MethodCall then val.name.to_s
                     end
       if callee_name && heap_fns.include?(callee_name)
-        ti = node.full_type rescue nil
-        ti.provenance = :heap if ti && !ti.heap_provenance?
+        ti = node.full_type
+        ti.provenance = :heap unless ti.heap_provenance?
       end
     end
 
@@ -516,8 +516,7 @@ module EscapeAnalysis
       AST.walk_body(body) do |bind|
         next unless bind.is_a?(AST::BindExpr) && bind.mode == :assign
         next unless bind.name.is_a?(String) && !local_names.include?(bind.name)
-        ti = bind.full_type rescue nil
-        next unless ti.is_a?(Type)
+        ti = bind.full_type
         # Outer-binding reassign in a mark_per_iter loop. Strings need
         # promotion regardless of initial provenance (a `last: String = ""`
         # outer var with rodata provenance still gets re-bound to a
@@ -540,8 +539,7 @@ module EscapeAnalysis
           AST.walk_body(body) do |local_decl|
             next unless (local_decl.is_a?(AST::VarDecl) || (local_decl.is_a?(AST::BindExpr) && local_decl.mode == :decl)) && local_decl.name.to_s == rhs.name
             local_decl.storage = :heap
-            decl_ti = local_decl.full_type rescue nil
-            decl_ti&.provenance = :heap
+            local_decl.full_type.provenance = :heap
             if rhs.symbol
               rhs.symbol.storage = :heap
               sym_reg = rhs.symbol.reg
@@ -553,8 +551,7 @@ module EscapeAnalysis
           AST.walk_body(fn.body) do |outer_decl|
             next unless (outer_decl.is_a?(AST::VarDecl) || (outer_decl.is_a?(AST::BindExpr) && outer_decl.mode == :decl)) && outer_decl.name.to_s == outer_name
             outer_decl.storage = :heap
-            outer_ti = outer_decl.full_type rescue nil
-            outer_ti&.provenance = :heap
+            outer_decl.full_type.provenance = :heap
             outer_decl.symbol.storage = :heap if outer_decl.symbol
           end
         end
@@ -623,8 +620,7 @@ module EscapeAnalysis
   sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   private_class_method def self.e2_stamp_full!(node)
     node.storage = :heap if node.respond_to?(:storage=)
-    ti = node.full_type rescue nil
-    ti.provenance = :heap if ti.is_a?(Type)
+    node.full_type.provenance = :heap
   end
 
   # Also stamp the SymbolEntry (scope entry) reached via the return identifier.
@@ -860,10 +856,10 @@ module EscapeAnalysis
           if val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall)
             fn_name = val.name.to_s
             if carry_fns.include?(fn_name)
-              call_ti = val.full_type rescue nil
-              call_ti.provenance = :heap if call_ti.is_a?(Type) && !call_ti.heap_provenance?
-              bind_ti = stmt.full_type rescue nil
-              bind_ti.provenance = :heap if bind_ti.is_a?(Type) && !bind_ti.heap_provenance?
+              call_ti = val.full_type
+              call_ti.provenance = :heap unless call_ti.heap_provenance?
+              bind_ti = stmt.full_type
+              bind_ti.provenance = :heap unless bind_ti.heap_provenance?
               bt2 = stmt.full_type
               bt2.provenance = :heap if bt2.is_a?(Type) && !bt2.heap_provenance?
             end
@@ -908,14 +904,14 @@ module EscapeAnalysis
     case node
     when AST::FuncCall
       if carry_fns.include?(node.name.to_s)
-        ti = node.full_type rescue nil
-        ti.provenance = :heap if ti && !ti.heap_provenance?
+        ti = node.full_type
+        ti.provenance = :heap unless ti.heap_provenance?
       end
       node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }
     when AST::MethodCall
       if carry_fns.include?(node.name.to_s)
-        ti = node.full_type rescue nil
-        ti.provenance = :heap if ti && !ti.heap_provenance?
+        ti = node.full_type
+        ti.provenance = :heap unless ti.heap_provenance?
       end
       e3_mark_carry_expr!(node.object, carry_fns)
       node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }
