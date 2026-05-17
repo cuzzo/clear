@@ -1,3 +1,6 @@
+ignore:
+  - "tools/"
+
 flags:
   nil-kill:
     paths:
