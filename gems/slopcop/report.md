@@ -5,7 +5,7 @@
 > reachable ones are gaps worth testing. Owns
 > categorization; consumes fix-cache for churn.
 
-## Top True Gaps (187) — test these, ranked by fix-churn
+## Top True Gaps (186) — test these, ranked by fix-churn
 
 | # | gap | method | churn |
 |---|---|---|---|
@@ -60,21 +60,21 @@
 | 49 | [`src/mir/mir_lowering.rb:3194`](../../src/mir/mir_lowering.rb#L3194) | `lower_polymorphic_universal` | 1.0 |
 | 50 | [`src/mir/mir_lowering.rb:3237`](../../src/mir/mir_lowering.rb#L3237) | `guard_fail_flow_body` | 1.0 |
 
-- ...(+137 more genuine gaps)
+- ...(+136 more genuine gaps)
 
 ## Category Summary
-_935 dark arms; only 187 are genuine gaps. The rest are not test targets:_
+_935 dark arms; only 186 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 220 | 23.5% | type/nil guard -- likely dead if the contract were strictly typed |
-| dead | 51 | 5.5% | decision never executes -- audit as dead code, delete |
-| defensive | 50 | 5.3% | inert / invariant-pinned -- accept, exclude from denominator |
+| type_norm | 221 | 23.6% | type/nil guard -- likely dead if the contract were strictly typed |
+| dead | 53 | 5.7% | decision never executes -- audit as dead code, delete |
+| defensive | 49 | 5.2% | inert / invariant-pinned -- accept, exclude from denominator |
 | ffi | 44 | 4.7% | external/boundary call -- needs an integration test |
-| diagnostic | 383 | 41.0% | error/raise path -- reachable only by invalid input (negative test) |
-| genuine | 187 | 20.0% | real reachable gap -- test it; ranked by fix-churn below |
+| diagnostic | 382 | 40.9% | error/raise path -- reachable only by invalid input (negative test) |
+| genuine | 186 | 19.9% | real reachable gap -- test it; ranked by fix-churn below |
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Files: 3; dark arms: 935; genuine gaps: 187
+- Files: 3; dark arms: 935; genuine gaps: 186
 - General engine: categorizes uncovered branches, ranks genuine gaps by consumed fix-cache churn. Project lexicon (external-boundary methods) is caller-supplied, not baked in (see docs/agents/design.md).
