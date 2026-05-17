@@ -901,10 +901,20 @@ module NilKill
       @hash_record_existing_struct_paths ||= {}
       @hash_record_existing_struct_paths[struct_name] ||= begin
         pattern = /\bclass\s+#{Regexp.escape(struct_name)}\b/
-        candidates = Dir.glob("src/**/*.rb") + Dir.glob("gems/*/lib/**/*.rb")
+        # ROOT-rooted, NOT cwd-relative: nil-kill is invoked from many
+        # cwds (rspec runs from gems/nil-kill); a cwd-relative glob
+        # silently found ZERO -> false "no existing struct" -> wrong
+        # inference. `gems/*/lib/**` structurally excludes gems/tmp
+        # scratch and gems/*/spec fixtures (only real gem libs match).
+        # Returned repo-relative via NilKill.rel so consumer output is
+        # unchanged from the cwd==ROOT case.
+        candidates = Dir.glob(File.join(NilKill::ROOT, "src/**/*.rb")) +
+                     Dir.glob(File.join(NilKill::ROOT, "gems/*/lib/**/*.rb"))
         candidates.filter_map do |path|
           next unless File.file?(path)
-          path if File.read(path).match?(pattern)
+          next unless File.read(path).match?(pattern)
+
+          NilKill.rel(path)
         rescue StandardError
           nil
         end
@@ -1142,7 +1152,14 @@ module NilKill
     end
 
     def static_or_rbi_return_source?(source)
-      return true if source["kind"].to_s == "static"
+      # `typed_call_inferred` is produced by Feature A
+      # (enrich_return_origins_with_receiver_inference!) ONLY when the
+      # receiver type + the callee's return are definitely resolved via
+      # RBI / a strong project return / a sig -- statically provable by
+      # construction, the SAME grade as `static`. Excluding it here
+      # silently under-promoted exactly the returns the pipeline
+      # resolved most confidently (e.g. a sig-typed param `.join`).
+      return true if %w[static typed_call_inferred].include?(source["kind"].to_s)
       return false unless %w[typed_call safe_call].include?(source["kind"].to_s)
       return true if source["stdlib"]
       callee = source["callee"].to_s
