@@ -27,15 +27,32 @@ RSpec.describe IntrinsicRegistry do
     end
   end
 
-  it "yields a pure Type return_type and Proc resolver fidelity" do
+  it "yields a pure Type return_type and a typed FunctionReturn (no Proc/Hash)" do
     REGISTRIES.each_value do |reg|
       reg.each do |mname, entry|
         next unless entry.is_a?(Hash)
 
         fs = IntrinsicRegistry.convert_entry(mname, entry, REGISTRIES)
         expect(fs.return_type).to be_a(Type)
+        expect(fs.return_def).to be_a(FunctionReturn)
         src = entry.key?(:return_type) ? entry[:return_type] : entry[:return]
-        expect(fs.return_resolver).to be_a(Proc) if src.is_a?(Proc)
+        # No Proc/Hash leakage: every descriptor maps to a closed
+        # FunctionReturn variant, and the static return_type matches
+        # the FunctionReturn for the Fixed case.
+        expect(src).not_to be_a(Proc)
+        if fs.return_def.kind == FunctionReturn::Kind::Fixed
+          expect(fs.return_type).to eq(fs.return_def.fixed)
+        else
+          expect(fs.return_type.resolved).to eq(:Any)
+        end
+        case src
+        when :r_element_of
+          expect(fs.return_def.kind).to eq(FunctionReturn::Kind::ElementOf)
+        when :r_id_element
+          expect(fs.return_def.kind).to eq(FunctionReturn::Kind::IdOfElement)
+        when :r_optional_value
+          expect(fs.return_def.kind).to eq(FunctionReturn::Kind::OptionalOfValue)
+        end
         expect(fs.emit).to be_a(IntrinsicEmit).or be_nil
         expect(fs.intrinsic).to be(true)
       end
@@ -49,7 +66,9 @@ RSpec.describe IntrinsicRegistry do
     expect(fs.emit.tag).to eq(:pool_method)
     expect(fs.emit.is_method).to be(true)
     expect(fs.emit.zig).to be_a(String)
-    expect(fs.return_resolver).to be_a(Proc)
+    # POOL_METHODS["insert"] returns `Id<element>` -> IdOfElement variant.
+    expect(fs.return_def).to be_a(FunctionReturn)
+    expect(fs.return_def.kind).to eq(FunctionReturn::Kind::IdOfElement)
 
     # Nested recursive sub-descriptor (eql/cleanup/... -> IntrinsicEmit)
     nested = REGISTRIES.each_value.flat_map(&:values)

@@ -209,21 +209,7 @@ STD_LIB = T.let({
   "toList" => [
     {
       args: [:"Any[]"],
-      return: lambda { |args, _node|
-        recv_t = Type.new(args[0])
-        elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
-          recv_t.tense_type.element_type
-        elsif recv_t.bounded_stream?
-          recv_t.stream_element_type
-        elsif recv_t.inf_stream?
-          recv_t.inf_stream_element_type
-        elsif recv_t.open_stream?
-          recv_t.open_stream_element_type
-        else
-          recv_t.element_type
-        end
-        Type.new(:"#{elem_t.resolved}[]", collection: :list, location: :heap)
-      },
+      return: :infer_to_list,
       zig: "try ({0}).toList({rt}.heapAlloc())",
       bc: true, bc_op: :to_list,
       allocates: true,
@@ -1007,10 +993,12 @@ STD_LIB = T.let({
 # ============================================================================
 # Method Registry — type-specific method definitions for Pool and HashMap
 # ============================================================================
-# Each entry: { arity: N, validate: lambda, return_type: lambda, tag: symbol }
+# Each entry: { arity: N, validate: lambda, return_type: <directive>, tag: symbol }
 #   arity:       expected arg count (-1 = any)
 #   validate:    lambda(node, args, obj_type, error_fn) — type-check args
-#   return_type: lambda(obj_type) — compute return type from receiver type
+#   return_type: declarative return directive (a type Symbol/Hash, an
+#                r_* receiver-parametric variant, or an infer_* host
+#                method) -> FunctionReturn via IntrinsicRegistry
 #   tag:         symbol to set on the node (pool_method / map_method)
 
 POOL_METHODS = T.let({
@@ -1028,14 +1016,14 @@ POOL_METHODS = T.let({
         error_fn.call(node, "Pool.insert: argument type #{arg_type} does not match pool element type #{elem.resolved}")
       end
     },
-    return_type: ->(obj_type) { Type.new(:"Id<#{obj_type.element_type.resolved}>") },
+    return_type: :r_id_element,
     is_method: true,
   },
   "get" => {
     arity: 1, tag: :pool_method,
     bc: true,
     zig: "{0}.get({1})",
-    return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
+    return_type: :r_optional_element,
     borrows: :all,  # returns borrowed pointer into pool storage,
     is_method: true,
   },
@@ -1044,7 +1032,7 @@ POOL_METHODS = T.let({
     bc: true,
     zig: "{0}.remove({1})",
     mutates_receiver: true,
-    return_type: ->(_) { :Void },
+    return_type: :Void,
     borrows: :all,  # pool frees the slot internally,
     is_method: true,
   },
@@ -1052,7 +1040,7 @@ POOL_METHODS = T.let({
     arity: 0, tag: :pool_method,
     bc: true,
     zig: "{0}.length()",
-    return_type: ->(_) { Type.new(:Int64) },
+    return_type: :Int64,
     borrows: :all,
     is_method: true,
   },
@@ -1060,7 +1048,7 @@ POOL_METHODS = T.let({
     arity: 1, tag: :pool_method,
     bc: true,
     zig: "({0}.get({1}) != null)",
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1068,7 +1056,7 @@ POOL_METHODS = T.let({
     arity: 0, tag: :pool_method,
     bc: true,
     zig: "({0}.length() == 0)",
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1076,7 +1064,7 @@ POOL_METHODS = T.let({
     arity: 0, tag: :pool_method,
     bc: true,
     zig: "({0}.length() > 0)",
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1098,14 +1086,14 @@ SET_METHODS = T.let({
         error_fn.call(node, "Set.insert: argument type #{arg_type} does not match set element type #{elem.resolved}")
       end
     },
-    return_type: ->(_) { :Void },
+    return_type: :Void,
     is_method: true,
   },
   "contains?" => {
     arity: 1, tag: :set_method,
     zig: "{0}.contains({1})",
     bc: true,
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1115,7 +1103,7 @@ SET_METHODS = T.let({
     bc: true,
     alloc: :heap,
     mutates_receiver: true,
-    return_type: ->(_) { :Void },
+    return_type: :Void,
     borrows: :all,  # set frees the element internally,
     is_method: true,
   },
@@ -1123,7 +1111,7 @@ SET_METHODS = T.let({
     arity: 0, tag: :set_method,
     zig: "{0}.length()",
     bc: true,
-    return_type: ->(_) { Type.new(:Int64) },
+    return_type: :Int64,
     borrows: :all,
     is_method: true,
   },
@@ -1131,7 +1119,7 @@ SET_METHODS = T.let({
     arity: 0, tag: :set_method,
     zig: "({0}.length() == 0)",
     bc: true,
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1139,7 +1127,7 @@ SET_METHODS = T.let({
     arity: 0, tag: :set_method,
     zig: "({0}.length() > 0)",
     bc: true,
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1163,7 +1151,7 @@ MAP_METHODS = T.let({
         error_fn.call(node, "HashMap.put: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
       end
     },
-    return_type: ->(_) { :Void },
+    return_type: :Void,
     is_method: true,
   },
   "delete" => {
@@ -1181,7 +1169,7 @@ MAP_METHODS = T.let({
         error_fn.call(node, "HashMap.delete: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
       end
     },
-    return_type: ->(_) { :Void },
+    return_type: :Void,
     borrows: :all,  # map frees key+value internally,
     is_method: true,
   },
@@ -1198,7 +1186,7 @@ MAP_METHODS = T.let({
         error_fn.call(node, "HashMap.contains?: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
       end
     },
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1207,7 +1195,7 @@ MAP_METHODS = T.let({
     zig: "{0}.count()",
     bc: true,
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
-    return_type: ->(_) { Type.new(:Int64) },
+    return_type: :Int64,
     borrows: :all,
     is_method: true,
   },
@@ -1216,7 +1204,7 @@ MAP_METHODS = T.let({
     zig: "{0}.count()",
     bc: true,
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
-    return_type: ->(_) { Type.new(:Int64) },
+    return_type: :Int64,
     borrows: :all,
     is_method: true,
   },
@@ -1237,7 +1225,7 @@ MAP_METHODS = T.let({
     # type-mismatch in CheatLib.cleanup at the binding's defer site.
     # For string-keyed HashMap<V>, key_type defaults to String;
     # numeric maps return e.g. `Int64[]@list`.
-    return_type: ->(obj_type) { :"#{obj_type.key_type.resolved}[]@list" },
+    return_type: :r_key_list,
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
@@ -1249,7 +1237,7 @@ MAP_METHODS = T.let({
     zig: "({0}.count() == 0)",
     bc: true,
     numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)",
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1258,7 +1246,7 @@ MAP_METHODS = T.let({
     zig: "({0}.count() > 0)",
     bc: true,
     numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)",
-    return_type: ->(_) { :Bool },
+    return_type: :Bool,
     borrows: :all,
     is_method: true,
   },
@@ -1272,7 +1260,7 @@ MAP_METHODS = T.let({
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
     # See the matching note on `keys`: this allocates an owned list,
     # so the declared type must be `T[]@list`, not the bare slice.
-    return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]@list" },
+    return_type: :r_value_list,
     borrows: :all,  # borrows map; returns new owned list,
     is_method: true,
   },
@@ -1284,7 +1272,7 @@ MAP_METHODS = T.let({
 # Keyed by container kind (:string_map, :numeric_map, :array, :pool, :set_collection).
 # Each entry has :get and/or :set with:
 #   zig:               Zig pattern string ({target}, {index}, {value}, {alloc}, {key_alloc}, etc.)
-#   return_type:       lambda(container_type) -> return type for get
+#   return_type:       declarative return directive (r_* variant / type) for get
 #   container_borrow:  true if get returns a borrowed view (no cleanup)
 #   takes_value:       true if set takes ownership of the value
 #   allocates:         true if set requires an allocator
@@ -1304,7 +1292,7 @@ INDEX_OPS = T.let({
     get: {
       zig: "{target}.get({index})",
       shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
-      return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
+      return_type: :r_optional_value,
       container_borrow: true,
       bc: true, bc_op: :map_get,
     },
@@ -1326,7 +1314,7 @@ INDEX_OPS = T.let({
       zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})",
       sharded_zig: "{target}.get({index})",
       shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
-      return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
+      return_type: :r_optional_value,
       container_borrow: true,
       bc: true, bc_op: :map_get,
     },
@@ -1346,7 +1334,7 @@ INDEX_OPS = T.let({
   array: {
     get: {
       zig: "CheatLib.getAt({target}, {index})",
-      return_type: ->(ct) { ct.element_type },
+      return_type: :r_element_of,
       container_borrow: true,
     },
     set: {
@@ -1358,7 +1346,7 @@ INDEX_OPS = T.let({
   list: {
     get: {
       zig: "CheatLib.getAt({target}, {index})",
-      return_type: ->(ct) { ct.element_type },
+      return_type: :r_element_of,
       container_borrow: true,
     },
     set: {
@@ -1370,7 +1358,7 @@ INDEX_OPS = T.let({
   pool: {
     get: {
       zig: "{target}.get({index})",
-      return_type: ->(ct) { :"?#{ct.element_type.resolved}" },
+      return_type: :r_optional_element,
       container_borrow: false,
     },
     set: {
@@ -1384,7 +1372,7 @@ INDEX_OPS = T.let({
   set_collection: {
     get: {
       zig: "if ({target}.contains({index})) {index} else null",
-      return_type: ->(ct) { Type.new(:"?#{ct.element_type.resolved}") },
+      return_type: :r_optional_element,
       container_borrow: true,
     },
     set: {
@@ -1399,7 +1387,7 @@ INDEX_OPS = T.let({
     get: {
       # O(1) byte access on String@raw. No allocation.
       builtin: :charAt,
-      return_type: ->(_t) { Type.new(:String, sync: :raw) },
+      return_type: {type: :String, sync: :raw},
       container_borrow: true,
     },
     # No :set — strings are immutable.
@@ -1408,7 +1396,7 @@ INDEX_OPS = T.let({
     get: {
       # Byte indexing on String@symbol — same as @raw, returns @symbol slice.
       builtin: :charAt,
-      return_type: ->(_t) { Type.new(:String, sync: :symbol) },
+      return_type: {type: :String, sync: :symbol},
       container_borrow: true,
     },
     # No :set — symbols are immutable.

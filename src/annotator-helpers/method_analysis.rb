@@ -86,7 +86,7 @@ module MethodAnalysis
 
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
-    node.full_type = defn.return_resolver.call(obj_type)
+    node.full_type = defn.return_def.resolve(obj_type, [], self)
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the

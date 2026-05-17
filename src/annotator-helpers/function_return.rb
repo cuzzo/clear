@@ -53,6 +53,13 @@ class FunctionReturn < T::Struct
   sig { params(m: Symbol).returns(FunctionReturn) }
   def self.infer(m) = new(kind: Kind::Infer, infer: m)
 
+  # A receiver-parametric variant (ElementOf / OptionalOfElement /
+  # IdOfElement / OptionalOfValue / ValueList / KeyList) by Kind
+  # constant name. No payload -- the Type is computed from the
+  # receiver at resolve time.
+  sig { params(kind_name: Symbol).returns(FunctionReturn) }
+  def self.variant(kind_name) = new(kind: Kind.const_get(kind_name))
+
   # Resolve to a concrete Type. receiver is the call's receiver type
   # (for parametric shapes); args/host support the Infer variant's
   # host-method dispatch. Always returns a Type, never nil.

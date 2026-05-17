@@ -69,33 +69,66 @@ module IntrinsicRegistry
     build_emit(v, registries)
   end
 
-  # Symbol/String type-name -> Type. Inference/macro directives
-  # (:infer_*, :macro_*) are not type names -> polymorphic placeholder
-  # (the real resolution is a later, consumer-side concern).
-  # Best-effort STATIC view of the return spec. The verbatim spec is
-  # kept on fs.return_spec for the full host dispatch.
-  def to_return_type(v)
-    return Type.new(:Void) if v.nil?
-    return Type.new(:Any) if v.is_a?(Proc)
-    if v.is_a?(Hash) && v[:type]
-      return Type.new(v[:type], sync: v[:sync], ownership: v[:ownership])
+  # Best-effort STATIC view of the return, derived from the typed
+  # FunctionReturn (single source of truth). Fixed -> its concrete
+  # Type; receiver-parametric / host-inferred -> polymorphic
+  # placeholder (the real resolution is consumer-side via
+  # return_def.resolve, gated by fixed_return?).
+  def to_return_type(rdef)
+    if rdef.kind == FunctionReturn::Kind::Fixed
+      rdef.fixed || Type.new(:Void)
+    else
+      Type.new(:Any)
     end
-    return Type.new(:Any) if v.is_a?(Hash)
+  end
+
+  # Declarative receiver-parametric return directives (replace the old
+  # `return_type: ->(recv){...}` Procs). Mapped to FunctionReturn
+  # variants whose Type is computed from the receiver at resolve time.
+  RETURN_VARIANTS = {
+    r_element_of:      :ElementOf,
+    r_optional_element: :OptionalOfElement,
+    r_id_element:      :IdOfElement,
+    r_optional_value:  :OptionalOfValue,
+    r_value_list:      :ValueList,
+    r_key_list:        :KeyList
+  }.freeze
+
+  # Registry return descriptor -> FunctionReturn (strongly typed,
+  # non-nil). No Proc, no Hash, no bare nil escape: every form maps to
+  # Fixed(Type) | a receiver-parametric variant | Infer(host method).
+  def to_return_def(v)
+    return FunctionReturn.fixed(Type.new(:Void)) if v.nil?
+    return FunctionReturn.fixed(v) if v.is_a?(Type)
+    if v.is_a?(Hash)
+      return FunctionReturn.fixed(
+        v[:type] ? Type.new(v[:type], sync: v[:sync], ownership: v[:ownership])
+                 : Type.new(:Any)
+      )
+    end
+    if v.is_a?(Proc)
+      raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
+            "use a declarative directive (r_* variant or infer_* host method)"
+    end
+    if (kind = RETURN_VARIANTS[v])
+      return FunctionReturn.variant(kind)
+    end
 
     s = v.to_s
-    return Type.new(:Any) if s.start_with?("infer_", "macro_")
-    v.is_a?(Type) ? v : Type.new(v)
+    return FunctionReturn.infer(v.to_sym) if s.start_with?("infer_", "macro_")
+
+    FunctionReturn.fixed(Type.new(v))
   end
 
   def convert_entry(_name, h, registries)
-    ret = h.key?(:return_type) ? h[:return_type] : h[:return]
+    ret  = h.key?(:return_type) ? h[:return_type] : h[:return]
+    rdef = to_return_def(ret)
     fs = FunctionSignature.new(
       params: [],
-      return_type: to_return_type(ret),
+      return_type: to_return_type(rdef),
       intrinsic: true
     )
-    fs.return_spec     = ret
-    fs.return_resolver = ret if ret.is_a?(Proc)
+    fs.return_def      = rdef
     fs.arg_validator   = h[:validate] if h[:validate].is_a?(Proc)
     fs.arg_spec        = h[:args]
     fs.arity           = h[:arity]

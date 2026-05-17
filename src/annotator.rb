@@ -2367,7 +2367,7 @@ private
     end
 
     node.zig_pattern = method_def.emit&.zig
-    node.full_type   = method_def.return_spec
+    node.full_type   = method_def.return_def.resolve(nil, node.args, self)
     node.matched_stdlib_def = method_def
     node.stdlib_allocates = true if method_def.emit&.allocates
     node.mutates_receiver = true if method_def.emit&.mutates_receiver
@@ -2557,17 +2557,7 @@ private
     # 3. Resolve return type (may be dynamic via method call).
     # Dynamic resolver methods are named `infer_*` to avoid collisions with
     # Ruby Kernel conversion methods (Integer, String, Array, etc.).
-    ret = matched_def.return_spec
-    if ret.is_a?(Hash) && ret[:type]
-      # Structured return: { type: :String, sync: :raw } etc. — preserves capabilities.
-      node.full_type = Type.new(ret[:type], sync: ret[:sync], ownership: ret[:ownership])
-    elsif ret.is_a?(Symbol) && ret.to_s.start_with?("infer_") && respond_to?(ret, true)
-      node.full_type = send(ret, args, node)
-    elsif ret.respond_to?(:call)
-      node.full_type = ret.call(args.map(&:resolved_type), node)
-    else
-      node.full_type = ret
-    end
+    node.full_type = matched_def.return_def.resolve(nil, args, self)
 
     # 4. Store Zig pattern and stdlib metadata for transpiler
     node.zig_pattern = matched_def.emit&.zig
@@ -3313,7 +3303,8 @@ private
 
     if op
       # Registry-driven: type and ownership from INDEX_OPS
-      node.full_type = op[:return_type].call(target_type_info)
+      node.full_type = IntrinsicRegistry.to_return_def(op[:return_type])
+                                        .resolve(target_type_info, [], self)
       node.container_borrow = true if op[:container_borrow]
 
       # Validate key types for maps
@@ -4298,7 +4289,9 @@ private
   end
 
   # Infer return type for list.remove(i) — returns the element type.
-  sig { params(args: T::Array[T.untyped], node: AST::MethodCall).returns(Symbol) }
+  # `node` is unused (the receiver is args.first); nilable because
+  # FunctionReturn#resolve dispatches without a call node.
+  sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Symbol) }
   def infer_element_type(args, node)
     receiver = args.first
     ti = receiver&.type_info
@@ -4312,6 +4305,25 @@ private
     ti = receiver&.type_info
     elem = ti&.element_type&.resolved || :Any
     :"?#{elem}"
+  end
+
+  # Infer return type for stream/list `.toList()` — an owned heap list
+  # of the receiver's element type (unwrapping stream/promise tenses).
+  sig { params(args: T::Array[T.untyped], node: T.untyped).returns(Type) }
+  def infer_to_list(args, node)
+    recv_t = Type.new(args[0].resolved_type)
+    elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
+      recv_t.tense_type.element_type
+    elsif recv_t.bounded_stream?
+      recv_t.stream_element_type
+    elsif recv_t.inf_stream?
+      recv_t.inf_stream_element_type
+    elsif recv_t.open_stream?
+      recv_t.open_stream_element_type
+    else
+      recv_t.element_type
+    end
+    Type.new(:"#{elem_t.resolved}[]", collection: :list, location: :heap)
   end
 
   sig { params(node: AST::LinkNode).returns(T.nilable(Type)) }

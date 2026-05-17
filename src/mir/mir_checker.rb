@@ -174,7 +174,7 @@ class MIRChecker
       # allocates/borrows, handled elsewhere. Only a static return
       # type counts here (matches pre-FS behavior, which read only
       # the static `:return` key).
-      return false if init.stdlib_def.return_resolver
+      return false unless init.stdlib_def.fixed_return?
       ret = init.stdlib_def.return_type
       return !ret.void?
     end
@@ -398,7 +398,7 @@ class MIRChecker
         "heap-returning try/catch result not bound to variable (leak)")
     end
     if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
-       !node.stdlib_def.return_resolver
+       node.stdlib_def.fixed_return?
       ret = node.stdlib_def.return_type
       unless ret.void?
         label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"

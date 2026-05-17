@@ -27,23 +27,14 @@ class FunctionSignature
   attr_accessor :intrinsic, :zig_pattern
 
   # Intrinsic signature semantics (set by the registry converter; nil
-  # for ordinary user functions). `return_resolver` is the polymorphic
-  # return Proc (receiver-type -> Type); `arg_validator` the custom
-  # arg type-checker; `arg_spec` the raw args shape; `emit` the typed
-  # codegen/dispatch metadata (IntrinsicEmit). Keeps `return_type` a
-  # pure Type even for receiver-dependent intrinsics.
-  attr_accessor :return_resolver, :arg_validator, :arg_spec, :arity, :emit
-  # Verbatim registry return spec (the authoring DSL's polymorphic
-  # return facility): a static Type, a type Symbol, an `infer_*`
-  # directive Symbol (host-dispatched via send), a Proc, or a
-  # { type:, sync:, ownership: } Hash. `return_type` is the
-  # best-effort static view; consumers needing the full dispatch read
-  # this. Strongly-typed sum, not T.untyped.
-  attr_accessor :return_spec
+  # for ordinary user functions). `arg_validator` the custom arg
+  # type-checker; `arg_spec` the raw args shape; `emit` the typed
+  # codegen/dispatch metadata (IntrinsicEmit).
+  attr_accessor :arg_validator, :arg_spec, :arity, :emit
   # Strongly-typed return (FunctionReturn). Non-nil; defaults to
-  # Fixed(Void). Supersedes return_spec/return_resolver/the Symbol|nil
-  # return_type union -- resolve(receiver,args,host) always yields a
-  # concrete Type.
+  # Fixed(Void). The single return facility -- resolve(receiver,
+  # args, host) always yields a concrete Type. Replaced the former
+  # untyped return_spec (Symbol|Hash|Proc|nil) / return_resolver Proc.
   attr_accessor :return_def
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
@@ -111,15 +102,19 @@ class FunctionSignature
     @return_strategy   = T.let(nil, T.untyped)
     @stack_tier        = T.let(nil, T.untyped)
     @requires          = T.let(nil, T.untyped)
-    @return_resolver   = T.let(nil, T.nilable(Proc))
     @arg_validator     = T.let(nil, T.nilable(Proc))
     @arg_spec          = T.let(nil, T.untyped)
     @arity             = T.let(nil, T.nilable(Integer))
     @emit              = T.let(nil, T.nilable(IntrinsicEmit))
-    @return_spec       = T.let(nil, T.untyped)
     @return_def        = T.let(FunctionReturn.fixed(Type.new(:Void)),
                                FunctionReturn)
   end
+
+  # True iff the return is a static Fixed Type (not receiver-parametric
+  # or host-inferred). Callers that only honor a statically-declared
+  # owned return (e.g. the MIR HPT_LEAK check) gate on this.
+  sig { returns(T::Boolean) }
+  def fixed_return? = @return_def.kind == FunctionReturn::Kind::Fixed
 
   sig { returns(FunctionSignature) }
   def dup
@@ -138,12 +133,10 @@ class FunctionSignature
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier
       s.requires = @requires
-      s.return_resolver = @return_resolver
       s.arg_validator = @arg_validator
       s.arg_spec = @arg_spec
       s.arity = @arity
       s.emit = @emit
-      s.return_spec = @return_spec
       s.return_def = @return_def
     end
   end
