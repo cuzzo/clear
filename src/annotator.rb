@@ -655,7 +655,7 @@ private
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
     @function_context_stack.push(FunctionContext.new(
-      name: node.name, return_type: declared_return,
+      name: node.name, return_type: node.return_type || Type.new(:Any),
       lifetime: lifetime_paths, type_params: fn_type_params
     ))
 
@@ -2198,7 +2198,7 @@ private
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     unless node.value.is_a?(AST::Identifier)
-      expected_type = Type.new(expected) if expected
+      expected_type = expected
       if expected_type && (expected_type.heap? || expected_type.dynamic?) &&
          node.value.respond_to?(:storage=) &&
          node.value.type_info&.requires_move?
