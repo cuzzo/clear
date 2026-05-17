@@ -94,26 +94,58 @@ module AST
     end
   end
 
+  # The value of a struct-pattern field: the :wildcard sentinel
+  # (`c: _`), the :bind sentinel (bare `a`), or the bound expression /
+  # nested pattern AST node (`b: x`). A real 3-way typed sum -- NOT
+  # T.untyped. Named once here and reused on every slot/param that
+  # carries it.
+  PatternFieldValue = T.type_alias { T.any(Symbol, AST::Locatable) }
+
   # One field of a struct-destructuring pattern (StructPattern#fields
   # element), e.g. `a` / `b: x` / `c: _` inside `MATCH v { a, b: x }`.
-  # `value` is a genuine sum: :wildcard (`c: _`), :bind (bare `a`), or
-  # an AST node (the bound expression / nested pattern in `b: x`). The
-  # sum is real (can't collapse to one type) but is encapsulated behind
+  # `value` is the PatternFieldValue sum, encapsulated behind
   # wildcard? / bind? / expr so no reader re-derives it via raw
   # `== :wildcard` / `== :bind` symbol comparisons.
   PatternField = Struct.new(:name, :value, :name_token, keyword_init: true) do
     extend T::Sig
 
-    sig { returns(T::Boolean) }
-    def wildcard? = self[:value] == :wildcard
+    sig { returns(String) }
+    def name
+      self[:name]
+    end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def name_token
+      self[:name_token]
+    end
+
+    sig { returns(PatternFieldValue) }
+    def value
+      self[:value]
+    end
+
+    sig { params(val: PatternFieldValue).void }
+    def value=(val)
+      self[:value] = val
+    end
 
     sig { returns(T::Boolean) }
-    def bind? = self[:value] == :bind
+    def wildcard?
+      self[:value] == :wildcard
+    end
+
+    sig { returns(T::Boolean) }
+    def bind?
+      self[:value] == :bind
+    end
 
     # The bound expression / nested pattern, or nil for the :wildcard /
     # :bind sentinels. Readers that want "the AST node" use this.
-    sig { returns(T.untyped) }
-    def expr = (wildcard? || bind?) ? nil : self[:value]
+    sig { returns(T.nilable(AST::Locatable)) }
+    def expr
+      v = self[:value]
+      v.is_a?(AST::Locatable) ? v : nil
+    end
 
     sig { params(f: T.any(PatternField, T::Hash[Symbol, T.untyped])).returns(PatternField) }
     def self.coerce(f)
