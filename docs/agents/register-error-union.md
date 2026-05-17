@@ -103,6 +103,44 @@ TryCatch: 216, 217, 350, 524.  TryExpr: 360, 381, 519.
 Add crossed tests to `register-transpile-allowlist.txt`; bump
 `run_tests.rb --min-pass` only after green + zero regressions.
 
+## BLOCKER found during commit 2 (inlining vs EGUARD)
+
+`compile_call` unconditionally inlines functions that return `:string`
+or a collection/union/pool/callable
+(`compile_inline_function` branch). `RETURNS !String` /
+`RETURNS ![]const u8` fallible functions (e.g. `76_catch_blocks`'s
+`riskyOp` / `handleWithCatch`) are therefore inlined: there is NO
+call frame, so `EGUARD`'s frame-pop propagation corrupts the
+enclosing real function's frame.
+
+`EGUARD` (return-from-fn via `frameRetIps` pop) is only correct for
+non-inlined callees -- i.e. `:i64` / `:f64` returns that go through
+`ICALL`/`FCALL`. Int64-returning error tests (`271`, `272`, the
+TryCatch/TryExpr Int64 ones) have real frames and are the correct
+commit-2/3 target. String-returning error tests (`76`) need one of:
+
+1. Do not inline fallible (`RETURNS !T`) functions -- force a real
+   `SCALL` frame so EGUARD works. (Cleanest; check SCALL exists / add
+   string-returning call opcode.)
+2. Inlined-error propagation via a forward jump to the inlined
+   body's exit label + an `errored` check at the inline site, instead
+   of frame pop. (Threads an "error exit" label through
+   `compile_inline_function` / `compile_inline_return`.)
+
+Option 1 is preferred (uniform frame model; EGUARD stays trivial).
+Decide before resuming commit 2.
+
+Also: a single test only goes green once kind+name+message matching
+all work (e.g. `271` asserts every CATCH form). So commit 2 (kind)
+and commit 3 (name/EMATCHN + message/EMATCHM, with per-program
+ErrorName registry id resolution) must both land before any error
+test flips. Plan the increments accordingly (foundation -> Int64
+kind+name+message vertical slice -> string via option 1 -> OR EXIT).
+
+Status: foundation committed (63723816). Commit-2 emitter wiring
+reverted pending the option-1 decision; the inlining incompatibility
+must be resolved first.
+
 ## Invariants
 
 - No Zig parsing; only `clause_meta`/`clause_bodies`/`error_reassigns`.
