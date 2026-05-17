@@ -53,8 +53,6 @@ module AtomicPtrMigrationSuggester
     return nil unless val.is_a?(AST::StructLit)
 
     ti = node.full_type
-    return nil unless ti
-    ti = Type.new(ti) unless ti.is_a?(Type)
     syn = ti.sync
     # Three sync families are atomic-ptr-fit candidates:
     #   - @locked / @writeLocked (replace-the-lock with rcu-publish)

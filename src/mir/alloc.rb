@@ -44,9 +44,7 @@ module AllocHelper
   sig { params(node: T.untyped, final_type: T.untyped).returns(T::Array[T.untyped]) }
   def resolve_resource_close(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    ft_obj = node.full_type
-    return [false, nil] unless ft_obj
-    ti = ft_obj.is_a?(Type) ? ft_obj : Type.new(ft_obj)
+    ti = node.full_type
     ti.resolve_resource_close(->(name) { lookup_type_schema(name) })
   end
 

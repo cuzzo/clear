@@ -177,8 +177,6 @@ module PromotionClassifier
       # TAKES params are already heap-owned; returning them doesn't require promotion.
       next false if ret.value.symbol&.takes
       ti = ret.value.full_type
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      next false unless ti.is_a?(Type)
       next true if ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?
       next true if schema_lookup && !ti.string? && !ti.heap_provenance? &&
                    struct_has_promotable_fields?(ti, schema_lookup)
@@ -393,7 +391,6 @@ module CleanupClassifier
 
       var_name = node.name.is_a?(String) ? node.name : node.name.to_s
       ti = node.full_type
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
       cleanup = classify_binding(var_name, T.must(ti), node, promoted_fns, schema_lookup)
       # Stamp on node for identity-based lookup in lower_var_decl (avoids
       # same-name collisions when two vars share a name in different scopes).
@@ -526,9 +523,7 @@ module CleanupClassifier
       next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
 
       source_ti = node.expr.full_type
-      source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
-      source_ti = nil unless source_ti.is_a?(Type)
-      union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
+      union_lookup = source_ti.generic_instance? ? source_ti.generic_base : source_ti.resolved
       schema = schema_lookup.call(union_lookup) rescue nil
       next unless (schema = Schemas.as_union_schema(schema))
 
@@ -592,9 +587,7 @@ module CleanupClassifier
       next unless cond.is_a?(AST::MethodCall) || cond.is_a?(AST::FuncCall)
       next if cond.is_a?(AST::ResolveNode)
       ti = cond.full_type
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      ti = nil unless ti.is_a?(Type)
-      inner_ti = ti&.wrapped_type
+      inner_ti = ti.wrapped_type
       next unless inner_ti
       e = classify_binding(node.binding_name.to_s, inner_ti, node, promoted_fns, schema_lookup)
       next unless e
@@ -616,9 +609,7 @@ module CleanupClassifier
         next unless expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
         next if expr.is_a?(AST::ResolveNode)
         ti = expr.full_type
-        ti = Type.new(ti) if ti && !ti.is_a?(Type)
-        ti = nil unless ti.is_a?(Type)
-        inner_ti = ti&.wrapped_type
+        inner_ti = ti.wrapped_type
         next unless inner_ti
         e = classify_binding(b[:name].to_s, inner_ti, node, promoted_fns, schema_lookup)
         next unless e
