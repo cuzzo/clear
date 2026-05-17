@@ -280,6 +280,9 @@
 # of EGUARD frame-pop, since fallible String fns are inlined).
 76_catch_blocks
 78_snapshot_ambiguous
+# Commit 4: MIR::TryExpr at statement position (`call() OR RAISE;`
+# with the result discarded) -- compile inner + emit_err_propagate.
+381_mutable_list_indexed_set
 
 # Tranche 10: side-effect-only BG bodies and bare MethodCall
 # statements. A BG body whose last statement is not an expression

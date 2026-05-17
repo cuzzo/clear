@@ -702,6 +702,10 @@ class RegisterBcEmitter
       # Bare-statement form (`NEXT p;` / `q.next();`) -- route through
       # the ExprStmt path so the same dispatch handles it.
       compile_expr_stmt(MIR::ExprStmt.new(stmt, false))
+    when MIR::TryExpr
+      # `call() OR RAISE;` at statement position (result discarded).
+      # Compile the inner call, then propagate if it raised.
+      compile_try_stmt(stmt)
     else
       raise Unsupported, "register emitter does not support #{stmt.class.name} yet"
     end
@@ -1018,10 +1022,10 @@ class RegisterBcEmitter
       return compile_inline_bc_stmt(expr)
     end
 
-    # `try expr;` as an ExprStmt -- the bc VM has no error union
-    # runtime, so just compile the inner.
+    # `try expr;` / `call() OR RAISE;` as an ExprStmt -- compile the
+    # inner (result discarded), then propagate if it raised.
     if expr.is_a?(MIR::TryExpr)
-      return compile_expr_stmt(MIR::ExprStmt.new(expr.expr, false))
+      return compile_try_stmt(expr)
     end
 
     # Bare Call discarding the result. Routes through compile_call_stmt.
@@ -3072,6 +3076,13 @@ class RegisterBcEmitter
   def compile_try_expr(inner_reg)
     emit_err_propagate
     inner_reg
+  end
+
+  # `call() OR RAISE;` at statement position -- compile the inner
+  # (value discarded), then propagate if it raised.
+  def compile_try_stmt(try_expr)
+    compile_expr_stmt(MIR::ExprStmt.new(try_expr.expr, false))
+    emit_err_propagate
   end
 
   # Wrapper fn whose body is a single MIR::CatchWrapper. Calls
