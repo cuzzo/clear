@@ -314,11 +314,9 @@ class PipelineRewriter
     body = []
     
     # 1. Initialize result container or accumulator(s)
+    # Inner Literal/BinaryOp/UnaryOp self-derive their type from
+    # structure (AST::*#full_type); statements derive Void. No stamping.
     init_nodes = build_init(terminal, res_var, token, smooth_node)
-    # Accumulator-init decls are typed, but their inner Literal `.value`
-    # (e.g. the 0.0 in `__res_sum = 0.0`) is not — stamp_synth! recurses
-    # in and types it by token kind (idempotent; leaves typed decls).
-    stamp_synth!(init_nodes, smooth_node.full_type)
     body.concat(init_nodes)
 
     # 2. Build loop body
@@ -339,14 +337,9 @@ class PipelineRewriter
 
     stage_inits = []
     res_type = smooth_node.full_type
+    # Loop-body nodes self-derive their type from structure
+    # (Literal/BinaryOp/UnaryOp via AST::*#full_type; statements Void).
     loop_body = build_recursive_body(stages, terminal, current_it, res_var, token, stage_inits, res_type)
-    # Stamp the WHOLE assembled loop body: stage scaffolds (LIMIT/SKIP
-    # counters, comparisons, BreakNodes) plus the terminal action.
-    # stamp_synth! is exact for the closed set of shapes the rewriter
-    # emits (statements→Void, compares→Bool, arithmetic inherits a
-    # typed operand) — no guessing, idempotent.
-    stamp_synth!(loop_body, res_type)
-    stamp_synth!(stage_inits, res_type)
     body.concat(stage_inits)
 
     # 3. Create ForEach loop
@@ -609,67 +602,6 @@ class PipelineRewriter
     end
   end
 
-  # Literal token-kind -> value Type for rewriter-synthesized literals.
-  SYNTH_LIT_TYPE = {
-    INT64: :Int64, NUMBER: :Number, FLOAT64: :Float64,
-    BOOLEAN: :Bool, STRING: :String, SYMBOL: :Symbol, NIL: :Void
-  }.freeze
-  # Comparison / logical BinaryOp ops always yield Bool.
-  SYNTH_BOOL_OPS = %i[LT GT LTE GTE EQ NEQ AND OR].freeze
-
-  # Recursively stamp full_type on the CLOSED set of node shapes this
-  # rewriter synthesizes post-annotation (accumulator arithmetic,
-  # counters, boolean flags, desugared loop statements). Every rule
-  # here is exact for the shapes the rewriter actually emits, not a
-  # guess: statements are Void; literals are typed by token kind;
-  # comparison/logical BinaryOps are Bool; arithmetic BinaryOp/UnaryOp
-  # inherit a typed operand; `scalar` is the accumulator's element
-  # type the builder already knows. Pre-typed nodes are left intact.
-  sig { params(node: T.untyped, scalar: T.nilable(Type)).void }
-  def stamp_synth!(node, scalar)
-    return if node.nil? || node.is_a?(Symbol) || node.is_a?(String) ||
-              node.is_a?(Numeric) || node == true || node == false
-    if node.is_a?(Array)
-      node.each { |c| stamp_synth!(c, scalar) }
-      return
-    end
-    # Children first so operand types are available for inheritance.
-    if node.respond_to?(:each_pair)
-      node.each_pair { |_, v| stamp_synth!(v, scalar) }
-    end
-    return unless node.respond_to?(:full_type) && node.full_type.nil?
-
-    case node
-    when AST::Literal
-      node.full_type = Type.new(SYNTH_LIT_TYPE.fetch(node.type, :Any))
-    when AST::Assignment, AST::IfStatement, AST::BreakNode,
-         AST::ContinueNode, AST::WhileLoop, AST::WhileBindLoop,
-         AST::ForRange, AST::ForEach
-      node.full_type = Type.new(:Void)
-    when AST::BinaryOp
-      node.full_type =
-        if SYNTH_BOOL_OPS.include?(node.op)
-          Type.new(:Bool)
-        else
-          (node.left.respond_to?(:full_type) && node.left.full_type) ||
-            (node.right.respond_to?(:full_type) && node.right.full_type) ||
-            scalar || Type.new(:Any)
-        end
-    when AST::UnaryOp
-      node.full_type =
-        if node.op == :NOT
-          Type.new(:Bool)
-        else
-          (node.right.respond_to?(:full_type) && node.right.full_type) ||
-            scalar || Type.new(:Any)
-        end
-    end
-    # Identifiers are intentionally NOT blanket-typed here: a loop
-    # element ident is not the result scalar, and a wrong type is
-    # worse than nil. Accumulator idents are typed at their
-    # construction sites; any survivor is a precise bug to fix there.
-  end
-
   sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
@@ -795,7 +727,6 @@ class PipelineRewriter
       call.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "append")
       [call]
     end
-    stamp_synth!(actions, res_type)
     actions
   end
 

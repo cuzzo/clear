@@ -225,10 +225,8 @@ module PipeAnalysis
     # type AFTER this op. The op node itself evaluates to exactly that
     # (a transform op -> the post-op stream type; a terminal -> its
     # result / Void). Stamp it so no pipeline op reaches MIR untyped.
-    op = node.right
-    if op.full_type.nil? && node.full_type
-      op.full_type = node.full_type
-    end
+    # Sole owner of a pipeline op node's type — assign unconditionally.
+    node.right.full_type = node.full_type
   end
 
   # COLLECT: pipe-terminal that joins a `~T@observable` and returns
@@ -489,9 +487,7 @@ module PipeAnalysis
       # The JOIN key lambda IS a predicate ((left,right)->Bool). Type
       # the LambdaLit via the standard lambda-signature builder (same
       # as visit_LambdaLit) — its return is the Bool just validated.
-      if key_expr.full_type.nil?
-        key_expr.full_type = build_lambda_signature(params, :Bool)
-      end
+      key_expr.full_type = build_lambda_signature(params, :Bool)
     else
       # Shared key form: _.field applied to both sides
       # Validate the key expression with _ as left type
@@ -1505,12 +1501,12 @@ module PipeAnalysis
     # category as a type-name ident; stamp the codebase's :Type marker
     # (not a guess: it is not an evaluatable value).
     options.each_value do |v|
-      if v.is_a?(AST::Identifier) && v.full_type.nil?
+      if v.is_a?(AST::Identifier)
         # Keyword selector (MICRO/STANDARD/...): compile-time marker.
         v.full_type = Type.new(:Type)
-      elsif v.full_type.nil?
+      else
         # A real value option (workers: 2, parallel: TRUE) — annotate
-        # it normally so it gets its true type, not a marker.
+        # it normally so it gets its true type.
         visit(v)
       end
     end
@@ -1633,9 +1629,7 @@ module PipeAnalysis
     # type just computed here — stamp it (and its WHERE/SELECT
     # expression sub-node) so no wrapped op reaches MIR untyped.
     inner = conc.op
-    if inner.full_type.nil?
-      inner.full_type = node.full_type || proxy.full_type
-    end
+    inner.full_type = node.full_type || proxy.full_type
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
   end
 

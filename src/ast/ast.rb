@@ -11,6 +11,26 @@ require_relative "../annotator-helpers/intrinsic_registry"
 module AST
     extend T::Sig
 
+  # A node's value-type is, for these kinds, a pure function of its
+  # structure — so it is DERIVED, never stamped. The full_type getter
+  # below memoizes the derived Type into @type_object; the pre-MIR
+  # invariant walk (which calls .full_type on every node) materializes
+  # it, so type_info / resolved_type work downstream with no extra
+  # code. An annotator-set value always wins (`||=`).
+  LITERAL_VALUE_TYPE = {
+    STRING: :String, NUMBER: :Number, FLOAT64: :Float64,
+    INT64: :Int64, BOOLEAN: :Bool, SYMBOL: :Symbol, NIL: :Void
+  }.freeze
+  BOOL_BINOPS = %i[LT GT LTE GTE EQ NEQ AND OR].freeze
+  # Statements / control-flow evaluate to Void unless the annotator
+  # promoted them to an expression (IF/MATCH as a value), in which
+  # case @type_object is already set and wins.
+  module StatementVoidType
+    def full_type
+      @type_object ||= Type.new(:Void)
+    end
+  end
+
   # A function/lambda/method parameter descriptor. Replaces the loose
   # `{ name:, type:, ... }` Hash that flowed through FunctionDef#params
   # and FunctionSignature#params. `type` is ALWAYS a Type (coerced;
@@ -740,6 +760,7 @@ module AST
   end
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
+    include StatementVoidType
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
     attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
@@ -776,6 +797,15 @@ module AST
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     extend T::Sig
     include Locatable
+    # Derived: comparison/logical -> Bool; otherwise an operand's type.
+    def full_type
+      @type_object ||=
+        if BOOL_BINOPS.include?(op)
+          Type.new(:Bool)
+        else
+          Type.new(left&.full_type&.resolved || right&.full_type&.resolved || :Any)
+        end
+    end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :storage        # :heap when carry-var concat is promoted to heap
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
@@ -795,7 +825,13 @@ module AST
     # pipeline lowering switches to fiber-spawn-with-accumulator codegen.
     attr_accessor :observable_dest
   end
-  UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
+  UnaryOp      = Struct.new(:token, :op, :right) do
+    include Locatable
+    # Derived: NOT -> Bool; otherwise the operand's type.
+    def full_type
+      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right&.full_type&.resolved || :Any)
+    end
+  end
   # Parser-only placeholder for call-site override syntax; the annotator
   # rejects it until runtime semantics are implemented.
   CallSiteOverride = Struct.new(:token, :kind, :n, :inner) { include Locatable }
@@ -809,7 +845,14 @@ module AST
     def wildcard?; false end
     def name; self[:name].to_s end
   end
-  Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
+  Literal      = Struct.new(:token, :type, :value, :storage) do
+    include Locatable
+    # Derived: a literal's value-type is a pure function of its token
+    # kind. Never nil, never stamped.
+    def full_type
+      @type_object ||= Type.new(LITERAL_VALUE_TYPE.fetch(self[:type], :Any))
+    end
+  end
   ListLit      = Struct.new(:token, :items, :storage) { 
     extend T::Sig
     include Locatable 
@@ -853,6 +896,7 @@ module AST
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [then_branch, else_branch].compact
@@ -870,6 +914,7 @@ module AST
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
@@ -879,14 +924,21 @@ module AST
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
   end
-  BreakNode    = Struct.new(:token) { include Locatable }
-  ContinueNode = Struct.new(:token) { include Locatable }
+  BreakNode    = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
+  end
+  ContinueNode = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
+  end
   FuncCall     = Struct.new(:token, :name, :args) do
     extend T::Sig
     include Locatable
@@ -1299,6 +1351,7 @@ module AST
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
@@ -1309,6 +1362,7 @@ module AST
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops, :is_mutable) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
