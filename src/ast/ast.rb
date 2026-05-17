@@ -363,11 +363,14 @@ module AST
       T.must(@type_object)
     end
 
-    # Returns the Type object directly. Callers use type_info for rich access
-    # and == / .to_s / Type.new(full_type) for interop.
-    sig { returns(T.nilable(Type)) }
+    # Non-nil contract: a generic evaluatable node defaults to the
+    # :Untyped sentinel (mirrors StatementVoidType's :Void default)
+    # rather than nil, so callers never branch on nil. A node the
+    # annotator failed to stamp surfaces as :Untyped and is caught by
+    # PreMirTypeCheck at the AST->MIR boundary, not as scattered nil.
+    sig { returns(Type) }
     def full_type
-      @type_object
+      @type_object ||= Type.new(:Untyped)
     end
 
     sig { params(val: T.untyped).returns(T.nilable(Type)) }

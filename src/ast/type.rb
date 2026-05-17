@@ -496,6 +496,15 @@ class Type
     resolved == :Void
   end
 
+  # The :Untyped sentinel: a generic evaluatable node whose full_type
+  # was never stamped by the annotator. full_type defaults to this
+  # instead of nil so the contract is non-nilable; PreMirTypeCheck
+  # raises on any :Untyped reaching the AST->MIR boundary (latent bug).
+  sig { returns(T::Boolean) }
+  def untyped?
+    resolved == :Untyped
+  end
+
   # Gradual-typing placeholder. True when this Type is an unresolved
   # `Auto` slot waiting for the inference pass to fill it in.
   sig { returns(T::Boolean) }

@@ -6368,8 +6368,9 @@ class MIRLowering
     target_node = node.name.target
     ti = target_node.full_type rescue nil
 
-    # Raw slice index (synthetic nodes from SOA rewrite have no type_info)
-    unless ti
+    # Raw slice index (synthetic nodes from SOA rewrite have no type info:
+    # full_type defaults to the :Untyped sentinel, never nil)
+    if ti.nil? || ti.untyped?
       target = lower(target_node)
       idx = lower(node.name.index)
       val = lower(node.value)

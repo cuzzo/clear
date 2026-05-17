@@ -43,9 +43,9 @@ module PreMirTypeCheck
     more = violations.size > 30 ? "\n  ... (+#{violations.size - 30} more)" : ""
     raise InternalTypeResolutionError, <<~MSG
       Internal Compiler Error: #{violations.size} AST node(s) reached MIR
-      lowering without a resolved type (full_type == nil). Every
-      evaluatable node must be typed (Void for statements / void
-      expressions) by the end of annotation.
+      lowering without a resolved type (full_type is the :Untyped
+      sentinel). Every evaluatable node must be typed (Void for
+      statements / void expressions) by the end of annotation.
 
       This is a bug in the CLEAR compiler, not an error in your
       program. Sorry for the inconvenience -- please report it.
@@ -64,7 +64,7 @@ module PreMirTypeCheck
     return if seen[oid]
     seen[oid] = true
 
-    if node.respond_to?(:full_type) && node.full_type.nil?
+    if node.respond_to?(:full_type) && node.full_type.untyped?
       tok = node.respond_to?(:token) ? node.token : nil
       loc = tok && tok.respond_to?(:line) ? "#{tok.line}:#{tok.column}" : "?"
       violations << { cls: node.class.name.to_s.split("::").last, loc: loc }
