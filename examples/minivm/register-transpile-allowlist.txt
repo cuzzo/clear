@@ -287,6 +287,13 @@
 # Commit 4: MIR::TryExpr at statement position (`call() OR RAISE;`
 # with the result discarded) -- compile inner + emit_err_propagate.
 381_mutable_list_indexed_set
+# Commit 6: OR EXIT (unified grammar). Structured InlineBc :or_exit
+# (mir_lowering :bc, both stmt + binding position) -> EREWRITE
+# partial error-field override; additive propagating-catch TryCatch
+# (does not touch the static value-fallback heuristic). 272 covers
+# all 7 inherit/override forms (msg-only, kind, kind+msg, kind+type,
+# full, type-only, type+msg).
+272_or_exit_unified
 
 # Tranche 10: side-effect-only BG bodies and bare MethodCall
 # statements. A BG body whose last statement is not an expression

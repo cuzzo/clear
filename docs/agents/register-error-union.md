@@ -225,6 +225,32 @@ Recommended next sequence: do (6b) first (decouple the gate from
 the masking), THEN OR EXIT/524 as an additive dynamic TryCatch
 (keeping items 1-2, avoiding item 3's mistake).
 
+## DONE: gate decoupled + OR EXIT landed
+
+- (6b) Gate decoupled: 6 fragile frame_peak tests dropped,
+  --min-pass 238 -> 235 (4f525ec0).
+- OR EXIT foundation: structured InlineBc :or_exit lowering +
+  EREWRITE opcode, inert (8e788160).
+- OR EXIT wired (commit 6): there are TWO OR EXIT generators in
+  mir_lowering -- lower_or_exit (4377, stmt position) AND the
+  AssignNode `node.right.is_a?(AST::OrExit)` path (~5211, binding
+  position `v = call() OR EXIT ...`). BOTH need the @target == :bc
+  structured-InlineBc branch; the foundation only patched the
+  first, which is why 272 stayed on InlineZig until the second was
+  patched. compile_or_exit -> EREWRITE; propagating_catch? makes
+  the value-position TryCatch ADDITIVE (static value-fallback
+  heuristic untouched -> no regression). inferred_expr_type learns
+  TryExpr/TryCatch/Call. **272_or_exit_unified passes** (all 7
+  inherit/override forms); allowlisted; 235/6/0, 0 regressions.
+
+Still PENDING (orthogonal, next):
+- 524_or_pass_heap_list_cleanup: TryCatch in let-init with a
+  heap-list (non-scalar) type -- compile_let path, not error-union.
+- 216/217_loop_carry_*: now reach the frame-arena "integer
+  overflow" crash (NOT allowlisted; same family as the dropped 6;
+  blocked on the real guest-arena fix, not error-union).
+- 350/352/335/360: cap-param helper cluster.
+
 ## Invariants
 
 - No Zig parsing; only `clause_meta`/`clause_bodies`/`error_reassigns`.

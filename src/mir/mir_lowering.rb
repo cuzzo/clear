@@ -5209,6 +5209,38 @@ class MIRLowering
     # clears the type explicitly (to avoid carrying a stale type
     # from the prior context that no longer matches the new kind).
     if node.right.is_a?(AST::OrExit)
+      if is_error && @target == :bc
+        # Register VM: structured sibling (no Zig text). One InlineBc
+        # carries the reassignment; RETURN error.CheatError propagates
+        # via the bc error-union (EGUARD / inline-exit).
+        ex = node.right
+        bc_kind = nil
+        bc_name_id = nil
+        bc_clear_type = false
+        if ex.kind
+          bc_kind = ex.kind.to_s
+          if ex.error_name
+            bc_name_id = AST.id_of_type(ex.error_name.to_sym)
+          else
+            bc_clear_type = true
+          end
+        elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
+          bc_kind = AST.kind_of_type(ex.error_name.to_sym).to_s
+          bc_name_id = AST.id_of_type(ex.error_name.to_sym)
+        end
+        msg_mir = ex.message ? lower(ex.message) : nil
+        reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
+          kind: bc_kind, name_id: bc_name_id,
+          clear_type: bc_clear_type, has_message: !ex.message.nil?,
+          line: (node.token&.line || 0).to_i
+        })
+        catch_block = MIR::ScopeBlock.new([
+          MIR::ExprStmt.new(reassign, false),
+          MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+        ])
+        return try_catch_with_provenance(left, catch_block, "__exit_err")
+      end
+
       if is_error
         rt_name = @rt_name
         ex = node.right

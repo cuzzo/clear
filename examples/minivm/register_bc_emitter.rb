@@ -1740,6 +1740,8 @@ class RegisterBcEmitter
       else
         raise Unsupported, "register emitter does not support remove on #{target_kind.inspect}"
       end
+    when :or_exit
+      compile_or_exit(stmt)
     else
       raise Unsupported, "register emitter does not support MIR::InlineBc stmt #{stmt.op.inspect} yet"
     end
@@ -2951,7 +2953,33 @@ class RegisterBcEmitter
     dst
   end
 
+  # A propagating catch_body re-raises rather than producing a
+  # fallback value: OR EXIT (InlineBc :or_exit) or a bare
+  # RETURN error.CheatError. Distinct from a value-fallback catch.
+  def propagating_catch?(cb)
+    return false unless cb.is_a?(MIR::ScopeBlock)
+
+    semantic_body(cb.body || []).any? do |s|
+      returns_cheat_error?(s) ||
+        (s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::InlineBc) && s.expr.op == :or_exit)
+    end
+  end
+
   def compile_scalar_try_catch(expr, type)
+    # Additive dynamic path for propagating catches (OR EXIT / re-
+    # raise). The static heuristic below is left intact for ordinary
+    # value-fallback callers (no regression).
+    if propagating_catch?(expr.catch_body)
+      resreg = type == :f64 ? compile_f64_expr(expr.expr) : compile_i64_expr(expr.expr)
+      e = fresh_ireg
+      emit(EFLAG, e)
+      emit(JF, e, 0)
+      done = @ops.length - 1
+      semantic_body(expr.catch_body.body || []).each { |s| compile_stmt(s) }
+      @ops[done] = @ops.length
+      return resreg
+    end
+
     unless expr.expr.is_a?(MIR::Call)
       raise Unsupported, "register emitter only supports OR fallback around helper calls in this tranche"
     end
@@ -3073,6 +3101,40 @@ class RegisterBcEmitter
     else
       emit(EGUARD)
     end
+  end
+
+  # OR EXIT: structured partial rewrite of the active error
+  # (InlineBc :or_exit from lower_or_exit's :bc branch). Unset fields
+  # inherit the error set by the failing call; errored stays set so
+  # the following RETURN error.CheatError propagates.
+  def compile_or_exit(stmt)
+    meta = stmt.stdlib_def || {}
+    mask = 0
+    kind_c = add_const(0)
+    name_c = add_const(0)
+    msg_c = add_const("")
+    if meta[:kind]
+      kind_c = add_const(ERROR_KIND_IDS.fetch(meta[:kind].to_s))
+      mask |= 1
+    end
+    if meta[:name_id]
+      name_c = add_const(meta[:name_id].to_i)
+      mask |= 2
+    elsif meta[:clear_type]
+      name_c = add_const(0)
+      mask |= 2
+    end
+    if meta[:has_message]
+      msg_arg = (stmt.args || []).first
+      unless msg_arg.is_a?(MIR::Lit)
+        raise Unsupported, "register emitter OR EXIT supports literal messages in this commit"
+      end
+      msg_c = add_const(string_lit_text(msg_arg))
+      mask |= 4
+    end
+    line_c = add_const(meta.fetch(:line, 0).to_i)
+    mask |= 8
+    emit(EREWRITE, kind_c, name_c, msg_c, line_c, add_const(mask))
   end
 
   # OR RAISE: inner already compiled (its call emitted); propagate if
@@ -7066,6 +7128,11 @@ class RegisterBcEmitter
       return inferred_expr_type(expr.source)
     elsif expr.is_a?(MIR::DupeSlice)
       return inferred_expr_type(expr.source)
+    elsif expr.is_a?(MIR::TryExpr) || expr.is_a?(MIR::TryCatch)
+      return inferred_expr_type(expr.expr)
+    elsif expr.is_a?(MIR::Call)
+      fn = @functions_by_name[expr.callee.to_s]
+      return normalize_type(fn.ret_type) if fn
     elsif expr.is_a?(MIR::HeapCreate)
       return inferred_expr_type(expr.init)
     elsif expr.is_a?(MIR::Deref)
