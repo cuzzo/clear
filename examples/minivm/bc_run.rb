@@ -136,7 +136,7 @@ if $PROGRAM_NAME == __FILE__
       runner_main += "    sourcePaths = loadRegisterSourcePaths!(\"#{register_source_path_file}\") OR RAISE;\n"
       runner_main += "    breakpoints = loadRegisterBreakpoints!(\"#{register_breakpoints_file}\") OR RAISE;\n"
       runner_main += "    varNames = loadRegisterVarNames!(\"#{register_names_file}\") OR RAISE;\n"
-      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames) OR RAISE;\n"
+      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64) OR RAISE;\n"
       runner_main += "    printRegisterResult(result) OR RAISE;\n"
       runner_main += "    RETURN;\nEND\n"
 

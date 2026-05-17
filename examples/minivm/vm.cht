@@ -831,7 +831,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list) RETURNS !RegisterValue ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64) RETURNS !RegisterValue ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -941,7 +941,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     # writes to the originating allocation.
     MUTABLE traceAllocId: Int64 = 0_i64;
 
-    MUTABLE ip: Int64 = 0;
+    # Re-entrant entry point (mirrors the stack VM's exec!(entryIp,...)).
+    # Top-level runs pass 0 (main is compiled first -> entry ip 0); a
+    # spawned BG fiber will pass its body region's entry. initCaps
+    # loading lands with BGSPAWN/capture-layout (see
+    # docs/agents/stack-vm-fiber-replication.md R5).
+    MUTABLE ip: Int64 = entryIp;
     TIGHT WHILE ip < ops.length() DO
         # Snapshot the instruction-start ip for error-site line lookup;
         # `ip` itself advances past the opcode and operands as we decode.
