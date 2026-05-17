@@ -2095,6 +2095,9 @@ class PipelineHost
     # structural MIR. There is no user-facing CONCURRENT wrapper here;
     # sharded EACH has always implied one worker per shard.
     conc = AST::ConcurrentOp.new(each_op.token, each_op, {})
+    # Synthesized post-annotation: inherit the wrapped EachOp's type
+    # so the AST->MIR type-resolution invariant holds.
+    conc.full_type = each_op.full_type if each_op.respond_to?(:full_type) && each_op.full_type
     cb = build_bounded_concurrent_callback_pointer(conc, item_t)
 
     source_mir = visit_mir(list_node)

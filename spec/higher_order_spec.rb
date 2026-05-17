@@ -1853,7 +1853,11 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("__res")
-        expect(out).to include("+ 1")
+        # Typed Int64 counter increment now lowers through the
+        # overflow-safe add (CheatLib.intAdd), not a raw `+`. The old
+        # `+ 1` assertion only held because the synthesized increment
+        # node was UNTYPED — the bug the AST→MIR invariant fixed.
+        expect(out).to match(/__res\d+ = CheatLib\.intAdd\(__res\d+, 1\)/)
       end
 
       it "wraps the predicate in an if condition in the loop" do

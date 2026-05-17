@@ -1114,6 +1114,16 @@ private
     field_defaults = node.fields.each_with_object({}) { |(k, f), h| h[k] = f[:default] if f[:default] }
     schema[:field_defaults] = field_defaults unless field_defaults.empty?
 
+    # A field default's type IS the field's declared type (it must be
+    # assignable to it) — not a guess. These default nodes (Literal /
+    # DefaultLit) are schema metadata never walked by the expression
+    # visitor, so type them here.
+    node.fields.each do |_, f|
+      d = f[:default]
+      next unless d && d.respond_to?(:full_type=) && d.full_type.nil?
+      d.full_type = f[:type].is_a?(Type) ? f[:type] : Type.new(f[:type] || :Any)
+    end
+
     # Track which fields are BORROWED (references, not owned).
     borrowed_fields = node.fields.select { |_, f| f[:borrowed] }.keys
     schema[:borrowed_fields] = borrowed_fields.to_set if borrowed_fields.any?
@@ -1409,6 +1419,14 @@ private
         end
       end
     end
+
+    # A destructuring pattern's type IS the subject it destructures
+    # (the MATCH expr) — not a guess.
+    if pat.respond_to?(:full_type=) && pat.full_type.nil?
+      pat.full_type = match_node.expr.full_type ||
+                      Type.new(match_node.expr.resolved_type || :Any)
+    end
+    nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
   end
 
   sig { params(node: AST::PassStmt).returns(Symbol) }
@@ -1532,8 +1550,17 @@ private
           # patterns (tag identifiers), not constructors — they don't need field values.
           @match_pattern_context = true
           visit(c[:value])
-          # Multi-pattern arm: visit + type-check each extra pattern too.
-          c[:extra_values]&.each { |ev| visit(ev) }
+          # Multi-pattern arm: visit + type-check each extra pattern
+          # too. A `{ field }` destructure goes through the SAME
+          # handler as a single :struct_pattern arm so it is typed
+          # (and its binds declared), not just visited.
+          c[:extra_values]&.each do |ev|
+            if ev.is_a?(AST::StructPattern)
+              annotate_struct_pattern!(node, ev)
+            else
+              visit(ev)
+            end
+          end
           @match_pattern_context = false
           expr_t2 = Type.new(node.expr.resolved_type || :Any)
           # Type-check the head pattern, then each extra. Patterns share
@@ -1632,6 +1659,14 @@ private
           # the SAME payload (same inline-struct fields and types) — the
           # destructured names are shared across all patterns' bodies.
           if c[:destructure] && is_union
+            # The destructure pattern's type IS the subject it
+            # destructures (the MATCH union expr) — same principle as
+            # annotate_struct_pattern!; not a guess. Binds are declared
+            # below; this only types the pattern node itself.
+            if c[:destructure].respond_to?(:full_type=) && c[:destructure].full_type.nil?
+              c[:destructure].full_type =
+                node.expr.full_type || Type.new(node.expr.resolved_type || :Any)
+            end
             variant_name = case c[:value]
                            when AST::GetField   then c[:value].field
                            when AST::MethodCall then c[:value].name
@@ -2320,6 +2355,14 @@ private
   sig { params(node: AST::StaticCall).void }
   def visit_StaticCall(node)
     node.args.each { |arg| visit(arg) }
+
+    # `File` in `File::open(...)` is a TYPE reference, not a runtime
+    # value. The codebase's established marker for a type-position
+    # identifier is :Type (cf. comptime type args in function_analysis)
+    # — not a guess.
+    if node.type_name.respond_to?(:full_type=) && node.type_name.full_type.nil?
+      node.type_name.full_type = Type.new(:Type)
+    end
 
     type_name = node.type_name.name.to_sym
     schema    = lookup_type_schema(type_name)
@@ -3941,6 +3984,12 @@ private
       nil,
       :stack
     )
+
+    # The bound identifier ($u) IS the per-element binding — type it
+    # exactly as it was declared (binding_type), not a guess.
+    if node.right.respond_to?(:full_type=) && node.right.full_type.nil?
+      node.right.full_type = binding_type
+    end
 
     # The result of the operation is the collection itself (passthrough for pipeline)
     node.full_type = lhs_type

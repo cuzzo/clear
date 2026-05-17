@@ -668,18 +668,26 @@ module EscapeAnalysis
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          node.type_info&.provenance = :heap
+          node.type_info.provenance = :heap
           if node.is_a?(AST::BindExpr) && node.mode == :assign
+            # decl is a lookup result (legitimately nil on miss); its
+            # type_info is invariant-guaranteed non-nil when found. The
+            # old `decl&.type_info.provenance=` was a BROKEN chain (the
+            # `&.` short-circuited to nil, then `.provenance=` ran on
+            # nil). Guard decl only; the type_info guard is dead.
             decl = e3_find_decl(fn.body, node.name)
-            decl&.type_info&.provenance = :heap
+            decl.type_info.provenance = :heap if decl
           end
         when AST::Assignment
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          sym = node.name.symbol
+          # Same as above: sym.reg is a lookup back-pointer (nil on
+          # miss); type_info is invariant-guaranteed when present.
+          # Guard decl only — no type_info guard, no broken `&.` chain.
+          sym  = node.name.symbol
           decl = sym&.reg
-          decl&.type_info&.provenance = :heap
+          decl.type_info.provenance = :heap if decl
         end
       end
     end

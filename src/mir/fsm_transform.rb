@@ -141,7 +141,7 @@ module FsmTransform
       when Array
         node.each { |n| visit.call(n) }
       when AST::VarDecl
-        entry = local_entry(node.name, node.full_type || node.type || node.value&.full_type)
+        entry = local_entry(node.name, node.full_type)
         if entry && !seen[entry[:name]]
           seen[entry[:name]] = true
           out << entry
@@ -149,7 +149,7 @@ module FsmTransform
         visit.call(node.value) if node.value
       when AST::BindExpr
         if node.mode == :decl
-          entry = local_entry(node.name, node.full_type || node.type || node.value&.full_type)
+          entry = local_entry(node.name, node.full_type)
           if entry && !seen[entry[:name]]
             seen[entry[:name]] = true
             # Mark suspend-result decls so the caller can include

@@ -16,6 +16,7 @@ require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
 require_relative "../mir/control_flow"
+require_relative "../mir/pre_mir_type_check"
 
 class CompilerFrontend
     extend T::Sig
@@ -61,6 +62,11 @@ class CompilerFrontend
     # appear at lower-time. The wrapper itself never reaches code
     # generation -- mir_lowering still walks the TestBlock directly.
     synthesize_test_body_wrappers!(T.must(ast), fn_nodes)
+
+    # AST→MIR boundary invariant: every evaluatable node must carry a
+    # resolved type by now. A nil full_type here is a compiler bug
+    # (annotator failed to stamp it), surfaced before MIR consumes it.
+    PreMirTypeCheck.verify!(T.must(ast))
 
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir_pass.transform!(T.must(ast))

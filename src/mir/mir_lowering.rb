@@ -2298,7 +2298,7 @@ class MIRLowering
 
   sig { params(node: AST::ListLit).returns(T.untyped) }
   def lower_list_lit(node)
-    ti = node.coerced_type_info || node.type_info || Type.new(node.full_type || :Any)
+    ti = node.coerced_type_info || node.type_info
 
     # Bounded stream: ~T[N] - emit BoundedStream struct with Promise items
     if ti.respond_to?(:bounded_stream?) && ti.bounded_stream?
@@ -2381,7 +2381,7 @@ class MIRLowering
   sig { params(node: AST::HashLit).returns(T.untyped) }
   def lower_hash_lit(node)
     # HashMaps are always heap-allocated
-    ti = node.coerced_type_info || node.type_info || Type.new(node.full_type || :Any)
+    ti = node.coerced_type_info || node.type_info
     rt_name = @rt_name
     alloc_str = "#{rt_name}.heapAlloc()"
 
@@ -3729,7 +3729,7 @@ class MIRLowering
           elsif code.strip.end_with?(";")
             code
           elsif code.strip.end_with?("}")
-            expr_type = expr.full_type || :Void
+            expr_type = expr.full_type
             is_void_expr = expr_type.nil? || expr_type == :Void ||
               (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
             is_void_expr = false if mir.is_a?(MIR::BgBlock)
@@ -3786,7 +3786,7 @@ class MIRLowering
     @bg_block_counter = (@bg_block_counter || 0) + 1
     id = @bg_block_counter - 1
 
-    tense_t = Type.new(node.full_type || :"~Void")
+    tense_t = Type.new(node.full_type)
     inner_t = Type.new(tense_t.tense_type)
     inner_zig = inner_t.zig_type
     promise_zig = tense_t.zig_type
@@ -3906,7 +3906,7 @@ class MIRLowering
           elsif code.strip.end_with?(";") || code.strip.end_with?("}")
             code
           else
-            expr_type = step[:expr].full_type || :Void
+            expr_type = step[:expr].full_type
             is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
             is_void_step ? "#{code};" : "_ = #{code};"
           end
@@ -4113,7 +4113,7 @@ class MIRLowering
     @stream_gen_counter = (@stream_gen_counter || 0) + 1
     id = @stream_gen_counter - 1
 
-    tense_t = Type.new(node.full_type || :"~?Void[]")
+    tense_t = Type.new(node.full_type)
     is_inf = tense_t.inf_stream?
     stream_zig = tense_t.zig_type
 
@@ -4270,7 +4270,7 @@ class MIRLowering
 
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
   def lower_next_expr(node, alloc_sym = :frame)
-    promise_type = Type.new(node.expr.full_type || :Void)
+    promise_type = Type.new(node.expr.full_type)
 
     if promise_type.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
@@ -5096,7 +5096,7 @@ class MIRLowering
     elsif rhs.is_a?(AST::FuncCall)
       # x |> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
-      synthetic.full_type = node.full_type || rhs.full_type
+      synthetic.full_type = node.full_type
       synthetic.storage = node.storage
       synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
@@ -5119,7 +5119,7 @@ class MIRLowering
 
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def lower_or_rescue(node)
-    t_left = node.left.full_type ? Type.new(node.left.full_type) : nil
+    t_left = Type.new(node.left.full_type)
     # CLEAR's auto-propagate strips `!T` from a fallible call's
     # full_type (so `x = call()` is x: T at the binding level). The
     # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
@@ -5420,7 +5420,7 @@ class MIRLowering
       # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
-        zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
+        zig_t = transpile_type(v.type_info.resolved.to_s)
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
@@ -5557,7 +5557,7 @@ class MIRLowering
   def lower_range_lit(node)
     s = lower(node.start)
     e = lower(node.finish)
-    elem_type = node.type_info&.tense_type&.element_type&.resolved
+    elem_type = node.type_info.tense_type&.element_type&.resolved
     if node.inclusive
       MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")), elem_type)
     else
@@ -5584,7 +5584,7 @@ class MIRLowering
       MIR::BinOp.new("+", MIR::Cast.new(end_expr, "usize", :intCast), MIR::Lit.new("1"))
     end
 
-    elem_zig = node.target.type_info&.element_type ? Type.new(node.target.type_info.element_type).zig_type : "u8"
+    elem_zig = node.target.type_info.element_type ? Type.new(node.target.type_info.element_type).zig_type : "u8"
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
@@ -5989,7 +5989,7 @@ class MIRLowering
   sig { params(node: AST::VarDecl).returns(T.untyped) }
   def lower_var_decl(node)
     is_mutable = node.respond_to?(:mutable) && node.mutable
-    ft = Type.new(node.full_type || :Void)
+    ft = Type.new(node.full_type)
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
     is_mutable ||= ft.collection?
     is_mutable ||= ft.any_sync?
@@ -6074,7 +6074,7 @@ class MIRLowering
         lower(node.value)
       elsif (rhs_unwrapped.is_a?(AST::CopyNode) || rhs_unwrapped.is_a?(AST::CloneNode)) &&
             rhs_unwrapped.value.respond_to?(:type_info) &&
-            rhs_unwrapped.value.type_info&.list_collection?
+            rhs_unwrapped.value.type_info.list_collection?
         # `let dest: T[]@list = COPY src;` where src is also @list.
         # The default lower_copy path returns a slice (via :list_shallow +
         # ItemsAccess), which doesn't match the @list destination. Use
@@ -6168,7 +6168,7 @@ class MIRLowering
       # use per-declaration storage. This avoids using a stale alloc from a same-named
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
-      ft = node.type_info ? (Type.new(node.type_info) rescue nil) : nil
+      ft = Type.new(node.type_info)
       node_alloc = if mir_allocates?(init)
         :heap
       elsif node.respond_to?(:storage) && node.storage == :heap
@@ -7224,7 +7224,7 @@ class MIRLowering
       ], T::Array[T.untyped])
       MIR::ScopeBlock.new(stmts)
     elsif needs_string_dupe && value
-      ret_type = node.value.full_type ? Type.new(node.value.full_type) : nil
+      ret_type = Type.new(node.value.full_type)
       if ret_type&.string?
         MIR::ScopeBlock.new([
           MIR::AllocMark.new("__ret_dupe", :heap, nil),
