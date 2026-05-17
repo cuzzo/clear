@@ -427,9 +427,35 @@ module NilKillRuntimeTrace
     end
   end
 
+  # The finalizer MUST be built in a separate method so its closure
+  # captures ONLY the (Integer) object_id and the module -- never
+  # `value` (capturing value would pin it alive forever, the finalizer
+  # would never run, and the leak would be reinstated).
+  def self.objects_finalizer(oid)
+    proc { @objects.delete(oid) }
+  end
+
   def self.register_collection_owner(value, owner)
     return unless value.is_a?(Array) || value.is_a?(Hash) || (defined?(Set) && value.is_a?(Set))
-    owners = (@objects[value.object_id] ||= {})
+
+    oid = value.object_id
+    unless @objects.key?(oid)
+      # @objects is keyed by object_id and was NEVER evicted -> every
+      # transient collection leaked an entry forever, and GC then
+      # marked a monotonically growing live graph each cycle (the
+      # collect end-to-end ceiling, and a real unbounded-memory bug).
+      # ObjectSpace::WeakMap is unusable here: Ruby 3.2 holds WeakMap
+      # VALUES weakly, so the owners hash would vanish for LIVE
+      # collections -> lost mutation attribution. Instead evict via a
+      # finalizer when the collection is GC'd: a GC'd collection can
+      # never be mutated again, so no recorded mutation is ever lost
+      # and downstream output is byte-identical. The 13 mutation-hook
+      # read sites + record_collection_mutation keep object_id keys
+      # unchanged.
+      @objects[oid] = {}
+      ObjectSpace.define_finalizer(value, objects_finalizer(oid))
+    end
+    owners = @objects[oid]
     owners[owner_identity_key(owner)] ||= owner
     record_collection_snapshot(value, owner)
   end
