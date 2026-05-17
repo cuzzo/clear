@@ -6708,7 +6708,7 @@ class MIRLowering
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
   def lower_if_bind(node)
     mir_bindings = node.bindings.map do |b|
-      { expr: lower(b[:expr]), capture: b[:name] }
+      { expr: lower(b.expr), capture: b.name }
     end
     then_body = lower_body(node.then_branch)
 
@@ -6721,7 +6721,7 @@ class MIRLowering
       alloc_expr = MIR::MethodCall.new(MIR::Ident.new(@rt_name), "heapAlloc", [], false)
       release_call = MIR::Call.new(
         "CheatLib.#{release_func}",
-        [MIR::Ident.new(mir_expr.zig_base), alloc_expr, MIR::Ident.new(b[:name])],
+        [MIR::Ident.new(mir_expr.zig_base), alloc_expr, MIR::Ident.new(b.name)],
         false
       )
       then_body = [MIR::DeferStmt.new(release_call)] + T.must(then_body)

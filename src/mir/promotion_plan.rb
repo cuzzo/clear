@@ -605,19 +605,19 @@ module CleanupClassifier
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::IfBind)
       node.bindings.each do |b|
-        expr = b[:expr]
+        expr = b.expr
         next unless expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
         next if expr.is_a?(AST::ResolveNode)
         ti = expr.full_type
         inner_ti = ti.wrapped_type
         next unless inner_ti
-        e = classify_binding(b[:name].to_s, inner_ti, node, promoted_fns, schema_lookup)
+        e = classify_binding(b.name.to_s, inner_ti, node, promoted_fns, schema_lookup)
         next unless e
         e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
         if inner_ti.element_type
           e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
         end
-        bindings[b[:name].to_s] = e
+        bindings[b.name.to_s] = e
       end
     end
   end

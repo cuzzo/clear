@@ -850,10 +850,10 @@ class MIRPass
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      entry = T.must(bindings)[b[:name].to_s]
+      entry = T.must(bindings)[b.name.to_s]
       next unless entry && entry[:needs_cleanup]
-      mir_prefix << MIR::Alloc.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc])
-      drop = MIR::Drop.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc],
+      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry[:kind], entry[:alloc])
+      drop = MIR::Drop.new(stmt.token, b.name.to_s, entry[:kind], entry[:alloc],
                            true, nil, nil, nil)
       drop.cleanup_entry = entry
       mir_prefix << drop

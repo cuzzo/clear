@@ -1308,40 +1308,38 @@ private
   def visit_IfBind(node)
     # Visit and validate each binding expression.
     node.bindings.each do |b|
-      visit(b[:expr])
-      ti = b[:expr].full_type
-      unless ti&.optional?
-        error!(b[:expr], :IF_AS_NEEDS_OPTIONAL, got: b[:expr].resolved_type)
+      visit(b.expr)
+      ti = b.expr.full_type
+      unless ti.optional?
+        error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
       end
       # Annotate each binding with the unwrapped type for use in lowering.
       unwrapped = ti.wrapped_type
       # RESOLVE returns ?T@multiowned/shared where the caller owns the strong ref.
       # Propagate ownership so field access auto-derefs through .ctrl.data and
       # the lowering knows to inject rcRelease cleanup.
-      if b[:expr].is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
+      if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
         unwrapped.ownership = ti.ownership
         unwrapped.link_source = ti.link_source
       end
-      b[:unwrapped_type] = unwrapped
+      b.unwrapped_type = unwrapped
     end
 
     branch_logic = [
       proc {
         # Declare each binding in the then-scope with the unwrapped type.
         node.bindings.each do |b|
-          unwrapped = b[:unwrapped_type]
-          # Sole producer sets this from ti.wrapped_type (Type|nil;
-          # never a Symbol) — see the binding-annotation loop above.
-          sym = unwrapped&.resolved
-          current_scope.declare(b[:name], nil, unwrapped, false, false, nil, :stack)
-          entry = current_scope.locals[b[:name]]
-          b[:symbol] = entry
+          unwrapped = b.unwrapped_type  # always a Type (never nil)
+          sym = unwrapped.resolved
+          current_scope.declare(b.name, nil, unwrapped, false, false, nil, :stack)
+          entry = current_scope.locals[b.name]
+          b.symbol = entry
           # Propagate non_escaping when the source is borrow-derived from a
           # non_escaping binding (a WITH alias or another transitive borrow
           # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
           # makes the new binding a borrow into locked data; it must not
           # escape the enclosing WITH scope either.
-          src_root = ifbind_source_root(b[:expr])
+          src_root = ifbind_source_root(b.expr)
           if src_root && src_root.symbol&.non_escaping
             entry.non_escaping = true
           end
