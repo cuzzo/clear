@@ -686,6 +686,21 @@ module AST
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
+
+    # Seam: a declaration's annotated/inferred type is always a Type
+    # (or nil when unannotated — the inference signal). Coerced at
+    # construction (positional Struct init) and post-parse assignment
+    # (auto-infer, propagation) so no reader needs an `is_a?(Type)`
+    # Symbol/Type discriminator.
+    def initialize(*)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
   end
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
@@ -707,6 +722,20 @@ module AST
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :compound_op
     attr_accessor :auto_atomic_op
+
+    # Seam: same contract as VarDecl#type — annotated/inferred type is
+    # always a Type (or nil when unannotated). Coerced at construction
+    # and post-parse assignment so no reader needs an `is_a?(Type)`
+    # Symbol/Type discriminator.
+    def initialize(*)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     extend T::Sig

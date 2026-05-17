@@ -569,7 +569,7 @@ class ShapeEvidenceCollector
     return if node.nil?
     case node
     when AST::BindExpr, AST::VarDecl
-      yield node if node.type.is_a?(Type) && node.type.auto?
+      yield node if node.type&.auto?
       walk_for_shape_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.

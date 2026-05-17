@@ -522,7 +522,7 @@ module GenericAnalysis
   sig { params(node: T.untyped).returns(NilClass) }
   def validate_stream_type!(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless node.type.is_a?(Type) && node.type.future?
+    return unless node.type&.future?
     if node.type.multiowned?
       error!(node, :RC_PROMISE_NEEDS_SHARED)
     end
@@ -537,7 +537,7 @@ module GenericAnalysis
   sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Type)) }
   def propagate_declared_type_to_value!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless node.type.is_a?(Type)
+    return unless node.type
 
     # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
     if node.value.is_a?(AST::BgStreamBlock) && node.type.inf_stream?
@@ -567,7 +567,7 @@ module GenericAnalysis
   sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Symbol)) }
   def propagate_collection_metadata!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    coll_src = if (decl_t = node.type).is_a?(Type) && decl_t.collection
+    coll_src = if (decl_t = node.type) && decl_t.collection
       decl_t
     elsif node.value.type_info&.collection
       node.value.type_info
@@ -585,13 +585,13 @@ module GenericAnalysis
     end
 
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
-    if !coll_src && (decl_t = node.type).is_a?(Type) && decl_t.soa
+    if !coll_src && (decl_t = node.type) && decl_t.soa
       node.type_info.soa = true if node.type_info
       node.full_type&.soa = true
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
-    if (decl_t = node.type).is_a?(Type)
+    if (decl_t = node.type)
       if decl_t.shard_count && !node.type_info&.shard_count
         node.type_info.shard_count = decl_t.shard_count if node.type_info
         node.full_type&.instance_variable_set(:@shard_count, decl_t.shard_count)

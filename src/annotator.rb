@@ -2600,7 +2600,7 @@ private
   # CLEAR operations, so :stack is always safe here.
   sig { params(node: AST::VarDecl).void }
   def visit_VarDecl(node)
-    if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
+    if node.value.is_a?(AST::ListLit) && node.type&.fixed?
       node.value.storage = :stack
     end
     visit(node.value)
@@ -2626,7 +2626,7 @@ private
   def promote_pipe_to_observable_dest!(node)
     return unless node.respond_to?(:type) && node.type
     return unless node.value
-    target = node.type.is_a?(Type) ? node.type : Type.new(node.type)
+    target = node.type
     return unless target.future? && target.observable?
     pipe = node.value
     return unless pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH
@@ -2639,7 +2639,7 @@ private
     # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
     if pipe.full_type&.observable_terminal
       pipe_terminal = T.must(pipe.full_type).observable_terminal
-      target_t = node.type.is_a?(Type) ? node.type : Type.new(node.type)
+      target_t = node.type
       # The pipe is the authority on terminal kind: only the fold's
       # analyzer knows whether this is :sum / :count / :max / ... .
       # The LHS annotation (`~Int64@observable`) never carries one, so
@@ -2699,7 +2699,7 @@ private
     # check is correct because promote_pipe_to_observable_dest! sets
     # `observable_dest` only when the RHS is a SMOOTH-pipe over a
     # tense source; any other shape leaves it false.
-    if node.type.is_a?(Type) && node.type.future? && node.type.observable?
+    if node.type&.future? && node.type.observable?
       pipe = node.value
       ok = pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH && pipe.observable_dest
       unless ok
@@ -2750,7 +2750,7 @@ private
     # Empty collection literals annotated as Auto need a permissive
     # container type in scope so method dispatch works during the body walk;
     # the declaration annotation remains Auto for the later constraint pass.
-    if node.type.is_a?(Type) && node.type.auto? &&
+    if node.type&.auto? &&
        node.value.respond_to?(:type_object) && node.value.type_object &&
        (
          (node.value.is_a?(AST::ListLit) && node.value.items.empty? &&
@@ -2862,7 +2862,7 @@ private
   sig { params(node: AST::BindExpr).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
   def visit_BindExpr(node)
     # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
-    if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
+    if node.value.is_a?(AST::ListLit) && node.type&.fixed?
       node.value.storage = :stack
     end
     visit(node.value)

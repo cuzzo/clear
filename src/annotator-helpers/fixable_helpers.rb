@@ -1481,7 +1481,7 @@ module FixableHelper
   sig { params(decl: T.untyped, slot: AutoConstraintCollector::Slot).returns(T.untyped) }
   def emit_auto_shape_resolved_finding!(decl, slot)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless decl && decl.type.is_a?(Type)
+    return unless decl&.type
     return if decl.type.auto?  # not yet wrapped — skip
     type_str = auto_type_source_form(decl.type)
     name = decl.respond_to?(:name) ? decl.name : "<binding>"
