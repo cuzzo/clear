@@ -14,7 +14,22 @@ class FunctionSignature
 
   # Static signature fields (set at creation)
   attr_reader :params, :visibility, :type_params, :reentrant
-  attr_accessor :return_type, :return_lifetime, :return_strategy
+  attr_accessor :return_lifetime, :return_strategy
+
+  # Seam: a function signature's return is ALWAYS a Type (Void for
+  # "no value"). Coerced here so callers may pass nil/Symbol during
+  # construction or late return-inference assignment without any
+  # reader ever needing a Symbol/Type/nil discriminator.
+  sig { returns(Type) }
+  attr_reader :return_type
+
+  sig { params(val: T.untyped).void }
+  def return_type=(val)
+    @return_type = T.let(
+      val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val)),
+      Type
+    )
+  end
 
   # EXTERN function fields
   attr_accessor :extern, :module_alias, :extern_effects
@@ -52,7 +67,7 @@ class FunctionSignature
     else
       FunctionSignature.new(
         params: fn.params || [],
-        return_type: fn.return_type || :Any,
+        return_type: fn.return_type || Type.new(:Any),
         return_lifetime: fn.return_lifetime,
         visibility: fn.visibility,
         type_params: fn.type_params,
@@ -75,14 +90,14 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
-  def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
+  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: T.nilable(Type), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
+  def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
                  fn_type_params: nil, owner_type: nil, owner_type_params: nil,
                  intrinsic: false, zig_pattern: nil)
     @params = params
-    @return_type = return_type
+    self.return_type = return_type
     @return_lifetime = return_lifetime
     @visibility = visibility
     @type_params = type_params

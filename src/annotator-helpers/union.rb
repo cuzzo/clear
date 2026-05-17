@@ -81,7 +81,7 @@ module UnionAnalysis
       # Return type check
       if req[:return_type]
         req_ret = to_type(req[:return_type]).resolved
-        sig_ret = to_type(sig.return_type).resolved
+        sig_ret = sig.return_type.resolved
         unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
           error!(req_tok, :UNION_METHOD_RETURN_TYPE, union: union_name, method: fn_name, expected: req_ret, fn: fn_name, got: sig_ret)
         end

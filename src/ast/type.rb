@@ -1748,11 +1748,9 @@ class Type
     other_params = other_raw.params || []
     return false unless self_params.length == other_params.length
 
-    self_ret  = @raw.return_type
-    other_ret = other_raw.return_type
-    self_ret_t  = self_ret.is_a?(Type)  ? self_ret  : Type.new(self_ret  || :Any)
-    other_ret_t = other_ret.is_a?(Type) ? other_ret : Type.new(other_ret || :Any)
-    return false unless self_ret_t.accepts?(other_ret_t)
+    # @raw / other_raw are FunctionSignature (fn_type? gate); their
+    # return_type is a non-nil Type by the FunctionSignature seam.
+    return false unless @raw.return_type.accepts?(other_raw.return_type)
 
     self_params.zip(other_params).each do |sp, op|
       sp_t = sp[:type].is_a?(Type) ? sp[:type] : Type.new(sp[:type] || :Any)
@@ -2099,8 +2097,7 @@ class Type
         t = p[:type]
         t.is_a?(Type) ? t.zig_type(is_param: true) : Type.new(t).zig_type(is_param: true)
       end
-      ret = @raw.return_type
-      ret_zig = ret.is_a?(Type) ? ret.zig_type : Type.new(ret).zig_type
+      ret_zig = @raw.return_type.zig_type
       all_params = ["*Runtime"] + param_types_zig
       ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
       return "*const fn(#{all_params.join(', ')}) #{ret_str}"

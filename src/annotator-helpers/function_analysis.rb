@@ -78,7 +78,7 @@ module FunctionAnalysis
       }
     end
 
-    FunctionSignature.new(params: normalized_params, return_type: return_type)
+    FunctionSignature.new(params: normalized_params, return_type: Type.new(return_type))
   end
 
   # Resolve a function call: look up the function, dispatch based on type

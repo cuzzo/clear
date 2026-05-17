@@ -547,7 +547,7 @@ private
         mutable: p[:mutable] || false,
         comptime: p[:comptime] || false
       }},
-      return_type: node.return_type || :Any,
+      return_type: node.return_type || Type.new(:Any),
       visibility: :pub,
       extern: true,
       module_alias: node.from_module,
@@ -606,7 +606,7 @@ private
         takes: p[:takes] || false,
         sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
       }},
-      return_type: (node.return_type || :Any),
+      return_type: node.return_type || Type.new(:Any),
       return_lifetime: get_lifetime_path(node),
       visibility: node.visibility,
       reentrant: node.reentrant == :reentrant
@@ -680,7 +680,7 @@ private
         default: p[:default], mutable: p[:mutable], takes: p[:takes],
         sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
       }},
-      return_type: declared_return, return_lifetime: lifetime_paths,
+      return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant
@@ -2458,7 +2458,7 @@ private
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
         node.instance_variable_set(:@extern_method, true)
-        node.full_type = method_sig.return_type || :Void
+        node.full_type = method_sig.return_type
         record_effect(EffectTracker::EXTERN)
         # Track allocator usage for EFFECTS :alloc methods.
         alloc_kind = method_sig.extern_effects&.dig(:alloc)

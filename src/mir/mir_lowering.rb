@@ -2266,8 +2266,7 @@ class MIRLowering
       MIR::Param.new(p[:name], type_str, pp)
     }
 
-    ret = sig.return_type || :Void
-    ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
+    ret_zig = sig.return_type.zig_type
     ret_str = if ret_zig.start_with?("!") || ret_zig.include?("anyerror!") || ret_zig.include?("error{")
                 ret_zig
               else

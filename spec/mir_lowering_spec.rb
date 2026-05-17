@@ -1911,7 +1911,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       sig = FunctionSignature.new(
         params: [{ name: "count", type: Type.new(:Int64), mutable: true }],
-        return_type: :Void
+        return_type: Type.new(:Void)
       )
 
       result = lowering(fn_sigs: { "bump" => sig }).lower(node)
@@ -1927,7 +1927,7 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "identity", [arg])
       node.full_type = :Int64
       node.generic_type_args = [:Int64]
-      sig = FunctionSignature.new(params: [{ name: "x", type: Type.new(:Int64) }], return_type: :Int64)
+      sig = FunctionSignature.new(params: [{ name: "x", type: Type.new(:Int64) }], return_type: Type.new(:Int64))
       sig.needs_rt = true
 
       result = lowering(fn_sigs: { "identity" => sig }).lower(node)
@@ -2003,7 +2003,7 @@ RSpec.describe MIRLowering do
       body = make_lit(:NUMBER, 42, full_type: :Int64)
       body.coerced_type = :Int64
       node = AST::LambdaLit.new(tok, [], nil, body, nil, nil)
-      node.full_type = FunctionSignature.new(params: [], return_type: :Int64)
+      node.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
       result = lowering.lower(node)
       expect(result).to be_a(MIR::LambdaExpr)
       zig = emit(result)
