@@ -529,3 +529,9 @@
 25_index
 167_nested_list_index_field
 181_hashmap_struct_list_field
+
+# Polymorphic WITH mutate-flow: WITH POLYMORPHIC c AS x [GUARD
+# cond] { body } [ON GuardFail gfail]. Single-threaded VM no-ops the
+# lock/family wrapper; structured body/guard handled directly.
+350_polymorphic_unified_tick
+360_polymorphic_flow_guard_return

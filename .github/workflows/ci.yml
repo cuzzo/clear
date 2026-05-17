@@ -258,7 +258,11 @@ jobs:
       # 2026-05-17: 241 -> 242. AddressOf/Deref unwrap in scalar
       # compile paths (93_tight_loop, MUTABLE-scalar by-pointer arg).
       # The full 242-entry allowlist now passes; 0 pending.
-      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=242
+      #
+      # 2026-05-17: 242 -> 244. WITH POLYMORPHIC mutate-flow
+      # (350/360) added; structured body/guard handled directly.
+      # Full 244-entry allowlist green, 0 pending.
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=244
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)

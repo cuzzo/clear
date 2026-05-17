@@ -688,6 +688,8 @@ class RegisterBcEmitter
       compile_snapshot_multi_txn(stmt)
     when MIR::WithMatchDispatch
       compile_with_match_dispatch(stmt)
+    when MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow
+      compile_polymorphic_mutate(stmt)
     when MIR::StructDef, MIR::EnumDef, MIR::UnionTypeDef
       # Type-definition forms appear when the language drops them
       # inline (rare; usually flattened to module level). The bc
@@ -2078,6 +2080,42 @@ class RegisterBcEmitter
       @value_by_name[alias_name] = { kind: :struct, type: src[:type], fields: src[:fields] }
     end
     semantic_body(arm[:body] || []).each { |s| compile_stmt(s) }
+  ensure
+    @value_by_name = saved if defined?(saved) && saved
+  end
+
+  # `WITH POLYMORPHIC c AS x [GUARD cond] { body } [ON GuardFail
+  # gfail]`. Single-threaded bc VM: the lock/family wrapper is a
+  # no-op; `x` is a view of cap-struct `c` (shared field regs). All
+  # control fields are structured MIR (body / guard_cond /
+  # guard_fail_body); only the simple `&c` / `x` identifiers come
+  # from the *_zig fields -- no Zig logic is parsed.
+  def compile_polymorphic_mutate(stmt)
+    cell_name = extract_cell_name(stmt.cell_zig.to_s) ||
+                stmt.cell_zig.to_s.strip.delete_prefix("&").strip
+    src = @value_by_name[cell_name]
+    unless src
+      raise Unsupported, "register emitter does not know WITH POLYMORPHIC cell #{cell_name.inspect}"
+    end
+
+    alias_name = stmt.alias_zig.to_s.strip
+    saved = @value_by_name.dup
+    @value_by_name[alias_name] = { kind: :struct, type: src[:type], fields: src[:fields] }
+
+    guard = stmt.respond_to?(:guard_cond) ? stmt.guard_cond : nil
+    if guard
+      cond = compile_bool_expr(guard)
+      emit(JF, cond, 0)
+      jf = @ops.length - 1
+      semantic_body(stmt.body || []).each { |s| compile_stmt(s) }
+      emit(JMP, 0)
+      jend = @ops.length - 1
+      @ops[jf] = @ops.length
+      semantic_body(stmt.guard_fail_body || []).each { |s| compile_stmt(s) }
+      @ops[jend] = @ops.length
+    else
+      semantic_body(stmt.body || []).each { |s| compile_stmt(s) }
+    end
   ensure
     @value_by_name = saved if defined?(saved) && saved
   end
