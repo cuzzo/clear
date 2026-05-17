@@ -3221,10 +3221,20 @@ class RegisterBcEmitter
     cb = stmt.catch_body
     if cb.is_a?(MIR::ScopeBlock)
       semantic_body(cb.body || []).each { |c| compile_stmt(c) }
+    elsif or_pass_sentinel?(cb)
+      # OR PASS: error suppressed; ECLR above is the whole handler.
+      nil
     elsif cb
       compile_stmt(cb)
     end
     @ops[skip] = @ops.length
+  end
+
+  # OR PASS lowers the catch body to `MIR::Ident("undefined")`
+  # (Zig `catch undefined`). It means "swallow the error"; the
+  # preceding ECLR is the entire handler -- nothing to emit.
+  def or_pass_sentinel?(node)
+    node.is_a?(MIR::Ident) && node.name.to_s == "undefined"
   end
 
   # Wrapper fn whose body is a single MIR::CatchWrapper. Calls

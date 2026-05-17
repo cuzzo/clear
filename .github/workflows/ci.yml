@@ -262,7 +262,11 @@ jobs:
       # 2026-05-17: 242 -> 244. WITH POLYMORPHIC mutate-flow
       # (350/360) added; structured body/guard handled directly.
       # Full 244-entry allowlist green, 0 pending.
-      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=244
+      #
+      # 2026-05-17: 244 -> 245. OR PASS sentinel no-op (524, heap
+      # @list through fallible OR PASS). Full 245-entry allowlist
+      # green, 0 pending.
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=245
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)

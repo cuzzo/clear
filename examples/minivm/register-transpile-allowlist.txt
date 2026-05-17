@@ -535,3 +535,8 @@
 # lock/family wrapper; structured body/guard handled directly.
 350_polymorphic_unified_tick
 360_polymorphic_flow_guard_return
+
+# OR PASS sentinel (catch -> MIR::Ident "undefined"): the ECLR is
+# the whole handler. Heap @list returned through a fallible fn via
+# OR PASS resolves through the value-position TryCatch routing.
+524_or_pass_heap_list_cleanup
