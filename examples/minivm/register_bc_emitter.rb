@@ -1039,8 +1039,15 @@ class RegisterBcEmitter
   def compile_return(stmt)
     if returns_cheat_error?(stmt)
       # `RETURN error.CheatError` -- preceding ERAISE set the VM error
-      # state; EGUARD propagates (return-from-fn since errored).
-      emit(EGUARD)
+      # state. Real frame: EGUARD pops it. Inlined: jump to inline
+      # exit (unconditional -- this IS the error-return path; errored
+      # is set; no value MOV).
+      if @inline_return
+        emit(JMP, 0)
+        @inline_return.fetch(:patches) << (@ops.length - 1)
+      else
+        emit(EGUARD)
+      end
       return
     end
 
@@ -3041,10 +3048,29 @@ class RegisterBcEmitter
     emit(ERAISE, add_const(kind_id), add_const(name_id), add_const(msg), add_const(line))
   end
 
-  # OR RAISE: inner already compiled (its call emitted); EGUARD
-  # propagates if the callee set the error state.
+  # Propagate the error one level out, context-aware:
+  # - real frame (non-inlined): EGUARD pops the frame.
+  # - inlined fn: jump to the inline exit (errored stays set; the
+  #   inline site's caller handles it). Frame-pop would corrupt the
+  #   enclosing real frame, since inlined code has no frame.
+  def emit_err_propagate
+    if @inline_return
+      t = fresh_ireg
+      emit(EFLAG, t)
+      emit(JF, t, 0)
+      skip = @ops.length - 1
+      emit(JMP, 0)
+      @inline_return.fetch(:patches) << (@ops.length - 1)
+      @ops[skip] = @ops.length
+    else
+      emit(EGUARD)
+    end
+  end
+
+  # OR RAISE: inner already compiled (its call emitted); propagate if
+  # the callee set the error state.
   def compile_try_expr(inner_reg)
-    emit(EGUARD)
+    emit_err_propagate
     inner_reg
   end
 
@@ -3053,21 +3079,28 @@ class RegisterBcEmitter
   # dispatches by clause_meta (kinds/types OR, narrowed by
   # filter_types/filter_messages), else DEFAULT, else propagate.
   # Uses clause_bodies/clause_meta only -- never the Zig `code`.
-  # Int64-return only in this commit (string returns are inlined ->
-  # no frame -> EGUARD invalid; see register-error-union.md).
+  # Int64/Bool/Float64/String returns. String/Bool wrappers are
+  # inlined (no frame); propagation is inline-aware (see
+  # emit_err_propagate / register-error-union.md).
   def compile_catch_wrapper(stmt)
-    unless @return_type == :i64
-      raise Unsupported, "register emitter CatchWrapper supports Int64-return wrappers in this commit (got #{@return_type.inspect})"
+    rk = @return_type
+    unless %i[i64 bool f64 string].include?(rk)
+      raise Unsupported, "register emitter CatchWrapper return type #{rk.inspect} unsupported"
     end
 
-    inner = "__#{@current_function_name}_body"
+    inner = "__#{@current_fn.name}_body"
     unless @functions_by_name.key?(inner)
       raise Unsupported, "register emitter CatchWrapper inner body #{inner.inspect} not found"
     end
 
     call_args = [MIR::Ident.new("rt")] +
                 callable_params(@current_fn).map { |p| MIR::Ident.new(p.name) }
-    resreg = compile_i64_expr(MIR::Call.new(inner, call_args, false, nil))
+    call = MIR::Call.new(inner, call_args, false, nil)
+    resreg = case rk
+             when :i64, :bool then compile_i64_expr(call)
+             when :f64        then compile_f64_expr(call)
+             when :string     then compile_string_expr(call)
+             end
 
     eflag = fresh_ireg
     emit(EFLAG, eflag)
@@ -3131,11 +3164,33 @@ class RegisterBcEmitter
       emit(ECLR)
       semantic_body(bodies[meta.length] || []).each { |c| compile_stmt(c) }
     else
-      emit(EGUARD)
+      emit_err_propagate
     end
 
     @ops[succ_patch] = @ops.length
-    emit(IRET, resreg)
+    emit_return_reg(resreg)
+  end
+
+  # Return `reg` per the current return type, inline-aware: real
+  # frame -> IRET/FRET/SRET; inlined -> MOV into the inline result
+  # reg + JMP to the inline exit (recorded in :patches).
+  def emit_return_reg(reg)
+    if @inline_return
+      tgt = @inline_return.fetch(:reg)
+      case @return_type
+      when :i64, :bool then emit(IMOV, tgt, reg) unless reg == tgt
+      when :f64        then emit(FMOV, tgt, reg) unless reg == tgt
+      when :string     then emit(SMOV, tgt, reg) unless reg == tgt
+      end
+      emit(JMP, 0)
+      @inline_return.fetch(:patches) << (@ops.length - 1)
+    else
+      case @return_type
+      when :i64, :bool then emit(IRET, reg)
+      when :f64        then emit(FRET, reg)
+      when :string     then emit(SRET, reg)
+      end
+    end
   end
 
   def compile_call_args(callee, function, args)
@@ -3358,6 +3413,8 @@ class RegisterBcEmitter
     saved_tag_types = @tag_type_by_name
     saved_return_type = @return_type
     saved_inline_return = @inline_return
+    saved_inline_fn = @current_fn
+    @current_fn = function
     saved_borrowed_list_aliases = @borrowed_list_aliases
 
     @ireg_by_name = saved_iregs.dup
@@ -3440,6 +3497,7 @@ class RegisterBcEmitter
     @borrowed_list_aliases = saved_borrowed_list_aliases
     @return_type = saved_return_type
     @inline_return = saved_inline_return
+    @current_fn = saved_inline_fn if defined?(saved_inline_fn)
   end
 
   def emit_function_call(opcode, dst, callee, compiled_args)
@@ -6971,6 +7029,8 @@ class RegisterBcEmitter
     elsif expr.is_a?(MIR::Orelse)
       return inferred_expr_type(expr.fallback)
     elsif expr.is_a?(MIR::DeepCopy)
+      return inferred_expr_type(expr.source)
+    elsif expr.is_a?(MIR::DupeSlice)
       return inferred_expr_type(expr.source)
     elsif expr.is_a?(MIR::HeapCreate)
       return inferred_expr_type(expr.init)

@@ -144,13 +144,26 @@ predicate accumulated with IADD/IGT/IMUL since there is no JT
 opcode). `271_catch_unified` passes (every CATCH form); allowlisted.
 Zero regressions (237/0-fail).
 
+Commit 3 LANDED: option 2 chosen (inline-aware propagation, not
+option 1). emit_err_propagate jumps to the inline exit (recorded in
+@inline_return[:patches]) instead of EGUARD frame-pop when inside an
+inlined fn; compile_inline_function now tracks @current_fn so the
+CatchWrapper resolves __<fn>_body even when the wrapper is inlined;
+compile_catch_wrapper generalized to i64/bool/f64/string with
+emit_return_reg (inline-aware). Plus inferred_expr_type learns
+MIR::DupeSlice (string slice dupe) -> unblocks the
+`__ret_dupe = DupeSlice(result)` string-return pattern.
+76_catch_blocks + 78_snapshot_ambiguous pass; allowlisted. 271 still
+green; 0 regressions (238/0-fail).
+
 Remaining (next commits), all cleanly PENDING with accurate reasons:
-- String/Bool-return CatchWrapper (76/77/78/352) -- blocked on the
-  inlining-vs-EGUARD decision (option 1: don't inline fallible fns).
+- 77_error_snapshot -- a different DupeSlice site (snapshot path),
+  not the binding-type one; orthogonal to error-union.
 - OR EXIT error_reassigns (272).
 - MIR::TryCatch / MIR::TryExpr at stmt position (216/217/350/360/
   381/519/524).
-- Cap-param raise wrappers (335) -- needs the cap-param cluster.
+- 352 (Bool-return CatchWrapper inside concurrent) / cap-param
+  raise wrappers (335) -- need the cap-param cluster.
 
 ## Invariants
 

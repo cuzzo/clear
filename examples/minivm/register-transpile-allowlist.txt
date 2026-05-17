@@ -275,6 +275,11 @@
 88_reentrant
 299_thunk_not_logical
 271_catch_unified
+# Commit 3: String/Bool-return CatchWrapper via inline-aware error
+# propagation (emit_err_propagate jumps to the inline exit instead
+# of EGUARD frame-pop, since fallible String fns are inlined).
+76_catch_blocks
+78_snapshot_ambiguous
 
 # Tranche 10: side-effect-only BG bodies and bare MethodCall
 # statements. A BG body whose last statement is not an expression
