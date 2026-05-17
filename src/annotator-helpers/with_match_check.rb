@@ -228,8 +228,8 @@ module WithMatchCheck
     # Plain-T args passed to universal-poly params must be lowered as Zig `var`
     # so &c yields *T instead of *const T and polymorphicMutate can write back.
     deep_funcalls(fn.body).each do |call_node|
-      sig = sig_lookup.call(call_node.name.to_s)
-      next unless sig.is_a?(FunctionSignature) && sig.requires
+      sig = FunctionSignature.unwrap(sig_lookup.call(call_node.name.to_s))
+      next unless sig && sig.requires
       sig.params.each_with_index do |param, idx|
         pname = param.name.to_s
         fams = sig.requires[pname]
@@ -247,8 +247,8 @@ module WithMatchCheck
 
     AST.walk_body(fn.body) do |node|
       next unless node.is_a?(AST::FuncCall) && node.respond_to?(:name)
-      sig = sig_lookup.call(node.name.to_s)
-      next unless sig.is_a?(FunctionSignature)
+      sig = FunctionSignature.unwrap(sig_lookup.call(node.name.to_s))
+      next unless sig
       next unless sig.requires && !sig.requires.empty?
 
       sig.params.each_with_index do |param, idx|

@@ -359,8 +359,8 @@ module EffectTracker
     @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
-      raw = fn_node.full_type&.raw
-      ret_type = raw.is_a?(FunctionSignature) ? raw.return_type : nil
+      fsig = FunctionSignature.unwrap(fn_node.full_type)
+      ret_type = fsig&.return_type
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params&.any? { |p|
         next unless p.takes
@@ -388,8 +388,7 @@ module EffectTracker
         next if needs_rt.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.locals[c]&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
         needs_rt[c] = true if sig&.needs_rt
       end
     end
@@ -433,8 +432,7 @@ module EffectTracker
         next if can_fail.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.locals[c]&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
         can_fail[c] = true if sig&.can_fail
       end
     end

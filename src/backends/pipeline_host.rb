@@ -3898,22 +3898,12 @@ class PipelineHost
 
   # Resolve the bare struct name (if any) for a capture symbol, used to
   # stamp BC pre-decoded slots with `:struct_<Name>`. Returns a String or
-  # nil. SymbolEntry#type may be a Type object, a sigil Symbol like
-  # `:Total`, or a Hash-shape (function types). Only struct-shaped Type
-  # values yield a useful hint.
+  # nil. Only struct-shaped Type values yield a useful hint.
   sig { params(sym: SymbolEntry).returns(T.nilable(String)) }
   def struct_name_hint_for_sym(sym)
     return nil unless sym
-    t = sym.type
-    if t.respond_to?(:bare_data_type)
-      bare = t.bare_data_type
-      return bare.to_s if bare && bare.respond_to?(:struct?) && bare.struct?
-    elsif t.is_a?(Symbol)
-      base = t.to_s
-      base = base.sub(/\A[~%@^!]+/, "")
-      return base if !base.empty? && base[0] =~ /[A-Z]/ &&
-                     %w[Int64 Float64 Bool String Void Any Number].none? { |p| p == base }
-    end
+    bare = sym.type.bare_data_type
+    return bare.to_s if bare && bare.respond_to?(:struct?) && bare.struct?
     nil
   end
 

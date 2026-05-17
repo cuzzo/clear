@@ -68,11 +68,17 @@
 # for tied). Walkers consume that uniform list and compare each
 # source's declaring scope against the destination.
 require "sorbet-runtime"
+# `type=` calls `Type.new` unconditionally (a hard, non-lazy dependency),
+# so Type must be loaded with this file. type.rb -> function_signature.rb
+# -> intrinsic_emit/function_return; none require scope/symbol_entry, so
+# this is acyclic and also makes FunctionSignature available for
+# `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
+require_relative "type"
 
 class SymbolEntry
     extend T::Sig
 
-  attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
+  attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,
                 :mutated,        # set by mark_var_mutated when the binding
                                  # is reassigned, field/index-assigned, or
@@ -100,6 +106,35 @@ class SymbolEntry
                                      # Forces Zig `var` storage so &binding yields *T, not *const T.
                 :poly_borrow_target  # address is taken at a universal-polymorphic call site;
                                      # forces mutable Zig storage so the callee can write back.
+
+  # The binding's type. Single coercing seam: every input is laundered
+  # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
+  # discriminator. A function binding is a Type whose @raw is its
+  # FunctionSignature (Type#fn_type?); a legacy bare Symbol becomes
+  # Type.new(sym); an unresolved binding becomes Type.new(:Untyped) so
+  # the pre-MIR invariant can catch it. Mirrors FunctionSignature#return_type=.
+  sig { returns(Type) }
+  attr_reader :type
+
+  sig { params(val: T.untyped).void }
+  def type=(val)
+    @type = T.let(
+      val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val)),
+      Type
+    )
+  end
+
+  # A function binding is a Type whose @raw is its FunctionSignature
+  # (Type#fn_type?). Readers that need the signature unwrap through
+  # here so no site re-derives the Symbol/Type/FunctionSignature split.
+  # The sig block is lazy (built on first call, by which point the full
+  # compiler — including FunctionSignature — is loaded), so referencing
+  # the constant here is safe despite the type.rb<->function_signature
+  # require ordering.
+  sig { returns(T.nilable(FunctionSignature)) }
+  def fn_signature
+    @type.fn_type? ? @type.raw : nil
+  end
 
   # Backward-compat alias for `lifetime == :current_scope`.
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,
@@ -152,7 +187,7 @@ class SymbolEntry
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
     @reg = reg
-    @type = type
+    self.type = type
     @mutable = mutable
     @storage = storage
     @sync = sync
@@ -171,6 +206,9 @@ class SymbolEntry
     @poly_borrow_target = T.let(nil, T.nilable(T::Boolean))
     @mutated = T.let(nil, T.nilable(T::Boolean))
     @read = T.let(nil, T.nilable(T::Boolean))
+    # Genuine Scope<->SymbolEntry back-reference cycle: scope.rb requires
+    # this file, so symbol_entry.rb cannot require scope.rb to make Scope
+    # a resolvable constant at T.let time. Stays T.untyped by necessity.
     @scope = T.let(nil, T.untyped)
     @scope_depth = T.let(nil, T.nilable(Integer))
     @ownership_kind = T.let(nil, T.nilable(Symbol))

@@ -1153,9 +1153,7 @@ module PipeAnalysis
     if node.is_a?(AST::Identifier)
       entry = node.symbol
       if entry
-        t = entry.type
-        t = Type.new(t) unless t.is_a?(Type)
-        names << node.name if t.sharded? && entry.sync.nil?
+        names << node.name if entry.type.sharded? && entry.sync.nil?
       end
     end
     return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -1176,9 +1174,7 @@ module PipeAnalysis
     if node.is_a?(AST::Identifier)
       entry = node.symbol
       return false unless entry
-      t = entry.type
-      t = Type.new(t) unless t.is_a?(Type)
-      return t.sharded? && entry.sync.nil?
+      return entry.type.sharded? && entry.sync.nil?
     end
     return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
     node.class.members.any? do |member|

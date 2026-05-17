@@ -102,11 +102,18 @@ module FunctionAnalysis
     end
 
     func_type = scope.resolve_type(func_name)
+    entry = scope.locals[func_name]
+    fsig = FunctionSignature.unwrap(func_type)
 
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
 
-    elsif func_type.is_a?(FunctionSignature)
+    # Direct call to a defined/imported/extern function. The authoritative
+    # fact is the binding's storage (:static for FN/IMPORT/EXTERN decls),
+    # NOT the storage shape of the signature — a fn-typed param/local
+    # holds the same Type-wrapped FunctionSignature but is :stack and
+    # routes to the fn_var_call path below.
+    elsif fsig && entry&.storage == :static && (func_type = fsig)
       node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
       if node.respond_to?(:extern_call=) && func_type.extern
         node.extern_call = true
@@ -216,10 +223,10 @@ module FunctionAnalysis
       end
 
 
-    elsif func_type.is_a?(Type) && func_type.fn_type?
+    elsif fsig
       node.fn_var_call = true if node.respond_to?(:fn_var_call=)
       lookup_scope_for(func_name)&.mark_read(func_name)
-      sig = func_type.raw
+      sig = fsig
       synthetic_sig = FunctionSignature.new(
         params: sig.params,
         return_type: sig.return_type
@@ -242,7 +249,7 @@ module FunctionAnalysis
     # frameAlloc internally — the caller shouldn't try to free those.
     if node.type_info
       callee_node = @fn_nodes[func_name]
-      sig_return_heap = func_type.is_a?(FunctionSignature) && func_type.return_provenance == :heap
+      sig_return_heap = fsig && fsig.return_provenance == :heap
       if callee_node&.return_provenance == :heap || sig_return_heap
         node.type_info&.provenance = :heap
       elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?

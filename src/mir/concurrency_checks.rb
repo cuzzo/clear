@@ -153,8 +153,8 @@ module ConcurrencyChecks
 
       walk_scope_no_nested_with(scope) do |node|
         next unless node.is_a?(AST::FuncCall) && node.respond_to?(:name)
-        sig = sig_lookup.call(node.name.to_s)
-        next unless sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
+        sig = FunctionSignature.unwrap(sig_lookup.call(node.name.to_s))
+        next unless sig && sig.requires && !sig.requires.empty?
 
         sig.params.each_with_index do |param, idx|
           pname = param.name.to_s

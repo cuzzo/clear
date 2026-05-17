@@ -92,8 +92,8 @@ class CompilerFrontend
     # determine needs_rt/can_fail for cross-module calls.
     annotator.scope_stack.first.locals.each do |name, entry|
       next if fn_sigs.key?(name)
-      sig = entry.type
-      next unless sig.is_a?(FunctionSignature) && sig.module_alias
+      sig = entry.fn_signature
+      next unless sig && sig.module_alias
       fn_sigs[name] = sig
     end
 

@@ -50,8 +50,8 @@ module UnionAnalysis
         end
       end
 
-      sig = local.type
-      unless sig.is_a?(FunctionSignature)
+      sig = FunctionSignature.unwrap(local.type)
+      unless sig
         error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
       end
 

@@ -28,6 +28,7 @@ require_relative "mir/alloc"
 require_relative "annotator-helpers/method_analysis"
 require_relative "annotator-helpers/union"
 require_relative "annotator-helpers/auto_inference"
+require_relative "backends/importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -177,8 +178,8 @@ class SemanticAnnotator
     # Re-stamp signatures so call-site checks below see any shim-inferred
     # REQUIRES clauses.
     @fn_nodes.each do |name, fn|
-      sig = @scope_stack.first.locals[name]&.type
-      sig.requires = fn.requires if sig.is_a?(FunctionSignature)
+      sig = FunctionSignature.unwrap(@scope_stack.first.locals[name]&.type)
+      sig.requires = fn.requires if sig
     end
     @fn_nodes.each_value { |fn| WithMatchCheck.check_call_sites!(fn, sig_lookup, err) }
     # Rank-annotated locks are checked by the rank-DAG analysis, not the
@@ -460,13 +461,8 @@ private
     # Copy computed metadata to FunctionSignature objects so callers don't
     # need direct access to @fn_nodes.
     @fn_nodes.each do |name, fn|
-      sig = fn.full_type
-      # Unwrap Type objects that wrap a FunctionSignature (e.g. @reentrant functions
-      # whose full_type was set to a Type by fn-type resolution).
-      if sig.is_a?(Type) && sig.raw.is_a?(FunctionSignature)
-        sig = sig.raw
-      end
-      next unless sig.is_a?(FunctionSignature)
+      sig = FunctionSignature.unwrap(fn.full_type)
+      next unless sig
       sig.needs_rt = fn.needs_rt
       sig.can_fail = fn.can_fail
       sig.return_provenance = fn.return_provenance
@@ -502,8 +498,8 @@ private
 
     # Import function signatures that are visible from this call site.
     mod.global_scope.locals.each do |name, entry|
-      sig = entry.type
-      next unless sig.is_a?(FunctionSignature)
+      sig = entry.fn_signature
+      next unless sig
 
       # For package imports: skip functions that were themselves imported from
       # another module (they have a pre-existing module_alias). Those functions
@@ -2459,8 +2455,8 @@ private
 
       # Error unions narrow at the call site based on the actual binding
       # families, not just the callee's declared family set.
-      sig = @scope_stack.first.locals[node.name]&.type if node.name.is_a?(String)
-      if sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
+      sig = FunctionSignature.unwrap(@scope_stack.first.locals[node.name]&.type) if node.name.is_a?(String)
+      if sig && sig.requires && !sig.requires.empty?
         node.collapsed_errors = collapse_errors_for_call(sig, node.args)
       end
 
@@ -3026,9 +3022,8 @@ private
   sig { params(entry: SymbolEntry).returns(T.nilable(Symbol)) }
   def classify_ownership!(entry)
     return unless entry
-    t = entry.type
-    return if t.is_a?(FunctionSignature) # function signature, not a variable
-    type_obj = t.is_a?(Type) ? t : Type.new(t || :Any)
+    type_obj = entry.type
+    return if type_obj.fn_type? # function signature, not a variable
     entry.ownership_kind = if entry.resource
       :resource
     elsif type_obj.multiowned? || type_obj.shared? ||
@@ -5568,7 +5563,14 @@ private
     return if rhs_info&.storage == :multiowned || rhs_info&.storage == :shared || rhs_info&.sync
 
     type_obj = Type.new(rhs_type)
-    is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+    # A String *binding* is owned/move (CLEAR contract). implicitly_copyable?
+    # returns true for a String only via the rvalue rodata exemption
+    # (type.rb: string? && rodata?); escape analysis stamps the binding's
+    # declaration :rodata because the initializer is a literal, but a
+    # binding's move semantics are type-intrinsic, not value-location.
+    # Exclude string? from the Copy gate at this ownership-decision site;
+    # genuinely-Copy aggregates keep their exemption.
+    is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) } && !type_obj.string?
     if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
       # Cannot move a borrowed value (non-TAKES parameter).
       if @og[rhs_name]&.kind == :borrowed
@@ -5631,8 +5633,8 @@ private
     scope = lookup_scope_for(func_name)
     return nil unless scope
 
-    func_type = scope.resolve_type(func_name)
-    return nil unless func_type.is_a?(FunctionSignature)
+    func_type = FunctionSignature.unwrap(scope.resolve_type(func_name))
+    return nil unless func_type
 
     # Multi-binding lifetime returns track the first source only. Borrow
     # tracking still records under one root; if a

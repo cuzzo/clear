@@ -138,11 +138,7 @@ class Scope
     entry = @locals[name]
     return Type.new(:Any) if entry.nil?
 
-    stored = entry.type
-
-    # If already a Type (e.g. from parse_type_annotation), clone and overlay storage
-    # If a non-Symbol (e.g. a function signature Hash), wrap as-is
-    base_type = stored.is_a?(Type) ? stored : Type.new(stored)
+    base_type = entry.type
 
     # Overlay storage-derived capabilities onto the type
     case entry.storage
@@ -292,7 +288,7 @@ module ScopeHelper
       scope
     else
       fn_scope = lookup_scope_for(name)
-      fn_scope && fn_scope.resolve_type(name).is_a?(FunctionSignature) ? fn_scope : nil
+      fn_scope && FunctionSignature.unwrap(fn_scope.resolve_type(name)) ? fn_scope : nil
     end
   end
 

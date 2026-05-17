@@ -61,10 +61,21 @@ class FunctionSignature
   # checks survive cross-module flow.
   attr_accessor :requires
 
+  # Canonical adapter: a function binding's signature is stored as a
+  # Type whose @raw is the FunctionSignature (the SymbolEntry#type
+  # seam). Some producers still hand back a bare FunctionSignature.
+  # Every reader that needs the signature goes through here so no site
+  # re-derives the Type/FunctionSignature/nil split.
+  sig { params(x: T.untyped).returns(T.nilable(FunctionSignature)) }
+  def self.unwrap(x)
+    return x if x.is_a?(FunctionSignature)
+    return x.raw if x.is_a?(Type) && x.raw.is_a?(FunctionSignature)
+    nil
+  end
+
   sig { params(fn: AST::FunctionDef).returns(FunctionSignature) }
   def self.from_function_def(fn)
-    raw_sig = fn.full_type
-    raw_sig = raw_sig.raw if raw_sig.is_a?(Type) && raw_sig.raw.is_a?(FunctionSignature)
+    raw_sig = unwrap(fn.full_type) || fn.full_type
 
     sig = if raw_sig.is_a?(FunctionSignature)
       raw_sig.dup

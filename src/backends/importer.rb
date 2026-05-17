@@ -230,8 +230,9 @@ class ModuleImporter
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       entry = annotator.scope_stack.first.locals[stmt.name]
-      next unless entry&.type.is_a?(FunctionSignature)
-      FunctionSignature.sync_from_function_def!(entry.type, stmt)
+      sig = entry&.fn_signature
+      next unless sig
+      FunctionSignature.sync_from_function_def!(sig, stmt)
     end
     nil
   end
