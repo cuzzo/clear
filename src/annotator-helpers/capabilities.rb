@@ -636,7 +636,7 @@ module CapabilityHelper
   # @param node [AST::WithBlock] the WITH block (for error reporting)
   # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
   # @param expanded [Array] accumulator for resolved capabilities
-  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: T::Array[AST::Capability]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: T::Array[AST::Capability]).void }
   def acquire_capability!(node, cap, expanded)
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]

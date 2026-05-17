@@ -596,7 +596,11 @@ module AST
     # full_type, or `default` when it is the :Untyped sentinel (the
     # node was never stamped). Single home for the "type, else
     # fallback" decision -- pass a value or a block for a lazy default.
-    sig { params(default: T.untyped, blk: T.untyped).returns(T.untyped) }
+    sig do
+      params(default: T.nilable(T.any(Type, Symbol, String)),
+             blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
+        .returns(T.nilable(T.any(Type, Symbol, String)))
+    end
     def full_type_or(default = nil, &blk)
       ft = full_type
       return ft unless ft.untyped?
