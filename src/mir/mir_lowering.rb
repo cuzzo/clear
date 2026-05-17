@@ -1163,7 +1163,7 @@ class MIRLowering
     # incorrectly received the `_m_` rename. The rename then masked the
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
-    mutable_scalar_params = (node.params || []).select { |p|
+    mutable_scalar_params = node.params.select { |p|
       next false unless p.mutable
       p_type_obj = p.type || Type.new(:Any)
       next false if p_type_obj && (p_type_obj.collection? ||
@@ -1178,17 +1178,17 @@ class MIRLowering
     # forwarding a `MUTABLE @list` param to another `MUTABLE @list`
     # callee adds a second `&`, producing `**ArrayList` which Zig's
     # one-level method auto-deref can't unwrap.
-    @current_fn_collection_params = (node.params || []).select { |p|
+    @current_fn_collection_params = node.params.select { |p|
       p_type_obj = p.type || Type.new(:Any)
       p_type_obj.needs_pointer_passing? ||
         (p.mutable && p_type_obj.list_collection?)
     }.map { |p| p.name }.to_set
 
     # All param names: used to distinguish params (slices) from locals (ArrayLists)
-    @current_fn_param_names = (node.params || []).map { |p| p.name }.to_set
+    @current_fn_param_names = node.params.map { |p| p.name }.to_set
 
     # Build param list
-    params_mir = (node.params || []).map { |param|
+    params_mir = node.params.map { |param|
       p_name = mutable_scalar_params.include?(param.name) ? "_m_#{param.name}" : param.name
       p_type_sym = param.type&.resolved
       p_type_obj = param.type || Type.new(:Any)
@@ -1353,7 +1353,7 @@ class MIRLowering
     end
 
     # Param suppressions for unused params
-    (node.params || []).each do |p|
+    node.params.each do |p|
       next if used_names.include?(p.name)
       suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : p.name
       prologue << MIR::Suppress.new(suppress_name)
@@ -1372,7 +1372,7 @@ class MIRLowering
     # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
     # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
     takes_mir = []
-    (node.params || []).select { |p| p.takes }.each do |p|
+    node.params.select { |p| p.takes }.each do |p|
       entry = @current_bindings[p.name.to_s]
       next unless entry && entry[:needs_cleanup]
       ti = p.type || Type.new(:Any)
@@ -1427,7 +1427,7 @@ class MIRLowering
                                  prologue + body_mir, :private, false, comptime_params)
 
       # Outer function: calls inner, catches errors
-      call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p.name } : (node.params || []).map { |p| p.name }
+      call_args = fn_needs_rt ? ["rt"] + node.params.map { |p| p.name } : node.params.map { |p| p.name }
       inner_call = "#{inner_name}(#{call_args.join(', ')})"
 
       catch_zig, catch_clause_bodies = build_catch_clauses(node, fn_can_fail)
@@ -1478,11 +1478,11 @@ class MIRLowering
     # uses the same renaming, so the call must forward the renamed
     # names verbatim. Forwarding the user-level name would produce
     # "use of undeclared identifier" at the wrapper's call site.
-    mutable_scalar = (node.params || []).select { |p|
+    mutable_scalar = node.params.select { |p|
       p.mutable && !transpile_type(p.type, is_param: true).start_with?("[]", "*")
     }.map { |p| p.name }.to_set
     forward_name = ->(p) { mutable_scalar.include?(p.name) ? "_m_#{p.name}" : p.name }
-    arg_idents = (node.params || []).map { |p| MIR::Ident.new(forward_name.call(p)) }
+    arg_idents = node.params.map { |p| MIR::Ident.new(forward_name.call(p)) }
     arg_idents = [MIR::Ident.new("rt")] + arg_idents if fn_needs_rt
 
     # Use the structured Type from the FunctionDef rather than parsing
@@ -1726,7 +1726,7 @@ class MIRLowering
       ti = a.full_type
       callee_param = nil
       if callee_sig
-        params_list = callee_sig.params || []
+        params_list = callee_sig.params
         callee_param = params_list[idx]
       end
       callee_wants_mutable_list =
@@ -2251,7 +2251,7 @@ class MIRLowering
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"
 
-    params_list = sig.params || []
+    params_list = sig.params
     params_mir = [MIR::Param.new("_rt", "*Runtime", false)] + params_list.map { |p|
       p_type = p.type
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
@@ -5916,7 +5916,7 @@ class MIRLowering
     ret = node.return_type
     return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
     return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
-    params = (node.params || []).select do |p|
+    params = node.params.select do |p|
       pt = p.type || Type.new(:Any)
       pt.shared? && pt.resolved == ret.resolved
     end

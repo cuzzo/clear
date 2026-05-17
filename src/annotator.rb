@@ -2319,7 +2319,7 @@ private
     explicit = (fn_node.type_params || []).map(&:to_s)
     return explicit unless explicit.empty?
     inferred = []
-    ([fn_node.return_type] + (fn_node.params || []).map { |p| p.type }).each do |type|
+    ([fn_node.return_type] + fn_node.params.map { |p| p.type }).each do |type|
       collect_implicit_type_params(type, inferred, explicit)
     end
     (explicit + inferred).uniq
@@ -5643,7 +5643,7 @@ private
     return nil if primary == :wildcard
     primary_root = primary.to_s.split(".").first
 
-    param_index = func_type.params&.find_index { |p| p.name == primary_root }
+    param_index = func_type.params.find_index { |p| p.name == primary_root }
     return nil unless param_index
 
     args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args

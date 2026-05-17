@@ -506,7 +506,7 @@ class OwnershipDataflow
   sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def init_entry_state
     state = {}
-    (@fn_node.params || []).each do |p|
+    @fn_node.params.each do |p|
       next unless p.takes
       name = p.name.to_s
       ti = p.type || Type.new(:Any)

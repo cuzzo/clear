@@ -76,7 +76,7 @@ class AutoConstraintCollector
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def register_signature_slots
     @fn_nodes.each do |name, fn|
-      (fn.params || []).each_with_index do |param, i|
+      fn.params.each_with_index do |param, i|
         next unless auto?(param.type)
         @slots[[:param, name, i]] = Slot.new(
           kind: :param, fn_name: name, index: i,
@@ -149,7 +149,7 @@ class AutoConstraintCollector
   def record_call_site(call_node)
     callee = @fn_nodes[call_node.name]
     return unless callee
-    (callee.params || []).each_with_index do |param, i|
+    callee.params.each_with_index do |param, i|
       next unless auto?(param.type)
       arg = call_node.args && call_node.args[i]
       next unless arg
@@ -712,7 +712,7 @@ class OperatorEvidenceCollector
   sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Array[T.untyped]]) }
   def build_name_map(fn)
     map = {}
-    (fn.params || []).each_with_index do |param, i|
+    fn.params.each_with_index do |param, i|
       slot_id = [:param, fn.name, i]
       map[param.name] = slot_id if @slots.key?(slot_id)
     end

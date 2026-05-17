@@ -81,7 +81,7 @@ class FunctionSignature
       raw_sig.dup
     else
       FunctionSignature.new(
-        params: fn.params || [],
+        params: fn.params,
         return_type: fn.return_type || Type.new(:Any),
         return_lifetime: fn.return_lifetime,
         visibility: fn.visibility,

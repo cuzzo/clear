@@ -1753,8 +1753,8 @@ class Type
     return false unless other_type.fn_type?
     other_raw = other_type.raw
 
-    self_params  = @raw.params || []
-    other_params = other_raw.params || []
+    self_params  = @raw.params
+    other_params = other_raw.params
     return false unless self_params.length == other_params.length
 
     # @raw / other_raw are FunctionSignature (fn_type? gate); their

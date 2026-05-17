@@ -113,7 +113,7 @@ class Scope
   sig { params(fn: AST::FunctionDef).returns(T::Hash[String, SymbolEntry]) }
   def self.live_param_syms(fn)
     return {} unless fn.respond_to?(:params)
-    (fn.params || []).each_with_object({}) do |p, h|
+    fn.params.each_with_object({}) do |p, h|
       h[p.name.to_s] = p.symbol if p.symbol
     end
   end

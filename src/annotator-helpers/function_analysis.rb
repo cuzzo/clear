@@ -139,7 +139,7 @@ module FunctionAnalysis
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
-        params = func_type.params || []
+        params = func_type.params
         params.each_with_index do |p, i|
           if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym

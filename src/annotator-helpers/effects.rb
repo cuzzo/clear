@@ -362,7 +362,7 @@ module EffectTracker
       fsig = FunctionSignature.unwrap(fn_node.full_type)
       ret_type = fsig&.return_type
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      has_takes_heap = fn_node.params&.any? { |p|
+      has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
         ti = Type.new(p.type || :Any)
         ti.string? || ti.array? || ti.list_collection? || ti.map?

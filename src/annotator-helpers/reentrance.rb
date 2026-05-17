@@ -687,7 +687,7 @@ module ReentranceBridge
     return unless fn_node.arrow_token
 
     existing = fn_node.requires_clauses || {}
-    candidates = (fn_node.params || []).filter_map do |p|
+    candidates = fn_node.params.filter_map do |p|
       name = p.name
       next nil if existing.key?(name)
       type = p.type
@@ -733,7 +733,7 @@ module ReentranceBridge
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?
     # Params come from the parser as hashes ({ name:, type:, default:, ... }).
     # See pre_register_function in annotator.rb.
-    param_names = (fn_node.params || []).map { |p| p.name }.compact.to_set
+    param_names = fn_node.params.map { |p| p.name }.compact.to_set
     fn_node.requires_clauses.each do |bound_name, _kind|
       next if param_names.include?(bound_name)
       error!(fn_node, :REQUIRES_NON_REENTRANT_NOT_PARAM, fn: fn_node.name, name: bound_name)
