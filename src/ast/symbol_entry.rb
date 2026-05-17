@@ -126,7 +126,12 @@ class SymbolEntry
   sig { returns(Type) }
   attr_reader :type
 
-  sig { params(val: T.untyped).void }
+  # The laundering seam input is a real bounded union, not untyped:
+  # a legacy Symbol tag, a String type name, a Type, a function
+  # binding's FunctionSignature, or nil (unresolved). Normalized to a
+  # single Type. The runtime sig now enforces the accepted domain --
+  # anything outside it is a compiler bug, surfaced here.
+  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
   def type=(val)
     @type = T.let(
       val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val)),

@@ -62,14 +62,13 @@ module AST
   end
 
   # One arm of a MATCH statement (MatchStatement#cases element).
-  # Replaces the untyped clause hash {kind,value,body,binding,
-  # destructure,extra_values}. MATCH-only (WITH MATCH uses a separate
-  # parse_with_match_arms shape). `body` is ALWAYS an Array -- an empty
-  # array means "no body", never nil (no nil-vs-[] ambiguity). `value`
-  # is a heterogeneous AST pattern node (genuinely T.untyped).
-  # `indirect_payload_as` is an annotator-stamped flag (not from the
-  # parser): set when a union-variant destructure needs the transpiler
-  # to emit `subject.Variant.*` through an indirect (*T) payload.
+  # Replaces the untyped clause hash. MATCH-only (WITH MATCH uses a
+  # separate parse_with_match_arms shape). Every slot is a single
+  # strong type (none is a union): `value` is ALWAYS the pattern /
+  # condition AST node (never a Symbol/nil), `body` is ALWAYS an Array
+  # ([] = no body, never nil). `indirect_payload_as` is an
+  # annotator-stamped flag (set when a union-variant destructure needs
+  # the transpiler to emit `subject.Variant.*` via an indirect *T).
   MatchCase = Struct.new(:kind, :value, :body, :binding, :destructure, :extra_values,
                          :indirect_payload_as,
                          keyword_init: true) do
@@ -80,9 +79,49 @@ module AST
       self[:body] = [] if self[:body].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { returns(Symbol) }
+    def kind
+      self[:kind]
+    end
+
+    sig { returns(AST::Locatable) }
+    def value
+      self[:value]
+    end
+
+    sig { returns(T::Array[AST::Locatable]) }
+    def body
+      self[:body]
+    end
+
+    sig { params(val: T.nilable(T::Array[AST::Locatable])).void }
     def body=(val)
       self[:body] = val.nil? ? [] : val
+    end
+
+    sig { returns(T.nilable(String)) }
+    def binding
+      self[:binding]
+    end
+
+    sig { returns(T.nilable(AST::StructPattern)) }
+    def destructure
+      self[:destructure]
+    end
+
+    sig { returns(T.nilable(T::Array[AST::Locatable])) }
+    def extra_values
+      self[:extra_values]
+    end
+
+    sig { returns(T.nilable(T::Boolean)) }
+    def indirect_payload_as
+      self[:indirect_payload_as]
+    end
+
+    sig { params(val: T.nilable(T::Boolean)).void }
+    def indirect_payload_as=(val)
+      self[:indirect_payload_as] = val
     end
 
     # Idempotent normalizer for the parser seam: passthrough a MatchCase,
