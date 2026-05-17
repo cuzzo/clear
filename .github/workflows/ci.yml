@@ -251,7 +251,10 @@ jobs:
       # helper params (333/334/341/345 pending->pass via the
       # AddressOf/Deref arg unwrap) crossed fail->pass. 240/242, only
       # 93 (AddressOf-i64) and 367 (DeferStmt) pending.
-      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=240
+      #
+      # 2026-05-17: 240 -> 241. WITH-release write-back defer no-op
+      # (367 pending->pass). Only 93 (AddressOf-i64) pending now.
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=241
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)

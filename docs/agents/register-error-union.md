@@ -254,15 +254,28 @@ AddressOf/Deref, mirrors atomic_receiver_ident) at both sites.
 333/334/341/345 pending->pass (all were allowlisted). Allowlist
 235 -> 240, min-pass bumped 235 -> 240. 0 regressions.
 
-Still PENDING (orthogonal, next):
-- 524_or_pass_heap_list_cleanup: TryCatch in let-init with a
-  heap-list (non-scalar) type -- compile_let path, not error-union.
-- 216/217_loop_carry_*: now reach the frame-arena "integer
-  overflow" crash (NOT allowlisted; same family as the dropped 6;
-  blocked on the real guest-arena fix, not error-union).
-- 350/360/367: cap-param resolved; now blocked on MIR::DeferStmt
-  (orthogonal -- defer support, not cap-param).
-- 93_tight_loop: MIR::AddressOf i64 expressions (orthogonal).
+## DeferStmt (commit 8) -- LANDED
+
+350/360/367's DeferStmt is uniformly the WITH-EXCLUSIVE lock-release
+write-back: `defer { *_m_c = c }`. In the bc field-decomposed
+cap-struct model the WITH body already mutated the shared field regs
+in place (caller/callee alias the same value identity), so the
+write-back is redundant; the lock is a no-op single-threaded.
+compile_defer_stmt now no-ops a defer body that is a ScopeBlock of
+only Set-to-Deref write-backs (with_release_writeback?), still
+raising for any other defer. 367 pending->pass; allowlist 240 ->
+241, min-pass 240 -> 241, 0 regressions. The ONLY remaining
+allowlist pending is 93_tight_loop.
+
+Still PENDING (orthogonal):
+- 93_tight_loop (allowlisted): MIR::AddressOf i64 expressions.
+- 350/360: cap-param + defer resolved; now MIR::PolymorphicMutate /
+  MIR::PolymorphicMutateFlow (a distinct WITH-MATCH mutate-flow
+  feature, not cap-param/defer).
+- 524_or_pass_heap_list_cleanup: heap-list TryCatch-let
+  (compile_let path, not error-union).
+- 216/217_loop_carry_*: frame-arena family (NOT allowlisted;
+  blocked on the real guest-arena fix).
 
 ## Invariants
 

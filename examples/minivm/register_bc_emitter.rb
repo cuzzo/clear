@@ -719,7 +719,23 @@ class RegisterBcEmitter
     body = stmt.body
     return nil if body.is_a?(MIR::Call) && body.callee.to_s.match?(/\A(?:CheatLib\.)?(?:rcRelease|arcRelease|weakRcRelease|weakArcRelease)\z/)
 
+    # WITH EXCLUSIVE lock-release write-back: `defer { *_m_c = c }`.
+    # In the bc field-decomposed cap-struct model the WITH body
+    # mutated the shared field regs in place (caller and callee
+    # alias the same value identity -- see compile_struct_arg /
+    # anytype_arg_type), so the write-back through the by-pointer
+    # param is redundant. Single-threaded VM: the lock itself is a
+    # no-op. Any non-write-back defer body still raises.
+    return nil if with_release_writeback?(body)
+
     raise Unsupported, "register emitter does not support MIR::DeferStmt yet"
+  end
+
+  def with_release_writeback?(body)
+    return false unless body.is_a?(MIR::ScopeBlock)
+
+    stmts = semantic_body(body.body || [])
+    !stmts.empty? && stmts.all? { |s| s.is_a?(MIR::Set) && s.target.is_a?(MIR::Deref) }
   end
 
   # Lower `MIR::ForStmt iter=ListItems(<list>) capture=<name> body=...`
