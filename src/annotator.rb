@@ -1375,44 +1375,44 @@ private
     schema = lookup_type_schema(expr_type)
 
     pat.fields.each do |f|
-      next if f[:value] == :wildcard
+      next if f.wildcard?
 
       if schema
-        unless schema.key?(f[:name])
-          name_tok = f[:name_token]
+        unless schema.key?(f.name)
+          name_tok = f.name_token
           if name_tok
             valid_fields = schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
             emit_typo_suggestion!(
-              name_tok, f[:name], valid_fields,
-              "MATCH struct pattern: field '#{f[:name]}' does not exist on type #{expr_type}",
+              name_tok, f.name, valid_fields,
+              "MATCH struct pattern: field '#{f.name}' does not exist on type #{expr_type}",
               "field of #{expr_type}",
               category: :type, cascade: true
             )
           else
-            error!(match_node, :MATCH_FIELD_UNKNOWN, field: f[:name], type: expr_type)
+            error!(match_node, :MATCH_FIELD_UNKNOWN, field: f.name, type: expr_type)
           end
         end
       end
 
-      if f[:value] == :bind
+      if f.bind?
         # Destructuring bind: declare a local variable with the field's type.
-        if schema && schema.key?(f[:name])
-          field_def = schema[f[:name]]
+        if schema && schema.key?(f.name)
+          field_def = schema[f.name]
           field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
           field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
-          current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-          og_declare(f[:name], nil, field_type)
+          current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
+          og_declare(f.name, nil, field_type)
         end
       else
-        visit(f[:value])
+        visit(f.expr)
 
         if schema
-          field_def = schema[f[:name]]
+          field_def = schema[f.name]
           field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(Hash) ? field_def[:type]&.resolved : field_def&.resolved)
-          val_type   = f[:value].resolved_type
+          val_type   = f.expr.resolved_type
           is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
           unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
-            error!(match_node, :MATCH_FIELD_TYPE_MISMATCH, field: f[:name], declared: field_type, got: val_type)
+            error!(match_node, :MATCH_FIELD_TYPE_MISMATCH, field: f.name, declared: field_type, got: val_type)
           end
         end
       end
@@ -1698,26 +1698,26 @@ private
 
               if payload_schema.is_a?(Hash) && !payload_schema[:kind]
                 c.destructure.fields.each do |f|
-                  next unless f[:value] == :bind
-                  unless payload_schema.key?(f[:name])
-                    name_tok = f[:name_token]
+                  next unless f.bind?
+                  unless payload_schema.key?(f.name)
+                    name_tok = f.name_token
                     if name_tok
                       valid_fields = payload_schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
                       emit_typo_suggestion!(
-                        name_tok, f[:name], valid_fields,
-                        "MATCH destructure: field '#{f[:name]}' is not on variant #{variant_name}",
+                        name_tok, f.name, valid_fields,
+                        "MATCH destructure: field '#{f.name}' is not on variant #{variant_name}",
                         "field of variant #{variant_name}",
                         category: :type, cascade: true
                       )
                     else
-                      error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f[:name], variant: variant_name)
+                      error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f.name, variant: variant_name)
                     end
                   end
-                  field_def = payload_schema[f[:name]]
+                  field_def = payload_schema[f.name]
                   field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
                   field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
-                  current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-                  og_declare(f[:name], nil, field_type)
+                  current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
+                  og_declare(f.name, nil, field_type)
                 end
               end
             end

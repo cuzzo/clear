@@ -7062,10 +7062,10 @@ class MIRLowering
           [MIR::Let.new(c.binding, payload, is_mutable, nil, "_ = &#{c.binding};")]
         elsif c.destructure
           c.destructure.fields.filter_map do |f|
-            next if f[:value] == :wildcard
-            next unless f[:value] == :bind
-            field = MIR::FieldGet.new(MIR::FieldGet.new(subject, v.to_s), f[:name].to_s)
-            MIR::Let.new(f[:name].to_s, field, false, nil, "_ = &#{f[:name]};")
+            next if f.wildcard?
+            next unless f.bind?
+            field = MIR::FieldGet.new(MIR::FieldGet.new(subject, v.to_s), f.name.to_s)
+            MIR::Let.new(f.name.to_s, field, false, nil, "_ = &#{f.name};")
           end
         else
           []
@@ -7325,13 +7325,13 @@ class MIRLowering
     bindings = []
 
     pat.fields.each do |f|
-      next if f[:value] == :wildcard
-      if f[:value] == :bind
-        field_access = MIR::FieldGet.new(subject, f[:name].to_s)
-        bindings << MIR::Let.new(f[:name].to_s, field_access, false, nil, "_ = &#{f[:name]};")
+      next if f.wildcard?
+      if f.bind?
+        field_access = MIR::FieldGet.new(subject, f.name.to_s)
+        bindings << MIR::Let.new(f.name.to_s, field_access, false, nil, "_ = &#{f.name};")
       else
-        val = lower(f[:value])
-        field_access = MIR::FieldGet.new(subject, f[:name].to_s)
+        val = lower(f.expr)
+        field_access = MIR::FieldGet.new(subject, f.name.to_s)
         conditions << MIR::BinOp.new("==", field_access, val)
       end
     end
