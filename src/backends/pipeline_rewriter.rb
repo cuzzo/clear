@@ -141,11 +141,11 @@ class PipelineRewriter
                              TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
-    inf_with_limit = real_source.type_info&.inf_stream? &&
+    inf_with_limit = real_source.type_info.inf_stream? &&
                      stages.any? { |s| s.is_a?(AST::LimitOp) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.type_info&.dynamic_stream? ||
-        real_source.type_info&.open_stream? ||
-        real_source.type_info&.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
+    if (real_source.is_a?(AST::RangeLit) || real_source.type_info.dynamic_stream? ||
+        real_source.type_info.open_stream? ||
+        real_source.type_info.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
        stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
@@ -166,8 +166,8 @@ class PipelineRewriter
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
     # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.type_info&.dynamic_stream? || real_source.type_info&.open_stream? ||
-                       real_source.type_info&.bounded_stream? || inf_with_limit) &&
+                      (real_source.type_info.dynamic_stream? || real_source.type_info.open_stream? ||
+                       real_source.type_info.bounded_stream? || inf_with_limit) &&
                       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])

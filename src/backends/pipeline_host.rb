@@ -785,7 +785,7 @@ class PipelineHost
         false, nil, nil)
     end
 
-    result_type = smooth_node.respond_to?(:full_type) && smooth_node.full_type ? transpile_type(smooth_node.full_type.to_s) : "f64"
+    result_type = transpile_type(smooth_node.full_type.to_s)
     init_stmts = []
     loop_body = []
     final_expr = nil
@@ -1106,7 +1106,7 @@ class PipelineHost
     # cases @channel_slots) and accumulates into a list. Producer fibers
     # whose body terminates early push Nil; the for-loop's nil-guard
     # ends the drain.
-    if bc_target? && list_node.full_type&.inf_stream?
+    if bc_target? && list_node.full_type.inf_stream?
       label = next_pipe_label
       source_mir = visit_mir(list_node)
       @current_pipe_label = label
@@ -1337,7 +1337,7 @@ class PipelineHost
   def lower_window(site, window_node)
     list_node = site.list
     smooth_node = site.options
-    expr_type_str = (window_node.expression.full_type || window_node.expression.resolved_type).to_s
+    expr_type_str = window_node.expression.full_type.to_s
     res_zig = transpile_type(expr_type_str)
     alloc = pipeline_alloc(smooth_node)
     size_mir = visit_mir(window_node.size)
@@ -1409,7 +1409,7 @@ class PipelineHost
   def lower_batch_window(site, bw_node)
     list_node = site.list
     smooth_node = site.options
-    expr_type_str = (bw_node.expression.full_type || bw_node.expression.resolved_type).to_s
+    expr_type_str = bw_node.expression.full_type.to_s
     res_zig = transpile_type(expr_type_str)
 
     lhs_type = list_node.type_info
@@ -1446,7 +1446,7 @@ class PipelineHost
     # genuinely-infinite producers stay blocked at the next YIELD until
     # exec! shutdown closes the channel.
     if bc_target? && list_node.is_a?(AST::Identifier) &&
-       list_node.type_info&.inf_stream?
+       list_node.type_info.inf_stream?
       label = next_pipe_label
       drain_label = next_pipe_label
       source_mir = visit_mir(list_node)
@@ -1684,7 +1684,7 @@ class PipelineHost
         lhs_ti.open_stream_element_type.resolved
       elsif lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
         lhs_ti.tense_type.element_type.resolved
-      elsif range_chain[:source].type_info&.inf_stream?
+      elsif range_chain[:source].type_info.inf_stream?
         # list_node is a SMOOTH chain (e.g. counter |> LIMIT 9); lhs_ti is the
         # materialized list type so tense_type is unavailable. Pull element type
         # from the inf stream source directly.
@@ -2132,9 +2132,9 @@ class PipelineHost
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def finite_stream_source_node?(node)
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? ||
-      node.type_info&.open_stream? ||
-      node.type_info&.bounded_stream? || node.type_info&.inf_stream?
+    node.is_a?(AST::RangeLit) || node.type_info.dynamic_stream? ||
+      node.type_info.open_stream? ||
+      node.type_info.bounded_stream? || node.type_info.inf_stream?
   end
 
   # Walk a BinaryOp(SMOOTH) left-spine looking for a finite stream source
@@ -3223,8 +3223,8 @@ class PipelineHost
       ])
     end
     if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream? ||
-        range_lit.type_info&.inf_stream?)
+       (range_lit.type_info.dynamic_stream? || range_lit.type_info.bounded_stream? ||
+        range_lit.type_info.inf_stream?)
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts], *acc_init_stmts,
         MIR::ForStmt.new(visit_mir(range_lit), capture_name,
@@ -3281,8 +3281,8 @@ class PipelineHost
       ])
     end
     if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream? ||
-        range_lit.type_info&.inf_stream?)
+       (range_lit.type_info.dynamic_stream? || range_lit.type_info.bounded_stream? ||
+        range_lit.type_info.inf_stream?)
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts],
         MIR::Let.new("acc", init_mir, true, acc_zig, nil),
@@ -3331,7 +3331,7 @@ class PipelineHost
       return lower_concurrent_bc(smooth_node.left, conc_op, smooth_node) unless stream_lhs
     end
 
-    if !smooth_node.left.is_a?(AST::RangeLit) && smooth_node.left.type_info&.bounded_stream?
+    if !smooth_node.left.is_a?(AST::RangeLit) && smooth_node.left.type_info.bounded_stream?
       return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
     end
 
@@ -3557,7 +3557,7 @@ class PipelineHost
   def lower_shard_concurrent_each_zig(id, range_node, conc_op, each_op, ctx,
                                       map_node, map_var_name, idx_var, key_var,
                                       sh_var, map_ptr, start_mir, end_mir)
-    shard_count = ctx[:shard_count] || map_node.type_info&.shard_count
+    shard_count = ctx[:shard_count] || map_node.type_info.shard_count
     raise "SHARD target missing shard_count" unless shard_count
 
     map_t = map_node.type_info
@@ -4291,7 +4291,7 @@ class PipelineHost
     list_zig = visit(lhs)
     src_needs_cleanup = lhs.is_a?(AST::MethodCall) &&
                         %w[values keys].include?(lhs.name.to_s) &&
-                        lhs.object.type_info&.sharded?
+                        lhs.object.type_info.sharded?
     cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(rt.heapAlloc());\n" : ""
     src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
     items_block  = build_pipe_items_block(lhs_type, "rt.heapAlloc()")
@@ -4303,8 +4303,11 @@ class PipelineHost
   sig { params(lhs: T.untyped).returns(Type) }
   def concurrent_list_item_type(lhs)
     if lhs.is_a?(AST::RangeLit)
-      elem = lhs.type_info&.tense_type&.element_type&.resolved ||
-        lhs.start.full_type || :Int64
+      # tense_type is legitimately nil for a non-tense source; the
+      # range start is an evaluatable node, so its full_type is the
+      # invariant-guaranteed fallback (no dead :Int64 guard).
+      elem = lhs.type_info.tense_type&.element_type&.resolved ||
+        lhs.start.full_type
       return Type.new(elem)
     end
     Type.new(lhs.type_info.element_type.resolved)

@@ -1,13 +1,20 @@
 require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
+require_relative "../src/backends/transpiler"  # loads compiler, annotator, lexer, parser, ast
 require_relative "../src/backends/pipeline_rewriter"
 
 RSpec.describe PipelineRewriter do
+  # Real pipeline order: lex -> parse -> annotate -> rewrite.
+  # PipelineRewriter runs AFTER annotation in CompilerFrontend and
+  # relies on typed nodes (the AST→MIR invariant). The old helper
+  # skipped annotation, an unrealistic path that masked the contract.
   def parse_and_rewrite(src)
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
-    PipelineRewriter.new.rewrite!(ast)
+    annotator = SemanticAnnotator.new(source_code: src)
+    annotator.annotate!(ast)
+    PipelineRewriter.new(annotator).rewrite!(ast)
     ast
   end
 
