@@ -269,9 +269,7 @@ class MIRLowering
   def container_borrow_expr?(ast_node)
     return false unless ast_node
     if ast_node.is_a?(AST::GetIndex)
-      ti = ast_node.target.full_type rescue nil
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      return false unless ti.is_a?(Type)
+      ti = ast_node.target.full_type
       return !!(ti.map? || ti.pool? || ti.list_collection? || (ti.array? && !ti.string?))
     end
     if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
@@ -1679,9 +1677,8 @@ class MIRLowering
   sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     return nil unless expr
-    ti = expr.full_type rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return :heap if ti&.heap_provenance?
+    ti = expr.full_type
+    return :heap if ti.heap_provenance?
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return storage if storage == :heap || storage == :frame
     nil
@@ -1957,10 +1954,9 @@ class MIRLowering
       alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
       # Resolve receiver type: MethodCall -> receiver object; UFCS FuncCall -> first arg
       receiver_type = if node.is_a?(AST::MethodCall)
-        ti = node.object.full_type rescue nil
-        ti ? Type.new(ti) : nil
+        Type.new(node.object.full_type)
       else
-        ti = node.args&.first&.full_type rescue nil
+        ti = node.args&.first&.full_type
         ti ? Type.new(ti) : nil
       end
       resolved = resolve_alloc_sym(alloc_sym, receiver_type, nil, node)
@@ -1974,8 +1970,7 @@ class MIRLowering
           param_def = stdlib_args[ai + 1]
           next unless param_def.is_a?(Hash) && param_def[:takes]
           mir_idx = node.is_a?(AST::MethodCall) ? ai + 1 : ai
-          ti = arg_node.full_type rescue nil
-          next unless ti&.string?
+          next unless arg_node.full_type.string?
           storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
           next if storage == :heap
           next if arg_node.is_a?(AST::CopyNode)
@@ -6341,21 +6336,16 @@ class MIRLowering
 
     # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
     if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
-      field_ti = node.name.full_type rescue nil
-      field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
-      field_ti = nil unless field_ti.is_a?(Type)
+      field_ti = node.name.full_type
       sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-      if field_ti&.needs_cleanup?(sl)
+      if field_ti.needs_cleanup?(sl)
         result.needs_field_cleanup = true
-      elsif field_ti&.string?
+      elsif field_ti.string?
         # String fields on heap-allocated structs need cleanup
         root = T.let(node.name.target, T.untyped)
         root = root.target while root.is_a?(AST::GetField)
         if root.is_a?(AST::Identifier)
-          root_ti = root.full_type rescue nil
-          root_ti = Type.new(root_ti) if root_ti && !root_ti.is_a?(Type)
-          root_ti = nil unless root_ti.is_a?(Type)
-          result.needs_field_cleanup = true if root_ti&.heap_provenance?
+          result.needs_field_cleanup = true if root.full_type.heap_provenance?
         end
       end
     end
@@ -6366,11 +6356,11 @@ class MIRLowering
   sig { params(node: AST::Assignment).returns(T.untyped) }
   def lower_indexed_assignment(node)
     target_node = node.name.target
-    ti = target_node.full_type rescue nil
+    ti = target_node.full_type
 
     # Raw slice index (synthetic nodes from SOA rewrite have no type info:
     # full_type defaults to the :Untyped sentinel, never nil)
-    if ti.nil? || ti.untyped?
+    if ti.untyped?
       target = lower(target_node)
       idx = lower(node.name.index)
       val = lower(node.value)
@@ -6447,7 +6437,7 @@ class MIRLowering
       shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
       if @target != :bc
         val_node = node.value
-        val_ti = val_node.full_type rescue nil
+        val_ti = val_node.full_type
         transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                      else op[:value_transforms] || []
                      end
@@ -6527,7 +6517,7 @@ class MIRLowering
     end
 
     val_node = node.value
-    val_ti = val_node.full_type rescue nil
+    val_ti = val_node.full_type
     transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                  else op[:value_transforms] || []
                  end
@@ -7259,9 +7249,7 @@ class MIRLowering
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
-    ti = node.full_type rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    ti&.heap_provenance? || false
+    node.full_type.heap_provenance?
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
@@ -7445,8 +7433,7 @@ class MIRLowering
     recv_ast = node.is_a?(AST::MethodCall) ? node.object : node.args.first
     return nil unless recv_ast
 
-    recv_ti = recv_ast.full_type rescue nil
-    return nil unless recv_ti
+    recv_ti = recv_ast.full_type
 
     ti = Type.new(recv_ti)
     # Containers (list/array/slice) all defer to CheatLib.len, which dispatches
@@ -7593,8 +7580,8 @@ class MIRLowering
   def should_dupe_borrowed_union?(val_node, val_ti = nil)
     return false if val_node.is_a?(AST::MoveNode) || val_node.is_a?(AST::CopyNode) || val_node.is_a?(AST::CloneNode)
     return false unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
-    val_ti ||= (val_node.full_type rescue nil)
-    return false unless val_ti && @union_schemas&.key?(val_ti.resolved)
+    val_ti ||= val_node.full_type
+    return false unless @union_schemas&.key?(val_ti.resolved)
     schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
     return false if val_ti.respond_to?(:implicitly_copyable?) && val_ti.implicitly_copyable?(schema_lookup)
     true
