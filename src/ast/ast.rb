@@ -94,6 +94,34 @@ module AST
     end
   end
 
+  # One field of a struct-destructuring pattern (StructPattern#fields
+  # element), e.g. `a` / `b: x` / `c: _` inside `MATCH v { a, b: x }`.
+  # `value` is a genuine sum: :wildcard (`c: _`), :bind (bare `a`), or
+  # an AST node (the bound expression / nested pattern in `b: x`). The
+  # sum is real (can't collapse to one type) but is encapsulated behind
+  # wildcard? / bind? / expr so no reader re-derives it via raw
+  # `== :wildcard` / `== :bind` symbol comparisons.
+  PatternField = Struct.new(:name, :value, :name_token, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(T::Boolean) }
+    def wildcard? = self[:value] == :wildcard
+
+    sig { returns(T::Boolean) }
+    def bind? = self[:value] == :bind
+
+    # The bound expression / nested pattern, or nil for the :wildcard /
+    # :bind sentinels. Readers that want "the AST node" use this.
+    sig { returns(T.untyped) }
+    def expr = (wildcard? || bind?) ? nil : self[:value]
+
+    sig { params(f: T.any(PatternField, T::Hash[Symbol, T.untyped])).returns(PatternField) }
+    def self.coerce(f)
+      return f if f.is_a?(PatternField)
+      new(**f.slice(*members))
+    end
+  end
+
   # Walk all statements in a body, recursing into control flow branches.
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
@@ -1232,7 +1260,20 @@ module AST
   # StructPattern: destructuring pattern for MATCH.
   # fields: Array of { name: String, value: ASTNode | :wildcard }
   # partial: Boolean — true when `...` is present (remaining fields ignored)
-  StructPattern     = Struct.new(:token, :fields, :partial) { include Locatable }
+  StructPattern     = Struct.new(:token, :fields, :partial) do
+    extend T::Sig
+    include Locatable
+
+    def initialize(*args)
+      super
+      self[:fields] = (self[:fields] || []).map { |f| PatternField.coerce(f) }
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def fields=(val)
+      self[:fields] = (val || []).map { |f| PatternField.coerce(f) }
+    end
+  end
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
