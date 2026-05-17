@@ -13,6 +13,10 @@ module NilKillRuntimeTrace
   TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
     File.expand_path(path, ROOT)
   end
+  # This gem's own absolute path, computed ONCE. The per-event caller
+  # scan used File.expand_path(__FILE__, ROOT) for EVERY candidate
+  # frame to skip this gem's frames; that string-builds per frame.
+  SELF_ABS = File.expand_path(__FILE__, ROOT)
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
   TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
@@ -566,13 +570,30 @@ module NilKillRuntimeTrace
     end
   end
 
+  # Was caller_locations(2, 20) -- a 20-frame backtrace ALLOCATION on
+  # every collection mutation of a registered collection (microseconds
+  # x per-mutation = the hot-loop killer). Thread.each_caller_location
+  # is lazy + early-exits at the first match and allocates nothing.
+  # Byte-identical: same predicate, same skip-1 offset (the +1 frame is
+  # this gem's own, excluded by SELF_ABS anyway) and same 20-frame
+  # window cap (indices 2..21), so a match deeper than the original
+  # window still yields nil exactly as before.
   def self.collection_mutation_site
-    loc = caller_locations(2, 20).find do |candidate|
-      path = candidate.absolute_path || candidate.path
-      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+    seen = 0
+    Thread.each_caller_location do |c|
+      seen += 1
+      next if seen == 1
+      return nil if seen > 21
+
+      raw = c.absolute_path || c.path
+      next unless raw && target_path?(raw)
+
+      a = abs_path(raw)
+      next if a == SELF_ABS
+
+      return "#{a}:#{c.lineno}"
     end
-    return nil unless loc
-    "#{abs_path(loc.absolute_path || loc.path)}:#{loc.lineno}"
+    nil
   end
 
   def self.with_collection_hook_guard
@@ -1310,9 +1331,19 @@ module NilKillRuntimeTrace
   end
 
   def self.record_open_struct_field(instance, field, value)
-    loc = caller_locations(2, 20).find do |candidate|
-      path = candidate.absolute_path || candidate.path
-      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+    loc = nil
+    seen = 0
+    Thread.each_caller_location do |c|
+      seen += 1
+      next if seen == 1
+      break if seen > 21
+
+      raw = c.absolute_path || c.path
+      next unless raw && target_path?(raw)
+      next if abs_path(raw) == SELF_ABS
+
+      loc = c
+      break
     end
     return unless loc
     singleton_name = NilKillRuntimeTrace.safe_module_name(instance.class)
