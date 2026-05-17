@@ -1867,7 +1867,7 @@ RSpec.describe MIRLowering do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
       sig = Struct.new(:needs_rt, :can_fail, :params, :return_type)
-                  .new(false, false, [{ name: "p", type: :Point, mutable: false, takes: false }], :Int64)
+                  .new(false, false, [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)], :Int64)
       l = lowering(
         fn_sigs: { "sum3" => sig },
         struct_schemas: { Point: { x: :Int64, y: :Int64 } }

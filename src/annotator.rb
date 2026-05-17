@@ -604,7 +604,7 @@ private
         default: p[:default],
         mutable: p[:mutable],
         takes: p[:takes] || false,
-        sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
+        sync: p.type&.any_sync? ? p.type.sync : nil
       }},
       return_type: node.return_type || Type.new(:Any),
       return_lifetime: get_lifetime_path(node),
@@ -670,7 +670,7 @@ private
     validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
 
     # Make type params visible during type annotation validation
-    node.params.each { |p| validate_type_annotation!(node, p[:type], is_param: true) if p[:type].is_a?(Type) }
+    node.params.each { |p| validate_type_annotation!(node, p.type, is_param: true) if p.type }
     validate_type_annotation!(node, node.return_type) if node.return_type
 
     # 3. Pre-declaration (so the function can be recursive)
@@ -678,7 +678,7 @@ private
       params: node.params.map { |p| {
         name: p[:name], type: p[:type], required: p[:default].nil?,
         default: p[:default], mutable: p[:mutable], takes: p[:takes],
-        sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
+        sync: p.type&.any_sync? ? p.type.sync : nil
       }},
       return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
       visibility: node.visibility,

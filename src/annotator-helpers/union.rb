@@ -36,7 +36,7 @@ module UnionAnalysis
         if req[:body]
           # No concrete override — synthesize a top-level function from the default body.
           fn_params = req[:params].map { |rp|
-            { name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false }
+            AST::Param.new(name: rp[:name], type: rp[:type], default: nil, mutable: false, takes: false)
           }
           fn_node = AST::FunctionDef.new(
             req[:token], req[:name], fn_params, [], req[:return_type],

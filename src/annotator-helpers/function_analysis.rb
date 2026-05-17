@@ -720,13 +720,13 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     node.params.each do |param|
       # Validate Defaults
-      if param[:default]
-        if param[:default].is_a?(AST::DefaultLit)
+      if param.default
+        if param.default.is_a?(AST::DefaultLit)
           # DEFAULT is only valid for struct-type params
-          param_type_sym = param[:type].is_a?(Symbol) ? param[:type] : param[:type].to_sym rescue nil
+          param_type_sym = param.type&.resolved
           schema = lookup_type_schema(param_type_sym) if param_type_sym
           unless schema.is_a?(Hash) && !schema[:kind]
-            error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param[:type])
+            error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param.type)
           end
           # Validate all fields of the struct have defaults
           field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
@@ -734,16 +734,16 @@ module FunctionAnalysis
             field_defaults = schema[:field_defaults] || {}
             missing = field_names.reject { |f| field_defaults.key?(f) }
             if missing.any?
-              error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param[:name], type: param[:type], missing: missing.join(', '))
+              error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
             end
           end
-          param[:default].full_type = Type.new((param[:type].to_sym rescue param[:type]))
+          param.default.full_type = param.type
         else
-          visit(param[:default])
-          def_type = param[:default].resolved_type
-          param_type = param[:type]
+          visit(param.default)
+          def_type = param.default.resolved_type
+          param_type = param.type
           unless is_safe_autocast?(def_type, param_type)
-            error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param[:name], expected: param_type, got: def_type)
+            error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param.name, expected: param_type, got: def_type)
           end
         end
       end
@@ -751,12 +751,12 @@ module FunctionAnalysis
       # Seed sync for cross-module helpers where caller-sync propagation
       # cannot see call sites. Visible callers still override this later.
       param_sync = nil
-      if param[:sync]
-        param_sync = param[:sync]
-      elsif param[:type].is_a?(Type) && param[:type].any_sync?
-        param_sync = param[:type].sync
+      if param.sync
+        param_sync = param.sync
+      elsif param.type&.any_sync?
+        param_sync = param.type.sync
       elsif node.respond_to?(:requires) && node.requires
-        families = node.requires[param[:name].to_s]
+        families = node.requires[param.name.to_s]
         if families
           # Polymorphic family seeds are only defaults; visible callers
           # override them during caller-sync propagation.
@@ -779,27 +779,27 @@ module FunctionAnalysis
       # the bare-cell form.
       param_layout = nil
       if param_sync == :atomic
-        param_t = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type])
+        param_t = param.type
         param_layout = :indirect if param_t.respond_to?(:struct?) && param_t.struct?
       end
       current_scope.declare(
-        param[:name], nil, param[:type], param[:mutable], false, nil, :stack,
+        param.name, nil, param.type, param.mutable, false, nil, :stack,
         Set.new, [], sync: param_sync, layout: param_layout
       )
-      # Stash the SymbolEntry on the param hash so downstream passes don't
+      # Stash the SymbolEntry on the Param so downstream passes don't
       # need to find an Identifier reference in the body.
-      param[:symbol] = current_scope.locals[param[:name]]
-      param[:symbol].is_param = true
-      param[:symbol].param_decl_token = param[:name_token]
+      param.symbol = current_scope.locals[param.name]
+      param.symbol.is_param = true
+      param.symbol.param_decl_token = param.name_token
       # Preserve REQUIRES disjunctions for call-site effect resolution.
       if node.respond_to?(:requires) && node.requires
-        fams = node.requires[param[:name].to_s]
-        param[:symbol].sync_families = fams if fams.is_a?(Set) && !fams.empty?
+        fams = node.requires[param.name.to_s]
+        param.symbol.sync_families = fams if fams.is_a?(Set) && !fams.empty?
       end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
-      current_scope.locals[param[:name]].takes = true if param[:takes]
-      classify_ownership!(current_scope.locals[param[:name]])
-      og_declare(param[:name], nil, param[:type])
+      current_scope.locals[param.name].takes = true if param.takes
+      classify_ownership!(current_scope.locals[param.name])
+      og_declare(param.name, nil, param.type)
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
       unless param[:takes]

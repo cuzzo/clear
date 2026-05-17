@@ -838,7 +838,18 @@ module AST
     # misspelled field-name for a fixable edit span.
     attr_accessor :field_tokens
   end
-  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
+  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
+    include Locatable
+    # Same params seam as FunctionDef: always Array<AST::Param>.
+    def initialize(*)
+      super
+      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
+    end
+
+    def params=(val)
+      self[:params] = (val || []).map { |p| Param.coerce(p) }
+    end
+  end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
     extend T::Sig
     include Locatable

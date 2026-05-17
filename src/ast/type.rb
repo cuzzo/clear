@@ -1753,8 +1753,8 @@ class Type
     return false unless @raw.return_type.accepts?(other_raw.return_type)
 
     self_params.zip(other_params).each do |sp, op|
-      sp_t = sp[:type].is_a?(Type) ? sp[:type] : Type.new(sp[:type] || :Any)
-      op_t = op[:type].is_a?(Type) ? op[:type] : Type.new(op[:type] || :Any)
+      sp_t = sp.type || Type.new(:Any)
+      op_t = op.type || Type.new(:Any)
       return false unless sp_t.accepts?(op_t)
     end
 

@@ -1167,7 +1167,7 @@ class MIRLowering
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
     mutable_scalar_params = (node.params || []).select { |p|
       next false unless p[:mutable]
-      p_type_obj = p[:type].is_a?(Type) ? p[:type] : (Type.new(p[:type] || :Any) rescue nil)
+      p_type_obj = p.type || Type.new(:Any)
       next false if p_type_obj && (p_type_obj.collection? ||
                                     (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
       !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
@@ -1181,7 +1181,7 @@ class MIRLowering
     # callee adds a second `&`, producing `**ArrayList` which Zig's
     # one-level method auto-deref can't unwrap.
     @current_fn_collection_params = (node.params || []).select { |p|
-      p_type_obj = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      p_type_obj = p.type || Type.new(:Any)
       p_type_obj.needs_pointer_passing? ||
         (p[:mutable] && p_type_obj.list_collection?)
     }.map { |p| p[:name] }.to_set
@@ -1192,8 +1192,8 @@ class MIRLowering
     # Build param list
     params_mir = (node.params || []).map { |param|
       p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
-      p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
-      p_type_obj = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
+      p_type_sym = param.type&.resolved
+      p_type_obj = param.type || Type.new(:Any)
       is_user_struct = @struct_schemas&.key?(p_type_sym)
       # Atomic params need `anytype` so call sites pass the cell itself,
       # allowing WITH MATCH comptime probes to dispatch by actual family.
@@ -1377,7 +1377,7 @@ class MIRLowering
     (node.params || []).select { |p| p[:takes] }.each do |p|
       entry = @current_bindings[p[:name].to_s]
       next unless entry && entry[:needs_cleanup]
-      ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      ti = p.type || Type.new(:Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
       takes_mir << MIR::AllocMark.new(p[:name].to_s, entry[:alloc], ti)
@@ -1737,7 +1737,7 @@ class MIRLowering
         callee_param[:type].respond_to?(:list_collection?) &&
         callee_param[:type].list_collection?
       callee_param_type = if callee_param
-        callee_param[:type].is_a?(Type) ? callee_param[:type] : (Type.new(callee_param[:type] || :Any) rescue nil)
+        callee_param.type || Type.new(:Any)
       end
       callee_wants_mutable_value =
         callee_param && callee_param[:mutable] && a.is_a?(AST::Identifier) &&
@@ -5920,7 +5920,7 @@ class MIRLowering
     return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
     return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
     params = (node.params || []).select do |p|
-      pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      pt = p.type || Type.new(:Any)
       pt.shared? && pt.resolved == ret.resolved
     end
     return nil unless params.size == 1

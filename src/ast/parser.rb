@@ -872,6 +872,9 @@ class Parser
         end
       end
 
+      # Plain Hash: this comma-seq block is shared by FN-param and
+      # USE-capture parsing. Params are coerced to AST::Param at the
+      # FunctionDef/LambdaLit seam; captures stay Hashes.
       { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
     end
      .last # always ignore the first token
