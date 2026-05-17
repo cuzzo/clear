@@ -29,6 +29,50 @@ module NilKillRuntimeTrace
   @objects = {}
   @frames = Hash.new { |h, k| h[k] = [] }
   @shape_lookup = {}
+
+  # ---- non-hooked recorder-internal accumulators (Fix 2) ----
+  # install_collection_hook prepends Array/Hash/Set CLASS-wide, so the
+  # recorder's OWN per-observation Set#merge / Hash#[]= bookkeeping
+  # re-enters the hook (dispatch + super + marker read) ~dozens of
+  # times per traced call -- the recorder taxing itself. NKSet/NKTally
+  # are NOT Array/Hash/Set (nor subclasses), so the hook never fires on
+  # them. They are recorder-private (never returned to the workload,
+  # never marshaled, never serialized as objects -- every dump path
+  # first does .to_a.sort / transform_values / sort_by.to_h), so output
+  # is byte-identical for EVERY workload (unlike a per-object singleton
+  # hook), and any semantics bug surfaces as different recorded JSON ->
+  # caught by the byte-identical suite. Writes use Hash#[]= captured
+  # HERE, in the class body, BEFORE install_collection_hook (line
+  # ~1611) prepends -> the pristine C method, hook-free.
+  ORIG_HASH_STORE = ::Hash.instance_method(:[]=)
+
+  # Set semantics via Hash keys -- identical dedup to ::Set (also
+  # Hash-backed: same eql?/hash). Every dump sorts, so insertion order
+  # is irrelevant. Surface = exactly what the recorder calls.
+  class NKSet
+    include Enumerable
+    def initialize; @h = {}; end
+    def <<(item); ORIG_HASH_STORE.bind_call(@h, item, true); self; end
+    alias_method :add, :<<
+    def merge(enum); enum.each { |item| ORIG_HASH_STORE.bind_call(@h, item, true) }; self; end
+    def each(&blk); @h.each_key(&blk); end
+    def to_a; @h.keys; end
+    def empty?; @h.empty?; end
+    def freeze; @h.freeze; super; end
+  end
+
+  # ::Hash.new(0) semantics: a missing key reads as 0 and is NOT
+  # stored; only []= stores -> insertion order == first-increment
+  # order, exactly as Hash.new(0), so to_h / sort_by are byte-identical.
+  class NKTally
+    def initialize; @h = {}; end
+    def [](key); @h.fetch(key, 0); end
+    def []=(key, val); ORIG_HASH_STORE.bind_call(@h, key, val); end
+    def to_h; @h; end
+    def each(&blk); @h.each(&blk); end
+    def sort_by(&blk); @h.sort_by(&blk); end
+    def empty?; @h.empty?; end
+  end
   @path_cache = {}
   @target_cache = {}
   # Per-(path,line) memo of the constant-per-callsite context (abs,
@@ -458,6 +502,18 @@ module NilKillRuntimeTrace
       # unchanged.
       @objects[oid] = {}
       ObjectSpace.define_finalizer(value, objects_finalizer(oid))
+      # Mutation-gate marker. The collection-mutation hooks fire on
+      # EVERY Array/Hash/Set mutation in the WHOLE process; the old
+      # gate paid Kernel#object_id + an @objects hash lookup on each
+      # one just to discover "not registered, ignore." Relevance is
+      # known HERE (registration). Stamp the object so the hook
+      # fast-path is one ivar read. Marker present <=> @objects entry
+      # present for every live non-frozen registered object (both set
+      # here, both die with the object; the finalizer only deletes
+      # @objects when the object -- and its ivar -- are already gone).
+      # Frozen collections raise at `super(...)` before the gate, so
+      # skipping the marker on them is byte-identical.
+      value.instance_variable_set(:@__nil_kill_traced, true) unless value.frozen?
     end
     owners = @objects[oid]
     owners[owner_identity_key(owner)] ||= owner
@@ -499,8 +555,8 @@ module NilKillRuntimeTrace
       return unless path && line
       kind = collection_kind(value)
       key = collection_key(value, owner)
-      rec = (@collections[key] ||= { calls: 0, classes: Set.new, elem_classes: Set.new, key_classes: Set.new, value_classes: Set.new,
-                                      elem_shapes: Set.new, key_shapes: Set.new, value_shapes: Set.new, mutation_sites: Hash.new(0) })
+      rec = (@collections[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new,
+                                      elem_shapes: NKSet.new, key_shapes: NKSet.new, value_shapes: NKSet.new, mutation_sites: NKTally.new })
       rec[:calls] += 1
       rec[:classes] << class_name(value)
       # merge accepts any enumerable; the args are already Sets (from
@@ -715,25 +771,25 @@ module NilKillRuntimeTrace
       calls: 0,
       ok_calls: 0,
       raised_calls: 0,
-      params_by_name: Hash.new { |h, k| h[k] = Set.new },
-      params_ok: Hash.new { |h, k| h[k] = Set.new },
-      params_raised: Hash.new { |h, k| h[k] = Set.new },
-      param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_sites_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_sites_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_elem: Hash.new { |h, k| h[k] = Set.new },
-      param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-      param_elem_shapes: Hash.new { |h, k| h[k] = Set.new },
-      param_kv_shapes: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-      returns: Set.new,
-      return_elem: Set.new,
-      return_kv: [Set.new, Set.new],
-      return_elem_shapes: Set.new,
-      return_kv_shapes: [Set.new, Set.new],
-      raised: Set.new,
+      params_by_name: Hash.new { |h, k| h[k] = NKSet.new },
+      params_ok: Hash.new { |h, k| h[k] = NKSet.new },
+      params_raised: Hash.new { |h, k| h[k] = NKSet.new },
+      param_sites: Hash.new { |h, k| h[k] = NKTally.new },
+      param_sites_ok: Hash.new { |h, k| h[k] = NKTally.new },
+      param_sites_raised: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces_ok: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces_raised: Hash.new { |h, k| h[k] = NKTally.new },
+      param_elem: Hash.new { |h, k| h[k] = NKSet.new },
+      param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+      param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
+      param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+      returns: NKSet.new,
+      return_elem: NKSet.new,
+      return_kv: [NKSet.new, NKSet.new],
+      return_elem_shapes: NKSet.new,
+      return_kv_shapes: [NKSet.new, NKSet.new],
+      raised: NKSet.new,
       plan: plan,
     }
   end
@@ -838,13 +894,13 @@ module NilKillRuntimeTrace
         bucket: b,
         sample_method: sample_method,
         plan: method_plan,
-        params: Hash.new { |h, k| h[k] = Set.new },
-        param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
-        param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
-        param_elem: Hash.new { |h, k| h[k] = Set.new },
-        param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-        param_elem_shapes: Hash.new { |h, k| h[k] = Set.new },
-        param_kv_shapes: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
+        params: Hash.new { |h, k| h[k] = NKSet.new },
+        param_sites: Hash.new { |h, k| h[k] = NKTally.new },
+        param_traces: Hash.new { |h, k| h[k] = NKTally.new },
+        param_elem: Hash.new { |h, k| h[k] = NKSet.new },
+        param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+        param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
+        param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
         callsite: nil,
         trace: [],
         method_site: meta[:method_site],
@@ -1053,7 +1109,7 @@ module NilKillRuntimeTrace
         key = [path, src_ln]
         NilKillRuntimeTrace.with_collection_hooks_disabled do
           NilKillRuntimeTrace.lock.synchronize do
-            rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: Set.new })
+            rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
             rec[:classes] << NilKillRuntimeTrace.class_name(value)
           end
@@ -1146,7 +1202,7 @@ module NilKillRuntimeTrace
     Array.prepend(Module.new do
       define_method(:<<) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1154,7 +1210,7 @@ module NilKillRuntimeTrace
 
       define_method(:push) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1162,7 +1218,7 @@ module NilKillRuntimeTrace
 
       define_method(:append) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1170,7 +1226,7 @@ module NilKillRuntimeTrace
 
       define_method(:unshift) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1179,7 +1235,7 @@ module NilKillRuntimeTrace
       define_method(:[]=) do |*args|
         value = args.last
         result = super(*args)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1187,7 +1243,7 @@ module NilKillRuntimeTrace
 
       define_method(:concat) do |other|
         result = super(other)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { Array(other).first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1201,7 +1257,7 @@ module NilKillRuntimeTrace
     Hash.prepend(Module.new do
       define_method(:[]=) do |key, value|
         result = super(key, value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
         end
         result
@@ -1209,7 +1265,7 @@ module NilKillRuntimeTrace
 
       define_method(:store) do |key, value|
         result = super(key, value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
         end
         result
@@ -1217,7 +1273,7 @@ module NilKillRuntimeTrace
 
       define_method(:merge!) do |*others, **kw, &blk|
         result = super(*others, **kw, &blk)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard do
             others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
             kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
@@ -1228,7 +1284,7 @@ module NilKillRuntimeTrace
 
       define_method(:update) do |*others, **kw, &blk|
         result = super(*others, **kw, &blk)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard do
             others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
             kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
@@ -1246,7 +1302,7 @@ module NilKillRuntimeTrace
     Set.prepend(Module.new do
       define_method(:add) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1254,7 +1310,7 @@ module NilKillRuntimeTrace
 
       define_method(:<<) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1262,7 +1318,7 @@ module NilKillRuntimeTrace
 
       define_method(:merge) do |enum|
         result = super(enum)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { enum.first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } if enum.respond_to?(:first) }
         end
         result
@@ -1366,7 +1422,7 @@ module NilKillRuntimeTrace
           # producer types feeding its is_a?(Type) guards.
           cls = safe_module_name(receiver.class)
           if cls
-            rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: Set.new })
+            rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
             rec[:classes] << class_name(value)
           end
@@ -1389,7 +1445,7 @@ module NilKillRuntimeTrace
     shape = container_shape(value)
     with_collection_hooks_disabled do
       @lock.synchronize do
-        rec = (@structs[key] ||= { calls: 0, classes: Set.new, elem_classes: Set.new, key_classes: Set.new, value_classes: Set.new, array_calls: 0, hash_calls: 0 })
+        rec = (@structs[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new, array_calls: 0, hash_calls: 0 })
         rec[:calls] += 1
         rec[:classes] << class_name(value)
         if shape&.first == :array
