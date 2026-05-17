@@ -175,6 +175,56 @@ Remaining (next commits), all cleanly PENDING with accurate reasons:
 - 77_error_snapshot -- snapshot-path DupeSlice site (orthogonal).
 - 352 / 335 / 360 -- cap-param helper cluster (orthogonal).
 
+## OR EXIT + TryCatch-as-value attempt (reverted) -- findings
+
+Attempted both in one commit; REVERTED to 5597801f (241) after a
+net regression. What was built and learned, for the next attempt:
+
+1. **Structured OR EXIT lowering works.** `lower_or_exit` with a
+   `@target == :bc` branch emitting a single
+   `MIR::InlineBc.new(:or_exit, [msg_mir], { kind:, name_id:,
+   clear_type:, has_message:, line: })` is the right shape (Zig
+   path untouched -> no Zig-backend risk). Keep this.
+2. **EREWRITE opcode works.** Partial error-field override, mask
+   bits 1/2/4/8 (kind/name/msg/line), unset = inherit. NOTE:
+   CLEAR has no `%` -- use `MOD`; integer `/` is fine. Literal
+   message only (non-literal -> Unsupported) is acceptable for 272.
+3. **Do NOT replace compile_scalar_try_catch.** Rewriting the
+   static always-raises/never-raises heuristic with a dynamic
+   EFLAG-based handler regressed tests that depended on the static
+   behavior (+2 pending). The dynamic TryCatch must be an ADDITIVE
+   path (e.g. only when the catch_body is an OR-EXIT/propagating
+   ScopeBlock), leaving the static heuristic intact for existing
+   value-fallback callers.
+4. **`v = call() OR EXIT ...` is `Let v = TryCatch(Call,
+   ScopeBlock[InlineBc:or_exit, RETURN error.CheatError])`.** The
+   propagating catch_body is a ScopeBlock in *value* position;
+   compile_*_expr(ScopeBlock) currently expects a block-with-break,
+   not a propagating body. Needs a value-position TryCatch that, on
+   error, runs the ScopeBlock stmts (EREWRITE + propagate) WITHOUT
+   treating the ScopeBlock as a break-valued block.
+5. **524** also needs compile_let/binding_type to dispatch
+   `MIR::TryCatch` (inferred_expr_type TryCatch -> expr -> Call
+   ret), plus the value-position dynamic TryCatch from (4).
+6. **BLOCKER -- frame-arena masking is now load-bearing and
+   fragile.** Adding error-union VM code shifts
+   runRegisterBytecode's frame; the --stack-check tier that
+   incidentally masks the open guest-frame-arena bug
+   (docs/agents/vm-bugs.md) flips, RE-CRASHING the 6
+   frame_peak/loop-arena tests (ERROR, not PENDING). Net: 241 ->
+   234. **Any further error-union code growth will keep destabilizing
+   this.** Resolution required BEFORE more error-union work: either
+   (a) land the faithful guest-arena fix (the real vm-bugs.md fix),
+   or (b) drop the 6 frame_peak tests from
+   register-transpile-allowlist.txt so the gate is not coupled to
+   the fragile stack-tier coincidence. (b) is the cheap unblock and
+   is honest -- those tests never robustly passed; they were only
+   ever incidentally masked.
+
+Recommended next sequence: do (6b) first (decouple the gate from
+the masking), THEN OR EXIT/524 as an additive dynamic TryCatch
+(keeping items 1-2, avoiding item 3's mistake).
+
 ## Invariants
 
 - No Zig parsing; only `clause_meta`/`clause_bodies`/`error_reassigns`.
