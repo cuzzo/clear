@@ -4466,8 +4466,6 @@ private
   def visit_ShareNode(node)
     visit(node.value)
     source_type = node.value.full_type
-    source_type = Type.new(source_type) if source_type && !source_type.is_a?(Type)
-    error!(node, :SHARE_NEEDS_TYPED) unless source_type
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
       error!(node, :SHARE_WITH_SCOPED, name: root.name)

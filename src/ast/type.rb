@@ -97,7 +97,7 @@ class Type
   #
   sig { params(source_type: Type, target_type: T.untyped).returns(T.nilable(String)) }
   def self.coerce_error(source_type, target_type)
-    source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
+    source = source_type
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
 
     # Gradual-typing tolerance: an Auto target accepts any source —
