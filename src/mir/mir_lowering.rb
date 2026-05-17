@@ -1281,7 +1281,7 @@ class MIRLowering
                            node.uses_frame
                          end
     uses_frame_or_alloc = has_frame_bindings || node.uses_alloc
-    ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+    ret_type_obj = node.return_type || Type.new(:Void)
     # Unwrap `!T` so value-type and string-return classification sees the
     # payload; otherwise frame save/restore is skipped for error-union returns.
     bare_ret = if ret_type_obj.respond_to?(:error_union?) && ret_type_obj.error_union? &&
@@ -1492,7 +1492,7 @@ class MIRLowering
     # `anyerror!T`, and any whitespace variants the formatter might
     # emit. Type#error_union? / Type#void? / Type#payload_type are
     # the single source of truth.
-    rt_obj = node.return_type.is_a?(Type) ? node.return_type : (node.return_type ? Type.new(node.return_type) : nil)
+    rt_obj = node.return_type
     is_error_union = !!(rt_obj && rt_obj.error_union?)
     payload_type   = is_error_union ? rt_obj.payload_type : rt_obj
     is_void        = !!(payload_type && payload_type.respond_to?(:void?) && payload_type.void?)
@@ -2179,7 +2179,7 @@ class MIRLowering
 
   sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String)).returns(MIR::InlineZig) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
-    ret_t = return_type.is_a?(Type) ? return_type : Type.new(return_type || :Void)
+    ret_t = return_type
     can_fail = ret_t.error_union?
     payload_t = can_fail ? ret_t.payload_type : ret_t
     returns_void = payload_t.resolved == :Void

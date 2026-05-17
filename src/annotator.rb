@@ -671,7 +671,7 @@ private
 
     # Make type params visible during type annotation validation
     node.params.each { |p| validate_type_annotation!(node, p[:type], is_param: true) if p[:type].is_a?(Type) }
-    validate_type_annotation!(node, node.return_type) if node.return_type.is_a?(Type)
+    validate_type_annotation!(node, node.return_type) if node.return_type
 
     # 3. Pre-declaration (so the function can be recursive)
     signature = FunctionSignature.new(
@@ -811,7 +811,7 @@ private
       # CATCH wrappers heap-dupe all string returns (both success and catch paths).
       # A fallible String return is an error union, so unwrap the payload
       # before classifying string-return ownership.
-      ret_type = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
+      ret_type = node.return_type || Type.new(:Void)
       bare_ret = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
                     ret_type.respond_to?(:payload_type)
                    ret_type.payload_type || ret_type

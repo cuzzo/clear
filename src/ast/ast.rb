@@ -559,6 +559,24 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
+
+    # Seam: a function's declared/inferred return is always a Type
+    # (or nil when undeclared — the implicit-return signal that
+    # inference consumes). Coerced at BOTH construction (positional
+    # Struct init from parser/synthetic builders) and post-parse
+    # assignment (return inference, auto-infer) so no reader needs
+    # an `is_a?(Type)` Symbol/Type discriminator.
+    def initialize(*)
+      super
+      rt = self[:return_type]
+      self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
+    end
+
+    sig { params(val: T.untyped).void }
+    def return_type=(val)
+      self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     # True when the user wrote RETURNS explicitly; fallible-signature checks
     # only enforce on user-authored return types.
