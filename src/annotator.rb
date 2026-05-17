@@ -2125,17 +2125,16 @@ private
   sig { params(node: AST::ReturnNode).returns(T.nilable(T::Boolean)) }
   def visit_ReturnNode(node)
     # Handle optional return node for Void functions.
-    expected = current_fn_ctx&.return_type
+    expected = current_fn_ctx.return_type
     if node.value.nil?
       # If the function expects a value but we return nothing -> ERROR.
       # `!Void` (error union over Void) accepts a plain `RETURN;` because
       # the success arm is Void; the wrap is implicit at lowering time.
-      expected_void_compatible = expected.nil? ||
-                                 expected == :Void || expected == :Any ||
+      expected_void_compatible = expected == :Void || expected == :Any ||
                                  (expected.respond_to?(:error_union?) && expected.error_union? &&
                                   expected.respond_to?(:payload_type) &&
                                   (expected.payload_type == :Void || expected.payload_type.nil?))
-      if expected && !expected_void_compatible
+      unless expected_void_compatible
         error!(node, :RETURN_VOID_FROM_TYPED, expected: expected)
       end
 
@@ -2204,7 +2203,7 @@ private
     # But COPY of an implicitly-copyable value (e.g. Id<T>) is value-like and
     # must not force heap return provenance.
     if node.value.is_a?(AST::CopyNode)
-      fn_node = @fn_nodes[current_fn_ctx&.name]
+      fn_node = @fn_nodes[current_fn_ctx.name]
       copy_ti = node.value.full_type
       resolver = ->(name) { lookup_type_schema(name) rescue nil }
       unless copy_ti&.implicitly_copyable?(resolver)
@@ -2217,7 +2216,7 @@ private
       # No implicitly_copyable? gate needed here.
       has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
       if has_copy_field
-        fn_node = @fn_nodes[current_fn_ctx&.name]
+        fn_node = @fn_nodes[current_fn_ctx.name]
         if fn_node
           fn_node.return_provenance = :heap
         end
@@ -2226,8 +2225,7 @@ private
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     unless node.value.is_a?(AST::Identifier)
-      expected_type = expected
-      if expected_type && (expected_type.heap? || expected_type.dynamic?) &&
+      if (expected.heap? || expected.dynamic?) &&
          node.value.respond_to?(:storage=) &&
          node.value.full_type.requires_move?
         node.value.storage = :heap
@@ -2237,12 +2235,11 @@ private
     # Auto returns are resolved after the body walk, so strict equality here
     # would reject valid programs before the unifier has run.
     actual_is_auto = actual_full.respond_to?(:auto?) && actual_full.auto?
-    expected_obj   = expected.is_a?(Type) ? expected : (expected ? Type.new(expected) : nil)
-    expected_is_auto = expected_obj.is_a?(Type) && expected_obj.auto?
+    expected_is_auto = expected.auto?
 
-    if !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
+    if !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
       error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
-    elsif !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && actual != expected
+    elsif !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && actual != expected
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
       check_prefixed_int_range!(node.value, expected)
     end
