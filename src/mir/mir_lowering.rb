@@ -4384,6 +4384,37 @@ class MIRLowering
     rt_name = @rt_name
     line = node.token.line.to_s
 
+    # Register VM: structured sibling of the InlineZig sequence below.
+    # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
+    # reassignment as one InlineBc with structured fields. The Zig
+    # backend path (target != :bc) is byte-for-byte unchanged.
+    if @target == :bc
+      bc_kind = nil
+      bc_name_id = nil
+      bc_clear_type = false
+      if node.kind
+        bc_kind = node.kind.to_s
+        if node.error_name
+          bc_name_id = AST.id_of_type(node.error_name.to_sym)
+        else
+          bc_clear_type = true
+        end
+      elsif node.error_name && AST.error_type?(node.error_name.to_sym)
+        bc_kind = AST.kind_of_type(node.error_name.to_sym).to_s
+        bc_name_id = AST.id_of_type(node.error_name.to_sym)
+      end
+      msg_mir = node.message ? lower(node.message) : nil
+      reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
+        kind: bc_kind, name_id: bc_name_id,
+        clear_type: bc_clear_type, has_message: !node.message.nil?,
+        line: node.token.line.to_i
+      })
+      return MIR::ScopeBlock.new([
+        MIR::ExprStmt.new(reassign, false),
+        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+      ])
+    end
+
     if node.kind
       stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind"), false)
       if node.error_name

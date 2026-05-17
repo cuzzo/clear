@@ -241,6 +241,9 @@ module MiniVM
         Opcode.new(name: :EFLAG,    code: 135, arity: 1, vm_name: "EFlag"),
         Opcode.new(name: :EMATCHN,  code: 136, arity: 2, vm_name: "EMatchN"),
         Opcode.new(name: :EMATCHM,  code: 137, arity: 2, vm_name: "EMatchM"),
+        # OR EXIT partial error-field override. mask bits: 1=kind
+        # 2=name 4=msg 8=line; unset fields inherit the active error.
+        Opcode.new(name: :EREWRITE, code: 138, arity: 5, vm_name: "ERewrite"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -365,6 +368,7 @@ module MiniVM
         EFLAG:    [:i_def],
         EMATCHN:  [:i_def, :const],
         EMATCHM:  [:i_def, :const],
+        EREWRITE: [:const, :const, :const, :const, :const],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

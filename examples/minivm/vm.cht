@@ -153,6 +153,7 @@ ENUM RegisterOp {
     EFlag,
     EMatchN,
     EMatchM,
+    ERewrite,
     Operand,
 }
 
@@ -580,6 +581,7 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.EFlag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.EMatchN -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.EMatchM -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERewrite -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -726,6 +728,7 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.EFlag -> RETURN 1_i64;,
         RegisterOp.EMatchN -> RETURN 2_i64;,
         RegisterOp.EMatchM -> RETURN 2_i64;,
+        RegisterOp.ERewrite -> RETURN 5_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -1148,6 +1151,20 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         iregs[slot] = 0_i64;
                     END
                     IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.ERewrite ->
+                # EREWRITE kindC nameC msgC lineC maskC -- OR EXIT
+                # partial override of the active error. Unset mask
+                # bits inherit the field set by the failing call.
+                # CLEAR has no `%`; use MOD. errored is unchanged.
+                    kc = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    lc = ops[ip]; ip += 1;
+                    mask = getRegisterConstInt(consts, ops[ip]); ip += 1;
+                    IF (mask MOD 2_i64) == 1_i64 THEN errKind = getRegisterConstInt(consts, kc); END
+                    IF ((mask / 2_i64) MOD 2_i64) == 1_i64 THEN errName = getRegisterConstInt(consts, nc); END
+                    IF ((mask / 4_i64) MOD 2_i64) == 1_i64 THEN errMsg = getRegisterConstString(consts, mc) OR RAISE; END
+                    IF ((mask / 8_i64) MOD 2_i64) == 1_i64 THEN errLine = getRegisterConstInt(consts, lc); END,
             RegisterOp.IMov ->
                 # IMOV dst src
                     dst = ops[ip]; ip += 1;
