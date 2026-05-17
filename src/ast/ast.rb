@@ -11,6 +11,36 @@ require_relative "../annotator-helpers/intrinsic_registry"
 module AST
     extend T::Sig
 
+  # A function/lambda/method parameter descriptor. Replaces the loose
+  # `{ name:, type:, ... }` Hash that flowed through FunctionDef#params
+  # and FunctionSignature#params. `type` is ALWAYS a Type (coerced;
+  # nil only when the param is unannotated/inferred — the inference
+  # signal). Strongly typed; no Hash-style access.
+  Param = Struct.new(:name, :type, :default, :mutable, :takes,
+                     :comptime, :name_token, :required, :sync, :symbol,
+                     keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { params(val: T.untyped).void }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    # Idempotent normalizer used at the FunctionDef / FunctionSignature
+    # seams. Accepts a Param (passthrough) or a Hash (legacy producer).
+    sig { params(p: T.any(Param, T::Hash[Symbol, T.untyped])).returns(Param) }
+    def self.coerce(p)
+      return p if p.is_a?(Param)
+      new(**p.slice(*members))
+    end
+  end
+
   # Walk all statements in a body, recursing into control flow branches.
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
@@ -570,11 +600,17 @@ module AST
       super
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
+      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
     end
 
     sig { params(val: T.untyped).void }
     def return_type=(val)
       self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def params=(val)
+      self[:params] = (val || []).map { |p| Param.coerce(p) }
     end
 
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil

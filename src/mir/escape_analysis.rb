@@ -800,13 +800,13 @@ module EscapeAnalysis
 
   # True when the param's declared type carried explicit sync (so the
   # entry.sync currently reflects an annotation, not a propagated value).
-  sig { params(param: T::Hash[Symbol, T.untyped]).returns(T.nilable(T::Boolean)) }
+  sig { params(param: AST::Param).returns(T.nilable(T::Boolean)) }
   private_class_method def self.param_sync_was_declared?(param)
     t = param[:type]
     t.is_a?(Type) && t.any_sync?
   end
 
-  sig { params(fn_node: AST::FunctionDef, param: T::Hash[Symbol, T.untyped], sync: Symbol).returns(T::Boolean) }
+  sig { params(fn_node: AST::FunctionDef, param: AST::Param, sync: Symbol).returns(T::Boolean) }
   private_class_method def self.param_accepts_caller_sync?(fn_node, param, sync)
     t = param[:type]
     return true if t.is_a?(Type) && (t.shared? || t.any_sync?)

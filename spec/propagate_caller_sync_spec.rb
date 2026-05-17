@@ -185,9 +185,9 @@ RSpec.describe "P1.5 FunctionSignature carries per-param sync" do
     ast, annotator = annotate(src)
     sig = annotator.scope_stack.first.locals["bumpIt"].type
     expect(sig).to be_a(FunctionSignature)
-    # The field is present (key exists in the param hash).
-    expect(sig.params.first).to have_key(:sync)
-    expect(sig.params.first[:sync]).to be_nil
+    # The field is present on the Param struct (defaulting to nil).
+    expect(sig.params.first).to be_a(AST::Param)
+    expect(sig.params.first.sync).to be_nil
   end
 
   it "leaves :sync nil for params with no sync annotation" do

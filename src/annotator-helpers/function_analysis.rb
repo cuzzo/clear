@@ -64,7 +64,7 @@ module FunctionAnalysis
     return_type
   end
 
-  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: Symbol).returns(FunctionSignature) }
+  sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
@@ -528,7 +528,7 @@ module FunctionAnalysis
     warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
   end
 
-  sig { params(arg_node: T.untyped, expected_type_obj: Type, param: T::Hash[Symbol, T.untyped]).returns(T::Boolean) }
+  sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
   def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -543,7 +543,7 @@ module FunctionAnalysis
     expected_type_obj.primitive?
   end
 
-  sig { params(arg_node: T.untyped, param: T::Hash[Symbol, T.untyped], signature: FunctionSignature).returns(T::Boolean) }
+  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def atomic_cell_to_atomic_param?(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
@@ -587,7 +587,7 @@ module FunctionAnalysis
       "will require an explicit @inconsistent call-site annotation.")
   end
 
-  sig { params(arg_node: T.untyped, param: T::Hash[Symbol, T.untyped], signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
+  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
   def verify_param_lifetime!(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)

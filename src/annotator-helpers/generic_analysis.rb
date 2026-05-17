@@ -507,7 +507,7 @@ module GenericAnalysis
   def substitute_type_params(signature, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(
-      params: signature.params.map { |p| p.merge(type: apply_type_subst(p[:type], subst)) },
+      params: signature.params.map { |p| p.dup.tap { |np| np.type = apply_type_subst(p.type, subst) } },
       return_type: apply_type_subst(signature.return_type, subst),
       return_lifetime: signature.return_lifetime,
       visibility: signature.visibility
