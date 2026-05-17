@@ -146,6 +146,10 @@ ENUM RegisterOp {
     NMFNew,
     NMPutF,
     NMGetF,
+    ERaise,
+    EGuard,
+    EClr,
+    EMatchK,
     Operand,
 }
 
@@ -566,6 +570,10 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.NMFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.NMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.NMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERaise -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EGuard -> PASS;,
+            RegisterOp.EClr -> PASS;,
+            RegisterOp.EMatchK -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -705,6 +713,10 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.NMFNew -> RETURN 1_i64;,
         RegisterOp.NMPutF -> RETURN 3_i64;,
         RegisterOp.NMGetF -> RETURN 4_i64;,
+        RegisterOp.ERaise -> RETURN 4_i64;,
+        RegisterOp.EGuard -> RETURN 0_i64;,
+        RegisterOp.EClr -> RETURN 0_i64;,
+        RegisterOp.EMatchK -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -888,6 +900,16 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE frameRetDsts: Int64[]@list = List[];
     MUTABLE iBase: Int64 = 0_i64;
     MUTABLE fBase: Int64 = 0_i64;
+    # Error-union runtime control state (VM-internal machinery, not a
+    # guest runtime structure). Faithful: errKind uses the compiler's
+    # ErrorKind ids (Transient=0..Unknown=6); errName uses the
+    # per-program error-registry u32 ids. See
+    # docs/agents/register-error-union.md.
+    MUTABLE errored: Int64 = 0_i64;
+    MUTABLE errKind: Int64 = 0_i64;
+    MUTABLE errName: Int64 = 0_i64;
+    MUTABLE errMsg: String = "";
+    MUTABLE errLine: Int64 = 0_i64;
     MUTABLE iTop: Int64 = 256_i64;
     MUTABLE fTop: Int64 = 256_i64;
 
@@ -1029,6 +1051,61 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.Halt ->
                 # HALT
                     RETURN RegisterValue.Nil;,
+            RegisterOp.ERaise ->
+                # ERAISE kindConst nameConst msgConst lineConst
+                # Sets VM error state. Faithful: errKind uses the
+                # compiler's ErrorKind ids; errName the registry u32 id.
+                    kc = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    lc = ops[ip]; ip += 1;
+                    errKind = getRegisterConstInt(consts, kc);
+                    errName = getRegisterConstInt(consts, nc);
+                    errMsg = getRegisterConstString(consts, mc) OR RAISE;
+                    errLine = getRegisterConstInt(consts, lc);
+                    errored = 1_i64;,
+            RegisterOp.EGuard ->
+                # EGUARD -- if errored, return from the current function
+                # immediately (propagate one frame up). No return value;
+                # `errored` is the cross-frame signal.
+                    IF errored == 1_i64 THEN
+                        IF frameRetIps.length() > 0 THEN
+                            last = frameRetIps.length() - 1;
+                            ip = frameRetIps[last];
+                            iBase = frameIBases[last];
+                            fBase = frameFBases[last];
+                            iTop = frameITops[last];
+                            fTop = frameFTops[last];
+                            frameRetIps.pop();
+                            frameRetDsts.pop();
+                            frameIBases.pop();
+                            frameFBases.pop();
+                            frameITops.pop();
+                            frameFTops.pop();
+                        ELSE
+                            RETURN RegisterValue.Nil;
+                        END
+                    END,
+            RegisterOp.EClr ->
+                # ECLR -- a CATCH clause handled the error.
+                    errored = 0_i64;
+                    errKind = 0_i64;
+                    errName = 0_i64;
+                    errMsg = "";
+                    errLine = 0_i64;,
+            RegisterOp.EMatchK ->
+                # EMATCHK dst kindConst -> dst = (errored and
+                # errKind == kind) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    kc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errKind == getRegisterConstInt(consts, kc) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.IMov ->
                 # IMOV dst src
                     dst = ops[ip]; ip += 1;

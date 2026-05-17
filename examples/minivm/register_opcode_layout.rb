@@ -231,6 +231,13 @@ module MiniVM
         Opcode.new(name: :NMFNEW,   code: 128, arity: 1, vm_name: "NMFNew"),
         Opcode.new(name: :NMPUTF,   code: 129, arity: 3, vm_name: "NMPutF"),
         Opcode.new(name: :NMGETF,   code: 130, arity: 4, vm_name: "NMGetF"),
+        # Error-union runtime. Payload lives in the real rt.__error;
+        # `errored` is the cross-frame control flag. See
+        # docs/agents/register-error-union.md.
+        Opcode.new(name: :ERAISE,   code: 131, arity: 4, vm_name: "ERaise"),
+        Opcode.new(name: :EGUARD,   code: 132, arity: 0, vm_name: "EGuard"),
+        Opcode.new(name: :ECLR,     code: 133, arity: 0, vm_name: "EClr"),
+        Opcode.new(name: :EMATCHK,  code: 134, arity: 2, vm_name: "EMatchK"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -348,6 +355,10 @@ module MiniVM
         NMFNEW:   [:m_def],
         NMPUTF:   [:m_use, :i_use, :f_use],
         NMGETF:   [:f_def, :m_use, :i_use, :f_use],
+        ERAISE:   [:const, :const, :const, :const],
+        EGUARD:   [],
+        ECLR:     [],
+        EMATCHK:  [:i_def, :const],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

@@ -384,7 +384,14 @@ silently corrupts.
    emitting silently-corrupting code. Risk: must be scoped precisely
    so it does not flip currently-passing tests to PENDING.
 
-Status: **OPEN**, acked. Contained cluster (6 tests); does not block
-the language-coverage roadmap. Revisit as its own commit; option 2 is
-the right next step (stops silent corruption, aligns with the
-NOT_SUPPORTED invariant) before option 1's faithful arena modeling.
+Status: **OPEN (root cause), symptom currently MASKED.** As of the
+error-union VM foundation commit, the 6 tests pass: adding error-state
+locals to `runRegisterBytecode` enlarged its frame, `--stack-check`
+rebuilt at a larger stack tier, and the arena corruption no longer
+manifests within these tests' iteration counts. This is incidental,
+not a fix -- the guest frame arena is still unmodeled, so a heavier
+guest loop (more iterations / larger per-iteration alloc) would still
+corrupt, and the masking can regress if the function frame shrinks.
+The faithful fix (option 1: model a guest arena distinct from the
+runner's) remains the correct resolution. Do not treat the green
+state as closure.
