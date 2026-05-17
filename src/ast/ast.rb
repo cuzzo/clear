@@ -133,6 +133,55 @@ module AST
     end
   end
 
+  # One paren-binding of an IF...AS (AST::IfBind#bindings element):
+  # `IF (expr) AS name`. Parser builds {expr,name,name_token}; the
+  # annotator stamps unwrapped_type (the bound name's type -- ALWAYS a
+  # Type; a bound name always has a type) and symbol. `capture` is the
+  # emitter's label alias. Replaces the anonymous hash.
+  Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
+                       keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
+    end
+
+    sig { returns(AST::Locatable) }
+    def expr
+      self[:expr]
+    end
+
+    sig { returns(String) }
+    def name
+      self[:name]
+    end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def name_token
+      self[:name_token]
+    end
+
+    # The bound name's unwrapped type. Always a Type, never nil --
+    # defaults to the :Untyped sentinel until the annotator stamps it
+    # (same contract as full_type).
+    sig { returns(Type) }
+    def unwrapped_type
+      self[:unwrapped_type]
+    end
+
+    sig { params(val: T.nilable(Type)).void }
+    def unwrapped_type=(val)
+      self[:unwrapped_type] = val.nil? ? Type.new(:Untyped) : val
+    end
+
+    sig { params(b: T.any(Binding, T::Hash[Symbol, T.untyped])).returns(Binding) }
+    def self.coerce(b)
+      return b if b.is_a?(Binding)
+      new(**b.slice(*members))
+    end
+  end
+
   # The value of a struct-pattern field: the :wildcard sentinel
   # (`c: _`), the :bind sentinel (bare `a`), or the bound expression /
   # nested pattern AST node (`b: x`). A real 3-way typed sum -- NOT
@@ -1058,7 +1107,18 @@ module AST
   # single binding emits: if (expr) |y| { ... }
   # multi binding emits labeled block: blk: { const y = expr1 orelse break :blk; const a = expr2 orelse break :blk; ... }
   IfBind       = Struct.new(:token, :bindings, :then_branch, :else_branch) do
+    extend T::Sig
     include Locatable
+
+    def initialize(*args)
+      super
+      self[:bindings] = (self[:bindings] || []).map { |b| Binding.coerce(b) }
+    end
+
+    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    def bindings=(val)
+      self[:bindings] = (val || []).map { |b| Binding.coerce(b) }
+    end
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     extend T::Sig
