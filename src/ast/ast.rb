@@ -157,7 +157,7 @@ module AST
       self[:name]
     end
 
-    sig { returns(T.nilable(Lexer::Token)) }
+    sig { returns(Lexer::Token) }
     def name_token
       self[:name_token]
     end
@@ -175,11 +175,6 @@ module AST
       self[:unwrapped_type] = val.nil? ? Type.new(:Untyped) : val
     end
 
-    sig { params(b: T.any(Binding, T::Hash[Symbol, T.untyped])).returns(Binding) }
-    def self.coerce(b)
-      return b if b.is_a?(Binding)
-      new(**b.slice(*members))
-    end
   end
 
   # One capability of a WITH block (AST::WithBlock#capabilities
@@ -1155,12 +1150,12 @@ module AST
 
     def initialize(*args)
       super
-      self[:bindings] = (self[:bindings] || []).map { |b| Binding.coerce(b) }
+      self[:bindings] = [] if self[:bindings].nil?
     end
 
-    sig { params(val: T.nilable(T::Array[T.untyped])).void }
+    sig { params(val: T.nilable(T::Array[AST::Binding])).void }
     def bindings=(val)
-      self[:bindings] = (val || []).map { |b| Binding.coerce(b) }
+      self[:bindings] = val || []
     end
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do

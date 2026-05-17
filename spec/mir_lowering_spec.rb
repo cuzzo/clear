@@ -1786,7 +1786,7 @@ RSpec.describe MIRLowering do
     it "adds release defers to IF RESOLVE bindings before the then body" do
       link = make_id("weak_node", full_type: :"Node@link")
       cond = AST::ResolveNode.new(tok, link)
-      node = AST::IfBind.new(tok, [{ expr: cond, name: "node", name_token: tok }], [AST::BreakNode.new(tok)], nil)
+      node = AST::IfBind.new(tok, [AST::Binding.new(expr: cond, name: "node", name_token: tok)], [AST::BreakNode.new(tok)], nil)
 
       result = lowering.lower(node)
 

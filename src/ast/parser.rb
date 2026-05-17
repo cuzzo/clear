@@ -1971,7 +1971,7 @@ class Parser
       if match?(:CHAR, '&&')
         error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
-      bindings = [{ expr: condition, name: T.must(name_tok).value, name_token: name_tok }]
+      bindings = [AST::Binding.new(expr: condition, name: T.must(name_tok).value, name_token: name_tok)]
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -2026,7 +2026,7 @@ class Parser
     case node
     when AST::BinaryOp
       if node.op == :BIND_VAR
-        return node.paren_bind ? [{ expr: node.left, name: node.right.name, name_token: node.right.token }] : nil
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : nil
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)
