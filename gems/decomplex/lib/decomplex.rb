@@ -11,6 +11,11 @@ require_relative "decomplex/sequence_mine"
 require_relative "decomplex/derived_state"
 require_relative "decomplex/type3_clone"
 require_relative "decomplex/decision_pressure"
+require_relative "decomplex/false_simplicity"
+require_relative "decomplex/fat_union"
+require_relative "decomplex/convergence"
+require_relative "decomplex/root_cause"
+require_relative "decomplex/delta"
 
 # Decomplex: decision-level duplication + neglected-condition detector.
 # See decomplex.gemspec for the rationale. v0 scope is exact-match

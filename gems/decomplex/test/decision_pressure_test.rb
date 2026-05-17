@@ -3,6 +3,7 @@
 require "minitest/autorun"
 require "tempfile"
 require_relative "../lib/decomplex"
+require_relative "../lib/decomplex/report"
 
 class DecisionPressureTest < Minitest::Test
   def rank(ruby)
@@ -72,5 +73,76 @@ class DecisionPressureTest < Minitest::Test
 
   def test_no_guards_no_rows
     assert_empty rank("def a(x); return x + 1; end\n")
+  end
+
+  # ---- use-role split (Rapps-Weyuker p-use / c-use) -----------------
+
+  def test_pure_c_use_is_excluded_not_pressure
+    # consumption, not a decision -> must produce NO rows.
+    assert_empty rank(<<~RB)
+      def a(n)
+        emit(n.full_type)
+        x = n.full_type
+        return n.full_type
+      end
+    RB
+  end
+
+  def test_rescue_nil_is_an_eliminable_guard
+    r = rank("def a(n)\n  y = n.full_type rescue nil\n  y\nend\n")
+    top = r.first
+    assert_equal ".full_type", top[:contract]
+    assert_operator top[:decisions], :>=, 1, "rescue nil is eliminable"
+  end
+
+  def test_pure_essential_dispatch_is_not_a_row
+    # `.string?` / `.collection?` over a contract is legitimate
+    # polymorphism. With NO eliminable guard it must NOT surface as
+    # pressure (telling someone to 'fix' real dispatch is the bug).
+    r = rank(<<~RB)
+      def a(n)
+        return 1 if n.full_type.string?
+        return 2 if n.full_type.collection?
+      end
+    RB
+    assert(r.none? { |x| x[:contract] == ".full_type" },
+           "essential-only contract is not pressure")
+  end
+
+  def test_eliminable_and_essential_are_split_never_summed
+    r = rank(<<~RB)
+      def a(n)
+        ti = n.full_type
+        return if ti.nil?
+        x = ti.string?
+        y = ti.collection?
+      end
+    RB
+    row = r.find { |x| x[:contract] == ".full_type" }
+    refute_nil row
+    assert_equal 1, row[:decisions], "decisions = ELIMINABLE only (the nil?)"
+    assert_equal 2, row[:essential], "string?/collection? are essential, separate"
+    refute_equal 3, row[:decisions], "the 3 must NEVER be summed"
+  end
+
+  def test_report_shows_split_with_routing_no_blended_scalar
+    f = Tempfile.new(["dp", ".rb"])
+    f.write(<<~RB)
+      def a(n)
+        ti = n.full_type
+        return if ti.nil?
+        x = ti.string?
+      end
+    RB
+    f.close
+    md = Decomplex::Report.new([f.path]).to_markdown
+    sec = md[/## Decision Pressure.*?\n(.*?)\n## /m, 1].to_s
+    assert_includes sec, "ELIMINABLE"
+    assert_includes sec, "essential dispatch"
+    assert_includes sec, "nil-kill: DELETE"
+    refute_match(/\*\*2\*\* (defensive|decisions)/, sec,
+                 "must not present eliminable+essential as one number")
+  ensure
+    f&.unlink
   end
 end

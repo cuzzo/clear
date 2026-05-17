@@ -19,7 +19,8 @@ module Decomplex
   # discipline): FP is acceptable, the receiver is printed so triage is
   # a one-line read.
   class CoUpdate
-    Write = Struct.new(:attr, :recv, :file, :defn, :line, keyword_init: true)
+    Write = Struct.new(:attr, :recv, :file, :defn, :line, :span,
+                       keyword_init: true)
 
     def self.scan(files)
       writes = []
@@ -50,11 +51,15 @@ module Decomplex
         attr = msg.to_s.sub(/=$/, "")
         @writes << Write.new(attr: attr, recv: slice(recv), file: @file,
                              defn: defstack.last || "(top-level)",
-                             line: node.first_lineno)
+                             line: node.first_lineno,
+                             span: [node.first_lineno, node.first_column,
+                                    node.last_lineno, node.last_column])
       when :IASGN
         @writes << Write.new(attr: node.children[0].to_s, recv: "self",
                              file: @file, defn: defstack.last || "(top-level)",
-                             line: node.first_lineno)
+                             line: node.first_lineno,
+                             span: [node.first_lineno, node.first_column,
+                                    node.last_lineno, node.last_column])
       end
 
       node.children.each { |c| walk(c, defstack) }
@@ -113,6 +118,7 @@ module Decomplex
             w = ws.find { |x| x.attr == has }
             out << { pair: h[:pair], support: h[:support], has: has,
                      missing: miss, at: "#{file}:#{defn}:#{w.line}",
+                     spans: { "#{file}:#{defn}:#{w.line}" => w.span },
                      recv: w.recv }
           end
         end

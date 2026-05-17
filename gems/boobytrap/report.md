@@ -1,4 +1,4 @@
-# Fix-Cache Report
+# Boobytrap Report
 
 > Defect-risk hotspots: recurring bug-fix locality (bugspots, time-decayed) x branch-coverage gap.
 > A ranking to triage **top-down**, never a verdict. A

@@ -3,7 +3,7 @@
 require "minitest/autorun"
 require "tempfile"
 require "json"
-require_relative "../lib/fix_cache"
+require_relative "../lib/boobytrap"
 
 class CoverageGapTest < Minitest::Test
   def with_resultset(hash)
@@ -34,7 +34,7 @@ class CoverageGapTest < Minitest::Test
       } }
     }
     with_resultset(rs) do |p|
-      g = FixCache::CoverageGap.from_resultset(p, root: "/root")
+      g = Boobytrap::CoverageGap.from_resultset(p, root: "/root")
       # x: both arms taken once merged => gap 0
       assert_equal 0.0, g["src/x.rb"].gap
       assert_equal 2, g["src/x.rb"].total
@@ -49,7 +49,7 @@ class CoverageGapTest < Minitest::Test
       "/root/src/z.rb" => { "lines" => [1, 0, nil] }
     } } }
     with_resultset(rs) do |p|
-      g = FixCache::CoverageGap.from_resultset(p, root: "/root")
+      g = Boobytrap::CoverageGap.from_resultset(p, root: "/root")
       assert_empty g
     end
   end
@@ -61,7 +61,7 @@ class CoverageGapTest < Minitest::Test
       } }
     } } }
     with_resultset(rs) do |p|
-      g = FixCache::CoverageGap.from_resultset(p, root: "/root")
+      g = Boobytrap::CoverageGap.from_resultset(p, root: "/root")
       assert g.key?("/elsewhere/a.rb")
       assert_equal 1.0, g["/elsewhere/a.rb"].gap
     end

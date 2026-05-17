@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require_relative "../lib/fix_cache"
+require_relative "../lib/boobytrap"
 
 class BugspotsTest < Minitest::Test
-  B = FixCache::Bugspots
+  B = Boobytrap::Bugspots
 
   def test_parse_log_keeps_only_fix_commits_with_files
     log = <<~LOG

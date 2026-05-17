@@ -11,7 +11,7 @@ module Decomplex
   # is NOT recomputed, every later use of b is stale -- the exact
   # "field copied from elsewhere then used for similar decisions" bug.
   class DerivedState
-    Asgn = Struct.new(:name, :deps, :line, keyword_init: true)
+    Asgn = Struct.new(:name, :deps, :line, :span, keyword_init: true)
 
     def self.scan(files)
       out = []
@@ -68,7 +68,9 @@ module Decomplex
       asgns = lasgns(stmts).map do |n|
         Asgn.new(name: n.children[0].to_s,
                  deps: lvars(n.children[1]).uniq,
-                 line: n.first_lineno)
+                 line: n.first_lineno,
+                 span: [n.first_lineno, n.first_column,
+                        n.last_lineno, n.last_column])
       end
       out = []
       asgns.each_with_index do |b, i|
@@ -92,7 +94,8 @@ module Decomplex
             derived: b.name, source: a,
             derived_at: b.line, source_reassigned_at: reasn.line,
             gap: reasn.line - b.line,
-            at: "#{file}:#{defn}:#{b.line}"
+            at: "#{file}:#{defn}:#{b.line}",
+            spans: { "#{file}:#{defn}:#{b.line}" => b.span }
           }
         end
       end

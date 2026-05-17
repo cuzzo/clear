@@ -2,7 +2,7 @@
 
 require "json"
 
-module FixCache
+module Boobytrap
   # Branch-coverage gap per file from SimpleCov's .resultset.json
   # (enable_coverage :branch). Same merge rule as
   # tools/branch_gap_report.rb: a decision arm is "taken" if ANY

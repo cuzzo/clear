@@ -15,7 +15,7 @@ module Decomplex
   # pairs, rank by support, accept FP. Same proven shape as co_update,
   # over calls instead of assigned attributes.
   class SequenceMine
-    Call = Struct.new(:mid, :file, :defn, :line, keyword_init: true)
+    Call = Struct.new(:mid, :file, :defn, :line, :span, keyword_init: true)
 
     def self.scan(files)
       calls = []
@@ -43,7 +43,9 @@ module Decomplex
         mid = node.children[node.type == :CALL ? 1 : 0]
         @calls << Call.new(mid: mid.to_s, file: @file,
                            defn: defstack.last || "(top-level)",
-                           line: node.first_lineno)
+                           line: node.first_lineno,
+                           span: [node.first_lineno, node.first_column,
+                                  node.last_lineno, node.last_column])
       end
       node.children.each { |c| walk(c, defstack) }
     end
@@ -93,10 +95,11 @@ module Decomplex
             conf = h[:support].to_f / @support[has]
             next if conf < min_confidence
 
-            line = cs.find { |c| c.mid == has }.line
+            hc = cs.find { |c| c.mid == has }
+            loc = "#{file}:#{defn}:#{hc.line}"
             out << { pair: h[:pair], support: h[:support],
                      confidence: conf.round(2), has: has, missing: miss,
-                     at: "#{file}:#{defn}:#{line}" }
+                     at: loc, spans: { loc => hc.span } }
           end
         end
         out.sort_by { |h| [-h[:confidence], -h[:support]] }

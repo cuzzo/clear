@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 Gem::Specification.new do |s|
-  s.name        = "fix-cache"
+  s.name        = "boobytrap"
   s.version     = "0.0.1"
   s.summary     = "Defect-risk hotspots: recurring fix-churn x branch-coverage gap"
   s.description = <<~DESC
@@ -19,6 +19,6 @@ Gem::Specification.new do |s|
   s.license     = "PolyForm-Noncommercial-1.0.0"
   s.files       = Dir["lib/**/*.rb", "exe/*"]
   s.bindir      = "exe"
-  s.executables = ["fix-cache"]
+  s.executables = ["boobytrap"]
   s.required_ruby_version = ">= 3.1"
 end

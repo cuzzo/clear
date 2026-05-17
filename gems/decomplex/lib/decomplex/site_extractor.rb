@@ -6,7 +6,12 @@ module Decomplex
   #   kind        :case_dispatch | :conjunction
   #   members     normalized predicate/pattern source texts (a Set-as-sorted-Array)
   #   file/def/ln  where the decision is made (def granularity = scatter unit)
-  Site = Struct.new(:kind, :members, :file, :defn, :line, keyword_init: true)
+  # span = [first_line, first_col, last_line, last_col] of the decision
+  # node -- additive; lets a consumer test whether a point (an
+  # uncovered branch arm) falls INSIDE this decision, not just "same
+  # method" (the decomplex authority unit stays (file, defn)).
+  Site = Struct.new(:kind, :members, :file, :defn, :line, :span,
+                    keyword_init: true)
 
   # Walks one file's AST (stdlib parser, zero deps) and emits Sites.
   # v0 mines exactly two shapes, both exact-match, no alias/polarity
@@ -83,7 +88,9 @@ module Decomplex
       return if pats.size < 2
 
       @sites << Site.new(kind: :case_dispatch, members: pats, file: @file,
-                         defn: cur_def(defstack), line: node.first_lineno)
+                         defn: cur_def(defstack), line: node.first_lineno,
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
     end
 
     # Flatten a left-leaning && chain into its operand set.
@@ -92,7 +99,9 @@ module Decomplex
       return if ops.size < 2
 
       @sites << Site.new(kind: :conjunction, members: ops, file: @file,
-                         defn: cur_def(defstack), line: node.first_lineno)
+                         defn: cur_def(defstack), line: node.first_lineno,
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
     end
 
     def flatten_and(node)

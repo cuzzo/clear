@@ -1,6 +1,6 @@
-# fix-cache: find the code most likely to be the source of bugs.
+# boobytrap: find the code most likely to be the source of bugs.
 
- * fix-cache answers "where is the complexity that is *likely causing
+ * boobytrap answers "where is the complexity that is *likely causing
    my bugs*" -- not "what is the most complex code" (raw complexity is
    a weak bug predictor).
  * It vendors the **bugspots** algorithm (Google's time-decayed
@@ -35,18 +35,18 @@ third direction, with no static analysis.
 
 ```
 # Full report (markdown), like this gem's report.md:
-fix-cache report --repo=. --coverage=coverage/.resultset.json \
+boobytrap report --repo=. --coverage=coverage/.resultset.json \
                  --output=report.md
 
 # Restrict ranking to part of the codebase (repeatable). The
 # committed report.md is generated with --only=src/ -- the fix
 # time-decay baseline still spans the WHOLE history; only which
 # files are ranked is filtered:
-fix-cache report --only=src/
-fix-cache report --only=src/ --only=lib/
+boobytrap report --only=src/
+boobytrap report --only=src/ --only=lib/
 
 # No coverage data? It degrades to fix-churn-only, loudly flagged:
-fix-cache report --repo=.
+boobytrap report --repo=.
 ```
 
 `--only=PATH` takes a repo-relative path prefix and is repeatable.
@@ -69,7 +69,7 @@ over CLEAR's compiler.
   branch-coverage data. Recurring-fix code the corpus does not measure
   at all is itself a risk; it is surfaced, not dropped.
 
-## What fix-cache does NOT do
+## What boobytrap does NOT do
 
  * **It does not claim bugs.** A hotspot is a prioritization. Triage
    top-down; the code may be fine.
@@ -79,13 +79,13 @@ over CLEAR's compiler.
    per-method branch gap) is the planned refinement.
  * **Not duplication or type analysis.** That is decomplex (what
    decision is duplicated) and nil-kill (which nils/types pollute).
-   fix-cache only says *where* to look; the other two say *what* is
+   boobytrap only says *where* to look; the other two say *what* is
    wrong there. The three are complementary lenses.
 
 ## FAQ
 
 **Why not the `churn` gem?** Raw churn measures activity and conflates
-feature development with fault-proneness. fix-cache filters to fix
+feature development with fault-proneness. boobytrap filters to fix
 commits -- the signal Google's study found actually actionable.
 
 **Why not the bugspots CLI directly?** It is file-only, unmaintained,

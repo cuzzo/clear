@@ -3,9 +3,9 @@
 > Top true coverage gaps to test, ranked by fix-churn.
 > Every dark branch arm is categorized; only the GENUINE
 > reachable ones are gaps worth testing. Owns
-> categorization; consumes fix-cache for churn.
+> categorization; consumes boobytrap for churn.
 
-## Top True Gaps (186) — test these, ranked by fix-churn
+## Top True Gaps (273) — test these, ranked by fix-churn
 
 | # | gap | method | churn |
 |---|---|---|---|
@@ -38,43 +38,43 @@
 | 27 | [`src/mir/mir_lowering.rb:750`](../../src/mir/mir_lowering.rb#L750) | `resolve_alloc_sym` | 1.0 |
 | 28 | [`src/mir/mir_lowering.rb:774`](../../src/mir/mir_lowering.rb#L774) | `alloc_zig_str` | 1.0 |
 | 29 | [`src/mir/mir_lowering.rb:775`](../../src/mir/mir_lowering.rb#L775) | `alloc_zig_str` | 1.0 |
-| 30 | [`src/mir/mir_lowering.rb:915`](../../src/mir/mir_lowering.rb#L915) | `lower_promote` | 1.0 |
-| 31 | [`src/mir/mir_lowering.rb:951`](../../src/mir/mir_lowering.rb#L951) | `lower_struct_def` | 1.0 |
-| 32 | [`src/mir/mir_lowering.rb:1245`](../../src/mir/mir_lowering.rb#L1245) | `lower_function_def` | 1.0 |
-| 33 | [`src/mir/mir_lowering.rb:1382`](../../src/mir/mir_lowering.rb#L1382) | `lower_function_def` | 1.0 |
-| 34 | [`src/mir/mir_lowering.rb:1519`](../../src/mir/mir_lowering.rb#L1519) | `build_post_outer_fn` | 1.0 |
-| 35 | [`src/mir/mir_lowering.rb:1571`](../../src/mir/mir_lowering.rb#L1571) | `build_catch_clauses` | 1.0 |
-| 36 | [`src/mir/mir_lowering.rb:1602`](../../src/mir/mir_lowering.rb#L1602) | `build_catch_clauses` | 1.0 |
-| 37 | [`src/mir/mir_lowering.rb:1966`](../../src/mir/mir_lowering.rb#L1966) | `lower_intrinsic` | 1.0 |
-| 38 | [`src/mir/mir_lowering.rb:1982`](../../src/mir/mir_lowering.rb#L1982) | `lower_intrinsic` | 1.0 |
-| 39 | [`src/mir/mir_lowering.rb:2177`](../../src/mir/mir_lowering.rb#L2177) | `extern_call_args_zig` | 1.0 |
-| 40 | [`src/mir/mir_lowering.rb:2257`](../../src/mir/mir_lowering.rb#L2257) | `lower_lambda` | 1.0 |
-| 41 | [`src/mir/mir_lowering.rb:2272`](../../src/mir/mir_lowering.rb#L2272) | `lower_lambda` | 1.0 |
-| 42 | [`src/mir/mir_lowering.rb:2402`](../../src/mir/mir_lowering.rb#L2402) | `lower_hash_lit` | 1.0 |
-| 43 | [`src/mir/mir_lowering.rb:2403`](../../src/mir/mir_lowering.rb#L2403) | `lower_hash_lit` | 1.0 |
-| 44 | [`src/mir/mir_lowering.rb:2410`](../../src/mir/mir_lowering.rb#L2410) | `lower_hash_lit` | 1.0 |
-| 45 | [`src/mir/mir_lowering.rb:2421`](../../src/mir/mir_lowering.rb#L2421) | `lower_hash_lit` | 1.0 |
-| 46 | [`src/mir/mir_lowering.rb:2823`](../../src/mir/mir_lowering.rb#L2823) | `lower_with_block` | 1.0 |
-| 47 | [`src/mir/mir_lowering.rb:2851`](../../src/mir/mir_lowering.rb#L2851) | `lower_with_block` | 1.0 |
-| 48 | [`src/mir/mir_lowering.rb:2892`](../../src/mir/mir_lowering.rb#L2892) | `lower_with_block` | 1.0 |
-| 49 | [`src/mir/mir_lowering.rb:3194`](../../src/mir/mir_lowering.rb#L3194) | `lower_polymorphic_universal` | 1.0 |
-| 50 | [`src/mir/mir_lowering.rb:3237`](../../src/mir/mir_lowering.rb#L3237) | `guard_fail_flow_body` | 1.0 |
+| 30 | [`src/mir/mir_lowering.rb:893`](../../src/mir/mir_lowering.rb#L893) | `resolve_decl_stdlib_alloc` | 1.0 |
+| 31 | [`src/mir/mir_lowering.rb:915`](../../src/mir/mir_lowering.rb#L915) | `lower_promote` | 1.0 |
+| 32 | [`src/mir/mir_lowering.rb:951`](../../src/mir/mir_lowering.rb#L951) | `lower_struct_def` | 1.0 |
+| 33 | [`src/mir/mir_lowering.rb:1061`](../../src/mir/mir_lowering.rb#L1061) | `lower_union_def` | 1.0 |
+| 34 | [`src/mir/mir_lowering.rb:1245`](../../src/mir/mir_lowering.rb#L1245) | `lower_function_def` | 1.0 |
+| 35 | [`src/mir/mir_lowering.rb:1434`](../../src/mir/mir_lowering.rb#L1434) | `lower_function_def` | 1.0 |
+| 36 | [`src/mir/mir_lowering.rb:1519`](../../src/mir/mir_lowering.rb#L1519) | `build_post_outer_fn` | 1.0 |
+| 37 | [`src/mir/mir_lowering.rb:1528`](../../src/mir/mir_lowering.rb#L1528) | `build_post_outer_fn` | 1.0 |
+| 38 | [`src/mir/mir_lowering.rb:1602`](../../src/mir/mir_lowering.rb#L1602) | `build_catch_clauses` | 1.0 |
+| 39 | [`src/mir/mir_lowering.rb:1647`](../../src/mir/mir_lowering.rb#L1647) | `collect_catch_reassigns` | 1.0 |
+| 40 | [`src/mir/mir_lowering.rb:1662`](../../src/mir/mir_lowering.rb#L1662) | `walk_catch_body_for_reassigns` | 1.0 |
+| 41 | [`src/mir/mir_lowering.rb:1672`](../../src/mir/mir_lowering.rb#L1672) | `walk_catch_body_for_reassigns` | 1.0 |
+| 42 | [`src/mir/mir_lowering.rb:1675`](../../src/mir/mir_lowering.rb#L1675) | `walk_catch_body_for_reassigns` | 1.0 |
+| 43 | [`src/mir/mir_lowering.rb:1856`](../../src/mir/mir_lowering.rb#L1856) | `lower_method_call` | 1.0 |
+| 44 | [`src/mir/mir_lowering.rb:1982`](../../src/mir/mir_lowering.rb#L1982) | `lower_intrinsic` | 1.0 |
+| 45 | [`src/mir/mir_lowering.rb:2177`](../../src/mir/mir_lowering.rb#L2177) | `extern_call_args_zig` | 1.0 |
+| 46 | [`src/mir/mir_lowering.rb:2274`](../../src/mir/mir_lowering.rb#L2274) | `lower_lambda` | 1.0 |
+| 47 | [`src/mir/mir_lowering.rb:2361`](../../src/mir/mir_lowering.rb#L2361) | `lower_list_lit` | 1.0 |
+| 48 | [`src/mir/mir_lowering.rb:2373`](../../src/mir/mir_lowering.rb#L2373) | `lower_list_lit` | 1.0 |
+| 49 | [`src/mir/mir_lowering.rb:2379`](../../src/mir/mir_lowering.rb#L2379) | `lower_list_lit` | 1.0 |
+| 50 | [`src/mir/mir_lowering.rb:2402`](../../src/mir/mir_lowering.rb#L2402) | `lower_hash_lit` | 1.0 |
 
-- ...(+136 more genuine gaps)
+- ...(+223 more genuine gaps)
 
 ## Category Summary
-_935 dark arms; only 186 are genuine gaps. The rest are not test targets:_
+_935 dark arms; only 273 are genuine gaps. The rest are not test targets:_
 
 | category | arms | % | what it means |
 |---|---|---|---|
-| type_norm | 221 | 23.6% | type/nil guard -- likely dead if the contract were strictly typed |
-| dead | 53 | 5.7% | decision never executes -- audit as dead code, delete |
-| defensive | 49 | 5.2% | inert / invariant-pinned -- accept, exclude from denominator |
-| ffi | 44 | 4.7% | external/boundary call -- needs an integration test |
-| diagnostic | 382 | 40.9% | error/raise path -- reachable only by invalid input (negative test) |
-| genuine | 186 | 19.9% | real reachable gap -- test it; ranked by fix-churn below |
+| type_norm | 229 | 24.5% | type/nil guard -- likely dead if the contract were strictly typed |
+| dead | 68 | 7.3% | decision never executes -- audit as dead code, delete |
+| defensive | 14 | 1.5% | inert / invariant-pinned -- accept, exclude from denominator |
+| ffi | 46 | 4.9% | external/boundary call -- needs an integration test |
+| diagnostic | 305 | 32.6% | error/raise path -- reachable only by invalid input (negative test) |
+| genuine | 273 | 29.2% | real reachable gap -- test it; ranked by fix-churn below |
 
 ## Run Summary
 - Repo: `/home/yahn/cheat`
-- Files: 3; dark arms: 935; genuine gaps: 186
-- General engine: categorizes uncovered branches, ranks genuine gaps by consumed fix-cache churn. Project lexicon (external-boundary methods) is caller-supplied, not baked in (see docs/agents/design.md).
+- Files: 3; dark arms: 935; genuine gaps: 273
+- General engine: categorizes uncovered branches, ranks genuine gaps by consumed boobytrap churn. Project lexicon (external-boundary methods) is caller-supplied, not baked in (see docs/agents/design.md).

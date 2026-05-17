@@ -1,13 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require_relative "../lib/fix_cache"
+require_relative "../lib/boobytrap"
 
 def usage
   warn <<~U
-    fix-cache -- defect-risk hotspots (bugspots fix-churn x branch gap)
+    boobytrap -- defect-risk hotspots (bugspots fix-churn x branch gap)
 
-      fix-cache report [--repo=.] [--coverage=coverage/.resultset.json] \\
+      boobytrap report [--repo=.] [--coverage=coverage/.resultset.json] \\
                        [--output=report.md] [--top=40] [--only=PATH ...]
 
     --only=PATH  restrict ranking to a repo-relative path prefix
@@ -36,7 +36,7 @@ ARGV[1..].each do |a|
   end
 end
 
-md = FixCache::Report.new(
+md = Boobytrap::Report.new(
   repo: opts[:repo],
   resultset: opts[:coverage],
   top: opts[:top],

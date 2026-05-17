@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module FixCache
+module Boobytrap
   # The join. A hotspot is code that BOTH keeps getting bug-fixed
   # (recurring, recent) AND is under-exercised by the test corpus.
   # hotspot = normalized_fix_score * branch_gap_fraction.

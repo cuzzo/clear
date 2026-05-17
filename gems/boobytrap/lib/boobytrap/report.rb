@@ -4,7 +4,7 @@ require_relative "bugspots"
 require_relative "coverage_gap"
 require_relative "hotspot"
 
-module FixCache
+module Boobytrap
   # Single markdown report, structured like decomplex / nil-kill: TOC,
   # prioritization, ranked sections, run summary. A ranking to triage
   # top-down, NOT a verdict -- a hotspot is "look here first," not
@@ -44,7 +44,7 @@ module FixCache
     end
 
     def to_markdown
-      o = +"# Fix-Cache Report\n\n"
+      o = +"# Boobytrap Report\n\n"
       o << "> Defect-risk hotspots: recurring bug-fix locality " \
            "(bugspots, time-decayed) x branch-coverage gap.\n" \
            "> A ranking to triage **top-down**, never a verdict. A\n" \

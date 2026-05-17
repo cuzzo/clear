@@ -4,7 +4,7 @@ require "minitest/autorun"
 require "tmpdir"
 require "json"
 require "fileutils"
-require_relative "../lib/fix_cache"
+require_relative "../lib/boobytrap"
 
 class ReportTest < Minitest::Test
   def git(dir, *args, date: nil)
@@ -48,9 +48,9 @@ class ReportTest < Minitest::Test
     Dir.mktmpdir do |dir|
       build_repo(dir)
       rs = resultset(dir)
-      md = FixCache::Report.new(repo: dir, resultset: rs).to_markdown
+      md = Boobytrap::Report.new(repo: dir, resultset: rs).to_markdown
 
-      assert_includes md, "# Fix-Cache Report"
+      assert_includes md, "# Boobytrap Report"
       assert_includes md, "never a verdict"
       assert_includes md, "## Hotspots (1)"
       # hot.rb: only fix touches it (fix_norm 1.0), both arms uncovered
@@ -64,7 +64,7 @@ class ReportTest < Minitest::Test
   def test_missing_resultset_degrades_to_fix_only
     Dir.mktmpdir do |dir|
       build_repo(dir)
-      md = FixCache::Report.new(repo: dir, resultset: "#{dir}/nope.json").to_markdown
+      md = Boobytrap::Report.new(repo: dir, resultset: "#{dir}/nope.json").to_markdown
       assert_includes md, "ABSENT (fix-churn only)"
       # hot.rb has fixes but no coverage => fixed-but-unmeasured
       assert_includes md, "## Fixed But Unmeasured (1)"
@@ -92,11 +92,11 @@ class ReportTest < Minitest::Test
       path = "#{dir}/.resultset.json"
       File.write(path, JSON.dump(rs))
 
-      full = FixCache::Report.new(repo: dir, resultset: path).to_markdown
+      full = Boobytrap::Report.new(repo: dir, resultset: path).to_markdown
       assert_includes full, "`src/in.rb`"
       assert_includes full, "`lib/out.rb`"
 
-      scoped = FixCache::Report.new(repo: dir, resultset: path,
+      scoped = Boobytrap::Report.new(repo: dir, resultset: path,
                                     only: ["src/"]).to_markdown
       assert_includes scoped, "`src/in.rb`"
       refute_includes scoped, "`lib/out.rb`"
@@ -112,7 +112,7 @@ class ReportTest < Minitest::Test
       File.write("#{dir}/x.rb", "1\n")
       git(dir, "add", "-A")
       git(dir, "commit", "-qm", "Add x only")
-      md = FixCache::Report.new(repo: dir, resultset: "#{dir}/none.json").to_markdown
+      md = Boobytrap::Report.new(repo: dir, resultset: "#{dir}/none.json").to_markdown
       assert_includes md, "## Hotspots (0)"
       assert_includes md, "No hotspots"
     end

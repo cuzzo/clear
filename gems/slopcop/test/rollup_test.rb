@@ -24,7 +24,7 @@ class RollupTest < Minitest::Test
       RB
       path = "#{dir}/src/m.rb"
       File.write(path, src)
-      # real git repo so fix-cache churn is computable (no fix commit ->
+      # real git repo so boobytrap churn is computable (no fix commit ->
       # churn 0, score 0, but the genuine bucket still lists).
       system("git", "-C", dir, "init", "-q", out: File::NULL, err: File::NULL)
       system("git", "-C", dir, "config", "user.email", "t@t")

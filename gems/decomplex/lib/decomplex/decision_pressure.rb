@@ -7,38 +7,54 @@ module Decomplex
   # canonical ROOT CONTRACT its subject comes from, then rank contracts
   # by how many re-derived decisions they drive.
   #
-  # This is the project's primary goal made concrete: not "this decision
-  # is duplicated N times" (scatter) but "THIS loosely-typed contract
-  # (`.full_type`, `[:type]`, `@schema`) is the SOURCE of N conditionals
-  # -- fix the contract once, the cluster dies." Pressure, decomplex-
-  # scoped: intra-procedural only (a local is resolved to the accessor
-  # it was assigned from IN THE SAME METHOD). Cross-procedure pressure
-  # is nil-kill's, by the recorded boundary -- not re-implemented here.
+  # Use-role discipline (Rapps & Weyuker 1985 c-use/p-use; McCabe /
+  # Cognitive Complexity count DECISIONS, not reads): a single blended
+  # "N defensive decisions" scalar is a category error -- it sums
+  # populations with OPPOSITE actions. This detector therefore splits,
+  # and the report NEVER presents one combined number:
   #
-  # A "decision" = a guard whose subject is type/nil-tested:
-  #   x.is_a?(T) / kind_of? / instance_of? / x.nil? / x.respond_to? /
-  #   x&.m  (safe-nav: an implicit nil decision on x).
+  #   * c-use (`emit(x.full_type)`, `y = x.full_type`, `return
+  #     x.full_type`) -- pure consumption, NOT a decision. Excluded by
+  #     construction (never recorded). Not complexity.
+  #   * ELIMINABLE guard (`x.nil?`, `is_a?`, `kind_of?`,
+  #     `instance_of?`, `respond_to?`, `x&.m`, `x.acc rescue nil`) --
+  #     contract-eliminable: a stronger contract removes it. The
+  #     actionable slop. -> tighten the contract / nil-kill (DELETE).
+  #   * ESSENTIAL dispatch (`x.string?`, `.collection?`,
+  #     `.heap_provenance?` -- a domain `?` query over a value that is
+  #     legitimately a sum). NOT removable by typing; it IS the
+  #     contract. Debt ONLY if the same dispatch is re-scattered, which
+  #     is a DIFFERENT metric (Fat-Union / Missing-Abstractions). Shown
+  #     as a per-contract context count, never summed into the headline.
+  #
+  # Pressure is decomplex-scoped: intra-procedural only (a local is
+  # resolved to the accessor it was assigned from IN THE SAME METHOD).
+  # Cross-procedure pressure is nil-kill's, by the recorded boundary.
   class DecisionPressure
     GUARD_MIDS = %i[is_a? kind_of? instance_of? nil? respond_to?].freeze
-    Hit = Struct.new(:contract, :file, :defn, :line, keyword_init: true)
+    Hit = Struct.new(:contract, :file, :defn, :line, :span,
+                     keyword_init: true)
 
     def self.scan(files)
-      hits = []
+      guard = []
+      dispatch = []
       files.each do |f|
         root, lines = Ast.parse(f)
         e = new(f, lines)
         e.walk(root, [], {})
-        hits.concat(e.hits)
+        guard.concat(e.guard_hits)
+        dispatch.concat(e.dispatch_hits)
       end
-      Report.new(hits)
+      Report.new(guard, dispatch)
     end
 
-    attr_reader :hits
+    attr_reader :guard_hits, :dispatch_hits
 
     def initialize(file, lines)
       @file = file
       @lines = lines
-      @hits = []
+      @guard_hits = []
+      @dispatch_hits = []
     end
 
     def walk(node, defstack, asgmap)
@@ -50,7 +66,8 @@ module Decomplex
         asgmap = build_asgmap(node)
       end
 
-      record_guard(node, defstack, asgmap)
+      record_decision(node, defstack, asgmap)
+      record_rescue_nil(node, defstack, asgmap)
       node.children.each { |c| walk(c, defstack, asgmap) }
     end
 
@@ -87,21 +104,60 @@ module Decomplex
       end
     end
 
-    def record_guard(node, defstack, asgmap)
+    def hit(contract, defstack, node)
+      Hit.new(contract: contract, file: @file,
+              defn: defstack.last || "(top-level)",
+              line: node.first_lineno,
+              span: [node.first_lineno, node.first_column,
+                     node.last_lineno, node.last_column])
+    end
+
+    # At most ONE record per node. ELIMINABLE guard takes precedence
+    # over ESSENTIAL dispatch (a `?` that is also a GUARD_MID, or a
+    # safe-nav, is the eliminable kind).
+    def record_decision(node, defstack, asgmap)
       return unless %i[CALL QCALL].include?(node.type)
 
       recv, mid, _args = node.children
-      is_guard =
+      return unless recv
+
+      guard =
         (node.type == :CALL && GUARD_MIDS.include?(mid)) ||
         node.type == :QCALL # safe-nav = implicit nil decision on recv
-      return unless is_guard && recv
+      if guard
+        c = contract_of(recv, asgmap)
+        @guard_hits << hit(c, defstack, node) if c
+        return
+      end
+
+      # essential dispatch: a domain `?` query over a contract. NOT a
+      # GUARD_MID (those are eliminable, handled above). Legitimate
+      # polymorphism -- counted separately, never as pressure.
+      return unless node.type == :CALL && mid.to_s.end_with?("?")
 
       c = contract_of(recv, asgmap)
-      return unless c
+      @dispatch_hits << hit(c, defstack, node) if c
+    end
 
-      @hits << Hit.new(contract: c, file: @file,
-                       defn: defstack.last || "(top-level)",
-                       line: node.first_lineno)
+    # `x.accessor rescue nil` -- a defensive nil-swallow that exists
+    # only because the receiver is loosely typed. Eliminable guard
+    # (the exact idiom typed contracts remove). Conservative: bare
+    # `rescue nil` wrapping a single contract-resolvable call.
+    def record_rescue_nil(node, defstack, asgmap)
+      return unless node.type == :RESCUE
+
+      body, resb, = node.children
+      return unless Ast.node?(resb) && resb.type == :RESBODY
+      return unless resb.children[0].nil? # bare rescue (no class list)
+
+      handler = resb.children[1]
+      nil_handler = handler.nil? ||
+                    (Ast.node?(handler) && handler.type == :NIL)
+      return unless nil_handler
+      return unless Ast.node?(body) && %i[CALL QCALL].include?(body.type)
+
+      c = contract_of(body, asgmap)
+      @guard_hits << hit(c, defstack, node) if c
     end
 
     # Canonical root contract of a subject node, resolving locals
@@ -131,22 +187,36 @@ module Decomplex
     end
 
     class Report
-      def initialize(hits)
-        @hits = hits
+      def initialize(guard_hits, dispatch_hits)
+        @guard = guard_hits
+        @dispatch = dispatch_hits
       end
 
-      # [{ contract:, decisions:, methods:, sites:[...] }, ...]
-      # ranked by decisions; the low-signal "~local" (unresolved
-      # proximate local -- needs cross-proc pressure = nil-kill) is
-      # reported last regardless of count.
+      # Rows are keyed/driven by ELIMINABLE guards (the actionable
+      # slop). A contract with only ESSENTIAL dispatch and zero
+      # eliminable guards produces NO row -- legitimate polymorphism is
+      # not pressure and must not be surfaced as actionable.
+      #
+      # `decisions` == eliminable guard count (the headline number,
+      # back-compat). `essential` == count of essential dispatches on
+      # the SAME contract (context only; NEVER summed into decisions,
+      # and deliberately NOT added to sites/spans so downstream
+      # consumers see the eliminable signal unchanged).
+      #
+      # [{ contract:, decisions:, essential:, methods:, sites:[...],
+      #    spans:{} }] ; ranked by eliminable decisions; "~local" last.
       def ranked
-        by = @hits.group_by(&:contract)
-        rows = by.map do |contract, hs|
+        ess = Hash.new(0)
+        @dispatch.each { |h| ess[h.contract] += 1 }
+
+        rows = @guard.group_by(&:contract).map do |contract, hs|
           {
             contract: contract,
             decisions: hs.size,
+            essential: ess[contract],
             methods: hs.map { |h| [h.file, h.defn] }.uniq.size,
-            sites: hs.map { |h| "#{h.file}:#{h.defn}:#{h.line}" }
+            sites: hs.map { |h| "#{h.file}:#{h.defn}:#{h.line}" },
+            spans: hs.to_h { |h| ["#{h.file}:#{h.defn}:#{h.line}", h.span] }
           }
         end
         named = rows.reject { |r| r[:contract] == "~local" }

@@ -12,9 +12,9 @@ Gem::Specification.new do |s|
     (delete: complexity down), or GENUINE reachable gap -- then overlays
     fix-churn so the genuine arms in churn-hot code surface as "bugs
     highly likely HERE." It OWNS the gap-categorization analysis and
-    CONSUMES fix-cache (churn) + an optional nil-kill verdict; it does
+    CONSUMES boobytrap (churn) + an optional nil-kill verdict; it does
     not re-derive them. Promotes the branch-gap triage probe to a
-    first-class product. Zero runtime deps beyond the sibling fix-cache.
+    first-class product. Zero runtime deps beyond the sibling boobytrap.
   DESC
   s.authors     = ["CLEAR"]
   s.license     = "PolyForm-Noncommercial-1.0.0"

@@ -42,7 +42,8 @@ module Decomplex
           support: sts.size,
           scatter: scatter,
           rank: sts.size * scatter,
-          sites: sts.map { |s| loc(s) }
+          sites: sts.map { |s| loc(s) },
+          spans: sts.to_h { |s| [loc(s), s.span] }
         }
       end.sort_by { |h| -h[:rank] }
     end
@@ -62,7 +63,8 @@ module Decomplex
             pattern: mem,
             support: sup,
             missing: (mem - s.members).first,
-            at: loc(s)
+            at: loc(s),
+            spans: { loc(s) => s.span }
           }
         end
       end
