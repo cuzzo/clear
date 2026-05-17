@@ -1626,12 +1626,12 @@ class Type
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
   # Returns nil if no type_info is available or conversion fails.
   # Replaces the repeated inline pattern:
-  #   ti = node.type_info rescue nil
+  #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
   sig { params(node: T.untyped).returns(T.untyped) }
   def self.from_node(node)
     return nil unless node
-    t = node.respond_to?(:type_info) ? (node.type_info rescue nil) : node
+    t = node.respond_to?(:full_type) ? (node.full_type rescue nil) : node
     return nil unless t
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
   end

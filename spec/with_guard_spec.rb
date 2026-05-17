@@ -50,7 +50,7 @@ RSpec.describe "WITH GUARD clauses" do
     CLEAR
 
     with_node = ast.statements.last.body[1]
-    expect(with_node.capabilities.first[:guard_expr].type_info.resolved).to eq(:Bool)
+    expect(with_node.capabilities.first[:guard_expr].full_type.resolved).to eq(:Bool)
   end
 
   it "allows repeated use of the guarded alias inside predicate arguments" do

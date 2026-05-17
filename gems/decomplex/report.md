@@ -9,39 +9,39 @@
 
 ## Table of Contents
 - [Project Prioritization](#project-prioritization)
-- [Decision Pressure (255)](#decision-pressure-255)
+- [Decision Pressure (254)](#decision-pressure-254)
 - [Missing Abstractions (214)](#missing-abstractions-214)
 - [Reification Misses (132)](#reification-misses-132)
 - [Semantic Predicate Aliases (3)](#semantic-predicate-aliases-3)
-- [Exact Predicate Aliases (7)](#exact-predicate-aliases-7)
+- [Exact Predicate Aliases (6)](#exact-predicate-aliases-6)
 - [Type-3 Clones (missed rename) (14)](#type3-clones-missed-rename-14)
 - [Neglected Updates (6262)](#neglected-updates-6262)
 - [Derived-State Staleness (248)](#derivedstate-staleness-248)
 - [Neglected Conditions (47)](#neglected-conditions-47)
-- [Neglected Path Conditions (2203)](#neglected-path-conditions-2203)
-- [Broken Protocols (1794)](#broken-protocols-1794)
+- [Neglected Path Conditions (2233)](#neglected-path-conditions-2233)
+- [Broken Protocols (1806)](#broken-protocols-1806)
 - [Run Summary](#run-summary)
 
 ## Project Prioritization
 _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 
-- **[tier 1]** [Decision Pressure (255)](#decision-pressure-255): loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)
+- **[tier 1]** [Decision Pressure (254)](#decision-pressure-254): loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)
 - **[tier 1]** [Missing Abstractions (214)](#missing-abstractions-214): guard tuple recomputed across >=2 decision units
 - **[tier 1]** [Reification Misses (132)](#reification-misses-132): an existing predicate reinvented inline -- invariant #16
-- **[tier 1]** [Exact Predicate Aliases (7)](#exact-predicate-aliases-7): identical one-line predicate body under >=2 names
+- **[tier 1]** [Exact Predicate Aliases (6)](#exact-predicate-aliases-6): identical one-line predicate body under >=2 names
 - **[tier 1]** [Semantic Predicate Aliases (3)](#semantic-predicate-aliases-3): one decision, multiple names (receiver/polarity folded)
 - **[tier 2]** [Neglected Updates (6262)](#neglected-updates-6262): co-written state, one write missing -- *POSSIBLE* redundant-state desync
 - **[tier 2]** [Derived-State Staleness (248)](#derivedstate-staleness-248): b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug
 - **[tier 2]** [Neglected Conditions (47)](#neglected-conditions-47): dispatch/conjunction minus one element -- *POSSIBLE* bug
 - **[tier 2]** [Type-3 Clones (missed rename) (14)](#type3-clones-missed-rename-14): pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug
-- **[tier 3]** [Neglected Path Conditions (2203)](#neglected-path-conditions-2203): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
-- **[tier 3]** [Broken Protocols (1794)](#broken-protocols-1794): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
+- **[tier 3]** [Neglected Path Conditions (2233)](#neglected-path-conditions-2233): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
+- **[tier 3]** [Broken Protocols (1806)](#broken-protocols-1806): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
 
-## Decision Pressure (255)
+## Decision Pressure (254)
 _loose contract -> N defensive type/nil decisions; fix the contract once, the cluster dies (intra-proc; cross-proc = nil-kill)_
 
-- `.type_info` drives **236** defensive type/nil decisions across 82 method(s)
-  - `src/annotator-helpers/function_analysis.rb:255` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:255` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:262` (resolve_call) ; `src/annotator-helpers/generic_analysis.rb:572` (propagate_collection_metadata!)
+- `.full_type` drives **266** defensive type/nil decisions across 94 method(s)
+  - `src/annotator-helpers/capabilities.rb:186` (validate_capability) ; `src/annotator-helpers/capabilities.rb:193` (validate_capability) ; `src/annotator-helpers/function_analysis.rb:188` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:201` (resolve_call)
 - `.value` drives **108** defensive type/nil decisions across 53 method(s)
   - `src/annotator-helpers/auto_inference.rb:760` (walk_binops) ; `src/annotator-helpers/capabilities.rb:1055` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1059` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1067` (_unified_capture_walk)
 - `.emit` drives **81** defensive type/nil decisions across 29 method(s)
@@ -58,8 +58,6 @@ _loose contract -> N defensive type/nil decisions; fix the contract once, the cl
   - `src/annotator-helpers/capabilities.rb:1148` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1185` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1329` (record_capability_binding) ; `src/annotator-helpers/capabilities.rb:1337` (record_capability_binding)
 - `.left` drives **30** defensive type/nil decisions across 19 method(s)
   - `src/annotator-helpers/pipe_analysis.rb:63` (stamp_observable_terminal!) ; `src/annotator-helpers/pipe_analysis.rb:247` (analyze_collect_op) ; `src/annotator-helpers/pipe_analysis.rb:599` (analyze_limit_op) ; `src/annotator-helpers/pipe_analysis.rb:1342` (analyze_shard_op)
-- `.full_type` drives **30** defensive type/nil decisions across 17 method(s)
-  - `src/annotator-helpers/capabilities.rb:186` (validate_capability) ; `src/annotator-helpers/capabilities.rb:193` (validate_capability) ; `src/annotator-helpers/function_analysis.rb:188` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:201` (resolve_call)
 - `.type` drives **26** defensive type/nil decisions across 20 method(s)
   - `src/annotator-helpers/auto_inference.rb:210` (record_local) ; `src/annotator-helpers/auto_inference.rb:504` (stamp_map_pairs!) ; `src/annotator-helpers/auto_inference.rb:505` (stamp_map_pairs!) ; `src/annotator-helpers/auto_inference.rb:572` (walk_for_shape_decls)
 - `.last` drives **25** defensive type/nil decisions across 6 method(s)
@@ -90,7 +88,9 @@ _loose contract -> N defensive type/nil decisions; fix the contract once, the cl
   - `src/annotator.rb:1207` (analyze_control_flow_branches) ; `src/annotator.rb:1214` (analyze_control_flow_branches) ; `src/annotator.rb:1220` (analyze_control_flow_branches) ; `src/annotator.rb:1231` (analyze_control_flow_branches)
 - `.sync` drives **13** defensive type/nil decisions across 12 method(s)
   - `src/annotator-helpers/function_analysis.rb:211` (resolve_call) ; `src/annotator-helpers/generic_analysis.rb:453` (generic_type_has_capabilities?) ; `src/annotator-helpers/pipe_analysis.rb:1156` (collect_sharded_names) ; `src/annotator-helpers/pipe_analysis.rb:1177` (pre_scan_node_for_sharded)
-- ...(+230 more)
+- `.expr` drives **13** defensive type/nil decisions across 8 method(s)
+  - `src/annotator.rb:1463` (visit_MatchStatement) ; `src/annotator.rb:1526` (visit_MatchStatement) ; `src/annotator.rb:5400` (visit_NextExpr) ; `src/annotator.rb:5418` (visit_NextExpr)
+- ...(+229 more)
 
 ## Missing Abstractions (214)
 _guard tuple recomputed across >=2 decision units_
@@ -206,29 +206,27 @@ _an existing predicate reinvented inline -- invariant #16_
 _one decision, multiple names (receiver/polarity folded)_
 
 - `needs_capture_site_annotation? = mir? = stmt? = expr? = has_own_frame?` == `true`
-  - `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:48` (expr?) ; `src/mir/mir.rb:76` (has_own_frame?) ; `src/mir/mir.rb:350` (expr?) ; `src/mir/mir.rb:403` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:533` (expr?) ; `src/mir/mir.rb:544` (expr?) ; `src/mir/mir.rb:559` (expr?) ; `src/mir/mir.rb:595` (expr?) ; `src/mir/mir.rb:1245` (stmt?) ; `src/mir/mir.rb:1277` (stmt?) ; `src/mir/mir.rb:1299` (stmt?) ; `src/mir/mir.rb:1326` (stmt?) ; `src/mir/mir.rb:1335` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1361` (stmt?) ; `src/mir/mir.rb:1369` (stmt?) ; `src/mir/mir.rb:1378` (stmt?) ; `src/mir/mir.rb:1386` (stmt?) ; `src/mir/mir.rb:1394` (stmt?) ; `src/mir/mir.rb:1666` (expr?) ; `src/mir/mir.rb:1746` (expr?) ; `src/mir/mir.rb:1790` (expr?)
+  - `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:48` (expr?) ; `src/mir/mir.rb:76` (has_own_frame?) ; `src/mir/mir.rb:350` (expr?) ; `src/mir/mir.rb:403` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:533` (expr?) ; `src/mir/mir.rb:544` (expr?) ; `src/mir/mir.rb:559` (expr?) ; `src/mir/mir.rb:595` (expr?) ; `src/mir/mir.rb:1245` (stmt?) ; `src/mir/mir.rb:1277` (stmt?) ; `src/mir/mir.rb:1299` (stmt?) ; `src/mir/mir.rb:1326` (stmt?) ; `src/mir/mir.rb:1335` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1361` (stmt?) ; `src/mir/mir.rb:1373` (stmt?) ; `src/mir/mir.rb:1382` (stmt?) ; `src/mir/mir.rb:1390` (stmt?) ; `src/mir/mir.rb:1398` (stmt?) ; `src/mir/mir.rb:1670` (expr?) ; `src/mir/mir.rb:1750` (expr?) ; `src/mir/mir.rb:1794` (expr?)
 - `wildcard? = needs_capture_site_annotation? = stmt? = expr?` == `false`
-  - `src/ast/ast.rb:845` (wildcard?) ; `src/ast/ast.rb:967` (wildcard?) ; `src/ast/ast.rb:982` (wildcard?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
+  - `src/ast/ast.rb:838` (wildcard?) ; `src/ast/ast.rb:960` (wildcard?) ; `src/ast/ast.rb:975` (wildcard?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
 - `auto? = auto_type?` == `t.is_a?(Type) && t.auto?`
   - `src/annotator-helpers/auto_inference.rb:98` (auto?) ; `src/annotator-helpers/auto_inference.rb:787` (auto?) ; `src/backends/importer.rb:159` (auto_type?)
 
-## Exact Predicate Aliases (7)
+## Exact Predicate Aliases (6)
 _identical one-line predicate body under >=2 names_
 
 - `needs_cleanup = needs_capture_site_annotation? = mir? = stmt? = expr? = has_own_frame?` == `true`
-  - `src/ast/ast.rb:1557` (needs_cleanup) ; `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:48` (expr?) ; `src/mir/mir.rb:76` (has_own_frame?) ; `src/mir/mir.rb:350` (expr?) ; `src/mir/mir.rb:403` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:533` (expr?) ; `src/mir/mir.rb:544` (expr?) ; `src/mir/mir.rb:559` (expr?) ; `src/mir/mir.rb:595` (expr?) ; `src/mir/mir.rb:1245` (stmt?) ; `src/mir/mir.rb:1277` (stmt?) ; `src/mir/mir.rb:1299` (stmt?) ; `src/mir/mir.rb:1326` (stmt?) ; `src/mir/mir.rb:1335` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1361` (stmt?) ; `src/mir/mir.rb:1369` (stmt?) ; `src/mir/mir.rb:1378` (stmt?) ; `src/mir/mir.rb:1386` (stmt?) ; `src/mir/mir.rb:1394` (stmt?) ; `src/mir/mir.rb:1666` (expr?) ; `src/mir/mir.rb:1746` (expr?) ; `src/mir/mir.rb:1790` (expr?)
+  - `src/ast/ast.rb:1550` (needs_cleanup) ; `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:48` (expr?) ; `src/mir/mir.rb:76` (has_own_frame?) ; `src/mir/mir.rb:350` (expr?) ; `src/mir/mir.rb:403` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:533` (expr?) ; `src/mir/mir.rb:544` (expr?) ; `src/mir/mir.rb:559` (expr?) ; `src/mir/mir.rb:595` (expr?) ; `src/mir/mir.rb:1245` (stmt?) ; `src/mir/mir.rb:1277` (stmt?) ; `src/mir/mir.rb:1299` (stmt?) ; `src/mir/mir.rb:1326` (stmt?) ; `src/mir/mir.rb:1335` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1361` (stmt?) ; `src/mir/mir.rb:1373` (stmt?) ; `src/mir/mir.rb:1382` (stmt?) ; `src/mir/mir.rb:1390` (stmt?) ; `src/mir/mir.rb:1398` (stmt?) ; `src/mir/mir.rb:1670` (expr?) ; `src/mir/mir.rb:1750` (expr?) ; `src/mir/mir.rb:1794` (expr?)
 - `visit_PassStmt = visit_OrRaise = visit_OrBreak = visit_OrPass = visit_OrPrune` == `node.full_type = :Void`
   - `src/annotator.rb:1429` (visit_PassStmt) ; `src/annotator.rb:4100` (visit_OrRaise) ; `src/annotator.rb:4105` (visit_OrBreak) ; `src/annotator.rb:4110` (visit_OrPass) ; `src/annotator.rb:4117` (visit_OrPrune)
 - `wildcard? = needs_capture_site_annotation? = stmt? = expr?` == `false`
-  - `src/ast/ast.rb:845` (wildcard?) ; `src/ast/ast.rb:967` (wildcard?) ; `src/ast/ast.rb:982` (wildcard?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
+  - `src/ast/ast.rb:838` (wildcard?) ; `src/ast/ast.rb:960` (wildcard?) ; `src/ast/ast.rb:975` (wildcard?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
 - `emit_rc_retain = emit_rc_downgrade = emit_weak_upgrade` == `"CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"`
   - `src/mir/mir_emitter.rb:1260` (emit_rc_retain) ; `src/mir/mir_emitter.rb:1265` (emit_rc_downgrade) ; `src/mir/mir_emitter.rb:1270` (emit_weak_upgrade)
 - `auto? = auto_type?` == `t.is_a?(Type) && t.auto?`
   - `src/annotator-helpers/auto_inference.rb:98` (auto?) ; `src/annotator-helpers/auto_inference.rb:787` (auto?) ; `src/backends/importer.rb:159` (auto_type?)
 - `child_bodies = marker_plan` == `[]`
   - `src/ast/ast.rb:246` (child_bodies) ; `src/mir/capture_strategy.rb:49` (marker_plan) ; `src/mir/capture_strategy.rb:62` (marker_plan) ; `src/mir/capture_strategy.rb:106` (marker_plan)
-- `full_type = type_info` == `@type_object`
-  - `src/ast/ast.rb:369` (full_type) ; `src/ast/ast.rb:548` (type_info)
 
 ## Type-3 Clones (missed rename) (14)
 _pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug_
@@ -338,37 +336,37 @@ _dispatch/conjunction minus one element -- *POSSIBLE* bug_
 - *POSSIBLE* (support=5) `src/tools/formatter.rb:2137` (bg_body_has_strategy_arrow?) -- MISSING `','` from `'(' | ')' | ',' | '[' | ']' | '{' | '}'`
 - ...(+22 more)
 
-## Neglected Path Conditions (2203)
+## Neglected Path Conditions (2233)
 _nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)_
 
-- *POSSIBLE* (support=39) `src/mir/mir_lowering.rb:6968` (lower_for_range) -- MISSING `node.mark_per_iter` from `!node.tight | @current_fn_has_rt | node.mark_per_iter`
-- *POSSIBLE* (support=39) `src/mir/mir_lowering.rb:6968` (lower_for_range) -- MISSING `node.mark_per_iter` from `!node.tight | @current_fn_has_rt | node.mark_per_iter`
-- *POSSIBLE* (support=39) `src/mir/mir_lowering.rb:6968` (lower_for_range) -- MISSING `node.mark_per_iter` from `!node.tight | @current_fn_has_rt | node.mark_per_iter`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:190` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:191` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:191` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:192` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:192` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:199` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=29) `src/annotator-helpers/function_analysis.rb:221` (resolve_call) -- MISSING `inner.is_a?(Type)` from `!func_type == :Intrinsic | !type_params&.any? | entry&.storage == :static | fsig | func_type = fsig | inner.is_a?(Type) | node.full_type.error_union? | node.full_type.respond_to?(:error_union?)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1083` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1090` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1090` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1118` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1122` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1122` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1123` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1123` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1124` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1130` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1130` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1130` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1130` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1133` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- *POSSIBLE* (support=28) `src/annotator-helpers/capabilities.rb:1133` (_unified_capture_walk) -- MISSING `!result.captures.key?(name)` from `!result.captures.key?(name) | info | node.is_a?(AST::Identifier)`
-- ...(+2178 more)
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1110` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1110` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1111` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1111` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1112` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1113` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1114` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1115` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1116` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1117` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1118` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1118` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1119` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1119` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1120` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1121` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1121` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1121` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1122` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1123` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1123` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1124` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1125` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1126` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1126` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
+- ...(+2208 more)
 
-## Broken Protocols (1794)
+## Broken Protocols (1806)
 _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 
 - *POSSIBLE* conf=0.99 support=81 `src/annotator.rb:2256` (visit_ReturnNode) does `returns` without `extend`
@@ -396,10 +394,10 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* conf=0.95 support=20 `src/mir/effect_set.rb:40` ((top-level)) does `attr_reader` without `nilable`
 - *POSSIBLE* conf=0.95 support=20 `src/tools/stack_verifier.rb:27` ((top-level)) does `attr_reader` without `[]`
 - *POSSIBLE* conf=0.95 support=18 `src/mir/mir_lowering.rb:3021` (with_match_arm_prelude) does `zig_safe_name` without `new`
-- ...(+1769 more)
+- ...(+1781 more)
 
 ## Run Summary
 - Files analyzed: 97
 - Detectors: 11 (all shipped, self-tested)
-- Total candidates: 11179
+- Total candidates: 11219
 - Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to (see docs/agents/design.md)

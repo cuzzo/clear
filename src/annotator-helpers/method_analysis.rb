@@ -14,7 +14,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall).returns(T.nilable(T::Boolean)) }
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    obj_type = node.object.type_info
+    obj_type = node.object.full_type
     config = COLLECTION_METHOD_CONFIGS[obj_type&.dispatch_key]
     return false unless config
     resolve_typed_method(node, obj_type, config[:registry], config[:tag],

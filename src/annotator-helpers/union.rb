@@ -211,7 +211,7 @@ module UnionAnalysis
       end
 
       expected_type = expected_fields[fname]
-      actual = val_node.type_info
+      actual = val_node.full_type
       unless T.must(expected_type).accepts?(actual)
         error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH, union: node.union_name, variant: node.variant_name, field: fname, expected: T.must(expected_type).resolved, got: actual&.resolved)
       end

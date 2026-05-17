@@ -348,12 +348,12 @@ class AutoUnifier
   def initialize(slots, type_of: nil)
     @slots = slots
     # `type_of` lets callers plug in a custom source-type resolver.
-    # Default reads `node.type_info` (CLEAR's existing per-node type
+    # Default reads `node.full_type` (CLEAR's existing per-node type
     # accessor — set by the annotator on AST nodes during body
     # validation). The tolerant body-pass populates type_info on each
     # constraint source before this unifier runs.
     @type_of = T.let(type_of || ->(node) {
-      node.respond_to?(:type_info) ? node.type_info : nil
+      node.respond_to?(:full_type) ? node.full_type : nil
     }, T.untyped)
   end
 

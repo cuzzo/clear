@@ -189,10 +189,10 @@ RSpec.describe "String@symbol" do
       body = ast.statements.first.body
       decl = body.find { |s| s.respond_to?(:name) && s.name == "x" }
       lit  = decl.value
-      expect(lit.type_info).to be_a(Type)
-      expect(lit.type_info.string?).to be true
-      expect(lit.type_info.symbol?).to be true
-      expect(lit.type_info.rodata?).to be true
+      expect(lit.full_type).to be_a(Type)
+      expect(lit.full_type.string?).to be true
+      expect(lit.full_type.symbol?).to be true
+      expect(lit.full_type.rodata?).to be true
     end
 
     it "infers variable type as String@symbol from a symbol literal" do
@@ -204,7 +204,7 @@ RSpec.describe "String@symbol" do
       CLEAR
       body  = ast.statements.first.body
       decl  = body.find { |s| s.respond_to?(:name) && s.name == "status" }
-      expect(decl.type_info.symbol?).to be true
+      expect(decl.full_type.symbol?).to be true
     end
 
     it "accepts String@symbol parameter annotation" do

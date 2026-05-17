@@ -40,11 +40,11 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates the variable as multiowned" do
-        expect(multiowned_decl(code).type_info.multiowned?).to be true
+        expect(multiowned_decl(code).full_type.multiowned?).to be true
       end
 
       it "preserves the base resolved type" do
-        expect(multiowned_decl(code).type_info.resolved).to eq(:Counter)
+        expect(multiowned_decl(code).full_type.resolved).to eq(:Counter)
       end
     end
 
@@ -118,11 +118,11 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates the variable as shared" do
-        expect(shared_decl(code).type_info.shared?).to be true
+        expect(shared_decl(code).full_type.shared?).to be true
       end
 
       it "preserves the base resolved type" do
-        expect(shared_decl(code).type_info.resolved).to eq(:Point)
+        expect(shared_decl(code).full_type.resolved).to eq(:Point)
       end
     end
 
@@ -195,11 +195,11 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates the variable as locked" do
-        expect(locked_decl(code).type_info.locked?).to be true
+        expect(locked_decl(code).full_type.locked?).to be true
       end
 
       it "preserves the base resolved type" do
-        expect(locked_decl(code).type_info.resolved).to eq(:Counter)
+        expect(locked_decl(code).full_type.resolved).to eq(:Counter)
       end
     end
 
@@ -458,11 +458,11 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "annotates the variable as write_locked" do
-        expect(write_locked_decl(code).type_info.write_locked?).to be true
+        expect(write_locked_decl(code).full_type.write_locked?).to be true
       end
 
       it "preserves the base resolved type" do
-        expect(write_locked_decl(code).type_info.resolved).to eq(:Counter)
+        expect(write_locked_decl(code).full_type.resolved).to eq(:Counter)
       end
     end
 
@@ -566,11 +566,11 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "marks the variable as shared (Arc)" do
-        expect(cap_join_decl(code).type_info.shared?).to be true
+        expect(cap_join_decl(code).full_type.shared?).to be true
       end
 
       it "marks the variable as locked (mutex)" do
-        expect(cap_join_decl(code).type_info.locked?).to be true
+        expect(cap_join_decl(code).full_type.locked?).to be true
       end
     end
 
@@ -587,11 +587,11 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "marks the variable as shared (Arc)" do
-        expect(cap_join_decl(code).type_info.shared?).to be true
+        expect(cap_join_decl(code).full_type.shared?).to be true
       end
 
       it "marks the variable as locked (mutex)" do
-        expect(cap_join_decl(code).type_info.locked?).to be true
+        expect(cap_join_decl(code).full_type.locked?).to be true
       end
     end
 
@@ -608,11 +608,11 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "marks the variable as multiowned (Rc)" do
-        expect(cap_join_decl(code).type_info.multiowned?).to be true
+        expect(cap_join_decl(code).full_type.multiowned?).to be true
       end
 
       it "marks the variable as write_locked (RwLock)" do
-        expect(cap_join_decl(code).type_info.write_locked?).to be true
+        expect(cap_join_decl(code).full_type.write_locked?).to be true
       end
     end
 

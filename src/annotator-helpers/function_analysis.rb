@@ -132,7 +132,7 @@ module FunctionAnalysis
 
       if func_type.extern
         args.each do |arg|
-          ti = arg.type_info rescue nil
+          ti = arg.full_type rescue nil
           if ti&.respond_to?(:soa?) && ti.soa?
             error!(arg, :SOA_TO_EXTERN_FN)
           end
@@ -247,17 +247,17 @@ module FunctionAnalysis
     # String returns only get heap_promoted_call from callee.returns_promoted
     # (not from type alone) because stdlib string functions like readFile use
     # frameAlloc internally — the caller shouldn't try to free those.
-    if node.type_info
+    if node.full_type
       callee_node = @fn_nodes[func_name]
       sig_return_heap = fsig && fsig.return_provenance == :heap
       if callee_node&.return_provenance == :heap || sig_return_heap
-        node.type_info&.provenance = :heap
-      elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
-        node.type_info&.provenance = :heap
+        node.full_type&.provenance = :heap
+      elsif node.full_type&.needs_escape_promotion? && !node.full_type&.string?
+        node.full_type&.provenance = :heap
       else
         # Union return types with heap variants need heap_promoted_call
         # when the callee allocates at all (frame, heap, or alloc).
-        ret_type = node.type_info
+        ret_type = node.full_type
         if ret_type
           ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
           schema = lookup_type_schema(ret_sym)
@@ -265,7 +265,7 @@ module FunctionAnalysis
             has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             if has_heap && callee_allocates
-              node.type_info&.provenance = :heap
+              node.full_type&.provenance = :heap
             end
           end
         end
@@ -381,7 +381,7 @@ module FunctionAnalysis
         # you cannot take ownership of data inside a container.
         # Use .remove(i) or COPY arr[i] instead.
         if inner_node.container_borrow
-          arg_ti = inner_node.type_info
+          arg_ti = inner_node.full_type
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti.is_a?(Type) ?
             (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
@@ -420,7 +420,7 @@ module FunctionAnalysis
       end
 
       # Weak refs must be RESOLVE'd before passing to concrete params.
-      arg_ti = arg_node.respond_to?(:type_info) ? arg_node.type_info : nil
+      arg_ti = arg_node.respond_to?(:full_type) ? arg_node.full_type : nil
       expected_raw = param.type
       if arg_ti&.link? && expected_raw != :Any
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
@@ -1029,7 +1029,7 @@ module FunctionAnalysis
           expected = spec[:type]
           next false unless is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.type_info
+          arg_type = arg.full_type
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true

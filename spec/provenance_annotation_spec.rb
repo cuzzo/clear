@@ -23,7 +23,7 @@ RSpec.describe "Provenance annotation" do
     it "has :rodata provenance" do
       ast, _ = annotate('FN main() RETURNS Void -> x = "hello"; RETURN; END')
       binding = find_binding(ast, "main", "x")
-      ti = binding.type_info
+      ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       expect(ti.provenance).to eq(:rodata)
     end
@@ -33,7 +33,7 @@ RSpec.describe "Provenance annotation" do
     it "has :heap provenance" do
       ast, _ = annotate('FN main() RETURNS Void -> x = "hello"; y = COPY x; RETURN; END')
       binding = find_binding(ast, "main", "y")
-      ti = binding.type_info
+      ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       expect(ti.provenance).to eq(:heap)
     end
@@ -43,7 +43,7 @@ RSpec.describe "Provenance annotation" do
     it "has :frame provenance" do
       ast, _ = annotate('FN main() RETURNS Void -> x = "a" + "b"; RETURN; END')
       binding = find_binding(ast, "main", "x")
-      ti = binding.type_info
+      ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       expect(ti.provenance).to eq(:frame)
     end
@@ -63,7 +63,7 @@ RSpec.describe "Provenance annotation" do
       name_field = struct_lit.fields["name"]
       # ensure_owned_value! wraps rodata string in CopyNode
       expect(name_field).to be_a(AST::CopyNode)
-      ti = name_field.type_info
+      ti = name_field.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       expect(ti.provenance).to eq(:heap)
     end
@@ -84,7 +84,7 @@ RSpec.describe "Provenance annotation" do
         END
       CLEAR
       binding = find_binding(ast, "main", "h")
-      ti = binding.type_info
+      ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       # Provenance should be :heap for promoted return values
       if ti.heap_provenance?
@@ -119,7 +119,7 @@ RSpec.describe "Provenance annotation" do
         END
       CLEAR
       binding = find_binding(ast, "main", "items")
-      ti = binding.type_info
+      ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       expect(ti.provenance).to eq(:frame)
     end

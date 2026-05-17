@@ -52,7 +52,7 @@ module AtomicPtrMigrationSuggester
     val = val.value if val.is_a?(AST::CapabilityWrap)
     return nil unless val.is_a?(AST::StructLit)
 
-    ti = node.type_info
+    ti = node.full_type
     return nil unless ti
     ti = Type.new(ti) unless ti.is_a?(Type)
     syn = ti.sync

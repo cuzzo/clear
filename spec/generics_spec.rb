@@ -479,8 +479,8 @@ RSpec.describe SemanticAnnotator do
         got = ast.statements.last.body[1]
         call = got.value
 
-        expect(got.type_info).to be_shared
-        expect(got.type_info.sync).to eq(:locked)
+        expect(got.full_type).to be_shared
+        expect(got.full_type.sync).to eq(:locked)
         expect(call.generic_type_args.first).to be_a(Type)
         expect(call.generic_type_args.first).to be_shared
         expect(call.generic_type_args.first.sync).to eq(:locked)
@@ -510,12 +510,12 @@ RSpec.describe SemanticAnnotator do
         got = main.body[2]
         set_call = main.body[3]
 
-        cache_arg = cache.type_info.generic_args.first
+        cache_arg = cache.full_type.generic_args.first
         expect(cache_arg).to be_shared
         expect(cache_arg.sync).to eq(:locked)
 
-        expect(got.type_info).to be_shared
-        expect(got.type_info.sync).to eq(:locked)
+        expect(got.full_type).to be_shared
+        expect(got.full_type.sync).to eq(:locked)
 
         expect(got.value.generic_type_args.first).to be_shared
         expect(got.value.generic_type_args.first.sync).to eq(:locked)
@@ -543,8 +543,8 @@ RSpec.describe SemanticAnnotator do
         got = ast.statements.last.body[1]
 
         expect(keep.type_params).to eq(["T"])
-        expect(got.type_info).to be_shared
-        expect(got.type_info.sync).to eq(:locked)
+        expect(got.full_type).to be_shared
+        expect(got.full_type.sync).to eq(:locked)
         expect(got.value.generic_type_args.first).to be_a(Type)
       end
 
@@ -566,12 +566,12 @@ RSpec.describe SemanticAnnotator do
         ret = copy_out.body.first.body.first
         got = ast.statements.last.body[1]
 
-        expect(ret.value.type_info.resolved).to eq(:T)
-        expect(ret.value.type_info.ownership).to eq(:affine)
-        expect(ret.value.type_info.sync).to be_nil
-        expect(got.type_info.resolved).to eq(:Box)
-        expect(got.type_info.ownership).to eq(:affine)
-        expect(got.type_info.sync).to be_nil
+        expect(ret.value.full_type.resolved).to eq(:T)
+        expect(ret.value.full_type.ownership).to eq(:affine)
+        expect(ret.value.full_type.sync).to be_nil
+        expect(got.full_type.resolved).to eq(:Box)
+        expect(got.full_type.ownership).to eq(:affine)
+        expect(got.full_type.sync).to be_nil
       end
 
       it "rejects mixed synchronization capabilities across generic shared parameters at the call site" do
@@ -615,9 +615,9 @@ RSpec.describe SemanticAnnotator do
 
         ast = run(src)
         got = ast.statements.last.body[2]
-        expect(got.type_info).to be_shared
-        expect(got.type_info.resolved).to eq(:Toy)
-        expect(got.type_info.sync).to eq(:locked)
+        expect(got.full_type).to be_shared
+        expect(got.full_type.resolved).to eq(:Toy)
+        expect(got.full_type.sync).to eq(:locked)
       end
     end
 

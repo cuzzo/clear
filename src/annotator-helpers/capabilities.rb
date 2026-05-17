@@ -457,7 +457,7 @@ module CapabilityHelper
         }
         visit(gcap[:guard_expr])
 
-        guard_type = gcap[:guard_expr].type_info
+        guard_type = gcap[:guard_expr].full_type
         unless guard_type && guard_type.resolved == :Bool
           error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
@@ -521,7 +521,7 @@ module CapabilityHelper
         }
         visit(expr)
 
-        pred_type = expr.type_info
+        pred_type = expr.full_type
         unless pred_type && pred_type.resolved == :Bool
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
@@ -587,7 +587,7 @@ module CapabilityHelper
           }
           visit(expr)
 
-          pred_type = expr.type_info
+          pred_type = expr.full_type
           unless pred_type && pred_type.resolved == :Bool
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
@@ -1088,7 +1088,7 @@ module CapabilityHelper
           # need the full cell shape so the captured ref keeps identity across
           # fibers.
           unless result.captures.key?(name)
-            cap_type = info.sync == :atomic ? info.type : node.type_info
+            cap_type = info.sync == :atomic ? info.type : node.full_type
             result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
@@ -1168,7 +1168,7 @@ module CapabilityHelper
           info = current_scope.locals[name]
           next unless info
           result.has_outer_ref = true
-          result.captures[name] ||= var_node.type_info
+          result.captures[name] ||= var_node.full_type
           # Also record the live SymbolEntry so mir_lowering can re-resolve
           # types after EscapeAnalysis.propagate_caller_sync! stamps params.
           result.capture_symbols[name] ||= info

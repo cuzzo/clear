@@ -141,11 +141,11 @@ class PipelineRewriter
                              TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
-    inf_with_limit = real_source.type_info.inf_stream? &&
+    inf_with_limit = real_source.full_type.inf_stream? &&
                      stages.any? { |s| s.is_a?(AST::LimitOp) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.type_info.dynamic_stream? ||
-        real_source.type_info.open_stream? ||
-        real_source.type_info.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
+    if (real_source.is_a?(AST::RangeLit) || real_source.full_type.dynamic_stream? ||
+        real_source.full_type.open_stream? ||
+        real_source.full_type.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
        stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
@@ -166,8 +166,8 @@ class PipelineRewriter
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
     # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.type_info.dynamic_stream? || real_source.type_info.open_stream? ||
-                       real_source.type_info.bounded_stream? || inf_with_limit) &&
+                      (real_source.full_type.dynamic_stream? || real_source.full_type.open_stream? ||
+                       real_source.full_type.bounded_stream? || inf_with_limit) &&
                       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -758,7 +758,7 @@ class PipelineRewriter
   # node's full_type was already unwrapped by a CATCH block).
   sig { params(rhs: T.untyped).returns(T::Boolean) }
   def callee_returns_error?(rhs)
-    ti = rhs.respond_to?(:type_info) ? rhs.type_info : nil
+    ti = rhs.respond_to?(:full_type) ? rhs.full_type : nil
     return false unless ti
     raw = ti.raw
     return false unless raw.is_a?(FunctionSignature)
@@ -770,7 +770,7 @@ class PipelineRewriter
   # (pool, sharded, or SOA collections need special iteration patterns).
   sig { params(source: T.untyped).returns(T::Boolean) }
   def needs_transpiler_pipeline?(source)
-    ti = source.respond_to?(:type_info) ? source.type_info : nil
+    ti = source.respond_to?(:full_type) ? source.full_type : nil
     return false unless ti
     ti.pool? || ti.soa? || ti.sharded?
   end

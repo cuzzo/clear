@@ -587,7 +587,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       fn = main_fn(ast)
       d = find_decl_in(fn, "trimmed")
       entry = cleanup_entry(fn, "trimmed")
-      expect(d.type_info.provenance).to eq(:borrow)
+      expect(d.full_type.provenance).to eq(:borrow)
       expect(entry&.dig(:needs_cleanup)).to be_falsey
       expect(entry&.dig(:alloc)).to be_nil
     end
@@ -637,7 +637,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       d = find_decl_in(main_fn(ast), "msg")
-      ti = d.type_info
+      ti = d.full_type
       expect(ti.provenance).to eq(:rodata) if ti.respond_to?(:provenance)
       expect(d.storage).to eq(:rodata)
     end

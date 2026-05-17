@@ -176,7 +176,7 @@ module PromotionClassifier
       next false unless ret.value.is_a?(AST::Identifier)
       # TAKES params are already heap-owned; returning them doesn't require promotion.
       next false if ret.value.symbol&.takes
-      ti = ret.value.type_info
+      ti = ret.value.full_type
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
       next false unless ti.is_a?(Type)
       next true if ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?
@@ -319,7 +319,7 @@ module CleanupClassifier
       next unless stmt.name.is_a?(AST::GetField)
       target_node = stmt.name.target
 
-      field_ti = stmt.name.type_info rescue nil
+      field_ti = stmt.name.full_type rescue nil
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
@@ -392,7 +392,7 @@ module CleanupClassifier
       next if node.is_a?(AST::BindExpr) && node.mode == :assign
 
       var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-      ti = node.type_info
+      ti = node.full_type
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
       cleanup = classify_binding(var_name, T.must(ti), node, promoted_fns, schema_lookup)
       # Stamp on node for identity-based lookup in lower_var_decl (avoids
@@ -525,7 +525,7 @@ module CleanupClassifier
       next unless node.is_a?(AST::MatchStatement)
       next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
 
-      source_ti = node.expr.type_info
+      source_ti = node.expr.full_type
       source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
       source_ti = nil unless source_ti.is_a?(Type)
       union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
@@ -591,7 +591,7 @@ module CleanupClassifier
       cond = node.condition
       next unless cond.is_a?(AST::MethodCall) || cond.is_a?(AST::FuncCall)
       next if cond.is_a?(AST::ResolveNode)
-      ti = cond.type_info
+      ti = cond.full_type
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
       ti = nil unless ti.is_a?(Type)
       inner_ti = ti&.wrapped_type
@@ -615,7 +615,7 @@ module CleanupClassifier
         expr = b[:expr]
         next unless expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
         next if expr.is_a?(AST::ResolveNode)
-        ti = expr.type_info
+        ti = expr.full_type
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
         ti = nil unless ti.is_a?(Type)
         inner_ti = ti&.wrapped_type
@@ -888,7 +888,7 @@ module CleanupClassifier
       # Rodata string fields don't need cleanup
       if struct_lit
         fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
-        fval_ti = fval&.type_info
+        fval_ti = fval&.full_type
         fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
         next false if fval_ti.is_a?(Type) && fval_ti.rodata?
       end

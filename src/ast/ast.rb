@@ -461,7 +461,7 @@ module AST
         new_t = Type.new(base_sym)
         # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
         # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
-        val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
+        val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
         new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
         new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
         new_t.sync = final_type.sync if final_type.is_a?(Type) && final_type.sync
@@ -494,7 +494,7 @@ module AST
         new_t
       end
       # Propagate @link ownership from the value's LinkNode
-      val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
+      val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
       if val_ti&.link?
         storage = :link
       end
@@ -540,13 +540,6 @@ module AST
       self.storage = storage
 
       storage
-    end
-
-    # -- NEW PREFERRED ACCESSOR --
-    # Use this in new code to get the rich object
-    sig { returns(T.nilable(Type)) }
-    def type_info
-      @type_object
     end
 
     # -- REFACTORED HELPERS --
@@ -1555,6 +1548,11 @@ module MIR
     attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
     sig { returns(TrueClass) }
     def needs_cleanup; true; end
+    # Carrier struct: the type lives in the :type_info member, NOT
+    # Locatable's @type_object. Override Locatable so the canonical
+    # full_type accessor reads/writes the member (member name kept).
+    def full_type; type_info; end
+    def full_type=(val); self.type_info = val; end
   end
 
   # Promote: escape promotion inserted before return statements.

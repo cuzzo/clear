@@ -515,7 +515,7 @@ class MIRChecker
       # INV-COPY-CLEANUP: primitives and Id<T> (value types that can never own
       # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
       # or visit_CopyNode missed the gate.
-      if (ti = alloc_marks.first.type_info)
+      if (ti = alloc_marks.first.full_type)
         no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
         if no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
           @errors << error(:COPY_CLEANUP, name,

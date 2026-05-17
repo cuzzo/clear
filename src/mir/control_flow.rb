@@ -620,7 +620,7 @@ class OwnershipDataflow
       lhs = stmt.name
       lhs_is_map = lhs.is_a?(AST::GetIndex) && (Type.from_node(lhs.target)&.map? rescue false)
       skip_rhs_move = if lhs_is_map
-        val_ti_raw = stmt.value.type_info rescue nil
+        val_ti_raw = stmt.value.full_type rescue nil
         val_resolved = val_ti_raw && (val_ti_raw.is_a?(Type) ? val_ti_raw.resolved : val_ti_raw)
         schema = val_resolved && @schema_lookup&.call(val_resolved)
         !!Schemas.as_union_schema(schema)
@@ -1498,7 +1498,7 @@ module LoopFrameAnalysis
     # carry value needing heap promotion. This covers both stdlib_allocates=true
     # calls (toString, intToString, etc.) and user-defined string-returning functions.
     if expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
-      ti = expr.type_info rescue nil
+      ti = expr.full_type rescue nil
       return true if ti.is_a?(Type) && ti.string?
     end
     case expr
@@ -1547,7 +1547,7 @@ module LoopFrameAnalysis
       # Identifiers are already handled by :dupe_string_literal in lower_indexed_assignment
       # (for map puts) and are a no-op for struct fields -- skip them to avoid double-dupe.
       next if val.is_a?(AST::Identifier)
-      val_ti = val.type_info rescue nil
+      val_ti = val.full_type rescue nil
       next unless val_ti.is_a?(Type) && val_ti.string?
       # Promote the value expression so the concat/dupe uses heapAlloc.
       promote_value_to_heap!(val)
@@ -1560,7 +1560,7 @@ module LoopFrameAnalysis
   sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   def self.promote_value_to_heap!(node)
     return unless node
-    ti = node.type_info rescue nil
+    ti = node.full_type rescue nil
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
     return unless ti.is_a?(Type) && ti.string?
     return if ti.heap_provenance?  # already heap
@@ -1598,7 +1598,7 @@ module LoopFrameAnalysis
   def self.promote_to_heap!(ident_node)
     decl_node = ident_node.symbol&.reg
     return unless decl_node
-    decl_ti = decl_node.type_info rescue nil
+    decl_ti = decl_node.full_type rescue nil
     return unless decl_ti.is_a?(Type)
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
     decl_ti.provenance = :heap
@@ -1969,7 +1969,7 @@ class BorrowChecker
     return if source.is_a?(AST::CopyNode)
 
     if source.is_a?(AST::Identifier)
-      ti = source.type_info rescue nil
+      ti = source.full_type rescue nil
       return if ti&.shared?
       names << source.name.to_s
       return
@@ -2015,7 +2015,7 @@ class BorrowChecker
 
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = ident.type_info rescue nil
+    ti = ident.full_type rescue nil
     return true unless ti
     ti = Type.new(ti) if !ti.is_a?(Type)
     is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect

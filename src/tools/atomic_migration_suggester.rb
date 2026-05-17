@@ -68,7 +68,7 @@ module AtomicMigrationSuggester
     val = val.value if val.is_a?(AST::CapabilityWrap)
     return nil unless val.is_a?(AST::StructLit)
 
-    ti = node.type_info
+    ti = node.full_type
     ti = Type.new(ti) unless ti.is_a?(Type)
     return nil unless ti.sync == :locked
 

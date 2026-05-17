@@ -2069,13 +2069,13 @@ RSpec.describe SemanticAnnotator do
 
       it "sets provenance to :borrow (no cleanup, caller owns data)" do
         decl = ast.statements.first
-        ti = decl.type_info
+        ti = decl.full_type
         expect(ti.provenance).to eq(:borrow)
       end
 
       it "sets provenance to :borrow" do
         decl = ast.statements.first
-        ti = decl.type_info
+        ti = decl.full_type
         expect(ti.provenance).to eq(:borrow)
       end
     end
@@ -3782,7 +3782,7 @@ RSpec.describe SemanticAnnotator do
       ast = run(code)
       fn  = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make_big" }
       decl = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "s" }
-      expect(decl.type_info.frame?).to be true
+      expect(decl.full_type.frame?).to be true
     end
 
     it "emits *BigS as the Zig type for the frame-allocated variable" do

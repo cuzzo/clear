@@ -479,9 +479,9 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         bind = find_var(tree, "f", "sp")
-        expect(bind.type_info.pool?).to be true
-        expect(bind.type_info.sharded?).to be true
-        expect(bind.type_info.shard_count).to eq(4)
+        expect(bind.full_type.pool?).to be true
+        expect(bind.full_type.sharded?).to be true
+        expect(bind.full_type.shard_count).to eq(4)
       end
 
       it "emits CheatLib.ShardedPool Zig type for @pool:sharded(4)" do
@@ -579,9 +579,9 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         bind = find_var(tree, "f", "sl")
-        expect(bind.type_info.list_collection?).to be true
-        expect(bind.type_info.sharded?).to be true
-        expect(bind.type_info.shard_count).to eq(2)
+        expect(bind.full_type.list_collection?).to be true
+        expect(bind.full_type.sharded?).to be true
+        expect(bind.full_type.shard_count).to eq(2)
       end
 
       it "emits CheatLib.ShardedList Zig type for @list:sharded(2)" do

@@ -269,8 +269,8 @@ module GenericAnalysis
       arg = actual_args[i]
       next unless arg
       param_type = param.type || Type.new(:Any)
-      actual_type = if arg.respond_to?(:type_info) && arg.type_info
-        arg.type_info
+      actual_type = if arg.respond_to?(:full_type) && arg.full_type
+        arg.full_type
       else
         Type.new(arg.resolved_type || :Any)
       end
@@ -294,8 +294,8 @@ module GenericAnalysis
       next unless arg
       param_type = param.type || Type.new(:Any)
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
-      actual_type = if arg.respond_to?(:type_info) && arg.type_info
-        arg.type_info
+      actual_type = if arg.respond_to?(:full_type) && arg.full_type
+        arg.full_type
       else
         Type.new(arg.resolved_type || :Any)
       end
@@ -562,21 +562,21 @@ module GenericAnalysis
   end
 
   # Propagate collection, shard_count, soa, and sync metadata from the declared
-  # type annotation (or inferred value type) into node.type_info and node.full_type.
+  # type annotation (or inferred value type) into node.full_type and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
   sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Symbol)) }
   def propagate_collection_metadata!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     coll_src = if (decl_t = node.type) && decl_t.collection
       decl_t
-    elsif node.value.type_info&.collection
-      node.value.type_info
+    elsif node.value.full_type&.collection
+      node.value.full_type
     end
     if coll_src
-      node.type_info.collection  = coll_src.collection
-      node.type_info.provenance  = :heap if coll_src.collection == :pool || coll_src.collection == :set
-      node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
-      node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
+      node.full_type.collection  = coll_src.collection
+      node.full_type.provenance  = :heap if coll_src.collection == :pool || coll_src.collection == :set
+      node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count
+      node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
       if node.full_type
         node.full_type.collection  = coll_src.collection unless node.full_type.collection
         node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
@@ -586,22 +586,22 @@ module GenericAnalysis
 
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
     if !coll_src && (decl_t = node.type) && decl_t.soa
-      node.type_info.soa = true if node.type_info
+      node.full_type.soa = true if node.full_type
       node.full_type&.soa = true
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
     if (decl_t = node.type)
-      if decl_t.shard_count && !node.type_info&.shard_count
-        node.type_info.shard_count = decl_t.shard_count if node.type_info
+      if decl_t.shard_count && !node.full_type&.shard_count
+        node.full_type.shard_count = decl_t.shard_count if node.full_type
         node.full_type&.instance_variable_set(:@shard_count, decl_t.shard_count)
       end
-      if decl_t.sync && node.type_info && !node.type_info.sync
-        node.type_info.sync = decl_t.sync
+      if decl_t.sync && node.full_type && !node.full_type.sync
+        node.full_type.sync = decl_t.sync
         node.full_type&.sync = decl_t.sync
       end
-      if decl_t.ownership != :affine && node.type_info
-        node.type_info.instance_variable_set(:@ownership, decl_t.ownership)
+      if decl_t.ownership != :affine && node.full_type
+        node.full_type.instance_variable_set(:@ownership, decl_t.ownership)
         node.full_type&.instance_variable_set(:@ownership, decl_t.ownership)
       end
     end
@@ -615,7 +615,7 @@ module GenericAnalysis
   def propagate_call_flags!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     if has_heap_promoted_call?(node.value)
-      node.type_info&.provenance = :heap
+      node.full_type&.provenance = :heap
     end
   end
 
@@ -642,8 +642,8 @@ module GenericAnalysis
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
-    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
-      ti = expr.target.type_info
+    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:full_type)
+      ti = expr.target.full_type
       if ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?)
         return root_variable_name(expr.target)
       end
@@ -653,12 +653,12 @@ module GenericAnalysis
     # the parent's cleanup also frees the field -- double-free.
     # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
     # values, not borrows from an existing variable.
-    if expr.is_a?(AST::GetField) && expr.respond_to?(:type_info)
+    if expr.is_a?(AST::GetField) && expr.respond_to?(:full_type)
       if expr.target.is_a?(AST::Identifier)
         target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
         return nil if target_schema.is_a?(Hash) && (target_schema[:kind] == :enum || target_schema[:kind] == :union)
       end
-      field_ti = expr.type_info rescue nil
+      field_ti = expr.full_type rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
       if field_ti && !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         return root_variable_name(expr.target)
@@ -682,7 +682,7 @@ module GenericAnalysis
   def has_heap_promoted_call?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
-    ti = expr.type_info rescue nil
+    ti = expr.full_type rescue nil
     ti = ti.is_a?(Type) ? ti : nil
     return true if ti&.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
@@ -698,7 +698,7 @@ module GenericAnalysis
   def bg_exit_frame_string?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
-    ti = expr.type_info rescue nil
+    ti = expr.full_type rescue nil
     t = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)
     return false unless t&.string?
     return false if t.heap? || t.rodata?

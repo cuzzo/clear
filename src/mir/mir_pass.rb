@@ -666,7 +666,7 @@ class MIRPass
   def or_rescue_needs_fallback_dupe?(or_node)
     return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
     left = or_node.left
-    ti = left.type_info rescue nil
+    ti = left.full_type rescue nil
     ti = ti.is_a?(Type) ? ti : nil
     return true if ti&.heap_provenance?
     if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
@@ -678,7 +678,7 @@ class MIRPass
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def or_rescue_needs_fallback_dupe_left?(expr)
     return false unless expr
-    ti = expr.type_info rescue nil
+    ti = expr.full_type rescue nil
     ti = ti.is_a?(Type) ? ti : nil
     return true if ti&.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
@@ -706,7 +706,7 @@ class MIRPass
             # consumed -- its cleanup defer must fire normally.
             lhs = stmt.name
             if lhs.is_a?(AST::GetIndex)
-              target_ti = (lhs.target.type_info rescue nil)
+              target_ti = (lhs.target.full_type rescue nil)
               target_ti = target_ti.is_a?(Type) ? target_ti : (target_ti ? Type.new(target_ti) : nil)
               target_ti&.map? ? nil : stmt.value
             else
@@ -776,7 +776,7 @@ class MIRPass
     entry = bindings[name]
     return unless entry && entry[:has_moved_guard] && entry[:needs_cleanup]
 
-    ti = ident.type_info
+    ti = ident.full_type
     return if ti&.string?
 
     is_atomic_ptr = ti && ti.sync == :atomic && ti.layout == :indirect
@@ -800,7 +800,7 @@ class MIRPass
     entry = bindings[stmt.name.to_s]
     return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
 
-    ti = stmt.type_info
+    ti = stmt.full_type
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
     zig_type = ti ? (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s) : "UNKNOWN"
     stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc], zig_type: zig_type }
@@ -884,7 +884,7 @@ class MIRPass
     target_node = stmt.name.target
 
     # Look up the INDEX_OPS :set entry for this container type.
-    target_ti = target_node.type_info rescue nil
+    target_ti = target_node.full_type rescue nil
     target_ti = Type.new(target_ti) if target_ti && !target_ti.is_a?(Type)
     set_op = resolve_container_set_op(target_ti)
     return unless set_op && set_op[:takes_value]
@@ -892,7 +892,7 @@ class MIRPass
     # Check if the value type needs frame-to-heap promotion.
     # Strings are handled by the :dupe_string_literal transform in the lowerer;
     # :container_promote only fires for !string? values.
-    val_ti = stmt.value.type_info rescue nil
+    val_ti = stmt.value.full_type rescue nil
     return unless val_ti
     val_ti = Type.new(val_ti) unless val_ti.is_a?(Type)
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?

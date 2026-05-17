@@ -1359,6 +1359,10 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    # Carrier struct: member stays :type_info; expose the project-wide
+    # canonical accessor name so readers use one name everywhere.
+    def full_type; type_info; end
+    def full_type=(val); self.type_info = val; end
   end
 
   # Marks function exit with escaped vars. Subsumes old MIR::Return.
