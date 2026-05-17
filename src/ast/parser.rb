@@ -833,7 +833,7 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { params(as_param: T::Boolean).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(as_param: T::Boolean).returns(T::Array[T.untyped]) }
   def parse_argument_list(as_param: true)
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')

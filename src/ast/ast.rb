@@ -70,6 +70,7 @@ module AST
       super
       self[:body] = [] if self[:body].nil?
       self[:extra_values] = [] if self[:extra_values].nil?
+      self[:indirect_payload_as] = false if self[:indirect_payload_as].nil?
     end
 
     sig { returns(Symbol) }
@@ -107,12 +108,12 @@ module AST
       self[:extra_values]
     end
 
-    sig { returns(T.nilable(T::Boolean)) }
+    sig { returns(T::Boolean) }
     def indirect_payload_as
       self[:indirect_payload_as]
     end
 
-    sig { params(val: T.nilable(T::Boolean)).void }
+    sig { params(val: T::Boolean).void }
     def indirect_payload_as=(val)
       self[:indirect_payload_as] = val
     end
@@ -570,12 +571,13 @@ module AST
     sig do
       params(default: T.nilable(T.any(Type, Symbol, String)),
              blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
-        .returns(T.nilable(T.any(Type, Symbol, String)))
+        .returns(T.any(Type, Symbol, String))
     end
     def full_type_or(default = nil, &blk)
       ft = full_type
       return ft unless ft.untyped?
-      blk ? blk.call : default
+      return blk.call if blk
+      default.nil? ? ft : default
     end
 
     # True when the node carries a real (stamped) type, i.e. full_type
