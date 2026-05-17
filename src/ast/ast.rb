@@ -194,14 +194,24 @@ module AST
                           keyword_init: true) do
     extend T::Sig
 
-    # resolved_type is T.nilable(Type) for now: it is stamped lazily
-    # (capabilities.rb:644 = var_node.full_type) and a live fallback
-    # chain (cap.resolved_type || old_scope.resolve_type) depends on
-    # nil meaning "not yet stamped". Making it always-Type requires an
-    # eager producer first -- tracked as the #53 tightening follow-up.
-    sig { returns(T.nilable(Type)) }
+    def initialize(**kw)
+      super
+      self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
+    end
+
+    # The capability's source type. Always a Type, never nil: the
+    # producer is eager (acquire_capability! stamps both the input cap
+    # and every expanded field-cap from .full_type); defaults to the
+    # :Untyped sentinel until then. Readers that previously fell back
+    # to old_scope.resolve_type now do so on .untyped? instead of nil.
+    sig { returns(Type) }
     def resolved_type
       self[:resolved_type]
+    end
+
+    sig { params(val: T.nilable(Type)).void }
+    def resolved_type=(val)
+      self[:resolved_type] = val.nil? ? Type.new(:Untyped) : val
     end
 
     sig { params(c: T.any(Capability, T::Hash[Symbol, T.untyped])).returns(Capability) }

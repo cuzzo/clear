@@ -722,10 +722,16 @@ module CapabilityHelper
       fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
       fields.each do |field_name, _|
         field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
+        # Eager producer: resolve the field's type now (same mechanism
+        # as the input cap, line 644) so every expanded cap carries a
+        # real resolved_type -- the cap.resolved_type || old_scope
+        # fallback chain becomes dead.
+        visit(field_node) rescue nil
         expanded << AST::Capability.new(
           capability: cap[:capability],
           var_node: field_node,
-          old_scope: cap[:old_scope]
+          old_scope: cap[:old_scope],
+          resolved_type: field_node.full_type
         )
       end
     else
@@ -815,7 +821,7 @@ module CapabilityHelper
       if cap[:alias] && !syn
         alias_name = cap[:alias]
         is_mutable = !!cap[:alias_mutable]
-        resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
+        resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         sym = current_scope.locals[alias_name]
         sym.non_escaping  = true
@@ -826,7 +832,7 @@ module CapabilityHelper
       # Observables Phase 2.3 / 2.4. Bind alias to `?T` where T is the
       # inner element type of the tense source. VIEW is immutable +
       # non_escaping (borrow); MATERIALIZED_VIEW is owned and may escape.
-      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
       st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
       inner = st.future? && st.tense_type ? st.tense_type : st
       # Wrap as ?T so the binding is null until the first item lands.
@@ -855,7 +861,7 @@ module CapabilityHelper
       # capture, GIVE, COPY-to-non-temp, pipeline-binding crossing the
       # WITH) is rejected by the existing non_escaping checks at the
       # use site.
-      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
       st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
       # Strip Group-1 sigils so the alias's `.type` is the bare inner T.
       # The alias's SymbolEntry already keeps sync/layout=nil (declare
@@ -893,7 +899,7 @@ module CapabilityHelper
         end
       end
       alias_name = cap[:alias] || var_name
-      resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
+      resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
