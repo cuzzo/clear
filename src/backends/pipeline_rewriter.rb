@@ -211,9 +211,9 @@ class PipelineRewriter
     # transpile_Smooth handles error propagation and snapshot semantics for CATCH.
     # The SMOOTH's full_type may already be unwrapped by CATCH, so also check
     # the callee's declared return type.
-    result_is_error = node.full_type && Type.new(node.full_type).error_union?
+    result_is_error = Type.new(node.full_type).error_union?
     result_is_error ||= callee_returns_error?(rhs)
-    needs_try = source.full_type && Type.new(source.full_type).error_union?
+    needs_try = Type.new(source.full_type).error_union?
 
     if rhs.is_a?(AST::FuncCall) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup

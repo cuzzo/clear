@@ -491,7 +491,7 @@ class MIRLowering
     end.tap { |mir|
       # Apply type coercion (int->float, float->int, etc.) when AST node has coerced_type
       if mir && node.respond_to?(:coerced_type) && node.coerced_type &&
-         node.full_type &&
+         !node.full_type.untyped? &&
          node.coerced_type != node.full_type
         # Skip coercion for stack-allocated fixed-size arrays (SROA)
         skip = node.is_a?(AST::ListLit) && node.storage == :stack &&

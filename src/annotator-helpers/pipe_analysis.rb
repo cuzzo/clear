@@ -39,8 +39,8 @@ module PipeAnalysis
   sig { params(node: T.untyped).returns(T::Boolean) }
   def finite_stream_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.is_a?(AST::RangeLit) || node.full_type&.dynamic_stream? ||
-      node.full_type&.bounded_stream? || node.full_type&.open_stream?
+    node.is_a?(AST::RangeLit) || node.full_type.dynamic_stream? ||
+      node.full_type.bounded_stream? || node.full_type.open_stream?
   end
 
   # Observable Phase 2.2 + COLLECT-default: a fold-terminal whose
@@ -109,14 +109,14 @@ module PipeAnalysis
   sig { params(node: T.untyped).returns(T::Boolean) }
   def bounded_stream_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.full_type&.bounded_stream?
+    node.full_type.bounded_stream?
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
   def finite_stream_element_type(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return range_element_type(node) if node.is_a?(AST::RangeLit)
-    return node.full_type.open_stream_element_type.resolved if node.full_type&.open_stream?
+    return node.full_type.open_stream_element_type.resolved if node.full_type.open_stream?
     node.full_type.tense_type.element_type.resolved
   end
 
@@ -266,7 +266,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.full_type&.inf_stream? &&
+    is_inf    = node.left.full_type.inf_stream? &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
     is_stream = (finite_stream_source?(node.left) || is_inf) &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) ||
@@ -326,7 +326,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_take_while_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.full_type&.inf_stream?
+    is_inf    = node.left.full_type.inf_stream?
     is_stream = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "TAKE_WHILE", allow_range: is_stream, allow_stream: is_stream)
     item_type = if is_inf
@@ -371,7 +371,8 @@ module PipeAnalysis
     end
 
     # Result is a list of whatever the expression produces
-    expr_type = node.right.expression.full_type || node.right.expression.resolved_type
+    _ft = node.right.expression.full_type
+    expr_type = _ft.untyped? ? node.right.expression.resolved_type : _ft
     node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
@@ -448,7 +449,8 @@ module PipeAnalysis
       visit(bw.expression)
     end
 
-    expr_type = bw.expression.full_type || bw.expression.resolved_type
+    _ft = bw.expression.full_type
+    expr_type = _ft.untyped? ? bw.expression.resolved_type : _ft
     node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
@@ -841,7 +843,7 @@ module PipeAnalysis
   def analyze_skip_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # SKIP: list |> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
-    is_inf   = node.left.full_type&.inf_stream?
+    is_inf   = node.left.full_type.inf_stream?
     is_range = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
     item_type = if is_inf
@@ -1522,8 +1524,8 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_select_family_op(node)
-      elsif node.left.full_type&.inf_stream? || node.left.full_type&.dynamic_stream? ||
-            node.left.full_type&.open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.full_type.inf_stream? || node.left.full_type.dynamic_stream? ||
+            node.left.full_type.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_select_family_op(node)
       else
         analyze_select_family_op(proxy)
@@ -1531,8 +1533,8 @@ module PipeAnalysis
     when AST::EachOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_each_op(node)
-      elsif node.left.full_type&.inf_stream? || node.left.full_type&.dynamic_stream? ||
-            node.left.full_type&.open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.full_type.inf_stream? || node.left.full_type.dynamic_stream? ||
+            node.left.full_type.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_each_op(node)
       elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
@@ -1610,9 +1612,9 @@ module PipeAnalysis
     # methods. REDUCE ops (SUM/COUNT/etc.) and array sources still use the proxy.
     stream_op_analyzed = (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp) || conc.op.is_a?(AST::EachOp)) &&
                          (bounded_stream_source?(node.left) ||
-                          node.left.full_type&.inf_stream? ||
-                          node.left.full_type&.dynamic_stream? ||
-                          node.left.full_type&.open_stream? ||
+                          node.left.full_type.inf_stream? ||
+                          node.left.full_type.dynamic_stream? ||
+                          node.left.full_type.open_stream? ||
                           node.left.is_a?(AST::RangeLit))
     unless stream_op_analyzed
       node.full_type = proxy.full_type
@@ -1625,7 +1627,7 @@ module PipeAnalysis
     # type just computed here — stamp it (and its WHERE/SELECT
     # expression sub-node) so no wrapped op reaches MIR untyped.
     inner = conc.op
-    inner.full_type = node.full_type || proxy.full_type
+    inner.full_type = node.full_type.untyped? ? proxy.full_type : node.full_type
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
   end
 
@@ -1790,7 +1792,7 @@ module PipeAnalysis
   sig { params(range_node: AST::RangeLit).returns(Type) }
   def range_element_type(range_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    range_node.start.full_type || :Number
+    range_node.start.full_type.untyped? ? :Number : range_node.start.full_type
   end
 
   # =========================================================

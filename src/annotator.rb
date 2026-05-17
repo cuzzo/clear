@@ -1420,8 +1420,9 @@ private
 
     # A destructuring pattern's type IS the subject it destructures
     # (the MATCH expr) — not a guess.
-    pat.full_type = match_node.expr.full_type ||
-                    Type.new(match_node.expr.resolved_type || :Any)
+    pat.full_type = match_node.expr.full_type.untyped? ?
+                    Type.new(match_node.expr.resolved_type || :Any) :
+                    match_node.expr.full_type
     nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
   end
 
@@ -1660,7 +1661,7 @@ private
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
             c[:destructure].full_type =
-              node.expr.full_type || Type.new(node.expr.resolved_type || :Any)
+              node.expr.full_type.untyped? ? Type.new(node.expr.resolved_type || :Any) : node.expr.full_type
             variant_name = case c[:value]
                            when AST::GetField   then c[:value].field
                            when AST::MethodCall then c[:value].name
@@ -2158,7 +2159,7 @@ private
     if inline_bg_sources.any?
       source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
       error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-             type: node.value.full_type || "BG handle",
+             type: node.value.full_type.untyped? ? "BG handle" : node.value.full_type,
              hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
     end
 
@@ -2232,7 +2233,7 @@ private
       expected_type = expected
       if expected_type && (expected_type.heap? || expected_type.dynamic?) &&
          node.value.respond_to?(:storage=) &&
-         node.value.full_type&.requires_move?
+         node.value.full_type.requires_move?
         node.value.storage = :heap
       end
     end
@@ -2674,7 +2675,7 @@ private
     # only the fold's analyzer knows whether this is :sum/:count/:max/...
     # Copying it onto node.type also propagates the kind to the binding's
     # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
-    if pipe.full_type&.observable_terminal
+    if pipe.full_type.observable_terminal
       pipe_terminal = T.must(pipe.full_type).observable_terminal
       target_t = node.type
       # The pipe is the authority on terminal kind: only the fold's
@@ -2698,7 +2699,7 @@ private
       # OBSERVABLE_WRAPPERS can find it. Without this, the binding's
       # emitted Zig wrapper would default-or-raise. Same mismatch
       # check as above.
-      if node.full_type&.observable?
+      if node.full_type.observable?
         if node.full_type.observable_terminal && node.full_type.observable_terminal != pipe_terminal
           raise CompilerError.new(
             node.token,
@@ -2810,14 +2811,14 @@ private
 
     Capabilities.validate!(node, node.full_type) { |n, msg| error!(n, :CAPABILITY_INVALID, message: msg) }
 
-    node_sync = node.full_type&.sync
-    node_layout = node.full_type&.layout
+    node_sync = node.full_type.sync
+    node_layout = node.full_type.layout
     # Preserve collection metadata (e.g. :set from DISTINCT) in scope so
     # resolve_full_type returns the correct dispatch_key for method lookup.
     # Do NOT store the full node.full_type — it embeds ownership/sync from
     # finalize_storage!, which breaks resolve_type in declare_capability_scope!
     # (WITH EXCLUSIVE unwrapping reads the raw entry.type expecting just the base type).
-    scope_type = if node.full_type&.collection && !(final_type.is_a?(Type) && final_type.collection)
+    scope_type = if node.full_type.collection && !(final_type.is_a?(Type) && final_type.collection)
       ft = Type.new(final_type)
       ft.collection = node.full_type.collection
       ft
@@ -2850,12 +2851,12 @@ private
     # rejected by visit_ReturnNode's non_escaping guard. Users get the
     # value out via `|> COLLECT` (joins + extracts scalar) or
     # `WITH MATERIALIZED VIEW` (deep-copy snapshot).
-    if node.full_type&.observable?
+    if node.full_type.observable?
       node.symbol.non_escaping = true
     end
     # Bare `T@versioned` is legal but unusual: a single-owner MVCC cell
     # cannot be reached from another thread, so suggest the shared form.
-    if node.full_type&.versioned? && node.full_type&.ownership == :affine
+    if node.full_type.versioned? && node.full_type.ownership == :affine
       cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
       fixes = []
       if cap_tok && cap_tok.value.to_s == "@versioned"
@@ -2880,7 +2881,7 @@ private
       end
     end
     classify_ownership!(node.symbol)
-    og_declare(node.name, node, node.full_type || final_type)
+    og_declare(node.name, node, node.full_type.untyped? ? final_type : node.full_type)
     register_container_borrow!(node)
     # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
     ti = node.full_type
@@ -3077,7 +3078,7 @@ private
 
     # Alias when: first arg is the SAME union type (extraction like jsonGet)
     # or first arg is a map (HashMap lookup returning union value)
-    if arg_type == ret_type_obj.resolved || first_arg.full_type&.map?
+    if arg_type == ret_type_obj.resolved || first_arg.full_type.map?
       @og.edges << OwnershipGraph::Edge.new(from: var_name, to: first_arg.name, kind: :aliases)
     end
   end
@@ -3926,7 +3927,7 @@ private
 
     # String concat (+) transpiles to std.mem.concat(rt.frameAlloc(), ...) —
     # mark as frame allocation so needs_rt and loop mark elision are correct.
-    if node.op == :ADD && (node.left.full_type&.string? || node.right.full_type&.string?)
+    if node.op == :ADD && (node.left.full_type.string? || node.right.full_type.string?)
       node.string_concat = true
       current_fn_ctx.frame_count += 1 if current_fn_ctx
       # String concat result is frame-allocated.
@@ -5238,7 +5239,7 @@ private
       error!(node, :YIELD_OUTSIDE_BG_STREAM)
     end
     visit(node.expr)
-    node.full_type = Type.new(node.expr.full_type || :Void)
+    node.full_type = Type.new(node.expr.full_type.untyped? ? :Void : node.expr.full_type)
     T.must(@stream_yield_types) << Type.new(node.full_type)
     record_effect(EffectTracker::SUSPENDS)
   end
@@ -5256,7 +5257,7 @@ private
     last_type = T.let(:Void, Symbol)
     node.body.each do |expr|
       visit(expr)
-      last_type = expr.respond_to?(:full_type) ? (expr.full_type || :Void) : :Void
+      last_type = expr.respond_to?(:full_type) && !expr.full_type.untyped? ? expr.full_type : :Void
       # Track names declared inside the body so we don't treat them as outer captures.
       if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
         locally_bound << expr.name
@@ -5357,7 +5358,7 @@ private
     last_type = T.let(:Void, Symbol)
     node.steps.each do |step|
       visit(step[:expr])
-      step_type = step[:expr].respond_to?(:full_type) ? (step[:expr].full_type || :Void) : :Void
+      step_type = step[:expr].respond_to?(:full_type) && !step[:expr].full_type.untyped? ? step[:expr].full_type : :Void
 
       if step[:binding]
         # Unwrap error union for the binding: !T -> T
@@ -5385,7 +5386,7 @@ private
   def visit_NextExpr(node)
     record_effect(EffectTracker::YIELD)
     visit(node.expr)
-    promise_type = Type.new(node.expr.full_type || :Void)
+    promise_type = Type.new(node.expr.full_type.untyped? ? :Void : node.expr.full_type)
 
     unless promise_type.future?
       error!(node, :NEXT_NEEDS_FUTURE, got: node.expr.full_type)
