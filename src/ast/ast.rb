@@ -577,9 +577,14 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
-    sig { params(final_type: T.untyped, schema_lookup: T.untyped).returns(Symbol) }
+    sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.untyped).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
+      # Normalize the Symbol|Type input to a Type once at the seam, so
+      # the body never re-derives via final_type.is_a?(Type). A Symbol
+      # tag yields a bare Type (no shard/sync/soa/observable) -- exactly
+      # what the old `is_a?(Type) && ...` false-branch produced.
+      final_type = Type.new(final_type) unless final_type.is_a?(Type)
       # Calculate slot size
       type_obj = Type.new(final_type)
       @slot_size = T.let(type_obj.slot_size(&schema_lookup), T.nilable(Integer))
@@ -606,18 +611,17 @@ module AST
 
       # Build a Type that carries the resolved base type plus storage-derived capabilities.
       # For fn_type, preserve the full type object — do not reduce to the return-type symbol.
-      t = if final_type.is_a?(Type) && final_type.fn_type?
+      t = if final_type.fn_type?
         final_type
       else
-        base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
-        new_t = Type.new(base_sym)
+        new_t = Type.new(final_type.resolved)
         # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
         # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
         val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
-        new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
+        new_t.shard_count = final_type.shard_count if final_type.shard_count
         new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
-        new_t.sync = final_type.sync if final_type.is_a?(Type) && final_type.sync
-        new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
+        new_t.sync = final_type.sync if final_type.sync
+        new_t.soa = final_type.soa if final_type.soa
         new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
         new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
         # Carry @observable through finalize_storage! — without this the
@@ -627,16 +631,16 @@ module AST
         # too so OBSERVABLE_WRAPPERS can pick the right wrapper Zig type;
         # without it the lookup falls back to a default and silently
         # emits the wrong wrapper.
-        new_t.is_observable = true if (final_type.is_a?(Type) && final_type.observable?) ||
+        new_t.is_observable = true if final_type.observable? ||
                                        (val_ti.respond_to?(:observable?) && val_ti.observable?)
-        if final_type.is_a?(Type) && final_type.observable_terminal
+        if final_type.observable_terminal
           new_t.observable_terminal = final_type.observable_terminal
         elsif val_ti.respond_to?(:observable_terminal) && val_ti.observable_terminal
           new_t.observable_terminal = val_ti.observable_terminal
         end
-        new_t.elem_ownership = final_type.elem_ownership if final_type.is_a?(Type) && final_type.elem_ownership
+        new_t.elem_ownership = final_type.elem_ownership if final_type.elem_ownership
         new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
-        new_t.elem_sync = final_type.elem_sync if final_type.is_a?(Type) && final_type.elem_sync
+        new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
         new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
         # Propagate @link_source from value's type
         if val_ti&.link?
