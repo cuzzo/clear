@@ -510,7 +510,7 @@ module CapabilityHelper
       end
     end
 
-    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
+    param_names = (fn_node.params || []).map { |p| p.name.to_s }
     prev_ctx = @current_predicate_context
     begin
       pre_clauses.each do |entry|
@@ -555,11 +555,11 @@ module CapabilityHelper
       error!(fn_node, :DEBUG_POST_NOT_WITH_CATCH)
     end
 
-    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
+    param_names = (fn_node.params || []).map { |p| p.name.to_s }
     rejected = (fn_node.params || []).filter_map do |p|
-      sym = current_scope.locals[p[:name].to_s]
+      sym = current_scope.locals[p.name.to_s]
       next unless sym && %i[locked write_locked versioned atomic].include?(sym.sync)
-      p[:name].to_s
+      p.name.to_s
     end.to_set
 
     rt = fn_node.return_type

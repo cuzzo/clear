@@ -1625,7 +1625,7 @@ module FixableHelper
     case slot.kind
     when :param
       param = slot.decl_node.params[slot.index]
-      "parameter '#{param[:name]}' of `#{slot.fn_name}`"
+      "parameter '#{param.name}' of `#{slot.fn_name}`"
     when :return
       "return type of `#{slot.fn_name}`"
     when :local

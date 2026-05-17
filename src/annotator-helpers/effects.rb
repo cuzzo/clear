@@ -363,8 +363,8 @@ module EffectTracker
       ret_type = raw.is_a?(FunctionSignature) ? raw.return_type : nil
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params&.any? { |p|
-        next unless p[:takes]
-        ti = Type.new(p[:type] || :Any)
+        next unless p.takes
+        ti = Type.new(p.type || :Any)
         ti.string? || ti.array? || ti.list_collection? || ti.map?
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?

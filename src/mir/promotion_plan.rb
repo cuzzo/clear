@@ -472,9 +472,9 @@ module CleanupClassifier
   #                                  *T; cleanup must NOT re-apply &.
   sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
-    (fn_node.params || []).select { |p| p[:takes] }.each do |p|
+    (fn_node.params || []).select { |p| p.takes }.each do |p|
       ti = p.type || Type.new(:Any)
-      name = p[:name].to_s
+      name = p.name.to_s
 
       base = takes_param_base_entry(ti, schema_lookup)
       next unless base

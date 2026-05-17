@@ -52,7 +52,7 @@ module WithMatchCheck
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
-    param_names = fn.params.map { |p| p[:name].to_s }.to_set
+    param_names = fn.params.map { |p| p.name.to_s }.to_set
 
     AST.walk_body(fn.body) do |node|
       next unless node.is_a?(AST::WithBlock)
@@ -231,7 +231,7 @@ module WithMatchCheck
       sig = sig_lookup.call(call_node.name.to_s)
       next unless sig.is_a?(FunctionSignature) && sig.requires
       sig.params.each_with_index do |param, idx|
-        pname = (param[:name] || param["name"]).to_s
+        pname = param.name.to_s
         fams = sig.requires[pname]
         next unless fams && fams.empty?
         arg = (call_node.args || [])[idx]
@@ -252,7 +252,7 @@ module WithMatchCheck
       next unless sig.requires && !sig.requires.empty?
 
       sig.params.each_with_index do |param, idx|
-        param_name = param[:name].to_s
+        param_name = param.name.to_s
         disjunction = sig.requires[param_name]
         next unless disjunction && !disjunction.empty?
 

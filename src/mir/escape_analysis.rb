@@ -313,7 +313,7 @@ module EscapeAnalysis
 
       args = call.args || []
       callee_fn.params.each_with_index do |param, idx|
-        next unless param[:takes]
+        next unless param.takes
         arg = args[idx]
         next unless arg
 
@@ -360,8 +360,8 @@ module EscapeAnalysis
 
       args = call.args || []
       callee_fn.params.each_with_index do |param, idx|
-        next unless param[:mutable]
-        param_t = param[:type]
+        next unless param.mutable
+        param_t = param.type
         param_t = param_t.is_a?(Type) ? param_t : (Type.new(param_t) rescue nil)
         next unless param_t && param_t.list_collection?
 
@@ -723,7 +723,7 @@ module EscapeAnalysis
         next if sites.empty?
 
         callee_fn.params.each_with_index do |param, idx|
-          entry = param[:symbol]
+          entry = param.symbol
           next unless entry
 
           # ── sync axis ────────────────────────────────────────────────
@@ -802,18 +802,18 @@ module EscapeAnalysis
   # entry.sync currently reflects an annotation, not a propagated value).
   sig { params(param: AST::Param).returns(T.nilable(T::Boolean)) }
   private_class_method def self.param_sync_was_declared?(param)
-    t = param[:type]
+    t = param.type
     t.is_a?(Type) && t.any_sync?
   end
 
   sig { params(fn_node: AST::FunctionDef, param: AST::Param, sync: Symbol).returns(T::Boolean) }
   private_class_method def self.param_accepts_caller_sync?(fn_node, param, sync)
-    t = param[:type]
+    t = param.type
     return true if t.is_a?(Type) && (t.shared? || t.any_sync?)
     return true unless sync == :atomic
 
     requires = fn_node.respond_to?(:requires) ? fn_node.requires : nil
-    families = requires && requires[param[:name].to_s]
+    families = requires && requires[param.name.to_s]
     return false unless families.respond_to?(:include?)
 
     case sync

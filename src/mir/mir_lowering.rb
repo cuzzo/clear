@@ -1166,12 +1166,12 @@ class MIRLowering
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
     mutable_scalar_params = (node.params || []).select { |p|
-      next false unless p[:mutable]
+      next false unless p.mutable
       p_type_obj = p.type || Type.new(:Any)
       next false if p_type_obj && (p_type_obj.collection? ||
                                     (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
-      !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
-    }.map { |p| p[:name] }.to_set
+      !transpile_type(p.type, is_param: true).start_with?("[]", "*")
+    }.map { |p| p.name }.to_set
     @current_fn_mutable_scalar_params = T.let(mutable_scalar_params, T.nilable(T::Set[T.untyped]))
 
     # Collection params: already passed by pointer, skip & at recursive
@@ -1183,21 +1183,21 @@ class MIRLowering
     @current_fn_collection_params = (node.params || []).select { |p|
       p_type_obj = p.type || Type.new(:Any)
       p_type_obj.needs_pointer_passing? ||
-        (p[:mutable] && p_type_obj.list_collection?)
-    }.map { |p| p[:name] }.to_set
+        (p.mutable && p_type_obj.list_collection?)
+    }.map { |p| p.name }.to_set
 
     # All param names: used to distinguish params (slices) from locals (ArrayLists)
-    @current_fn_param_names = (node.params || []).map { |p| p[:name] }.to_set
+    @current_fn_param_names = (node.params || []).map { |p| p.name }.to_set
 
     # Build param list
     params_mir = (node.params || []).map { |param|
-      p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
+      p_name = mutable_scalar_params.include?(param.name) ? "_m_#{param.name}" : param.name
       p_type_sym = param.type&.resolved
       p_type_obj = param.type || Type.new(:Any)
       is_user_struct = @struct_schemas&.key?(p_type_sym)
       # Atomic params need `anytype` so call sites pass the cell itself,
       # allowing WITH MATCH comptime probes to dispatch by actual family.
-      sym = param[:symbol]
+      sym = param.symbol
       atomic_sync = sym && (sym.sync == :atomic ||
                             (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
       zig_t = if p_type_obj.shared? && p_type_obj.resolved.to_s.match?(/\A[A-Z]\z/)
@@ -1209,17 +1209,17 @@ class MIRLowering
       elsif atomic_sync
         "anytype"
       else
-        transpile_type(param[:type], is_param: true)
+        transpile_type(param.type, is_param: true)
       end
-      zig_t = "*#{zig_t}" if mutable_scalar_params.include?(param[:name]) && zig_t != "anytype"
+      zig_t = "*#{zig_t}" if mutable_scalar_params.include?(param.name) && zig_t != "anytype"
       # `pointer_passed`: this param's receiver is a pointer-to-T at the
       # Zig level, so allocations made inside this function on its behalf
       # outlive the function. Mirrors `@current_fn_collection_params`'s
       # criteria so the MIR checker can independently verify the
       # allocator-routing decision (see INV-CROSS-FRAME-PARAM-ALLOC).
       pointer_passed = p_type_obj.needs_pointer_passing? ||
-                       (param[:mutable] && p_type_obj.list_collection?) ||
-                       mutable_scalar_params.include?(param[:name])
+                       (param.mutable && p_type_obj.list_collection?) ||
+                       mutable_scalar_params.include?(param.name)
       MIR::Param.new(p_name, zig_t, pointer_passed)
     }
 
@@ -1356,8 +1356,8 @@ class MIRLowering
 
     # Param suppressions for unused params
     (node.params || []).each do |p|
-      next if used_names.include?(p[:name])
-      suppress_name = mutable_scalar_params.include?(p[:name]) ? "_m_#{p[:name]}" : p[:name]
+      next if used_names.include?(p.name)
+      suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : p.name
       prologue << MIR::Suppress.new(suppress_name)
     end
 
@@ -1374,14 +1374,14 @@ class MIRLowering
     # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
     # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
     takes_mir = []
-    (node.params || []).select { |p| p[:takes] }.each do |p|
-      entry = @current_bindings[p[:name].to_s]
+    (node.params || []).select { |p| p.takes }.each do |p|
+      entry = @current_bindings[p.name.to_s]
       next unless entry && entry[:needs_cleanup]
       ti = p.type || Type.new(:Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
-      takes_mir << MIR::AllocMark.new(p[:name].to_s, entry[:alloc], ti)
-      takes_mir << MIR::Cleanup.new(zig_safe_name(p[:name].to_s), drop_entry)
+      takes_mir << MIR::AllocMark.new(p.name.to_s, entry[:alloc], ti)
+      takes_mir << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
     end
 
     # Lower body (track snapshot types for catch blocks)
@@ -1429,7 +1429,7 @@ class MIRLowering
                                  prologue + body_mir, :private, false, comptime_params)
 
       # Outer function: calls inner, catches errors
-      call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p[:name] } : (node.params || []).map { |p| p[:name] }
+      call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p.name } : (node.params || []).map { |p| p.name }
       inner_call = "#{inner_name}(#{call_args.join(', ')})"
 
       catch_zig, catch_clause_bodies = build_catch_clauses(node, fn_can_fail)
@@ -1481,9 +1481,9 @@ class MIRLowering
     # names verbatim. Forwarding the user-level name would produce
     # "use of undeclared identifier" at the wrapper's call site.
     mutable_scalar = (node.params || []).select { |p|
-      p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
-    }.map { |p| p[:name] }.to_set
-    forward_name = ->(p) { mutable_scalar.include?(p[:name]) ? "_m_#{p[:name]}" : p[:name] }
+      p.mutable && !transpile_type(p.type, is_param: true).start_with?("[]", "*")
+    }.map { |p| p.name }.to_set
+    forward_name = ->(p) { mutable_scalar.include?(p.name) ? "_m_#{p.name}" : p.name }
     arg_idents = (node.params || []).map { |p| MIR::Ident.new(forward_name.call(p)) }
     arg_idents = [MIR::Ident.new("rt")] + arg_idents if fn_needs_rt
 
@@ -1709,7 +1709,7 @@ class MIRLowering
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.each_with_index.map { |a, idx|
       # The annotator stamps was_moved when the callee takes ownership of this
-      # arg on success (param[:takes] || GIVE). That is the SINGLE source of
+      # arg on success (param.takes || GIVE). That is the SINGLE source of
       # truth for "callee takes" — the lowering must not re-derive it from
       # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
       takes = a.was_moved
@@ -1733,14 +1733,14 @@ class MIRLowering
         callee_param = params_list[idx]
       end
       callee_wants_mutable_list =
-        callee_param && callee_param[:mutable] &&
-        callee_param[:type].respond_to?(:list_collection?) &&
-        callee_param[:type].list_collection?
+        callee_param && callee_param.mutable &&
+        callee_param.type.respond_to?(:list_collection?) &&
+        callee_param.type.list_collection?
       callee_param_type = if callee_param
         callee_param.type || Type.new(:Any)
       end
       callee_wants_mutable_value =
-        callee_param && callee_param[:mutable] && a.is_a?(AST::Identifier) &&
+        callee_param && callee_param.mutable && a.is_a?(AST::Identifier) &&
         !callee_wants_mutable_list &&
         !(callee_param_type&.respond_to?(:needs_pointer_passing?) && callee_param_type.needs_pointer_passing?)
 
@@ -2115,13 +2115,13 @@ class MIRLowering
     # Skip extern/module functions: their CLEAR types (e.g. String -> []const u8) may differ
     # from the actual Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
     sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_sym) || @fn_sigs&.dig(node.name.to_s)
-    sig_params = (sig&.params || sig&.dig(:params) || []).reject { |p| p[:comptime] }
+    sig_params = (sig&.params || sig&.dig(:params) || []).reject { |p| p.comptime }
     arg_field_types = if sig&.module_alias
       nil
     else
       types = sig_params.each_with_index.map do |p, i|
         next nil unless i < runtime_ast_args.length
-        pt = p[:type]
+        pt = p.type
         pt.is_a?(Type) ? pt.zig_type(is_param: true) : (Type::ZIG_TYPE_MAP[pt] || nil)
       end
       types.empty? || types.all?(&:nil?) ? nil : types
@@ -2258,12 +2258,12 @@ class MIRLowering
 
     params_list = sig.params || []
     params_mir = [MIR::Param.new("_rt", "*Runtime", false)] + params_list.map { |p|
-      p_type = p[:type]
+      p_type = p.type
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
       pt_obj = p_type.is_a?(Type) ? p_type : (Type.new(p_type) rescue nil)
       pp = !!(pt_obj && (pt_obj.respond_to?(:needs_pointer_passing?) && pt_obj.needs_pointer_passing? ||
-                         (p[:mutable] && pt_obj.respond_to?(:list_collection?) && pt_obj.list_collection?)))
-      MIR::Param.new(p[:name], type_str, pp)
+                         (p.mutable && pt_obj.respond_to?(:list_collection?) && pt_obj.list_collection?)))
+      MIR::Param.new(p.name, type_str, pp)
     }
 
     ret_zig = sig.return_type.zig_type
@@ -2276,7 +2276,7 @@ class MIRLowering
     # Build body: suppressions + return expr
     body_mir = []
     body_mir << MIR::Suppress.new("_rt")
-    params_list.each { |p| body_mir << MIR::Suppress.new(p[:name]) }
+    params_list.each { |p| body_mir << MIR::Suppress.new(p.name) }
     body_mir << MIR::ReturnStmt.new(lower(node.body))
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
@@ -7285,7 +7285,7 @@ class MIRLowering
     return false unless callee_sig.requires
     param = callee_sig.params[idx]
     return false unless param
-    pname = (param[:name] || param["name"]).to_s
+    pname = param.name.to_s
     fams = callee_sig.requires[pname]
     # Universal poly: REQUIRES key present AND the family-set is empty.
     return false unless fams && fams.empty?

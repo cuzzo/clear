@@ -1141,12 +1141,22 @@ module AST
   # ExternFnDecl: EXTERN FN name<T>(params) RETURNS type [EFFECTS :alloc] FROM "module"
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
-  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) {
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) do
     include Locatable
     attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
     attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
     attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
-  }
+
+    # Same params seam as FunctionDef/LambdaLit: always Array<AST::Param>.
+    def initialize(*)
+      super
+      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
+    end
+
+    def params=(val)
+      self[:params] = (val || []).map { |p| Param.coerce(p) }
+    end
+  end
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).

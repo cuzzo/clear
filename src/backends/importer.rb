@@ -140,7 +140,7 @@ class ModuleImporter
 
       offending = []
       stmt.params.each do |p|
-        offending << "param '#{p[:name]}'" if auto_type?(p[:type])
+        offending << "param '#{p.name}'" if auto_type?(p.type)
       end
       offending << "return type" if auto_type?(stmt.return_type)
       next if offending.empty?

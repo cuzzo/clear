@@ -77,11 +77,11 @@ class AutoConstraintCollector
   def register_signature_slots
     @fn_nodes.each do |name, fn|
       (fn.params || []).each_with_index do |param, i|
-        next unless auto?(param[:type])
+        next unless auto?(param.type)
         @slots[[:param, name, i]] = Slot.new(
           kind: :param, fn_name: name, index: i,
           decl_node: fn, sources: [],
-          auto_token: param[:type].auto_token,
+          auto_token: param.type.auto_token,
         )
       end
       if auto?(fn.return_type)
@@ -150,7 +150,7 @@ class AutoConstraintCollector
     callee = @fn_nodes[call_node.name]
     return unless callee
     (callee.params || []).each_with_index do |param, i|
-      next unless auto?(param[:type])
+      next unless auto?(param.type)
       arg = call_node.args && call_node.args[i]
       next unless arg
       slot = @slots[[:param, callee.name, i]]
@@ -714,7 +714,7 @@ class OperatorEvidenceCollector
     map = {}
     (fn.params || []).each_with_index do |param, i|
       slot_id = [:param, fn.name, i]
-      map[param[:name]] = slot_id if @slots.key?(slot_id)
+      map[param.name] = slot_id if @slots.key?(slot_id)
     end
     walk_for_local_decls(fn.body) do |decl|
       slot_id = [:local, decl.object_id]

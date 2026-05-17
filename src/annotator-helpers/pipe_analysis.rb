@@ -756,7 +756,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
     params = sig.params
-    min_args = params.count { |p| p[:required] }
+    min_args = params.count { |p| p.required }
     max_args = params.size
 
     if min_args < 1 || max_args > 1
@@ -770,12 +770,12 @@ module PipeAnalysis
     # 2. Validate Type: The Input must match Parameter 1
     if max_args >= 1
       param = params[0]
-      expected = param[:type]
+      expected = param.type
       actual = node.left.resolved_type
 
       # Type.accepts? handles slice coercion (Number[3] -> Number[])
       unless is_safe_autocast?(actual, expected)
-        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param[:name]}'", index: 1, expected: expected, got: actual)
+        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param.name}'", index: 1, expected: expected, got: actual)
       end
     end
 

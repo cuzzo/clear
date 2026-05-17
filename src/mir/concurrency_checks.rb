@@ -157,7 +157,7 @@ module ConcurrencyChecks
         next unless sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
 
         sig.params.each_with_index do |param, idx|
-          pname = param[:name].to_s
+          pname = param.name.to_s
           next unless sig.requires.key?(pname)
           arg = node.args[idx]
           next unless arg
@@ -229,7 +229,7 @@ module ConcurrencyChecks
   sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[T.untyped]) }
   def collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
-    param_names = fn.params.map { |p| p[:name].to_s }.to_set
+    param_names = fn.params.map { |p| p.name.to_s }.to_set
     out = Set.new
     (with_block.capabilities || []).each do |cap|
       n = cap_var_name(cap[:var_node])

@@ -262,7 +262,7 @@ private
     return true if node.respond_to?(:type) && node.type.is_a?(Type) && node.type.auto?
     return true if node.respond_to?(:return_type) && node.return_type.is_a?(Type) && node.return_type.auto?
     if node.respond_to?(:params) && node.params.is_a?(Array)
-      return true if node.params.any? { |p| p[:type].is_a?(Type) && p[:type].auto? }
+      return true if node.params.any? { |p| p.type&.auto? }
     end
     if node.respond_to?(:each_pair)
       return node.each_pair.any? { |_, v| program_has_auto?(v) }
@@ -541,11 +541,11 @@ private
   def visit_ExternFnDecl(node)
     signature = FunctionSignature.new(
       params: node.params.map { |p| {
-        name: p[:name],
-        type: p[:type],
-        required: p[:default].nil?,
-        mutable: p[:mutable] || false,
-        comptime: p[:comptime] || false
+        name: p.name,
+        type: p.type,
+        required: p.default.nil?,
+        mutable: p.mutable || false,
+        comptime: p.comptime || false
       }},
       return_type: node.return_type || Type.new(:Any),
       visibility: :pub,
@@ -598,12 +598,12 @@ private
   def pre_register_function(node)
     signature = FunctionSignature.new(
       params: node.params.map { |p| {
-        name: p[:name],
-        type: p[:type],
-        required: p[:default].nil?,
-        default: p[:default],
-        mutable: p[:mutable],
-        takes: p[:takes] || false,
+        name: p.name,
+        type: p.type,
+        required: p.default.nil?,
+        default: p.default,
+        mutable: p.mutable,
+        takes: p.takes || false,
         sync: p.type&.any_sync? ? p.type.sync : nil
       }},
       return_type: node.return_type || Type.new(:Any),
@@ -660,7 +660,7 @@ private
     ))
 
     # 2. Validation & Lifetime
-    has_mutable_param = node.params.any? { |p| p[:mutable] }
+    has_mutable_param = node.params.any? { |p| p.mutable }
     if has_mutable_param && !node.name.end_with?("!")
       emit_style_mutable_param_needs_bang!(node)
     end
@@ -676,8 +676,8 @@ private
     # 3. Pre-declaration (so the function can be recursive)
     signature = FunctionSignature.new(
       params: node.params.map { |p| {
-        name: p[:name], type: p[:type], required: p[:default].nil?,
-        default: p[:default], mutable: p[:mutable], takes: p[:takes],
+        name: p.name, type: p.type, required: p.default.nil?,
+        default: p.default, mutable: p.mutable, takes: p.takes,
         sync: p.type&.any_sync? ? p.type.sync : nil
       }},
       return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
@@ -950,7 +950,7 @@ private
     require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
     collapsed = Set.new
     sig.requires.each do |param_name, _families|
-      idx = sig.params.find_index { |p| p[:name].to_s == param_name }
+      idx = sig.params.find_index { |p| p.name.to_s == param_name }
       next unless idx
       arg = args[idx]
       next unless arg
@@ -2294,7 +2294,7 @@ private
     explicit = (fn_node.type_params || []).map(&:to_s)
     return explicit unless explicit.empty?
     inferred = []
-    ([fn_node.return_type] + (fn_node.params || []).map { |p| p[:type] }).each do |type|
+    ([fn_node.return_type] + (fn_node.params || []).map { |p| p.type }).each do |type|
       collect_implicit_type_params(type, inferred, explicit)
     end
     (explicit + inferred).uniq
@@ -5604,7 +5604,7 @@ private
     return nil if primary == :wildcard
     primary_root = primary.to_s.split(".").first
 
-    param_index = func_type.params&.find_index { |p| p[:name] == primary_root }
+    param_index = func_type.params&.find_index { |p| p.name == primary_root }
     return nil unless param_index
 
     args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
@@ -5969,7 +5969,7 @@ private
     @fn_nodes.each_value do |fn|
       next unless fn.respond_to?(:params)
       fn.params.each do |p|
-        return p[:name].to_s if p[:symbol].equal?(sym)
+        return p.name.to_s if p.symbol.equal?(sym)
       end
     end
     nil

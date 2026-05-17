@@ -54,7 +54,7 @@ class Scope
   #
   # The cost: storage / sync / type changes that happen AFTER the body
   # has been visited (notably `EscapeAnalysis.propagate_caller_sync!`,
-  # which mutates `param[:symbol]`) do NOT propagate to the deep-copied
+  # which mutates `param.symbol`) do NOT propagate to the deep-copied
   # entries inside nested scopes. A pass that reads `node.symbol.storage`
   # off an Identifier inside a nested scope sees the pre-propagation
   # value.
@@ -62,7 +62,7 @@ class Scope
   # The rule for any post-annotation pass that needs a param's CURRENT
   # storage / sync:
   #
-  #   * mutate `param[:symbol]` (the function-level entry)
+  #   * mutate `param.symbol` (the function-level entry)
   #   * read against `Scope.live_param_syms(fn)` to refresh stale
   #     references
   #
@@ -101,7 +101,7 @@ class Scope
 
   # Build a {param_name => live SymbolEntry} map from a FunctionDef.
   #
-  # The "live" entry is the one stored on `param[:symbol]` -- the entry
+  # The "live" entry is the one stored on `param.symbol` -- the entry
   # that lives at the function scope and that `propagate_caller_sync!`
   # mutates in place. Any pass that has a `capture_symbols` (or similar)
   # cache of SymbolEntry references collected during annotation should
@@ -114,7 +114,7 @@ class Scope
   def self.live_param_syms(fn)
     return {} unless fn.respond_to?(:params)
     (fn.params || []).each_with_object({}) do |p, h|
-      h[p[:name].to_s] = p[:symbol] if p[:symbol]
+      h[p.name.to_s] = p.symbol if p.symbol
     end
   end
 

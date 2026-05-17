@@ -2094,7 +2094,7 @@ class Type
     # 2c. Function type: FN(T, ...) -> R  =>  *const fn(*Runtime, T, ...) anyerror!R
     if fn_type?
       param_types_zig = @raw.params.map do |p|
-        t = p[:type]
+        t = p.type
         t.is_a?(Type) ? t.zig_type(is_param: true) : Type.new(t).zig_type(is_param: true)
       end
       ret_zig = @raw.return_type.zig_type

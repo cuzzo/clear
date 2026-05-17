@@ -69,12 +69,12 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
       {
-        name: param[:name],
-        type: param[:type],
-        required: param[:default].nil?,
-        default: param[:default],
-        mutable: param[:mutable] || false,
-        takes: param[:takes] || false
+        name: param.name,
+        type: param.type,
+        required: param.default.nil?,
+        default: param.default,
+        mutable: param.mutable || false,
+        takes: param.takes || false
       }
     end
 
@@ -135,7 +135,7 @@ module FunctionAnalysis
         comptime_type_args = []
         params = func_type.params || []
         params.each_with_index do |p, i|
-          if p[:comptime] && args[i].is_a?(AST::Identifier)
+          if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
             args[i].full_type = :Type  # Mark as type-value, not a variable
           end
@@ -305,7 +305,7 @@ module FunctionAnalysis
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     params = signature.params
-    min_args = params.count { |param| param[:required] }
+    min_args = params.count { |param| param.required }
     max_args = params.size
     given_args = node.args.size
 
@@ -319,11 +319,11 @@ module FunctionAnalysis
 
     if given_args < max_args
       params[given_args...max_args].each do |param|
-        next if param[:required]
-        default = param[:default]
+        next if param.required
+        default = param.default
         injected = case default
         when AST::DefaultLit
-          type_name = param[:type].is_a?(Symbol) ? param[:type].to_s : param[:type].to_s
+          type_name = param.type.to_s
           AST::StructLit.new(default.token, type_name, {}, nil)
         else
           default.dup
@@ -339,16 +339,16 @@ module FunctionAnalysis
 
     node.args.each_with_index do |arg_node, i|
       param = params[i]
-      next if param[:comptime]  # comptime type params are not type-checked
+      next if param.comptime  # comptime type params are not type-checked
       verify_param_lifetime!(arg_node, param, signature)
 
-      if param[:mutable]
+      if param.mutable
         if !arg_node.is_a?(AST::Identifier)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param[:name])
+          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param.name)
         end
 
         if current_scope.is_immutable?(arg_node.name)
-          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param[:name])
+          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param.name)
         end
 
         # Mark only the SymbolEntry as mutated-through-call. The callee receives a mutable reference
@@ -368,7 +368,7 @@ module FunctionAnalysis
 
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
-      if param[:takes] || is_give
+      if param.takes || is_give
         # Reject borrowed values passed to TAKES params.
         # Container index access (arr[i], map[key]) returns a borrow -
         # you cannot take ownership of data inside a container.
@@ -386,7 +386,7 @@ module FunctionAnalysis
 
         # Ensure @list args to TAKES params are heap-owned (implicit COPY).
         if inner_node.is_a?(AST::Identifier)
-          owned = ensure_owned_value!(inner_node, param[:type])
+          owned = ensure_owned_value!(inner_node, param.type)
           node.args[i] = owned if owned
         end
 
@@ -401,7 +401,7 @@ module FunctionAnalysis
         move_if_not_copyable!(
           inner_node,
           action: is_give ? :give : :takes,
-          consumer_param_type: param[:type],
+          consumer_param_type: param.type,
         )
         inner_node.was_moved = true
         arg_node.was_moved = true
@@ -414,16 +414,16 @@ module FunctionAnalysis
 
       # Weak refs must be RESOLVE'd before passing to concrete params.
       arg_ti = arg_node.respond_to?(:type_info) ? arg_node.type_info : nil
-      expected_raw = param[:type]
+      expected_raw = param.type
       if arg_ti&.link? && expected_raw != :Any
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
         unless param_type_obj&.link?
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param[:name])
+          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param.name)
         end
       end
 
-      expected = param[:type]
+      expected = param.type
       actual = arg_node.resolved_type
 
       match = false
@@ -439,7 +439,7 @@ module FunctionAnalysis
         elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
               actual_type_obj.raw.reentrant && !expected_type_obj.raw.reentrant
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param[:name])
+          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)
         end
       end
 
@@ -506,7 +506,7 @@ module FunctionAnalysis
       current_path = get_path_to_root(arg_node)
 
       next if current_path.nil?
-      is_mutable = param[:mutable]
+      is_mutable = param.mutable
 
       encountered_args.each_with_index do |prev, prev_index|
         # Mutable aliases conflict when their root paths overlap.
@@ -535,8 +535,8 @@ module FunctionAnalysis
     sym = arg_node.symbol
     return false unless sym&.sync == :atomic
     return false if sym.respond_to?(:layout) && sym.layout == :indirect
-    return false if param[:sync] == :atomic
-    return false if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+    return false if param.sync == :atomic
+    return false if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
     return false if expected_type_obj.any? || expected_type_obj.fn_type?
     return false if expected_type_obj.shared? || expected_type_obj.any_sync?
 
@@ -549,13 +549,13 @@ module FunctionAnalysis
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.sync == :atomic
-    ptype = param[:type]
+    ptype = param.type
     return true if ptype.is_a?(Type) && ptype.sync == :atomic
-    return true if param[:sync] == :atomic
-    return true if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+    return true if param.sync == :atomic
+    return true if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
 
     requires = signature.requires
-    families = requires && requires[param[:name].to_s]
+    families = requires && requires[param.name.to_s]
     families.respond_to?(:include?) && families.include?(:ATOMIC)
   end
 
@@ -593,7 +593,7 @@ module FunctionAnalysis
     return true if !arg_node.is_a?(AST::Identifier)
 
     @og = T.let(@og, T.untyped)
-    if param[:mutable] && !@og.can_write?(arg_node.name)
+    if param.mutable && !@og.can_write?(arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
@@ -602,7 +602,7 @@ module FunctionAnalysis
     lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
     return true if lifetime_paths.empty?
 
-    borrow_type = param[:mutable] ? :mutable : :immutable
+    borrow_type = param.mutable ? :mutable : :immutable
     return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
     # If `param` is named in the lifetime sources (any of the multi-
@@ -613,9 +613,9 @@ module FunctionAnalysis
       next [:wildcard] if p == :wildcard
       [p.to_s.split(".").first]
     end
-    return true unless base_paths.include?(:wildcard) || base_paths.include?(param[:name])
+    return true unless base_paths.include?(:wildcard) || base_paths.include?(param.name)
 
-    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param[:name])
+    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param.name)
   end
 
   # `node.return_lifetime` shapes:
@@ -682,14 +682,14 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
     root_param_name = T.must(path).first.to_s
-    param = node.params.find { |p| p[:name] == root_param_name }
+    param = node.params.find { |p| p.name == root_param_name }
 
     if param.nil?
       error!(node, :LIFETIME_ROOT_NOT_PARAM, name: root_param_name)
     end
 
     # Extract the resolved type name (Type objects from parse_type_annotation)
-    param_type = param[:type]
+    param_type = param.type
     current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
 
     T.must(path).drop(1).each do |field_sym|
@@ -802,10 +802,10 @@ module FunctionAnalysis
       og_declare(param.name, nil, param.type)
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
-      unless param[:takes]
-        @og[param[:name]]&.kind = :borrowed
+      unless param.takes
+        @og[param.name]&.kind = :borrowed
       end
-      param[:type]
+      param.type
     end
   end
 

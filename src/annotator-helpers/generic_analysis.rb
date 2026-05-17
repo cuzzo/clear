@@ -301,7 +301,7 @@ module GenericAnalysis
       end
       next unless actual_type.shared?
       shared_args << {
-        name: param[:name],
+        name: param.name,
         type: generic_shared_payload_binding(actual_type)
       }
     end
