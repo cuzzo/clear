@@ -531,9 +531,7 @@ class MIRPass
     return unless last_expr
     return if last_expr.is_a?(AST::Assignment)
 
-    ft = last_expr.full_type
-    return unless ft
-    t = ft.is_a?(Type) ? ft : Type.new(ft)
+    t = last_expr.full_type
     return if t.void?
 
     bg_node.exit_promote = { strategy: :string_dupe } if bg_exit_needs_string_dupe?(last_expr, t)
@@ -566,9 +564,8 @@ class MIRPass
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       if stmt.is_a?(AST::YieldExpr)
-        ft = stmt.expr.full_type
-        t = ft.is_a?(Type) ? ft : (ft ? Type.new(ft) : nil)
-        stmt.yield_dupe = true if t && bg_exit_needs_string_dupe?(stmt.expr, t)
+        t = stmt.expr.full_type
+        stmt.yield_dupe = true if bg_exit_needs_string_dupe?(stmt.expr, t)
       else
         case stmt
         when AST::WhileLoop    then walk_stream_yields(stmt.do_branch)
@@ -616,10 +613,7 @@ class MIRPass
   sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode).returns(T.nilable(T::Boolean)) }
   def insert_catch_string_dupe!(result, ret_node)
     return unless ret_node.value
-    ft = ret_node.value.full_type
-    return unless ft
-    t = Type.new(ft)
-    return unless t.string?
+    return unless ret_node.value.full_type.string?
     ret_node.catch_string_dupe_ret = true
   end
 
@@ -777,9 +771,9 @@ class MIRPass
     return unless entry && entry[:has_moved_guard] && entry[:needs_cleanup]
 
     ti = ident.full_type
-    return if ti&.string?
+    return if ti.string?
 
-    is_atomic_ptr = ti && ti.sync == :atomic && ti.layout == :indirect
+    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     # RC types: only consume on explicit GIVE. AtomicPtr is represented
     # as shared for escape/lifetime purposes, but its runtime value is a
     # unique heap cell pointer, not an Arc handle.
@@ -801,8 +795,7 @@ class MIRPass
     return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
 
     ti = stmt.full_type
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    zig_type = ti ? (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s) : "UNKNOWN"
+    zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc], zig_type: zig_type }
   end
 
