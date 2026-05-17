@@ -27,6 +27,27 @@ module NilKillRuntimeTrace
   @shape_lookup = {}
   @path_cache = {}
   @target_cache = {}
+  # Per-(path,line) memo of the constant-per-callsite context (abs,
+  # plan, bucket, site prefix, method-id string). The wrapper injects
+  # owner/method_id/kind/__FILE__/line as LITERALS, so all of this is
+  # invariant for a given instrumented def -- recomputing+allocating
+  # it every call was the dominant collect cost (array key + to_s +
+  # plan lookup + abs interpolation, x call/return/raise). Bucket
+  # identity stays anchored in @methods[key], so concurrent first-
+  # calls still converge on one bucket (no behaviour change).
+  @site_ctx = {}
+  # Type-signature memo for collection shapes. container_shape and
+  # collection_type_shape_key are PURE FUNCTIONS of the bounded
+  # sampled element CLASSES (not values); the recorder only reads /
+  # merges from the result, never mutates it. So a collection whose
+  # sampled elements are all one scalar class yields byte-identical
+  # output every call -- cache it under a nested-hash class key
+  # (alloc-free lookup). Heterogeneous / nested / depth<=0 fall back
+  # to the original code path unchanged.
+  @cshape = {}
+  @ctsk = {}
+  @cls_name = {}
+  @sym_s = Hash.new { |h, k| h[k] = (k.is_a?(String) ? k : k.to_s).freeze }
   @method_metadata = {}
   @planned_methods_by_class = nil
   @targeted_tracepoints = []
@@ -179,7 +200,29 @@ module NilKillRuntimeTrace
     return "NilClass" if value.nil?
     cls = value.class rescue nil
     return "T.untyped" unless cls
-    safe_module_name(cls) || "T.untyped"
+    n = @cls_name[cls]
+    return n if n
+
+    @cls_name[cls] = (safe_module_name(cls) || "T.untyped")
+  end
+
+  # Memoized constant-per-callsite context, or false if `path` is not
+  # a target (negative cached too). Anchors bucket on @methods[key]
+  # via method_bucket so racing first-calls still share one bucket.
+  def self.site_ctx(owner, method_id, kind, path, line)
+    by_line = (@site_ctx[path.to_s] ||= {})
+    c = by_line[line]
+    return c unless c.nil?
+
+    abs = abs_path(path)
+    return (by_line[line] = false) unless target_path?(abs)
+
+    ms = @sym_s[method_id]
+    key = [owner, ms, kind, abs, line]
+    plan = source_method_plan(owner, method_id, kind, abs, line)
+    by_line[line] = { abs: abs, method_s: ms, plan: plan,
+                      bucket: method_bucket(key, plan),
+                      prefix: "#{abs}:#{line}" }
   end
 
   def self.shape_payload(key)
@@ -196,7 +239,72 @@ module NilKillRuntimeTrace
     remember_shape("class:#{cls}", { "kind" => "class", "name" => cls })
   end
 
+  # The single scalar element class shared by the first ELEMENT_SAMPLE
+  # elements, or :empty, or nil if heterogeneous / nested-collection /
+  # not eligible (-> caller uses the original full path). Allocation-
+  # free (index-bounded scan, no intermediate arrays).
+  def self.homog_scalar_class(value)
+    n = 0
+    c0 = nil
+    value.each do |item|
+      cls = item.class
+      return nil if cls == Array || cls == Hash || cls == Set
+
+      if n.zero? then c0 = cls
+      elsif cls != c0 then return nil
+      end
+      n += 1
+      break if n >= ELEMENT_SAMPLE
+    end
+    n.zero? ? :empty : c0
+  end
+
   def self.collection_type_shape_key(value, depth = 3)
+    if depth.positive?
+      case value
+      when Array, Set
+        c = homog_scalar_class(value)
+        if c
+          m = (@ctsk[value.class] ||= {})
+          k = m[c]
+          return k if k
+
+          return (m[c] = collection_type_shape_key_full(value, depth))
+        end
+      when Hash
+        kc = nil
+        vc = nil
+        nn = 0
+        homog = true
+        value.each do |hk, hv|
+          kk = hk.class
+          vv = hv.class
+          if kk == Array || kk == Hash || kk == Set ||
+             vv == Array || vv == Hash || vv == Set
+            homog = false
+            break
+          end
+          if nn.zero? then kc = kk; vc = vv
+          elsif kk != kc || vv != vc then homog = false; break
+          end
+          nn += 1
+          break if nn >= ELEMENT_SAMPLE
+        end
+        if homog
+          kc ||= :empty
+          mk = (@ctsk[:h] ||= {})
+          mkc = (mk[kc] ||= {})
+          k = mkc[vc]
+          return k if k
+
+          return (mkc[vc] = collection_type_shape_key_full(value, depth))
+        end
+      end
+    end
+    collection_type_shape_key_full(value, depth)
+  end
+
+  def self.collection_type_shape_key_full(value, depth = 3)
     return class_shape_key(value) unless depth.positive?
     case value
     when Array
@@ -231,7 +339,73 @@ module NilKillRuntimeTrace
     collection_type_shape_key(value) if collection_value?(value)
   end
 
+  # Type-signature-memoized: the result is a pure function of the
+  # sampled element classes and is only READ / merged-from by the
+  # recorder. Cached Sets are frozen so a regression that tried to
+  # mutate them fails loudly instead of corrupting the memo. Hetero /
+  # nested / depth fall through to the unchanged full computation.
   def self.container_shape(value)
+    case value
+    when Array, Set
+      c = homog_scalar_class(value)
+      if c
+        m = (@cshape[value.class] ||= {})
+        cached = m[c]
+        return cached if cached
+
+        return (m[c] = freeze_shape(container_shape_full(value)))
+      end
+    when Hash
+      kc = nil
+      vc = nil
+      nn = 0
+      homog = true
+      value.each do |hk, hv|
+        kk = hk.class
+        vv = hv.class
+        if kk == Array || kk == Hash || kk == Set ||
+           vv == Array || vv == Hash || vv == Set
+          homog = false
+          break
+        end
+        if nn.zero? then kc = kk; vc = vv
+        elsif kk != kc || vv != vc then homog = false; break
+        end
+        nn += 1
+        break if nn >= ELEMENT_SAMPLE
+      end
+      if homog
+        kc ||= :empty
+        mk = (@cshape[:h] ||= {})
+        mkc = (mk[kc] ||= {})
+        cached = mkc[vc]
+        return cached if cached
+
+        return (mkc[vc] = freeze_shape(container_shape_full(value)))
+      end
+    end
+    container_shape_full(value)
+  end
+
+  # Freeze the Sets inside a memoized container_shape tuple (read-only
+  # by the recorder; merge-from a frozen Set is allowed).
+  def self.freeze_shape(shape)
+    return shape unless shape
+
+    case shape[0]
+    when :array
+      shape[1].freeze
+      shape[2].freeze
+    when :hash
+      shape[1][0].freeze
+      shape[1][1].freeze
+      shape[2][0].freeze
+      shape[2][1].freeze
+    end
+    shape.freeze
+  end
+
+  def self.container_shape_full(value)
     case value
     when Array, Set
       [:array, value.first(ELEMENT_SAMPLE).map { |item| class_name(item) }.to_set,
@@ -261,7 +435,7 @@ module NilKillRuntimeTrace
   end
 
   def self.owner_identity_key(owner)
-    [owner[:owner_kind].to_s, owner[:name].to_s, File.expand_path(owner[:path], ROOT), owner[:line]]
+    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line]]
   end
 
   def self.collection_kind(value)
@@ -275,7 +449,7 @@ module NilKillRuntimeTrace
   end
 
   def self.collection_key(value, owner)
-    [owner[:owner_kind].to_s, owner[:name].to_s, File.expand_path(owner[:path], ROOT), owner[:line], collection_kind(value)]
+    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line], collection_kind(value)]
   end
 
   def self.record_collection_snapshot(value, owner)
@@ -299,35 +473,39 @@ module NilKillRuntimeTrace
                                       elem_shapes: Set.new, key_shapes: Set.new, value_shapes: Set.new, mutation_sites: Hash.new(0) })
       rec[:calls] += 1
       rec[:classes] << class_name(value)
-      rec[:elem_classes].merge(Array(elem_classes))
-      rec[:key_classes].merge(Array(key_classes))
-      rec[:value_classes].merge(Array(value_classes))
-      rec[:elem_shapes].merge(Array(elem_shapes))
-      rec[:key_shapes].merge(Array(key_shapes))
-      rec[:value_shapes].merge(Array(value_shapes))
+      # merge accepts any enumerable; the args are already Sets (from
+      # the memoized container_shape) or the [] kwarg default. The
+      # Array() wrapper allocated a fresh array EVERY collection call
+      # for nothing -- same elements merged, byte-identical output.
+      rec[:elem_classes].merge(elem_classes)
+      rec[:key_classes].merge(key_classes)
+      rec[:value_classes].merge(value_classes)
+      rec[:elem_shapes].merge(elem_shapes)
+      rec[:key_shapes].merge(key_shapes)
+      rec[:value_shapes].merge(value_shapes)
       rec[:mutation_sites][mutation_site] += 1 if mutation_site
       bucket = owner[:bucket]
       if bucket
         case owner[:owner_kind].to_s
         when "method_param"
           if kind == "hash"
-            bucket[:param_kv][owner[:name]][0].merge(Array(key_classes))
-            bucket[:param_kv][owner[:name]][1].merge(Array(value_classes))
-            bucket[:param_kv_shapes][owner[:name]][0].merge(Array(key_shapes))
-            bucket[:param_kv_shapes][owner[:name]][1].merge(Array(value_shapes))
+            bucket[:param_kv][owner[:name]][0].merge(key_classes)
+            bucket[:param_kv][owner[:name]][1].merge(value_classes)
+            bucket[:param_kv_shapes][owner[:name]][0].merge(key_shapes)
+            bucket[:param_kv_shapes][owner[:name]][1].merge(value_shapes)
           else
-            bucket[:param_elem][owner[:name]].merge(Array(elem_classes))
-            bucket[:param_elem_shapes][owner[:name]].merge(Array(elem_shapes))
+            bucket[:param_elem][owner[:name]].merge(elem_classes)
+            bucket[:param_elem_shapes][owner[:name]].merge(elem_shapes)
           end
         when "method_return"
           if kind == "hash"
-            bucket[:return_kv][0].merge(Array(key_classes))
-            bucket[:return_kv][1].merge(Array(value_classes))
-            bucket[:return_kv_shapes][0].merge(Array(key_shapes))
-            bucket[:return_kv_shapes][1].merge(Array(value_shapes))
+            bucket[:return_kv][0].merge(key_classes)
+            bucket[:return_kv][1].merge(value_classes)
+            bucket[:return_kv_shapes][0].merge(key_shapes)
+            bucket[:return_kv_shapes][1].merge(value_shapes)
           else
-            bucket[:return_elem].merge(Array(elem_classes))
-            bucket[:return_elem_shapes].merge(Array(elem_shapes))
+            bucket[:return_elem].merge(elem_classes)
+            bucket[:return_elem_shapes].merge(elem_shapes)
           end
         end
       end
@@ -519,20 +697,21 @@ module NilKillRuntimeTrace
 
   def self.record_source_method_call(owner, method_id, kind, path, line, params)
     return if Thread.current[:__nil_kill_collection_hook]
-    abs = abs_path(path)
-    return unless target_path?(abs)
-    plan = source_method_plan(owner, method_id, kind, abs, line)
-    key = [owner, method_id.to_s, kind, abs, line]
-    b = method_bucket(key, plan)
+    ctx = site_ctx(owner, method_id, kind, path, line)
+    return unless ctx
+
+    abs = ctx[:abs]
+    plan = ctx[:plan]
+    b = ctx[:bucket]
     with_collection_hooks_disabled do
       @lock.synchronize do
         b[:calls] += 1
         params.each do |name, value|
           next unless sample_param?(plan, name)
           cls = class_name(value)
-          name = name.to_s
+          name = @sym_s[name]
           b[:params_by_name][name] << cls
-          b[:param_sites][name][site_key("#{abs}:#{line}", cls)] += 1
+          b[:param_sites][name]["#{ctx[:prefix]}:#{cls}"] += 1
           shape = container_shape(value)
           if shape
             if shape[0] == :array
@@ -554,12 +733,12 @@ module NilKillRuntimeTrace
   end
 
   def self.record_source_method_return(owner, method_id, kind, path, line, value)
-    abs = abs_path(path)
-    return value unless target_path?(abs)
-    plan = source_method_plan(owner, method_id, kind, abs, line)
-    return value unless sample_return?(plan)
-    key = [owner, method_id.to_s, kind, abs, line]
-    b = method_bucket(key, plan)
+    ctx = site_ctx(owner, method_id, kind, path, line)
+    return value unless ctx
+    return value unless sample_return?(ctx[:plan])
+
+    abs = ctx[:abs]
+    b = ctx[:bucket]
     with_collection_hooks_disabled do
       @lock.synchronize do
         b[:ok_calls] += 1
@@ -569,14 +748,14 @@ module NilKillRuntimeTrace
           if shape[0] == :array
             b[:return_elem].merge(shape[1])
             b[:return_elem_shapes].merge(shape[2])
-            record_tuple("return", abs, line, method_id.to_s, value)
+            record_tuple("return", abs, line, ctx[:method_s], value)
           else
             b[:return_kv][0].merge(shape[1][0])
             b[:return_kv][1].merge(shape[1][1])
             b[:return_kv_shapes][0].merge(shape[2][0])
             b[:return_kv_shapes][1].merge(shape[2][1])
           end
-          register_collection_owner(value, owner_kind: "method_return", name: method_id.to_s, path: abs, line: line, bucket: b)
+          register_collection_owner(value, owner_kind: "method_return", name: ctx[:method_s], path: abs, line: line, bucket: b)
         end
       end
     end
@@ -584,11 +763,10 @@ module NilKillRuntimeTrace
   end
 
   def self.record_source_method_raise(owner, method_id, kind, path, line, error)
-    abs = abs_path(path)
-    return unless target_path?(abs)
-    plan = source_method_plan(owner, method_id, kind, abs, line)
-    key = [owner, method_id.to_s, kind, abs, line]
-    b = method_bucket(key, plan)
+    ctx = site_ctx(owner, method_id, kind, path, line)
+    return unless ctx
+
+    b = ctx[:bucket]
     @lock.synchronize do
       b[:raised_calls] += 1
       b[:raised] << class_name(error)
@@ -1179,7 +1357,7 @@ module NilKillRuntimeTrace
     complete = sampled.size == value.size
     mixed = types.uniq.size > 1
     return unless complete || mixed
-    key = [kind, File.expand_path(path, ROOT), line, slot.to_s, complete ? value.size : ">=#{ELEMENT_SAMPLE}", types]
+    key = [kind, abs_path(path), line, slot.to_s, complete ? value.size : ">=#{ELEMENT_SAMPLE}", types]
     rec = (@tuples[key] ||= { calls: 0, complete: complete, mixed: mixed })
     rec[:calls] += 1
     rec[:complete] &&= complete
