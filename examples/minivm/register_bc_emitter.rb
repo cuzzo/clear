@@ -2191,7 +2191,10 @@ class RegisterBcEmitter
       compile_i64_expr(expr.expr)
     when MIR::DeepCopy
       compile_i64_expr(expr.source)
-    when MIR::Deref
+    when MIR::Deref, MIR::AddressOf
+      # &x / *x for a MUTABLE/by-pointer scalar arg. The bc VM passes
+      # scalars by register value (mutation is shared when the callee
+      # is inlined); unwrap to the inner value.
       compile_i64_expr(expr.expr)
     when MIR::BlockExpr
       compile_i64_block_expr(expr)
@@ -2253,7 +2256,7 @@ class RegisterBcEmitter
       compile_f64_try_catch(expr)
     when MIR::DeepCopy
       compile_f64_expr(expr.source)
-    when MIR::Deref
+    when MIR::Deref, MIR::AddressOf
       compile_f64_expr(expr.expr)
     when MIR::Orelse
       compile_f64_orelse(expr)
@@ -2301,7 +2304,7 @@ class RegisterBcEmitter
       compile_string_expr(expr.source)
     when MIR::HeapCreate
       compile_string_expr(expr.init)
-    when MIR::Deref
+    when MIR::Deref, MIR::AddressOf
       compile_string_expr(expr.expr)
     when MIR::BinOp
       unless expr.op.to_s == "+"

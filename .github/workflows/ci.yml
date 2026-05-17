@@ -254,7 +254,11 @@ jobs:
       #
       # 2026-05-17: 240 -> 241. WITH-release write-back defer no-op
       # (367 pending->pass). Only 93 (AddressOf-i64) pending now.
-      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=241
+      #
+      # 2026-05-17: 241 -> 242. AddressOf/Deref unwrap in scalar
+      # compile paths (93_tight_loop, MUTABLE-scalar by-pointer arg).
+      # The full 242-entry allowlist now passes; 0 pending.
+      - run: bundle exec ruby examples/minivm/run_tests.rb --vm=register --min-pass=242
 
   module-integration:
     name: transpile-tests/module-integration (zig build test)
