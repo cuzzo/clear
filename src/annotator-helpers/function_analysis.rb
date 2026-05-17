@@ -68,14 +68,14 @@ module FunctionAnalysis
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
-      {
+      AST::Param.new(
         name: param.name,
         type: param.type,
         required: param.default.nil?,
         default: param.default,
         mutable: param.mutable || false,
         takes: param.takes || false
-      }
+      )
     end
 
     FunctionSignature.new(params: normalized_params, return_type: Type.new(return_type))
@@ -280,22 +280,22 @@ module FunctionAnalysis
     params = config.arg_spec.each_with_index.map do |arg_def, i|
       if arg_def.is_a?(Hash)
         # Extended format: { type: :Int64, mutable: true, takes: false }
-        {
+        AST::Param.new(
           name: arg_def[:name] || "arg#{i}",
           type: arg_def[:type],
           required: true,
           mutable: arg_def[:mutable] || false,
           takes: arg_def[:takes] || false
-        }
+        )
       else
         # Simple format: just a type symbol
-        {
+        AST::Param.new(
           name: "arg#{i}",
           type: arg_def,
           required: true,
           mutable: false,
           takes: false
-        }
+        )
       end
     end
 

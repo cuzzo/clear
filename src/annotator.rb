@@ -536,13 +536,13 @@ private
   sig { params(node: AST::ExternFnDecl).returns(Symbol) }
   def visit_ExternFnDecl(node)
     signature = FunctionSignature.new(
-      params: node.params.map { |p| {
+      params: node.params.map { |p| AST::Param.new(
         name: p.name,
         type: p.type,
         required: p.default.nil?,
         mutable: p.mutable || false,
         comptime: p.comptime || false
-      }},
+      )},
       return_type: node.return_type || Type.new(:Any),
       visibility: :pub,
       extern: true,
@@ -593,7 +593,7 @@ private
   sig { params(node: AST::FunctionDef).returns(SymbolEntry) }
   def pre_register_function(node)
     signature = FunctionSignature.new(
-      params: node.params.map { |p| {
+      params: node.params.map { |p| AST::Param.new(
         name: p.name,
         type: p.type,
         required: p.default.nil?,
@@ -601,7 +601,7 @@ private
         mutable: p.mutable,
         takes: p.takes || false,
         sync: p.type&.any_sync? ? p.type.sync : nil
-      }},
+      )},
       return_type: node.return_type || Type.new(:Any),
       return_lifetime: get_lifetime_path(node),
       visibility: node.visibility,
@@ -671,11 +671,11 @@ private
 
     # 3. Pre-declaration (so the function can be recursive)
     signature = FunctionSignature.new(
-      params: node.params.map { |p| {
+      params: node.params.map { |p| AST::Param.new(
         name: p.name, type: p.type, required: p.default.nil?,
         default: p.default, mutable: p.mutable, takes: p.takes,
         sync: p.type&.any_sync? ? p.type.sync : nil
-      }},
+      )},
       return_type: node.return_type || Type.new(:Any), return_lifetime: lifetime_paths,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,

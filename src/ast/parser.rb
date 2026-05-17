@@ -833,8 +833,8 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
-  def parse_argument_list()
+  sig { params(as_param: T::Boolean).returns(T.nilable(T::Array[T.untyped])) }
+  def parse_argument_list(as_param: true)
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
       is_mutable = match!(:KEYWORD, 'MUTABLE')
@@ -872,10 +872,16 @@ class Parser
         end
       end
 
-      # Plain Hash: this comma-seq block is shared by FN-param and
-      # USE-capture parsing. Params are coerced to AST::Param at the
-      # FunctionDef/LambdaLit seam; captures stay Hashes.
-      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
+      # Shared by FN-param and USE-capture parsing. Params build an
+      # AST::Param directly (single representation, no Hash seam);
+      # USE-captures stay Hashes (distinct downstream shape).
+      if as_param
+        AST::Param.new(name: p_name, type: p_type, default: default_val,
+                       mutable: is_mutable, takes: takes,
+                       comptime: is_comptime, name_token: name_tok)
+      else
+        { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
+      end
     end
      .last # always ignore the first token
   end
@@ -1147,7 +1153,7 @@ class Parser
           p_name = T.must(consume(:VAR_ID)).value
           consume(:CHAR, ':')
           p_type = parse_type_annotation
-          { name: p_name, type: p_type }
+          AST::Param.new(name: p_name, type: p_type)
         end
         ret_type = nil
         if match!(:KEYWORD, 'RETURNS')
@@ -1259,7 +1265,7 @@ class Parser
 
     captures = []
     if match!(:KEYWORD, 'USE')
-      captures = parse_argument_list()
+      captures = parse_argument_list(as_param: false)
     end
 
     # Return lifetime syntax:
@@ -2582,7 +2588,7 @@ class Parser
       params = parse_argument_list()
       captures = []
       if match!(:KEYWORD, 'USE')
-        captures = parse_argument_list()
+        captures = parse_argument_list(as_param: false)
       end
       consume(:ARROW, '->')
       body = parse_expression
@@ -2706,7 +2712,7 @@ class Parser
     end
     Type.new(FunctionSignature.new(
       params: param_types.each_with_index.map { |t, i|
-        { name: "arg#{i}", type: t, required: true, mutable: false, takes: false }
+        AST::Param.new(name: "arg#{i}", type: t, required: true, mutable: false, takes: false)
       },
       return_type: return_type,
       reentrant: allows_reentrant

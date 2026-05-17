@@ -51,14 +51,6 @@ module AST
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
-
-    # Idempotent normalizer used at the FunctionDef / FunctionSignature
-    # seams. Accepts a Param (passthrough) or a Hash (legacy producer).
-    sig { params(p: T.any(Param, T::Hash[Symbol, T.untyped])).returns(Param) }
-    def self.coerce(p)
-      return p if p.is_a?(Param)
-      new(**p.slice(*members))
-    end
   end
 
   # One arm of a MATCH statement (MatchStatement#cases element).
@@ -840,7 +832,7 @@ module AST
       super
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
-      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
+      self[:params] = self[:params] || []
     end
 
     sig { params(val: T.untyped).void }
@@ -850,7 +842,7 @@ module AST
 
     sig { params(val: T::Array[T.untyped]).void }
     def params=(val)
-      self[:params] = val.map { |p| Param.coerce(p) }
+      self[:params] = val
     end
 
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
@@ -1106,11 +1098,11 @@ module AST
     # Same params seam as FunctionDef: always Array<AST::Param>.
     def initialize(*)
       super
-      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
+      self[:params] = self[:params] || []
     end
 
     def params=(val)
-      self[:params] = (val || []).map { |p| Param.coerce(p) }
+      self[:params] = val || []
     end
   end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
@@ -1457,11 +1449,11 @@ module AST
     # Same params seam as FunctionDef/LambdaLit: always Array<AST::Param>.
     def initialize(*)
       super
-      self[:params] = (self[:params] || []).map { |p| Param.coerce(p) }
+      self[:params] = self[:params] || []
     end
 
     def params=(val)
-      self[:params] = (val || []).map { |p| Param.coerce(p) }
+      self[:params] = val || []
     end
   end
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"

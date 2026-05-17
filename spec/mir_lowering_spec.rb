@@ -1623,8 +1623,8 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers function with params" do
-      params = [{ name: "x", type: :Int64, mutable: false },
-                { name: "y", type: :Number, mutable: false }]
+      params = [AST::Param.new(name: "x", type: :Int64, mutable: false),
+                AST::Param.new(name: "y", type: :Number, mutable: false)]
       fn = make_fn("add", params: params, return_type: :Number)
       result = lowering.lower(fn)
       zig = emit(result)
@@ -1635,7 +1635,7 @@ RSpec.describe MIRLowering do
     it "stack struct param uses anytype — SROA candidate, no const-ptr" do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
-      params = [{ name: "p", type: :Point, mutable: false }]
+      params = [AST::Param.new(name: "p", type: :Point, mutable: false)]
       l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
       fn = make_fn("sum3", params: params)
       result = l.lower(fn)
@@ -1690,7 +1690,7 @@ RSpec.describe MIRLowering do
     end
 
     it "handles mutable scalar param shadows" do
-      params = [{ name: "count", type: :Int64, mutable: true }]
+      params = [AST::Param.new(name: "count", type: :Int64, mutable: true)]
       body_stmt = make_id("count")
       fn = make_fn("inc", params: params, body: [body_stmt])
       result = lowering.lower(fn)
@@ -1912,7 +1912,7 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "bump", [arg])
       node.full_type = :Void
       sig = FunctionSignature.new(
-        params: [{ name: "count", type: Type.new(:Int64), mutable: true }],
+        params: [AST::Param.new(name: "count", type: Type.new(:Int64), mutable: true)],
         return_type: Type.new(:Void)
       )
 
@@ -1929,7 +1929,7 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "identity", [arg])
       node.full_type = :Int64
       node.generic_type_args = [:Int64]
-      sig = FunctionSignature.new(params: [{ name: "x", type: Type.new(:Int64) }], return_type: Type.new(:Int64))
+      sig = FunctionSignature.new(params: [AST::Param.new(name: "x", type: Type.new(:Int64))], return_type: Type.new(:Int64))
       sig.needs_rt = true
 
       result = lowering(fn_sigs: { "identity" => sig }).lower(node)

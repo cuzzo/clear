@@ -105,13 +105,13 @@ class FunctionSignature
     sig
   end
 
-  sig { params(params: T::Array[T.untyped], return_type: T.nilable(Type), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
+  sig { params(params: T::Array[AST::Param], return_type: T.nilable(Type), return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(T::Array[Symbol]), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, Symbol]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(T::Array[T.untyped]), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,
                  fn_type_params: nil, owner_type: nil, owner_type_params: nil,
                  intrinsic: false, zig_pattern: nil)
-    @params = params.map { |p| AST::Param.coerce(p) }
+    @params = params
     self.return_type = return_type
     @return_lifetime = return_lifetime
     @visibility = visibility
