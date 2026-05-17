@@ -243,13 +243,26 @@ the masking), THEN OR EXIT/524 as an additive dynamic TryCatch
   TryExpr/TryCatch/Call. **272_or_exit_unified passes** (all 7
   inherit/override forms); allowlisted; 235/6/0, 0 regressions.
 
+## Cap-param cluster (commit 7) -- LANDED
+
+Root cause: MUTABLE / by-pointer helper params arrive as
+MIR::AddressOf wrapping the binding Ident, but anytype_arg_type and
+compile_struct_arg only handled a bare Ident, so cap-wrapped struct
+args (Counter @locked / @shared:atomic / @atomicPtr) fell through to
+"only supports Int64...helper params". Added unwrap_to_ident (peels
+AddressOf/Deref, mirrors atomic_receiver_ident) at both sites.
+333/334/341/345 pending->pass (all were allowlisted). Allowlist
+235 -> 240, min-pass bumped 235 -> 240. 0 regressions.
+
 Still PENDING (orthogonal, next):
 - 524_or_pass_heap_list_cleanup: TryCatch in let-init with a
   heap-list (non-scalar) type -- compile_let path, not error-union.
 - 216/217_loop_carry_*: now reach the frame-arena "integer
   overflow" crash (NOT allowlisted; same family as the dropped 6;
   blocked on the real guest-arena fix, not error-union).
-- 350/352/335/360: cap-param helper cluster.
+- 350/360/367: cap-param resolved; now blocked on MIR::DeferStmt
+  (orthogonal -- defer support, not cap-param).
+- 93_tight_loop: MIR::AddressOf i64 expressions (orthogonal).
 
 ## Invariants
 

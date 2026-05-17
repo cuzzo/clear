@@ -3440,8 +3440,9 @@ class RegisterBcEmitter
   end
 
   def compile_struct_arg(arg, expected_type)
-    value = if arg.is_a?(MIR::Ident)
-              @value_by_name[arg.name.to_s]
+    inner = unwrap_to_ident(arg)
+    value = if inner.is_a?(MIR::Ident)
+              @value_by_name[inner.name.to_s]
             else
               compile_value_expr(arg)
             end
@@ -7304,10 +7305,20 @@ class RegisterBcEmitter
     @struct_fields.key?(text) ? [:struct, text] : nil
   end
 
+  # MUTABLE / by-pointer params arrive as MIR::AddressOf (and reads
+  # back via MIR::Deref) wrapping the binding Ident. Peel those to
+  # recover the Ident so cap-wrapped struct args resolve through
+  # @value_by_name. Mirrors atomic_receiver_ident.
+  def unwrap_to_ident(node)
+    node = node.expr while node.is_a?(MIR::AddressOf) || node.is_a?(MIR::Deref)
+    node
+  end
+
   def anytype_arg_type(param, arg)
     return nil unless param.zig_type.to_s == "anytype"
 
-    value = arg.is_a?(MIR::Ident) ? @value_by_name[arg.name.to_s] : compile_value_expr(arg)
+    inner = unwrap_to_ident(arg)
+    value = inner.is_a?(MIR::Ident) ? @value_by_name[inner.name.to_s] : compile_value_expr(arg)
     return nil unless value
     case value.fetch(:kind)
     when :struct, :rc_struct, :arc_struct, :locked_struct, :write_locked_struct, :local_struct, :versioned_struct, :atomic_ptr_struct
