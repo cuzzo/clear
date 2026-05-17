@@ -75,6 +75,16 @@ require "sorbet-runtime"
 # `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
 require_relative "type"
 
+# Scope and SymbolEntry are a mutual back-reference: scope.rb requires
+# this file, so this file cannot require scope.rb. `# typed: strict`
+# forces every ivar through the eager `T.let`, which needs `Scope`
+# resolvable at first `SymbolEntry.new`. This guarded forward
+# declaration is a pure no-op in the real load path (scope.rb defines
+# Scope first); loaded in isolation it creates the bare constant that
+# scope.rb later reopens (same constant, not a shadow), so `@scope`
+# can be typed `T.nilable(Scope)` without restructuring the cycle.
+class Scope; end unless defined?(Scope)
+
 class SymbolEntry
     extend T::Sig
 
@@ -206,10 +216,7 @@ class SymbolEntry
     @poly_borrow_target = T.let(nil, T.nilable(T::Boolean))
     @mutated = T.let(nil, T.nilable(T::Boolean))
     @read = T.let(nil, T.nilable(T::Boolean))
-    # Genuine Scope<->SymbolEntry back-reference cycle: scope.rb requires
-    # this file, so symbol_entry.rb cannot require scope.rb to make Scope
-    # a resolvable constant at T.let time. Stays T.untyped by necessity.
-    @scope = T.let(nil, T.untyped)
+    @scope = T.let(nil, T.nilable(Scope))
     @scope_depth = T.let(nil, T.nilable(Integer))
     @ownership_kind = T.let(nil, T.nilable(Symbol))
     @takes = T.let(nil, T.nilable(T::Boolean))
