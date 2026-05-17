@@ -81,12 +81,21 @@ its entry is ip 0) and `initCaps = List[]`. Capture loading is a
 no-op when `initCaps` is empty -> identical behavior. Mirrors
 exec!'s signature growth. Verify allowlist 245/245.
 
-### R2. `FIBERRET` opcode (= stack op 81)
+### R2. (resolved 2026-05-17) No `FIBERRET` opcode needed
 
-Terminate the current `runRegisterBytecode!` invocation, returning
-the fiber's value as a `RegisterValue`. The emitter ends a BG-body
-region with `FIBERRET <reg>`. Register-VM equivalent of the existing
-RET-at-top-of-frame-stack-empty path, but tagged as a fiber exit.
+The stack VM needed op 81 because all fibers share one `exec!` loop
+shape with a sentinel. In the register VM each spawned fiber is its
+**own `runRegisterBytecode!` invocation** (R3 spawns
+`BG { -> runRegisterBytecode!(..., bgEntry) }`) with its **own**
+frame stack (`frameRetIps` starts empty in that invocation). The BG
+body region therefore ends in a normal typed `RETURN`; at
+frame-depth 0 the existing `IRET`/`FRET`/`SRET` arm already does
+`RETURN intResult|floatResult|stringResult(...)`, which returns from
+that `runRegisterBytecode!` = the fiber's result, exactly what `BG`
+captures. So R2 is a no-op: the emitter just emits the BG body
+region ending in the normal typed `compile_return` for the body's
+value type. Avoids a speculative opcode (CLAUDE.md scope control).
+Renumber: R3->R2 (BGSPAWN), R4->R3 (FNEXT), R5->R4 (emitter), etc.
 
 ### R3. `BGSPAWN entry_ip argc` opcode (= stack op 82)
 
