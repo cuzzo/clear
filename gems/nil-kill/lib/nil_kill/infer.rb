@@ -104,20 +104,6 @@ module NilKill
       SourceIndex.reset_global_shape_indexes
       files = NilKill.target_files
       files.each { |path| SourceIndex.new(path) }
-      # Propagate cross-file T.noreturn until the global set stabilises.
-      # Each pass picks up methods whose body resolves to noreturn via
-      # calls to methods registered by an earlier pass. Bounded at 5
-      # iterations -- typical chain depth is 1-2.
-      # The final emit pass below re-walked every file a 3rd time only
-      # to read pass-invariant facts + noreturn_candidate. When the
-      # fixpoint CONVERGES, the converged pass registered nothing
-      # (size unchanged start->end), so every method_record in it saw
-      # the converged @@noreturn_methods -- byte-identical to what a
-      # fresh final walk recomputes (same converged set, same pass-
-      # invariant walk). Cache that pass and emit from it; only fall
-      # back to a fresh final walk if it never converges (rare; the
-      # comment above notes typical chain depth 1-2). Toggle for the
-      # differential proof (NIL_KILL_IDX_REUSE=0 == the old 3rd pass).
       reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
       cached = nil
       5.times do
@@ -219,13 +205,9 @@ module NilKill
 
     STRUCT_FIELD_RBI_PATH = "sorbet/rbi/ast-struct-fields.rbi"
 
-    # One `add_struct_field_sig` action per typeable struct field, fed
-    # through the SAME verified loop (apply_verified) that bisects every
-    # other action. This replaces struct-rbi's all-or-nothing
-    # error-parse-blocklist convergence: the loop applies the maximal
-    # srb-tc-clean subset and skips (surfaces) only the few fields whose
-    # typing breaks srb tc -- no full revert, and blocked slots become
-    # first-class REVIEW actions the report already counts/prioritises.
+    # One add_struct_field_sig action per typeable struct field, fed
+    # through the same verified loop so a field that breaks srb tc is
+    # skipped as a REVIEW action instead of reverting the whole batch.
     def propose_struct_field_sig_actions
       candidates = Report.new.struct_field_candidates(
         Array(@store.facts["struct_field_runtime"]), Array(@store.facts["struct_field_static"])
@@ -686,30 +668,12 @@ module NilKill
 
     def hash_record_cluster_blockers(row)
       blockers = hash_record_field_blockers(Array(row["fields"]))
-      # A hash that flows into a collection is the NORMAL case: the
-      # collection has a hidden element type == the hash shape. The
-      # correct end state is to promote the hash to a Struct AND type
-      # the collection `T::Array[Struct]`, then convert iteration
-      # readers (`coll.each { |f| f[:k] }` -> `f.k`). The genuine
-      # exception is a heterogeneous dumping-ground (AST/MIR node lists)
-      # where many divergent shapes / T.any value-types share a
-      # collection and no single struct describes them.
-      #
-      # Classify which case this cluster is, from data already computed:
-      #   - common/optional key ratio (divergent shapes merge as many
-      #     optional keys)
-      #   - fraction of fields whose value type is T.any / T.untyped
-      #     (same key, many value-type families == heterogeneous)
-      #
-      # Two distinct outcomes (NOT lumped together):
-      #   * heterogeneous  -> hard block, "not a struct candidate"
-      #   * coherent + escaping -> the record IS a real struct and the
-      #     collection has a hidden shape, but auto-applying requires
-      #     the element-typed-collection rewrite (type the container +
-      #     convert every iteration reader). That rewrite is the
-      #     twice-reverted hard part and is NOT implemented, so block
-      #     with a DISTINCT message that flags it as a real
-      #     opportunity, not a dead end.
+      # A hash flowing into a collection splits two ways: a coherent
+      # shape (the collection has a hidden element type -> a real
+      # struct opportunity) vs a heterogeneous dumping-ground (many
+      # divergent shapes / T.any value-types, no single struct). They
+      # get distinct block messages; the coherent+escaping case is a
+      # real opportunity whose container rewrite is not implemented.
       escaping = hash_record_producers_escaping_into_collection(Array(row["producers"]))
       unless escaping.empty?
         if hash_record_collection_shape_coherent?(row)
@@ -739,19 +703,9 @@ module NilKill
       blockers
     end
 
-    # A cluster describes ONE coherent struct (the collection it flows
-    # into has a real hidden element type) when:
-    #   - there are at least 2 common keys present in every shape
-    #     (a single stable skeleton, not a grab-bag), and
-    #   - optional keys don't dominate -- many optional keys means many
-    #     divergent shapes were merged (the heterogeneous case), and
-    #   - value types are mostly concrete -- a high fraction of
-    #     T.any/T.untyped fields means the same key carries unrelated
-    #     value-type families across sites (also heterogeneous).
-    # Thresholds are intentionally permissive: the user's stated model
-    # is that homogeneous-shape-into-collection is the NORM and the
-    # heterogeneous node-list is the exception, so only clearly
-    # divergent clusters fall through to "not a struct candidate".
+    # Coherent struct: >=2 keys common to every shape, optional keys
+    # don't dominate, and value types are mostly concrete. Permissive
+    # by design -- only clearly divergent clusters are rejected.
     def hash_record_collection_shape_coherent?(row)
       common = Array(row["common_keys"]).size
       optional = Array(row["optional_keys"]).size
@@ -767,20 +721,10 @@ module NilKill
 
     COLLECTION_APPEND_METHODS = %w[<< push unshift append prepend concat].freeze
 
-    # Returns the producer entries whose record value escapes into an
-    # untyped container -- so downstream readers iterate it via block
-    # params / generic walkers the proposer cannot enumerate. Three
-    # escape vectors, all statically decidable:
-    #   1. the hash literal is an element of an ArrayNode literal
-    #      (`Foo.new(x, [ { ... } ])`)
-    #   2. the hash literal (or a local bound to it) is the argument of a
-    #      collection-append call (`fields << { ... }`, `arr.push(x)`)
-    #   3. the hash literal (or its bound local) is the value of an
-    #      index-write that stores it into a container
-    #      (`@functions[key] = f` where `f = { ... }`)
-    # One-hop local aliasing is followed (`f = { ... }` then `f` used);
-    # deeper alias chains are conservatively treated as escaping when
-    # the local is passed as a bare call argument anywhere.
+    # Producer entries whose record escapes into an untyped container:
+    # array-literal element, collection-append arg, or index-write
+    # value. One-hop local aliasing is followed; deeper chains are
+    # conservatively treated as escaping.
     def hash_record_producers_escaping_into_collection(producers)
       by_path = Array(producers).group_by { |p| p["path"].to_s }
       by_path.flat_map do |rel_path, entries|
@@ -917,13 +861,9 @@ module NilKill
       @hash_record_existing_struct_paths ||= {}
       @hash_record_existing_struct_paths[struct_name] ||= begin
         pattern = /\bclass\s+#{Regexp.escape(struct_name)}\b/
-        # ROOT-rooted, NOT cwd-relative: nil-kill is invoked from many
-        # cwds (rspec runs from gems/nil-kill); a cwd-relative glob
-        # silently found ZERO -> false "no existing struct" -> wrong
-        # inference. `gems/*/lib/**` structurally excludes gems/tmp
-        # scratch and gems/*/spec fixtures (only real gem libs match).
-        # Returned repo-relative via NilKill.rel so consumer output is
-        # unchanged from the cwd==ROOT case.
+        # ROOT-rooted, NOT cwd-relative: nil-kill runs from many cwds
+        # (rspec from gems/nil-kill); a cwd-relative glob silently
+        # matches ZERO -> false "no existing struct" -> wrong inference.
         candidates = Dir.glob(File.join(NilKill::ROOT, "src/**/*.rb")) +
                      Dir.glob(File.join(NilKill::ROOT, "gems/*/lib/**/*.rb"))
         candidates.filter_map do |path|
@@ -1120,21 +1060,11 @@ module NilKill
           "blockers" => Array(origin["blockers"]).first(8) })
     end
 
-    # HIGH must mean "statically guaranteed to typecheck" -- a high
-    # action that fails `srb tc` is a calibration bug. Three gates:
-    #   1. origin confidence must be strong;
-    #   2. NO blockers -- a blocker is the static analysis itself
-    #      reporting it could not cleanly determine the return, so the
-    #      candidate is a guess, never HIGH;
-    #   3. every useful source is static/RBI AND, for a BARE static
-    #      source (a heuristic guess, not RBI/stdlib-backed), the method
-    #      must be runtime-corroborated. runtime_contradicts? has
-    #      already rejected incompatible observed returns, so any
-    #      observed return here agrees; if there is NO runtime return at
-    #      all, a bare-static guess is unverifiable -> REVIEW (the loop
-    #      filters it; a review rejection is by-design, not miscalib).
-    # RBI/stdlib-backed sources are statically provable and stay HIGH
-    # without runtime backing.
+    # HIGH must be statically guaranteed to typecheck. Gates: strong
+    # confidence; no blockers (a blocker means the analysis itself
+    # couldn't determine the return); every source static/RBI, and a
+    # bare static guess (not RBI/stdlib-backed) needs runtime
+    # corroboration -- unverifiable bare guesses drop to REVIEW.
     def high_confidence_static_return_origin?(origin, rec = nil)
       return false unless origin["confidence"] == "strong"
       return false if Array(origin["blockers"]).any?
@@ -1168,13 +1098,9 @@ module NilKill
     end
 
     def static_or_rbi_return_source?(source)
-      # `typed_call_inferred` is produced by Feature A
-      # (enrich_return_origins_with_receiver_inference!) ONLY when the
-      # receiver type + the callee's return are definitely resolved via
-      # RBI / a strong project return / a sig -- statically provable by
-      # construction, the SAME grade as `static`. Excluding it here
-      # silently under-promoted exactly the returns the pipeline
-      # resolved most confidently (e.g. a sig-typed param `.join`).
+      # typed_call_inferred is only emitted when receiver + callee
+      # return are resolved via RBI / strong project return / sig --
+      # statically provable, the same grade as `static`.
       return true if %w[static typed_call_inferred].include?(source["kind"].to_s)
       return false unless %w[typed_call safe_call].include?(source["kind"].to_s)
       return true if source["stdlib"]
@@ -1189,36 +1115,12 @@ module NilKill
       @return_origin_by_location[[src["path"], src["line"]]]
     end
 
-    # Feature A: receiver-type inference. After SourceIndex collects all
-    # `param_origins` and `return_origins`, walk each `call_untyped` return
-    # source of the form `recv.method` where `recv` is a param of the
-    # enclosing method. Look up classes callers pass for that param slot
-    # via `param_origins`; for each, look up `.method`'s return type in
-    # `RbiReturnIndex`. If consistent (single class with a strong sig),
-    # replace the source's `call_untyped` kind with `typed_call_inferred`
-    # and recompute the origin's candidate_type/confidence so downstream
-    # proposers (propose_static_return_action, propose_forwarded_return_chain)
-    # pick up the new info.
-    #
-    # Guards:
-    # - Only matches simple `recv.method` calls (regex-bounded).
-    # - Only emits when ALL caller classes agree on the return type.
-    # - Drops T.nilable and weak-collection narrowings (same cascade rules
-    #   as elsewhere).
-    # - Cross-check against runtime via `runtime_contradicts?` -- if runtime
-    #   observed returns that the inferred type doesn't accept, skip.
-    # Fixed-point iteration: each pass turns some `call_untyped` sources into
-    # `typed_call_inferred`, which feeds into the next iteration's project-
-    # method-return index via `build_project_method_return_index` (C2 pulls
-    # strong return_origins into the index). A method whose return becomes
-    # strong in iteration N can be the receiver-typed narrowing source for
-    # another method in iteration N+1.
-    #
-    # Bounded at 5 iterations as a safety stop. In practice convergence is
-    # 1-3 iterations; cycles can't make progress beyond the first hit
-    # because the second visit is a no-op (kind already changed from
-    # call_untyped to typed_call_inferred). When a pass enriches zero
-    # sources we stop early.
+    # Receiver-type inference: for a `recv.method` call_untyped return
+    # where `recv` is a param, resolve the caller-passed classes via
+    # param_origins and the callee return via RbiReturnIndex; rewrite
+    # to typed_call_inferred only when all caller classes agree.
+    # Fixpoint because a resolved return feeds the next iteration's
+    # return index; a re-visit is a no-op so cycles can't progress.
     MAX_RECEIVER_ENRICHMENT_ITERS = 5
 
     def enrich_return_origins_with_receiver_inference!
@@ -1248,33 +1150,13 @@ module NilKill
 
     MAX_CALLEE_PROPAGATION_ITERS = 8
 
-    # Whole-program return-type propagation.
-    #
-    # A `call_untyped` return source means the enclosing method returns
-    # `callee(...)` whose return type wasn't known *in the callee's own
-    # file*. But the callee's return IS often resolvable program-wide --
-    # from its Sorbet sig, an RBI, or a strong return_origin computed for
-    # the callee elsewhere. nil-kill already stores the whole-program
-    # call graph (param_origins) and per-method return facts; this pass
-    # is the missing transitive closure over them.
-    #
-    # Fixpoint: a leaf method that resolves in iteration N feeds
-    # `build_project_method_return_index` (which folds in strong
-    # return_origins), so its callers resolve in iteration N+1. Bounded
-    # at MAX_CALLEE_PROPAGATION_ITERS.
-    #
-    # Resolution order per call_untyped source (conservative, matching
-    # the existing forwarded-return ambiguity stance):
-    #   1. `[enclosing_class, callee]` exact (self / inherited call)
-    #   2. unique program-wide return for the callee NAME (skip if the
-    #      name resolves to >1 distinct type across classes -- a
-    #      collision we can't disambiguate without receiver typing,
-    #      which is Feature A's job)
-    #
-    # Guards mirror receiver inference: useful, non-weak, non-nilable,
-    # and a runtime cross-check. On resolution the stale
-    # "untyped callee <callee>" blocker is pruned so the origin can
-    # actually reach `strong` in recompute.
+    # Transitive closure of callee return types over the whole-program
+    # call graph: a `call_untyped` whose callee return is resolvable
+    # program-wide (sig / RBI / strong return_origin elsewhere).
+    # Resolution per source: [enclosing_class, callee] exact, else a
+    # program-wide return for the callee name that is unique across
+    # classes (a >1-type collision needs receiver typing). Fixpoint
+    # because a resolved leaf feeds the next iteration's return index.
     def enrich_return_origins_with_callee_propagation!
       MAX_CALLEE_PROPAGATION_ITERS.times do
         index = build_project_method_return_index
@@ -1309,21 +1191,12 @@ module NilKill
               end
             next unless NilKill.useful_type?(resolved)
             next if NilKill.weak_type?(resolved)
-            # NOTE: no T.nilable refusal here. That guard is correct for
-            # PARAM narrowing (cascade-prone -- copied from Feature A's
-            # receiver path) but wrong for RETURN propagation: a callee
-            # whose resolved return is `T.nilable(Foo)` genuinely
-            # returns that, and propagating it is the correct, sound
-            # answer. Refusing it stranded ~21 otherwise-resolvable
-            # return origins as false NoEvidence/blocked.
-            # The runtime cross-check compares `resolved` against the
-            # ENCLOSING method's observed return. That is correct for a
-            # concrete-type substitution, but incoherent for T.noreturn:
-            # the callee (`error!`) genuinely never returns at THAT call
-            # site; it makes no claim about the enclosing method, which
-            # legitimately returns via other paths. static_sorbet_type
-            # drops T.noreturn as bottom in recompute anyway. Applying
-            # the guard here wrongly skips every noreturn-helper caller.
+            # No T.nilable refusal: correct for param narrowing but
+            # wrong for return propagation -- a callee returning
+            # T.nilable(Foo) genuinely returns that. The runtime
+            # cross-check is also skipped for T.noreturn: the callee
+            # never returns at that site so it makes no claim about the
+            # enclosing method (dropped as bottom in recompute anyway).
             unless resolved == "T.noreturn"
               rec = method_record_for_origin(origin)
               next if rec && runtime_contradicts?(rec, :return, nil, resolved)
@@ -1369,10 +1242,8 @@ module NilKill
         next if klass.empty? || name.empty?
         ret = NilKill.extract_return_type(method["sig"].to_s).to_s
         next if ret.empty? || ret == "T.untyped"
-        # Multiple definitions of the same name across classes are fine
-        # because the key is [class, method] -- but if a single class has
-        # two `def name` blocks with different sigs, we lose all but the
-        # first. Acceptable for first cut.
+        # If one class has two `def name` with different sigs we keep
+        # only the first.
         index[[klass, name]] ||= ret
       end
       # RBI-declared struct-field accessors: the regenerated
@@ -1493,17 +1364,9 @@ module NilKill
       origin["confidence"] = confidence
     end
 
-    # Sorbet-validates every HIGH-confidence action before they leave infer.
-    # Catches over-narrow signatures where the proposer trusted incomplete
-    # static or runtime evidence (e.g. method body returns a broader type than
-    # observed at runtime; nilable receivers wrapped in T.must that Sorbet now
-    # flags as redundant).
-    #
-    # Strategy: snapshot the affected files, apply the HIGH batch, run srb tc.
-    # On srb tc success: restore files and keep the actions at HIGH.
-    # On srb tc failure: bisect to isolate the failing actions and downgrade
-    # them to REVIEW so the user-facing verified loop can re-attempt them
-    # under a stronger gate. Always restores files before returning.
+    # Sorbet-validates the HIGH batch before it leaves infer: snapshot
+    # files, apply, srb tc. On failure, bisect the failing actions and
+    # downgrade them to REVIEW. Always restores files before returning.
     def sorbet_validate_high_actions!
       high = @store.actions.select { |a| a["confidence"] == HIGH }
       return if high.empty?
@@ -1590,15 +1453,9 @@ module NilKill
         return NilKill.split_top_level(inner).any? { |alt| proposed_type_accepts?(alt.strip, observed_class) }
       end
       return %w[TrueClass FalseClass T::Boolean].include?(observed_class) if type == "T::Boolean"
-      # Parameterised collection types: the container shape must match. Runtime
-      # observing `Hash` against a proposed `T::Array[T.untyped]` is a hard
-      # contradiction -- sorbet-runtime would raise TypeError on that path.
-      # Previously this returned `true` unconditionally, which was the root cause
-      # of nine of the twelve prspec-only rejections in Move 2: narrowings to
-      # `T.nilable(T::Array[T.untyped])` whose runtime trace included other
-      # container classes (Hash, custom classes) that the proposer's static
-      # analysis missed. Catching them here means the verified loop never
-      # attempts them.
+      # Parameterised collection types: the container shape must match.
+      # Runtime `Hash` against a proposed `T::Array[T.untyped]` is a
+      # hard contradiction -- sorbet-runtime raises TypeError there.
       return observed_class == "Array" if type.start_with?("T::Array[")
       return observed_class == "Hash" if type.start_with?("T::Hash[")
       return observed_class == "Set" if type.start_with?("T::Set[")
@@ -1721,11 +1578,9 @@ module NilKill
       protocol_index = static_param_backflow_protocol_index
       protocol_resolver = ProtocolResolver.new(@store)
       methods_by_name.each do |name, methods|
-        # Class-scoped: a shared method name no longer blocks the whole
-        # group. Each method is evaluated independently; the per-method
-        # runtime_contradicts? + protocol-rejection guards below, and the
-        # verified loop's bisection, reject any candidate that does not
-        # actually hold for a given class. (B:34 name-shared bucket.)
+        # Class-scoped: a shared method name does not block the whole
+        # group; each method is evaluated independently and gated by the
+        # per-method guards below and the verified loop's bisection.
         methods.each do |method|
         sig = method["sig"].to_s
         NilKill.extract_param_entries(sig).each_with_index do |(param_name, current_type), idx|
@@ -1753,17 +1608,10 @@ module NilKill
       origins = Array(origins)
       return [nil, "no static callsites"] if origins.empty?
       return [nil, "unknown/dynamic callsite expression"] if origins.any? { |origin| origin["origin_kind"].to_s == "unknown" || origin["type"].to_s.empty? }
-      # A `local` origin means the caller passed the arg via a local
-      # variable. SourceIndex has ALREADY resolved that local's type
-      # via expression_type when it recorded `origin["type"]` -- the
-      # same machinery trusted for `static`/`typed_return` origins. The
-      # old blanket "any local -> bail" guard threw away every such
-      # case even when the type was concretely known (e.g. a caller
-      # `name = "x"; closest_name(name)` -> origin type "String").
-      # Only reject locals whose type is NOT resolved; resolved-type
-      # locals flow into the normal aggregation, still gated downstream
-      # by weak/Object/conflicting checks, runtime_contradicts?, the
-      # protocol resolver, and the verified loop.
+      # A `local` origin's type was already resolved by expression_type
+      # when origin["type"] was recorded -- same machinery as
+      # static/typed_return. Only reject locals whose type is NOT
+      # resolved; resolved ones flow into the normal gated aggregation.
       return [nil, "local alias with unresolved type"] if origins.any? do |origin|
         origin["origin_kind"].to_s == "local" && !NilKill.useful_type?(origin["type"].to_s)
       end
@@ -1955,17 +1803,10 @@ module NilKill
       end
     end
 
-    # Resolves the transitive protocol required of a method's param by
-    # walking forwarded helpers and ivar captures. Used by
-    # `static_param_backflow_protocol_rejection` to decide whether a
-    # narrowing candidate satisfies the chain.
-    #
-    # Cycle-safe via a stub cache entry written before recursion.
-    # Returns { "methods" => Set, "chain" => Array, "blocked" => bool }.
-    # `blocked` is true when ANY hop hits a forwarded helper not in the
-    # project method index, an ivar with no observed protocol, or an
-    # unrecognised gap shape. The caller falls back to the conservative
-    # rejection in that case.
+    # Transitive protocol required of a param, walking forwarded
+    # helpers and ivar captures. Cycle-safe via a stub cache entry
+    # written before recursion. `blocked` is true when a hop hits an
+    # unknown helper/ivar/gap shape -> caller rejects conservatively.
     class ProtocolResolver
       FORWARDED_GAP_RE = /\Aforwarded to (\S+) slot (\d+) at /.freeze
       LEGACY_FORWARDED_GAP_RE = /\Aforwarded to (\S+) at /.freeze

@@ -3,10 +3,8 @@
 
 module NilKill
   class SourceIndex
-    # C4.2: the cross-file shape/type symbol table -- one owned object
-    # replacing the 7 class-level @ indexes. Pure storage move; the
-    # class-level readers delegate here so every existing
-    # `self.class.<index>` call site is unchanged -> byte-identical.
+    # Cross-file shape/type symbol table; class-level readers delegate
+    # here so existing call sites are unchanged.
     class ShapeSymbolTable
       attr_reader :attribute_hash_shapes, :attribute_array_element_shapes,
         :struct_field_hash_shapes, :struct_field_array_element_shapes,
@@ -82,11 +80,9 @@ module NilKill
       :type_normalizers, :dispatcher_inferences, :return_origins, :param_origins,
       :ivar_protocols, :ivar_param_origins
 
-    # Hash that bumps a shared 1-element epoch cell on every mutation
-    # (step 1 of the expression_type memo: epoch tracking only, no memo
-    # yet). Identical to Hash for every read/iteration/dump; `wrap`
-    # guarantees the cell is set even for an EpochHash arriving via a
-    # non-mutating Hash#merge etc.
+    # Hash that bumps a shared epoch cell on every mutation so the
+    # expression_type memo can detect staleness. `wrap` keeps the cell
+    # bound across a non-mutating Hash#merge that returns an EpochHash.
     class EpochHash < Hash
       def self.wrap(src, cell)
         if src.is_a?(EpochHash)
@@ -112,11 +108,8 @@ module NilKill
       def keep_if(&b); @ec[0] += 1 if @ec; super; end
     end
 
-    # The 5 @current_* maps expression_type reads. Reader returns the
-    # ivar (EpochHash, behaves as Hash); writer re-wraps + binds the
-    # epoch cell so reassignments and subsequent in-place writes both
-    # bump. instance_variable_set keeps the reassignment sed from
-    # rewriting the accessor itself.
+    # The 5 @current_* maps expression_type reads. The writer re-wraps
+    # so a reassignment and later in-place writes both bump the epoch.
     %i[current_param_types current_local_types current_collection_builders
        current_hash_shapes current_array_element_shapes].each do |n|
       define_method(n) { instance_variable_get("@#{n}") }
@@ -160,11 +153,7 @@ module NilKill
       @inferred_param_hash_shapes = {}
       @inferred_param_array_element_shapes = {}
       @method_nodes = []
-      # receiver_classes_for_field_shape is a PURE function of its type
-      # string (only pure NilKill string helpers, zero walk state) but
-      # was called ~7x per AST node (~260k/file) with no memo. Cache by
-      # type -- byte-identical by construction (same proven pattern as
-      # RbiReturnIndex#concrete_return_type?).
+      # Pure function of the type string -> memoize by type.
       @rcfs_memo = {}
       self.current_param_types = {}
       self.current_local_types = {}
@@ -203,13 +192,6 @@ module NilKill
         "param_origins" => @param_origins.size }
     end
 
-    # AST-based normalizer capture (replaces the old single-line
-    # `is_a?(Type)` + `Type.new(` scanner that undercounted by ~10x and
-    # mis-tracked methods). Walks the def body for every
-    # `recv.is_a?(Type)` / `recv.kind_of?(Type)` guard -- multi-line,
-    # `!`-wrapped, ternary, `T.must` forms all caught -- with exact
-    # class/method from the def record, and resolves the receiver's
-    # one-hop origin from the def's own assignment nodes (no points-to).
     def collect_type_normalizers!(def_node, record)
       body = def_node.respond_to?(:body) ? def_node.body : nil
       return unless body
@@ -238,11 +220,9 @@ module NilKill
       node.child_nodes.compact.each { |c| each_ast(c, &blk) }
     end
 
-    # One-hop, intra-method origin of a guard receiver, resolved on the
-    # AST: an accessor read (`node.type_info`), a hash-key read
-    # (`h[:type]`), an ivar, a call, or a param. A local receiver is
-    # resolved through its in-method assignment exactly once (depth 1)
-    # so `ti = node.type_info; ti.is_a?(Type)` keys to `.type_info`.
+    # A local receiver is resolved through its in-method assignment
+    # exactly once (depth 1) so `ti = node.type_info; ti.is_a?(Type)`
+    # keys to `.type_info`.
     def classify_origin(node, param_names, assigns, depth)
       case node
       when Prism::InstanceVariableReadNode
@@ -391,18 +371,10 @@ module NilKill
       end
     end
 
-    # During the main `walk`, a `Struct.new(x, ...)` argument that is a
-    # plain local/ivar reference resolves to no type, because
-    # `@current_local_types` is only populated by the return-origin
-    # pass, not the main walk. struct_field_candidates then marks the
-    # field's slot `has_unknown_static` and refuses to type it (the
-    # AST::ConcurrentOp soundness guard). Re-resolve those args here
-    # with local-type facts populated (the same machinery the
-    # return-origin pass uses) and fill the empty `type` in place.
-    # Existing soundness guards downstream are untouched: a still-
-    # unresolvable arg keeps its empty type (slot stays skipped), and
-    # struct-rbi's nilable / weak-collection / --validate srb tc gates
-    # still apply.
+    # The main walk leaves a `Struct.new(local, ...)` arg untyped
+    # (@current_local_types is only populated by the return-origin
+    # pass). Re-resolve with local-type facts so the field slot isn't
+    # needlessly skipped; a still-unresolvable arg keeps its empty type.
     def recompute_struct_field_static_with_inferred_locals
       return if @method_nodes.empty? || @struct_field_static.empty?
       index = Hash.new { |h, k| h[k] = [] }
@@ -939,12 +911,6 @@ module NilKill
       sig = sig_above(node.location.start_line)
       method_params = params(node, sig)
       noreturn_candidate = !contains_explicit_return?(node.body) && noreturn_body?(node.body)
-      # Cross-file propagation: register the method name globally so that
-      # callers in other files can recognise a transitive raise via
-      # `noreturn_call?`. Run between the first and second passes of
-      # `index_sources` in `infer.rb`, which gives one hop of propagation
-      # per pass. Multi-hop chains need additional passes (driven by
-      # `propagate_noreturn_until_stable!`).
       SourceIndex.register_noreturn_method(node.name) if noreturn_candidate
       SourceIndex.register_noreturn_method(node.name) if sig && /returns\(\s*T\.noreturn\s*\)/.match?(sig)
       { "path" => @rel, "line" => node.location.start_line, "end_line" => node.location.end_line, "class" => scope.join("::"),
@@ -1620,8 +1586,7 @@ module NilKill
       end
 
       # `@x = v` / `x = v` / `CONST = v` as the return expression: the
-      # returned value IS the RHS. Recurse so it types exactly like a
-      # direct return of the RHS (this was ~90% of "NotImplemented").
+      # returned value IS the RHS, so type it as the RHS.
       if node.is_a?(Prism::InstanceVariableWriteNode) || node.is_a?(Prism::LocalVariableWriteNode) ||
          node.is_a?(Prism::ClassVariableWriteNode) || node.is_a?(Prism::GlobalVariableWriteNode) ||
          node.is_a?(Prism::ConstantWriteNode)
@@ -1640,11 +1605,8 @@ module NilKill
     end
 
     def setter_call?(node)
-      # Trailing `=` identifies setters (`foo=`) and `[]=`. Exclude
-      # comparison operators (`==`, `!=`, `<=`, `>=`, `===`) which also
-      # end with `=` but are method calls returning T::Boolean, not
-      # assignments. Without this filter, `1 != 2` is misclassified as
-      # an assignment and returns the RHS type.
+      # Comparisons (`==`, `!=`, `<=`, `>=`, `===`) also end with `=`;
+      # without excluding them `1 != 2` is misread as an assignment.
       return false unless node.is_a?(Prism::CallNode)
       name = node.name.to_s
       return false unless name.end_with?("=")
@@ -1671,11 +1633,8 @@ module NilKill
 
     def rbi_return_candidate?(node)
       return false unless node.is_a?(Prism::CallNode)
-      # A call on a global variable receiver (e.g. `$stderr.puts`) is not safe
-      # to look up via the RBI index: the global is dynamically reassignable
-      # and the receiver's actual class at runtime can be anything. Treating
-      # the result as the stdlib's nominal return type leads the proposer to
-      # narrow signatures that runtime test paths violate.
+      # A global-variable receiver (`$stderr.puts`) is dynamically
+      # reassignable, so its RBI nominal return is unsound to narrow on.
       return false if node.receiver.is_a?(Prism::GlobalVariableReadNode)
       node.receiver || %w[! == puts print warn raise].include?(node.name.to_s)
     end
@@ -1967,9 +1926,7 @@ module NilKill
         if receiver.is_a?(Prism::LocalVariableReadNode) && protocols.key?(receiver.name.to_s)
           protocols[receiver.name.to_s]["methods"] << node.name.to_s
         end
-        # Methods called on an instance variable populate the class-scoped
-        # ivar protocol used by the recursive resolver. Capture covers
-        # `@x.token` directly as well as `T.must(@x).token` / safe-nav.
+        # Covers `@x.token`, `T.must(@x).token`, and safe-nav.
         if receiver.is_a?(Prism::InstanceVariableReadNode) && @current_class_name
           @ivar_protocols[[@current_class_name, receiver.name.to_s]] << node.name.to_s
         end
@@ -1987,9 +1944,6 @@ module NilKill
         source = unwrap_alias_source(node.value)
         if source && protocols.key?(source)
           protocols[source]["gaps"] << "captured in #{node.name} at #{@rel}:#{node.location.start_line}"
-          # Record that this ivar receives a value originating from a param
-          # of the enclosing method. The resolver uses this to decide
-          # whether to consult @ivar_protocols when expanding a capture gap.
           @ivar_param_origins[[@current_class_name, node.name.to_s]] << source if @current_class_name
         end
       end
@@ -2024,12 +1978,9 @@ module NilKill
       end
     end
 
-    # Splat (`*a`), double-splat (`**kw`), and block (`&b`) params: the
-    # runtime tracer types only positional/keyword named args, so these
-    # slots can never get runtime evidence. They appear in the Sorbet
-    # sig string (as `name: T...`) with no `*`/`**`/`&` marker, so the
-    # sig-text heuristic alone cannot recognise them -- the structural
-    # truth lives only in the def's Prism parameter list.
+    # Splat/double-splat/block params can never get runtime evidence
+    # and the sig text has no `*`/`**`/`&` marker, so they must be
+    # identified from the Prism parameter list, not the sig string.
     def untraceable_param_names(node)
       p = node.parameters
       return [] unless p
@@ -2303,10 +2254,8 @@ module NilKill
       NilKill.static_sorbet_type(types.uniq)
     end
 
-    # Pure function of `type` -> memoize. .dup so every caller still
-    # gets a fresh array (original returned fresh each call); the dup
-    # of a 1-3 element array is nothing vs the strip/split/recursion it
-    # replaces. Byte-identical by construction.
+    # Pure function of `type` -> memoize. .dup so callers keep getting
+    # a fresh array.
     def receiver_classes_for_field_shape(type)
       (@rcfs_memo[type] ||= receiver_classes_for_field_shape_uncached(type)).dup
     end
@@ -2376,16 +2325,11 @@ module NilKill
       @tlet_sites << { "path" => @rel, "line" => node.location.start_line, "tlet" => false, "name" => node.name.to_s, "candidate_type" => type }
     end
 
-    # Memo wrapper (NIL_KILL_EXPR_MEMO). ~95% of calls are redundant
-    # recompute (measured). Sound by construction: expression_type only
-    # READS state; every mutation of its complete transitive read
-    # surface bumps @ep -- the 5 @current_* maps via EpochHash (step 1)
-    # plus the exactly-4 explicit writes to @static_return_types/
-    # @ivar_tlet_types/@method_return_types -- and @current_class_name
-    # (the only scalar dep) is in the key. So a cached entry whose
-    # [epoch, class_name] still match cannot be stale. NIL_KILL_EXPR_
-    # SHADOW asserts memo == fresh on every call (empirical proof the
-    # surface enumeration is complete).
+    # Sound because expression_type only READS state and every mutation
+    # of its read surface bumps @ep (the @current_* maps via EpochHash;
+    # the writes to @static_return_types/@ivar_tlet_types/
+    # @method_return_types); @current_class_name is in the key.
+    # NIL_KILL_EXPR_SHADOW asserts memo == fresh per call.
     def expression_type(node)
       return expression_type_uncached(node) unless @expr_use_memo && node
 
