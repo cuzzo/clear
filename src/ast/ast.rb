@@ -26,6 +26,8 @@ module AST
   # promoted them to an expression (IF/MATCH as a value), in which
   # case @type_object is already set and wins.
   module StatementVoidType
+    extend T::Sig
+    sig { returns(Type) }
     def full_type
       @type_object ||= Type.new(:Void)
     end
@@ -1012,12 +1014,13 @@ module AST
     extend T::Sig
     include Locatable
     # Derived: comparison/logical -> Bool; otherwise an operand's type.
+    sig { returns(Type) }
     def full_type
       @type_object ||=
         if BOOL_BINOPS.include?(op)
           Type.new(:Bool)
         else
-          Type.new(left&.full_type.resolved || right&.full_type.resolved || :Any)
+          Type.new(left.full_type.resolved || right.full_type.resolved || :Any)
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
@@ -1040,10 +1043,12 @@ module AST
     attr_accessor :observable_dest
   end
   UnaryOp      = Struct.new(:token, :op, :right) do
+    extend T::Sig
     include Locatable
     # Derived: NOT -> Bool; otherwise the operand's type.
+    sig { returns(Type) }
     def full_type
-      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right&.full_type.resolved || :Any)
+      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right.full_type.resolved || :Any)
     end
   end
   # Parser-only placeholder for call-site override syntax; the annotator
@@ -1060,9 +1065,11 @@ module AST
     def name; self[:name].to_s end
   end
   Literal      = Struct.new(:token, :type, :value, :storage) do
+    extend T::Sig
     include Locatable
     # Derived: a literal's value-type is a pure function of its token
     # kind. Never nil, never stamped.
+    sig { returns(Type) }
     def full_type
       @type_object ||= Type.new(LITERAL_VALUE_TYPE.fetch(self[:type], :Any))
     end
