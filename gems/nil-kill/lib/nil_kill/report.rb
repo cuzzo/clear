@@ -2468,10 +2468,22 @@ module NilKill
       2
     end
 
+    # Was O(slots x param_origins): every method-slot rescanned ALL
+    # param_origins (thousands, whole-project) -> ~70% of the report
+    # tail. callee is the exact first filter, so index by it ONCE
+    # (memoized on the origins array, immutable during a report) and
+    # filter only the tiny per-callee group. group_by preserves order,
+    # so the per-callee group filtered by the slot predicate is exactly
+    # (and in the same order as) the original combined select ->
+    # byte-identical.
+    def param_origins_by_callee(origins)
+      (@param_origins_by_callee ||= {})[origins.object_id] ||=
+        origins.group_by { |origin| origin["callee"].to_s }
+    end
+
     def param_origins_for_slot(origins, method, name, idx)
-      origins.select do |origin|
-        origin["callee"].to_s == method["method"].to_s &&
-          (origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s)
+      Array(param_origins_by_callee(origins)[method["method"].to_s]).select do |origin|
+        origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s
       end
     end
 
@@ -2586,10 +2598,10 @@ module NilKill
         params = Array(method["params"])
         extract_param_entries(method["sig"].to_s).each_with_index do |(name, type), idx|
           next unless type == "T.untyped"
-          slot_origins = origins.select do |origin|
-            origin["callee"].to_s == method["method"].to_s &&
-              (origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s)
-          end
+          # Identical predicate to param_origins_for_slot -- route
+          # through it so this shares the memoized by-callee index
+          # (was the same O(slots x origins) rescan).
+          slot_origins = param_origins_for_slot(origins, method, name, idx)
           bucket = untyped_param_source_category(slot_origins)
           buckets[bucket] += 1
           if examples[bucket].size < 8
