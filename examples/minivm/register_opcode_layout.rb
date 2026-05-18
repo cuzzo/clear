@@ -244,6 +244,10 @@ module MiniVM
         # OR EXIT partial error-field override. mask bits: 1=kind
         # 2=name 4=msg 8=line; unset fields inherit the active error.
         Opcode.new(name: :EREWRITE, code: 138, arity: 5, vm_name: "ERewrite"),
+        Opcode.new(name: :BGSPAWN, code: 139, arity: 3, vm_name: "BgSpawn"),
+        Opcode.new(name: :FNEXTI,  code: 140, arity: 2, vm_name: "FNextI"),
+        Opcode.new(name: :FNEXTF,  code: 141, arity: 2, vm_name: "FNextF"),
+        Opcode.new(name: :FNEXTS,  code: 142, arity: 2, vm_name: "FNextS"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -369,6 +373,10 @@ module MiniVM
         EMATCHN:  [:i_def, :const],
         EMATCHM:  [:i_def, :const],
         EREWRITE: [:const, :const, :const, :const, :const],
+        BGSPAWN: [:i_def, :target, :v_use],
+        FNEXTI:  [:i_def, :i_use],
+        FNEXTF:  [:f_def, :i_use],
+        FNEXTS:  [:s_def, :i_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

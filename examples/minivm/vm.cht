@@ -156,6 +156,10 @@ ENUM RegisterOp {
     EMatchN,
     EMatchM,
     ERewrite,
+    BgSpawn,
+    FNextI,
+    FNextF,
+    FNextS,
     Operand,
 }
 
@@ -584,6 +588,10 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.EMatchN -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.EMatchM -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.ERewrite -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.BgSpawn -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -731,6 +739,10 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.EMatchN -> RETURN 2_i64;,
         RegisterOp.EMatchM -> RETURN 2_i64;,
         RegisterOp.ERewrite -> RETURN 5_i64;,
+        RegisterOp.BgSpawn -> RETURN 3_i64;,
+        RegisterOp.FNextI -> RETURN 2_i64;,
+        RegisterOp.FNextF -> RETURN 2_i64;,
+        RegisterOp.FNextS -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -894,6 +906,9 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE vlist3: RegisterValue[]@list = List[];
     # Separate from vlist0..3 (guests clobber those via LVNew).
     MUTABLE captureSlots: RegisterValue[]@list = List[];
+    # futureResolved keyed by id.toString() (no HashMap<Int64>).
+    MUTABLE futureTable: ~RegisterValue[]@list = List[];
+    MUTABLE futureResolved: HashMap<RegisterValue> = {};
     MUTABLE map0: HashMap<Int64> = {};
     MUTABLE map1: HashMap<Int64> = {};
     MUTABLE map2: HashMap<Int64> = {};
@@ -2458,6 +2473,76 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     dst = ops[ip]; ip += 1;
                     handleReg = ops[ip]; ip += 1;
                     iregs[iBase + dst] = stringListHandles[iregs[iBase + handleReg]].values.length();,
+            RegisterOp.BgSpawn ->
+                    bgDst = ops[ip]; ip += 1;
+                    bgEntry = ops[ip]; ip += 1;
+                    bgCapReg = ops[ip]; ip += 1;
+                    MUTABLE bgCaps: RegisterValue[]@list = List[];
+                    IF bgCapReg == 0_i64 THEN
+                        FOR bci IN (0_i64 ..< vlist0.length()) DO bgCaps.append(COPY vlist0[bci]); END
+                    ELSE_IF bgCapReg == 1_i64 THEN
+                        FOR bci IN (0_i64 ..< vlist1.length()) DO bgCaps.append(COPY vlist1[bci]); END
+                    ELSE_IF bgCapReg == 2_i64 THEN
+                        FOR bci IN (0_i64 ..< vlist2.length()) DO bgCaps.append(COPY vlist2[bci]); END
+                    ELSE
+                        FOR bci IN (0_i64 ..< vlist3.length()) DO bgCaps.append(COPY vlist3[bci]); END
+                    END
+                    bgFut: ~RegisterValue = BG { @service ->
+                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps) OR RAISE;
+                    };
+                    bgNewFid = futureTable.length();
+                    futureTable.append(bgFut);
+                    iregs[iBase + bgDst] = bgNewFid;,
+            RegisterOp.FNextI ->
+                    fniDst = ops[ip]; ip += 1;
+                    fniFid = ops[ip]; ip += 1;
+                    fniFidVal = iregs[iBase + fniFid];
+                    MUTABLE fniPv: RegisterValue = RegisterValue.Nil;
+                    fniKey = fniFidVal.toString();
+                    IF futureResolved[fniKey] AS fniCached THEN
+                        fniPv = COPY fniCached;
+                    ELSE
+                        fniPv = NEXT futureTable[fniFidVal];
+                        futureResolved[fniKey] = COPY fniPv;
+                    END
+                    PARTIAL MATCH fniPv START
+                        RegisterValue.Int64Val AS fniI -> iregs[iBase + fniDst] = fniI;,
+                        RegisterValue.Number AS fniN -> iregs[iBase + fniDst] = toInt(fniN);,
+                        DEFAULT -> iregs[iBase + fniDst] = 0_i64;
+                    END,
+            RegisterOp.FNextF ->
+                    fnfDst = ops[ip]; ip += 1;
+                    fnfFid = ops[ip]; ip += 1;
+                    fnfFidVal = iregs[iBase + fnfFid];
+                    MUTABLE fnfPv: RegisterValue = RegisterValue.Nil;
+                    fnfKey = fnfFidVal.toString();
+                    IF futureResolved[fnfKey] AS fnfCached THEN
+                        fnfPv = COPY fnfCached;
+                    ELSE
+                        fnfPv = NEXT futureTable[fnfFidVal];
+                        futureResolved[fnfKey] = COPY fnfPv;
+                    END
+                    PARTIAL MATCH fnfPv START
+                        RegisterValue.Number AS fnfN -> fregs[fBase + fnfDst] = fnfN;,
+                        RegisterValue.Int64Val AS fnfI -> fregs[fBase + fnfDst] = toFloat(fnfI);,
+                        DEFAULT -> fregs[fBase + fnfDst] = 0.0;
+                    END,
+            RegisterOp.FNextS ->
+                    fnsDst = ops[ip]; ip += 1;
+                    fnsFid = ops[ip]; ip += 1;
+                    fnsFidVal = iregs[iBase + fnsFid];
+                    MUTABLE fnsPv: RegisterValue = RegisterValue.Nil;
+                    fnsKey = fnsFidVal.toString();
+                    IF futureResolved[fnsKey] AS fnsCached THEN
+                        fnsPv = COPY fnsCached;
+                    ELSE
+                        fnsPv = NEXT futureTable[fnsFidVal];
+                        futureResolved[fnsKey] = COPY fnsPv;
+                    END
+                    PARTIAL MATCH fnsPv START
+                        RegisterValue.Str AS fnsS -> sregs[fnsDst] = COPY fnsS;,
+                        DEFAULT -> sregs[fnsDst] = "";
+                    END,
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;
