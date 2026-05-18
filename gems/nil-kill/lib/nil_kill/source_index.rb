@@ -71,10 +71,52 @@ module NilKill
       :type_normalizers, :dispatcher_inferences, :return_origins, :param_origins,
       :ivar_protocols, :ivar_param_origins
 
+    # Hash that bumps a shared 1-element epoch cell on every mutation
+    # (step 1 of the expression_type memo: epoch tracking only, no memo
+    # yet). Identical to Hash for every read/iteration/dump; `wrap`
+    # guarantees the cell is set even for an EpochHash arriving via a
+    # non-mutating Hash#merge etc.
+    class EpochHash < Hash
+      def self.wrap(src, cell)
+        if src.is_a?(EpochHash)
+          src.instance_variable_set(:@ec, cell)
+          return src
+        end
+        h = new
+        h.instance_variable_set(:@ec, cell)
+        src&.each { |k, v| h[k] = v }
+        h
+      end
+
+      def []=(k, v); @ec[0] += 1 if @ec; super; end
+      def store(k, v); @ec[0] += 1 if @ec; super; end
+      def delete(*a, &b); @ec[0] += 1 if @ec; super; end
+      def clear; @ec[0] += 1 if @ec; super; end
+      def merge!(*a, &b); @ec[0] += 1 if @ec; super; end
+      def update(*a, &b); @ec[0] += 1 if @ec; super; end
+      def replace(o); @ec[0] += 1 if @ec; super; end
+      def delete_if(&b); @ec[0] += 1 if @ec; super; end
+      def reject!(&b); @ec[0] += 1 if @ec; super; end
+      def select!(&b); @ec[0] += 1 if @ec; super; end
+      def keep_if(&b); @ec[0] += 1 if @ec; super; end
+    end
+
+    # The 5 @current_* maps expression_type reads. Reader returns the
+    # ivar (EpochHash, behaves as Hash); writer re-wraps + binds the
+    # epoch cell so reassignments and subsequent in-place writes both
+    # bump. instance_variable_set keeps the reassignment sed from
+    # rewriting the accessor itself.
+    %i[current_param_types current_local_types current_collection_builders
+       current_hash_shapes current_array_element_shapes].each do |n|
+      define_method(n) { instance_variable_get("@#{n}") }
+      define_method("#{n}=") { |v| instance_variable_set("@#{n}", EpochHash.wrap(v, @ep)) }
+    end
+
     def initialize(path)
       @path = path
       @rel = NilKill.rel(path)
       @lines = File.readlines(path)
+      @ep = [0]
       @methods = []
       @tlet_sites = []
       @dead_nil_checks = []
@@ -109,12 +151,12 @@ module NilKill
       # type -- byte-identical by construction (same proven pattern as
       # RbiReturnIndex#concrete_return_type?).
       @rcfs_memo = {}
-      @current_param_types = {}
-      @current_local_types = {}
-      @current_collection_builders = {}
-      @current_hash_shapes = {}
+      self.current_param_types = {}
+      self.current_local_types = {}
+      self.current_collection_builders = {}
+      self.current_hash_shapes = {}
       @current_hash_shape_sources = {}
-      @current_array_element_shapes = {}
+      self.current_array_element_shapes = {}
       @current_method_name = nil
       @local_container_origins = {}
       @ivar_container_origins = {}
@@ -289,14 +331,14 @@ module NilKill
       end
 
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
       end
       child_walk(node, scope)
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def recompute_return_origins_with_inferred_shapes
@@ -423,14 +465,14 @@ module NilKill
         return
       end
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
       end
       node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) }
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def collect_struct_declarations(node, scope)
@@ -853,13 +895,13 @@ module NilKill
       old_method_name = @current_method_name
       @non_nil_locals = Set.new(method_record["non_nil_params"])
       @maybe_nil_locals = Set.new
-      @current_param_types = method_record["params"].each_with_object({}) do |param, types|
+      self.current_param_types = method_record["params"].each_with_object({}) do |param, types|
         types[param["name"]] = param["type"] if NilKill.useful_type?(param["type"])
       end
-      @current_local_types = {}
-      @current_collection_builders = seed_param_collection_builders(method_record)
-      @current_hash_shapes = seed_param_hash_shapes(method_record)
-      @current_array_element_shapes = seed_param_array_element_shapes(method_record)
+      self.current_local_types = {}
+      self.current_collection_builders = seed_param_collection_builders(method_record)
+      self.current_hash_shapes = seed_param_hash_shapes(method_record)
+      self.current_array_element_shapes = seed_param_array_element_shapes(method_record)
       @current_method_name = method_record["method"]
       @local_container_origins = method_record["params"].each_with_object({}) do |param, origins|
         origins[param["name"]] = { "kind" => "method parameter", "name" => param["name"], "type" => param["type"],
@@ -869,11 +911,11 @@ module NilKill
     ensure
       @non_nil_locals = old
       @maybe_nil_locals = old_maybe_nil
-      @current_param_types = old_param_types
-      @current_local_types = old_local_types
-      @current_collection_builders = old_collection_builders
-      @current_hash_shapes = old_hash_shapes
-      @current_array_element_shapes = old_array_element_shapes
+      self.current_param_types = old_param_types
+      self.current_local_types = old_local_types
+      self.current_collection_builders = old_collection_builders
+      self.current_hash_shapes = old_hash_shapes
+      self.current_array_element_shapes = old_array_element_shapes
       @local_container_origins = old_local_origins
       @current_method_name = old_method_name
     end
@@ -952,13 +994,13 @@ module NilKill
       old_array_element_shapes = @current_array_element_shapes
       old_method_name = @current_method_name
       old_class_name = @current_class_name
-      @current_param_types = record["params"].each_with_object({}) do |param, types|
+      self.current_param_types = record["params"].each_with_object({}) do |param, types|
         types[param["name"]] = param["type"] if NilKill.useful_type?(param["type"])
       end
-      @current_local_types = {}
-      @current_collection_builders = seed_param_collection_builders(record)
-      @current_hash_shapes = seed_param_hash_shapes(record)
-      @current_array_element_shapes = seed_param_array_element_shapes(record)
+      self.current_local_types = {}
+      self.current_collection_builders = seed_param_collection_builders(record)
+      self.current_hash_shapes = seed_param_hash_shapes(record)
+      self.current_array_element_shapes = seed_param_array_element_shapes(record)
       @current_method_name = record["method"]
       @current_class_name = record["class"] if record["class"] && !record["class"].empty?
       collect_local_type_facts(node.body)
@@ -997,11 +1039,11 @@ module NilKill
         "confidence" => confidence, "sources" => sources, "blockers" => blockers.uniq,
         "hash_shape" => hash_shape, "array_element_shape" => array_element_shape }
     ensure
-      @current_param_types = old_param_types
-      @current_local_types = old_local_types
-      @current_collection_builders = old_collection_builders
-      @current_hash_shapes = old_hash_shapes
-      @current_array_element_shapes = old_array_element_shapes
+      self.current_param_types = old_param_types
+      self.current_local_types = old_local_types
+      self.current_collection_builders = old_collection_builders
+      self.current_hash_shapes = old_hash_shapes
+      self.current_array_element_shapes = old_array_element_shapes
       @current_method_name = old_method_name
       @current_class_name = old_class_name
     end
@@ -1024,30 +1066,30 @@ module NilKill
       before_shapes = dup_hash_shapes(@current_hash_shapes)
       before_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = before.dup
-      @current_collection_builders = dup_collection_builders(before_builders)
-      @current_hash_shapes = dup_hash_shapes(before_shapes)
-      @current_array_element_shapes = dup_hash_shapes(before_array_shapes)
+      self.current_local_types = before.dup
+      self.current_collection_builders = dup_collection_builders(before_builders)
+      self.current_hash_shapes = dup_hash_shapes(before_shapes)
+      self.current_array_element_shapes = dup_hash_shapes(before_array_shapes)
       collect_local_type_facts(node.statements)
       then_types = @current_local_types.dup
       then_builders = dup_collection_builders(@current_collection_builders)
       then_shapes = dup_hash_shapes(@current_hash_shapes)
       then_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = before.dup
-      @current_collection_builders = dup_collection_builders(before_builders)
-      @current_hash_shapes = dup_hash_shapes(before_shapes)
-      @current_array_element_shapes = dup_hash_shapes(before_array_shapes)
+      self.current_local_types = before.dup
+      self.current_collection_builders = dup_collection_builders(before_builders)
+      self.current_hash_shapes = dup_hash_shapes(before_shapes)
+      self.current_array_element_shapes = dup_hash_shapes(before_array_shapes)
       collect_local_type_facts(node.subsequent)
       else_types = @current_local_types.dup
       else_builders = dup_collection_builders(@current_collection_builders)
       else_shapes = dup_hash_shapes(@current_hash_shapes)
       else_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = merge_branch_local_types(before, then_types, else_types)
-      @current_collection_builders = merge_branch_collection_builders(before_builders, then_builders, else_builders)
-      @current_hash_shapes = merge_branch_hash_shapes(before_shapes, then_shapes, else_shapes)
-      @current_array_element_shapes = merge_branch_hash_shapes(before_array_shapes, then_array_shapes, else_array_shapes)
+      self.current_local_types = merge_branch_local_types(before, then_types, else_types)
+      self.current_collection_builders = merge_branch_collection_builders(before_builders, then_builders, else_builders)
+      self.current_hash_shapes = merge_branch_hash_shapes(before_shapes, then_shapes, else_shapes)
+      self.current_array_element_shapes = merge_branch_hash_shapes(before_array_shapes, then_array_shapes, else_array_shapes)
     end
 
     def merge_branch_local_types(before, then_types, else_types)
@@ -2178,7 +2220,7 @@ module NilKill
       block = call_node.block
       return nil unless block && block.respond_to?(:body)
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(call_node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
@@ -2190,7 +2232,7 @@ module NilKill
       end
       shape
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def hash_shape_for_literal_keys(value)
@@ -2506,8 +2548,8 @@ module NilKill
       return nil unless block && block.respond_to?(:body)
       old_local_types = @current_local_types
       old_hash_shapes = @current_hash_shapes
-      @current_local_types = @current_local_types.dup
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_local_types = @current_local_types.dup
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         type = param_types[idx]
         @current_local_types[name] = type if name && NilKill.useful_type?(type)
@@ -2516,8 +2558,8 @@ module NilKill
       end
       expression_type(implicit_return_expression(block.body))
     ensure
-      @current_local_types = old_local_types if old_local_types
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_local_types = old_local_types if old_local_types
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def block_param_names(block)
