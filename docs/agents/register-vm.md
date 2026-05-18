@@ -177,3 +177,87 @@ allocator. The TraceEvent's `slot` field repurposes as stack-slot index.
 | Up/down/frame N for the trace cursor | small | Stepping back through earlier frames in the recording |
 | `LSP::TraceAdapter` — convert TraceEvent + Span → LSP `Diagnostic` | small (~30 lines, pure Ruby) | Visualization in any LSP-aware editor |
 | Stack VM port of the metadata pipeline | medium-large (~250 lines mechanical wiring) | Same debugger feel for the stack VM |
+
+## Language coverage roadmap (2026-05-18)
+
+Transpile-test coverage: **276 / 466 = 59.2%**
+(`examples/minivm/register-transpile-allowlist.txt`; `run_tests.rb
+--vm=register`). The +27 over the prior 249 were already-passing
+tests never given regression coverage, found by bucketing every
+non-allowlisted test by failure reason (the sweep below).
+
+### CI status (important)
+
+- The **Register-VM allowlist** CI job is **disabled** (`if: false`
+  in `ci.yml`): the register VM compiles `vm.cht` to a native binary
+  per run and times out on GitHub-hosted runners. Coverage is
+  enforced locally only: `bundle exec ruby
+  examples/minivm/run_tests.rb --vm=register`.
+- The golden harness's `vm.cht`-binary-executing examples (6 in
+  `minivm_golden_harness_spec`, all of `minivm_register_debugger_spec`
+  = 19) **skip on CI** (`ENV["CI"]`) for the same timeout reason.
+  The in-process Ruby-emitter compile/snapshot tests still run on CI.
+- Golden snapshots (`examples/minivm/vm-tests/**/*.{bc,out}`) are
+  committed: `.gitignore` `examples/**` had no `*.bc`/`*.out`
+  negation, so a fresh checkout (CI) had none and the golden harness
+  hard-failed. Negations added; regenerate with
+  `update_vm_golden.rb --target all` and commit.
+
+### Empirical failure-bucket map (drive work by this, not prose)
+
+Bucketed all 217 then-non-allowlisted tests by register failure
+reason. Highest-impact remaining clusters:
+
+| Cluster | ~Tests | Tracker | Effort |
+|---|---|---|---|
+| `list of anytype` -- `BG STREAM`/observable pipelines | 27 | #17 | Hard (CPS/coroutine) |
+| Non-scalar param types (Int/Float/String/list-helper only) | 9 | #12/#14 | medium |
+| `ThunkTrampoline`/`MutualThunkTrampoline` (recursion) | 8 | (new) | medium |
+| `Value[]@list` append (struct-lit/.Variant RHS) | 5 | #14 | medium |
+| Scalar/nested struct placeholder fields | 5 | #12 | medium |
+| `ForStmt` iter shapes beyond ListItems/range/struct_list | 5 | #12/#13 | medium |
+| Struct-list-as-struct-field (`orders: ArrayListUnmanaged(T)`) | 5 | #12 | 2 days |
+| `DoBlock` parallel branches | 3 | #18 | Hard |
+| String/array struct fields ("Int64/Float64 only Tranche 7") | 3 | #12 | medium |
+| long tail | ~110 | #12-#18 | large/unscoped |
+
+`101_pipeline_binding` is the canonical #12 hard case: struct-list
+struct fields **plus** the full `UNNEST`/`AS $x` pipeline -- not a
+single-fix unlock.
+
+### Priority-ordered roadmap (CLI tracker tasks #12-#19)
+
+- **P1** (~36 tests, projects to ~61%): #12 ORDER_BY/INDEX/nested-list
+  struct fields (ORDER_BY/INDEX sub-cluster already landed; remaining
+  = struct-list-as-field); #13 Pool tail (`pool |> FIND/EACH`,
+  SoaPool, pool-as-capture); #14 recursive Value-list/Val[]/Node[].
+- **P2** (~20 tests, projects to ~65.5%): #15 CatchWrapper/RAISE/OR
+  EXIT error-union runtime (needs new VM opcodes: RAISE, error
+  register, error-kind dispatch); #16 Map `.values()`/`.keys()`; #17
+  StreamSpawn/observable streams (Hard, CPS -- reuse the FSM universal
+  transform, no per-shape emitter); #18 DoBlock (Hard); #19 RawZig
+  (OUT OF SCOPE -- CLAUDE.md forbids parsing Zig in the VM).
+- Long tail 65.5% -> ~100% (~110 tests) is not itemized.
+
+### "Usable to debug concurrent tasks" scoping
+
+Two orthogonal axes:
+
+1. **Concurrency semantics** -- DONE (R6: real per-cell lock,
+   `WITH EXCLUSIVE`, `ON LockTimeout`/`RETRY`, `@shared:locked` cell
+   structs, real BG fibers scalar+void, cap-shared-by-id, hammer
+   battery). The foundation, ~20-25% of the road.
+2. **Deterministic interleaving explorer** -- the headline feature,
+   essentially unbuilt; only the observation surface exists
+   (`@bg_dispatch_points`/`@shared_events`,
+   `run_tests.rb --concurrency-report`). The controllable/replayable
+   scheduler + DPOR + deadlock oracle is the critical path and is its
+   own multi-week workstream. See
+   `examples/minivm/docs/agents/concurrency-and-loom-roadmap.md`.
+
+Language coverage (P1/P2 above) is mostly orthogonal to concurrent
+debugging but is the prerequisite for *running* realistic concurrent
+programs at all (error handling #15, DoBlock #18, streams #17 are
+concurrency-adjacent). Minimum "concurrent-debugger-usable" scope ~=
+R6 (done) + #15 + #18 + the interleaving explorer ~= 6-10 weeks,
+explorer-dominated.
