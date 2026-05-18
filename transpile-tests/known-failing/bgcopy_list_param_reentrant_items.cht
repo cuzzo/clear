@@ -1,0 +1,32 @@
+# Known-failing reproducer for docs/agents/vm-bugs.md
+# "COPY of an @list PARAM into a BG deep-copies via unguarded .items".
+# Filed 57f23367; blocks register-VM R3 Step 3.
+#
+# COPY of an `Int64[]@list` PARAMETER captured into a BG whose body
+# calls a REENTRANT:MAX_DEPTH fn. The captured param is a slice
+# `[]i64` in the BG ctx; the COPY-into-BG deep-copy lowering emits
+# `__ctx_0.sl.items` (ArrayList shape) instead of the comptime
+# `@hasField(@TypeOf(x),"items")` resilient access every other @list
+# read uses ->  Zig: `error: no member named 'items' in '[]i64'`.
+#
+# Distinct from Bug #7 (ctx-field *const T vs T typing) and the
+# nested-@list-root allocator bug. When fixed, move this up to
+# transpile-tests/<NNN>_bgcopy_list_param_reentrant.cht so the
+# regression joins the gate.
+FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+
+FN worker!(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
+    IF depth <= 0_i64 THEN RETURN consume(sl); END
+    f: ~Int64 = BG { @service ->
+        worker!(COPY sl, depth - 1_i64) OR RAISE;
+    };
+    RETURN NEXT f;
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE xs: Int64[]@list = List[];
+    xs.append(1_i64); xs.append(2_i64); xs.append(3_i64);
+    n: Int64 = worker!(GIVE xs, 2_i64) OR RAISE;
+    ASSERT n == 3_i64, "reentrant BG COPY @list param";
+    RETURN;
+END
