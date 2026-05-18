@@ -45,11 +45,25 @@ fn schedulerThread(a: std.mem.Allocator) void {
     fp.scheduler_running = false;
 }
 
-fn startWorkers(threads: []std.Thread, n: usize) void {
-    for (threads[0..n]) |*t| {
-        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+fn startWorkers(threads: []std.Thread, n: usize) !void {
+    var spawned: usize = 0;
+    errdefer {
+        global_shutdown.store(true, .release);
+        fp.global_registry.notifyAll();
+        for (threads[0..spawned]) |*t| t.join();
+        fp.global_registry.deinit(alloc);
+        fp.global_registry = .{};
+        global_shutdown.store(false, .release);
     }
-    while (fp.global_registry.count() < n) {
+
+    for (threads[0..n]) |*t| {
+        t.* = try std.Thread.spawn(.{}, schedulerThread, .{alloc});
+        spawned += 1;
+    }
+
+    var wait_ms: usize = 0;
+    while (fp.global_registry.count() < n) : (wait_ms += 1) {
+        if (wait_ms >= 5_000) return error.WorkerRegistrationTimeout;
         compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
@@ -559,7 +573,7 @@ fn runTinyGetRemoveLoopWithDelays(get_ctx_delay: bool, remove_ctx_delay: bool, k
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -642,7 +656,7 @@ fn runTinyGetRemoveLoopWithEventLog(iters: usize) !void {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -753,7 +767,7 @@ test "Promise(i64): repeated concurrent worker batches survive reuse" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -827,7 +841,7 @@ test "RemoteCall: repeated concurrent batches survive reuse" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -922,7 +936,7 @@ test "PartitionedStringMap: lazy ensureOwnership survives concurrent first-touch
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -972,7 +986,7 @@ test "PartitionedStringMap: remote overwrite keeps latest value" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1023,7 +1037,7 @@ test "PartitionedStringMap: stack-local remote ops are complete before deinit" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1076,7 +1090,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1136,7 +1150,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1196,7 +1210,7 @@ test "PartitionedStringMap: recreated heap-backed map survives repeated concurre
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1255,7 +1269,7 @@ test "PartitionedStringMap: inline L6-shaped put-get batches survive repeated ru
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1352,7 +1366,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1411,7 +1425,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1470,7 +1484,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1532,7 +1546,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1594,7 +1608,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1655,7 +1669,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1716,7 +1730,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1778,7 +1792,7 @@ test "PartitionedStringMap: forced same-remote-shard get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1836,7 +1850,7 @@ test "PartitionedStringMap: disjoint-shard get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1899,7 +1913,7 @@ test "PartitionedStringMap: local-owner and remote-owner get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -1962,7 +1976,7 @@ test "RemoteCall: back-to-back read then mutate calls are a reclamation barrier"
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2078,7 +2092,7 @@ test "Allocator: remote alloc then cross-scheduler free is safe" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2151,7 +2165,7 @@ test "PartitionedStringMap: overlapping-key get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2213,7 +2227,7 @@ test "PartitionedStringMap: single-worker repeated remote get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2270,7 +2284,7 @@ test "PartitionedStringMap: same-keys vs fresh-keys get-remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2344,7 +2358,7 @@ test "PartitionedStringMap: get-remove ctx counters drain after each batch" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2407,7 +2421,7 @@ test "PartitionedStringMap: phased get then remove batches" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2471,7 +2485,7 @@ test "PartitionedStringMap: tiny 2-worker 2-key 1-remote-shard loop" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2533,7 +2547,7 @@ test "PartitionedStringMap: persistent map repeated get-remove with counters" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2595,7 +2609,7 @@ test "PartitionedStringMap: delayed-destroy diagnostic for get-remove" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2849,7 +2863,7 @@ test "PartitionedNumericMap: remote put/get across schedulers" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
@@ -2895,7 +2909,7 @@ test "PartitionedNumericMap: remote remove cleans up correctly" {
     defer deinitWorkerGlobals();
 
     var threads: [2]std.Thread = undefined;
-    startWorkers(&threads, 2);
+    try startWorkers(&threads, 2);
     defer stopWorkers(&threads, 2);
 
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
