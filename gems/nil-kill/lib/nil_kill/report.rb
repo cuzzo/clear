@@ -3234,6 +3234,15 @@ module NilKill
       member_calls = Array(evidence.dig("facts", "hash_record_member_calls"))
       param_origins = Array(evidence.dig("facts", "param_origins"))
       return_sources = Array(evidence.dig("facts", "return_origins")).flat_map { |origin| Array(origin["sources"]) }
+      # Was O(lookups x param_origins) + O(lookups x return_sources):
+      # every lookup rescanned ALL origins/sources with a per-element
+      # .to_s compare (~54s of build_actions on a whole-project index).
+      # Index by code ONCE -> O(1) per lookup. group_by preserves
+      # order, so the per-code group is exactly (and in the same order
+      # as) what `next unless code == lookup_code` yielded -> identical
+      # Set contents -> byte-identical.
+      param_origins_by_code = param_origins.group_by { |origin| origin["code"].to_s }
+      return_sources_by_code = return_sources.group_by { |source| source["code"].to_s }
 
       lookups.each do |lookup|
         cluster = cluster_for_hash_lookup(lookup, clusters_by_exact_key)
@@ -3247,12 +3256,11 @@ module NilKill
           "receiver" => lookup["receiver"], "index" => lookup["index"], "key" => key,
           "lookup_type" => lookup["lookup_type"], "status" => lookup["status"], "origin" => lookup["origin"] }
 
-        param_origins.each do |origin|
-          next unless origin["code"].to_s == lookup["code"].to_s
+        lookup_code = lookup["code"].to_s
+        Array(param_origins_by_code[lookup_code]).each do |origin|
           cluster["param_slot_ids"].add([origin["path"], origin["line"], origin["callee"], origin["slot"]])
         end
-        return_sources.each do |source|
-          next unless source["code"].to_s == lookup["code"].to_s
+        Array(return_sources_by_code[lookup_code]).each do |source|
           cluster["return_slot_ids"].add([source["path"], source["line"], source["code"]])
         end
       end
@@ -3648,6 +3656,15 @@ module NilKill
       lookups = Array(evidence.dig("facts", "collection_index_lookups")).select { |lookup| hash_record_lookup?(lookup) }
       param_origins = Array(evidence.dig("facts", "param_origins"))
       return_sources = Array(evidence.dig("facts", "return_origins")).flat_map { |origin| Array(origin["sources"]) }
+      # Was O(lookups x param_origins) + O(lookups x return_sources):
+      # every lookup rescanned ALL origins/sources with a per-element
+      # .to_s compare (~54s of build_actions on a whole-project index).
+      # Index by code ONCE -> O(1) per lookup. group_by preserves
+      # order, so the per-code group is exactly (and in the same order
+      # as) what `next unless code == lookup_code` yielded -> identical
+      # Set contents -> byte-identical.
+      param_origins_by_code = param_origins.group_by { |origin| origin["code"].to_s }
+      return_sources_by_code = return_sources.group_by { |source| source["code"].to_s }
       groups = Hash.new do |hash, key|
         hash[key] = { "label" => key, "keys" => Set.new, "examples" => [],
           "collection_slot_ids" => Set.new, "param_slot_ids" => Set.new, "return_slot_ids" => Set.new,
@@ -3663,12 +3680,11 @@ module NilKill
         row["ivar_slot_ids"].add([lookup["path"], lookup["line"], lookup["receiver"]]) if hash_record_ivar_lookup?(lookup)
         row["examples"] << "#{lookup["path"]}:#{lookup["line"]} #{lookup["code"]}; receiver type #{lookup["receiver_type"] || "unknown"}" if row["examples"].size < 5
 
-        param_origins.each do |origin|
-          next unless origin["code"].to_s == lookup["code"].to_s
+        lookup_code = lookup["code"].to_s
+        Array(param_origins_by_code[lookup_code]).each do |origin|
           row["param_slot_ids"].add([origin["path"], origin["line"], origin["callee"], origin["slot"]])
         end
-        return_sources.each do |source|
-          next unless source["code"].to_s == lookup["code"].to_s
+        Array(return_sources_by_code[lookup_code]).each do |source|
           row["return_slot_ids"].add([source["path"], source["line"], source["code"]])
         end
       end
