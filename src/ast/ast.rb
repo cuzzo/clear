@@ -164,6 +164,24 @@ module AST
       self[:unwrapped_type] = val
     end
 
+    # Annotator-stamped SymbolEntry for the bound name (nil until the
+    # then-scope declares it).
+    sig { returns(T.nilable(SymbolEntry)) }
+    def symbol
+      self[:symbol]
+    end
+
+    sig { params(val: T.nilable(SymbolEntry)).void }
+    def symbol=(val)
+      self[:symbol] = val
+    end
+
+    # Emitter label alias (currently unused; reserved).
+    sig { returns(T.nilable(String)) }
+    def capture
+      self[:capture]
+    end
+
   end
 
   # One capability of a WITH block (AST::WithBlock#capabilities

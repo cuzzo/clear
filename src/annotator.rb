@@ -1344,7 +1344,7 @@ private
             entry.non_escaping = true
           end
           classify_ownership!(entry)
-          og_declare(b[:name].to_s, nil, unwrapped)
+          og_declare(b.name.to_s, nil, unwrapped)
         end
         visit_stmts(node.then_branch)
         nil
