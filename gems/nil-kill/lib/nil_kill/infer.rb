@@ -108,13 +108,29 @@ module NilKill
       # Each pass picks up methods whose body resolves to noreturn via
       # calls to methods registered by an earlier pass. Bounded at 5
       # iterations -- typical chain depth is 1-2.
+      # The final emit pass below re-walked every file a 3rd time only
+      # to read pass-invariant facts + noreturn_candidate. When the
+      # fixpoint CONVERGES, the converged pass registered nothing
+      # (size unchanged start->end), so every method_record in it saw
+      # the converged @@noreturn_methods -- byte-identical to what a
+      # fresh final walk recomputes (same converged set, same pass-
+      # invariant walk). Cache that pass and emit from it; only fall
+      # back to a fresh final walk if it never converges (rare; the
+      # comment above notes typical chain depth 1-2). Toggle for the
+      # differential proof (NIL_KILL_IDX_REUSE=0 == the old 3rd pass).
+      reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
+      cached = nil
       5.times do
         before = SourceIndex.noreturn_methods.size
-        files.each { |path| SourceIndex.new(path) }
-        break if SourceIndex.noreturn_methods.size == before
+        pass = reuse ? {} : nil
+        files.each { |path| idx = SourceIndex.new(path); pass[path] = idx if reuse }
+        if SourceIndex.noreturn_methods.size == before
+          cached = pass
+          break
+        end
       end
       files.each do |path|
-        idx = SourceIndex.new(path)
+        idx = (cached && cached[path]) || SourceIndex.new(path)
         @store.facts["files"][NilKill.rel(path)] = idx.summary
         @store.facts["unsigned_methods"].concat(idx.methods.reject { |m| m["has_sig"] })
         @store.facts["existing_sigs"].concat(idx.methods.select { |m| m["has_sig"] })
