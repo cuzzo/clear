@@ -170,6 +170,8 @@ ENUM RegisterOp {
     SCellNew,
     SCellGetI,
     SCellSetI,
+    LockAcq,
+    LockRel,
     Operand,
 }
 
@@ -612,6 +614,8 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.SCellNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.SCellGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.SCellSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockAcq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockRel -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -773,6 +777,8 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.SCellNew -> RETURN 1_i64;,
         RegisterOp.SCellGetI -> RETURN 2_i64;,
         RegisterOp.SCellSetI -> RETURN 2_i64;,
+        RegisterOp.LockAcq -> RETURN 3_i64;,
+        RegisterOp.LockRel -> RETURN 1_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -2611,6 +2617,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
                         iregs[iBase + scnDst] = sc.length();
                         sc.append(RegisterValue{ Int64Val: 0_i64 });
+                        sc.append(RegisterValue{ Int64Val: 0_i64 });
                     },
             RegisterOp.SCellGetI ->
                     scgDst = ops[ip]; ip += 1;
@@ -2627,6 +2634,43 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     scsSrc = ops[ip]; ip += 1;
                     WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
                         sc[iregs[iBase + scsCell]] = RegisterValue{ Int64Val: iregs[iBase + scsSrc] };
+                    },
+            RegisterOp.LockAcq ->
+                    laDst = ops[ip]; ip += 1;
+                    laCell = ops[ip]; ip += 1;
+                    laTmo = ops[ip]; ip += 1;
+                    laCellIdx = iregs[iBase + laCell];
+                    laTimeout = iregs[iBase + laTmo];
+                    MUTABLE laAcquired = FALSE;
+                    MUTABLE laTimedOut = FALSE;
+                    MUTABLE laWaited: Int64 = 0_i64;
+                    WHILE !laAcquired DO
+                        WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                            MUTABLE laFree = FALSE;
+                            PARTIAL MATCH sc[laCellIdx + 1_i64] START
+                                RegisterValue.Int64Val AS laL -> IF laL == 0_i64 THEN laFree = TRUE; END,
+                                DEFAULT -> laFree = TRUE;
+                            END
+                            IF laFree THEN
+                                sc[laCellIdx + 1_i64] = RegisterValue{ Int64Val: 1_i64 };
+                                laAcquired = TRUE;
+                            END
+                        }
+                        IF !laAcquired THEN
+                            laSleep: Int64 = 1_i64;
+                            sleep(laSleep);
+                            laWaited = laWaited + 1_i64;
+                            IF laWaited >= laTimeout THEN
+                                laTimedOut = TRUE;
+                                laAcquired = TRUE;
+                            END
+                        END
+                    END
+                    IF laTimedOut THEN iregs[iBase + laDst] = 0_i64; ELSE iregs[iBase + laDst] = 1_i64; END,
+            RegisterOp.LockRel ->
+                    lrCell = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        sc[iregs[iBase + lrCell] + 1_i64] = RegisterValue{ Int64Val: 0_i64 };
                     },
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");

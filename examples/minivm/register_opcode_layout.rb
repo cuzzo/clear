@@ -258,6 +258,8 @@ module MiniVM
         Opcode.new(name: :SCELLNEW,  code: 150, arity: 1, vm_name: "SCellNew"),
         Opcode.new(name: :SCELLGETI, code: 151, arity: 2, vm_name: "SCellGetI"),
         Opcode.new(name: :SCELLSETI, code: 152, arity: 2, vm_name: "SCellSetI"),
+        Opcode.new(name: :LOCKACQ,   code: 153, arity: 3, vm_name: "LockAcq"),
+        Opcode.new(name: :LOCKREL,   code: 154, arity: 1, vm_name: "LockRel"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -397,6 +399,8 @@ module MiniVM
         SCELLNEW:  [:i_def],
         SCELLGETI: [:i_def, :i_use],
         SCELLSETI: [:i_use, :i_use],
+        LOCKACQ:   [:i_def, :i_use, :i_use],
+        LOCKREL:   [:i_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],
