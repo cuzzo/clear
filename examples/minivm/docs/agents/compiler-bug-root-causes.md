@@ -14,28 +14,69 @@ plainly rather than guessed.
 
 ## A. CLEAR compiler bugs (src/)
 
-### A1. `ControlFlow.scan_direct` sig contradicted its own contract
+### A1. `IfStatement#else_branch` AST-invariant violation by PipelineRewriter
 
-- **Bug:** Sorbet `sig` declared `body: T::Array`, but the method
-  body opens with `return unless body.is_a?(Array)` and is called
-  recursively on `s.else_branch` / `s.default_case` (legitimately
-  nil: IF-without-ELSE, PARTIAL-MATCH-without-DEFAULT). Sorbet
-  validates params at the call boundary, so it aborted *before* the
-  method's own designed guard ran.
-- **Systemic gap:** a hand-written `sig` that is stricter than the
-  method's intentional, self-documented behavior — and **zero unit
-  coverage** of the optional-subtree recursion path, so the
-  contradiction sat latent until a reentrant + IF/MATCH shape hit it.
-- **Architecturally-correct fix (DONE):** make the sig express the
-  real contract (`body: T.nilable(T::Array[...])`); the existing
-  `return unless body.is_a?(Array)` IS the intended handling. No new
-  logic. **Regression-locked:** `spec/loop_frame_analysis_spec.rb`
-  Group G directly exercises `scan_direct(nil)`, IF-without-ELSE,
-  and PARTIAL-MATCH-without-DEFAULT; **proven** to fail without the
-  fix and pass with it. prspec 4801/0.
-- **Class prevention:** audited `control_flow.rb` for the same
-  pattern (sig stricter than an internal type/nil guard) — no other
-  instance. The durable guard is the new spec, not a grep.
+- **First fix was a band-aid (corrected).** Initially I widened
+  `ControlFlow.scan_direct`'s sig to `T.nilable` so it would accept
+  the nil it was receiving. That treats the symptom and **adds a
+  nil path** — exactly what CLAUDE.md / `decomplex` forbid. The
+  user correctly rejected it ("adding nil is not acceptable; that
+  is almost certainly a bug"). `origin/decomplex` was checked: it
+  carries the **identical** strict `scan_direct` sig — it would NOT
+  have fixed this; a static type-tightening sweep can't see a
+  runtime nil-flow.
+- **Real root cause:** the parser upholds an invariant —
+  `IfStatement#else_branch` is **always an `Array`** (`[]` for an
+  absent ELSE; parser.rb:2009/2036/2052). `PipelineRewriter`
+  violated it at **9 sites**, constructing
+  `AST::IfStatement.new(..., nil)`. `scan_direct` then *correctly*
+  received a contract-violating nil. (`MatchStatement#default_case`
+  is, by contrast, `[ASTNode] or nil` **by AST design**
+  (ast.rb:1171) — a sanctioned optional, not a violation.)
+- **Systemic gap:** an AST invariant the parser guarantees but a
+  rewrite pass silently broke, with **zero coverage** asserting the
+  invariant at the rewrite boundary — so the contradiction sat
+  latent until a body-shape reached `scan_direct` without a loop
+  boundary in between.
+- **Architecturally-correct fix (DONE):**
+  1. `pipeline_rewriter.rb`: all 9 `IfStatement.new(...,nil)` →
+     `(...,[])` — restore the parser invariant at the source.
+  2. `control_flow.rb`: `scan_direct` sig reverted to **strictly
+     non-nil** `T::Array`; the dead `return unless body.is_a?(Array)`
+     band-aid removed; the ONE genuinely-optional recurse site
+     guarded `... if s.default_case` (mirrors ast.rb's own
+     `bodies << default_case if default_case`). No nil ever reaches
+     `scan_direct`.
+- **Regression-locked (proven):** `spec/loop_frame_analysis_spec.rb`
+  Group G asserts the invariant directly (no `IfStatement` in a
+  pipeline-rewritten tree has a nil `else_branch`) — **proven to
+  fail** if a single `nil` is reintroduced — plus end-to-end
+  IF-no-ELSE / PARTIAL-MATCH-no-DEFAULT and a `scan_direct(nil) ->
+  TypeError` test that **encodes the strict contract** (nil is a
+  bug, not a no-op). Exhaustively verified: prspec **4802/0**,
+  transpile-tests **554/554** (0 leaks), fuzz matrix **141/141**,
+  register allowlist **245/245**.
+- **Missing fuzz coverage (answer to "what fuzz would have caught
+  this?"):** the stable matrix
+  (`access_gate, execution_boundary, stream_into_boundary,
+  loop_carry_collection, mutable_collection_param`) has **no
+  template emitting pipeline ops** (WHERE/FIND/AVG/ANY/ALL/skip/
+  limit — the shapes that drive PipelineRewriter's synthesized
+  IfStatements) at **direct (non-loop-nested) body scope** in
+  escape/loop-frame-analyzed functions. `scan_direct` STOPs at loop
+  boundaries, so pipeline ops nested in generated loops never reach
+  it — which is why 554 transpile-tests + the fuzz matrix were all
+  green pre-fix. A `pipeline_direct_scope` template would add that
+  cross-product. **But** the structurally-correct guard is the
+  invariant test above (assert at the rewrite boundary), which
+  catches the root cause regardless of which downstream consumer
+  trips on it — strictly better than fuzzing for one consumer's
+  symptom. Recommended: add the fuzz template *and* keep the
+  invariant assertion as the primary guard.
+- **Class prevention:** audited `control_flow.rb` — `scan_direct`
+  was the lone sig-vs-internal-guard instance. The durable guards
+  are (a) the invariant spec, (b) the strict non-nil sig now
+  enforcing the contract at every call site.
 
 ### A2. Reentrant `INLINE_ALLOC_MISMATCH` (UNCONFIRMED — do not fix blind)
 
