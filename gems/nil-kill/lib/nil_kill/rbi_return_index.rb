@@ -17,9 +17,28 @@ module NilKill
     def initialize
       @returns = Hash.new { |hash, key| hash[key] = [] }
       @owner_returns = Hash.new { |hash, key| hash[key] = Hash.new { |inner, method| inner[method] = [] } }
+      # return_type / concrete_return_type? are PURE over the immutable
+      # post-build index (@returns/@owner_returns written only during
+      # `build`, read-only after) and this is a process-global
+      # singleton (NilKill.rbi_return_index). They are recomputed
+      # identically for every call site across every SourceIndex pass
+      # (index_sources re-walks all files ~3-7x for the noreturn
+      # fixpoint). Memoizing on the singleton collapses that to one
+      # computation per distinct argument for the whole infer run.
+      # Byte-identical by construction: same inputs -> same outputs;
+      # the only "mutation" is the Hash default-block inserting a benign
+      # empty [] for unknown keys, which never changes a result.
+      @rt_memo = {}
+      @crt_memo = {}
     end
 
     def return_type(method_name, receiver_type = nil)
+      @rt_memo.fetch([method_name.to_s, receiver_type]) do |k|
+        @rt_memo[k] = return_type_uncached(method_name, receiver_type)
+      end
+    end
+
+    def return_type_uncached(method_name, receiver_type = nil)
       owner_candidates_for(receiver_type).each do |owner|
         types = @owner_returns[owner][method_name.to_s].compact.uniq.select { |type| concrete_return_type?(type) }
         candidate = normalize_candidate_set(types)
@@ -173,6 +192,10 @@ module NilKill
     ].freeze
 
     def concrete_return_type?(type)
+      @crt_memo.fetch(type) { |k| @crt_memo[k] = concrete_return_type_uncached?(type) }
+    end
+
+    def concrete_return_type_uncached?(type)
       return false unless NilKill.useful_type?(type)
       str = type.to_s
       return false if AMBIGUOUS_RBI_OWNERS.any? { |prefix| str.include?(prefix) }
