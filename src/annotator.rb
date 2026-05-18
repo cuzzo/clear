@@ -574,7 +574,7 @@ private
   # CLOSE makes it a resource type — auto-defer cleanup via RAII.
   sig { params(node: AST::ExternStructDecl).returns(Symbol) }
   def visit_ExternStructDecl(node)
-    schema = node.fields.transform_keys(&:to_s).transform_values { |f| f[:type] }
+    schema = node.field_decls.transform_keys(&:to_s).transform_values { |f| f.type }
     type_params = node.respond_to?(:type_params) ? node.type_params : nil
     schema[:type_params] = type_params if type_params&.any?
     schema[:extern_module] = node.from_module
@@ -1104,26 +1104,26 @@ private
     validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
 
     # Register the Type Name with its field schema.
-    schema = node.fields.transform_values { |f| f[:type] }
+    schema = node.field_decls.transform_values { |f| f.type }
 
     # Store field defaults so empty struct literals (Foo{}) can be validated.
-    field_defaults = node.fields.each_with_object({}) { |(k, f), h| h[k] = f[:default] if f[:default] }
+    field_defaults = node.field_decls.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
     schema[:field_defaults] = field_defaults unless field_defaults.empty?
 
     # A field default's type IS the field's declared type (it must be
     # assignable to it) — not a guess. These default nodes (Literal /
     # DefaultLit) are schema metadata never walked by the expression
     # visitor, so type them here.
-    node.fields.each do |_, f|
-      d = f[:default]
+    node.field_decls.each do |_, f|
+      d = f.default
       next unless d
       # In field-default position the value's type IS the field type;
       # assign unconditionally (overrides a Literal's derived kind).
-      d.full_type = f[:type].is_a?(Type) ? f[:type] : Type.new(f[:type] || :Any)
+      d.full_type = f.type.is_a?(Type) ? f.type : Type.new(f.type || :Any)
     end
 
     # Track which fields are BORROWED (references, not owned).
-    borrowed_fields = node.fields.select { |_, f| f[:borrowed] }.keys
+    borrowed_fields = node.field_decls.select { |_, f| f.borrowed }.keys
     schema[:borrowed_fields] = borrowed_fields.to_set if borrowed_fields.any?
 
     # For generic structs, record the type parameter names so field-type
@@ -1396,7 +1396,7 @@ private
         # Destructuring bind: declare a local variable with the field's type.
         if schema && schema.key?(f.name)
           field_def = schema[f.name]
-          field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
+          field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
           field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
           current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
           og_declare(f.name, nil, field_type)
@@ -1406,7 +1406,7 @@ private
 
         if schema
           field_def = schema[f.name]
-          field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(Hash) ? field_def[:type]&.resolved : field_def&.resolved)
+          field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(AST::StructField) ? field_def.type&.resolved : field_def&.resolved)
           val_type   = f.expr.resolved_type
           is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
           unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
@@ -1712,7 +1712,7 @@ private
                     end
                   end
                   field_def = payload_schema[f.name]
-                  field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
+                  field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
                   field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
                   current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
                   og_declare(f.name, nil, field_type)

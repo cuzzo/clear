@@ -76,7 +76,7 @@ class CompilerFrontend
     union_schemas = {}
     T.must(ast).statements.each do |stmt|
       case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
       when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
       end

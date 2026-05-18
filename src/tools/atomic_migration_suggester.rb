@@ -79,7 +79,8 @@ module AtomicMigrationSuggester
     fields = schema.fields
     return nil unless fields.size == 1
 
-    field_name, field_type = fields.first
+    field_name, field_def = fields.first
+    field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
     field_resolved = field_type.is_a?(Type) ? field_type.resolved : field_type
     return nil unless ATOMIC_ELIGIBLE_FIELD_TYPES.include?(field_resolved)
 

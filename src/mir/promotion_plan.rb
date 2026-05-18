@@ -196,7 +196,7 @@ module PromotionClassifier
     schema = schema_lookup.call(resolved) rescue nil
     return false unless (schema = Schemas.as_struct_schema(schema))
     schema.fields.any? do |_, v|
-      ft = v.is_a?(Hash) ? v[:type] : v
+      ft = v.is_a?(AST::StructField) ? v.type : v
       t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
       t.string? || t.list_collection? || t.map?
@@ -219,7 +219,7 @@ module PromotionClassifier
     unhandled = []
     schema.fields.each do |fname, fdef|
       next if handled_fields.include?(fname.to_s)
-      ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(Hash) ? (fdef[:type] || :Any) : (fdef || :Any))
+      ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(AST::StructField) ? (fdef.type || :Any) : (fdef || :Any))
       unhandled << fname.to_s if ft.needs_escape_promotion?
     end
 
@@ -816,7 +816,7 @@ module CleanupClassifier
     end
     if (ss = Schemas.as_struct_schema(schema))
       has_escapable = ss.fields.any? do |_, v|
-        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(AST::StructField) ? (v.type || :Any) : (v || :Any))
         ft.needs_escape_promotion?
       end
       return entry(:heap_struct) if has_escapable
@@ -853,7 +853,7 @@ module CleanupClassifier
     end
     if (ss = Schemas.as_struct_schema(schema))
       has_escapable = ss.fields.any? do |_, v|
-        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(AST::StructField) ? (v.type || :Any) : (v || :Any))
         ft.needs_escape_promotion?
       end
       return entry(:heap_struct) if has_escapable
@@ -871,7 +871,7 @@ module CleanupClassifier
     # IF-bind capture nodes don't carry `.value`; only VarDecl/BindExpr do.
     struct_lit = node.respond_to?(:value) && node.value.is_a?(AST::StructLit) ? node.value : nil
     has_cleanup = schema.fields.any? do |k, v|
-      ft = v.is_a?(Hash) ? v[:type] : v
+      ft = v.is_a?(AST::StructField) ? v.type : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       next true if t.link? || t.any_rc?
       next true if t.collection? || t.map?
@@ -924,7 +924,7 @@ module CleanupClassifier
   private_class_method def self.elem_has_string_fields?(schema)
     return false unless (schema = Schemas.as_struct_schema(schema))
     schema.fields.any? do |_, v|
-      ft = v.is_a?(Hash) ? v[:type] : v
+      ft = v.is_a?(AST::StructField) ? v.type : v
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       t.string?
     end

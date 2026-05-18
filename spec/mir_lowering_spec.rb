@@ -600,7 +600,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers simple struct definition" do
-      fields = { name: { type: :String }, age: { type: :Int64 } }
+      fields = { name: AST::StructField.new(type: :String), age: AST::StructField.new(type: :Int64) }
       node = AST::StructDef.new(tok, "User", fields, nil, nil)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::StructDef)
@@ -611,7 +611,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers generic struct to FnDef returning anonymous StructDef" do
-      fields = { value: { type: :T } }
+      fields = { value: AST::StructField.new(type: :T) }
       node = AST::StructDef.new(tok, "Box", fields, nil, ["T"])
       result = lowering.lower(node)
       expect(result).to be_a(MIR::FnDef)

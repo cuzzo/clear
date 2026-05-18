@@ -1028,7 +1028,36 @@ module AST
     # call resolution, same UFCS at call sites at the language level.
     attr_accessor :is_method
   end
-  StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
+  # One field of a struct/extern-struct declaration (the value in
+  # StructDef#field_decls / ExternStructDecl#field_decls, keyed by
+  # field name). Built by parse_struct_body. Replaces the loose
+  # {type,default,borrowed} Hash; every member strongly typed.
+  StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      self[:borrowed] = false if self[:borrowed].nil?
+    end
+
+    sig { returns(T.any(Type, Symbol)) }
+    def type; self[:type]; end
+    sig { params(val: T.any(Type, Symbol)).void }
+    def type=(val); self[:type] = val; end
+
+    sig { returns(T.nilable(AST::Locatable)) }
+    def default; self[:default]; end
+
+    sig { returns(T::Boolean) }
+    def borrowed; self[:borrowed]; end
+  end
+
+  StructDef    = Struct.new(:token, :name, :field_decls, :visibility, :type_params) do
+    extend T::Sig
+    include Locatable
+    sig { returns(T::Hash[String, AST::StructField]) }
+    def field_decls; self[:field_decls]; end
+  end
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
@@ -1614,12 +1643,15 @@ module AST
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
-  ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) {
+  ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module) do
+    extend T::Sig
     include Locatable
     attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
-  }
+    sig { returns(T::Hash[String, AST::StructField]) }
+    def field_decls; self[:field_decls]; end
+  end
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }

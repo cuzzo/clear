@@ -937,23 +937,23 @@ class MIRLowering
 
   sig { params(node: AST::StructDef).returns(T.untyped) }
   def lower_struct_def(node)
-    @struct_schemas[node.name.to_sym] = Schemas::StructSchema.new(fields: node.fields)
+    @struct_schemas[node.name.to_sym] = Schemas::StructSchema.new(fields: node.field_decls)
 
     if node.type_params&.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
       comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
-      fields_mir = node.fields.map { |name, fd|
-        zig_t = transpile_type(fd[:type], is_field: true)
-        default_mir = fd[:default] ? lower_field_default(fd[:default]) : nil
+      fields_mir = node.field_decls.map { |name, fd|
+        zig_t = transpile_type(fd.type, is_field: true)
+        default_mir = fd.default ? lower_field_default(fd.default) : nil
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
       body = [MIR::ReturnStmt.new(inner_struct)]
       MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
     else
-      fields = node.fields.map { |name, fd|
-        zig_t = transpile_type(fd[:type], is_field: true)
-        default_mir = fd[:default] ? lower_field_default(fd[:default]) : nil
+      fields = node.field_decls.map { |name, fd|
+        zig_t = transpile_type(fd.type, is_field: true)
+        default_mir = fd.default ? lower_field_default(fd.default) : nil
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       MIR::StructDef.new(node.name, fields, nil, nil)
@@ -1104,11 +1104,11 @@ class MIRLowering
       zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
       items << MIR::TypeAlias.new(node.name, zig_rhs)
       items.length == 1 ? items.first : items
-    elsif node.fields.empty?
+    elsif node.field_decls.empty?
       MIR::Noop.new("empty_local_extern_struct")
     else
-      fields = node.fields.map { |name, fd|
-        zig_t = transpile_type(fd[:type], is_field: true)
+      fields = node.field_decls.map { |name, fd|
+        zig_t = transpile_type(fd.type, is_field: true)
         MIR::FieldDef.new(name.to_s, zig_t, nil)
       }
       MIR::StructDef.new(node.name, fields, nil, nil)
@@ -5407,7 +5407,7 @@ class MIRLowering
       schema_for_name = @struct_schemas&.dig(node.name.to_sym)
       schema_fields = schema_for_name.is_a?(Schemas::StructSchema) ? schema_for_name.fields : schema_for_name
       field_def = schema_fields&.[](k)
-      if field_def.is_a?(Hash) && field_def[:borrowed] && vt&.array? && !needs_items
+      if field_def.is_a?(AST::StructField) && field_def.borrowed && vt&.array? && !needs_items
         val = MIR::ItemsAccess.new(val, true)
       elsif needs_items
         val = MIR::ItemsAccess.new(val, false)

@@ -2443,7 +2443,7 @@ class Parser
 
       reject_auto_in_aggregate_field!(T.must(type), name, name_tok, "STRUCT")
 
-      [name, { type: type, default: default_val, borrowed: borrowed }]
+      [name, AST::StructField.new(type: type, default: default_val, borrowed: borrowed)]
     end
     pairs.to_h
   end

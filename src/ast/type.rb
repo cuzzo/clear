@@ -1469,7 +1469,7 @@ class Type
       if schema.is_a?(Hash) && !schema[:kind]
         all_copy = schema.all? do |k, v|
           next true if k.is_a?(Symbol) # skip metadata (:type_params etc.)
-          ft = v.is_a?(Type) ? v : (v.is_a?(Hash) ? Type.new(v[:type] || :Any) : Type.new(v || :Any))
+          ft = v.is_a?(Type) ? v : (v.is_a?(AST::StructField) ? Type.new(v.type || :Any) : Type.new(v || :Any))
           ft.implicitly_copyable?(resolver)
         end
         return true if all_copy
@@ -1724,7 +1724,7 @@ class Type
     fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
     fields.any? { |k, v|
       next false if k.is_a?(Symbol)
-      ft = v.is_a?(Hash) ? v[:type] : v
+      ft = v.is_a?(AST::StructField) ? v.type : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
       blk.call(t)
