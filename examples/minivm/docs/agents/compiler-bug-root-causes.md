@@ -189,3 +189,73 @@ under incremental pressure, not missing principles. Concrete
 durable guardrail added this session: the A1 regression spec. The
 B and A2 architectural fixes are scoped above as dedicated,
 verified workstreams — explicitly not to be band-aided.
+
+---
+
+## Post-mortem: nested-@list-field append allocator (2026-05-18)
+
+**Bug.** A `root[i].field.append(x)` where `root` is a loop-spanning
+`@list` heap-promoted by a non-tight loop's per-iteration arena
+rewind: the nested-field append resolved its allocator from the
+leaf `GetField`/`GetIndex` receiver (no storage stamp -> `:frame`)
+while `mir_checker` attributed the op to the heap root via
+`extract_root_var_name` -> INLINE_ALLOC_MISMATCH. (Full root cause
+in `docs/agents/vm-bugs.md`.)
+
+**Why it went unnoticed until now.** Three independent coverage
+gaps, each of which alone would have caught it:
+
+1. **The fuzz template existed but was partially implemented.**
+   `tools/fuzz/templates/loop_carry_collection.rb` is *exactly* the
+   template for "collection carried across a rewinding loop." But
+   its only axes were `elem ∈ {int,string}` (FLAT element types)
+   and loop `depth`. It had **no nested-collection-field carrier
+   axis** and **no frame-allocating-body axis**. The bug needs
+   BOTH: a carrier whose element has a nested `@list` AND a loop
+   body that frame-allocates (so `mark_per_iter` fires and the
+   root is heap-promoted). The template generated neither, so the
+   whole stable matrix was green while the bug was live. (This is
+   the recurring "is it just only partially implemented?" failure
+   mode -- a template named for the right scenario that samples a
+   strict sub-region of it.)
+
+2. **No unit/spec coverage for allocator-root agreement.**
+   `mir_checker_spec.rb` / `loop_frame_analysis_spec.rb` /
+   `allocation_strategy_spec.rb` test promotion and the checker
+   invariants, but none asserts the *contract* that
+   `resolve_alloc_sym`'s receiver root and `mir_checker`'s
+   `extract_root_var_name` attribution resolve to the SAME root.
+   The two functions independently walk receivers; nothing pinned
+   them together. A nested-field-append-on-heap-root unit case
+   would have failed immediately.
+
+3. **The integration corpus never combined the ingredients.**
+   `transpile-tests/` had loop-carried collections and had
+   structs-with-`@list`-fields, but never a struct-with-nested-
+   `@list` carried across a *non-tight, frame-allocating* loop with
+   a *nested-field* mutation. `vm.cht` is the first program in the
+   tree that does (its handle tables) -- and only when de-TIGHT'd,
+   which nothing tested because the dispatch loop was always TIGHT.
+
+**What made it finally surface.** Measuring the perf cost of
+de-TIGHT-ing the register-VM dispatch loop (a user-requested
+benchmark guardrail) -- i.e. a *deliberate* poke at the exact
+axis (non-tight + frame-alloc body + nested-`@list` carrier) none
+of the three coverage layers sampled.
+
+**Durable guardrails added this session.**
+- `loop_carry_collection.rb`: added `carrier ∈ {flat,nested}` and
+  `body ∈ {plain,frame_alloc}` axes; the nested+frame_alloc cells
+  are positive (compile AND run) and fail pre-fix -- the template
+  now samples its own named scenario fully.
+- `transpile-tests/528_nested_list_loop_rewind.cht`: concrete
+  leak-checked regression with a runtime assertion.
+
+**Systemic lesson.** When a template's name describes a scenario,
+its axes must span that scenario's *triggering structure*, not
+just its surface (element type, count). "Loop-carried collection"
+must include the collection being non-flat and the loop body
+frame-allocating -- those are structural to the
+escape/rewrite/promotion paths the template claims to stress. Audit
+sibling templates (`mutable_collection_param`, `stream_into_boundary`)
+for the same flat-only / no-frame-alloc-body blind spot.

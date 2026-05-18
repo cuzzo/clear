@@ -1,0 +1,36 @@
+# Regression: a loop-spanning @list whose element type has a NESTED
+# @list field, mutated inside a non-TIGHT loop whose body frame-
+# allocates. The per-iteration arena rewind promotes the root
+# container `handles` to :heap; the direct `handles.append` inherits
+# that, but the nested-field append `handles[i].values.append(...)`
+# used to resolve its allocator from the leaf receiver (a
+# GetField/GetIndex chain with no storage) -> :frame, while the MIR
+# checker attributes the op to the root `handles` (:heap) ->
+# INLINE_ALLOC_MISMATCH. Fixed by resolving the nested-field op
+# allocator from the same root the checker uses. Leak-checked.
+STRUCT Handle { values: Int64[]@list }
+
+FN run(n: Int64) RETURNS !Int64 ->
+    MUTABLE handles: Handle[]@list = List[];
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < n DO
+        MUTABLE scratch: Int64[]@list = List[];
+        scratch.append(i);
+        scratch.append(i + 1_i64);
+        handles.append(Handle{ values: [] });
+        handles[i].values.append(scratch[0]);
+        handles[i].values.append(scratch[1]);
+        i = i + 1_i64;
+    END
+    MUTABLE total: Int64 = 0_i64;
+    FOR h IN (0_i64 ..< handles.length()) DO
+        total = total + handles[h].values.length();
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    r: Int64 = run(5_i64) OR PASS;
+    ASSERT r == 10_i64, "5 handles x 2 nested values each";
+    RETURN;
+END

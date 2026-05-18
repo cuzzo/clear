@@ -614,3 +614,77 @@ future all verified). Regression: `transpile-tests/527_discard_
 owned_value.cht` (multi-discard, leak-checked). Verified: prspec
 4802/0, transpile-tests 555/555 (0 leak), fuzz matrix 145/145
 (0 fail/leak), register allowlist 245/245.
+
+## Compiler: nested-@list-field append allocator not inherited from root container
+
+Found 2026-05-18, faithfully reproduced from the register-VM
+de-TIGHT P0 (`stack-vm-fiber-replication.md`). Minimal repro
+(`transpile-tests/528_nested_list_loop_rewind.cht`):
+
+```cht
+STRUCT Handle { values: Int64[]@list }
+FN run(n: Int64) RETURNS !Int64 ->
+    MUTABLE handles: Handle[]@list = List[];
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < n DO                       # non-TIGHT
+        MUTABLE scratch: Int64[]@list = List[];   # per-iter frame alloc
+        scratch.append(i);
+        handles.append(Handle{ values: [] });
+        handles[i].values.append(scratch[0]);     # nested-field append
+        i = i + 1_i64;
+    END
+    ...
+```
+
+`./clear build`: `[INLINE_ALLOC_MISMATCH] run::handles --
+operation uses :frame but container 'handles' is :heap`.
+
+### Trigger matrix (all verified)
+
+| carrier | loop | frame-alloc body | result |
+|---|---|---|---|
+| plain `Int64[]@list` | non-tight | yes | OK |
+| nested-`@list` struct `H[]@list` | **TIGHT** | yes | OK |
+| nested-`@list` struct `H[]@list` | non-tight | **no** | OK |
+| single struct `H` (not `@list`) nested-`@list` | non-tight | yes | OK |
+| **`H[]@list` (nested `@list`)** | **non-tight** | **yes** | **MISMATCH** |
+| same, FOR instead of WHILE | non-tight | yes | MISMATCH |
+
+### Root cause (pinpointed via pipeline probe)
+
+The non-tight loop's per-iteration `saveLoopMark/restoreLoopMark`
+(mir_lowering `lower_while`/for) makes escape analysis promote the
+loop-spanning container `handles` to `:heap` (decl `node.storage`
+and `symbol.reg.storage` both `:heap` -- correct). The DIRECT
+append `handles.append(...)` correctly resolves `:heap` (its
+receiver is the Identifier `handles`, `symbol.reg.storage == :heap`).
+
+The NESTED-field append `handles[i].values.append(x)` does NOT.
+`mir_lowering.rb resolve_alloc_sym(:receiver_storage, ...)`
+resolves the op allocator from the *immediate receiver*
+`handles[i].values` -- a `GetField`/`GetIndex` chain whose
+`type_info.provenance` is nil and which has no `symbol`/`reg` --
+so every `needs_heap` signal misses and it resolves `:frame`. But
+`mir_checker` attributes the op to the ROOT container via
+`extract_root_var_name(node.object)` -> `handles` (AllocMark
+`:heap`). Checker and resolver disagree on the subject: checker
+walks to the root, resolver looks only at the leaf receiver. Plain
+`Int64[]@list` (no nested field) never hits this because there is
+no nested-field append. TIGHT / no-frame-alloc keep the root
+`:frame` so leaf `:frame` coincidentally matches.
+
+### Architecturally-correct fix (applied)
+
+`resolve_alloc_sym` must resolve a nested-collection-field
+mutation's allocator from the SAME root the checker attributes it
+to. When the receiver is a `GetField`/`GetIndex` chain, descend to
+the root Identifier (mirroring `extract_root_var_name`) and consult
+ITS declaration storage. The root's storage is the single source of
+truth (INV-16); a nested `@list` living inside a heap-allocated
+container element is itself heap-backed, so `:heap` is correct.
+This unifies the allocator-resolution root with the checker's
+attribution root -- not a per-condition band-aid.
+
+Regression: `transpile-tests/528_nested_list_loop_rewind.cht`;
+fuzz axis added to `tools/fuzz/templates/loop_carry_collection.rb`
+(see post-mortem).

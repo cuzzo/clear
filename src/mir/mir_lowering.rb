@@ -746,6 +746,13 @@ class MIRLowering
       # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
+        # A nested-collection-field mutation (`root[i].field.append(x)`)
+        # must inherit the ROOT container's allocator -- the same root
+        # the MIR checker attributes the op to via extract_root_var_name.
+        # The leaf receiver (GetField/GetIndex) carries no storage stamp,
+        # so resolving from it alone yields :frame while the checker sees
+        # the heap-promoted root -> INLINE_ALLOC_MISMATCH.
+        receiver_root_heap?(obj) ||
         obj.storage == :heap || obj.symbol&.reg&.storage == :heap ||
           # Pointer-passed `@list` parameter: the receiver crosses a frame
           # boundary into this function. The caller's frame allocator is
@@ -760,6 +767,7 @@ class MIRLowering
           (obj.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(obj.name))
       elsif node.mutates_receiver
         first = node.args&.first
+        receiver_root_heap?(first) ||
         first&.storage == :heap || first&.symbol&.reg&.storage == :heap ||
           (first.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(first.name))
       end
@@ -768,6 +776,27 @@ class MIRLowering
     when :node_storage
       node.storage == :heap ? :heap : :frame
     else :heap
+    end
+  end
+
+  # True when a receiver's ROOT container is heap-storage. Mirrors
+  # extract_root_var_name's GetField/GetIndex descent so the allocator
+  # resolution and the MIR checker's container attribution agree on the
+  # same root. A nested `@list` living inside a heap-allocated container
+  # element is itself heap-backed, so a `root[i].field.append(x)` op
+  # must use the root's :heap allocator. (INV-16: storage lives on the
+  # declaration; use sites read it -- here, the root declaration.)
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def receiver_root_heap?(node)
+    case node
+    when nil then false
+    when AST::Identifier
+      node.storage == :heap || !!(node.symbol&.reg&.respond_to?(:storage) &&
+                                  node.symbol.reg.storage == :heap)
+    when AST::GetField, AST::GetIndex
+      receiver_root_heap?(node.target)
+    else
+      node.respond_to?(:target) ? receiver_root_heap?(node.target) : false
     end
   end
 
