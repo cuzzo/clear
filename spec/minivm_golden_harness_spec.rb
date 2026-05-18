@@ -78,18 +78,23 @@ RSpec.describe "MiniVM golden harness", :integration do
     expect(bytecode.snapshot).to include("0003 IRET r0")
   end
 
-  it "keeps unsupported register cases explicit but pending" do
-    # map_contains_i64 binds a String local (`m`) for the map handle,
-    # which the register emitter doesn't track yet. The test is here to
-    # ensure unsupported features raise PendingTarget rather than
-    # silently producing wrong bytecode. When the register emitter gains
-    # support, swap this fixture for one that is still pending.
-    unsupported_path = File.join(vm_tests_dir, "values", "map_contains_i64.cht")
-    unsupported = File.read(unsupported_path)
+  # A function returning a non-scalar struct by value is a fundamental
+  # register-emitter restriction ("only supports Int64 and Float64
+  # returns"), not a fixture that keeps gaining support -- so it stays
+  # a stable probe that the PendingTarget guard still fires (unsupported
+  # features must raise, not silently emit wrong bytecode). Inline so it
+  # is not coupled to the evolving vm-tests corpus.
+  REGISTER_UNSUPPORTED_SRC = <<~CHT
+    STRUCT P { x: Int64 }
+    FN main() RETURNS P ->
+        RETURN P{ x: 1_i64 };
+    END
+  CHT
 
+  it "keeps unsupported register cases explicit but pending" do
     expect {
-      MiniVM::Golden.register.compile(unsupported, source_dir: File.dirname(unsupported_path))
-    }.to raise_error(MiniVM::Golden::PendingTarget, /support|String local/)
+      MiniVM::Golden.register.compile(REGISTER_UNSUPPORTED_SRC, source_dir: Dir.pwd)
+    }.to raise_error(MiniVM::Golden::PendingTarget, /support|returns/)
   end
 
   it "exposes runner hooks for both targets" do
@@ -252,9 +257,9 @@ RSpec.describe "MiniVM golden harness", :integration do
     Dir.mktmpdir("minivm-golden-") do |dir|
       fixture_dir = File.join(dir, "basics")
       FileUtils.mkdir_p(fixture_dir)
-      # Use a fixture the register emitter still doesn't support; see the
-      # comment in "keeps unsupported register cases explicit but pending".
-      FileUtils.cp(File.join(vm_tests_dir, "values", "map_contains_i64.cht"), File.join(fixture_dir, "map_contains_i64.cht"))
+      # A register-unsupported fixture (non-scalar struct return); see
+      # REGISTER_UNSUPPORTED_SRC above.
+      File.write(File.join(fixture_dir, "struct_return.cht"), REGISTER_UNSUPPORTED_SRC)
 
       results = MiniVM::Golden.update_snapshots(root: dir, targets: [:register])
 

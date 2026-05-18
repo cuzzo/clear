@@ -220,7 +220,8 @@ class BcEmitter
     # variants (the payload Pair has no field named "Variant"). Building
     # the set up front gives an O(1) check inside compile_field_get.
     @union_variant_names = Set.new
-    (@result.union_schemas || {}).each do |_uname, variants|
+    (@result.union_schemas || {}).each do |_uname, schema|
+      variants = schema.respond_to?(:variants) ? schema.variants : schema
       (variants || {}).each_key { |vname| @union_variant_names << vname.to_s }
     end
     # Don't shadow any registered struct field names (a non-inline-struct
@@ -238,7 +239,8 @@ class BcEmitter
     # find_field_index can resolve `ci.radius` after a MATCH-capture
     # unpacks the payload via pairCdr (which returns Value.Vector of the
     # variant's fields in declaration order).
-    (@result.union_schemas || {}).each do |_uname, variants|
+    (@result.union_schemas || {}).each do |_uname, schema|
+      variants = schema.respond_to?(:variants) ? schema.variants : schema
       (variants || {}).each do |vname, spec|
         next unless spec.is_a?(Hash) && spec[:kind] == :inline_struct
         fields = spec[:fields]

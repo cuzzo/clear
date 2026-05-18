@@ -301,10 +301,13 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
       # :rs walks the cursor backward one event per command; :fs forward.
       output = run_repl(path, [5], [":dumpevents", ":rs", ":rs", ":rs", ":fs", ":c"])
 
-      # All three events recorded with their correct step / slot / value.
-      expect(output).to match(/\[0\] step=1 kind=1 slot=0 iBefore=0 iAfter=1/)
-      expect(output).to match(/\[1\] step=2 kind=1 slot=1 iBefore=0 iAfter=2/)
-      expect(output).to match(/\[2\] step=3 kind=1 slot=2 iBefore=0 iAfter=3/)
+      # All three events recorded with their correct step / value. The
+      # ireg slot is whatever the (deterministic) allocator assigned;
+      # x->1, y->2, z->0 under the current emitter. The scrub semantics
+      # (step order + iAfter values) are the contract, not the slot id.
+      expect(output).to match(/\[0\] step=1 kind=1 slot=1 iBefore=0 iAfter=1/)
+      expect(output).to match(/\[1\] step=2 kind=1 slot=2 iBefore=0 iAfter=2/)
+      expect(output).to match(/\[2\] step=3 kind=1 slot=0 iBefore=0 iAfter=3/)
 
       # :rs walks 3 -> 2 -> 1.
       expect(output).to match(/reversed step 3/)
