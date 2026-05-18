@@ -218,6 +218,50 @@ it) — but the register VM's own arena/escape model under
 reentrancy must be resolved first. R2's real spawn was reverted;
 R1 (re-entrant entryIp, inert) + the compiler fix remain.
 
+### Faithful re-reproduction (2026-05-18, post-compiler-fix)
+
+After the `scan_direct`/`pipeline_rewriter` root-cause fix, a
+**minimal** faithful probe (`EFFECTS REENTRANT` +
+`IF false { probeFut: ~RegisterValue = BG { @service ->
+runRegisterBytecode!(COPY ops, COPY opcodes, ...) }; ... }`) was
+applied to drive the reentrant escape/codegen path with the
+smallest possible change. It does NOT reach
+`INLINE_ALLOC_MISMATCH` — it fails **earlier**, in generated Zig:
+
+```
+error: expected type '*array_list.Aligned(i64,null)',
+       found '*const []i64'
+```
+
+i.e. `COPY ops` (a slice param, `Int64[]`) captured into a `BG`
+fiber and passed to the recursive call. **This is the OPEN
+BG-capture compiler-bug family** documented at the top of
+`docs/agents/vm-bugs.md`:
+
+- Bug #4 — "`COPY` at BG capture site → cryptic Zig error" (COPY
+  of a value captured into BG produces wrong/`*const`-vs-`*T` Zig).
+- Bugs #2/#3/#6 — the dangling-pointer family: a borrow/slice from
+  local scope escaping into an async BG fiber without ownership
+  transfer; the lowering emits no marker, the checker has nothing
+  to fire on, codegen mismatches or UAFs.
+
+The stack VM's `exec!` does the *same* `BG { exec!(COPY ops, ...) }`
+shape and works — so the trigger is a register-side difference
+(slice-param `ops: Int64[]` capture interacting with the giant
+frame / `EFFECTS REENTRANT` escape model) that the existing
+BG-capture bugs don't yet cover or fix.
+
+**Revised, evidence-based blocker for R2-R6:** not "one
+escape-analysis tweak" and not "flatten" (retracted). The fiber
+port is blocked behind the **OPEN BG-capture / dangling-pointer
+compiler-bug family** (`vm-bugs.md` Bugs #2/#3/#4/#6) — exactly
+what that doc was opened to track — *plus* P0 (guest frame-arena +
+giant-function FSM/heap-resident conversion). These are
+shared-compiler correctness fixes that must land, architecturally,
+**before** stack-VM fiber replication is viable. Do NOT band-aid
+around them in `vm.cht`. R1 + the compiler-bug fix remain; the
+probe was reverted (tree green, register allowlist 245/245).
+
 ### CORRECTION (2026-05-18): retracting the "flatten" workaround
 
 An earlier revision of this section claimed the fix was to "flatten

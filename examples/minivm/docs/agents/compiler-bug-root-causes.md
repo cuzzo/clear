@@ -78,32 +78,39 @@ plainly rather than guessed.
   are (a) the invariant spec, (b) the strict non-nil sig now
   enforcing the contract at every call site.
 
-### A2. Reentrant `INLINE_ALLOC_MISMATCH` (UNCONFIRMED — do not fix blind)
+### A2. R2 fiber blocker = OPEN BG-capture compiler-bug family (vm-bugs.md)
 
-- **Observation:** with `runRegisterBytecode!` made `EFFECTS
-  REENTRANT` + non-TIGHT + the recursive `BG { ... }` spawn, MIR
-  ownership verification reported `INLINE_ALLOC_MISMATCH` on the
-  function's own `intListHandles`/`stringListHandles`.
-- **Status: NOT minimally reproduced.** Every minimal repro
-  (nested-`@list`-in-struct into a heap container, incl. reentrant +
-  BG-recursive + indexed in-place mutation) **passes**. The native
-  RETURNS-heap escape path provably propagates correctly. So the
-  earlier "Condition 7 only promotes string-concats" diagnosis is
-  **withdrawn as unproven**.
-- **Suspected systemic gap (hypothesis, to verify):** the
-  heap-promotion logic in `EscapeAnalysis` is spread across several
-  independent conditions (RETURNS / assign-escape / container-mutator
-  / concat-into-heap / reentrant-conservative). They are **not
-  unified**: the RETURNS path recurses into nested collection fields;
-  another path (whatever the giant reentrant body triggers) may not.
-- **Architecturally-correct response:** per CLAUDE.md, **reproduce
-  before fixing**. Re-apply R2, bisect to the minimal failing
-  program, then — if confirmed — the fix is to make heap-promotion
-  a single canonical operation that recursively covers nested
-  collection fields, applied by ALL conditions, not a new
-  per-condition branch. **Explicitly NOT** flattening VM structs
-  and **NOT** a Condition-7 band-aid. Tracked in
-  `stack-vm-fiber-replication.md` (corrected section).
+- **Earlier "INLINE_ALLOC_MISMATCH escape gap" framing: superseded
+  by evidence.** A minimal faithful probe (post compiler-fix:
+  `EFFECTS REENTRANT` + a dead-guarded `BG { @service ->
+  runRegisterBytecode!(COPY ops, COPY opcodes, ...) }`) does **not**
+  reach `INLINE_ALLOC_MISMATCH` — it fails **earlier** in generated
+  Zig: `expected '*array_list.Aligned(i64,null)', found
+  '*const []i64'` for `COPY ops` (a slice param) captured into the
+  BG fiber. The `INLINE_ALLOC_MISMATCH` seen in the original full-R2
+  attempt was a *later* symptom along the same path.
+- **Actual root:** the **OPEN BG-capture / dangling-pointer
+  compiler-bug family** that `docs/agents/vm-bugs.md` was opened to
+  track — Bug #4 (`COPY` at BG capture site → wrong `*const`-vs-`*T`
+  Zig) and Bugs #2/#3/#6 (a borrow/slice escaping into an async BG
+  fiber with no ownership-transfer marker; checker has nothing to
+  fire on; codegen mismatch or UAF). These are **shared-compiler
+  correctness bugs**, OPEN, with their own gap analysis in
+  vm-bugs.md ("Fix priorities").
+- **Systemic gap:** the lowering emits **no MIR marker** for a
+  borrow/slice captured into a `BG` fiber, so MIRChecker's 7
+  invariants are structurally blind to it (vm-bugs.md "Gap
+  analysis"). The fix is in the **lowering** (emit a capture/
+  ownership marker, or refuse the unsafe capture) — not the checker,
+  not a vm.cht workaround.
+- **Architecturally-correct response:** R2-R6 (stack-VM fiber
+  replication) is **blocked behind the vm-bugs.md BG-capture family
+  + P0** (guest frame-arena + giant-function FSM/heap-resident).
+  These compiler fixes land first, architecturally, per the
+  vm-bugs.md fix-priorities — **explicitly not** flattening VM
+  structs, **not** a Condition-7 band-aid, **not** working around
+  it in `vm.cht`. Cross-referenced in
+  `stack-vm-fiber-replication.md` ("Faithful re-reproduction").
 
 ---
 
