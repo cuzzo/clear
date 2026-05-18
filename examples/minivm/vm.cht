@@ -12,6 +12,13 @@ UNION RegisterValue {
     Int64Val: Int64,
     Number: Float64,
     Str: String,
+    # VM-internal future marker (R3): a NEXT-able BG handle id into
+    # futureTable. Never produced by guest constants -- only by the
+    # BGSPAWN dispatch arm; consumed by FNEXT. Cleaner than the stack
+    # VM's Pair("__future__", id) sentinel. All RegisterValue matches
+    # are PARTIAL+DEFAULT so this variant is additive and inert until
+    # BGSPAWN/FNEXT are emitted.
+    Future: Int64,
 }
 
 ENUM RegisterOp {
@@ -831,7 +838,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64) RETURNS !RegisterValue ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
