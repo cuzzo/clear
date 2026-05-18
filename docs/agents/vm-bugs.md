@@ -859,3 +859,26 @@ exact axis combination here was unsampled).
 R3 Step 3 (BGSPAWN/FNEXT runtime, saved /tmp/r3_step3.patch) is
 structurally complete and reverted-pending this fix; not hacked
 around in vm.cht.
+
+## TODO (architectural debt, no open bug): collapse the FiberCtxBuilder parallel capture system
+
+A/B/C collapsed three divergent re-derivations and killed Bug #7,
+the `.items` codegen bug, and Bug #8 (all regression-locked). The
+remaining "Step D" from the /plan is pure debt, not a live bug:
+
+`FiberCtxBuilder` emits BG/DO/CONCURRENT captures as raw Zig string
+fragments (`dupe_decl_zig` = `dupeCaptured` + `errdefer cleanup`;
+`body_cleanup_zig` = in-body `defer cleanup`) spliced into
+hand-written templates at 5 callsites (mir_lowering x2,
+pipeline_host x3) + fsm_transform. MIRChecker (INV-12) cannot see
+inside it. The capture cleanup is synthesized at the destination
+instead of inherited from the source binding's CleanupClassifier
+recipe (INV-14), and the ctx field type is `CapturedValue(@TypeOf
+(source))` instead of the declaration's storage stamp (INV-16).
+
+Collapse: convert `CaptureSpec` to carry MIR `Cleanup`/`ErrCleanup`
+inherited from the source recipe and a declaration-stamped type;
+migrate the 5 callsites string->MIR one at a time behind the green
+gate; prove MIRChecker covers the dupe; then delete
+`CheatLib.CapturedValue` / `dupeCaptured` (single caller) and the
+FreshHeapCopy fork. No correctness fire forces this; own workstream.
