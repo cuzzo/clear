@@ -22,6 +22,14 @@ RSpec.describe "MiniVM golden harness", :integration do
     skip e.message
   end
 
+  # MiniVM::Golden.*.run builds vm.cht to a native binary and executes
+  # it. That compile times out on GitHub-hosted runners (same reason
+  # the Register-VM allowlist CI job is disabled). The compile/snapshot
+  # tests above use the in-process Ruby emitter and are unaffected.
+  def skip_vm_binary_on_ci!
+    skip "vm.cht native-binary execution times out on GitHub runners; run locally" if ENV["CI"]
+  end
+
   def run_or_skip(target, test_case)
     target.run(test_case.source, source_dir: test_case.source_dir)
   rescue MiniVM::Golden::PendingTarget => e
@@ -103,6 +111,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "runs register bytecode through vm.cht for an Int64 return" do
+    skip_vm_binary_on_ci!
     source = <<~CHT
       FN main() RETURNS Int64 ->
           RETURN 42_i64;
@@ -116,6 +125,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "uses truncating signed integer division" do
+    skip_vm_binary_on_ci!
     source = <<~CHT
       FN main() RETURNS Int64 ->
           RETURN -7_i64 / 2_i64;
@@ -129,6 +139,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "runs integer modulo bytecode" do
+    skip_vm_binary_on_ci!
     source = <<~CHT
       FN main() RETURNS Int64 ->
           RETURN 200_i64 MOD 150_i64;
@@ -142,6 +153,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "runs compiled register bytecode for the first Int64 fixture" do
+    skip_vm_binary_on_ci!
     test_case = MiniVM::Golden::Case.new(path: source_path)
 
     result = MiniVM::Golden.register.run(test_case.source, source_dir: test_case.source_dir)
@@ -151,6 +163,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "runs scalar register match expressions" do
+    skip_vm_binary_on_ci!
     source = <<~CHT
       FN score(n: Int64) RETURNS Int64 ->
           RETURN PARTIAL MATCH n START
@@ -172,6 +185,7 @@ RSpec.describe "MiniVM golden harness", :integration do
   end
 
   it "runs every register-supported golden fixture to its expected output" do
+    skip_vm_binary_on_ci!
     # Conformance check: only fixtures with both a committed register
     # snapshot AND a committed expected-output file. Fixtures missing
     # either are surfaced as `pending` per-case above; including them
