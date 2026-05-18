@@ -698,8 +698,9 @@ class RegisterBcEmitter
       nil
     when MIR::BlockExpr
       # Side-effect-only BlockExpr in stmt position (a WITH wrapper
-      # that doesn't break a value). Inline the body.
-      semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
+      # that doesn't break a value). A fallible WITH lowers here, not
+      # to ScopeBlock, so it needs the same lock-release/escape drain.
+      with_lock_scope { semantic_body(stmt.body || []).each { |child| compile_stmt(child) } }
     when MIR::MethodCall
       # Bare-statement form (`NEXT p;` / `q.next();`) -- route through
       # the ExprStmt path so the same dispatch handles it.
@@ -1058,13 +1059,74 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter does not support ExprStmt of #{expr.class.name} yet"
   end
 
-  def compile_scope_block(stmt)
+  # Scope guarding the lock-release/fallible-escape stacks: emit
+  # LOCKREL for cells acquired within, and patch fallible-acquire
+  # escape JUMPs to land past the releases. Both ScopeBlock (non-
+  # fallible WITH) and stmt-position BlockExpr (fallible WITH) use it.
+  def with_lock_scope
     @with_lock_releases ||= []
+    @with_fallible_escapes ||= []
     saved = @with_lock_releases.length
-    semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
+    saved_esc = @with_fallible_escapes.length
+    yield
     while @with_lock_releases.length > saved
       emit(LOCKREL, @with_lock_releases.pop)
     end
+    while @with_fallible_escapes.length > saved_esc
+      @ops[@with_fallible_escapes.pop] = @ops.length
+    end
+  end
+
+  def compile_scope_block(stmt)
+    with_lock_scope { semantic_body(stmt.body || []).each { |child| compile_stmt(child) } }
+  end
+
+  # Port of the stack VM's emit_fallible_lock_dispatch (bc_emitter.rb):
+  # ON LockTimeout / RETRY acquire. LOCKACQ writes 1 (acquired) or 0
+  # (timed out) into a reg; 0 falls into the retry/ON-action path, which
+  # ends in an escape JUMP patched by compile_scope_block to land past
+  # the LOCKREL. The acquired path registers the cell for release.
+  def emit_fallible_lock_dispatch(fc, cell_reg)
+    retries = fc[:retries]
+    retry_reg = nil
+    retry_top = nil
+    if retries
+      retry_reg = fresh_ireg
+      emit(ICONST, retry_reg, add_const(0))
+      retry_top = @ops.length
+    end
+    tmo = fresh_ireg
+    emit(ICONST, tmo, add_const(100))
+    res = fresh_ireg
+    emit(LOCKACQ, res, cell_reg, tmo)
+    emit(JF, res, 0)
+    to_err = @ops.length - 1
+    emit(JMP, 0)
+    to_ok = @ops.length - 1
+    @ops[to_err] = @ops.length
+    if retries
+      one = fresh_ireg
+      emit(ICONST, one, add_const(1))
+      nxt = fresh_ireg
+      emit(IADD, nxt, retry_reg, one)
+      lim = fresh_ireg
+      emit(ICONST, lim, add_const(retries.to_i))
+      lt = fresh_ireg
+      emit(ILT, lt, nxt, lim)
+      emit(JF, lt, 0)
+      giveup = @ops.length - 1
+      emit(IADD, retry_reg, retry_reg, one)
+      emit(JMP, retry_top)
+      @ops[giveup] = @ops.length
+    end
+    if fc[:action_kind] == :block
+      semantic_body(fc[:action_mir] || []).each { |s| compile_stmt(s) }
+    end
+    emit(JMP, 0)
+    @with_fallible_escapes ||= []
+    @with_fallible_escapes << (@ops.length - 1)
+    @ops[to_ok] = @ops.length
+    @with_lock_releases << cell_reg
   end
 
   # The single cell-backed field's value-index reg, if `src` is a
@@ -2180,14 +2242,18 @@ class RegisterBcEmitter
     if src_caps && %i[locked write_locked].include?(src_caps[:sync])
       record_shared_event(:acquire, src_name, src[:kind], caps: src_caps)
       fallible = (stmt.stdlib_def && stmt.stdlib_def[:fallible_clauses]) || []
-      fallible_vars = fallible.map { |fc| fc[:var_name].to_s }.to_set
       cell_reg = cell_backed_field_cell(src)
-      if cell_reg && !fallible_vars.include?(src_name)
-        tmo = fresh_ireg
-        emit(ICONST, tmo, add_const(30000))
-        emit(LOCKACQ, fresh_ireg, cell_reg, tmo)
+      if cell_reg
         @with_lock_releases ||= []
-        @with_lock_releases << cell_reg
+        fc = fallible.find { |c| c[:var_name].to_s == src_name }
+        if fc
+          emit_fallible_lock_dispatch(fc, cell_reg)
+        else
+          tmo = fresh_ireg
+          emit(ICONST, tmo, add_const(30000))
+          emit(LOCKACQ, fresh_ireg, cell_reg, tmo)
+          @with_lock_releases << cell_reg
+        end
       end
     end
 
