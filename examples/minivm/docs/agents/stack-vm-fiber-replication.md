@@ -385,3 +385,70 @@ BG-capture bug family (cleared). Remaining R3 prerequisites:
 de-TIGHT the dispatch loop + faithfully re-probe for the reentrant
 `INLINE_ALLOC_MISMATCH` *with the spawn actually reachable inside
 the loop* (reproduce-first; do not pre-emptively rewrite).
+
+## P0(b) FAITHFULLY REPRODUCED — minimal trigger isolated (2026-05-18)
+
+While measuring the perf cost of de-`TIGHT`ing the dispatch loop
+(R3 prerequisite), the P0 `INLINE_ALLOC_MISMATCH` reproduced from a
+**single-token change** and nothing else:
+
+`examples/minivm/vm.cht:950` `TIGHT WHILE ip < ops.length()` ->
+`WHILE ip < ops.length()` (drop `TIGHT`). NO `EFFECTS REENTRANT`,
+NO BG/probe, NO `COPY`-capture set. `./clear build vm.cht`:
+
+```
+MIR ownership verification failed (post-lowering):
+[INLINE_ALLOC_MISMATCH] runRegisterBytecode::intListHandles
+  -- operation uses :frame but container is :heap
+[INLINE_ALLOC_MISMATCH] runRegisterBytecode::stringListHandles
+  -- operation uses :frame but container is :heap
+```
+
+### Root trigger (now proven, no longer hypothesised)
+
+A non-`TIGHT` `WHILE` in a runtime fn with a frame-allocating body
+gets, per `mir_lowering.rb` `lower_while` (~L6862/L6874):
+`saveLoopMark()` + `defer restoreLoopMark()` (per-iteration frame
+arena rewind) and a trailing `checkYield()`. Adding per-iteration
+arena rewind to the dispatch loop flips the escape classification
+of the giant function's own loop-spanning collections
+(`intListHandles` / `stringListHandles`) frame->heap (they must
+survive the per-iteration rewind), but the inline ops on them are
+still emitted `:frame`. That mismatch is INV-1/ALLOC_MISMATCH.
+
+This is the earlier doc's hypothesis CONFIRMED and the trigger
+NARROWED: it is **not** reentrancy and **not** the BG-capture set
+(those were the Bug#7 / discard-`_` blockers, now fixed and shown
+to compile). It is the **non-tight-loop per-iteration arena
+rewind** interacting with collections whose lifetime spans loop
+iterations.
+
+### Consequence for R3 / the user's perf concern
+
+De-`TIGHT`ing the dispatch loop does not merely cost performance
+(it would: a `checkYield()` + `saveLoopMark/restoreLoopMark` on
+EVERY bytecode instruction, the VM's hottest loop) -- it currently
+**fails to compile**. So R3 cannot proceed by naively dropping
+`TIGHT`. Two independent problems, both must be solved before R3:
+
+1. **Correctness (gating):** the escape model must promote
+   loop-spanning nested collections (`@list` and their element
+   backing) consistently so inline ops match the container
+   allocator under per-iteration rewind. Architecturally-correct
+   fix = unify heap-promotion so it recursively covers nested
+   collection fields across ALL promotion conditions including the
+   non-tight-loop-rewind path (NOT a per-condition band-aid, NOT
+   flattening the VM's data, NOT an FSM rewrite). Dedicated
+   standalone bug-fix workstream; reproduce-first satisfied here.
+2. **Performance:** even once it compiles, per-instruction
+   `checkYield`/arena-rewind on the dispatch loop must be measured
+   and kept off the hot path (e.g. the recursive `BG{ runReg... }`
+   may be expressible WITHOUT de-`TIGHT`ing -- the earlier probe
+   compiled with the loop still `TIGHT` because the spawn sat in
+   `IF FALSE` outside it; whether a BG-wrapped spawn INSIDE the
+   `MATCH` trips the TIGHT-reentrant check is the next probe).
+
+**Revised gate:** R3 blocked on (1) [now reproduced; root-cause +
+unified-promotion fix pending, its own commit]. Path (2) probe:
+test whether `BG { runRegisterBytecode!(...) }` inside the still-
+`TIGHT` dispatch `MATCH` compiles (avoids the perf hit entirely).
