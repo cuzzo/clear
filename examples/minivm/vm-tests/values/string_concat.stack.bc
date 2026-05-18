@@ -1,0 +1,11 @@
+instructions:
+0000 LOAD_CONST        0 ; S:5:hello
+0002 LOAD_CONST        1 ; S:1: 
+0004 CONCAT            
+0005 LOAD_CONST        2 ; S:2:vm
+0007 CONCAT            
+0008 HALT              
+consts:
+S:5:hello
+S:1: 
+S:2:vm

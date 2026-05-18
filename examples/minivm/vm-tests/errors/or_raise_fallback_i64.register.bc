@@ -1,0 +1,6 @@
+register instructions:
+0000 ICONST r0 0 ; I:42
+0003 IRET r0
+0005 HALT
+consts:
+I:42

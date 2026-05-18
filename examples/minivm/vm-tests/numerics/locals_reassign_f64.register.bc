@@ -1,0 +1,12 @@
+register instructions:
+0000 FCONST f0 0 ; F:1.25
+0003 FCONST f1 1 ; F:2.5
+0006 FADD f0 f0 f1
+0010 FCONST f1 2 ; F:2.0
+0013 FMUL f0 f0 f1
+0017 FRET f0
+0019 HALT
+consts:
+F:1.25
+F:2.5
+F:2.0

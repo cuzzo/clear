@@ -1,0 +1,15 @@
+register instructions:
+0000 ICONST r0 0 ; I:0
+0003 ICONST r1 0 ; I:0
+0006 ICONST r2 1 ; I:3
+0009 JILTF r0 r2 26
+0013 IADD r1 r1 r0
+0017 ICONST r2 2 ; I:1
+0020 IADD r0 r0 r2
+0024 JMP 6
+0026 IRET r1
+0028 HALT
+consts:
+I:0
+I:3
+I:1

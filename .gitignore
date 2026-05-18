@@ -84,6 +84,11 @@ examples/**
 !examples/**/*.toml
 !examples/**/*.zon
 !examples/**/*.zig
+# minivm golden harness: bytecode snapshots + expected-output files are
+# committed test data (the integration golden harness hard-fails if
+# they are missing on a fresh checkout, e.g. CI).
+!examples/minivm/vm-tests/**/*.bc
+!examples/minivm/vm-tests/**/*.out
 # minivm has Ruby/Python helpers + the bytecode compiler
 !examples/**/*.py
 !examples/**/*.rb

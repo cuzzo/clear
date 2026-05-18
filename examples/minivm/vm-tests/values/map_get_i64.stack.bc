@@ -1,0 +1,27 @@
+instructions:
+0000 MAP_NEW           
+0001 STORE_SLOT        0
+0003 LOAD_SLOT         0
+0005 LOAD_CONST        0 ; S:6:answer
+0007 LOAD_CONST_I64    1 ; I:42
+0009 I_TO_VAL          
+0010 MAP_PUT           
+0011 LOAD_SLOT         0
+0013 LOAD_CONST        2 ; S:6:answer
+0015 MAP_GET           
+0016 STORE_NAME        3
+0018 NOT               
+0019 NOT               
+0020 JUMP_IF_FALSE     26
+0022 LOAD_NAME         4
+0024 JUMP              29
+0026 LOAD_CONST_I64    5 ; I:0
+0028 I_TO_VAL          
+0029 HALT              
+consts:
+S:6:answer
+I:42
+S:6:answer
+SYM:__orelse_11
+SYM:__orelse_11
+I:0

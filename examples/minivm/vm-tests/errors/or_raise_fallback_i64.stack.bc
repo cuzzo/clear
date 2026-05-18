@@ -1,0 +1,21 @@
+instructions:
+0000 JUMP              10
+0002 LOAD_CONST        0 ; S:0:
+0004 LOAD_CONST        1 ; S:6:System
+0006 LOAD_CONST        2 ; S:3:bad
+0008 RAISE_ERR
+0009 BC_RET
+0010 BC_CALL           2 0 0
+0014 STORE_SLOT        0
+0016 IS_ERR
+0017 JUMP_IF_FALSE     24
+0019 LOAD_CONST_I64    3 ; I:42
+0021 I_TO_VAL
+0022 JUMP              26
+0024 LOAD_SLOT         0
+0026 HALT
+consts:
+S:0:
+S:6:System
+S:3:bad
+I:42

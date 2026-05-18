@@ -1,0 +1,6 @@
+instructions:
+0000 LOAD_CONST_I64    0 ; I:42
+0002 I_TO_VAL
+0003 HALT
+consts:
+I:42
