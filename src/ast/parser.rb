@@ -2514,8 +2514,8 @@ class Parser
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
       if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
-        consume(:CHAR, '[')
-        consume(:CHAR, ']')
+        # List[] / List[1, 2, 3] -- empty or element-initialized.
+        _, ctor_items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
         collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
@@ -2528,7 +2528,7 @@ class Parser
           shard_count = mods[:shard_count]
           is_soa = mods[:soa]
         end
-        node = AST::ListLit.new(type_token, [], storage)
+        node = AST::ListLit.new(type_token, ctor_items, storage)
         node.instance_variable_set(:@constructor_collection, collection)
         node.instance_variable_set(:@constructor_soa, is_soa)
         node.instance_variable_set(:@constructor_shard_count, shard_count)
