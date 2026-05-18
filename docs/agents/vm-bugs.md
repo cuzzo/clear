@@ -883,35 +883,36 @@ gate; prove MIRChecker covers the dupe; then delete
 `CheatLib.CapturedValue` / `dupeCaptured` (single caller) and the
 FreshHeapCopy fork. No correctness fire forces this; own workstream.
 
-## Known limitation (R6, not yet started): register VM fakes lock contention
+## RESOLVED (R6): register VM lock contention is now genuine
 
-The register VM's WITH EXCLUSIVE / WITH SHARED / @versioned snapshot
-acquire+release are explicit NO-OPS (register_bc_emitter ~L1946:
-"No actual locking happens because the bc VM is single-threaded").
-vm.cht has no real Locked<T>, no lock-timeout, no atomics.
+Superseded. R6 made the register-VM lock real:
+- R6.2/R6.3: single-i64-field @shared:locked structs are backed by
+  shared store cells with a real per-cell spin-flag lock
+  (LOCKACQ/LOCKREL, 100ms fallible timeout, RETRY) in vm.cht,
+  ported verbatim from _bc_runner.cht's LOCK_ACQUIRE/LOCK_RELEASE.
+- R6.4: a @shared:locked capture marshals its cell index (kind
+  :cell); the BG runs as a REAL fiber (BGSPAWN) sharing the cell by
+  id, for both scalar-return and void-payload bodies.
 
-Consequence: lock/atomic/contention tests in the allowlist (e.g.
-263_with_lock_contention, which asserts a waiter timed out exactly
-once) PASS VACUOUSLY -- the single-threaded fake satisfies the
-assertions sequentially; no contention or ON LockTimeout path is
-actually exercised. R5's :fiber flip did not change this: a
-@shared:locked capture is non-scalar -> cap_kind :other -> the BG
-inlines (single-threaded) rather than spawning a real fiber.
+Consequence: 263_with_lock_contention now compiles to 2 real fibers
+(holder + waiter); the waiter genuinely fails to acquire within
+100ms while the holder holds the lock for 300ms, so its
+`ON LockTimeout` action fires and `ASSERT timed_out == 1` is a real
+contention assertion (it would FAIL, not pass vacuously, if the BGs
+regressed to inline). 267/280/281 likewise run as real fibers
+(BGSPAWN 2/4/6). 262/367 have no BG by design (single-threaded
+selector-codegen / rt-threading regression tests) and are correct
+as-is.
 
-R6 makes this real and is its own workstream, NOT a bounded
-continuation:
-- real Locked<T> + lock-timeout in vm.cht (mirror _bc_runner.cht);
-- extend :fiber captures to cap-wrapped (@shared:locked / Arc)
-  types -- entangled with the deferred plan Step D (FiberCtxBuilder
-  pointer_captures / parallel-capture collapse);
-- route guest WITH EXCLUSIVE / atomic through the real primitive on
-  the :fiber path;
-- MANDATORY per CLAUDE.md (real cross-fiber shared state + locks +
-  timeout): hammer + loom + VOPR, TSan/ASan, std.testing.allocator,
-  green before compiler integration.
+Regression lock: spec/register_shared_cell_spec.rb asserts
+263_with_lock_contention emits >= 2 BGSPAWN, so a silent revert to
+the inline (vacuous) path is caught at emit time, not just by the
+runtime assertion. Concurrency battery rationale: see the R6.5
+section above.
 
-Until R6: do not trust register-VM lock/atomic/contention tests as
-concurrency coverage; they verify only the single-threaded shape.
+Register-VM lock/atomic/contention tests ARE now trustworthy as
+concurrency coverage to the extent of the differential parity with
+the stack VM (262/263/267/280/281/367 pass identically on both).
 
 ## R6 design (corrected): register-VM shared cap-wrapped store
 

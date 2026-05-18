@@ -119,4 +119,15 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     expect(ops).to include(code(:CAPGETI))
     expect(ops).to include(code(:LOCKACQ))
   end
+
+  # R6.6 regression lock: the canonical lock-contention test must
+  # compile to real concurrent fibers, not the inline (vacuous) path.
+  # If it regressed to inline, 263's `ASSERT timed_out == 1` would
+  # pass for the wrong reason; this catches it at emit time.
+  it "compiles 263_with_lock_contention to >= 2 real fibers" do
+    src = File.read(File.expand_path("../transpile-tests/263_with_lock_contention.cht", __dir__))
+    ops = emit(src)
+    expect(ops.count { |o| o == code(:BGSPAWN) }).to be >= 2
+    expect(ops).to include(code(:LOCKACQ))
+  end
 end
