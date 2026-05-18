@@ -5068,7 +5068,7 @@ class RegisterBcEmitter
         pk = kinds[bare] if kinds.key?(bare)
       end
       name_map = { i64: @ireg_by_name, f64: @freg_by_name, string: @sreg_by_name }
-      app_op  = { i64: LVAPPI, f64: LVAPPF, string: LVAPPS }
+      push_op = { i64: CAPPUSHI, f64: CAPPUSHF, string: CAPPUSHS }
       cap_op  = { i64: CAPGETI, f64: CAPGETF, string: CAPGETS }
       if [:i64, :f64, :string].include?(pk) && kinds.values.all? { |k| k != :other }
         outer = caps.keys.map { |n| [n, kinds[n], name_map[kinds[n]].fetch(n)] }
@@ -5089,11 +5089,10 @@ class RegisterBcEmitter
         @bg_ctx_prefixes = saved_pfx
         saved.each { |n, k, r| r.nil? ? name_map[k].delete(n) : name_map[k][n] = r }
         @ops[over_patch] = @ops.length
-        cv = 0
-        emit(LVNEW, cv)
-        outer.each { |_, k, r| emit(app_op[k], cv, r) }
+        emit(CAPNEW)
+        outer.each { |_, k, r| emit(push_op[k], r) }
         fid = fresh_ireg
-        emit(BGSPAWN, fid, entry_ip, cv)
+        emit(BGSPAWN, fid, entry_ip, 0)
         return { kind: :bg_promise, payload_kind: pk, reg: fid, fiber: true }
       end
     end

@@ -163,6 +163,10 @@ ENUM RegisterOp {
     CapGetI,
     CapGetF,
     CapGetS,
+    CapNew,
+    CapPushI,
+    CapPushF,
+    CapPushS,
     Operand,
 }
 
@@ -598,6 +602,10 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.CapGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.CapGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.CapGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapNew -> PASS;,
+            RegisterOp.CapPushI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -752,6 +760,10 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.CapGetI -> RETURN 2_i64;,
         RegisterOp.CapGetF -> RETURN 2_i64;,
         RegisterOp.CapGetS -> RETURN 2_i64;,
+        RegisterOp.CapNew -> RETURN 0_i64;,
+        RegisterOp.CapPushI -> RETURN 1_i64;,
+        RegisterOp.CapPushF -> RETURN 1_i64;,
+        RegisterOp.CapPushS -> RETURN 1_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -918,6 +930,9 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     # futureResolved keyed by id.toString() (no HashMap<Int64>).
     MUTABLE futureTable: ~RegisterValue[]@list = List[];
     MUTABLE futureResolved: HashMap<RegisterValue> = {};
+    # Dedicated BGSPAWN capture-marshal channel; never the guest
+    # vlist0..3 (those are clobbered by LVNew).
+    MUTABLE pendingCaps: RegisterValue[]@list = List[];
     MUTABLE map0: HashMap<Int64> = {};
     MUTABLE map1: HashMap<Int64> = {};
     MUTABLE map2: HashMap<Int64> = {};
@@ -2485,17 +2500,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.BgSpawn ->
                     bgDst = ops[ip]; ip += 1;
                     bgEntry = ops[ip]; ip += 1;
-                    bgCapReg = ops[ip]; ip += 1;
+                    ip += 1;
                     MUTABLE bgCaps: RegisterValue[]@list = List[];
-                    IF bgCapReg == 0_i64 THEN
-                        FOR bci IN (0_i64 ..< vlist0.length()) DO bgCaps.append(COPY vlist0[bci]); END
-                    ELSE_IF bgCapReg == 1_i64 THEN
-                        FOR bci IN (0_i64 ..< vlist1.length()) DO bgCaps.append(COPY vlist1[bci]); END
-                    ELSE_IF bgCapReg == 2_i64 THEN
-                        FOR bci IN (0_i64 ..< vlist2.length()) DO bgCaps.append(COPY vlist2[bci]); END
-                    ELSE
-                        FOR bci IN (0_i64 ..< vlist3.length()) DO bgCaps.append(COPY vlist3[bci]); END
-                    END
+                    FOR bci IN (0_i64 ..< pendingCaps.length()) DO bgCaps.append(COPY pendingCaps[bci]); END
+                    pendingCaps = List[];
                     bgFut: ~RegisterValue = BG { @service ->
                         runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps) OR RAISE;
                     };
@@ -2578,6 +2586,17 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         RegisterValue.Str AS cgsV -> sregs[cgsDst] = COPY cgsV;,
                         DEFAULT -> sregs[cgsDst] = "";
                     END,
+            RegisterOp.CapNew ->
+                    pendingCaps = List[];,
+            RegisterOp.CapPushI ->
+                    cpiR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Int64Val: iregs[iBase + cpiR] });,
+            RegisterOp.CapPushF ->
+                    cpfR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Number: fregs[fBase + cpfR] });,
+            RegisterOp.CapPushS ->
+                    cpsR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Str: COPY sregs[cpsR] });,
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;

@@ -251,6 +251,10 @@ module MiniVM
         Opcode.new(name: :CAPGETI, code: 143, arity: 2, vm_name: "CapGetI"),
         Opcode.new(name: :CAPGETF, code: 144, arity: 2, vm_name: "CapGetF"),
         Opcode.new(name: :CAPGETS, code: 145, arity: 2, vm_name: "CapGetS"),
+        Opcode.new(name: :CAPNEW,   code: 146, arity: 0, vm_name: "CapNew"),
+        Opcode.new(name: :CAPPUSHI, code: 147, arity: 1, vm_name: "CapPushI"),
+        Opcode.new(name: :CAPPUSHF, code: 148, arity: 1, vm_name: "CapPushF"),
+        Opcode.new(name: :CAPPUSHS, code: 149, arity: 1, vm_name: "CapPushS"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -383,6 +387,10 @@ module MiniVM
         CAPGETI: [:i_def, :const],
         CAPGETF: [:f_def, :const],
         CAPGETS: [:s_def, :const],
+        CAPNEW:   [],
+        CAPPUSHI: [:i_use],
+        CAPPUSHF: [:f_use],
+        CAPPUSHS: [:s_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],
