@@ -178,6 +178,54 @@ land.
   layout into typed register files (R5a uniform-RegisterValue
   resolves it the same way the stack VM uses uniform `slots[]`).
 
+## R2 attempt (2026-05-18) — blocked on P0, as predicted
+
+Implemented the real recursive-spawn mechanism (BGSPAWN/FNEXT +
+futureTable + `BG { @service -> runRegisterBytecode!(..,bgEntry) }`)
+to empirically test the giant-frame-fiber-recursion risk. Findings,
+in order encountered:
+
+1. **Compiler diagnostic (correct):** recursive `runRegisterBytecode!`
+   needs `EFFECTS REENTRANT` (like the stack VM's `exec!`). Added.
+2. **Compiler diagnostic (correct):** a `@reentrant` call cannot sit
+   in a `TIGHT WHILE`. The register dispatch loop had to drop TIGHT
+   (the stack VM's `exec!` loop is a plain `WHILE` for exactly this
+   reason). Done — known per-iteration perf tradeoff.
+3. **Compiler BUG (fixed + filed):** `ControlFlow.scan_direct`'s
+   Sorbet sig forbade the nil sub-bodies it is internally designed
+   to tolerate (IF-without-ELSE), aborting at the call boundary
+   before its own `return unless body.is_a?(Array)` guard. Exposed
+   by the new `EFFECTS REENTRANT` + BG-block path. Fixed
+   (sig -> `T.nilable`); recorded in `docs/agents/vm-bugs.md`
+   ("Compiler: control_flow.scan_direct sig rejects nil sub-bodies").
+   Verified: prspec 4798/0, transpile-tests 554/554 (0 leaks),
+   register allowlist 245/245.
+4. **HARD BLOCKER (= P0):** with the giant `runRegisterBytecode!`
+   made `EFFECTS REENTRANT` + non-TIGHT + spawning recursive
+   fibers, MIR ownership verification fails:
+   `[INLINE_ALLOC_MISMATCH] runRegisterBytecode::intListHandles --
+   operation uses :frame but container is :heap` (and
+   `stringListHandles`). Making the giant function reentrant changes
+   the escape analysis of **its own** frame-allocated collections
+   (frame -> heap), but inline ops on them still use :frame.
+
+This is exactly the roadmap's **P0** and the README's standing
+warning: the register VM's giant stackful `runRegisterBytecode!`
+must become FSM-style / heap-resident (its big locals become
+ctx fields) **before** it can be made reentrant and spawn real
+fibers. The recursive-spawn shape is sound (the stack VM proves
+it) — but the register VM's own arena/escape model under
+reentrancy must be resolved first. R2's real spawn was reverted;
+R1 (re-entrant entryIp, inert) + the compiler fix remain.
+
+**Revised gate:** P0 = (a) faithful guest frame-arena
+(`vm-bugs.md`) AND (b) FSM/heap-resident conversion of
+`runRegisterBytecode!` so it survives `EFFECTS REENTRANT` + non-TIGHT
+without `INLINE_ALLOC_MISMATCH` on its own collections. R2-R6 are
+blocked until (b) lands. This is a substantial, separate workstream
+(register-vm.md flags the FSM conversion); not a tail-of-session
+change.
+
 ## Ordering & gating
 
 R1 (keystone, inert) -> R2 -> R3 -> R4 -> R5 -> R6, each a verified

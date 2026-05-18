@@ -1625,7 +1625,12 @@ module LoopFrameAnalysis
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
   # nested loops and function definitions.
-  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  # body is nilable: callers recurse into s.else_branch /
+  # s.default_case which are legitimately nil (IF without ELSE,
+  # MATCH without DEFAULT). The `return unless body.is_a?(Array)`
+  # guard below is the intended handling; the sig must permit nil so
+  # Sorbet does not abort at the call boundary before the guard runs.
+  sig { params(body: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.scan_direct(body, &block)
     return unless body.is_a?(Array)
     body.each do |s|

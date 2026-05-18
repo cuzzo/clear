@@ -395,3 +395,44 @@ corrupt, and the masking can regress if the function frame shrinks.
 The faithful fix (option 1: model a guest arena distinct from the
 runner's) remains the correct resolution. Do not treat the green
 state as closure.
+
+---
+
+## Compiler: control_flow.scan_direct sig rejects nil sub-bodies
+
+Found 2026-05-18 while replicating the stack VM's fibers into the
+register VM (BGSPAWN + EFFECTS REENTRANT in vm.cht).
+
+### Symptom
+
+Compiler crash (not a user diagnostic):
+`Parameter 'body': Expected type T::Array[T.untyped], got type
+NilClass (TypeError)` at `src/mir/control_flow.rb:1641`
+(`ControlFlow.scan_direct`), reached via `collect_local_names`.
+
+### Root cause
+
+`scan_direct(body)` recurses into `s.else_branch` (IfStatement),
+`s.default_case` (MatchStatement), `s.body` (WithBlock), `b[:body]`
+(DoBlock) — all of which are **legitimately nil** (an IF without
+ELSE, a MATCH without DEFAULT, etc.). The method body's first line
+is `return unless body.is_a?(Array)` — i.e. it is *designed* to
+tolerate nil. But the Sorbet `sig` declared
+`params(body: T::Array[T.untyped], ...)`, which Sorbet validates at
+the call boundary **before** the method runs, so it aborts on the
+nil recursion before the intended guard executes.
+
+Latent: only fires on code paths where `collect_local_names` /
+`scan_direct` traverses an IF-without-ELSE (or MATCH-without-DEFAULT)
+under the effect/reentrancy analysis — exposed here by adding
+`EFFECTS REENTRANT` + a BG block containing an `IF ... THEN ... END`
+(no ELSE) to `vm.cht`.
+
+### Fix (applied)
+
+`src/mir/control_flow.rb`: sig changed to
+`params(body: T.nilable(T::Array[T.untyped]), ...)`. The existing
+`return unless body.is_a?(Array)` guard is the intended handling;
+the sig now matches the method's real contract. Minimal,
+architecturally-correct (no new logic — aligns the type with
+existing behavior). Status: **FIXED**.
