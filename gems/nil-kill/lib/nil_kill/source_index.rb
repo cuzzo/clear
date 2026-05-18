@@ -3,21 +3,16 @@
 
 module NilKill
   class SourceIndex
-    @attribute_hash_shapes = {}
-    @attribute_array_element_shapes = {}
-    @struct_field_hash_shapes = {}
-    @struct_field_array_element_shapes = {}
-    @struct_field_static_types = {}
-    @struct_fields_by_name = {}
-    @struct_full_by_name = {}
-
-    class << self
+    # C4.2: the cross-file shape/type symbol table -- one owned object
+    # replacing the 7 class-level @ indexes. Pure storage move; the
+    # class-level readers delegate here so every existing
+    # `self.class.<index>` call site is unchanged -> byte-identical.
+    class ShapeSymbolTable
       attr_reader :attribute_hash_shapes, :attribute_array_element_shapes,
         :struct_field_hash_shapes, :struct_field_array_element_shapes,
-        :struct_field_static_types, :struct_fields_by_name, :struct_full_by_name,
-        :noreturn_methods
+        :struct_field_static_types, :struct_fields_by_name, :struct_full_by_name
 
-      def reset_global_shape_indexes
+      def initialize
         @attribute_hash_shapes = {}
         @attribute_array_element_shapes = {}
         @struct_field_hash_shapes = {}
@@ -25,6 +20,22 @@ module NilKill
         @struct_field_static_types = {}
         @struct_fields_by_name = {}
         @struct_full_by_name = {}
+      end
+    end
+
+    @shape_table = ShapeSymbolTable.new
+
+    class << self
+      attr_reader :noreturn_methods, :shape_table
+
+      %i[attribute_hash_shapes attribute_array_element_shapes
+         struct_field_hash_shapes struct_field_array_element_shapes
+         struct_field_static_types struct_fields_by_name struct_full_by_name].each do |idx|
+        define_method(idx) { @shape_table.public_send(idx) }
+      end
+
+      def reset_global_shape_indexes
+        @shape_table = ShapeSymbolTable.new
         @rbi_field_types = nil
         @noreturn_methods = Set.new
       end
