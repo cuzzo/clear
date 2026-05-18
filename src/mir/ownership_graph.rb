@@ -31,7 +31,9 @@ class OwnershipGraph
     def dropped?; state == :dropped; end
     # Carrier struct: member stays :type_info; expose the project-wide
     # canonical accessor name so readers use one name everywhere.
+    sig { returns(T.untyped) }
     def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
     def full_type=(val); self.type_info = val; end
   end
 

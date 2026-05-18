@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../ast/ast"
 # method_analysis.rb — Type-specific method resolution for Pool and HashMap.
 #
 # Resolves method calls on collection types using the declarative registries
@@ -57,7 +58,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
-    defn = IntrinsicRegistry.sig(registry, node.name)
+    defn = IntrinsicRegistry.sig(registry, T.unsafe(node).name)
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(

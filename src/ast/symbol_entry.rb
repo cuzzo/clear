@@ -133,10 +133,7 @@ class SymbolEntry
   # anything outside it is a compiler bug, surfaced here.
   sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
   def type=(val)
-    @type = T.let(
-      val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val)),
-      Type
-    )
+    @type = val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
   # A function binding is a Type whose @raw is its FunctionSignature
@@ -202,6 +199,7 @@ class SymbolEntry
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
     @reg = reg
+    @type = T.let(Type.new(:Untyped), Type)
     self.type = type
     @mutable = mutable
     @storage = storage

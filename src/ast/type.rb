@@ -2100,7 +2100,6 @@ class Type
       pointee = Type.new(self)
       pointee.layout = nil
       pointee.provenance = :stack if pointee.respond_to?(:provenance=)
-      pointee.location = :stack if pointee.respond_to?(:location=)
       return "*#{pointee.zig_type(is_param: is_param, is_field: is_field)}"
     end
 

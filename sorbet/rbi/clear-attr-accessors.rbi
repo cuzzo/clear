@@ -1132,7 +1132,7 @@ class FunctionContext
   def needs_rt; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def needs_rt=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def return_type; end
   sig { returns(T::Array[T.untyped]) }
   def returns; end
@@ -1392,7 +1392,7 @@ class FunctionSignature
   def return_strategy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def return_strategy=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def return_type; end
   sig { returns(T.untyped) }
   def stack_tier; end
@@ -1883,7 +1883,7 @@ class SymbolEntry
   def takes; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def takes=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(Type) }
   def type; end
   sig { returns(T.untyped) }
   def valid; end

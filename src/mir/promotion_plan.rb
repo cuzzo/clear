@@ -391,7 +391,7 @@ module CleanupClassifier
 
       var_name = node.name.is_a?(String) ? node.name : node.name.to_s
       ti = node.full_type
-      cleanup = classify_binding(var_name, T.must(ti), node, promoted_fns, schema_lookup)
+      cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
       # Stamp on node for identity-based lookup in lower_var_decl (avoids
       # same-name collisions when two vars share a name in different scopes).
       node.mir_binding_entry = cleanup if cleanup

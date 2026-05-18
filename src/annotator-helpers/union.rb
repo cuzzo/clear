@@ -53,6 +53,7 @@ module UnionAnalysis
       sig = FunctionSignature.unwrap(local.type)
       unless sig
         error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
+        next
       end
 
       # Visibility check
@@ -72,7 +73,9 @@ module UnionAnalysis
       # Parameter type checks
       req[:params].each_with_index do |rp, i|
         req_t  = to_type(rp[:type]).resolved
-        sig_t  = to_type(sig.params[i][:type]).resolved
+        sp = sig.params[i]
+        next unless sp
+        sig_t  = to_type(sp[:type]).resolved
         unless req_t == sig_t || req_t == :Any || sig_t == :Any
           error!(req_tok, :UNION_METHOD_PARAM_TYPE, union: union_name, method: fn_name, index: i + 1, expected: req_t, fn: fn_name, got: sig_t)
         end
@@ -148,17 +151,17 @@ module UnionAnalysis
     unless Schemas.union?(schema)
       error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
     end
-    unless T.must(schema).variants.key?(node.variant_name)
+    unless schema.variants.key?(node.variant_name)
       emit_variant_typo!(
         T.must(variant_anchor_from_unionlit(node, node.variant_name)),
-        node.variant_name, T.must(schema).variants.keys,
+        node.variant_name, schema.variants.keys,
         "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
         "variant of union #{node.union_name}",
         cascade: true
       )
     end
 
-    var_data = T.must(schema).variants[node.variant_name]
+    var_data = schema.variants[node.variant_name]
     unless Schemas.inline_struct?(var_data)
       if var_data.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)

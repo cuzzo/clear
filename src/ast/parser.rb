@@ -2000,7 +2000,7 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
-  sig { params(if_token: Lexer::Token, bindings: T::Array[T::Hash[Symbol, T.untyped]]).returns(AST::IfBind) }
+  sig { params(if_token: Lexer::Token, bindings: T::Array[AST::Binding]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
@@ -2017,7 +2017,7 @@ class Parser
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
   # Returns nil if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[AST::Binding])) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp

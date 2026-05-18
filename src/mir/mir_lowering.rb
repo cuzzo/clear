@@ -494,7 +494,7 @@ class MIRLowering
         skip = node.is_a?(AST::ListLit) && node.storage == :stack &&
                (node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type)&.fixed?
         unless skip
-          cast_node = mir_cast(mir, T.must(node.full_type), node.coerced_type)
+          cast_node = mir_cast(mir, node.full_type, node.coerced_type)
           return cast_node if cast_node
         end
       end
@@ -2121,7 +2121,7 @@ class MIRLowering
       arg_field_types: arg_field_types,
       arg_tuple: arg_tuple,
       alloc_kind: alloc_kind,
-      return_type: T.must(node.full_type),
+      return_type: node.full_type,
       call_zig: call_zig,
       receiver_field: nil
     )
@@ -2145,7 +2145,7 @@ class MIRLowering
       arg_field_types: nil,
       arg_tuple: arg_tuple,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
-      return_type: T.must(node.full_type),
+      return_type: node.full_type,
       call_zig: "f.self_val.#{node.name}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
       receiver_field: receiver_code
     )
@@ -5334,7 +5334,7 @@ class MIRLowering
       # `IF pool[id] AS env`.
       elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
       elem_name = elem_t.respond_to?(:resolved) ? T.must(elem_t).resolved.to_s : elem_t.to_s
-      pool_get_def = IntrinsicRegistry.sig(POOL_METHODS, "get").dup
+      pool_get_def = T.must(IntrinsicRegistry.sig(POOL_METHODS, "get")).dup
       pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
       pool_get_def.emit.elem = elem_name
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
@@ -6125,7 +6125,7 @@ class MIRLowering
                end
         { kind: kind, alloc: decl_alloc, has_moved_guard: false }
       end
-      build_drop_entry!(drop_entry, T.must(node.full_type), node)
+      build_drop_entry!(drop_entry, node.full_type, node)
       # Escape-analysis heap stamp takes precedence.
       # Same-name collision fix: if cleanup_bindings says :heap but this declaration's
       # storage is :frame and the type doesn't structurally require heap (sharded/pool/map),
@@ -7579,8 +7579,8 @@ class MIRLowering
   sig { params(value_node: AST::Identifier).returns(MIR::RcRetain) }
   def make_rc_retain(value_node)
     ti = value_node.full_type
-    func = T.must(ti).shared? ? "arcRetain" : "rcRetain"
-    zig_base = rc_payload_zig_type(T.must(ti))
+    func = ti.shared? ? "arcRetain" : "rcRetain"
+    zig_base = rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(value_node), zig_base, func)
   end
 

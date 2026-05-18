@@ -102,7 +102,7 @@ module CapabilityHelper
     sym = var_node.symbol
     return sym.storage if sym
     if var_node.full_type
-      case T.must(var_node.full_type).ownership
+      case var_node.full_type.ownership
       when :shared     then return :shared
       when :multiowned then return :multiowned
       end

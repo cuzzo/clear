@@ -324,7 +324,7 @@ module FunctionAnalysis
     end
 
     if given_args < max_args
-      params[given_args...max_args].each do |param|
+      (params[given_args...max_args] || []).each do |param|
         next if param.required
         default = param.default
         injected = case default
@@ -344,7 +344,7 @@ module FunctionAnalysis
     atomic_bare_value_args = []
 
     node.args.each_with_index do |arg_node, i|
-      param = params[i]
+      param = T.must(params[i])
       next if param.comptime  # comptime type params are not type-checked
       verify_param_lifetime!(arg_node, param, signature)
 

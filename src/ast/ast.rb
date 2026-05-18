@@ -17,10 +17,10 @@ module AST
   # invariant walk (which calls .full_type on every node) materializes
   # it, so type_info / resolved_type work downstream with no extra
   # code. An annotator-set value always wins (`||=`).
-  LITERAL_VALUE_TYPE = {
+  LITERAL_VALUE_TYPE = T.let({
     STRING: :String, NUMBER: :Number, FLOAT64: :Float64,
     INT64: :Int64, BOOLEAN: :Bool, SYMBOL: :Symbol, NIL: :Void
-  }.freeze
+  }.freeze, T::Hash[Symbol, Symbol])
   BOOL_BINOPS = %i[LT GT LTE GTE EQ NEQ AND OR].freeze
   # Statements / control-flow evaluate to Void unless the annotator
   # promoted them to an expression (IF/MATCH as a value), in which
@@ -29,6 +29,7 @@ module AST
     extend T::Sig
     sig { returns(Type) }
     def full_type
+      @type_object = T.let(@type_object, T.nilable(Type))
       @type_object ||= Type.new(:Void)
     end
   end
@@ -38,6 +39,7 @@ module AST
                      keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       t = self[:type]
@@ -55,6 +57,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       # mutable/takes/comptime arrive from match! (a Token when the
@@ -104,6 +107,7 @@ module AST
                          keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       self[:body] = [] if self[:body].nil?
@@ -162,6 +166,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
@@ -214,6 +219,7 @@ module AST
                           keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
@@ -856,7 +862,8 @@ module AST
     # Struct init from parser/synthetic builders) and post-parse
     # assignment (return inference, auto-infer) so no reader needs
     # an `is_a?(Type)` Symbol/Type discriminator.
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
       rt = self[:return_type]
       self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
@@ -981,6 +988,7 @@ module AST
   StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       self[:borrowed] = false if self[:borrowed].nil?
@@ -1005,15 +1013,18 @@ module AST
     def field_decls; self[:field_decls]; end
   end
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+    extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
 
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
       t = self[:type]
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
+    sig { params(val: T.untyped).returns(T.untyped) }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1033,6 +1044,7 @@ module AST
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
+    extend T::Sig
     include Locatable
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
@@ -1044,12 +1056,14 @@ module AST
     # always a Type (or nil when unannotated). Coerced at construction
     # and post-parse assignment so no reader needs an `is_a?(Type)`
     # Symbol/Type discriminator.
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
       t = self[:type]
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
+    sig { params(val: T.untyped).returns(T.untyped) }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
     end
@@ -1152,12 +1166,15 @@ module AST
     attr_accessor :borrowed_field_names
   end
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
+    extend T::Sig
     include Locatable
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
       self[:params] = self[:params] || []
     end
 
+    sig { params(val: T.untyped).returns(T.untyped) }
     def params=(val)
       self[:params] = val || []
     end
@@ -1181,6 +1198,7 @@ module AST
     extend T::Sig
     include Locatable
 
+    sig { params(args: T.untyped).void }
     def initialize(*args)
       super
       self[:bindings] = [] if self[:bindings].nil?
@@ -1311,6 +1329,7 @@ module AST
     include Locatable
     include HasBodies
 
+    sig { params(args: T.untyped).void }
     def initialize(*args)
       super
       self[:capabilities] = [] if self[:capabilities].nil?
@@ -1457,6 +1476,7 @@ module AST
                            keyword_init: true) do
     extend T::Sig
 
+    sig { params(kw: T.untyped).void }
     def initialize(**kw)
       super
       self[:items]           = [] if self[:items].nil?
@@ -1549,6 +1569,7 @@ module AST
     extend T::Sig
     include Locatable
 
+    sig { params(args: T.untyped).void }
     def initialize(*args)
       super
       self[:fields] = [] if self[:fields].nil?
@@ -1566,16 +1587,19 @@ module AST
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
   ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) do
+    extend T::Sig
     include Locatable
     attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
     attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
     attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
 
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
       self[:params] = self[:params] || []
     end
 
+    sig { params(val: T.untyped).returns(T.untyped) }
     def params=(val)
       self[:params] = val || []
     end
@@ -1709,6 +1733,7 @@ module AST
     include Locatable
     include HasBodies
 
+    sig { params(args: T.untyped).void }
     def initialize(*args)
       super
       self[:cases] = [] if self[:cases].nil?
@@ -1943,7 +1968,9 @@ module MIR
     # Carrier struct: the type lives in the :type_info member, NOT
     # Locatable's @type_object. Override Locatable so the canonical
     # full_type accessor reads/writes the member (member name kept).
+    sig { returns(T.untyped) }
     def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
     def full_type=(val); self.type_info = val; end
   end
 

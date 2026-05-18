@@ -79,7 +79,7 @@ module LockHelper
     T.must(@lock_type_ranks)[t]
   end
 
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
   def record_lock_clause_site!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.lock_error_clause
@@ -97,7 +97,7 @@ module LockHelper
   # same-name; does not chase aliases or cross function boundaries (Phase
   # 2 handles cross-function type-level cycles). Opt-outs downgrade to a
   # [Note].
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).returns(T.nilable(T::Array[AST::Capability])) }
   def check_nested_lock_reacquire!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_locks = T.let(@held_locks, T.untyped)
@@ -126,7 +126,7 @@ module LockHelper
   # cycle detection covers those). POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE
   # on the inner WITH downgrades the error to a [Note] so the risk is
   # visible but not blocking.
-  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: AST::WithBlock, expanded_capabilities: T::Array[AST::Capability]).returns(T.nilable(T::Array[AST::Capability])) }
   def check_lock_rank_ordering!(node, expanded_capabilities)
     T.bind(self, SemanticAnnotator) rescue nil
     @held_lock_types = T.let(@held_lock_types, T.untyped)

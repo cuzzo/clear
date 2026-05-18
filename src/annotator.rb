@@ -1403,7 +1403,8 @@ private
 
         if schema
           field_def = schema.fields[f.name]
-          field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(AST::StructField) ? field_def.type&.resolved : field_def&.resolved)
+          ft = field_def&.type
+          field_type = ft.is_a?(Type) ? ft.resolved : ft
           val_type   = f.expr.resolved_type
           is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
           unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
@@ -2365,7 +2366,7 @@ private
     end
 
     static_methods = schema.static_methods || {}
-    method_def     = IntrinsicRegistry.sig(static_methods, node.method_name)
+    method_def     = IntrinsicRegistry.sig(static_methods, T.unsafe(node).method_name)
 
     unless method_def
       available = static_methods.keys.join(", ")
@@ -2386,6 +2387,7 @@ private
       else
         error!(node, :STATIC_UNKNOWN_METHOD, method: node.method_name, type: type_name, available: available)
       end
+      return
     end
 
     expected_args = method_def.arg_spec
@@ -2672,7 +2674,7 @@ private
     # Copying it onto node.type also propagates the kind to the binding's
     # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
     if pipe.full_type.observable_terminal
-      pipe_terminal = T.must(pipe.full_type).observable_terminal
+      pipe_terminal = pipe.full_type.observable_terminal
       target_t = node.type
       # The pipe is the authority on terminal kind: only the fold's
       # analyzer knows whether this is :sum / :count / :max / ... .

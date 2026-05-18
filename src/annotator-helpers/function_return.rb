@@ -75,9 +75,9 @@ class FunctionReturn < T::Struct
       el = receiver&.element_type
       el.is_a?(Type) ? el : Type.new(el || :Any)
     when Kind::OptionalOfElement
-      Type.new(:"?#{T.must(receiver).element_type.resolved}")
+      Type.new(:"?#{T.must(T.must(receiver).element_type).resolved}")
     when Kind::IdOfElement
-      Type.new(:"Id<#{T.must(receiver).element_type.resolved}>")
+      Type.new(:"Id<#{T.must(T.must(receiver).element_type).resolved}>")
     when Kind::OptionalOfValue
       Type.new(:"?#{T.must(receiver).value_type.resolved}")
     when Kind::ValueList

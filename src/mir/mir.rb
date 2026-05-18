@@ -1361,7 +1361,9 @@ module MIR
     def stmt?; true; end
     # Carrier struct: member stays :type_info; expose the project-wide
     # canonical accessor name so readers use one name everywhere.
+    sig { returns(T.untyped) }
     def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
     def full_type=(val); self.type_info = val; end
   end
 
@@ -1805,6 +1807,8 @@ module MIR
   # doing entry[:zig]/.dig(:...) will fail loudly, which is the
   # intended map of remaining reader-migration work.
   module StdlibDefFsCoercion
+    extend T::Sig
+    sig { params(v: T.untyped).returns(T.untyped) }
     def stdlib_def=(v)
       super(IntrinsicRegistry.fs(v))
     end
@@ -1812,9 +1816,10 @@ module MIR
     # Struct positional construction (`InlineBc.new(op, args, hash)`)
     # assigns the member directly, bypassing the setter -- re-run it
     # through the coercing setter so the carrier is always FS.
-    def initialize(*)
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
       super
-      self.stdlib_def = stdlib_def
+      T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
     end
   end
   [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|

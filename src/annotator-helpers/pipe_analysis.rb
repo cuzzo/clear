@@ -780,7 +780,7 @@ module PipeAnalysis
 
     # 2. Validate Type: The Input must match Parameter 1
     if max_args >= 1
-      param = params[0]
+      param = T.must(params[0])
       expected = param.type
       actual = node.left.resolved_type
 

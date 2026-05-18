@@ -21,15 +21,13 @@ class FunctionContext
 
   sig { params(val: T.untyped).void }
   def return_type=(val)
-    @return_type = T.let(
-      val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val)),
-      Type
-    )
+    @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
   sig { params(name: String, return_type: T.nilable(Type), lifetime: T.nilable(T::Array[String]), type_params: T::Array[Symbol]).void }
   def initialize(name:, return_type: nil, lifetime: nil, type_params: [])
     @name = name
+    @return_type = T.let(Type.new(:Void), Type)
     self.return_type = return_type
     @lifetime = lifetime
     @type_params = type_params

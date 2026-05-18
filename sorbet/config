@@ -12,6 +12,7 @@
 --ignore=.claude/
 --ignore=docs/
 --ignore=tools/
+--ignore=gems/boobytrap/
 --ignore=gems/decomplex/
 --ignore=gems/slopcop/
 --ignore=gems/fix-cache/
