@@ -540,3 +540,5 @@
 # the whole handler. Heap @list returned through a fallible fn via
 # OR PASS resolves through the value-position TryCatch routing.
 524_or_pass_heap_list_cleanup
+# 532: single-i64-field @shared:locked struct -> SCELL store cell.
+532_register_shared_cell_scalar

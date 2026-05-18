@@ -1290,6 +1290,12 @@ class RegisterBcEmitter
     raise Unsupported, "register emitter does not know struct field #{target.field.inspect}" unless field
     object[:dirty_fields][target.field.to_s] = true if object[:dirty_fields]
 
+    if (cell = field[:cell])
+      raise Unsupported, "register emitter only supports i64 shared store cells" unless field.fetch(:type) == :i64
+      emit(SCELLSETI, cell, compile_i64_expr(value))
+      return
+    end
+
     field_type = field.fetch(:type)
     dst = field.fetch(:reg)
     unless dst.is_a?(Integer)
@@ -5275,6 +5281,16 @@ class RegisterBcEmitter
                  else :rc_struct
                  end
                end
+    if sync == :locked && field_regs.size == 1
+      fname, finfo = field_regs.first
+      if finfo[:type] == :i64
+        cell_reg = fresh_ireg
+        emit(SCELLNEW, cell_reg)
+        emit(SCELLSETI, cell_reg, finfo[:reg])
+        field_regs[fname] = { type: :i64, cell: cell_reg }
+      end
+    end
+
     { kind: cap_kind, type: type_name, fields: field_regs, caps: caps }
   end
 
@@ -6587,6 +6603,11 @@ class RegisterBcEmitter
       field = ensure_struct_field_loaded(object, expr.field.to_s)
       raise Unsupported, "register emitter does not know struct field #{expr.field.inspect}" unless field
       raise Unsupported, "register emitter expected Int64 struct field #{expr.field.inspect}" unless field.fetch(:type) == :i64
+      if (cell = field[:cell])
+        dst = fresh_ireg
+        emit(SCELLGETI, dst, cell)
+        return dst
+      end
       field.fetch(:reg)
     when :pool_slot
       return object.fetch(:alive_reg) if expr.field.to_s == "alive"

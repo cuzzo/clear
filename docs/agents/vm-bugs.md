@@ -947,3 +947,13 @@ R6 first step = DESIGN the shared store, modeled on stack VM:
 This is a dedicated multi-commit workstream gated on that design;
 no bounded slice meaningfully advances it. The :fiber scalar
 fiber path (R5, landed) stays the foundation.
+
+## Pre-existing: nested_field_append_allocator_spec flaky under prspec
+
+`spec/nested_field_append_allocator_spec.rb:74` and `:89` fail under
+`bundle exec prspec spec/` (parallel) but pass in isolation
+(`bundle exec rspec spec/nested_field_append_allocator_spec.rb` -> 3/3).
+Reproduces on a clean tree at the R6.2a commit (2f106c1d) with all
+later changes stashed, so it is order/parallel-worker dependent and
+predates R6.2b. Likely a shared-state leak between specs sharing a
+MIRLowering/global registry under parallel workers. Not yet root-caused.

@@ -1,0 +1,15 @@
+# Single-scalar @shared:locked struct: field lives in a shared store
+# cell (register VM SCELLNEW/SCELLSETI/SCELLGETI), not a plain reg.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    c = Counter{ value: 7 } @shared:locked;
+    WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 35;
+    }
+    WITH c AS inner {
+        ASSERT inner.value == 42, "shared cell read must see the write";
+    }
+    RETURN;
+END
