@@ -882,3 +882,33 @@ migrate the 5 callsites string->MIR one at a time behind the green
 gate; prove MIRChecker covers the dupe; then delete
 `CheatLib.CapturedValue` / `dupeCaptured` (single caller) and the
 FreshHeapCopy fork. No correctness fire forces this; own workstream.
+
+## Known limitation (R6, not yet started): register VM fakes lock contention
+
+The register VM's WITH EXCLUSIVE / WITH SHARED / @versioned snapshot
+acquire+release are explicit NO-OPS (register_bc_emitter ~L1946:
+"No actual locking happens because the bc VM is single-threaded").
+vm.cht has no real Locked<T>, no lock-timeout, no atomics.
+
+Consequence: lock/atomic/contention tests in the allowlist (e.g.
+263_with_lock_contention, which asserts a waiter timed out exactly
+once) PASS VACUOUSLY -- the single-threaded fake satisfies the
+assertions sequentially; no contention or ON LockTimeout path is
+actually exercised. R5's :fiber flip did not change this: a
+@shared:locked capture is non-scalar -> cap_kind :other -> the BG
+inlines (single-threaded) rather than spawning a real fiber.
+
+R6 makes this real and is its own workstream, NOT a bounded
+continuation:
+- real Locked<T> + lock-timeout in vm.cht (mirror _bc_runner.cht);
+- extend :fiber captures to cap-wrapped (@shared:locked / Arc)
+  types -- entangled with the deferred plan Step D (FiberCtxBuilder
+  pointer_captures / parallel-capture collapse);
+- route guest WITH EXCLUSIVE / atomic through the real primitive on
+  the :fiber path;
+- MANDATORY per CLAUDE.md (real cross-fiber shared state + locks +
+  timeout): hammer + loom + VOPR, TSan/ASan, std.testing.allocator,
+  green before compiler integration.
+
+Until R6: do not trust register-VM lock/atomic/contention tests as
+concurrency coverage; they verify only the single-threaded shape.
