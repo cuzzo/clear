@@ -76,6 +76,14 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `mutable_collection_param`  | 8            | E2 :mutable_list_param_escape, INV-CROSS-FRAME-PARAM-ALLOC |
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
+| `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
+| `binary_op_matrix`         | 30           | Binary operator lowering/admission combinations. |
+| `capability_wrap_matrix`   | 7            | Capability wrapper construction/admission cells. |
+| `catch_allocator_matrix`   | 10           | Error/catch paths that preserve allocator identity. |
+| `catch_reassign_matrix`    | 8            | Catch/fallback reassignment ownership cells. |
+| `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
+| `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
+| `match_matrix`             | 6            | MATCH lowering over union and scalar shapes. |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
@@ -86,7 +94,6 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `error_cleanup`             | 24              | INV-9: alloc-cleanup pairing on error paths (OR PASS / RAISE / DEFAULT) |
 | `branch_cleanup`            | 48              | INV-2: alloc-cleanup pairing across IF/ELSE branches with optional early-return |
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
-| `fsm_lowering`              | 42              | FSM lowering cross-product — suspend × control-flow × placement (CLAUDE.md invariant #13) |
 | `cond_or_fallback`          | 8               | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
 | `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
 
