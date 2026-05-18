@@ -118,9 +118,10 @@ class RegisterBcEmitter
     # value-kinds we already track and adds nothing to the runtime.
     @shared_events = []
     @bg_dispatch_points = []
-    # :fiber emits a real BGSPAWN/FNEXT region; opt-in until capture
-    # marshaling lands, default :inline keeps the allowlist green.
-    @bg_mode = ENV["CLEAR_REGISTER_BG_MODE"] == "fiber" ? :fiber : :inline
+    # Default: top-level scalar BGs spawn real fibers; nested /
+    # FSM-eligible / suspend / non-scalar-capture bodies still inline.
+    # CLEAR_REGISTER_BG_MODE=inline forces the all-inline fallback.
+    @bg_mode = ENV["CLEAR_REGISTER_BG_MODE"] == "inline" ? :inline : :fiber
     @current_function_name = nil
   end
 
@@ -5049,13 +5050,18 @@ class RegisterBcEmitter
       raise Unsupported, "register emitter :defer BG mode is reserved for future loom-mode integration"
     end
 
-    if @bg_mode == :fiber
+    if @bg_mode == :fiber && expr.fsm_structure.nil? && !bg_body_has_suspend?(body) &&
+       (@bg_ctx_prefixes.nil? || @bg_ctx_prefixes.empty?)
       caps = (expr.captures || {})
       cap_kind = lambda do |t|
-        raw = (t.respond_to?(:raw) ? t.raw : t).to_s
-        if raw =~ /Int64|\bBool\b/ then :i64
-        elsif raw =~ /Float64/ then :f64
-        elsif raw =~ /String/ then :string
+        return :other unless t.respond_to?(:raw)
+        return :other if %i[list_collection? array? map? set_collection? pool?]
+                           .any? { |m| t.respond_to?(m) && t.send(m) } &&
+                         !(t.respond_to?(:string?) && t.string?)
+        return :string if t.respond_to?(:string?) && t.string?
+        case t.raw.to_s
+        when "Int64", "Bool" then :i64
+        when "Float64" then :f64
         else :other
         end
       end
@@ -5144,6 +5150,21 @@ class RegisterBcEmitter
   # An expression-shaped last statement (Lit, Call, BinOp, ...) gives
   # the value; anything else (assignments, ScopeBlocks, IfStmts that
   # don't break with a value) is side-effect-only and yields ~Void.
+  # A nested BG or a NEXT anywhere makes the body FSM-eligible
+  # (suspend points); the plain :fiber region cannot model that.
+  def bg_body_has_suspend?(node)
+    case node
+    when MIR::BgBlock then true
+    when MIR::MethodCall then node.method.to_s == "next" ||
+        bg_body_has_suspend?(node.receiver) ||
+        (node.args || []).any? { |a| bg_body_has_suspend?(a) }
+    when Array then node.any? { |n| bg_body_has_suspend?(n) }
+    else
+      node.is_a?(Struct) && node.class.name.to_s.start_with?("MIR::") &&
+        node.members.any? { |m| bg_body_has_suspend?(node[m]) }
+    end
+  end
+
   def bg_body_tail_is_expr?(last)
     case last
     when MIR::Lit, MIR::Ident, MIR::BinOp, MIR::UnaryOp, MIR::Call, MIR::MethodCall,

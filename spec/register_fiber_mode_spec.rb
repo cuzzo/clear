@@ -51,7 +51,7 @@ RSpec.describe "register-VM :fiber bg_mode" do
     expect(ops).to include(capgeti)
   end
 
-  it ":inline (default) emits none of them" do
+  it ":inline (forced fallback) emits none of them" do
     ops = emit("inline")
     expect(ops).not_to include(bgspawn)
     expect(ops).not_to include(fnexti)
