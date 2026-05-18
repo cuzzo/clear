@@ -756,6 +756,23 @@ fixed inline; a standalone bug-fix should re-key the gate and add a
 
 ## Compiler: COPY of an @list PARAM into a BG deep-copies via unguarded `.items`
 
+**FIXED 2026-05-18** (architectural Step B -- collapse N divergent
+backing accessors onto the one canonical resilient one). Root:
+`mir_lowering lower_copy` built the list deep-copy source as
+`MIR::ItemsAccess.new(source, false)` -- the UNGUARDED `.items`
+variant, which assumes the source is statically an ArrayList. A
+captured `@list` param is a slice `[]i64` in the BG ctx (and a
+pointer-passed one is `*const ArrayList`), so bare `.items` was a
+hard Zig error. Fix: `MIR::ItemsAccess.new(source, true)` -- the
+ONE canonical comptime `@hasField(@TypeOf(x),"items")` dispatch
+every other backing access already uses (ArrayList -> `.items`,
+slice -> `[0..]`, `*const ArrayList` -> `.*.items`), zero runtime
+cost. The deep-copy no longer re-derives "this is an ArrayList".
+Regression: `transpile-tests/530_bgcopy_list_param_reentrant.cht`
+(compile+run) + fuzz `tools/fuzz/templates/bg_copy_param_reentrant.rb`
+(re-enabled: `CALLEES = [:reentrant]`). Unblocks register-VM R3
+Step 3.
+
 Found 2026-05-18 wiring register-VM R3 (the BGSPAWN dispatch arm
 does `BG { runRegisterBytecode!(..., COPY sourceLines, ...) }`
 where `sourceLines: Int64[]@list` is a parameter). Blocks R3 Step 3.

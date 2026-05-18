@@ -5888,7 +5888,16 @@ class MIRLowering
       elem_zig = transpile_type(elem_type)
       needs_deep = node.respond_to?(:deep_copy) && node.deep_copy
       strategy = needs_deep ? :list_deep : :list_shallow
-      src = ti&.list_collection? ? MIR::ItemsAccess.new(source, false) : source
+      # Canonical resilient backing access (Step B): the deep-copy
+      # needs the list's element slice, but `source` may be an
+      # ArrayList, a slice (captured @list param in a BG ctx), or a
+      # *const ArrayList (pointer-passed param). The unguarded
+      # `safe: false` form emitted bare `.items` and broke for the
+      # non-ArrayList shapes (vm-bugs.md "COPY of an @list PARAM into
+      # a BG ... unguarded .items", 57f23367). `safe: true` is the
+      # ONE comptime @hasField dispatch every other backing access
+      # uses -- zero runtime cost, correct for every representation.
+      src = ti&.list_collection? ? MIR::ItemsAccess.new(source, true) : source
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)

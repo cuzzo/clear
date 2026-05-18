@@ -27,7 +27,7 @@
 BG_COPY_PARAM_REENTRANT_CELLS = []
 
 # Re-enable: CALLEES = [:reentrant]  (when 57f23367 is fixed)
-CALLEES = [].freeze
+CALLEES = [:reentrant].freeze
 
 CALLEES.each do |callee|
   [:int].each do |elem|
