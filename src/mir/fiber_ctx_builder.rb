@@ -118,13 +118,20 @@ module FiberCtxBuilder
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
+        # Single source of truth: the ctx field TYPE and the dupe's
+        # return type are BOTH CheatLib.CapturedValue(@TypeOf(source)).
+        # A borrowed `@list`/struct PARAM is `*const T`; CapturedValue
+        # strips it to the owned `T` and dupeCaptured deep-copies the
+        # pointee, so the fiber owns a mutable value rather than a
+        # `*const` alias (Bug #7 root cause). For a local owned source
+        # both reduce to the source type, preserving prior behavior.
         dupe_decl =
-          "const #{dupe_var} = try CheatLib.dupeValue(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});\n" \
+          "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});\n" \
           "        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});"
         body_cleanup =
           "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
-        CaptureSpec.new(name, "@TypeOf(#{source_ref})", dupe_var,
+        CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
       elsif pointer_captures.include?(name)
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).

@@ -439,7 +439,7 @@ existing behavior). Status: **FIXED**.
 
 ---
 
-## Bug #7 (OPEN): COPY of an `@list` fn-param captured into BG
+## Bug #7 (FIXED 2026-05-18): COPY of an `@list` fn-param captured into BG
 
 Found 2026-05-18 while faithfully re-reproducing the R2 fiber
 blocker (post the scan_direct/pipeline_rewriter compiler fix). The
@@ -488,23 +488,77 @@ is a borrowed `*const ArrayList(T)`, so the ctx field is declared
 `*const ArrayList` while it actually holds an owned dupe ->
 `*T` vs `*const T` mismatch in the fiber body / forwarded call.
 
-### Architecturally-correct fix (NOT a band-aid, NOT vm.cht-side)
+### Architecturally-correct fix (applied, NOT a band-aid, NOT vm.cht-side)
 
 The ctx field type must describe **the value the field holds** (the
-dupe), not the source it was copied from: in the `FreshHeapCopy`
-branch, `field_type_zig` should be `@TypeOf(#{dupe_var})` (with the
-dupe decl ordered before the ctx struct type so `@TypeOf` resolves),
-or the owned element/container type directly. This is one principled
-change in `FiberCtxBuilder`, but it is on the BG / BG STREAM /
-CONCURRENT / DO capture codegen path -- **broad blast radius across
-all concurrency**. It must be its own dedicated commit verified
-EXHAUSTIVELY (prspec, transpile-tests, fuzz matrix, the full
-`:integration` BG/concurrency suite, register allowlist) and must
-**flip** Bug #7's spec expectation to `ok == true`. Do NOT work
-around it in `vm.cht` (that would be the band-aid); it blocks the
-stack-VM fiber replication (R2-R6) because
+deep-copied owned value), not the borrowed source it was copied
+from. Single-source-of-truth fix so the field type and the dupe's
+return type can never diverge:
+
+1. **`zig/runtime/runtime-header.zig`** -- new comptime
+   `CheatLib.CapturedValue(S)` and `CheatLib.dupeCaptured(S, src,
+   alloc)`. `CapturedValue(S)` returns the OWNED value the fiber
+   holds; `dupeCaptured` is `dupeValue` that derefs-then-deep-copies
+   for that case. The strip is scoped to a **`*const T` single-item
+   pointer ONLY** -- that is precisely a CLEAR *borrow* (an immutable
+   param passed by pointer). A NON-const `*T` is an owned heap box
+   (`*Locked(T)` from `lockedCreate`, Arc, Box) whose pointer shape
+   the body+cleanup pipeline (`dupeValue` + `lockedDestroy(...,c)`)
+   relies on -- it must pass through unchanged. (The `is_const`
+   guard was added after the broader-strip first cut regressed the
+   `stream_into_boundary` `@locked`-local cell:
+   `lockedDestroy` got `Locked(T)` instead of `*Locked(T)`.)
+2. **`src/mir/fiber_ctx_builder.rb`** FreshHeapCopy branch -- ctx
+   `field_type_zig` and the dupe both go through
+   `CheatLib.CapturedValue(@TypeOf(src))` / `dupeCaptured` (the
+   owned type, not a `*const` alias of the source).
+3. **`src/mir/mir_pass.rb`** `insert_bg_escape_promote!` -- skip the
+   in-place `promoteList(&x)` for *parameters* (borrowed/caller-owned;
+   the COPY strategy already deep-copies them, and an in-place
+   promote of a `*const` param is itself a `*T`/`*const T` error).
+
+Verified EXHAUSTIVELY: prspec 4802/0, transpile-tests 554/554 (0
+leak), fuzz matrix incl `bg_capture_typing` 145/145 (0 fail/leak),
+register allowlist 245/245, `zig build test` 0-fail (incl new
+`cleanup-test.zig` CapturedValue/dupeCaptured unit tests).
+Regression-locked by `tools/fuzz/templates/bg_capture_typing.rb`
+(`:int` x {local,param} x {bare_list,struct_field}).
+
+Unblocks the stack-VM fiber replication (R2-R6):
 `runRegisterBytecode!`'s `@list` params (`sourceLines` etc.) are
 exactly this shape.
 
-Regression: `spec/vm_bg_capture_bugs_spec.rb` "Bug #7 (OPEN)" --
-asserts the current compile failure; flip when fixed.
+Regression: `spec/vm_bg_capture_bugs_spec.rb` "Bug #7 (FIXED)" --
+now asserts `ok == true` (compiles AND runs).
+
+## Bug #8 (OPEN): bare `String[]@list` COPY'd into a BG fiber double-frees
+
+Found 2026-05-18, exposed only once Bug #7's compile error was
+removed (before that, the program never built far enough to run).
+Distinct from Bug #7: that was ctx-field *typing*; this is a
+cleanup-*ownership* double-free of the element strings.
+
+### Symptom
+
+A bare `String[]@list` (NOT int-element, NOT struct-wrapped)
+captured by `COPY` into a `BG { ... }` -- for BOTH a local and a
+fn-param origin -- double-frees its element strings under the
+leak-detecting allocator (`./clear test`). With int elements or a
+struct-with-`@list`-field wrapper the same shapes are clean, so the
+fault is specific to the duped list's owned `[]const u8` payloads
+being freed by both the in-fiber `defer cleanup` and the
+pre-spawn `errdefer`/outer recipe.
+
+### Why not asserted in the spec
+
+`spec/vm_bg_capture_bugs_spec.rb`'s `compile_and_run` helper uses
+the C allocator (no double-free detection). It reproduces under
+`./clear test` (std.testing.allocator). Documented there as a
+comment block, no assertion.
+
+### Scope / fix-forward
+
+`tools/fuzz/templates/bg_capture_typing.rb` is currently scoped to
+`elem = :int` for exactly this reason. When Bug #8 is fixed (its
+own standalone bug-fix commit), re-enable the `:string` cells in
+that template -- they become the regression lock.
