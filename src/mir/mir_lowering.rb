@@ -779,14 +779,9 @@ class MIRLowering
     end
   end
 
-  # Canonical receiver-root resolver. EVERY pass that needs "which
-  # declared container does this receiver act on" must descend through
-  # GetField/GetIndex (and any `.target` chain) via THIS one function.
-  # The MIR checker's container attribution (extract_root_var_name) and
-  # the allocator resolution (receiver_root_heap?) both delegate here so
-  # they cannot drift apart when a new receiver shape is added -- a
-  # single new `when` here keeps both consumers correct. (Project rule:
-  # one canonical walker, not N mirrors. cf. AST.wrapped_children.)
+  # Shared by extract_root_var_name (checker attribution) and
+  # receiver_root_heap? (allocator resolution); they must agree on the
+  # root or an op's allocator diverges from its AllocMark.
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_receiver_node(node)
     case node
@@ -797,12 +792,8 @@ class MIRLowering
     end
   end
 
-  # True when a receiver's ROOT container is heap-storage. A nested
-  # `@list` living inside a heap-allocated container element is itself
-  # heap-backed, so a `root[i].field.append(x)` op must use the root's
-  # :heap allocator. (INV-16: storage lives on the declaration; use
-  # sites read it -- here, the root declaration. Same root the checker
-  # attributes the op to, via the shared root_receiver_node.)
+  # A nested @list inside a heap container element is itself heap-
+  # backed, so `root[i].field.append(x)` must use the root's allocator.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def receiver_root_heap?(node)
     root = root_receiver_node(node)
@@ -5886,7 +5877,15 @@ class MIRLowering
     elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
       elem_type = ti.element_type
       elem_zig = transpile_type(elem_type)
-      needs_deep = node.respond_to?(:deep_copy) && node.deep_copy
+      # Copy-depth must mirror the list's cleanup recursion or a
+      # shallow copy aliases the source's owned payloads and both
+      # cleanups free them. `string?` is OR'd in because runtime
+      # needsCleanup([]const u8) is unconditional while
+      # String#needs_cleanup? gates on heap_provenance.
+      sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
+      elem_owns_heap = et.needs_cleanup?(sl) || et.string?
+      needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
       strategy = needs_deep ? :list_deep : :list_shallow
       # Canonical resilient backing access (Step B): the deep-copy
       # needs the list's element slice, but `source` may be an
@@ -6254,14 +6253,9 @@ class MIRLowering
       end
     end
 
-    # The discard placeholder `_` is not a valid Zig binding identifier
-    # (`const _ = ...; _ = &_;` is rejected). A discarded value that still
-    # needs cleanup must be bound to a real, unique temp so the decl, its
-    # self-use, and its `defer cleanup(&name)` are consistent valid Zig.
-    # `binding_entry` above stays keyed by the original `_`, so the
-    # cleanup recipe (no-leak) is preserved -- only the emitted Zig name
-    # changes. One synthetic name per occurrence (threaded through
-    # Let/AllocMark/Cleanup/suppression below).
+    # `_` is not a valid Zig binding identifier; a discarded value that
+    # still needs cleanup must bind to a unique temp. binding_entry
+    # stays keyed by `_` so its cleanup recipe is preserved.
     if node.name.to_s == "_"
       @tmp_counter += 1
       safe_name = "__discard_#{@tmp_counter}"

@@ -1176,7 +1176,7 @@ class MIREmitter
       "    if (__src.len > 0) {\n" \
       "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
       "        errdefer #{alloc}.free(__buf);\n" \
-      "        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeUnionValue(#{elem}, __src[__i], #{alloc}); }\n" \
+      "        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeValue(#{elem}, __src[__i], #{alloc}); }\n" \
       "        break :blk_copy __buf;\n" \
       "    } else break :blk_copy #{src};\n" \
       "}"

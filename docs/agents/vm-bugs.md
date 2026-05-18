@@ -531,7 +531,32 @@ exactly this shape.
 Regression: `spec/vm_bg_capture_bugs_spec.rb` "Bug #7 (FIXED)" --
 now asserts `ok == true` (compiles AND runs).
 
-## Bug #8 (OPEN): bare `String[]@list` COPY'd into a BG fiber double-frees
+## Bug #8 (FIXED): bare `String[]@list` COPY'd into a BG fiber double-frees
+
+**FIXED 2026-05-18** (architectural Step C -- make COPY-depth agree
+with cleanup-depth via the canonical predicates). Root: a `COPY` of
+a `String[]@list` lowered to `:list_shallow` (`@memcpy` of the
+`[]const u8` element *handles*) because the depth was read from the
+narrow annotator `node.deep_copy` flag (set only for
+union-with-heap), NOT from whether the element owns heap. The
+list's cleanup recipe deep-frees each element string, so the
+shallow copy aliased the source's strings and both cleanups freed
+them ("Second free"). Two coordinated canonical-isations:
+1. `mir_lowering lower_copy`: depth decided by
+   `!elem_type.implicitly_copyable?(schema_lookup)` -- the SAME
+   canonical predicate the Copy/cleanup machinery uses everywhere
+   (String/list/map/union-with-heap/struct-with-owned -> deep;
+   Int64/... -> cheap shallow memcpy, no owned payload).
+2. `mir_emitter emit_deep_copy` `:list_deep`: per-element copy via
+   the canonical recursive `CheatLib.dupeValue` (which *delegates*
+   to `dupeUnionValue` for unions -> regression-safe, but also
+   correctly deep-copies string/list/struct elements that
+   `dupeUnionValue` alone no-op'd).
+The COPY now owns independent element payloads; its cleanup and the
+source's target disjoint memory. Regression:
+`transpile-tests/531_bgcopy_string_list_element_ownership.cht`
+(leak-checked) + the re-enabled `:string` cells of
+`tools/fuzz/templates/bg_capture_typing.rb`.
 
 Found 2026-05-18, exposed only once Bug #7's compile error was
 removed (before that, the program never built far enough to run).
