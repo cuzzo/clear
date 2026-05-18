@@ -137,7 +137,8 @@ if $PROGRAM_NAME == __FILE__
       runner_main += "    breakpoints = loadRegisterBreakpoints!(\"#{register_breakpoints_file}\") OR RAISE;\n"
       runner_main += "    varNames = loadRegisterVarNames!(\"#{register_names_file}\") OR RAISE;\n"
       runner_main += "    rootCaps: RegisterValue[]@list = List[];\n"
-      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps) OR RAISE;\n"
+      runner_main += "    MUTABLE rootSharedCells: RegisterValue[]@list:shared:locked = List[];\n"
+      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps, rootSharedCells) OR RAISE;\n"
       runner_main += "    printRegisterResult(result) OR RAISE;\n"
       runner_main += "    RETURN;\nEND\n"
 

@@ -866,7 +866,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[]) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -2505,7 +2505,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     FOR bci IN (0_i64 ..< pendingCaps.length()) DO bgCaps.append(COPY pendingCaps[bci]); END
                     pendingCaps = List[];
                     bgFut: ~RegisterValue = BG { @service ->
-                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps) OR RAISE;
+                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR RAISE;
                     };
                     bgNewFid = futureTable.length();
                     futureTable.append(bgFut);
