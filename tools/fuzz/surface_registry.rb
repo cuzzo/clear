@@ -144,6 +144,23 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape, :loop_frame_rewind],
     },
 
+    collection_shape_smoke: {
+      collection_shapes: [
+        :dynamic_array,
+        :list,
+        :pool,
+        :set,
+        :hash_map,
+        :sharded_list,
+        :sharded_pool,
+        :sharded_set,
+        :sharded_hash_map,
+        :soa_list,
+        :soa_pool,
+        :nested_collection,
+      ],
+    },
+
     loop_cleanup: {
       cleanup_value_shapes: [:heap_list, :string, :frame_string_concat, :frame_list],
       escape_sources: [:loop_local],
@@ -214,8 +231,9 @@ module FuzzSurfaceRegistry
   REQUIRED_SURFACES_BY_TEMPLATE = {
     escape_via_return: [:cleanup_value_shapes, :escape_sinks],
     loop_carry_collection: [:cleanup_value_shapes],
-    mutable_collection_param: [:collection_shapes],
-    nested_loop_escape: [:collection_shapes, :cleanup_value_shapes],
+    mutable_collection_param: [],
+    nested_loop_escape: [:cleanup_value_shapes],
+    collection_shape_smoke: [:collection_shapes],
     loop_cleanup: [:cleanup_value_shapes],
     error_cleanup: [:cleanup_value_shapes],
     branch_cleanup: [:cleanup_value_shapes],
