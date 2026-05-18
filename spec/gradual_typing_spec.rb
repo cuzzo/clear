@@ -1838,11 +1838,8 @@ RSpec.describe "Gradual typing — Auto in STRUCT fields (M2.3)" do
     }.to raise_error(ParserError, /Auto is not allowed in UNION inline-variant field/)
   end
 
-  # Audit#3 — combining `Auto` with a prefix sigil has no defined
-  # semantics. The parser used to fall through to a generic
-  # "Expected TYPE_ID" error; now it produces a tailored message.
-  describe "Audit#3 — Auto with prefix sigils" do
-    %w[? ! ~ %].each do |prefix|
+  describe "Auto with prefix sigils" do
+    %w[? ! ~].each do |prefix|
       it "rejects `#{prefix}Auto` in a struct field with a clear message" do
         expect {
           parse(<<~CLEAR)

@@ -66,7 +66,7 @@ RSpec.describe UseAfterMoveChecker do
       expect_no_error(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: %User = User{ id: 1 };
+          a: User @indirect = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -192,7 +192,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: %User = User{ id: 1 };
+          a: User @indirect = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -217,7 +217,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: %User = User{ id: 1 };
+          a: User @indirect = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -242,7 +242,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: %User = User{ id: 1 };
+          a: User @indirect = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -379,7 +379,7 @@ RSpec.describe UseAfterMoveChecker do
     it "struct literal return copies fields (CopyNode), source stays owned" do
       df = analyze_state(<<~CLEAR, "wrap")
         STRUCT Wrapper { data: Int64[] }
-        FN wrap() RETURNS !%Wrapper ->
+        FN wrap() RETURNS !Wrapper @indirect ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN Wrapper{ data: items };
@@ -426,7 +426,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: %User = User{ id: 1 };
+          a: User @indirect = User{ id: 1 };
           b = a;
           RETURN;
         END

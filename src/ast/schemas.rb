@@ -1,23 +1,21 @@
 # typed: strict
 # Typed schemas for declared types stored in Scope.
 #
-# Replaces the hash-as-struct pattern where every type's schema was a
-# Hash and dispatch was done by inspecting `schema[:kind]`. The kinds
-# are heterogeneous enough that one Hash made the call sites repeat
-# `schema.is_a?(Hash) && schema[:kind] == :X` ~60 times across the
-# annotator and MIR pipeline.
-#
-# Migration is incremental — see TODO.md "Self-host preparation" task #2.
-# Until all kinds (struct, union, resource) move out of Hash, callers
-# may see EITHER a typed schema or a Hash, and must handle both.
+# A declared type's schema is ALWAYS one of the typed classes below —
+# never a raw Hash. Producers (the annotator's visit_*Def) construct
+# these directly; consumers use the typed accessors (`.fields`,
+# `.variants`, `.kind`, `.struct?`, ...). There is exactly one
+# representation.
 require "sorbet-runtime"
+require "set"
 
 module Schemas
     extend T::Sig
 
   # Plain classes (not Data.define) so Sorbet's 4010 doesn't fire on
   # the kwarg-only initialize signatures we need for default values.
-  # Frozen at the end of initialize so callers still see immutable shapes.
+  # Frozen at the end of initialize so callers see immutable shapes
+  # (the methods table is mutable in place — see StructSchema#methods).
 
   class EnumSchema
       extend T::Sig
@@ -29,6 +27,12 @@ module Schemas
       @visibility = visibility
       freeze
     end
+
+    def kind = :enum
+    def enum? = true
+    def union? = false
+    def struct? = false
+    def resource? = false
   end
 
   # Resource type schema — types with RAII cleanup (CLOSE method).
@@ -38,9 +42,9 @@ module Schemas
   # an extern module name, and an AS alias.
   class ResourceSchema
     extend T::Sig
-    attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility
-    sig { params(close_zig: T.untyped, static_methods: T.untyped, fields: T.untyped, type_params: T.untyped, extern_module: T.untyped, as_type: T.untyped, visibility: Symbol).void }
-    def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package)
+    attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
+    sig { params(close_zig: T.untyped, static_methods: T.untyped, fields: T.untyped, type_params: T.untyped, extern_module: T.untyped, as_type: T.untyped, visibility: Symbol, methods: T.untyped).void }
+    def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
       @close_zig       = T.let(close_zig, T.untyped)
       @static_methods  = T.let(static_methods, T.untyped)
       @fields          = T.let(fields, T.untyped)
@@ -48,16 +52,47 @@ module Schemas
       @extern_module   = T.let(extern_module, T.untyped)
       @as_type         = T.let(as_type, T.untyped)
       @visibility      = T.let(visibility, Symbol)
+      @methods         = T.let(methods, T.untyped)
       freeze
     end
+
+    def kind = :resource
+    def resource? = true
+    def union? = false
+    def enum? = false
+    def struct? = false
   end
 
-  # Union (sum-type) schema. `variants` is a Hash[Symbol => Type|Hash]
-  # where the value is `:nil` for payload-less variants, a Type for
-  # typed variants, or a Hash with `:kind => :inline_struct` for inline
-  # struct variants. The variant-level Hash (inline_struct shape) is
-  # itself a hash-as-struct that hasn't been extracted yet — that's a
-  # smaller, per-variant scope and can wait.
+  # One union variant whose payload is an anonymous inline struct
+  # (`UNION Shape { Circle { radius: Float64 } }`). `fields` maps field
+  # name (String) to its declared Type. `deinit_entries` is filled in by
+  # the annotator after parse (which fields need @indirect / array
+  # cleanup) and is intentionally mutable in place, like
+  # StructSchema#methods.
+  class InlineStructVariant
+      extend T::Sig
+
+    attr_reader :fields
+    attr_accessor :deinit_entries
+    sig { params(fields: T.untyped, deinit_entries: T.untyped).void }
+    def initialize(fields:, deinit_entries: nil)
+      @fields = fields
+      @deinit_entries = deinit_entries
+    end
+
+    # Value equality on the field shape (not deinit_entries, which is
+    # derived). The multi-arm shared-destructure check compares two
+    # variants' payloads structurally — this used to be Hash `==`.
+    def ==(other)
+      other.is_a?(InlineStructVariant) && other.fields == @fields
+    end
+    alias eql? ==
+    def hash = @fields.hash
+  end
+
+  # Union (sum-type) schema. `variants` is a Hash[Symbol => value] where
+  # the value is `nil` for payload-less variants, a Type for single-type
+  # payloads, or an InlineStructVariant for inline struct variants.
   class UnionSchema
       extend T::Sig
 
@@ -69,22 +104,30 @@ module Schemas
       @visibility = visibility
       freeze
     end
+
+    def kind = :union
+    def union? = true
+    def enum? = false
+    def struct? = false
+    def resource? = false
   end
 
-  # Struct/record schema. `fields` maps String field names to Type/Symbol/Hash
-  # representations of field types — Hash form is `{type:, default:, borrowed:}`
-  # produced by the parser, kept here unflattened for now. Metadata (defaults,
-  # borrowed-set, generic type params, methods, EXTERN module, AS alias type,
-  # visibility) live as named attrs rather than mixed Symbol keys in fields.
+  # Struct/record schema. `fields` maps String field names to Type/Symbol
+  # representations of field types. Metadata (defaults, borrowed-set,
+  # generic type params, methods, EXTERN module, AS alias type,
+  # visibility) live as named attrs. `methods` is intentionally mutable
+  # in place: method signatures are registered after the struct is
+  # declared (when the method's FunctionDef is visited).
   class StructSchema
       extend T::Sig
 
-    attr_reader :fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: T.untyped, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: T.untyped, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
-    def initialize(fields: {}, field_defaults: nil, borrowed_fields: nil, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
+    # `fields` is ALWAYS Hash[String => AST::StructField]. Per-field
+    # default value and borrowed-ness live on the StructField, so
+    # `field_defaults` / `borrowed_fields` are derived, not stored.
+    attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
+    sig { params(fields: T.untyped, type_params: T.nilable(T::Array[Symbol]), methods: T.untyped, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    def initialize(fields: {}, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = fields
-      @field_defaults = field_defaults
-      @borrowed_fields = borrowed_fields
       @type_params = type_params
       @methods = methods
       @visibility = visibility
@@ -92,58 +135,41 @@ module Schemas
       @as_type = as_type
       freeze
     end
+
+    def field_defaults
+      @fields.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
+    end
+
+    def borrowed_fields
+      @fields.each_with_object(Set.new) { |(k, f), s| s << k if f.borrowed }
+    end
+
+    def kind = nil
+    def struct? = true
+    def union? = false
+    def enum? = false
+    def resource? = false
   end
 
-  # ── Coercion helpers ─────────────────────────────────────────────
-  # The annotator stores schemas as raw Hashes in scope.declare_type;
-  # the MIR side wraps in Schemas::* via lower_struct_def / lower_union_def.
-  # Consumers (PromotionClassifier, CleanupClassifier, Type) see EITHER
-  # form depending on which pipeline phase they're invoked from.
-  #
-  # These coercion helpers normalize to the typed form (returning nil
-  # when the input isn't a struct / union schema), so a single call
-  # site can use `.fields` / `.variants` regardless of source.
+  # Nil-safe kind predicates. Single representation: a schema is always
+  # one of the typed classes above (or nil for an unknown type name).
+  sig { params(s: T.untyped).returns(T::Boolean) }
+  def self.struct?(s) = s.is_a?(StructSchema)
 
-  sig { params(schema: T.untyped).returns(T.nilable(Schemas::StructSchema)) }
-  def self.as_struct_schema(schema)
-    return schema if schema.is_a?(StructSchema)
-    return nil unless schema.is_a?(Hash) && (!schema[:kind] || schema[:kind] == :resource)
-    fields = schema[:fields] || schema.reject { |k, _| k.is_a?(Symbol) }
-    StructSchema.new(
-      fields: fields,
-      field_defaults: schema[:field_defaults],
-      borrowed_fields: schema[:borrowed_fields],
-      type_params: schema[:type_params],
-      methods: schema[:methods] || {},
-      visibility: schema[:visibility] || :package,
-      extern_module: schema[:extern_module],
-      as_type: schema[:as_type],
-    )
-  end
+  sig { params(s: T.untyped).returns(T::Boolean) }
+  def self.union?(s) = s.is_a?(UnionSchema)
 
-  sig { params(schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(Schemas::UnionSchema)) }
-  def self.as_union_schema(schema)
-    return schema if schema.is_a?(UnionSchema)
-    return nil unless schema.is_a?(Hash) && schema[:kind] == :union
-    UnionSchema.new(
-      variants: schema[:variants] || {},
-      type_params: schema[:type_params],
-      visibility: schema[:visibility] || :package,
-    )
-  end
+  sig { params(s: T.untyped).returns(T::Boolean) }
+  def self.enum?(s) = s.is_a?(EnumSchema)
 
-  sig { params(schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.untyped) }
-  def self.as_resource_schema(schema)
-    return schema if schema.is_a?(ResourceSchema)
-    return nil unless schema.is_a?(Hash) && schema[:kind] == :resource
-    ResourceSchema.new(
-      close_zig: schema[:close_zig],
-      static_methods: schema[:static_methods] || {},
-      fields: schema[:fields] || schema.reject { |k, _| k.is_a?(Symbol) },
-      type_params: schema[:type_params],
-      extern_module: schema[:extern_module],
-      as_type: schema[:as_type],
-      visibility: schema[:visibility] || :package,
-    )
-  end
+  sig { params(s: T.untyped).returns(T::Boolean) }
+  def self.resource?(s) = s.is_a?(ResourceSchema)
+
+  sig { params(v: T.untyped).returns(T::Boolean) }
+  def self.inline_struct?(v) = v.is_a?(InlineStructVariant)
+
+  # Field-bearing schema: StructSchema or ResourceSchema (EXTERN STRUCT
+  # ... CLOSE carries fields too), so `.fields` is safe to read.
+  sig { params(s: T.untyped).returns(T::Boolean) }
+  def self.field_bearing?(s) = s.is_a?(StructSchema) || s.is_a?(ResourceSchema)
 end

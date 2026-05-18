@@ -260,8 +260,8 @@ module FunctionAnalysis
         if ret_type
           ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
           schema = lookup_type_schema(ret_sym)
-          if schema.is_a?(Hash) && schema[:kind] == :union
-            has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+          if Schemas.union?(schema)
+            has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             if has_heap && callee_allocates
               node.full_type.provenance = :heap
@@ -710,7 +710,8 @@ module FunctionAnalysis
       end
 
       # Check if the field exists in the schema
-      next_type = schema[field_name] || schema[field_sym] # handle string/sym keys
+      sf = schema.fields[field_name] || schema.fields[field_sym] # handle string/sym keys
+      next_type = sf&.type
 
       if next_type.nil?
         error!(node, :LIFETIME_NO_FIELD, type: current_type_name, field: field_name)
@@ -731,13 +732,13 @@ module FunctionAnalysis
           # DEFAULT is only valid for struct-type params
           param_type_sym = param.type&.resolved
           schema = lookup_type_schema(param_type_sym) if param_type_sym
-          unless schema.is_a?(Hash) && !schema[:kind]
+          unless Schemas.struct?(schema)
             error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param.type)
           end
           # Validate all fields of the struct have defaults
-          field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
+          field_names = schema.fields.keys
           unless field_names.empty?
-            field_defaults = schema[:field_defaults] || {}
+            field_defaults = schema.field_defaults || {}
             missing = field_names.reject { |f| field_defaults.key?(f) }
             if missing.any?
               error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
@@ -913,7 +914,7 @@ module FunctionAnalysis
     # Union variant constructors (Value.Nil, Shape.Point) create new values, not borrows.
     if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
       schema = lookup_type_schema(node.target.name.to_sym) rescue nil
-      return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
+      return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
     lifetime_paths = current_fn_ctx&.lifetime || []

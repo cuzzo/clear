@@ -719,7 +719,7 @@ module CapabilityHelper
         error!(node, :BORROW_WILDCARD_NEEDS_STRUCT, name: var_node.target.name, type: target_type)
       end
 
-      fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
+      fields = schema.fields
       fields.each do |field_name, _|
         field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
         # Eager producer: resolve the field's type now (same mechanism
@@ -734,6 +734,18 @@ module CapabilityHelper
           resolved_type: field_node.full_type
         )
       end
+      # The per-field caps above each alias the base variable name; the
+      # base binding must remain the struct type (a field cap declaring
+      # `p` as a field's type would break `p.field` inside the block).
+      # Re-assert the whole-struct cap last so the base keeps its type.
+      base_t = var_node.target.full_type
+      base_t = Type.new(base_t) unless base_t.is_a?(Type)
+      expanded << AST::Capability.new(
+        capability: cap[:capability],
+        var_node: var_node.target,
+        old_scope: cap[:old_scope],
+        resolved_type: base_t
+      )
     else
       expanded << cap
     end

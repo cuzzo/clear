@@ -33,11 +33,6 @@ module AST
     end
   end
 
-  # A function/lambda/method parameter descriptor. Replaces the loose
-  # `{ name:, type:, ... }` Hash that flowed through FunctionDef#params
-  # and FunctionSignature#params. `type` is ALWAYS a Type (coerced;
-  # nil only when the param is unannotated/inferred — the inference
-  # signal). Strongly typed; no Hash-style access.
   Param = Struct.new(:name, :type, :default, :mutable, :takes,
                      :comptime, :name_token, :required, :sync, :symbol,
                      keyword_init: true) do
@@ -55,13 +50,6 @@ module AST
     end
   end
 
-  # A `USE` capture descriptor (FunctionDef#captures / LambdaLit#
-  # captures element). Parser builds name/type/default/mutable/takes/
-  # comptime/name_token (same shape as Param, via the shared
-  # parse_argument_list); the annotator (verify_captures!) stamps the
-  # resolved `type` and `storage`. Replaces the loose Hash; every
-  # member strongly typed, no [:key] access. (Distinct from the FSM
-  # capture record in mir_checker, which carries cleanup_at.)
   Capture = Struct.new(:name, :type, :default, :mutable, :takes,
                        :comptime, :name_token, :storage,
                        keyword_init: true) do
@@ -111,14 +99,6 @@ module AST
     def storage=(val); self[:storage] = val; end
   end
 
-  # One arm of a MATCH statement (MatchStatement#cases element).
-  # Replaces the untyped clause hash. MATCH-only (WITH MATCH uses a
-  # separate parse_with_match_arms shape). Every slot is a single
-  # strong type (none is a union): `value` is ALWAYS the pattern /
-  # condition AST node (never a Symbol/nil), `body` is ALWAYS an Array
-  # ([] = no body, never nil). `indirect_payload_as` is an
-  # annotator-stamped flag (set when a union-variant destructure needs
-  # the transpiler to emit `subject.Variant.*` via an indirect *T).
   MatchCase = Struct.new(:kind, :value, :body, :binding, :destructure, :extra_values,
                          :indirect_payload_as,
                          keyword_init: true) do
@@ -178,11 +158,6 @@ module AST
 
   end
 
-  # One paren-binding of an IF...AS (AST::IfBind#bindings element):
-  # `IF (expr) AS name`. Parser builds {expr,name,name_token}; the
-  # annotator stamps unwrapped_type (the bound name's type -- ALWAYS a
-  # Type; a bound name always has a type) and symbol. `capture` is the
-  # emitter's label alias. Replaces the anonymous hash.
   Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
                        keyword_init: true) do
     extend T::Sig
@@ -207,9 +182,6 @@ module AST
       self[:name_token]
     end
 
-    # The bound name's unwrapped type. Always a Type, never nil --
-    # defaults to the :Untyped sentinel until the annotator stamps it
-    # (same contract as full_type).
     sig { returns(Type) }
     def unwrapped_type
       self[:unwrapped_type]
@@ -220,8 +192,6 @@ module AST
       self[:unwrapped_type] = val
     end
 
-    # Annotator-stamped SymbolEntry for the bound name (nil until the
-    # then-scope declares it).
     sig { returns(T.nilable(SymbolEntry)) }
     def symbol
       self[:symbol]
@@ -232,7 +202,6 @@ module AST
       self[:symbol] = val
     end
 
-    # Emitter label alias (currently unused; reserved).
     sig { returns(T.nilable(String)) }
     def capture
       self[:capture]
@@ -240,13 +209,6 @@ module AST
 
   end
 
-  # One capability of a WITH block (AST::WithBlock#capabilities
-  # element): `WITH @locked c AS a`. Parser builds
-  # {capability,var_node,alias,alias_mutable,guard_expr}; the annotator
-  # stamps resolved_type (= var_node.full_type, ALWAYS a Type) and
-  # old_scope. Distinct from the BG-capture record (also named `cap`
-  # in capture analysis) -- that has name/type/storage keys and is NOT
-  # this struct. Replaces the anonymous hash.
   Capability = Struct.new(:capability, :var_node, :alias, :alias_mutable, :guard_expr,
                           :snapshot_token, :view_token, :resolved_type, :old_scope,
                           keyword_init: true) do
@@ -257,11 +219,6 @@ module AST
       self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
     end
 
-    # The capability's source type. Always a Type, never nil: the
-    # producer is eager (acquire_capability! stamps both the input cap
-    # and every expanded field-cap from .full_type); defaults to the
-    # :Untyped sentinel until then. Readers that previously fell back
-    # to old_scope.resolve_type now do so on .untyped? instead of nil.
     sig { returns(Type) }
     def resolved_type
       self[:resolved_type]
@@ -631,19 +588,12 @@ module AST
       T.must(@type_object)
     end
 
-    # Non-nil contract: a generic evaluatable node defaults to the
-    # :Untyped sentinel (mirrors StatementVoidType's :Void default)
-    # rather than nil, so callers never branch on nil. A node the
-    # annotator failed to stamp surfaces as :Untyped and is caught by
-    # PreMirTypeCheck at the AST->MIR boundary, not as scattered nil.
+    # :Untyped sentinel (not nil) so no caller branches on nil; PreMirTypeCheck rejects it at the AST->MIR boundary.
     sig { returns(Type) }
     def full_type
       @type_object ||= Type.new(:Untyped)
     end
 
-    # full_type, or `default` when it is the :Untyped sentinel (the
-    # node was never stamped). Single home for the "type, else
-    # fallback" decision -- pass a value or a block for a lazy default.
     sig do
       params(default: T.nilable(T.any(Type, Symbol, String)),
              blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
@@ -1028,10 +978,6 @@ module AST
     # call resolution, same UFCS at call sites at the language level.
     attr_accessor :is_method
   end
-  # One field of a struct/extern-struct declaration (the value in
-  # StructDef#field_decls / ExternStructDecl#field_decls, keyed by
-  # field name). Built by parse_struct_body. Replaces the loose
-  # {type,default,borrowed} Hash; every member strongly typed.
   StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
     extend T::Sig
 
@@ -1062,11 +1008,6 @@ module AST
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
 
-    # Seam: a declaration's annotated/inferred type is always a Type
-    # (or nil when unannotated — the inference signal). Coerced at
-    # construction (positional Struct init) and post-parse assignment
-    # (auto-infer, propagation) so no reader needs an `is_a?(Type)`
-    # Symbol/Type discriminator.
     def initialize(*)
       super
       t = self[:type]
@@ -1204,10 +1145,14 @@ module AST
     # the name. Populated by the parser so `clear fix` can locate a
     # misspelled field-name for a fixable edit span.
     attr_accessor :field_tokens
+    # Set of field names the schema marks BORROWED, stamped by the
+    # annotator. MIR lowering reads this instead of re-resolving the
+    # struct schema (single-source-of-truth: the annotator already
+    # knows which fields are borrowed when it validates the literal).
+    attr_accessor :borrowed_field_names
   end
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
     include Locatable
-    # Same params seam as FunctionDef: always Array<AST::Param>.
     def initialize(*)
       super
       self[:params] = self[:params] || []
@@ -1326,6 +1271,9 @@ module AST
     # assignment — writes go through visit_assignment_field's
     # auto-lock path instead.
     attr_accessor :is_assignment_lhs
+    # Set by visit_GetField when this reads an @indirect (heap-boxed) field:
+    # the value is a one-level pointer that lower_get_field must deref.
+    attr_accessor :indirect_field
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
     sig { returns(String) }
@@ -1484,8 +1432,6 @@ module AST
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
-  # One `CATCH Type` / `CATCH kind` item. `form` is :kind or :type;
-  # `name` is the TYPE_ID text; `token` its source token.
   CatchItem = Struct.new(:form, :name, :token, keyword_init: true) do
     extend T::Sig
     sig { returns(Symbol) }
@@ -1496,8 +1442,6 @@ module AST
     def token; self[:token]; end
   end
 
-  # One `CATCH WITH (...)` filter. `form` is :type (value is the
-  # TYPE_ID String) or :message (value is the parsed message AST node).
   CatchFilter = Struct.new(:form, :value, :token, keyword_init: true) do
     extend T::Sig
     sig { returns(Symbol) }
@@ -1508,9 +1452,6 @@ module AST
     def token; self[:token]; end
   end
 
-  # One CATCH clause. Parser builds items/filters/body; the annotator
-  # (resolve_catch_clause!) stamps kinds/types/filter_types/
-  # filter_messages. The stamped arrays default to [] (never nil).
   CatchClause = Struct.new(:items, :filters, :body, :kinds, :types,
                            :filter_types, :filter_messages,
                            keyword_init: true) do
@@ -1630,7 +1571,6 @@ module AST
     attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
     attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
 
-    # Same params seam as FunctionDef/LambdaLit: always Array<AST::Param>.
     def initialize(*)
       super
       self[:params] = self[:params] || []
@@ -1660,7 +1600,7 @@ module AST
   # { "VariantName" => value } where value is:
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
-  #   { kind: :inline_struct, fields: { "f" => Type } } — inline struct payload (new)
+  #   Schemas::InlineStructVariant                 — inline struct payload
   # methods (optional): Array of { token:, name:, params: [{name:, type:},...], return_type: }
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do

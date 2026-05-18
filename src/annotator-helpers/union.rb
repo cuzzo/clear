@@ -98,12 +98,12 @@ module UnionAnalysis
 
     type_name = node.target.name.to_sym
     schema = lookup_type_schema(type_name)
-    return false unless schema.is_a?(Hash)
+    return false unless Schemas.union?(schema) || Schemas.enum?(schema)
 
-    if schema[:kind] == :enum
-      unless schema[:variants].include?(node.field)
+    if schema.kind == :enum
+      unless schema.variants.include?(node.field)
         emit_variant_typo!(
-          T.must(variant_anchor_from_getfield(node)), node.field, schema[:variants],
+          T.must(variant_anchor_from_getfield(node)), node.field, schema.variants,
           "Type Error: Enum '#{type_name}' has no variant '#{node.field}'.",
           "variant of enum #{type_name}",
           cascade: true
@@ -114,18 +114,18 @@ module UnionAnalysis
       return true
     end
 
-    if schema[:kind] == :union
-      unless schema[:variants].key?(node.field)
+    if schema.kind == :union
+      unless schema.variants.key?(node.field)
         emit_variant_typo!(
-          T.must(variant_anchor_from_getfield(node)), node.field, schema[:variants].keys,
+          T.must(variant_anchor_from_getfield(node)), node.field, schema.variants.keys,
           "Type Error: Union '#{type_name}' has no variant '#{node.field}'.",
           "variant of union #{type_name}",
           cascade: true
         )
       end
-      var_data = schema[:variants][node.field]
+      var_data = schema.variants[node.field]
       @match_pattern_context = T.let(@match_pattern_context, T.untyped)
-      if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
+      if Schemas.inline_struct?(var_data) && !@match_pattern_context
         error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
       node.target.full_type = type_name
@@ -139,27 +139,27 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
-  sig { params(node: AST::UnionVariantLit, schema: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(node: AST::UnionVariantLit, schema: T.untyped).returns(T.nilable(Schemas::InlineStructVariant)) }
   def validate_union_schema!(node, schema)
     T.bind(self, SemanticAnnotator) rescue {}
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
-    unless schema.is_a?(Hash) && schema[:kind] == :union
+    unless Schemas.union?(schema)
       error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
     end
-    unless T.must(schema)[:variants].key?(node.variant_name)
+    unless T.must(schema).variants.key?(node.variant_name)
       emit_variant_typo!(
         T.must(variant_anchor_from_unionlit(node, node.variant_name)),
-        node.variant_name, T.must(schema)[:variants].keys,
+        node.variant_name, T.must(schema).variants.keys,
         "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
         "variant of union #{node.union_name}",
         cascade: true
       )
     end
 
-    var_data = T.must(schema)[:variants][node.variant_name]
-    unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+    var_data = T.must(schema).variants[node.variant_name]
+    unless Schemas.inline_struct?(var_data)
       if var_data.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)
       else
@@ -175,14 +175,6 @@ module UnionAnalysis
   sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
-    schema = lookup_type_schema(node.union_name.to_sym)
-    variant_data = schema&.dig(:variants)&.[](node.variant_name)
-    indirect_fields = if variant_data.is_a?(Hash)
-      variant_data[:indirect_fields] || Set.new
-    else
-      Set.new
-    end
-
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
         error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)
@@ -197,17 +189,18 @@ module UnionAnalysis
 
     node.fields.each do |fname, val_node|
       visit(val_node)
-      if indirect_fields.include?(fname)
-        val_node.needs_heap_create = true
-        current_fn_ctx.heap_count += 1 if current_fn_ctx
-        record_effect(EffectTracker::HEAP)
-      end
       reject_borrowed_value!(val_node, "#{node.union_name}.#{node.variant_name}.#{fname}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = ensure_owned_value!(val_node, expected_fields[fname], "#{node.union_name}.#{node.variant_name}.#{fname}")
       if owned
         node.fields[fname] = owned
         val_node = owned
+      end
+      ef = expected_fields[fname]
+      if ef.is_a?(Type) && ef.indirect?
+        val_node.needs_heap_create = true
+        current_fn_ctx.heap_count += 1 if current_fn_ctx
+        record_effect(EffectTracker::HEAP)
       end
 
       expected_type = expected_fields[fname]

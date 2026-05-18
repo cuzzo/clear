@@ -51,7 +51,6 @@ class MIRLowering
     @shard_context = T.let(nil, T.untyped)  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
     @emitted_extern_modules = T.let(Set.new, T::Set[T.untyped])
     @block_expr_counter = T.let(0, Integer)
-    @indirect_fields = T.let({}, T::Hash[T.untyped, T.untyped])
     @pipeline_host = T.let(nil, T.nilable(PipelineHost))
     @importer = T.let(importer, T.nilable(ModuleImporter))
     @source_dir = T.let(source_dir, T.nilable(String))
@@ -964,27 +963,17 @@ class MIRLowering
   def lower_union_def(node)
     @union_schemas[node.name.to_sym] = Schemas::UnionSchema.new(variants: node.variants)
 
-    # Track @indirect fields
-    node.variants.each do |var_name, var_data|
-      next unless var_data.is_a?(Hash) && var_data[:indirect_fields]
-      var_data[:indirect_fields].each do |fname|
-        @indirect_fields["#{node.name}_#{var_name}.#{fname}"] = true
-      end
-    end
-
     # Emit helper structs for inline struct variants
     helper_structs = node.variants.filter_map do |var_name, var_data|
-      next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
-      indirect = var_data[:indirect_fields] || Set.new
-      fields = var_data[:fields].map { |fname, ftype|
+      next unless Schemas.inline_struct?(var_data)
+      fields = var_data.fields.map { |fname, ftype|
         zig_t = transpile_type(ftype, is_field: true)
-        zig_t = "*#{zig_t}" if indirect.include?(fname)
         MIR::FieldDef.new(fname.to_s, zig_t, nil)
       }
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_stmts = (var_data[:deinit_entries] || []).flat_map { |de|
+      deinit_stmts = (var_data.deinit_entries || []).flat_map { |de|
         self_field = MIR::FieldGet.new(self_ref, de[:field])
         case de[:kind]
         when :indirect
@@ -1037,10 +1026,8 @@ class MIRLowering
     variants = node.variants.map { |var_name, var_data|
       zig_t = if var_data.nil?
         "void"
-      elsif var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+      elsif Schemas.inline_struct?(var_data)
         "#{node.name}_#{var_name}"
-      elsif var_data.is_a?(Hash) && var_data[:kind] == :indirect_payload
-        "*#{transpile_type(var_data[:type], is_field: true)}"
       else
         transpile_type(var_data, is_field: true)
       end
@@ -4477,15 +4464,6 @@ class MIRLowering
     end
     if mod.union_schemas
       @union_schemas.merge!(mod.union_schemas)
-      mod.union_schemas.each do |uname, schema|
-        variants = schema.is_a?(Schemas::UnionSchema) ? schema.variants : schema
-        variants.each do |var_name, var_data|
-          next unless var_data.is_a?(Hash) && var_data[:indirect_fields]
-          var_data[:indirect_fields].each do |fname|
-            @indirect_fields["#{uname}_#{var_name}.#{fname}"] = true
-          end
-        end
-      end
     end
     if mod.enum_schemas
       @enum_schemas.merge!(mod.enum_schemas)
@@ -4510,7 +4488,7 @@ class MIRLowering
         @emitted_types.add(name)
         if stmt.is_a?(AST::UnionDef)
           stmt.variants.each do |var_name, var_data|
-            next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+            next unless Schemas.inline_struct?(var_data)
             syn = "#{stmt.name}_#{var_name}"
             visible_names.add(syn)
             @emitted_types.add(syn)
@@ -4963,7 +4941,7 @@ class MIRLowering
     # payload variant construction goes through MethodCall. Bare
     # GetField on a payload-having variant is invalid CLEAR (annotator
     # would have raised).
-    return nil if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+    return nil if Schemas.inline_struct?(var_data)
     [type_name, node.field]
   end
 
@@ -5218,7 +5196,7 @@ class MIRLowering
       schema = @union_schemas&.dig(node.target.name.to_sym)
       if schema.is_a?(Schemas::UnionSchema)
         var_data = schema.variants[node.field]
-        unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+        unless Schemas.inline_struct?(var_data)
           return MIR::StructInit.new(node.target.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
         end
       end
@@ -5282,7 +5260,7 @@ class MIRLowering
     # matching (vs. plain struct-field access).
     target_type_sym = ti&.resolved&.to_s&.to_sym
     union_schema = target_type_sym && @union_schemas&.dig(target_type_sym)
-    union_variants = union_schema.is_a?(Schemas::UnionSchema) ? union_schema.variants : nil
+    union_variants = Schemas.union?(union_schema) ? union_schema.variants : nil
     field_str = node.field.to_s
     if union_variants && (union_variants.key?(node.field) ||
                           union_variants.key?(field_str) ||
@@ -5292,11 +5270,7 @@ class MIRLowering
 
     result = MIR::FieldGet.new(target, field_str)
 
-    # Auto-dereference @indirect fields
-    target_type = ti&.resolved.to_s
-    if @indirect_fields&.dig("#{target_type}.#{node.field}")
-      return MIR::Deref.new(result)
-    end
+    return MIR::Deref.new(result) if node.is_a?(AST::GetField) && node.indirect_field
 
     result
   end
@@ -5403,11 +5377,9 @@ class MIRLowering
       vt = v.full_type
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
                     !(v.respond_to?(:target_is_list_field) && v.target_is_list_field)
-      # BORROWED fields: source may be ArrayList but field expects slice
-      schema_for_name = @struct_schemas&.dig(node.name.to_sym)
-      schema_fields = schema_for_name.is_a?(Schemas::StructSchema) ? schema_for_name.fields : schema_for_name
-      field_def = schema_fields&.[](k)
-      if field_def.is_a?(AST::StructField) && field_def.borrowed && vt&.array? && !needs_items
+      # BORROWED fields: source may be ArrayList but field expects slice.
+      # node.borrowed_field_names is stamped by the annotator.
+      if node.borrowed_field_names&.include?(k) && vt&.array? && !needs_items
         val = MIR::ItemsAccess.new(val, true)
       elsif needs_items
         val = MIR::ItemsAccess.new(val, false)
@@ -5462,10 +5434,6 @@ class MIRLowering
 
   sig { params(node: AST::UnionVariantLit).returns(T.untyped) }
   def lower_union_variant_lit(node)
-    schema = @union_schemas&.dig(node.union_name.to_sym)
-    var_data = schema.is_a?(Schemas::UnionSchema) ? schema.variants[node.variant_name] : schema&.dig(node.variant_name)
-    indirect = (var_data.is_a?(Hash) && var_data[:indirect_fields]) || Set.new
-
     # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
     hoisted = []
 
@@ -5473,13 +5441,14 @@ class MIRLowering
     field_values = node.fields.map { |k, v|
       # err_cleanup: union owns its payload on success; only clean up on error.
       val = hoist_alloc(lower(v), v, err_cleanup: true)
-      if indirect.include?(k)
-        zig_t = transpile_type(var_data[:fields][k])
+      # @indirect is signalled by the annotator's needs_heap_create stamp
+      # (same single source the struct-literal path reads).
+      if v.needs_heap_create
+        field_sym = v.full_type&.resolved
+        zig_t = transpile_type(field_sym.to_s)
         # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
         # If the field holds a union value, deep-copy so the new allocation's
         # internal heap pointers are independent of the source binding's cleanup.
-        field_type = var_data[:fields][k]
-        field_sym = field_type.is_a?(Type) ? field_type.resolved : field_type.to_sym
         # Deep-copy only when source is an existing binding (GetField / Identifier):
         # those have independent cleanup that would free the same heap data, causing
         # UAF in the new allocation. Fresh literals (StructLit, FuncCall, COPY, etc.)

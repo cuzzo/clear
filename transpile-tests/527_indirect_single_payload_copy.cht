@@ -1,0 +1,40 @@
+# Regression: brace-form single-type @indirect union payload.
+# `U{ Box: "hi" }` for a `Box: String @indirect` variant must heap-box the
+# payload (one pointer level). The needs_heap_create marker was lost when
+# ensure_owned_value! wrapped a rodata-string literal in an implicit COPY,
+# so the field stored a bare []const u8 into a *[]const u8 slot (type
+# mismatch / would be a non-boxed payload). The marker is now applied to
+# the owned value, after COPY-wrapping. Also covers recursive single-type
+# @indirect payload construction, MATCH extraction, and cleanup.
+
+UNION U {
+    Nil,
+    Lit: Int64,
+    Str: String @indirect,
+    Box: U @indirect
+}
+
+FN wrap!() RETURNS !U ->
+    RETURN U{ Box: U{ Lit: 9_i64 } };
+END
+
+FN main() RETURNS Void ->
+    s = U{ Str: "hi" };
+    PARTIAL MATCH s START
+        U.Str AS v -> ASSERT v == "hi", "single @indirect string boxed + deref";,
+        DEFAULT -> ASSERT FALSE, "expected Str";
+    END
+
+    boxed = wrap!() OR RAISE;
+    PARTIAL MATCH boxed START
+        U.Box AS inner ->
+            c = COPY inner;
+            PARTIAL MATCH c START
+                U.Lit AS n -> ASSERT n == 9_i64, "recursive @indirect payload survives";,
+                DEFAULT -> ASSERT FALSE, "expected Lit";
+            END,
+        DEFAULT -> ASSERT FALSE, "expected Box";
+    END
+
+    print("527: indirect single payload copy PASSED");
+END

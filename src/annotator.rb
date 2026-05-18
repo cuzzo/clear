@@ -301,15 +301,17 @@ private
     current_scope.declare("argv", nil, Type::STRING_TYPE, false, false, nil, :heap)
 
     # Built-in Range type: fields accessible via dot access
-    current_scope.declare_type(:Range, {"start" => :Float64, "end" => :Float64})
+    current_scope.declare_type(:Range, Schemas::StructSchema.new(fields: {
+      "start" => AST::StructField.new(type: :Float64),
+      "end"   => AST::StructField.new(type: :Float64),
+    }))
 
     # Built-in File resource type
     # bc/bc_op marks the static methods as VM-dispatchable so the lowering
     # produces a structural MIR::InlineBc that both backends consume. The
     # close_zig template carries to the resource's MIR::Cleanup unchanged
     # (Zig defers it; BC ignores -- the VM has no fd-style close).
-    current_scope.declare_type(:File, {
-      kind: :resource,
+    current_scope.declare_type(:File, Schemas::ResourceSchema.new(
       close_zig: "{0}.close()",
       static_methods: {
         "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})",
@@ -317,29 +319,27 @@ private
         "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})",
                        bc: true, bc_op: :file_create, can_fail: true }
       }
-    })
+    ))
 
     # Built-in TCPServer resource type — a non-blocking server socket (i32 fd).
     # TCPServer::listen(port) returns the server fd; auto-closes via RAII.
-    current_scope.declare_type(:TCPServer, {
-      kind: :resource,
+    current_scope.declare_type(:TCPServer, Schemas::ResourceSchema.new(
       close_zig: "CheatLib.socketClose({0})",
       static_methods: {
         "listen" => { args: [:Int64], return: :TCPServer, zig: "try CheatLib.socketListen(@intCast({0}))", can_fail: true }
       }
-    })
+    ))
 
     # Built-in TCPClient resource type — a connected client socket (i32 fd).
     # Produced by accept(server) or TCPClient::connect(host, port).
     # Auto-closes via RAII.
-    current_scope.declare_type(:TCPClient, {
-      kind: :resource,
+    current_scope.declare_type(:TCPClient, Schemas::ResourceSchema.new(
       close_zig: "CheatLib.socketClose({0})",
       static_methods: {
         "connect" => { args: [:String, :Int64], return: :TCPClient,
                        zig: "try CheatLib.socketConnect({0}, @intCast({1}))", can_fail: true }
       }
-    })
+    ))
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
@@ -523,7 +523,7 @@ private
 
     # Import type definitions (structs, unions, enums) respecting visibility.
     mod.global_scope.types.each do |type_name, type_entry|
-      vis = type_entry[:schema][:visibility] || :package
+      vis = type_entry[:schema].visibility || :package
       next if vis == :private
       next unless (vis == :pub) || (vis == :package && same_dir)
       current_scope.declare_type(type_name, type_entry[:schema])
@@ -558,9 +558,8 @@ private
       # EXTERN FN TypeName<T>.method(...) — register as method on the type
       type_sym = node.owner_type.to_sym
       type_schema = current_scope.types[type_sym]&.dig(:schema)
-      if type_schema.is_a?(Hash)
-        type_schema[:methods] ||= {}
-        type_schema[:methods][node.name] = signature
+      if Schemas.struct?(type_schema) || Schemas.resource?(type_schema)
+        type_schema.methods[node.name] = signature
       end
     else
       # Free function — register in scope as before
@@ -574,17 +573,22 @@ private
   # CLOSE makes it a resource type — auto-defer cleanup via RAII.
   sig { params(node: AST::ExternStructDecl).returns(Symbol) }
   def visit_ExternStructDecl(node)
-    schema = node.field_decls.transform_keys(&:to_s).transform_values { |f| f.type }
+    fields = node.field_decls.transform_keys(&:to_s)
     type_params = node.respond_to?(:type_params) ? node.type_params : nil
-    schema[:type_params] = type_params if type_params&.any?
-    schema[:extern_module] = node.from_module
+    tp = type_params&.any? ? type_params.map(&:to_sym) : nil
 
-    if node.close_method && node.from_module
-      schema[:kind] = :resource
-      # Instance method call: parsed.deinit() — not a module-level function.
-      schema[:close_zig] = "{0}.#{node.close_method}()"
+    schema = if node.close_method && node.from_module
+      Schemas::ResourceSchema.new(
+        close_zig: "{0}.#{node.close_method}()",
+        fields: fields, type_params: tp,
+        extern_module: node.from_module, as_type: node.as_type,
+      )
+    else
+      Schemas::StructSchema.new(
+        fields: fields, type_params: tp,
+        extern_module: node.from_module, as_type: node.as_type,
+      )
     end
-    schema[:as_type] = node.as_type if node.as_type
 
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
@@ -1103,13 +1107,6 @@ private
     # Validate generic type parameters (duplicate / builtin-shadow)
     validate_type_param_list!(node, node.type_params, "struct") if node.type_params&.any?
 
-    # Register the Type Name with its field schema.
-    schema = node.field_decls.transform_values { |f| f.type }
-
-    # Store field defaults so empty struct literals (Foo{}) can be validated.
-    field_defaults = node.field_decls.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
-    schema[:field_defaults] = field_defaults unless field_defaults.empty?
-
     # A field default's type IS the field's declared type (it must be
     # assignable to it) — not a guess. These default nodes (Literal /
     # DefaultLit) are schema metadata never walked by the expression
@@ -1122,23 +1119,21 @@ private
       d.full_type = f.type.is_a?(Type) ? f.type : Type.new(f.type || :Any)
     end
 
-    # Track which fields are BORROWED (references, not owned).
-    borrowed_fields = node.field_decls.select { |_, f| f.borrowed }.keys
-    schema[:borrowed_fields] = borrowed_fields.to_set if borrowed_fields.any?
-
-    # For generic structs, record the type parameter names so field-type
-    # lookups don't reject them as unknown types.
-    schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
-
-    schema[:visibility] = node.visibility || :package
+    schema = Schemas::StructSchema.new(
+      fields: node.field_decls,
+      type_params: node.type_params&.any? ? node.type_params.map(&:to_sym) : nil,
+      visibility: node.visibility || :package,
+    )
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
 
   sig { params(node: AST::EnumDef).returns(Symbol) }
   def visit_EnumDef(node)
-    schema = { kind: :enum, variants: node.variants.to_set }
-    schema[:visibility] = node.visibility || :package
+    schema = Schemas::EnumSchema.new(
+      variants: node.variants.to_set,
+      visibility: node.visibility || :package,
+    )
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -1149,34 +1144,36 @@ private
     validate_type_param_list!(node, node.type_params, "union") if node.type_params&.any?
 
     # Inline struct variants are not supported in generic unions.
-    if node.type_params&.any? && node.variants.any? { |_, v| v.is_a?(Hash) && v[:kind] == :inline_struct }
+    if node.type_params&.any? && node.variants.any? { |_, v| Schemas.inline_struct?(v) }
       error!(node, :UNION_INLINE_IN_GENERIC)
     end
 
     # Register a synthetic struct schema for each inline struct variant so
     # that MATCH AS bindings (e.g. `Shape.Circle AS c`) can field-access the payload.
     node.variants.each do |var_name, var_data|
-      next unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+      next unless Schemas.inline_struct?(var_data)
       synthetic_name = :"#{node.name}_#{var_name}"
-      current_scope.declare_type(synthetic_name, var_data[:fields])
+      current_scope.declare_type(synthetic_name, Schemas::StructSchema.new(
+        fields: var_data.fields.transform_values { |t| AST::StructField.new(type: t) }))
 
       # Pre-compute deinit entries for transpiler: which fields need cleanup.
-      indirect = var_data[:indirect_fields] || Set.new
       deinit_entries = []
-      var_data[:fields].each do |fname, ftype|
+      var_data.fields.each do |fname, ftype|
         ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
-        if indirect.include?(fname)
-          deinit_entries << { field: fname, kind: :indirect, zig_type: ft.zig_type(is_field: true) }
+        if ft.indirect?
+          deinit_entries << { field: fname, kind: :indirect, zig_type: Type.new(ft.resolved).zig_type }
         elsif ft.array? && !ft.string?
           deinit_entries << { field: fname, kind: :array, elem_zig_type: Type.new(ft.element_type).zig_type }
         end
       end
-      var_data[:deinit_entries] = deinit_entries if deinit_entries.any?
+      var_data.deinit_entries = deinit_entries if deinit_entries.any?
     end
 
-    schema = { kind: :union, variants: node.variants }
-    schema[:type_params] = node.type_params.map(&:to_sym) if node.type_params&.any?
-    schema[:visibility] = node.visibility || :package
+    schema = Schemas::UnionSchema.new(
+      variants: node.variants,
+      type_params: node.type_params&.any? ? node.type_params.map(&:to_sym) : nil,
+      visibility: node.visibility || :package,
+    )
     current_scope.declare_type(node.name.to_sym, schema)
     node.full_type = :Void
   end
@@ -1188,7 +1185,7 @@ private
   def visit_UnionVariantLit(node)
     schema = lookup_type_schema(node.union_name.to_sym)
     var_data = validate_union_schema!(node, schema)
-    validate_union_fields!(node, T.must(var_data)[:fields])
+    validate_union_fields!(node, T.must(var_data).fields)
     node.full_type = node.union_name.to_sym
   end
 
@@ -1376,10 +1373,10 @@ private
       next if f.wildcard?
 
       if schema
-        unless schema.key?(f.name)
+        unless schema.fields.key?(f.name)
           name_tok = f.name_token
           if name_tok
-            valid_fields = schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+            valid_fields = schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
             emit_typo_suggestion!(
               name_tok, f.name, valid_fields,
               "MATCH struct pattern: field '#{f.name}' does not exist on type #{expr_type}",
@@ -1394,8 +1391,8 @@ private
 
       if f.bind?
         # Destructuring bind: declare a local variable with the field's type.
-        if schema && schema.key?(f.name)
-          field_def = schema[f.name]
+        if schema && schema.fields.key?(f.name)
+          field_def = schema.fields[f.name]
           field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
           field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
           current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
@@ -1405,7 +1402,7 @@ private
         visit(f.expr)
 
         if schema
-          field_def = schema[f.name]
+          field_def = schema.fields[f.name]
           field_type = field_def.is_a?(Type) ? field_def.resolved : (field_def.is_a?(AST::StructField) ? field_def.type&.resolved : field_def&.resolved)
           val_type   = f.expr.resolved_type
           is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
@@ -1436,14 +1433,14 @@ private
     node.string_match = true if expr_t.string?
     type_name = expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved
     schema    = lookup_type_schema(type_name)
-    is_enum   = schema.is_a?(Hash) && schema[:kind] == :enum
-    is_union  = schema.is_a?(Hash) && schema[:kind] == :union
+    is_enum   = Schemas.enum?(schema)
+    is_union  = Schemas.union?(schema)
 
     # Build type-param substitution for generic union payload capture
     # e.g. Option<Number> → { T: :Float64 }
     union_subst = {}
-    if is_union && expr_t.generic_instance? && schema[:type_params]&.any?
-      schema[:type_params].zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
+    if is_union && expr_t.generic_instance? && schema.type_params&.any?
+      schema.type_params.zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
     end
 
     # MATCH TAKES: if the source is explicitly consumed (MATCH TAKES expr START),
@@ -1468,15 +1465,15 @@ private
              when AST::MethodCall then c.value.name
              end
         next false unless vn
-        vt = (schema[:variants] || {})[vn]
+        vt = (schema.variants || {})[vn]
         next false unless vt
         # Inline struct with heap fields: non-Copy (strings/collections/indirect)
-        if vt.is_a?(Hash) && (vt[:kind] == :inline_struct || vt[:kind] == :indirect_payload)
+        if Schemas.inline_struct?(vt)
           Type.variant_has_heap?(vt)
         else
-          # Simple payload: only non-Copy if it's a collection/array (not string)
+          # Simple payload: non-Copy if @indirect or a collection/array (not string)
           t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-          t && !t.string? && (t.collection? || t.map? || (t.array? && !t.fixed?))
+          t && (t.indirect? || (!t.string? && (t.collection? || t.map? || (t.array? && !t.fixed?))))
         end
       }
       if has_non_copy_as
@@ -1607,25 +1604,26 @@ private
                           when AST::MethodCall then ev.name
                           end
                 next unless ev_name && variant_name
-                head_payload = normalize_payload.call(schema[:variants][variant_name])
-                ev_payload   = normalize_payload.call(schema[:variants][ev_name])
+                head_payload = normalize_payload.call(schema.variants[variant_name])
+                ev_payload   = normalize_payload.call(schema.variants[ev_name])
                 if head_payload != ev_payload
                   error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
                     head: variant_name, other: ev_name, kind: 'AS', name: c.binding)
                 end
               end
               if variant_name
-                raw_payload = schema[:variants][variant_name]
+                raw_payload = schema.variants[variant_name]
                 if raw_payload.nil?
                   error!(node, :MATCH_UNIT_CAPTURE, binding: c.binding, variant: variant_name)
-                elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
+                elsif Schemas.inline_struct?(raw_payload)
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c.binding, nil, Type.new(synthetic_type), false, false, nil, :stack)
                   og_declare(c.binding, nil, Type.new(synthetic_type))
                   classify_ownership!(current_scope.locals[c.binding])
-                elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :indirect_payload
+                elsif raw_payload.is_a?(Type) && raw_payload.indirect?
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
-                  inner_type = raw_payload[:type].is_a?(Type) ? raw_payload[:type] : Type.new(raw_payload[:type])
+                  inner_type = raw_payload.dup
+                  inner_type.layout = nil
                   inner_type = union_subst.any? ? apply_type_subst(inner_type, union_subst) : inner_type
                   current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
                   og_declare(c.binding, nil, inner_type)
@@ -1678,29 +1676,30 @@ private
                         when AST::MethodCall then ev.name
                         end
               next unless ev_name && variant_name
-              if normalize_payload_d.call(schema[:variants][variant_name]) != normalize_payload_d.call(schema[:variants][ev_name])
+              if normalize_payload_d.call(schema.variants[variant_name]) != normalize_payload_d.call(schema.variants[ev_name])
                 error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
                   head: variant_name, other: ev_name, kind: 'destructure', name: '{ ... }')
               end
             end
             if variant_name
-              raw_payload = schema[:variants][variant_name]
+              raw_payload = schema.variants[variant_name]
               # Resolve the payload's field schema (inline struct or named type)
-              payload_schema = if raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
-                raw_payload[:fields]
+              payload_schema = if Schemas.inline_struct?(raw_payload)
+                Schemas::StructSchema.new(
+                  fields: raw_payload.fields.transform_values { |t| AST::StructField.new(type: t) })
               else
                 payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
                 payload_type_sym = union_subst[payload_type_sym] if union_subst[payload_type_sym]
                 lookup_type_schema(payload_type_sym)
               end
 
-              if payload_schema.is_a?(Hash) && !payload_schema[:kind]
+              if Schemas.struct?(payload_schema)
                 c.destructure.fields.each do |f|
                   next unless f.bind?
-                  unless payload_schema.key?(f.name)
+                  unless payload_schema.fields.key?(f.name)
                     name_tok = f.name_token
                     if name_tok
-                      valid_fields = payload_schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+                      valid_fields = payload_schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
                       emit_typo_suggestion!(
                         name_tok, f.name, valid_fields,
                         "MATCH destructure: field '#{f.name}' is not on variant #{variant_name}",
@@ -1711,7 +1710,7 @@ private
                       error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f.name, variant: variant_name)
                     end
                   end
-                  field_def = payload_schema[f.name]
+                  field_def = payload_schema.fields[f.name]
                   field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
                   field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
                   current_scope.declare(f.name, nil, field_type, false, false, nil, :stack)
@@ -1802,7 +1801,7 @@ private
         names
       end.to_set
 
-      all_variants = is_enum ? schema[:variants] : schema[:variants].keys.to_set
+      all_variants = is_enum ? schema.variants : schema.variants.keys.to_set
       missing = all_variants - covered
       unless missing.empty?
         type_label2 = is_enum ? "enum" : "union"
@@ -2280,9 +2279,13 @@ private
        expected_t.sync.nil? && expected_t.resolved == actual_t.resolved
       return true
     end
+    # @indirect on a return type is a storage directive: the value is
+    # heap-boxed into a `*T` cell at the RETURN site (escape analysis),
+    # so the returned expression need not already carry :indirect.
+    layout_ok = expected_t.layout == actual_t.layout || expected_t.layout == :indirect
     expected_t.ownership == actual_t.ownership &&
       expected_t.sync == actual_t.sync &&
-      expected_t.layout == actual_t.layout &&
+      layout_ok &&
       expected_t.elem_ownership == actual_t.elem_ownership &&
       expected_t.elem_sync == actual_t.elem_sync
   end
@@ -2357,11 +2360,11 @@ private
       error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
     end
 
-    unless schema[:kind] == :resource
+    unless schema.kind == :resource
       error!(node, :STATIC_NOT_RESOURCE, type: type_name)
     end
 
-    static_methods = schema[:static_methods] || {}
+    static_methods = schema.static_methods || {}
     method_def     = IntrinsicRegistry.sig(static_methods, node.method_name)
 
     unless method_def
@@ -2484,8 +2487,8 @@ private
       # Check for generic instance: Parsed<MyDoc> → base type Parsed
       base = obj_type.is_a?(Type) && obj_type.generic_instance? ? obj_type.generic_base : resolved
       type_schema = lookup_type_schema(base)
-      if type_schema.is_a?(Hash) && type_schema[:methods]&.key?(node.name)
-        method_sig = type_schema[:methods][node.name]
+      if (Schemas.struct?(type_schema) || Schemas.resource?(type_schema)) && type_schema.methods&.key?(node.name)
+        method_sig = type_schema.methods[node.name]
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
         node.instance_variable_set(:@extern_method, true)
@@ -3056,8 +3059,8 @@ private
 
     # Check if the return type is a union with heap variants
     schema = lookup_type_schema(ret_type_obj.resolved)
-    return unless schema.is_a?(Hash) && schema[:kind] == :union
-    has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    return unless Schemas.union?(schema)
+    has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
     return unless has_heap
 
     # Get the first argument (object for MethodCall, first arg for FuncCall)
@@ -3434,13 +3437,13 @@ private
     end
 
     raw_schema = lookup_type_schema(type)
-    struct_schema = Schemas.as_struct_schema(raw_schema)
-    if raw_schema.is_a?(Hash) && raw_schema[:kind] == :enum
+    struct_schema = Schemas.field_bearing?(raw_schema) ? raw_schema : nil
+    if Schemas.enum?(raw_schema)
       error!(node, :ENUM_FIELD_ACCESS, enum: type)
-    elsif raw_schema.is_a?(Schemas::UnionSchema) || (raw_schema.is_a?(Hash) && raw_schema[:kind] == :union)
+    elsif raw_schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(raw_schema))
       error!(node, :UNION_FIELD_ACCESS, union: type)
     elsif struct_schema && struct_schema.fields[node.field]
-      field_type = struct_schema.fields[node.field]
+      field_type = struct_schema.fields[node.field].type
       # SOA tracking: record field access on pipeline variable `_`
       if @pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         @pipeline_accessed_fields << node.field
@@ -3455,6 +3458,19 @@ private
           subst[param] = arg.resolved
         end
         field_type = apply_type_subst(field_type, subst) if subst.any?
+      end
+      if field_type.is_a?(Type) && field_type.indirect?
+        # A struct-pointee @indirect field is an owned heap pointer that
+        # moves like the old `%T`: bind/move the `*T`, let Zig auto-deref
+        # field access, and free once. An explicit read-deref there turns
+        # the move into a value copy and leaks the box. String/scalar and
+        # union/enum pointees still need the read-deref (Zig won't coerce
+        # `*T` -> `T` for those consumers).
+        psch = (lookup_type_schema(field_type.resolved) rescue nil)
+        struct_pointee = Schemas.struct?(psch)
+        node.indirect_field = true if node.is_a?(AST::GetField) && !struct_pointee
+        field_type = field_type.dup
+        field_type.layout = nil
       end
       node.full_type = field_type
     elsif struct_schema && node.token
@@ -3569,13 +3585,13 @@ private
 
     # Union literal: Result{ Ok: 42 } or Option<Number>{ Some: 42.0 }
     # Reuses struct-literal syntax — no new parser changes required.
-    if schema.is_a?(Hash) && schema[:kind] == :union
+    if Schemas.union?(schema)
       if node.fields.length != 1
         error!(node, :UNION_LITERAL_VARIANT_COUNT, name: node.name, got: node.fields.length)
       end
 
       # Build type param substitution for generic unions
-      union_type_params = schema[:type_params]
+      union_type_params = schema.type_params
       union_subst = {}
       if node.type_args&.any?
         if union_type_params.nil? || union_type_params.empty?
@@ -3591,11 +3607,11 @@ private
       end
 
       variant_name, val_node = node.fields.first
-      unless schema[:variants].key?(variant_name)
+      unless schema.variants.key?(variant_name)
         anchor = variant_anchor_from_unionlit(node, variant_name)
         if anchor
           emit_variant_typo!(
-            anchor, variant_name, schema[:variants].keys,
+            anchor, variant_name, schema.variants.keys,
             "Type Error: Union '#{node.name}' has no variant '#{variant_name}'.",
             "variant of union #{node.name}",
             cascade: true
@@ -3604,30 +3620,36 @@ private
           error!(node, :UNION_UNKNOWN_VARIANT, union: node.name, variant: variant_name)
         end
       end
-      raw_expected = schema[:variants][variant_name]
+      raw_expected = schema.variants[variant_name]
       if raw_expected.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_PAYLOAD, variant: variant_name, union: node.name, variant2: variant_name)
       end
-      if raw_expected.is_a?(Hash) && raw_expected[:kind] == :inline_struct
+      if Schemas.inline_struct?(raw_expected)
         error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, union: node.name, variant: variant_name, union2: node.name, variant2: variant_name)
       end
       # @indirect single-type payload: unwrap inner type for type-checking;
       # mark the value node so the transpiler heap-allocates it via create(*T).
-      indirect_payload = raw_expected.is_a?(Hash) && raw_expected[:kind] == :indirect_payload
-      raw_for_check = indirect_payload ? raw_expected[:type] : raw_expected
+      indirect_payload = raw_expected.is_a?(Type) && raw_expected.indirect?
+      raw_for_check = if indirect_payload
+                        d = raw_expected.dup
+                        d.layout = nil
+                        d
+                      else
+                        raw_expected
+                      end
       # Apply type param substitution (e.g. T → Number for generic unions)
       expected_type = T.let(union_subst.any? ? apply_type_subst(raw_for_check, union_subst) : raw_for_check, Type)
       visit(val_node)
-      if indirect_payload
-        val_node.needs_heap_create = true
-        current_fn_ctx.heap_count += 1 if current_fn_ctx  # heapAlloc().create(*T) needs rt
-      end
       reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
       owned = T.let(ensure_owned_value!(val_node, expected_type, "#{node.name}.#{variant_name}"), T.nilable(AST::CopyNode))
       if owned
         node.fields[variant_name] = owned
         val_node = owned
+      end
+      if indirect_payload
+        val_node.needs_heap_create = true
+        current_fn_ctx.heap_count += 1 if current_fn_ctx  # heapAlloc().create(*T) needs rt
       end
       actual = val_node.full_type
       unless expected_type.accepts?(actual)
@@ -3645,9 +3667,9 @@ private
 
     # Empty struct literal: MyStruct{} — use all struct field defaults.
     if node.fields.empty?
-      field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
+      field_names = schema.fields.keys
       unless field_names.empty?
-        field_defaults = schema[:field_defaults] || {}
+        field_defaults = schema.field_defaults || {}
         missing = field_names.reject { |f| field_defaults.key?(f) }
         if missing.any?
           error!(node, :STRUCT_LITERAL_MISSING_FIELDS, name: node.name, fields: missing.join(', '))
@@ -3659,7 +3681,7 @@ private
 
     # Build type param substitution map for generic struct instantiation.
     # e.g. Pair<Number>{ first: 1.0 } → { :T => :Float64 }
-    type_params = schema[:type_params]
+    type_params = schema.type_params
     type_subst = {}
     if node.type_args&.any?
       if type_params.nil? || type_params.empty?
@@ -3680,9 +3702,9 @@ private
     node.fields.each do |field_name, val_node|
       visit(val_node) # Resolve value type
 
-      raw_expected = T.let(schema[field_name], T.nilable(Type))
+      raw_expected = T.let(schema.fields[field_name]&.type, T.nilable(T.any(Type, Symbol)))
       if raw_expected.nil?
-        valid_fields = schema.keys.reject { |k| k == :borrowed_fields || k.to_s.start_with?('_') }
+        valid_fields = schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
         name_tok = node.field_tokens&.[](field_name)
         if name_tok
           emit_typo_suggestion!(
@@ -3697,7 +3719,7 @@ private
       end
 
       # Check if this field is declared BORROWED in the struct definition
-      field_is_borrowed = schema[:borrowed_fields]&.include?(field_name)
+      field_is_borrowed = schema.borrowed_fields&.include?(field_name)
 
       # Apply type param substitution (e.g., T → Number, T[] → String[])
       expected_type = T.let(if type_subst.any?
@@ -3741,7 +3763,8 @@ private
     end
 
     # Non-escaping propagation: structs with BORROWED fields inherit non_escaping.
-    node.instance_variable_set(:@has_borrowed_fields, true) if schema[:borrowed_fields]&.any?
+    node.borrowed_field_names = schema.borrowed_fields
+    node.instance_variable_set(:@has_borrowed_fields, true) if schema.borrowed_fields&.any?
 
     # Set full_type to the generic instance name or plain struct name
     node.full_type = if node.type_args&.any?
@@ -4262,8 +4285,8 @@ private
       elem = vti.element_type
       if elem
         es = lookup_type_schema(elem.resolved) rescue nil
-        copy.deep_copy = es.is_a?(Hash) && es[:kind] == :union &&
-          (es[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        copy.deep_copy = Schemas.union?(es) &&
+          (es.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
       return copy
     end
@@ -4314,8 +4337,8 @@ private
       elem = vti.element_type
       if elem
         schema = lookup_type_schema(elem.resolved) rescue nil
-        if schema.is_a?(Hash) && schema[:kind] == :union
-          has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+        if Schemas.union?(schema)
+          has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
           node.deep_copy = has_heap
         end
       end

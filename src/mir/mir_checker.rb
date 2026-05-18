@@ -148,8 +148,40 @@ class MIRChecker
     verify_raw_justified!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
     verify_unhoisted_allocs!(fn_def.body) if strict
+    verify_heap_create_single_indirection!(fn_def.body)
 
     @errors
+  end
+
+  # INV-INDIRECT-SINGLE-BOX: a HeapCreate is exactly one indirection
+  # (`HeapCreate(T)` -> `*T`), so its cell type must never itself be a
+  # pointer. A `*`-typed cell is a `**U` double box -> UAF on read.
+  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_heap_create_single_indirection!(body)
+    each_heap_create(body) do |hc|
+      zt = hc.zig_type
+      next unless zt.is_a?(String) && zt.lstrip.start_with?("*")
+      @errors << error(:INDIRECT_DOUBLE_BOX, @fn_name,
+        "HeapCreate cell type is `#{zt}` (already a pointer) — boxing it yields a double indirection")
+    end
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.untyped).returns(T.untyped) }
+  def each_heap_create(stmts, &blk)
+    walk_mir(stmts) do |node|
+      [node.respond_to?(:init) ? node.init : nil,
+       node.respond_to?(:expr) ? node.expr : nil,
+       node.respond_to?(:value) ? node.value : nil].each do |root|
+        deep_each_expr(root) { |e| yield e if e.is_a?(MIR::HeapCreate) }
+      end
+    end
+  end
+
+  sig { params(expr: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def deep_each_expr(expr, &blk)
+    return unless expr
+    yield expr
+    each_sub_expr(expr) { |sub| deep_each_expr(sub, &blk) }
   end
 
   sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }

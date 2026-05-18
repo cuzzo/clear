@@ -506,8 +506,8 @@ module PipeAnalysis
     join_type_name = :"JoinResult_#{left_type}_#{right_type}"
     unless current_scope.resolve_type_definition(join_type_name)
       current_scope.declare_type(join_type_name, Schemas::StructSchema.new(fields: {
-        "left"  => left_type,
-        "right" => :"?#{right_type}",
+        "left"  => AST::StructField.new(type: left_type),
+        "right" => AST::StructField.new(type: :"?#{right_type}"),
       }))
     end
 
@@ -1814,8 +1814,8 @@ module PipeAnalysis
     accessed = @pipeline_accessed_fields
     return if accessed.empty?
 
-    schema = Schemas.as_struct_schema(lookup_type_schema(item_type))
-    return unless schema
+    schema = lookup_type_schema(item_type)
+    return unless Schemas.field_bearing?(schema)
 
     total = schema.fields.keys.size
     return if total < SOA_MIN_FIELDS

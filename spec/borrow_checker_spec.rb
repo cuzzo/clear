@@ -112,7 +112,7 @@ RSpec.describe BorrowChecker do
       expect_no_error(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE u: %User = User{ id: 1 };
+          MUTABLE u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             n = ref.id;
           }
@@ -239,12 +239,12 @@ RSpec.describe BorrowChecker do
   describe "MOVE_WHILE_BORROWED" do
     it "catches GIVE of heap struct inside WITH BORROWED" do
       errors = check_errors(<<~CLEAR)
-        FN consume(TAKES u: %User) RETURNS Int64 ->
+        FN consume(TAKES u: User @indirect) RETURNS Int64 ->
           RETURN u.id;
         END
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          u: %User = User{ id: 1 };
+          u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             n = consume(GIVE u);
           }
@@ -260,7 +260,7 @@ RSpec.describe BorrowChecker do
       errors = check_errors(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          u: %User = User{ id: 1 };
+          u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             v = u;
           }
@@ -276,7 +276,7 @@ RSpec.describe BorrowChecker do
       errors = check_errors(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          u: %User = User{ id: 1 };
+          u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             shared = SHARE u;
           }
@@ -293,7 +293,7 @@ RSpec.describe BorrowChecker do
         STRUCT User { id: Int64 }
         STRUCT Box { user: User }
         FN main() RETURNS Void ->
-          u: %User = User{ id: 1 };
+          u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             shared = SHARE Box{ user: u };
           }
@@ -340,12 +340,12 @@ RSpec.describe BorrowChecker do
 
     it "catches move inside nested control flow within WITH" do
       errors = check_errors(<<~CLEAR)
-        FN consume(TAKES u: %User) RETURNS Int64 ->
+        FN consume(TAKES u: User @indirect) RETURNS Int64 ->
           RETURN u.id;
         END
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          u: %User = User{ id: 1 };
+          u: User @indirect = User{ id: 1 };
           WITH BORROWED u AS ref {
             IF ref.id > 0 THEN
               n = consume(GIVE u);

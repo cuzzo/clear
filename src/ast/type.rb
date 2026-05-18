@@ -945,19 +945,18 @@ class Type
     return [false, nil] unless schema_lookup
     schema = schema_lookup.call(resolved) rescue nil
 
-    if schema&.dig(:kind) == :resource
-      return [true, schema[:close_zig]]
+    if Schemas.resource?(schema)
+      return [true, schema.close_zig]
     end
 
     # Struct with resource fields: compose close statements from fields.
-    if schema.is_a?(Hash) && schema[:kind].nil?
+    if Schemas.struct?(schema)
       closes = []
-      schema.each do |fname, ftype|
-        next if fname.is_a?(Symbol)  # skip metadata keys; field names are strings
-        f_resolved = Type.new(ftype).resolved
+      schema.fields.each do |fname, fdef|
+        f_resolved = Type.new(fdef.type).resolved
         f_schema = schema_lookup.call(f_resolved) rescue nil
-        if f_schema&.dig(:kind) == :resource
-          closes << f_schema[:close_zig].gsub("{0}", "{0}.#{fname}")
+        if Schemas.resource?(f_schema)
+          closes << f_schema.close_zig.gsub("{0}", "{0}.#{fname}")
         end
       end
       return [true, closes.join("; ")] if closes.any?
@@ -1356,11 +1355,10 @@ class Type
       schema = resolver.call(resolved)
       return 1 unless schema # Treat unknown/nil schemas as 1 slot (default for pointers/unknown structs)
       # Enum/Union/Resource types — treat as slot size 1.
-      return 1 if schema.is_a?(Hash) && (schema[:kind] == :enum || schema[:kind] == :union || schema[:kind] == :resource)
+      return 1 if (Schemas.enum?(schema) || Schemas.union?(schema) || Schemas.resource?(schema))
       # Generic structs: treat as 1 slot (size depends on type args, unknown at this point)
-      return 1 if schema.is_a?(Hash) && schema[:type_params]
-      # Only sum field entries (string keys). Skip metadata (symbol keys like :type_params, :extern_module).
-      return schema.select { |k, _| k.is_a?(String) }.values.sum { |t| Type.new(t).slot_size(resolver) }
+      return 1 if schema.respond_to?(:type_params) && schema.type_params
+      return schema.fields.values.sum { |f| Type.new(f.type).slot_size(resolver) }
     end
 
     1 # Default
@@ -1399,8 +1397,8 @@ class Type
       resolver = lookup_arg || lookup_block
       return false unless resolver
       schema = resolver.is_a?(Proc) ? resolver.call(resolved) : (resolver[resolved] rescue nil)
-      return false unless schema
-      return schema.values.all? { |t| Type.new(t).copyable?(resolver) }
+      return false unless Schemas.struct?(schema)
+      return schema.fields.values.all? { |f| Type.new(f.type).copyable?(resolver) }
     end
 
     false
@@ -1431,9 +1429,9 @@ class Type
     if schema.nil? && generic_instance?
       schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
     end
-    return true if schema.is_a?(Hash) && schema[:kind] == :enum
-    if schema.is_a?(Hash) && schema[:kind] == :union
-      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    return true if Schemas.enum?(schema)
+    if Schemas.union?(schema)
+      has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       return !has_heap
     end
     # Structs (no :kind) deliberately fall through to false — captured by ref.
@@ -1459,16 +1457,15 @@ class Type
       if schema.nil? && generic_instance?
         schema = resolver.is_a?(Proc) ? resolver.call(generic_base) : (resolver[generic_base] rescue nil)
       end
-      return true if schema.is_a?(Hash) && schema[:kind] == :enum
+      return true if Schemas.enum?(schema)
       # Unions: Copy if no heap variants
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      if Schemas.union?(schema)
+        has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
         return !has_heap
       end
       # Structs: Copy if all fields are Copy
-      if schema.is_a?(Hash) && !schema[:kind]
-        all_copy = schema.all? do |k, v|
-          next true if k.is_a?(Symbol) # skip metadata (:type_params etc.)
+      if Schemas.struct?(schema)
+        all_copy = schema.fields.all? do |_, v|
           ft = v.is_a?(Type) ? v : (v.is_a?(AST::StructField) ? Type.new(v.type || :Any) : Type.new(v || :Any))
           ft.implicitly_copyable?(resolver)
         end
@@ -1491,9 +1488,9 @@ class Type
     return true if string? || list_collection? || (map? && !numeric_map?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Schemas::UnionSchema) || (schema.is_a?(Hash) && schema[:kind] == :union)
+      if schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(schema))
         return schema_union_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
-      elsif schema.is_a?(Schemas::StructSchema) || (schema.is_a?(Hash) && !schema[:kind])
+      elsif Schemas.struct?(schema)
         return schema_struct_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
       end
     end
@@ -1512,9 +1509,9 @@ class Type
                    (array? && !string?) || any_sync?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Schemas::UnionSchema) || (schema.is_a?(Hash) && schema[:kind] == :union)
+      if schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(schema))
         return schema_union_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
-      elsif schema.is_a?(Schemas::StructSchema) || (schema.is_a?(Hash) && !schema[:kind])
+      elsif Schemas.struct?(schema)
         return schema_struct_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
       end
     end
@@ -1552,9 +1549,9 @@ class Type
     # Frame structs/unions: check fields recursively
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      elsif schema.is_a?(Hash) && !schema[:kind]
+      if Schemas.union?(schema)
+        return (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      elsif Schemas.struct?(schema)
         return schema_struct_any?(schema) { |t| t.any_rc? || t.link? || t.any_sync? || t.resource? }
       end
     end
@@ -1573,9 +1570,9 @@ class Type
     # Check struct/union element types via schema
     if schema_lookup
       schema = schema_lookup.call(t.resolved) rescue nil
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      elsif schema.is_a?(Hash) && !schema[:kind]
+      if Schemas.union?(schema)
+        return (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      elsif Schemas.struct?(schema)
         return schema_struct_any?(schema) { |ft| ft.any_rc? || ft.link? || ft.any_sync? || ft.resource? }
       end
     end
@@ -1602,10 +1599,10 @@ class Type
                      tense_observable?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
-      if schema.is_a?(Hash) && !schema[:kind]
+      if Schemas.struct?(schema)
         return :heap if schema_struct_any?(schema) { |t| t.link? || t.any_rc? || t.string? }
-      elsif schema.is_a?(Hash) && schema[:kind] == :union
-        return :heap if (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      elsif Schemas.union?(schema)
+        return :heap if (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
     end
     :frame
@@ -1616,20 +1613,16 @@ class Type
   sig { params(vt: T.untyped).returns(T::Boolean) }
   def self.variant_has_heap?(vt)
     return false unless vt
-    # Single-type payload with @indirect: always heap (stored as *T pointer)
-    return true if vt.is_a?(Hash) && vt[:kind] == :indirect_payload
-    if vt.is_a?(Hash) && vt[:kind] == :inline_struct
-      # Inline struct: check for @indirect fields or string/collection fields
-      return true if vt[:indirect_fields]&.any?
-      fields = vt[:fields] || {}
+    if Schemas.inline_struct?(vt)
+      fields = vt.fields
       return fields.any? { |_, ft|
         t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && (t.string? || t.collection? || t.map? || (t.array? && !t.fixed?))
+        t && (t.indirect? || t.string? || t.collection? || t.map? || (t.array? && !t.fixed?))
       }
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
+    (t.indirect? || t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
@@ -1721,9 +1714,8 @@ class Type
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
   sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
   def schema_struct_any?(schema, &blk)
-    fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
-    fields.any? { |k, v|
-      next false if k.is_a?(Symbol)
+    fields = Schemas.struct?(schema) ? schema.fields : {}
+    fields.any? { |_, v|
       ft = v.is_a?(AST::StructField) ? v.type : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
@@ -1736,7 +1728,7 @@ class Type
   # Type.variant_has_heap? when needed.
   sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
   def schema_union_any?(schema, &blk)
-    variants = schema.is_a?(Schemas::UnionSchema) ? schema.variants : (schema[:variants] || {})
+    variants = Schemas.union?(schema) ? schema.variants : {}
     variants.any? { |_, vt|
       next false unless vt
       next false if vt.is_a?(Hash)
@@ -2058,7 +2050,7 @@ class Type
       # The parser stamps storage decorators (heap/frame, ownership
       # like @multiowned/@shared, sync, layout) on the OUTER
       # error-union Type, but `payload_type` is built from the bare
-      # base symbol -- so a `RETURNS !%User` payload is `User` (no
+      # base symbol -- so a `RETURNS !User @indirect` payload is `User` (no
       # heap), and `RETURNS !Node @multiowned` payload is `Node` (no
       # ownership). Propagate the outer's storage hints so the
       # payload renders as `*User`, `CheatLib.Rc(Node)`,
@@ -2098,6 +2090,18 @@ class Type
     if optional?
       inner_zig = wrapped_type.zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
+    end
+
+    # @indirect is a heap-pinned cell boxed by a single HeapCreate, so its
+    # Zig type must be exactly one pointer level around the bare pointee for
+    # every type uniformly (the String/slice path below otherwise drops it).
+    if indirect? && !any_sync? && (@ownership.nil? || @ownership == :affine) &&
+       !fn_type? && !error_union? && !optional?
+      pointee = Type.new(self)
+      pointee.layout = nil
+      pointee.provenance = :stack if pointee.respond_to?(:provenance=)
+      pointee.location = :stack if pointee.respond_to?(:location=)
+      return "*#{pointee.zig_type(is_param: is_param, is_field: is_field)}"
     end
 
     # 2c. Function type: FN(T, ...) -> R  =>  *const fn(*Runtime, T, ...) anyerror!R

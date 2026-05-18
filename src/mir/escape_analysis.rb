@@ -58,7 +58,7 @@ module EscapeAnalysis
   # Escape conditions handled:
   #   1. :always_returned    — collection returned on all paths → heap from start
   #   2. :bg_captured        — list/map/pool/set captured by BG block → heap
-  #   3. :heap_ptr_return    — identifier returned from RETURNS %T fn → storage :heap
+  #   3. :heap_ptr_return    — identifier returned from RETURNS T @indirect fn → storage :heap
   #   4. :assign_escape      — frame value (requires_move?) assigned to heap field → storage :heap
   #   5. :loop_carry_string  — string reassigned in mark_per_iter loop → heap
   #   6. :transitive_callee  — declaration value is call to heap-returning fn → provenance :heap
@@ -206,7 +206,7 @@ module EscapeAnalysis
         bg_upgraded << vname
 
       elsif heap_ptr_return
-        # Condition 3: RETURNS %T — returned identifiers get storage :heap only
+        # Condition 3: RETURNS T @indirect — returned identifiers get storage :heap only
         # (no provenance write; classify_heap_struct_plain consults schema via storage).
         ident = e2_find_return_ident(return_nodes, vname)
         if ident

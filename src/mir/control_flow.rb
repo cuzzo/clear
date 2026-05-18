@@ -622,7 +622,7 @@ class OwnershipDataflow
       skip_rhs_move = if lhs_is_map
         val_resolved = stmt.value.full_type.resolved
         schema = @schema_lookup&.call(val_resolved)
-        !!Schemas.as_union_schema(schema)
+        Schemas.union?(schema)
       else
         false
       end

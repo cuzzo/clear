@@ -74,8 +74,7 @@ module AtomicMigrationSuggester
 
     schema = annotator.respond_to?(:lookup_type_schema) ?
              annotator.lookup_type_schema(ti.resolved) : nil
-    schema = Schemas.as_struct_schema(schema)
-    return nil unless schema && schema.methods.empty?
+    return nil unless Schemas.field_bearing?(schema) && schema.methods.empty?
     fields = schema.fields
     return nil unless fields.size == 1
 

@@ -63,7 +63,6 @@ class Parser
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
-    @last_indirect_consumed = T.let(false, T::Boolean)
     @last_requires_clauses = T.let({}, T::Hash[T.untyped, T.untyped])
     @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
@@ -1174,30 +1173,19 @@ class Parser
         var_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
-          # parse_type_annotation records consumed @indirect so recursive union
-          # fields can preserve indirect payloads.
-          indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
             fname = T.must(fname_tok).value
             consume(:CHAR, ':')
             ftype = parse_type_annotation
-            indirect_fields << fname if @last_indirect_consumed
-            @last_indirect_consumed = false
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
             [fname, ftype]
           end
-          var_data = { kind: :inline_struct, fields: field_pairs.to_h }
-          var_data[:indirect_fields] = indirect_fields unless indirect_fields.empty?
-          variants[var_name] = var_data
+          variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
           vtype = parse_type_annotation
           reject_auto_in_aggregate_field!(T.must(vtype), var_name, nil, "UNION variant payload")
-          if @last_indirect_consumed
-            @last_indirect_consumed = false
-            vtype = { kind: :indirect_payload, type: vtype }
-          end
           variants[var_name] = vtype
         else
           # Unit variant: Point
@@ -2764,22 +2752,8 @@ class Parser
       optional_prefix = "?"
     end
 
-    # Check for heap prefix: %Type — tracked as location, not embedded in the symbol.
-    is_heap = false
-    if match?(:PERCENT)
-      consume(:PERCENT)
-      is_heap = true
-    end
-
-    # Audit#3 — clear diagnostic for `?Auto` / `!Auto` / `~Auto` /
-    # `%Auto`. Combining a prefix with `Auto` has no defined
-    # semantics yet (would `?Auto` infer a nullable T or a regular
-    # T?), so reject explicitly with a message pointing at the
-    # offending Auto keyword. Without this check the parser would
-    # fall through to `consume(:TYPE_ID)` and emit a generic
-    # "Expected TYPE_ID, got Auto" error.
     if match?(:KEYWORD, 'Auto')
-      prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{is_heap ? '%' : ''}"
+      prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}"
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
 
@@ -2899,14 +2873,10 @@ class Parser
     observable  = caps&.dig(:observable) || false
     observable_token = caps&.dig(:observable_token)
 
-    # Plain @indirect on non-array types is a union-field signal, not a
-    # heap-boxed Type layout. @indirect:atomic is the exception because it
-    # represents the AtomicPtr surface.
-    is_indirect = false if is_indirect && !inner.start_with?("[") && sync != :atomic
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
-    loc = is_heap ? :heap : (is_indirect ? :heap : nil)
+    loc = is_indirect ? :heap : nil
     layout = is_indirect ? :indirect : nil
     # Mirror CapabilityWrap's auto-promotion so @indirect:atomic has the same
     # ownership whether it appears in an expression or a type annotation.
@@ -3142,7 +3112,6 @@ class Parser
       result[:sync] = :symbol
     when "@indirect"
       error!(token, :DUPLICATE_LAYOUT_CAP) if result[:is_indirect]
-      @last_indirect_consumed = true
       result[:is_indirect] = true
     when "@soa"
       error!(token, :DUPLICATE_SOA_CAP) if result[:is_soa]

@@ -2221,7 +2221,7 @@ RSpec.describe SemanticAnnotator do
         expect_escape("x")
         run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
-          FN create() RETURNS !%Config ->
+          FN create() RETURNS !Config @indirect ->
             x = Config { id: 1 };
             RETURN x; # x must be on heap to survive return
           END
@@ -2231,7 +2231,7 @@ RSpec.describe SemanticAnnotator do
       it "uses heap_struct_plain cleanup for promoted plain struct (no heap fields)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
-          FN create() RETURNS !%Config ->
+          FN create() RETURNS !Config @indirect ->
             x = Config { id: 1 };
             RETURN x;
           END
@@ -2243,7 +2243,7 @@ RSpec.describe SemanticAnnotator do
       it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Person { name: String, age: Float64 }
-          FN make() RETURNS !%Person ->
+          FN make() RETURNS !Person @indirect ->
             p = Person { name: "alice", age: 30 };
             RETURN p;
           END
@@ -2267,13 +2267,35 @@ RSpec.describe SemanticAnnotator do
         expect_escape("local")
         run_mir_escape(<<~FLUX)
           STRUCT Item { id: Float64, name: Byte[100] }
-          STRUCT Container { item: %Item }
+          STRUCT Container { item: Item @indirect }
 
-          MUTABLE g: %Container = Container { item: Item{id:0, name: [0]} }; # Global Heap
+          MUTABLE g: Container @indirect = Container { item: Item{id:0, name: [0]} }; # Global Heap
 
           FN update() USE(MUTABLE g) ->
             local = Item { id: 99, name: [1] };
             g.item = local; # 'local' escapes to Global
+          END
+        FLUX
+      end
+
+      # Regression: a frame value assigned into a GLOBAL must be
+      # heap-promoted even when the global's type is `@indirect`
+      # (not `%`). `@indirect` is context-deferred and is NOT :heap
+      # on a plain struct, so the assign-escape gate must key off the
+      # destination being a global (scope_depth 0), not the global's
+      # Type.location flag. Without this, `local` would dangle after
+      # `update()` returns (UAF). Guards the %->@indirect migration.
+      it "promotes a frame value assigned to an @indirect Global (scope-depth gate)" do
+        expect_escape("local")
+        run_mir_escape(<<~FLUX)
+          STRUCT Item { id: Float64, name: Byte[100] }
+          STRUCT Container { item: Item @indirect }
+
+          MUTABLE g: Container @indirect = Container { item: Item{id:0, name: [0]} };
+
+          FN update() USE(MUTABLE g) ->
+            local = Item { id: 99, name: [1] };
+            g.item = local;
           END
         FLUX
       end
@@ -2360,11 +2382,11 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "uses :register for Heap Objects (Pointers)" do
-        # Even though Config is a struct, %Config is a pointer (8 bytes).
+        # Even though Config is a struct, Config @indirect is a pointer (8 bytes).
         # Pointers fit in registers.
         code = preamble + <<~FLUX
-          FN make_heap() RETURNS !%Config ->
-            c = %Config{id:1};
+          FN make_heap() RETURNS !Config @indirect ->
+            c = Config{id:1};
             RETURN c;
           END
         FLUX
@@ -2735,7 +2757,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           PUB STRUCT Point { x: Float64, y: Float64 }
           PUB FN makePoint(x: Float64, y: Float64) RETURNS Point ->
-            RETURN %Point{ x: x, y: y };
+            RETURN Point{ x: x, y: y };
           END
         FLUX
       }

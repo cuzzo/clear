@@ -214,11 +214,11 @@ module GenericAnalysis
         end
       end
 
-      unless schema.is_a?(Hash) && schema[:type_params]
+      unless schema.respond_to?(:type_params) && schema.type_params
         error!(node, :GENERIC_NOT_GENERIC, type: base_name)
       end
 
-      expected = schema[:type_params].length
+      expected = schema.type_params.length
       actual   = inner.generic_args.length
       if actual != expected
         error!(node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual)
@@ -232,8 +232,8 @@ module GenericAnalysis
         if arg_schema.nil?
           error!(node, :GENERIC_UNKNOWN_TYPE_ARG, type: arg.resolved)
         end
-        if arg_schema.is_a?(Hash) && arg_schema[:type_params]&.any?
-          params_hint = arg_schema[:type_params].map(&:to_s).join(', ')
+        if arg_schema.respond_to?(:type_params) && arg_schema.type_params&.any?
+          params_hint = arg_schema.type_params.map(&:to_s).join(', ')
           error!(node, :GENERIC_MISSING_TYPE_ARGS, type: arg.resolved, type2: arg.resolved, hint: params_hint)
         end
       end
@@ -243,8 +243,8 @@ module GenericAnalysis
       base_name = inner.resolved
       return if (current_fn_ctx&.type_params || []).include?(base_name)  # T itself is valid
       schema = lookup_type_schema(base_name)
-      if schema.is_a?(Hash) && schema[:type_params]&.any?
-        params_hint = schema[:type_params].map(&:to_s).join(', ')
+      if schema.respond_to?(:type_params) && schema.type_params&.any?
+        params_hint = schema.type_params.map(&:to_s).join(', ')
         error!(node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
       end
     end
@@ -656,7 +656,7 @@ module GenericAnalysis
     if expr.is_a?(AST::GetField) && expr.respond_to?(:full_type)
       if expr.target.is_a?(AST::Identifier)
         target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
-        return nil if target_schema.is_a?(Hash) && (target_schema[:kind] == :enum || target_schema[:kind] == :union)
+        return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
       end
       field_ti = expr.full_type
       if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }

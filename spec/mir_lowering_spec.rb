@@ -657,7 +657,7 @@ RSpec.describe MIRLowering do
       pub_struct = AST::StructDef.new(tok, "PubThing", {}, :pub, nil)
       pkg_enum = AST::EnumDef.new(tok, "PkgThing", [:A], nil)
       private_struct = AST::StructDef.new(tok, "PrivateThing", {}, :private, nil)
-      inline_union = AST::UnionDef.new(tok, "Value", { Pair: { kind: :inline_struct, fields: {} } }, :pub)
+      inline_union = AST::UnionDef.new(tok, "Value", { Pair: Schemas::InlineStructVariant.new(fields: {}) }, :pub)
       ast = AST::Program.new(tok, [pub_struct, pkg_enum, private_struct, inline_union])
       type_defs = <<~ZIG
         const PubThing = struct {};
@@ -1070,7 +1070,7 @@ RSpec.describe MIRLowering do
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
-      l = lowering(union_schemas: { Result: { Ok: :Int64, Err: :String } })
+      l = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::IfChain)
       zig = emit(result)
@@ -1172,7 +1172,7 @@ RSpec.describe MIRLowering do
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
-      result = lowering(union_schemas: { Result: { Ok: :Int64, Err: :Int64 } }).lower(node)
+      result = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :Int64 }) }).lower(node)
 
       expect(result).to be_a(MIR::IfChain)
       expect(result.branches.length).to eq(2)
@@ -1349,7 +1349,7 @@ RSpec.describe MIRLowering do
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Value
 
-      l = lowering(union_schemas: { Value: { Num: :Number, Str: :String } })
+      l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
@@ -1363,7 +1363,7 @@ RSpec.describe MIRLowering do
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Value
 
-      l = lowering(union_schemas: { Value: { Num: :Number, Str: :String } })
+      l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
@@ -1636,7 +1636,7 @@ RSpec.describe MIRLowering do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
       params = [AST::Param.new(name: "p", type: :Point, mutable: false)]
-      l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
+      l = lowering(struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Number, "y" => :Number }) })
       fn = make_fn("sum3", params: params)
       result = l.lower(fn)
       zig = emit(result)
@@ -1872,7 +1872,7 @@ RSpec.describe MIRLowering do
                   .new(false, false, [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)], :Int64)
       l = lowering(
         fn_sigs: { "sum3" => sig },
-        struct_schemas: { Point: { x: :Int64, y: :Int64 } }
+        struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Int64, "y" => :Int64 }) }
       )
       arg = make_id("point", full_type: :Point)
       node = AST::FuncCall.new(tok, "sum3", [arg])
@@ -3241,7 +3241,7 @@ RSpec.describe MIRLowering do
         node = AST::BinaryOp.new(tok, left, :OR_RESCUE, struct_lit)
         node.full_type = :Node
 
-        l = lowering(struct_schemas: { Node: { "label" => { type: Type.new(:String) } } })
+        l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
         result = l.lower(node)
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)

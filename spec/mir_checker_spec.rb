@@ -21,6 +21,30 @@ RSpec.describe MIRChecker do
   # HPT_LEAK -- heap-returning call result discarded
   # ===========================================================================
 
+  describe "INDIRECT_DOUBLE_BOX" do
+    it "flags a HeapCreate whose cell type is already a pointer" do
+      hc = MIR::HeapCreate.new("*Val", MIR::Ident.new("v"), :heap, "blk")
+      body = [
+        MIR::AllocMark.new("t", :heap),
+        MIR::Let.new("t", hc, false, nil, nil),
+        MIR::Cleanup.new("t", { kind: :heap, alloc: :heap, has_moved_guard: false }),
+      ]
+      errors = checker.check_fn!(fn_def("dbl", body))
+      expect(errors.any? { |e| e.include?("INDIRECT_DOUBLE_BOX") && e.include?("*Val") }).to be true
+    end
+
+    it "passes a HeapCreate boxing a bare pointee type" do
+      hc = MIR::HeapCreate.new("[]const u8", MIR::Ident.new("s"), :heap, "blk")
+      body = [
+        MIR::AllocMark.new("t", :heap),
+        MIR::Let.new("t", hc, false, nil, nil),
+        MIR::Cleanup.new("t", { kind: :heap, alloc: :heap, has_moved_guard: false }),
+      ]
+      errors = checker.check_fn!(fn_def("ok", body))
+      expect(errors.none? { |e| e.include?("INDIRECT_DOUBLE_BOX") }).to be true
+    end
+  end
+
   describe "HPT_LEAK" do
     it "detects discarded heap-returning call" do
       call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)

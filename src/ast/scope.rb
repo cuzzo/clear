@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "./symbol_entry"
+require_relative "./schemas"
 
 class Scope
     extend T::Sig
