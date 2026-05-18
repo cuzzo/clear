@@ -517,3 +517,52 @@ regression to unblock R3.
 
 Tree state: vm.cht reverted to clean TIGHT baseline; all probes
 reverted; suite green.
+
+## R3 UNBLOCKED at ZERO perf cost (2026-05-18) -- supersedes the de-TIGHT plan
+
+The previous section concluded "R3 must de-TIGHT (+~43% hot path)".
+That is now SUPERSEDED. Probing what `validate_tight_node!`
+(`effects.rb`) actually blocks:
+
+TIGHT loops block exactly two call kinds: `EXTERN FN` (opaque to
+scheduler) and functions with `fn.reentrant == :reentrant`.
+Per `reentrance.rb`:
+- `:reentrant` (plain), `:reentrant_thunk`, `:reentrant_tail_call`
+  all `fn_node.reentrant ||= :reentrant` -> BLOCKED in TIGHT.
+- `:reentrant_not_logical`, `:reentrant_max_depth`
+  `fn_node.reentrant = :non_reentrant` -> NOT blocked.
+
+So plain `EFFECTS REENTRANT` is blocked only because it is
+*unbounded* logical recursion (the diagnostic literally says
+"unbounded depth"). `EFFECTS REENTRANT:MAX_DEPTH(N)` is bounded
+recursion -> `:non_reentrant` -> permitted inside a TIGHT loop.
+
+**Verified empirically:** the recursive `BG { @service ->
+runRegisterBytecode!(COPY ops, ...) }` placed inside the
+still-TIGHT dispatch MATCH compiles cleanly when
+`runRegisterBytecode!` is declared
+`EFFECTS REENTRANT:MAX_DEPTH(1024)` (N <= YIELD_BUDGET 4096 ->
+`tight_reentrance` stays true -> NO yield injected). The
+MAX_DEPTH-annotated register VM runs the benchmark subset at
+TIGHT-baseline perf (within run-to-run noise; NOT the +43%
+de-TIGHT regression).
+
+`:NOT_LOGICAL` is correctly rejected (real self-recursion);
+`:THUNK`/`:TAIL_CALL` are blocked (see the filed inconsistency in
+docs/agents/vm-bugs.md). `:MAX_DEPTH(N)` is the path.
+
+### Revised R3 plan
+
+R3 (real BGSPAWN/FNEXT) proceeds with `runRegisterBytecode!`
+declared `EFFECTS REENTRANT:MAX_DEPTH(N)`:
+- NO de-TIGHT of the dispatch loop -> zero per-instruction
+  checkYield/saveLoopMark cost (the +43% is avoided entirely).
+- N bounds guest BG-fiber nesting depth; raises System
+  MaxDepthExceeded above N (a correct, faithful failure mode for a
+  VM -- mirrors a real stack-depth limit). Pick N from the fiber
+  stack budget; <= 4096 keeps the fn TIGHT-fast.
+- The earlier "restructure the dispatch body so mark_per_iter is
+  false" workstream is NO LONGER REQUIRED for R3 (it stays TIGHT).
+
+Next: wire the real BGSPAWN/FNEXT opcodes (R3 proper) on top of
+the MAX_DEPTH-annotated, still-TIGHT dispatch loop.

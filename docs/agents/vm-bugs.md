@@ -688,3 +688,53 @@ attribution root -- not a per-condition band-aid.
 Regression: `transpile-tests/528_nested_list_loop_rewind.cht`;
 fuzz axis added to `tools/fuzz/templates/loop_carry_collection.rb`
 (see post-mortem).
+
+## Language inconsistency: REENTRANT:THUNK / :TAIL_CALL blocked in TIGHT loops
+
+Found 2026-05-18 while unblocking register-VM R3.
+
+`effects.rb validate_tight_node!` blocks a call inside a TIGHT loop
+iff `fn.reentrant == :reentrant`. `reentrance.rb` maps the reentrant
+variants to `fn.reentrant` as:
+
+| variant | fn.reentrant | TIGHT-loop call |
+|---|---|---|
+| `:reentrant` (plain) | `:reentrant` | blocked (correct: unbounded) |
+| `:reentrant_thunk` | `:reentrant` | **blocked (inconsistent)** |
+| `:reentrant_tail_call` | `:reentrant` | **blocked (inconsistent)** |
+| `:reentrant_not_logical` | `:non_reentrant` | allowed |
+| `:reentrant_max_depth` | `:non_reentrant` | allowed |
+
+The TIGHT block's stated rationale is "unbounded depth"
+(`TIGHT_CALLS_REENTRANT_FN` summary). But:
+
+- `:THUNK` is a CPS + heap trampoline: the *native* stack is
+  provably bounded (continuations are heap-resident). It is
+  arguably the MOST TIGHT-safe recursion form -- strictly safer
+  than `:MAX_DEPTH(N)`, which still consumes N real stack frames
+  yet is allowed.
+- `:TAIL_CALL` is a verified self-loop (constant native stack) --
+  also bounded.
+- TIGHT already permits heap allocation (it merely skips the
+  per-iteration arena mark/restore; boundedness comes from the
+  loop's termination proof) and permits nested TIGHT loops
+  (`validate_tight_node!` just walks the subtree; bounded x bounded
+  composes). By that same termination/bounded-stack logic, a
+  bounded-stack recursion (`:THUNK`, `:TAIL_CALL`) has no reason to
+  be blocked when `:MAX_DEPTH` is not.
+
+Root cause: `reentrance.rb` lumps `:reentrant_thunk` /
+`:reentrant_tail_call` under `fn_node.reentrant ||= :reentrant`
+(legacy-compat bucket) together with unbounded plain `:reentrant`.
+The TIGHT gate keys on that coarse field instead of on
+"unbounded native stack". Architecturally-correct fix: the TIGHT
+gate should block only *unbounded-native-stack* recursion -- i.e.
+plain `:reentrant` (and `:reentrant` reached via mutual cycle) --
+and permit `:reentrant_thunk` / `:reentrant_tail_call` exactly as
+it permits `:reentrant_max_depth` / `:reentrant_not_logical`. Most
+direct: gate on `reentrance_kind`/`tight_reentrance`, not on the
+legacy `fn.reentrant == :reentrant` proxy.
+
+Not blocking R3 (which uses `:MAX_DEPTH(N)`), so filed rather than
+fixed inline; a standalone bug-fix should re-key the gate and add a
+`:THUNK`/`:TAIL_CALL`-in-TIGHT-loop regression test.
