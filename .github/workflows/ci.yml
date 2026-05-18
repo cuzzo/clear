@@ -213,6 +213,11 @@ jobs:
 
   register-vm-allowlist:
     name: Register-VM allowlist (transpile-tests via --vm=register)
+    # DISABLED: the register VM compiles vm.cht to a native binary per
+    # run; on GitHub-hosted runners this consistently times out. Run
+    # locally instead:
+    #   bundle exec ruby examples/minivm/run_tests.rb --vm=register
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
