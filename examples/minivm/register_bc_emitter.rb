@@ -5164,31 +5164,59 @@ class RegisterBcEmitter
       pk = bg_body_tail_is_expr?(tail) ? inferred_expr_type(tail) : :other
       pk = :i64 if pk == :bool
       kinds = caps.transform_values { |t| cap_kind.call(t) }
+      # A cell-backed @shared:locked struct capture (R6.2b) shares by
+      # value-id: the cell index marshals as an i64, sharedCells is
+      # already by-ref, so the fiber mutates the same cell. The body
+      # reaches it via @value_by_name, not a scalar reg.
+      caps.each_key do |n|
+        kinds[n] = :cell if kinds[n] == :other && cell_backed_field_cell(@value_by_name[n])
+      end
       if !%i[i64 f64 string].include?(pk) && tail.is_a?(MIR::Ident)
         bare = tail.name.to_s.split(".").last
         pk = kinds[bare] if kinds.key?(bare)
       end
       name_map = { i64: @ireg_by_name, f64: @freg_by_name, string: @sreg_by_name }
-      push_op = { i64: CAPPUSHI, f64: CAPPUSHF, string: CAPPUSHS }
-      cap_op  = { i64: CAPGETI, f64: CAPGETF, string: CAPGETS }
-      if [:i64, :f64, :string].include?(pk) && kinds.values.all? { |k| k != :other }
-        outer = caps.keys.map { |n| [n, kinds[n], name_map[kinds[n]].fetch(n)] }
+      push_op = { i64: CAPPUSHI, f64: CAPPUSHF, string: CAPPUSHS, cell: CAPPUSHI }
+      cap_op  = { i64: CAPGETI, f64: CAPGETF, string: CAPGETS, cell: CAPGETI }
+      if [:i64, :f64, :string].include?(pk) && kinds.values.all? { |k| %i[i64 f64 string cell].include?(k) }
+        outer = caps.keys.map do |n|
+          k = kinds[n]
+          reg = k == :cell ? cell_backed_field_cell(@value_by_name[n]) : name_map[k].fetch(n)
+          [n, k, reg]
+        end
         emit(JMP, 0)
         over_patch = @ops.length - 1
         entry_ip = @ops.length
-        saved = outer.map { |n, k, _| [n, k, name_map[k][n]] }
+        saved = outer.map { |n, k, _| [n, k, k == :cell ? @value_by_name[n] : name_map[k][n]] }
         saved_pfx = @bg_ctx_prefixes
         @bg_ctx_prefixes = (saved_pfx ? saved_pfx.dup : []).push("__ctx_")
         outer.each_with_index do |(n, k, _), i|
-          r = (k == :i64 ? fresh_ireg : k == :f64 ? fresh_freg : fresh_sreg)
-          emit(cap_op[k], r, add_const(i))
-          name_map[k][n] = r
+          if k == :cell
+            r = fresh_ireg
+            emit(CAPGETI, r, add_const(i))
+            cv = @value_by_name[n]
+            fname = cv[:fields].keys.first
+            @value_by_name[n] = { kind: cv[:kind], type: cv[:type], caps: cv[:caps],
+                                  fields: { fname => { type: :i64, cell: r } } }
+          else
+            r = (k == :i64 ? fresh_ireg : k == :f64 ? fresh_freg : fresh_sreg)
+            emit(cap_op[k], r, add_const(i))
+            name_map[k][n] = r
+          end
         end
         body[0...-1].each { |s| compile_stmt(s) }
         ret = pk == :i64 ? compile_i64_expr(tail) : pk == :f64 ? compile_f64_expr(tail) : compile_string_expr(tail)
         emit(pk == :i64 ? IRET : pk == :f64 ? FRET : SRET, ret)
         @bg_ctx_prefixes = saved_pfx
-        saved.each { |n, k, r| r.nil? ? name_map[k].delete(n) : name_map[k][n] = r }
+        saved.each do |n, k, v|
+          if k == :cell
+            @value_by_name[n] = v
+          elsif v.nil?
+            name_map[k].delete(n)
+          else
+            name_map[k][n] = v
+          end
+        end
         @ops[over_patch] = @ops.length
         emit(CAPNEW)
         outer.each { |_, k, r| emit(push_op[k], r) }

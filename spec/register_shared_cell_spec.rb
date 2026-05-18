@@ -77,4 +77,26 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     expect(ops).not_to include(code(:LOCKACQ))
     expect(ops).not_to include(code(:LOCKREL))
   end
+
+  FIBER_SHARE_SRC = <<~CHT
+    STRUCT Counter { value: Int64 }
+    FN main() RETURNS Void ->
+        MUTABLE c = Counter{ value: 10 } @shared:locked;
+        f: ~Int64 = BG {
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 5; }
+            7_i64;
+        };
+        n: Int64 = NEXT f;
+        ASSERT n == 7_i64, "ret";
+        WITH c AS r { ASSERT r.value == 15, "shared"; }
+        RETURN;
+    END
+  CHT
+
+  it "marshals a cell-backed cap capture into the real fiber path (BGSPAWN+CAPGETI)" do
+    ops = emit(FIBER_SHARE_SRC)
+    expect(ops).to include(code(:BGSPAWN))
+    expect(ops).to include(code(:CAPGETI))
+    expect(ops).to include(code(:LOCKACQ))
+  end
 end

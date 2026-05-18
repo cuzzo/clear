@@ -1,0 +1,17 @@
+# A cell-backed @shared:locked struct captured by a real BG fiber is
+# shared by cell-id (not copied): the fiber's WITH EXCLUSIVE mutation
+# is visible to the parent after NEXT.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    MUTABLE c = Counter{ value: 10 } @shared:locked;
+    f: ~Int64 = BG {
+        WITH EXCLUSIVE c AS inner { inner.value = inner.value + 5; }
+        7_i64;
+    };
+    n: Int64 = NEXT f;
+    ASSERT n == 7_i64, "bg returns 7";
+    WITH c AS r { ASSERT r.value == 15, "shared mutation visible across fiber"; }
+    RETURN;
+END

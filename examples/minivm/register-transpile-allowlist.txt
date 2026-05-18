@@ -542,3 +542,5 @@
 524_or_pass_heap_list_cleanup
 # 532: single-i64-field @shared:locked struct -> SCELL store cell.
 532_register_shared_cell_scalar
+# 533: cell-backed @shared:locked struct shared into a real BG fiber.
+533_register_fiber_shared_cell
