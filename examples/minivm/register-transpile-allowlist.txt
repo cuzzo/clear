@@ -546,3 +546,5 @@
 533_register_fiber_shared_cell
 # 534: two void BG fibers share a @shared:locked cell under WITH EXCLUSIVE.
 534_register_void_fiber_shared_cell
+# 535: R6.5 hammer - 3 fibers RMW a shared @shared:locked counter, lock held across yield.
+535_register_lock_hammer

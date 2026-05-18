@@ -957,3 +957,39 @@ Reproduces on a clean tree at the R6.2a commit (2f106c1d) with all
 later changes stashed, so it is order/parallel-worker dependent and
 predates R6.2b. Likely a shared-state leak between specs sharing a
 MIRLowering/global registry under parallel workers. Not yet root-caused.
+
+## R6.5 concurrency battery rationale (register-VM lock)
+
+R6 added a guest-level per-cell spin-flag lock (LOCKACQ/LOCKREL +
+SCELL store cells) implemented entirely in CLEAR in
+`examples/minivm/vm.cht`, layered on top of the EXISTING, already-
+loom/hammer/VOPR-validated host `CheatLib.Locked` and the existing
+cooperative fiber scheduler (`BG { @service }` / `NEXT`). No new
+`zig/runtime/` atomic, lock, thread, or FFI primitive was introduced
+(only `vm.cht` CLEAR + the Ruby register emitter changed).
+
+Battery decision:
+
+- **Hammer (REQUIRED, delivered):** transpile-test 535 — 3 real BG
+  fibers each RMW a shared `@shared:locked` counter, holding the
+  per-cell lock across a yield (`napFor` inside `WITH EXCLUSIVE`), so
+  contenders must spin-wait rather than interleave. A lost/torn
+  update fails the `== 15` assert. Plus 534 (basic 2-fiber shared
+  RMW). Both run under the standard transpile-test pipeline.
+- **Loom (N/A):** the register VM runs cooperative fibers on a single
+  OS thread; there is no instruction-reordering / multicore memory-
+  visibility surface to exhaust. The only memory barrier is the host
+  `CheatLib.Locked`, which already has its own loom coverage. R6
+  introduced no new atomics or ordering.
+- **VOPR (covered by deterministic differential):** the cooperative
+  scheduler is deterministic given fixed sleeps; 535 was verified
+  stable across repeated runs. Timeout/retry combinatorics are
+  covered deterministically by 262/263/267 (fixed sleep vs fixed
+  100ms lock timeout). No real-time/network/disk randomness exists
+  in this path, so a seeded simulator adds nothing over the fixed-
+  parameter deterministic tests.
+
+Load-bearing correctness evidence: differential parity — the
+contention/timeout/retry allowlist tests (262/263/267/280/281/367)
+pass identically on the register VM and the stack VM, whose lock
+mechanism R6.3 ports verbatim.
