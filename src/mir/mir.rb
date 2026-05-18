@@ -43,11 +43,13 @@ module MIR
     # in mir_lowering.rb from the AST node's `token.line`. nil when the
     # statement was synthesized by lowering (e.g. cleanup defers, hoist
     # temps) and has no user-visible source line.
+    sig { returns(T.nilable(Integer)) }
     attr_accessor :source_line
     # Companion to `source_line`. Captures the AST node's `token.column`
     # so visualization layers can pinpoint the in-line position (LSP
     # ranges, debugger source-list carets, time-travel scrub UIs).
     # Same nil semantics as `source_line` for synthesized fragments.
+    sig { returns(T.nilable(Integer)) }
     attr_accessor :source_column
   end
 

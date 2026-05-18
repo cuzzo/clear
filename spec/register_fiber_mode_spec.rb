@@ -7,7 +7,7 @@ require_relative "../src/backends/importer"
 require_relative "../examples/minivm/register_bc_emitter"
 
 RSpec.describe "register-VM :fiber bg_mode" do
-  SRC = <<~CHT
+  FIBER_MODE_SRC = <<~CHT
     FN main() RETURNS !Void ->
         x: Int64 = 40_i64;
         f: ~Int64 = BG { x + 2_i64; };
@@ -25,14 +25,14 @@ RSpec.describe "register-VM :fiber bg_mode" do
     $stdout = StringIO.new
     $stderr = StringIO.new
     begin
-      fe = CompilerFrontend.compile(SRC, importer: imp, source_dir: Dir.pwd)
+      fe = CompilerFrontend.compile(FIBER_MODE_SRC, importer: imp, source_dir: Dir.pwd)
       low = MIRLowering.new(struct_schemas: fe.struct_schemas, enum_schemas: fe.enum_schemas,
                             union_schemas: fe.union_schemas, fn_sigs: fe.fn_sigs,
                             moved_guard_info: fe.moved_guard_info, importer: imp,
                             source_dir: Dir.pwd, target: :bc)
       prog = low.lower_program(fe.ast)
       MIRChecker.new.check_program!(prog, strict: true)
-      RegisterBcEmitter.new(fe, source: SRC, importer: imp).compile(prog).ops
+      RegisterBcEmitter.new(fe, source: FIBER_MODE_SRC, importer: imp).compile(prog).ops
     ensure
       $stdout, $stderr = out, err
       ENV["CLEAR_REGISTER_BG_MODE"] = prev

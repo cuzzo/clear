@@ -28,6 +28,7 @@ class ModuleImporter
   # → ../../stdlib relative to __FILE__.
   STDLIB_ROOT = T.let(File.expand_path('../../stdlib', __dir__), String)
 
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   attr_reader :module_cache
 
   sig { params(base_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_mir: T::Boolean, stdlib_root: String).void }

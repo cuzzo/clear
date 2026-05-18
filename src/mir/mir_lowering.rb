@@ -550,6 +550,7 @@ class MIRLowering
   # cleanup defers, hoist temps, and other synthesized statements all
   # inherit their parent statement's position. No-op when `line` is
   # nil (synthesized fragments may have no AST origin).
+  sig { params(node: T.untyped, line: T.nilable(Integer), column: T.nilable(Integer)).void }
   def stamp_source_line!(node, line, column = nil)
     return unless line
     return unless node.respond_to?(:source_line=)

@@ -1511,6 +1511,11 @@ class MethodCall
   def set_method=(value); end
 end
 
+class ModuleImporter
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  def module_cache; end
+end
+
 class OwnershipDataflow
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def block_in; end

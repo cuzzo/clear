@@ -884,6 +884,7 @@ class Parser
   # type has a known zero literal (Int64/Float64/String/Bool family). It
   # synthesizes a ListLit of N zeroes so the rest of the pipeline lowers
   # the declaration via the existing fixed-array path.
+  sig { returns(AST::VarDecl) }
   def parse_mutable_var_decl
     start_token = consume(:KEYWORD, 'MUTABLE')
     name = T.must(consume(:VAR_ID)).value
@@ -902,7 +903,7 @@ class Parser
     unless type_annotation
       error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
     end
-    value = synthesize_default_for_type(start_token, type_annotation)
+    value = synthesize_default_for_type(T.must(start_token), type_annotation)
     AST::VarDecl.new(start_token, name, type_annotation, value, true)
   end
 
@@ -910,6 +911,7 @@ class Parser
   # `parse_mutable_var_decl` when no `= expr` was given. Restricted to
   # fixed-size raw arrays of element types with an obvious zero (primitives
   # and String); other types must be initialized explicitly.
+  sig { params(tok: Lexer::Token, type: T.untyped).returns(AST::ListLit) }
   def synthesize_default_for_type(tok, type)
     unless type.is_a?(Type) && type.fixed?
       error!(tok, :MUTABLE_BARE_NEEDS_FIXED, type: type.respond_to?(:resolved) ? type.resolved : type)

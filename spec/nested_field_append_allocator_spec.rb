@@ -11,7 +11,7 @@ require_relative "../src/backends/importer"
 require_relative "../src/backends/compiler_frontend"
 
 RSpec.describe "nested-@list-field append inherits root container allocator" do
-  SRC = <<~CHT
+  NESTED_FIELD_SRC = <<~CHT
     STRUCT Handle { values: Int64[]@list }
 
     FN run(n: Int64) RETURNS !Int64 ->
@@ -69,7 +69,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     node.members.each { |m| each_mir(node[m], seen, &blk) }
   end
 
-  let(:program) { lower_program(SRC) }
+  let(:program) { lower_program(NESTED_FIELD_SRC) }
 
   it "lowers a nested-field append whose root has a :heap AllocMark (path is exercised)" do
     alloc_marks = {}
