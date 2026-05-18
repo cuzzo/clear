@@ -838,7 +838,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[]) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -897,6 +897,15 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE vlist1: RegisterValue[]@list = List[];
     MUTABLE vlist2: RegisterValue[]@list = List[];
     MUTABLE vlist3: RegisterValue[]@list = List[];
+    # R3 capture carrier (R5a uniform-RegisterValue path). A spawned
+    # BG fiber's captures arrive via the `initCaps` param and are
+    # loaded here at entry; the emitted body prologue reads
+    # captureSlots[i] and unwraps into the capture's typed reg.
+    # SEPARATE from vlist0..3 (guests clobber those via LVNew), so
+    # this never collides with guest list-register usage. Empty for
+    # the top-level invocation -> the load loop is a no-op ->
+    # behavior identical to pre-R3 (allowlist 245/245).
+    MUTABLE captureSlots: RegisterValue[]@list = List[];
     MUTABLE map0: HashMap<Int64> = {};
     MUTABLE map1: HashMap<Int64> = {};
     MUTABLE map2: HashMap<Int64> = {};
@@ -950,9 +959,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
 
     # Re-entrant entry point (mirrors the stack VM's exec!(entryIp,...)).
     # Top-level runs pass 0 (main is compiled first -> entry ip 0); a
-    # spawned BG fiber will pass its body region's entry. initCaps
-    # loading lands with BGSPAWN/capture-layout (see
-    # docs/agents/stack-vm-fiber-replication.md R5).
+    # spawned BG fiber passes its body region's entry. Captures arrive
+    # via initCaps and are mirrored into captureSlots so the emitted
+    # body prologue can read captureSlots[i]. Top-level passes an
+    # empty initCaps -> this loop is a no-op -> behavior identical to
+    # pre-R3 (mirrors the stack VM's `slots[ci] = COPY initCaps[ci]`).
+    FOR ci IN (0_i64 ..< initCaps.length()) DO
+        captureSlots.append(COPY initCaps[ci]);
+    END
     MUTABLE ip: Int64 = entryIp;
     TIGHT WHILE ip < ops.length() DO
         # Snapshot the instruction-start ip for error-site line lookup;
