@@ -2878,11 +2878,8 @@ private
     visit(node.value)
 
     scope = current_scope
-    # The discard placeholder `_` is a sink, not a binding: every
-    # `_ = expr;` is an independent discard, never a reassignment of a
-    # prior `_` (which would wrongly trip the immutable-reassign error).
-    # mir_lowering gives each `_` decl a unique synthetic Zig name so
-    # repeated discards in one scope do not collide.
+    # `_` is a discard sink: every `_ = expr;` is an independent
+    # declaration, never a reassignment.
     if !scope.locals.key?(node.name) || node.name == "_"
       # Declaration path
       promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)

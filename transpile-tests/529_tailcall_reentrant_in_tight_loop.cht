@@ -1,15 +1,5 @@
-# Regression for docs/agents/vm-bugs.md "REENTRANT:THUNK /
-# :TAIL_CALL blocked in TIGHT loops" (fixed: TIGHT gate re-keyed
-# onto canonical reentrance_kind == :reentrant, i.e. UNBOUNDED
-# native stack only).
-#
-# A `:TAIL_CALL` reentrant fn has CONSTANT native stack (verified
-# self-loop) -- strictly more TIGHT-safe than `:MAX_DEPTH(N)` (which
-# is permitted yet burns N real frames). It must compile inside a
-# TIGHT loop and produce the correct result (sums 1..5 three times
-# = 45). The unit-level gate contract is pinned by
-# spec/error_emission_coverage_spec.rb ":TIGHT_CALLS_REENTRANT_FN"
-# (plain :reentrant still blocked; :TAIL_CALL / :THUNK permitted).
+# Regression: a :TAIL_CALL reentrant fn (bounded native stack) must
+# be callable inside a TIGHT loop.
 FN sumTo(n: Int64, acc: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
     IF n <= 0_i64 THEN RETURN acc; END
     RETURN sumTo(n - 1_i64, acc + n);

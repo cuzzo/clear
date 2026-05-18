@@ -12,12 +12,7 @@ UNION RegisterValue {
     Int64Val: Int64,
     Number: Float64,
     Str: String,
-    # VM-internal future marker (R3): a NEXT-able BG handle id into
-    # futureTable. Never produced by guest constants -- only by the
-    # BGSPAWN dispatch arm; consumed by FNEXT. Cleaner than the stack
-    # VM's Pair("__future__", id) sentinel. All RegisterValue matches
-    # are PARTIAL+DEFAULT so this variant is additive and inert until
-    # BGSPAWN/FNEXT are emitted.
+    # futureTable index; produced by BGSPAWN, consumed by FNEXT.
     Future: Int64,
 }
 
@@ -897,14 +892,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE vlist1: RegisterValue[]@list = List[];
     MUTABLE vlist2: RegisterValue[]@list = List[];
     MUTABLE vlist3: RegisterValue[]@list = List[];
-    # R3 capture carrier (R5a uniform-RegisterValue path). A spawned
-    # BG fiber's captures arrive via the `initCaps` param and are
-    # loaded here at entry; the emitted body prologue reads
-    # captureSlots[i] and unwraps into the capture's typed reg.
-    # SEPARATE from vlist0..3 (guests clobber those via LVNew), so
-    # this never collides with guest list-register usage. Empty for
-    # the top-level invocation -> the load loop is a no-op ->
-    # behavior identical to pre-R3 (allowlist 245/245).
+    # Separate from vlist0..3 (guests clobber those via LVNew).
     MUTABLE captureSlots: RegisterValue[]@list = List[];
     MUTABLE map0: HashMap<Int64> = {};
     MUTABLE map1: HashMap<Int64> = {};
@@ -957,13 +945,6 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     # writes to the originating allocation.
     MUTABLE traceAllocId: Int64 = 0_i64;
 
-    # Re-entrant entry point (mirrors the stack VM's exec!(entryIp,...)).
-    # Top-level runs pass 0 (main is compiled first -> entry ip 0); a
-    # spawned BG fiber passes its body region's entry. Captures arrive
-    # via initCaps and are mirrored into captureSlots so the emitted
-    # body prologue can read captureSlots[i]. Top-level passes an
-    # empty initCaps -> this loop is a no-op -> behavior identical to
-    # pre-R3 (mirrors the stack VM's `slots[ci] = COPY initCaps[ci]`).
     FOR ci IN (0_i64 ..< initCaps.length()) DO
         captureSlots.append(COPY initCaps[ci]);
     END

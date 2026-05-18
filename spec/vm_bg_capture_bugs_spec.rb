@@ -184,37 +184,6 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     end
   end
 
-  # Bug #7 -- the @list-PARAM sibling of Bug #1 (which fixed the
-  # slice-param case). Root cause: FiberCtxBuilder's FreshHeapCopy /
-  # COPY path (src/mir/fiber_ctx_builder.rb:~127) types the BG ctx
-  # field as `@TypeOf(source_ref)` -- the ORIGINAL captured binding --
-  # but the field actually stores `dupe_var` (the deep-copied owned
-  # value). For a *local* @list or a *slice* param @TypeOf(source) ~=
-  # @TypeOf(dupe), so it works (Bug #1). For an `@list` *parameter*
-  # the source is a borrowed `*const ArrayList(T)`, so the ctx field
-  # is declared `*const ArrayList` while it stores an owned dupe ->
-  # generated Zig `error: expected '*T', found '*const T'`
-  # (T = array_list.Aligned(...)). Architecturally-correct fix: the
-  # ctx field type must describe the value it holds (the dupe), not
-  # the source it was copied from.
-  #
-  # Isolation matrix (all verified 2026-05-18):
-  #   COPY local @list   -> @list param, in BG   : OK
-  #   COPY slice param   -> slice param, in BG    : OK (Bug #1 fix)
-  #   COPY @list param   -> @list param, no BG    : OK
-  #   COPY @list param   -> @list param, in BG    : OK (this fix)
-  #
-  # FIXED 2026-05-18 by three complementary, architecturally-correct
-  # changes: (a) src/mir/mir_pass.rb insert_bg_escape_promote! skips
-  # in-place promoteList for *parameters* (borrowed/caller-owned, the
-  # COPY strategy deep-copies them); (b) FiberCtxBuilder's
-  # FreshHeapCopy ctx field type + dupe are a single source of truth
-  # via CheatLib.CapturedValue(@TypeOf(src)) / dupeCaptured (the
-  # owned value type, not a `*const` alias of the source); (c) that
-  # strip is scoped to `*const T` (a CLEAR borrow) ONLY -- a NON-const
-  # `*T` owned heap box (`*Locked(T)`, Arc, Box) passes through so the
-  # @locked-local body+cleanup pipeline (lockedDestroy) is unchanged.
-  # Also regression-locked by tools/fuzz/templates/bg_capture_typing.rb.
   describe "Bug #7 (FIXED): COPY of an @list fn-param captured into BG" do
     let(:src) { <<~CHT }
       FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
@@ -238,14 +207,4 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     end
   end
 
-  # Bug #8 (OPEN, separate): a bare String[]@list COPY'd into a BG
-  # fiber double-frees its element strings under the leak-detecting
-  # allocator (both local + param origin). Distinct from Bug #7
-  # (cleanup-ownership, not ctx-field typing); only exposed once
-  # Bug #7's compile error was removed. Not asserted here because
-  # compile_and_run uses the C allocator (no double-free detection);
-  # it reproduces under `./clear test`. Tracked in
-  # docs/agents/vm-bugs.md "Bug #8" for its own standalone fix
-  # (which re-enables the :string cells in
-  # tools/fuzz/templates/bg_capture_typing.rb).
 end

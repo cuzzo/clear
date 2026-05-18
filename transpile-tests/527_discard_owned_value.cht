@@ -1,11 +1,5 @@
-# Regression: `_ = <owned/cleanup-bearing expr>;` discard. The discard
-# placeholder `_` is not a valid Zig binding identifier -- the lowering
-# used to emit `const _ = expr; _ = &_; defer cleanup(&_)` which Zig
-# rejects ("'_' used as an identifier without @\"_\" syntax"). A
-# discarded owned value must still be cleaned up (no leak), so it is
-# bound to a unique synthetic temp. Covers an owned @list and an owned
-# struct-with-@list-field; the leak-detecting harness proves the duped
-# value is freed exactly once.
+# Regression: `_ = <owned expr>;` discard must bind a unique temp
+# and still be cleaned up (no leak), not emit literal Zig `_`.
 FN mkList() RETURNS !Int64[]@list ->
     MUTABLE xs: Int64[]@list = List[];
     xs.append(7_i64);

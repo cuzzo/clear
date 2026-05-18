@@ -1,20 +1,5 @@
-# Unit guard for the "nested-@list-field append allocator not inherited
-# from root container" bug (docs/agents/vm-bugs.md).
-#
-# The bug class: mir_lowering's allocator resolution and mir_checker's
-# container attribution independently walk a receiver to find its root
-# container. If they disagree on the root, a nested-field op
-# (`root[i].field.append(x)`) resolves :frame while the heap-promoted
-# root's AllocMark says :heap -> INLINE_ALLOC_MISMATCH (or, worse, a
-# silent use-after-free if the checker is the one that's wrong).
-#
-# This spec pins the *contract* directly via the checker, so it stays
-# valid no matter which promotion path heap-promotes the root or which
-# receiver shape is added later: it does NOT hardcode "should be :heap".
-# It also asserts the program genuinely exercises the path (a
-# nested-field-append InlineZig whose root has a :heap AllocMark), so a
-# future lowering change that stops generating that shape can't make
-# the guard pass vacuously.
+# A nested-field op's allocator must match its root container's
+# AllocMark; divergence is INLINE_ALLOC_MISMATCH or a UAF.
 
 require "rspec"
 require "stringio"
@@ -26,9 +11,6 @@ require_relative "../src/backends/importer"
 require_relative "../src/backends/compiler_frontend"
 
 RSpec.describe "nested-@list-field append inherits root container allocator" do
-  # Loop-spanning @list whose element has a nested @list, mutated via a
-  # nested-field append inside a non-tight loop whose body frame-
-  # allocates (forces saveLoopMark -> heap-promotes the root).
   SRC = <<~CHT
     STRUCT Handle { values: Int64[]@list }
 
@@ -69,17 +51,11 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       fn_sigs: fe.fn_sigs,
       moved_guard_info: fe.moved_guard_info,
       importer: importer,
-      source_dir: Dir.pwd
-      # Default (Zig) target: this is where INLINE_ALLOC_MISMATCH is
-      # checked (on MIR::InlineZig nodes). :bc lowers appends to MIR
-      # calls and never exercises verify_inline_alloc_contracts!.
+      source_dir: Dir.pwd # default Zig target; :bc skips InlineZig checks
     )
     low.lower_program(fe.ast)
   end
 
-  # Generic structural walk: recurse every Struct member (MIR nodes are
-  # Structs) and every Array. No per-shape member list -> the test
-  # walker itself can't drift as MIR node shapes change.
   def each_mir(node, seen = {}, &blk)
     return if node.nil?
     return if seen[node.object_id]
@@ -107,9 +83,6 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     expect(alloc_marks["handles"]).not_to be_nil
     expect(alloc_marks["handles"].alloc).to eq(:heap),
       "root container must be heap-promoted by the loop rewind for this guard to be meaningful"
-    # The nested-field append `handles[i].values.append(...)` is an
-    # InlineZig whose target_var resolves (via root_receiver_node) to
-    # the root "handles" -- proves we're exercising the bug path.
     expect(inline_targeting_handles.any? { |iz| iz.allocs&.key?(:alloc) }).to be(true)
   end
 

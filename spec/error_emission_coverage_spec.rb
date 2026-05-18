@@ -462,15 +462,6 @@ RSpec.describe "error emission coverage" do
       CLEAR
     end
 
-    # The gate keys on canonical reentrance_kind == :reentrant
-    # (UNBOUNDED native stack) only. :TAIL_CALL (verified self-loop,
-    # constant native stack) and :THUNK (CPS+heap trampoline, bounded
-    # native stack) are strictly safer than the already-permitted
-    # :MAX_DEPTH and must NOT be blocked. (Regression for the
-    # docs/agents/vm-bugs.md "REENTRANT:THUNK / :TAIL_CALL blocked in
-    # TIGHT loops" inconsistency -- previously these wrongly raised
-    # because reentrance.rb back-fills fn.reentrant=:reentrant for
-    # them and the gate keyed on that coarse proxy.)
     it "compiles a :TAIL_CALL reentrant call inside a TIGHT WHILE body" do
       run(<<~CLEAR)
         FN sumTo(n: Int64, acc: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->

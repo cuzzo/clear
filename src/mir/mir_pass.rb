@@ -597,14 +597,9 @@ class MIRPass
         t = type_obj ? Type.new(type_obj) : nil
         next unless t && t.needs_escape_promotion?
         next if t.needs_pointer_passing?
-        # A captured *parameter* is borrowed / caller-owned (lowered
-        # as `*const T`). In-place `promoteList(&param)` is invalid
-        # (discards const) AND unnecessary: a param captured into BG
-        # uses the COPY / FreshHeapCopy strategy, which deep-copies it
-        # into the fiber's own owned value. Only frame-allocated
-        # LOCALS are in-place promotable. Mirrors promotion_plan.rb's
-        # `next if val.symbol&.takes` (caller-owned => no promote).
-        # Root cause of vm-bugs.md Bug #7.
+        # A captured param is borrowed `*const T`: in-place
+        # promoteList(&param) discards const, and the COPY capture
+        # strategy already deep-copies it. Only locals are promotable.
         next if bg.capture_analysis&.capture_symbols&.dig(name)&.is_param
         next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
         if t.list_collection?

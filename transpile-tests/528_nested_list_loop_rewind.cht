@@ -1,13 +1,5 @@
-# Regression: a loop-spanning @list whose element type has a NESTED
-# @list field, mutated inside a non-TIGHT loop whose body frame-
-# allocates. The per-iteration arena rewind promotes the root
-# container `handles` to :heap; the direct `handles.append` inherits
-# that, but the nested-field append `handles[i].values.append(...)`
-# used to resolve its allocator from the leaf receiver (a
-# GetField/GetIndex chain with no storage) -> :frame, while the MIR
-# checker attributes the op to the root `handles` (:heap) ->
-# INLINE_ALLOC_MISMATCH. Fixed by resolving the nested-field op
-# allocator from the same root the checker uses. Leak-checked.
+# Regression: a nested-@list-field append on a loop-rewind-heap-
+# promoted root must use the root's allocator, not :frame.
 STRUCT Handle { values: Int64[]@list }
 
 FN run(n: Int64) RETURNS !Int64 ->

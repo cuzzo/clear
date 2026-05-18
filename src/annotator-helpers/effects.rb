@@ -1020,14 +1020,8 @@ module EffectTracker
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
-      # TIGHT blocks only UNBOUNDED native-stack recursion (plain
-      # :reentrant). Key on the canonical reentrance_kind, NOT the
-      # coarse legacy fn.reentrant proxy: reentrance.rb back-fills
-      # fn.reentrant=:reentrant for :thunk (CPS+heap trampoline) and
-      # :tail_call (verified self-loop) too -- both have bounded
-      # native stack and are strictly safer than the already-permitted
-      # :max_depth. (docs/agents/vm-bugs.md "REENTRANT:THUNK /
-      # :TAIL_CALL blocked in TIGHT loops".)
+      # Only plain :reentrant is unbounded native stack; :thunk /
+      # :tail_call / :max_depth are bounded and TIGHT-safe.
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
@@ -1037,14 +1031,8 @@ module EffectTracker
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
-      # TIGHT blocks only UNBOUNDED native-stack recursion (plain
-      # :reentrant). Key on the canonical reentrance_kind, NOT the
-      # coarse legacy fn.reentrant proxy: reentrance.rb back-fills
-      # fn.reentrant=:reentrant for :thunk (CPS+heap trampoline) and
-      # :tail_call (verified self-loop) too -- both have bounded
-      # native stack and are strictly safer than the already-permitted
-      # :max_depth. (docs/agents/vm-bugs.md "REENTRANT:THUNK /
-      # :TAIL_CALL blocked in TIGHT loops".)
+      # Only plain :reentrant is unbounded native stack; :thunk /
+      # :tail_call / :max_depth are bounded and TIGHT-safe.
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end

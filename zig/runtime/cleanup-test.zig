@@ -761,20 +761,10 @@ test "cleanup: recursive union slice" {
     CheatLib.cleanup([]RecValue, alloc, &buf);
 }
 
-// --- CheatLib.CapturedValue / dupeCaptured (vm-bugs.md Bug #7) ----------
-// A binding captured-by-COPY into a BG fiber must become an OWNED value.
-// CapturedValue(S) is the single source of truth for the ctx field type
-// AND dupeCaptured's return type, so they can never diverge.
-
 test "CapturedValue: only *const (borrow) strips; *T / value / slice passthrough" {
     const LI = std.ArrayListUnmanaged(i64);
-    // A `*const T` single-item pointer is a BORROW (immutable CLEAR
-    // param passed by pointer) -> the OWNED pointee type.
     try std.testing.expect(CheatLib.CapturedValue(*const LI) == LI);
-    // A NON-const `*T` is an owned heap box (`*Locked(T)`, Arc, Box):
-    // the body+cleanup pipeline relies on that pointer shape -> keep.
     try std.testing.expect(CheatLib.CapturedValue(*LI) == *LI);
-    // Owned value source / slice -> unchanged (prior behavior preserved).
     try std.testing.expect(CheatLib.CapturedValue(LI) == LI);
     try std.testing.expect(CheatLib.CapturedValue([]const u8) == []const u8);
 }
@@ -789,16 +779,13 @@ test "dupeCaptured: borrowed @list param deep-copies into an independent owned l
     try src.append(alloc, 2);
     try src.append(alloc, 3);
 
-    // Capture-by-COPY of a borrowed param: source is *const LI.
     const sp: *const LI = &src;
     var dup = try CheatLib.dupeCaptured(*const LI, sp, alloc);
     defer dup.deinit(alloc);
 
-    // Owned, mutable value (not a *const alias): independent backing.
     try std.testing.expect(@TypeOf(dup) == LI);
     try std.testing.expectEqual(@as(usize, 3), dup.items.len);
     try std.testing.expectEqualSlices(i64, &[_]i64{ 1, 2, 3 }, dup.items);
-    // Mutating the copy must not touch the source (proves a real copy).
     dup.items[0] = 99;
     try std.testing.expectEqual(@as(i64, 1), src.items[0]);
 }

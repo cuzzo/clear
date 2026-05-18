@@ -1,16 +1,5 @@
-# Regression for docs/agents/vm-bugs.md "COPY of an @list PARAM
-# into a BG ... unguarded .items" (filed 57f23367, FIXED via the
-# architectural Step B: lower_copy routes the list deep-copy
-# through the ONE canonical resilient backing accessor
-# MIR::ItemsAccess(safe: true) instead of the unguarded `.items`).
-#
-# COPY of an `Int64[]@list` PARAMETER captured into a BG whose body
-# calls a REENTRANT fn: the captured param is a slice `[]i64` in
-# the BG ctx, so the old unguarded `.items` deep-copy produced Zig
-# `no member named 'items' in '[]i64'`. The comptime
-# `@hasField(@TypeOf(x),"items")` dispatch now handles ArrayList,
-# slice, and *const ArrayList uniformly at zero runtime cost. Must
-# compile AND run (asserts n == 3). Unblocks register-VM R3 Step 3.
+# Regression: COPY of an @list param into a BG calling a reentrant
+# fn (the captured param is a slice; backing access must be resilient).
 FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
 
 FN worker!(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->

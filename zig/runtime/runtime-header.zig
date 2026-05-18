@@ -3290,22 +3290,12 @@ pub const CheatLib = struct {
         return value;
     }
 
-    /// Owned value type for a binding captured-by-COPY into a fiber.
-    /// A borrowed single-item pointer source (a `@list` / struct fn
-    /// parameter, lowered as `*const T`) must become a fresh OWNED
-    /// `T` the fiber owns by value -- not a `*const` alias of the
-    /// caller's binding. Local owned sources copy as their own type.
-    /// Single source of truth: the BG ctx field type and
-    /// `dupeCaptured`'s return type are BOTH `CapturedValue(S)`, so
-    /// they can never diverge (the Bug #7 root cause). See
-    /// docs/agents/vm-bugs.md "Bug #7".
+    /// The owned type a COPY-captured binding becomes in the fiber.
+    /// Strips ONLY a `*const T` borrow (immutable param passed by
+    /// pointer); a non-const `*T` owned box (*Locked, Arc) keeps its
+    /// pointer shape, which the body+cleanup pipeline relies on.
     pub fn CapturedValue(comptime S: type) type {
         const info = @typeInfo(S);
-        // Only a `*const T` single-item pointer is a BORROW (an
-        // immutable CLEAR param passed by pointer) -- that is the
-        // case the fiber must deep-copy into an owned value. An owned
-        // heap box (`*Locked(T)`, Arc, Box) is a NON-const `*` whose
-        // pointer shape the body+cleanup pipeline relies on; leave it.
         if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and
             @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
         {
@@ -3314,10 +3304,8 @@ pub const CheatLib = struct {
         return S;
     }
 
-    /// Deep-copy a captured binding into the owned value the fiber
-    /// will hold. Mirrors `dupeValue` but, for a borrowed single-item
-    /// pointer source, derefs first so the result is an owned VALUE
-    /// (mutable), not a `*const` pointer aliasing the caller.
+    /// `dupeValue`, but derefs a `*const T` borrow first so the
+    /// result is an owned value, not a `*const` alias of the caller.
     pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) std.mem.Allocator.Error!CapturedValue(S) {
         const info = @typeInfo(S);
         if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and

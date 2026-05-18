@@ -7,32 +7,13 @@
 # the list's backing buffer (it lives in the enclosing frame, not the
 # loop's per-iter frame).
 #
-# Axes:
-#   elem    : Int64 / String element type
-#   depth   : 1 = single loop, 2 = nested loops (flat carrier only)
-#   outer   : iteration count
-#   carrier : :flat   -> `T[]@list`
-#             :nested -> `H[]@list` where `STRUCT H { values: T[]@list }`,
-#                        with a NESTED-FIELD append `lst[i].values.append`
-#   body    : :plain       -> body only appends
-#             :frame_alloc -> body declares a per-iteration frame @list,
-#                             forcing the non-tight loop's
-#                             saveLoopMark/restoreLoopMark (mark_per_iter)
-#
-# The `:nested` + `:frame_alloc` cells are the regression for the
-# nested-@list-field-append allocator bug (docs/agents/vm-bugs.md
-# "nested-@list-field append allocator not inherited from root
-# container"): the per-iteration arena rewind promotes the root
-# container to :heap; the nested-field append must inherit that root
-# allocator, not resolve :frame from the leaf GetField/GetIndex
-# receiver. Pre-fix these cells fail with INLINE_ALLOC_MISMATCH;
-# post-fix the whole matrix is clean. The original flat/:plain cells
-# never exercised this (no nested-field carrier, no frame-alloc body)
-# -- the template was partially implemented.
+# Axes: elem {Int64,String} x depth x outer x carrier
+# {:flat `T[]@list`, :nested `H{values:T[]@list}[]@list` with a
+# nested-field append} x body {:plain, :frame_alloc (per-iter frame
+# @list forcing the non-tight loop's saveLoopMark/restoreLoopMark)}.
 
 LOOP_CARRY_CELLS = []
 
-# Original coverage: flat carrier, plain body.
 [:int, :string].each do |elem|
   [1, 2].each do |depth|
     [5, 12].each do |outer|
