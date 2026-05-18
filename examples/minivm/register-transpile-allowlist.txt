@@ -548,3 +548,32 @@
 534_register_void_fiber_shared_cell
 # 535: R6.5 hammer - 3 fibers RMW a shared @shared:locked counter, lock held across yield.
 535_register_lock_hammer
+
+# --- Roadmap sweep: already-passing tests promoted to regression coverage ---
+24_error_returns
+78_hashmap_methods
+86_then_chain
+92_var_mutated_sroa
+168_struct_list_field_move
+229_shard_numeric_keys
+255_same_name_reassign_in_elif
+283_or_optional_struct_lit_no_leak
+335_with_match_arm_raise
+352_shard_concurrent_error
+353_shard_concurrent_capacity
+382_mutable_param_updates_caller
+382_returned_list_cleanup_leak
+503_match_multi_arm_union_as
+504_match_multi_arm_union_destructure
+509_match_multi_arm_string
+510_match_multi_arm_with_default
+512_match_multi_arm_generic_union
+514_match_multi_arm_mixed_with_single_as
+515_match_multi_arm_when_on_union
+516_match_multi_arm_payload_arith
+517_match_method_shadow_resolution
+521_bg_capture_promise_handle
+522_bg_capture_promise_relay
+527_discard_owned_value
+528_nested_list_loop_rewind
+531_bgcopy_string_list_element_ownership
