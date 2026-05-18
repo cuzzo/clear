@@ -449,6 +449,10 @@ end
 
 class AST::GetField
   sig { returns(T.untyped) }
+  def indirect_field; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def indirect_field=(value); end
+  sig { returns(T.untyped) }
   def is_assignment_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def is_assignment_lhs=(value); end
@@ -564,6 +568,10 @@ class AST::StringConcat
 end
 
 class AST::StructLit
+  sig { returns(T.untyped) }
+  def borrowed_field_names; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def borrowed_field_names=(value); end
   sig { returns(T.untyped) }
   def field_tokens; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1126,8 +1134,6 @@ class FunctionContext
   def needs_rt=(value); end
   sig { returns(T.untyped) }
   def return_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_type=(value); end
   sig { returns(T::Array[T.untyped]) }
   def returns; end
   sig { params(value: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
@@ -1307,6 +1313,18 @@ end
 
 class FunctionSignature
   sig { returns(T.untyped) }
+  def arg_spec; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def arg_spec=(value); end
+  sig { returns(T.nilable(Proc)) }
+  def arg_validator; end
+  sig { params(value: T.nilable(Proc)).returns(T.nilable(Proc)) }
+  def arg_validator=(value); end
+  sig { returns(T.nilable(Integer)) }
+  def arity; end
+  sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
+  def arity=(value); end
+  sig { returns(T.untyped) }
   def can_fail; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_fail=(value); end
@@ -1314,6 +1332,10 @@ class FunctionSignature
   def effects; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def effects=(value); end
+  sig { returns(T.nilable(IntrinsicEmit)) }
+  def emit; end
+  sig { params(value: T.nilable(IntrinsicEmit)).returns(T.nilable(IntrinsicEmit)) }
+  def emit=(value); end
   sig { returns(T.untyped) }
   def extern; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1354,6 +1376,10 @@ class FunctionSignature
   def requires; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def requires=(value); end
+  sig { returns(FunctionReturn) }
+  def return_def; end
+  sig { params(value: FunctionReturn).returns(FunctionReturn) }
+  def return_def=(value); end
   sig { returns(T.untyped) }
   def return_lifetime; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1368,8 +1394,6 @@ class FunctionSignature
   def return_strategy=(value); end
   sig { returns(T.untyped) }
   def return_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_type=(value); end
   sig { returns(T.untyped) }
   def stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1385,6 +1409,10 @@ class FunctionSignature
 end
 
 class GetField
+  sig { returns(T.untyped) }
+  def indirect_field; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def indirect_field=(value); end
   sig { returns(T.untyped) }
   def is_assignment_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1419,6 +1447,15 @@ class IfStatement
   def then_result_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def then_result_type=(value); end
+end
+
+class InlineStructVariant
+  sig { returns(T.untyped) }
+  def deinit_entries; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def deinit_entries=(value); end
+  sig { returns(T.untyped) }
+  def fields; end
 end
 
 class MIR::Drop
@@ -1572,6 +1609,8 @@ class ResourceSchema
   sig { returns(T.untyped) }
   def fields; end
   sig { returns(T.untyped) }
+  def methods; end
+  sig { returns(T.untyped) }
   def static_methods; end
   sig { returns(T.untyped) }
   def type_params; end
@@ -1601,6 +1640,15 @@ class Schemas::EnumSchema
   def visibility; end
 end
 
+class Schemas::InlineStructVariant
+  sig { returns(T.untyped) }
+  def deinit_entries; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def deinit_entries=(value); end
+  sig { returns(T.untyped) }
+  def fields; end
+end
+
 class Schemas::ResourceSchema
   sig { returns(T.untyped) }
   def as_type; end
@@ -1610,6 +1658,8 @@ class Schemas::ResourceSchema
   def extern_module; end
   sig { returns(T.untyped) }
   def fields; end
+  sig { returns(T.untyped) }
+  def methods; end
   sig { returns(T.untyped) }
   def static_methods; end
   sig { returns(T.untyped) }
@@ -1622,11 +1672,7 @@ class Schemas::StructSchema
   sig { returns(T.untyped) }
   def as_type; end
   sig { returns(T.untyped) }
-  def borrowed_fields; end
-  sig { returns(T.untyped) }
   def extern_module; end
-  sig { returns(T.untyped) }
-  def field_defaults; end
   sig { returns(T.untyped) }
   def fields; end
   sig { returns(T.untyped) }
@@ -1712,6 +1758,10 @@ end
 
 class StructLit
   sig { returns(T.untyped) }
+  def borrowed_field_names; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def borrowed_field_names=(value); end
+  sig { returns(T.untyped) }
   def field_tokens; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_tokens=(value); end
@@ -1721,11 +1771,7 @@ class StructSchema
   sig { returns(T.untyped) }
   def as_type; end
   sig { returns(T.untyped) }
-  def borrowed_fields; end
-  sig { returns(T.untyped) }
   def extern_module; end
-  sig { returns(T.untyped) }
-  def field_defaults; end
   sig { returns(T.untyped) }
   def fields; end
   sig { returns(T.untyped) }
@@ -1737,9 +1783,9 @@ class StructSchema
 end
 
 class SymbolEntry
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def borrowed_alias; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def borrowed_alias=(value); end
   sig { returns(T.untyped) }
   def capabilities; end
@@ -1753,9 +1799,9 @@ class SymbolEntry
   def invalid_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def invalid_reason=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def is_param; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def is_param=(value); end
   sig { returns(T.untyped) }
   def layout; end
@@ -1773,13 +1819,13 @@ class SymbolEntry
   def mutable; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutable=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def mutable_ref_target; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutable_ref_target=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def mutated; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutated=(value); end
   sig { returns(T.nilable(Symbol)) }
   def ownership_kind; end
@@ -1789,13 +1835,13 @@ class SymbolEntry
   def param_decl_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def param_decl_token=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def poly_borrow_target; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def poly_borrow_target=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def read; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def read=(value); end
   sig { returns(T.untyped) }
   def rebindable; end
@@ -1809,9 +1855,9 @@ class SymbolEntry
   def resource; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def resource=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Scope)) }
   def scope; end
-  sig { params(value: T.untyped).returns(T.untyped) }
+  sig { params(value: T.nilable(Scope)).returns(T.nilable(Scope)) }
   def scope=(value); end
   sig { returns(T.nilable(Integer)) }
   def scope_depth; end
@@ -1833,14 +1879,12 @@ class SymbolEntry
   def sync_families; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_families=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
+  sig { returns(T::Boolean) }
   def takes; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+  sig { params(value: T::Boolean).returns(T::Boolean) }
   def takes=(value); end
   sig { returns(T.untyped) }
   def type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def type=(value); end
   sig { returns(T.untyped) }
   def valid; end
   sig { params(value: T.untyped).returns(T.untyped) }
