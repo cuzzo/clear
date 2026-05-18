@@ -912,3 +912,38 @@ continuation:
 
 Until R6: do not trust register-VM lock/atomic/contention tests as
 concurrency coverage; they verify only the single-threaded shape.
+
+## R6 design (corrected): register-VM shared cap-wrapped store
+
+Earlier note said R6 should "start by un-deferring Step D". That
+is WRONG: Step D is the Zig-backend FiberCtxBuilder collapse,
+orthogonal to the register VM. The register VM has its own capture
+machinery (the :fiber emitter + vm.cht pendingCaps/captureSlots).
+
+Real root: the register VM has NO shared cap-wrapped store. The
+stack VM threads one `pool: Env[N]@pool:shared:locked` as an
+exec! PARAMETER (passed by shared-Arc ref into every spawned
+exec!, never copied) -- that single Arc<Locked<>> is where all
+cross-fiber guest state lives. runRegisterBytecode!'s params
+(ops..entryIp, initCaps) have no analogue; @shared:locked Counter
+is field-decomposed to scalar regs (single-threaded fake).
+Marshaling such a capture through the scalar pendingCaps COPY
+would give each fiber its own copy -> no sharing -> the lock is
+meaningless.
+
+R6 first step = DESIGN the shared store, modeled on stack VM:
+- Add a shared cap-wrapped store threaded through every recursive
+  runRegisterBytecode! spawn by reference (analogue of `pool`):
+  a real `T@shared:locked` (or an Arc<Locked<RegisterValue[]>>
+  handle table) param, GIVEN/forwarded into BGSPAWN's recursive
+  call alongside ops/initCaps -- NOT deep-copied.
+- A @shared:locked guest value becomes a handle into that store;
+  WITH EXCLUSIVE acquires the real Locked; captures pass the
+  handle (shared), not a scalar copy.
+- Then real lock-timeout + ON LockTimeout, atomics.
+- MANDATORY (CLAUDE.md): hammer + loom + VOPR, TSan/ASan,
+  std.testing.allocator green before integration.
+
+This is a dedicated multi-commit workstream gated on that design;
+no bounded slice meaningfully advances it. The :fiber scalar
+fiber path (R5, landed) stays the foundation.
