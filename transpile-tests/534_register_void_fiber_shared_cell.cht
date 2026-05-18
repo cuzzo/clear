@@ -1,0 +1,16 @@
+# Two void-payload BG fibers each mutate a shared @shared:locked
+# counter under WITH EXCLUSIVE. They run as REAL fibers (BGSPAWN),
+# share the cell by id, and the lock serializes the read-modify-write
+# so the joined result is exactly 2.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    MUTABLE c = Counter{ value: 0 } @shared:locked;
+    a: ~Void = BG { WITH EXCLUSIVE c AS x { x.value = x.value + 1; } };
+    b: ~Void = BG { WITH EXCLUSIVE c AS x { x.value = x.value + 1; } };
+    NEXT a;
+    NEXT b;
+    WITH c AS r { ASSERT r.value == 2, "two fibers each +1 = 2"; }
+    RETURN;
+END

@@ -99,4 +99,24 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     expect(ops).to include(code(:CAPGETI))
     expect(ops).to include(code(:LOCKACQ))
   end
+
+  VOID_FIBER_SRC = <<~CHT
+    STRUCT Counter { value: Int64 }
+    FN main() RETURNS Void ->
+        MUTABLE c = Counter{ value: 0 } @shared:locked;
+        a: ~Void = BG { WITH EXCLUSIVE c AS x { x.value = x.value + 1; } };
+        b: ~Void = BG { WITH EXCLUSIVE c AS x { x.value = x.value + 1; } };
+        NEXT a;
+        NEXT b;
+        WITH c AS r { ASSERT r.value == 2, "two"; }
+        RETURN;
+    END
+  CHT
+
+  it "runs a void-payload cap-capturing BG as a real fiber (BGSPAWN per BG)" do
+    ops = emit(VOID_FIBER_SRC)
+    expect(ops.count { |o| o == code(:BGSPAWN) }).to eq(2)
+    expect(ops).to include(code(:CAPGETI))
+    expect(ops).to include(code(:LOCKACQ))
+  end
 end

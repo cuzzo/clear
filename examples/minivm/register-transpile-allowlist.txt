@@ -544,3 +544,5 @@
 532_register_shared_cell_scalar
 # 533: cell-backed @shared:locked struct shared into a real BG fiber.
 533_register_fiber_shared_cell
+# 534: two void BG fibers share a @shared:locked cell under WITH EXCLUSIVE.
+534_register_void_fiber_shared_cell

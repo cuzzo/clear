@@ -951,7 +951,15 @@ class RegisterBcEmitter
       # is a no-op.
       name = resolve_ctx_name(expr.receiver.name)
       promise = (@bg_promise_bindings || {})[name]
-      return if promise && promise.fetch(:payload_kind) == :void
+      if promise && promise.fetch(:payload_kind) == :void
+        # Real fiber: NEXT must join (force the fiber to run to
+        # completion). Inline body already ran; NEXT is a no-op.
+        if promise[:fiber]
+          dst = fresh_ireg
+          emit(FNEXTI, dst, promise.fetch(:reg))
+        end
+        return
+      end
     end
 
     if expr.is_a?(MIR::MethodCall) &&
@@ -5163,6 +5171,7 @@ class RegisterBcEmitter
       tail = body.last
       pk = bg_body_tail_is_expr?(tail) ? inferred_expr_type(tail) : :other
       pk = :i64 if pk == :bool
+      void_body = !bg_body_tail_is_expr?(tail) || pk == :void
       kinds = caps.transform_values { |t| cap_kind.call(t) }
       # A cell-backed @shared:locked struct capture (R6.2b) shares by
       # value-id: the cell index marshals as an i64, sharedCells is
@@ -5178,7 +5187,7 @@ class RegisterBcEmitter
       name_map = { i64: @ireg_by_name, f64: @freg_by_name, string: @sreg_by_name }
       push_op = { i64: CAPPUSHI, f64: CAPPUSHF, string: CAPPUSHS, cell: CAPPUSHI }
       cap_op  = { i64: CAPGETI, f64: CAPGETF, string: CAPGETS, cell: CAPGETI }
-      if [:i64, :f64, :string].include?(pk) && kinds.values.all? { |k| %i[i64 f64 string cell].include?(k) }
+      if ([:i64, :f64, :string].include?(pk) || void_body) && kinds.values.all? { |k| %i[i64 f64 string cell].include?(k) }
         outer = caps.keys.map do |n|
           k = kinds[n]
           reg = k == :cell ? cell_backed_field_cell(@value_by_name[n]) : name_map[k].fetch(n)
@@ -5204,9 +5213,16 @@ class RegisterBcEmitter
             name_map[k][n] = r
           end
         end
-        body[0...-1].each { |s| compile_stmt(s) }
-        ret = pk == :i64 ? compile_i64_expr(tail) : pk == :f64 ? compile_f64_expr(tail) : compile_string_expr(tail)
-        emit(pk == :i64 ? IRET : pk == :f64 ? FRET : SRET, ret)
+        if void_body
+          body.each { |s| compile_stmt(s) }
+          z = fresh_ireg
+          emit(ICONST, z, add_const(0))
+          emit(IRET, z)
+        else
+          body[0...-1].each { |s| compile_stmt(s) }
+          ret = pk == :i64 ? compile_i64_expr(tail) : pk == :f64 ? compile_f64_expr(tail) : compile_string_expr(tail)
+          emit(pk == :i64 ? IRET : pk == :f64 ? FRET : SRET, ret)
+        end
         @bg_ctx_prefixes = saved_pfx
         saved.each do |n, k, v|
           if k == :cell
@@ -5222,7 +5238,7 @@ class RegisterBcEmitter
         outer.each { |_, k, r| emit(push_op[k], r) }
         fid = fresh_ireg
         emit(BGSPAWN, fid, entry_ip, 0)
-        return { kind: :bg_promise, payload_kind: pk, reg: fid, fiber: true }
+        return { kind: :bg_promise, payload_kind: void_body ? :void : pk, reg: fid, fiber: true }
       end
     end
 
