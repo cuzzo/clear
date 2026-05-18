@@ -691,6 +691,21 @@ fuzz axis added to `tools/fuzz/templates/loop_carry_collection.rb`
 
 ## Language inconsistency: REENTRANT:THUNK / :TAIL_CALL blocked in TIGHT loops
 
+**FIXED 2026-05-18** (architectural Step A -- collapse a divergent
+proxy onto the canonical field). `effects.rb validate_tight_node!`
+now keys on `fn.reentrance_kind == :reentrant` (the canonical
+"UNBOUNDED native stack" property) instead of the coarse legacy
+`fn.reentrant == :reentrant` proxy that reentrance.rb back-fills
+for `:thunk`/`:tail_call` too. The gate no longer consults the
+proxy; bounded-native-stack recursion (`:thunk`, `:tail_call`,
+and the already-permitted `:max_depth`/`:not_logical`) is allowed
+in TIGHT loops. Net complexity reduction: one fewer place that
+re-derives "is this recursion bounded". Regression:
+`transpile-tests/529_tailcall_reentrant_in_tight_loop.cht`
+(compile+run) and `spec/error_emission_coverage_spec.rb`
+":TIGHT_CALLS_REENTRANT_FN" (unit: plain :reentrant still blocked;
+:TAIL_CALL/:THUNK permitted -- load-bearing, fails pre-fix).
+
 Found 2026-05-18 while unblocking register-VM R3.
 
 `effects.rb validate_tight_node!` blocks a call inside a TIGHT loop

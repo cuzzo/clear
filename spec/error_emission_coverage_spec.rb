@@ -461,6 +461,51 @@ RSpec.describe "error emission coverage" do
         END
       CLEAR
     end
+
+    # The gate keys on canonical reentrance_kind == :reentrant
+    # (UNBOUNDED native stack) only. :TAIL_CALL (verified self-loop,
+    # constant native stack) and :THUNK (CPS+heap trampoline, bounded
+    # native stack) are strictly safer than the already-permitted
+    # :MAX_DEPTH and must NOT be blocked. (Regression for the
+    # docs/agents/vm-bugs.md "REENTRANT:THUNK / :TAIL_CALL blocked in
+    # TIGHT loops" inconsistency -- previously these wrongly raised
+    # because reentrance.rb back-fills fn.reentrant=:reentrant for
+    # them and the gate keyed on that coarse proxy.)
+    it "compiles a :TAIL_CALL reentrant call inside a TIGHT WHILE body" do
+      run(<<~CLEAR)
+        FN sumTo(n: Int64, acc: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
+          IF n <= 0 THEN RETURN acc; END
+          RETURN sumTo(n - 1, acc + n);
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE i: Int64 = 0;
+          MUTABLE total: Int64 = 0;
+          TIGHT WHILE i < 3 DO
+            total += sumTo(5, 0);
+            i += 1;
+          END
+        END
+      CLEAR
+    end
+
+    it "compiles a :THUNK reentrant call inside a TIGHT WHILE body" do
+      run(<<~CLEAR)
+        FN fact(n: Int64) RETURNS Int64 EFFECTS REENTRANT:THUNK ->
+          IF n <= 1 THEN RETURN 1; END
+          RETURN n * fact(n - 1);
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE i: Int64 = 0;
+          MUTABLE acc: Int64 = 0;
+          TIGHT WHILE i < 3 DO
+            acc += fact(5);
+            i += 1;
+          END
+        END
+      CLEAR
+    end
   end
 
   # @example_for: BORROW_WILDCARD_NEEDS_STRUCT
