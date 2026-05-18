@@ -436,3 +436,75 @@ under the effect/reentrancy analysis — exposed here by adding
 the sig now matches the method's real contract. Minimal,
 architecturally-correct (no new logic — aligns the type with
 existing behavior). Status: **FIXED**.
+
+---
+
+## Bug #7 (OPEN): COPY of an `@list` fn-param captured into BG
+
+Found 2026-05-18 while faithfully re-reproducing the R2 fiber
+blocker (post the scan_direct/pipeline_rewriter compiler fix). The
+direct `@list`-parameter sibling of Bug #1 (which fixed only the
+slice-param case).
+
+### Minimal reproduction
+
+```cht
+FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+FN runit(ops: Int64[]@list) RETURNS !Int64 ->
+    p: ~Int64 = BG { consume(COPY ops); };
+    RETURN NEXT p;
+END
+```
+
+Generated Zig: `error: expected type '*T', found '*const T'`,
+`note: T = array_list.Aligned(i64,null)`.
+
+### Isolation matrix (all verified)
+
+| capture                         | result |
+|---------------------------------|--------|
+| COPY local @list  -> in BG      | OK     |
+| COPY slice param  -> in BG      | OK (Bug #1 fix) |
+| COPY @list param  -> NO BG      | OK     |
+| **COPY @list param -> in BG**   | **FAILS** |
+
+### Root cause (pinpointed, one line)
+
+`src/mir/fiber_ctx_builder.rb` ~L127, the `FreshHeapCopy` (COPY)
+branch:
+
+```ruby
+dupe_decl = "const #{dupe_var} = try CheatLib.dupeValue(@TypeOf(#{source_ref}), #{source_ref}, ...)"
+CaptureSpec.new(name, "@TypeOf(#{source_ref})", dupe_var, ...)
+                       # ^^ ctx FIELD TYPE = type of the SOURCE
+                       #    but the field STORES `dupe_var` (the
+                       #    deep-copied owned value).
+```
+
+For a *local* @list or a *slice* param, `@TypeOf(source_ref) ~=
+@TypeOf(dupe_var)`, so it works (that is why Bug #1's slice-param
+fix appeared complete). For an `@list` **parameter**, `source_ref`
+is a borrowed `*const ArrayList(T)`, so the ctx field is declared
+`*const ArrayList` while it actually holds an owned dupe ->
+`*T` vs `*const T` mismatch in the fiber body / forwarded call.
+
+### Architecturally-correct fix (NOT a band-aid, NOT vm.cht-side)
+
+The ctx field type must describe **the value the field holds** (the
+dupe), not the source it was copied from: in the `FreshHeapCopy`
+branch, `field_type_zig` should be `@TypeOf(#{dupe_var})` (with the
+dupe decl ordered before the ctx struct type so `@TypeOf` resolves),
+or the owned element/container type directly. This is one principled
+change in `FiberCtxBuilder`, but it is on the BG / BG STREAM /
+CONCURRENT / DO capture codegen path -- **broad blast radius across
+all concurrency**. It must be its own dedicated commit verified
+EXHAUSTIVELY (prspec, transpile-tests, fuzz matrix, the full
+`:integration` BG/concurrency suite, register allowlist) and must
+**flip** Bug #7's spec expectation to `ok == true`. Do NOT work
+around it in `vm.cht` (that would be the band-aid); it blocks the
+stack-VM fiber replication (R2-R6) because
+`runRegisterBytecode!`'s `@list` params (`sourceLines` etc.) are
+exactly this shape.
+
+Regression: `spec/vm_bg_capture_bugs_spec.rb` "Bug #7 (OPEN)" --
+asserts the current compile failure; flip when fixed.

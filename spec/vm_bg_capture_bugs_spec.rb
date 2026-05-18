@@ -183,4 +183,51 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
+
+  # Bug #7 -- the @list-PARAM sibling of Bug #1 (which fixed the
+  # slice-param case). Root cause: FiberCtxBuilder's FreshHeapCopy /
+  # COPY path (src/mir/fiber_ctx_builder.rb:~127) types the BG ctx
+  # field as `@TypeOf(source_ref)` -- the ORIGINAL captured binding --
+  # but the field actually stores `dupe_var` (the deep-copied owned
+  # value). For a *local* @list or a *slice* param @TypeOf(source) ~=
+  # @TypeOf(dupe), so it works (Bug #1). For an `@list` *parameter*
+  # the source is a borrowed `*const ArrayList(T)`, so the ctx field
+  # is declared `*const ArrayList` while it stores an owned dupe ->
+  # generated Zig `error: expected '*T', found '*const T'`
+  # (T = array_list.Aligned(...)). Architecturally-correct fix: the
+  # ctx field type must describe the value it holds (the dupe), not
+  # the source it was copied from.
+  #
+  # Isolation matrix (all verified 2026-05-18):
+  #   COPY local @list   -> @list param, in BG   : OK
+  #   COPY slice param   -> slice param, in BG    : OK (Bug #1 fix)
+  #   COPY @list param   -> @list param, no BG    : OK
+  #   COPY @list param   -> @list param, in BG    : FAILS  <-- this
+  #
+  # Asserts the CURRENT broken behavior; flip to expect ok==true when
+  # fiber_ctx_builder is fixed. See docs/agents/vm-bugs.md.
+  describe "Bug #7 (OPEN): COPY of an @list fn-param captured into BG" do
+    let(:src) { <<~CHT }
+      FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+
+      FN runit(ops: Int64[]@list) RETURNS !Int64 ->
+          p: ~Int64 = BG { consume(COPY ops); };
+          RETURN NEXT p;
+      END
+
+      FN main() RETURNS !Void ->
+          MUTABLE arr: Int64[]@list = List[];
+          arr.append(1_i64); arr.append(2_i64); arr.append(3_i64);
+          n: Int64 = runit(GIVE arr) OR RAISE;
+          ASSERT n == 3, "@list-param + COPY captures into BG";
+      END
+    CHT
+
+    it "currently FAILS to compile (ctx field typed from source, not the owned dupe)" do
+      result = compile(src)
+      expect(result[:ok]).to be(false),
+        "Bug #7 fixed? flip this expectation + the vm-bugs.md entry"
+      expect(result[:output]).to match(/expected type .\*|const|array_list/i)
+    end
+  end
 end
