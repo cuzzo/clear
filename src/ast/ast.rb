@@ -55,6 +55,62 @@ module AST
     end
   end
 
+  # A `USE` capture descriptor (FunctionDef#captures / LambdaLit#
+  # captures element). Parser builds name/type/default/mutable/takes/
+  # comptime/name_token (same shape as Param, via the shared
+  # parse_argument_list); the annotator (verify_captures!) stamps the
+  # resolved `type` and `storage`. Replaces the loose Hash; every
+  # member strongly typed, no [:key] access. (Distinct from the FSM
+  # capture record in mir_checker, which carries cleanup_at.)
+  Capture = Struct.new(:name, :type, :default, :mutable, :takes,
+                       :comptime, :name_token, :storage,
+                       keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      # mutable/takes/comptime arrive from match! (a Token when the
+      # keyword is present, nil/false otherwise) -- normalize to Bool.
+      self[:mutable]  = !!self[:mutable]
+      self[:takes]    = !!self[:takes]
+      self[:comptime] = !!self[:comptime]
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { returns(String) }
+    def name; self[:name]; end
+
+    sig { returns(T.nilable(Type)) }
+    def type; self[:type]; end
+
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    sig { returns(T.nilable(AST::Locatable)) }
+    def default; self[:default]; end
+
+    sig { returns(T::Boolean) }
+    def mutable; self[:mutable]; end
+
+    sig { returns(T::Boolean) }
+    def takes; self[:takes]; end
+
+    sig { returns(T::Boolean) }
+    def comptime; self[:comptime]; end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def name_token; self[:name_token]; end
+
+    sig { returns(T.nilable(Symbol)) }
+    def storage; self[:storage]; end
+
+    sig { params(val: T.nilable(Symbol)).void }
+    def storage=(val); self[:storage] = val; end
+  end
+
   # One arm of a MATCH statement (MatchStatement#cases element).
   # Replaces the untyped clause hash. MATCH-only (WITH MATCH uses a
   # separate parse_with_match_arms shape). Every slot is a single

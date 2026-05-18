@@ -880,7 +880,9 @@ class Parser
                        mutable: is_mutable, takes: takes,
                        comptime: is_comptime, name_token: name_tok)
       else
-        { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
+        AST::Capture.new(name: p_name, type: p_type, default: default_val,
+                         mutable: is_mutable, takes: takes,
+                         comptime: is_comptime, name_token: name_tok)
       end
     end
      .last # always ignore the first token

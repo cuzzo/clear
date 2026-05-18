@@ -822,10 +822,9 @@ module FunctionAnalysis
     return if node.captures.nil? || node.captures.empty?
 
     node.captures.each do |cap|
-      # cap is likely a hash: { name: "x" }
-      cap_name = cap[:name]
+      cap_name = cap.name
 
-      if cap[:default]
+      if cap.default
         error!(node, :CAPTURE_NO_DEFAULT, name: cap_name)
       end
 
@@ -843,7 +842,7 @@ module FunctionAnalysis
 
       entry = owner_scope.locals[cap_name]
 
-      if cap[:mutable] && !entry.mutable
+      if cap.mutable && !entry.mutable
         emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
       end
 
@@ -851,8 +850,8 @@ module FunctionAnalysis
       owner_scope.mark_read(cap_name)
 
       # Enrich the capture node with the resolved type
-      cap[:type] = entry.type
-      cap[:storage] = entry.storage
+      cap.type = entry.type
+      cap.storage = entry.storage
     end
   end
 
@@ -863,13 +862,13 @@ module FunctionAnalysis
 
     node.captures.each do |cap|
       current_scope.declare(
-        cap[:name],
+        cap.name,
         nil,
-        cap[:type],
-        cap[:mutable],
+        cap.type,
+        cap.mutable,
         false,
         nil,
-        cap[:storage]
+        cap.storage
       )
     end
   end
