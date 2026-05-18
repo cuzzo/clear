@@ -1059,7 +1059,20 @@ class RegisterBcEmitter
   end
 
   def compile_scope_block(stmt)
+    @with_lock_releases ||= []
+    saved = @with_lock_releases.length
     semantic_body(stmt.body || []).each { |child| compile_stmt(child) }
+    while @with_lock_releases.length > saved
+      emit(LOCKREL, @with_lock_releases.pop)
+    end
+  end
+
+  # The single cell-backed field's value-index reg, if `src` is a
+  # single-i64-field @shared:locked struct (R6.2b). nil otherwise.
+  def cell_backed_field_cell(src)
+    fields = src && src[:fields]
+    return nil unless fields && fields.size == 1
+    fields.values.first[:cell]
   end
 
   def compile_return(stmt)
@@ -2166,6 +2179,16 @@ class RegisterBcEmitter
     src_caps = caps_for_value(src)
     if src_caps && %i[locked write_locked].include?(src_caps[:sync])
       record_shared_event(:acquire, src_name, src[:kind], caps: src_caps)
+      fallible = (stmt.stdlib_def && stmt.stdlib_def[:fallible_clauses]) || []
+      fallible_vars = fallible.map { |fc| fc[:var_name].to_s }.to_set
+      cell_reg = cell_backed_field_cell(src)
+      if cell_reg && !fallible_vars.include?(src_name)
+        tmo = fresh_ireg
+        emit(ICONST, tmo, add_const(30000))
+        emit(LOCKACQ, fresh_ireg, cell_reg, tmo)
+        @with_lock_releases ||= []
+        @with_lock_releases << cell_reg
+      end
     end
 
     # Each `const <name> = ...get();` line introduces a binding for

@@ -62,4 +62,19 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     expect(ops).not_to include(code(:SCELLSETI))
     expect(ops).not_to include(code(:SCELLGETI))
   end
+
+  it "brackets the guest WITH block with LOCKACQ/LOCKREL" do
+    ops = emit(LOCKED_SRC)
+    acq = ops.index(code(:LOCKACQ))
+    rel = ops.rindex(code(:LOCKREL))
+    expect(acq).not_to be_nil
+    expect(rel).not_to be_nil
+    expect(acq).to be < rel
+  end
+
+  it "emits no lock ops for a plain struct" do
+    ops = emit(PLAIN_SRC)
+    expect(ops).not_to include(code(:LOCKACQ))
+    expect(ops).not_to include(code(:LOCKREL))
+  end
 end
