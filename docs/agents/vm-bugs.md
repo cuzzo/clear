@@ -562,3 +562,55 @@ comment block, no assertion.
 `elem = :int` for exactly this reason. When Bug #8 is fixed (its
 own standalone bug-fix commit), re-enable the `:string` cells in
 that template -- they become the regression lock.
+
+## Compiler: discard placeholder `_` emitted as a Zig identifier
+
+Found 2026-05-18 while running the faithful post-Bug#7 reentrant
+register-VM probe (`docs/agents/stack-vm-fiber-replication.md`).
+
+### Symptom
+
+`_ = <owned/cleanup-bearing expr>;` (an `AST::BindExpr` decl with
+`name == "_"` -- e.g. `_ = makeList() OR RAISE;`, `_ = NEXT fut;`)
+lowered to literal Zig:
+
+```zig
+const _ = try make(rt); _ = _;
+defer CheatLib.cleanup(RegisterValue, rt.heapAlloc(), &_);
+```
+
+`error: '_' used as an identifier without @"_" syntax`. Zig forbids
+`_` as a bindable name; the discarded owned value also still needs
+its cleanup (no leak).
+
+Second facet: two `_ = ...;` discards in one scope -- the annotator
+saw the second as a *reassignment* of the first (immutable) `_` and
+raised `Variable '_' is immutable`.
+
+### Root cause
+
+`_` is the discard sink, never a real binding, but it flowed
+through as an ordinary name in two places:
+
+1. `src/mir/mir_lowering.rb` `lower_var_decl`: `safe_name =
+   zig_safe_name(node.name)` returned literal `_`, threaded into
+   `MIR::Let`/`AllocMark`/`Cleanup`/suppression.
+2. `src/annotator.rb` `visit_BindExpr`: `_` was registered as a
+   scope local, so the next `_ =` hit the immutable-reassign branch.
+
+### Fix (applied, single chokepoint each)
+
+1. `lower_var_decl`: when `node.name == "_"`, emit a unique
+   `__discard_<n>` (via the existing `@tmp_counter` convention)
+   instead of `zig_safe_name`. `binding_entry` stays keyed by the
+   original `_`, so the cleanup recipe (no-leak) is preserved -- only
+   the emitted Zig name changes, consistently across decl + cleanup.
+2. `visit_BindExpr`: `_` always takes the declaration path
+   (`|| node.name == "_"`); every `_ =` is an independent discard,
+   never a reassignment.
+
+Type-agnostic (owned `@list`, struct-with-`@list`-field, `NEXT`
+future all verified). Regression: `transpile-tests/527_discard_
+owned_value.cht` (multi-discard, leak-checked). Verified: prspec
+4802/0, transpile-tests 555/555 (0 leak), fuzz matrix 145/145
+(0 fail/leak), register allowlist 245/245.

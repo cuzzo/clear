@@ -6210,7 +6210,20 @@ class MIRLowering
       end
     end
 
-    safe_name = zig_safe_name(node.name)
+    # The discard placeholder `_` is not a valid Zig binding identifier
+    # (`const _ = ...; _ = &_;` is rejected). A discarded value that still
+    # needs cleanup must be bound to a real, unique temp so the decl, its
+    # self-use, and its `defer cleanup(&name)` are consistent valid Zig.
+    # `binding_entry` above stays keyed by the original `_`, so the
+    # cleanup recipe (no-leak) is preserved -- only the emitted Zig name
+    # changes. One synthetic name per occurrence (threaded through
+    # Let/AllocMark/Cleanup/suppression below).
+    if node.name.to_s == "_"
+      @tmp_counter += 1
+      safe_name = "__discard_#{@tmp_counter}"
+    else
+      safe_name = zig_safe_name(node.name)
+    end
 
     # Disambiguate when two variables in the same function would share a Zig
     # name AND both emit AllocMarks (has_mir_drop).  The MIR checker's flat

@@ -338,3 +338,50 @@ real.
 Record any compiler/language bug hit while replicating in
 `docs/agents/vm-bugs.md` (per project convention; this doc focuses
 on the VM port).
+
+## Bisection result (2026-05-18, post Bug#7 + discard-`_` fixes)
+
+Re-ran the faithful minimal reentrant probe (`EFFECTS REENTRANT` +
+`IF FALSE { probeFut: ~RegisterValue = BG { @service ->
+runRegisterBytecode!(COPY ops, COPY opcodes, ...) }; }`) after two
+shared-compiler bug fixes landed:
+
+- **Bug #7** (FIXED): `COPY` of a borrowed `@list`/struct param
+  captured into BG (`*const T` vs `*T`). Was the exact
+  `expected '*array_list...', found '*const []i64'` blocker.
+- **Discard `_`** (FIXED): `_ = NEXT probeFut;` /
+  `_ = <owned>;` emitted literal Zig `const _ = ...`. Was the
+  next blocker the probe hit once Bug #7 cleared.
+
+**Result: the probe now compiles cleanly** -- no `*const`/`*T`
+error, **no `INLINE_ALLOC_MISMATCH`**, no MIR error, no
+frame/escape failure. The giant `runRegisterBytecode!` made
+`EFFECTS REENTRANT` and lexically containing a recursive
+`BG { runRegisterBytecode!(COPY ops, ...) }` (the exact stack-VM
+`exec!` shape) builds.
+
+### Revised P0 assessment
+
+The previously-feared P0(b) `INLINE_ALLOC_MISMATCH` **did not
+reproduce** under the faithful minimal probe -- consistent with
+the earlier note that it was "real in the full R2 vm.cht but never
+minimally reproduced; root-cause unproven." The two real,
+minimally-reproduced, now-fixed blockers were ordinary
+shared-compiler bugs (BG-capture param typing; discard-`_`
+codegen), exactly what `vm-bugs.md` exists to track -- NOT a
+guest-arena/FSM rewrite.
+
+Caveat: the probe keeps the recursive spawn in `IF FALSE` and the
+dispatch loop still `TIGHT WHILE` (no `@reentrant` call lexically
+inside the TIGHT loop). R3 (real `BGSPAWN` inside dispatch) will
+still require de-`TIGHT`ing the loop (doc finding #2) and a faithful
+re-check for `INLINE_ALLOC_MISMATCH` at that point -- if it
+reappears there, reproduce minimally before any fix (CLAUDE.md).
+The probe was reverted; tree green (prspec 4802/0, transpile-tests
+555/555 0-leak, fuzz 145/145, register 245/245).
+
+**Revised gate:** R2->R3 is no longer blocked behind the
+BG-capture bug family (cleared). Remaining R3 prerequisites:
+de-TIGHT the dispatch loop + faithfully re-probe for the reentrant
+`INLINE_ALLOC_MISMATCH` *with the spawn actually reachable inside
+the loop* (reproduce-first; do not pre-emptively rewrite).
