@@ -6,12 +6,13 @@ require_relative "../src/mir/mir_checker"
 require_relative "../src/backends/importer"
 require_relative "../examples/minivm/register_bc_emitter"
 
-RSpec.describe "register-VM :fiber bg_mode (zero-capture slice)" do
+RSpec.describe "register-VM :fiber bg_mode" do
   SRC = <<~CHT
     FN main() RETURNS !Void ->
-        f: ~Int64 = BG { a: Int64 = 40_i64; a + 2_i64; };
+        x: Int64 = 40_i64;
+        f: ~Int64 = BG { x + 2_i64; };
         n: Int64 = NEXT f;
-        ASSERT n == 42_i64, "zero-capture fiber";
+        ASSERT n == 42_i64, "i64-capture fiber";
         RETURN;
     END
   CHT
@@ -41,15 +42,19 @@ RSpec.describe "register-VM :fiber bg_mode (zero-capture slice)" do
   let(:bgspawn) { MiniVM::Register::OpcodeSpec::OPCODES.find { |o| o.name == :BGSPAWN }.code }
   let(:fnexti)  { MiniVM::Register::OpcodeSpec::OPCODES.find { |o| o.name == :FNEXTI }.code }
 
-  it ":fiber emits BGSPAWN + FNEXTI" do
+  let(:capgeti) { MiniVM::Register::OpcodeSpec::OPCODES.find { |o| o.name == :CAPGETI }.code }
+
+  it ":fiber emits BGSPAWN + FNEXTI + CAPGETI for an i64 capture" do
     ops = emit("fiber")
     expect(ops).to include(bgspawn)
     expect(ops).to include(fnexti)
+    expect(ops).to include(capgeti)
   end
 
-  it ":inline (default) emits neither" do
+  it ":inline (default) emits none of them" do
     ops = emit("inline")
     expect(ops).not_to include(bgspawn)
     expect(ops).not_to include(fnexti)
+    expect(ops).not_to include(capgeti)
   end
 end

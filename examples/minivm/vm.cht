@@ -160,6 +160,9 @@ ENUM RegisterOp {
     FNextI,
     FNextF,
     FNextS,
+    CapGetI,
+    CapGetF,
+    CapGetS,
     Operand,
 }
 
@@ -592,6 +595,9 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.FNextI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.FNextF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.FNextS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -743,6 +749,9 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.FNextI -> RETURN 2_i64;,
         RegisterOp.FNextF -> RETURN 2_i64;,
         RegisterOp.FNextS -> RETURN 2_i64;,
+        RegisterOp.CapGetI -> RETURN 2_i64;,
+        RegisterOp.CapGetF -> RETURN 2_i64;,
+        RegisterOp.CapGetS -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -2542,6 +2551,32 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     PARTIAL MATCH fnsPv START
                         RegisterValue.Str AS fnsS -> sregs[fnsDst] = COPY fnsS;,
                         DEFAULT -> sregs[fnsDst] = "";
+                    END,
+            RegisterOp.CapGetI ->
+                    cgiDst = ops[ip]; ip += 1;
+                    cgiCidx = ops[ip]; ip += 1;
+                    cgiIdx = getRegisterConstInt(consts, cgiCidx);
+                    PARTIAL MATCH captureSlots[cgiIdx] START
+                        RegisterValue.Int64Val AS cgiV -> iregs[iBase + cgiDst] = cgiV;,
+                        RegisterValue.Number AS cgiN -> iregs[iBase + cgiDst] = toInt(cgiN);,
+                        DEFAULT -> iregs[iBase + cgiDst] = 0_i64;
+                    END,
+            RegisterOp.CapGetF ->
+                    cgfDst = ops[ip]; ip += 1;
+                    cgfCidx = ops[ip]; ip += 1;
+                    cgfIdx = getRegisterConstInt(consts, cgfCidx);
+                    PARTIAL MATCH captureSlots[cgfIdx] START
+                        RegisterValue.Number AS cgfV -> fregs[fBase + cgfDst] = cgfV;,
+                        RegisterValue.Int64Val AS cgfI -> fregs[fBase + cgfDst] = toFloat(cgfI);,
+                        DEFAULT -> fregs[fBase + cgfDst] = 0.0;
+                    END,
+            RegisterOp.CapGetS ->
+                    cgsDst = ops[ip]; ip += 1;
+                    cgsCidx = ops[ip]; ip += 1;
+                    cgsIdx = getRegisterConstInt(consts, cgsCidx);
+                    PARTIAL MATCH captureSlots[cgsIdx] START
+                        RegisterValue.Str AS cgsV -> sregs[cgsDst] = COPY cgsV;,
+                        DEFAULT -> sregs[cgsDst] = "";
                     END,
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");

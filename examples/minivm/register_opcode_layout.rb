@@ -248,6 +248,9 @@ module MiniVM
         Opcode.new(name: :FNEXTI,  code: 140, arity: 2, vm_name: "FNextI"),
         Opcode.new(name: :FNEXTF,  code: 141, arity: 2, vm_name: "FNextF"),
         Opcode.new(name: :FNEXTS,  code: 142, arity: 2, vm_name: "FNextS"),
+        Opcode.new(name: :CAPGETI, code: 143, arity: 2, vm_name: "CapGetI"),
+        Opcode.new(name: :CAPGETF, code: 144, arity: 2, vm_name: "CapGetF"),
+        Opcode.new(name: :CAPGETS, code: 145, arity: 2, vm_name: "CapGetS"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -377,6 +380,9 @@ module MiniVM
         FNEXTI:  [:i_def, :i_use],
         FNEXTF:  [:f_def, :i_use],
         FNEXTS:  [:s_def, :i_use],
+        CAPGETI: [:i_def, :const],
+        CAPGETF: [:f_def, :const],
+        CAPGETS: [:s_def, :const],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],

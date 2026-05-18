@@ -5049,17 +5049,35 @@ class RegisterBcEmitter
       raise Unsupported, "register emitter :defer BG mode is reserved for future loom-mode integration"
     end
 
-    if @bg_mode == :fiber && (expr.captures || {}).empty?
+    if @bg_mode == :fiber
+      caps = (expr.captures || {})
+      cap_i64 = ->(t) { raw = (t.respond_to?(:raw) ? t.raw : t).to_s; raw =~ /Int64|\bBool\b/ }
       tail = body.last
-      if bg_body_tail_is_expr?(tail) && [:i64, :bool].include?(inferred_expr_type(tail))
+      if bg_body_tail_is_expr?(tail) && [:i64, :bool].include?(inferred_expr_type(tail)) &&
+         caps.values.all? { |t| cap_i64.call(t) }
+        outer = caps.keys.map { |n| [n, @ireg_by_name.fetch(n)] }
         emit(JMP, 0)
         over_patch = @ops.length - 1
         entry_ip = @ops.length
+        saved = outer.map { |n, _| [n, @ireg_by_name[n]] }
+        saved_pfx = @bg_ctx_prefixes
+        @bg_ctx_prefixes = (saved_pfx ? saved_pfx.dup : []).push("__ctx_")
+        outer.each_with_index do |(n, _), i|
+          r = fresh_ireg
+          emit(CAPGETI, r, add_const(i))
+          @ireg_by_name[n] = r
+        end
         body[0...-1].each { |s| compile_stmt(s) }
-        emit(IRET, compile_i64_expr(tail))
+        ret = compile_i64_expr(tail)
+        emit(IRET, ret)
+        @bg_ctx_prefixes = saved_pfx
+        saved.each { |n, r| r.nil? ? @ireg_by_name.delete(n) : @ireg_by_name[n] = r }
         @ops[over_patch] = @ops.length
+        cv = 0
+        emit(LVNEW, cv)
+        outer.each { |_, r| emit(LVAPPI, cv, r) }
         fid = fresh_ireg
-        emit(BGSPAWN, fid, entry_ip, 0)
+        emit(BGSPAWN, fid, entry_ip, cv)
         return { kind: :bg_promise, payload_kind: :i64, reg: fid, fiber: true }
       end
     end
