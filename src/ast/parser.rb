@@ -1466,11 +1466,11 @@ class Parser
         end
 
         clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
-        catch_clauses << {
+        catch_clauses << AST::CatchClause.new(
           items: items,
           filters: filters,
           body: clause_body,
-        }
+        )
       end
       if match?(:KEYWORD, 'DEFAULT')
         consume(:KEYWORD, 'DEFAULT')
@@ -2316,25 +2316,25 @@ class Parser
   # present, `kind` is nil and the annotator resolves it from the
   # registered (type, kind) entry.
   # Parse a single CATCH item: a bare TYPE_ID that's either a kind (if
-  # in ERROR_KINDS) or a type. Returns { form:, name:, token: }.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  # in ERROR_KINDS) or a type.
+  sig { returns(AST::CatchItem) }
   def parse_catch_item
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
-    { form: form, name: T.must(tok).value, token: tok }
+    AST::CatchItem.new(form: form, name: T.must(tok).value, token: T.must(tok))
   end
 
   # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
-  # STRING literal (message). Returns { form:, value:, token: }.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  # STRING literal (message).
+  sig { returns(T.nilable(AST::CatchFilter)) }
   def parse_catch_filter
     if match?(:TYPE_ID)
       tok = consume(:TYPE_ID)
-      { form: :type, value: T.must(tok).value, token: tok }
+      AST::CatchFilter.new(form: :type, value: T.must(tok).value, token: T.must(tok))
     elsif match?(:STRING)
       tok = current
       str_expr = parse_expression
-      { form: :message, value: str_expr, token: tok }
+      AST::CatchFilter.new(form: :message, value: str_expr, token: tok)
     else
       error!(current, :CATCH_WITH_BAD_INNER)
     end

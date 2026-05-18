@@ -1399,9 +1399,81 @@ module AST
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
+  # One `CATCH Type` / `CATCH kind` item. `form` is :kind or :type;
+  # `name` is the TYPE_ID text; `token` its source token.
+  CatchItem = Struct.new(:form, :name, :token, keyword_init: true) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def form; self[:form]; end
+    sig { returns(String) }
+    def name; self[:name]; end
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+  end
+
+  # One `CATCH WITH (...)` filter. `form` is :type (value is the
+  # TYPE_ID String) or :message (value is the parsed message AST node).
+  CatchFilter = Struct.new(:form, :value, :token, keyword_init: true) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def form; self[:form]; end
+    sig { returns(T.any(String, AST::Locatable)) }
+    def value; self[:value]; end
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+  end
+
+  # One CATCH clause. Parser builds items/filters/body; the annotator
+  # (resolve_catch_clause!) stamps kinds/types/filter_types/
+  # filter_messages. The stamped arrays default to [] (never nil).
+  CatchClause = Struct.new(:items, :filters, :body, :kinds, :types,
+                           :filter_types, :filter_messages,
+                           keyword_init: true) do
+    extend T::Sig
+
+    def initialize(**kw)
+      super
+      self[:items]           = [] if self[:items].nil?
+      self[:filters]         = [] if self[:filters].nil?
+      self[:body]            = [] if self[:body].nil?
+      self[:kinds]           = [] if self[:kinds].nil?
+      self[:types]           = [] if self[:types].nil?
+      self[:filter_types]    = [] if self[:filter_types].nil?
+      self[:filter_messages] = [] if self[:filter_messages].nil?
+    end
+
+    sig { returns(T::Array[CatchItem]) }
+    def items; self[:items]; end
+    sig { returns(T::Array[CatchFilter]) }
+    def filters; self[:filters]; end
+    sig { returns(T::Array[AST::Locatable]) }
+    def body; self[:body]; end
+    sig { params(val: T::Array[AST::Locatable]).void }
+    def body=(val); self[:body] = val; end
+
+    sig { returns(T::Array[Symbol]) }
+    def kinds; self[:kinds]; end
+    sig { params(val: T::Array[Symbol]).void }
+    def kinds=(val); self[:kinds] = val; end
+
+    sig { returns(T::Array[String]) }
+    def types; self[:types]; end
+    sig { params(val: T::Array[String]).void }
+    def types=(val); self[:types] = val; end
+
+    sig { returns(T::Array[String]) }
+    def filter_types; self[:filter_types]; end
+    sig { params(val: T::Array[String]).void }
+    def filter_types=(val); self[:filter_types] = val; end
+
+    sig { returns(T::Array[AST::Locatable]) }
+    def filter_messages; self[:filter_messages]; end
+    sig { params(val: T::Array[AST::Locatable]).void }
+    def filter_messages=(val); self[:filter_messages] = val; end
+  end
+
   # CATCH block: error handler at function bottom. Multiple CATCH clauses + optional DEFAULT.
-  # catch_clauses: [{ error_name: String|nil, with_msg: String|nil, body: [ASTNode] }]
-  # default_body: [ASTNode] or nil
+  # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) { include Locatable }
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }

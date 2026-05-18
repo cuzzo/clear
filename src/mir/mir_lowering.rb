@@ -1434,10 +1434,10 @@ class MIRLowering
       error_reassigns = collect_catch_reassigns(node)
       catch_meta = (node.catch_clauses || []).map { |clause|
         {
-          kinds: (clause[:kinds] || []).map(&:to_s),
-          types: (clause[:types] || []).map(&:to_s),
-          filter_types: (clause[:filter_types] || []).map(&:to_s),
-          filter_messages: (clause[:filter_messages] || []).map { |m| lower(m) },
+          kinds: clause.kinds.map(&:to_s),
+          types: clause.types.map(&:to_s),
+          filter_types: clause.filter_types.map(&:to_s),
+          filter_messages: clause.filter_messages.map { |m| lower(m) },
         }
       }
       has_default = node.default_catch.is_a?(Array) && node.default_catch.any?
@@ -1581,12 +1581,12 @@ class MIRLowering
       #   (any kind matches OR any type matches)
       #   AND
       #   (no filters OR any filter_type OR any filter_message matches)
-      kinds            = clause[:kinds]            || []
-      types            = clause[:types]            || []
-      filter_types     = clause[:filter_types]     || []
-      filter_messages  = clause[:filter_messages]  || []
+      kinds            = clause.kinds
+      types            = clause.types
+      filter_types     = clause.filter_types
+      filter_messages  = clause.filter_messages
 
-      clause_mir = lower_body(clause[:body])
+      clause_mir = lower_body(clause.body)
       clause_bodies << clause_mir
       clause_body_zig = T.must(clause_mir).map { |m| emit_expr(m) }.join("\n            ")
 
@@ -1640,7 +1640,7 @@ class MIRLowering
   def collect_catch_reassigns(node)
     reassigns = []
     catch_bodies = []
-    (node.catch_clauses || []).each { |c| catch_bodies << c[:body] if c[:body] }
+    (node.catch_clauses || []).each { |c| catch_bodies << c.body if c.body }
     catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
 
     catch_bodies.each do |body|

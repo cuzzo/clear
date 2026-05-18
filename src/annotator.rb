@@ -790,7 +790,7 @@ private
       collect_pipe_input_types(node.body, snap_types)
       node.snapshot_types = snap_types
 
-      all_catch_bodies = node.catch_clauses.map { |c| c[:body] }
+      all_catch_bodies = node.catch_clauses.map { |c| c.body }
       all_catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
       all_catch_bodies.compact.each do |clause_body|
         with_new_scope do
@@ -844,7 +844,7 @@ private
     program_node.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       seed_body.call(stmt.body)
-      seed_body.call(stmt.catch_clauses&.map { |c| c[:body] }&.flatten || [])
+      seed_body.call(stmt.catch_clauses&.map { |c| c.body }&.flatten || [])
     end
   end
 
@@ -1003,56 +1003,56 @@ private
   #   (filters empty OR any filter_type matches OR any filter_message
   #    matches). No cross-constraint between items and filters — a
   #   mixed `CATCH Kind, Type` simply ORs the two checks.
-  sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(clause: AST::CatchClause).void }
   def resolve_catch_clause!(clause)
     kinds = []
     types = []
-    (clause[:items] || []).each do |item|
-      if item[:form] == :kind
-        kind_sym = item[:name].to_sym
+    clause.items.each do |item|
+      if item.form == :kind
+        kind_sym = item.name.to_sym
         unless AST.error_kind?(kind_sym)
           emit_registry_mismatch!(
-            item[:token], item[:name], AST::ERROR_KINDS,
-            "Unknown error kind '#{item[:name]}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
+            item.token, item.name, AST::ERROR_KINDS,
+            "Unknown error kind '#{item.name}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
             "closest known kind"
           )
         end
         kinds << kind_sym if AST.error_kind?(kind_sym)
       else
-        type_sym = item[:name].to_sym
+        type_sym = item.name.to_sym
         unless AST.error_type?(type_sym)
           emit_registry_mismatch!(
-            item[:token], item[:name], AST::ERROR_TYPES.keys,
-            "CATCH #{item[:name]}: error type '#{item[:name]}' is not registered. A type " \
+            item.token, item.name, AST::ERROR_TYPES.keys,
+            "CATCH #{item.name}: error type '#{item.name}' is not registered. A type " \
             "must be registered via RAISE/OR EXIT before it can be CATCHed.",
             "closest registered type"
           )
         end
-        types << item[:name] if AST.error_type?(type_sym)
+        types << item.name if AST.error_type?(type_sym)
       end
     end
-    clause[:kinds] = kinds.uniq
-    clause[:types] = types.uniq
+    clause.kinds = kinds.uniq
+    clause.types = types.uniq
 
     filter_types    = []
     filter_messages = []
-    (clause[:filters] || []).each do |f|
-      case f[:form]
+    clause.filters.each do |f|
+      case f.form
       when :type
-        type_sym = f[:value].to_sym
+        type_sym = T.cast(f.value, String).to_sym
         unless AST.error_type?(type_sym)
-          error!(f[:token], :CATCH_WITH_UNREGISTERED, name: f[:value])
+          error!(f.token, :CATCH_WITH_UNREGISTERED, name: f.value)
         end
-        filter_types << f[:value]
+        filter_types << T.cast(f.value, String)
       when :message
         # value is the parsed STRING expression. Visit so the string
         # literal gets its Type stamped for downstream lowering.
-        visit(f[:value])
-        filter_messages << f[:value]
+        visit(f.value)
+        filter_messages << T.cast(f.value, AST::Locatable)
       end
     end
-    clause[:filter_types]    = filter_types.uniq
-    clause[:filter_messages] = filter_messages
+    clause.filter_types    = filter_types.uniq
+    clause.filter_messages = filter_messages
   end
 
   # Collect input types from pipeline |> steps that can fail.

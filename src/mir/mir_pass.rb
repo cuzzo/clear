@@ -198,7 +198,8 @@ class MIRPass
     if has_catch
       empty_ctx = WalkCtx.new(bindings: nil, promo: nil)
       fn.catch_clauses.each do |clause|
-        clause[:body] = transform_body(clause[:body], empty_ctx) if clause[:body]
+        tb = transform_body(clause.body, empty_ctx)
+        clause.body = tb if tb
       end
       if fn.default_catch.is_a?(Array)
         fn.default_catch = transform_body(fn.default_catch, empty_ctx)
