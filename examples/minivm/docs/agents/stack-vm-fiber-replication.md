@@ -218,13 +218,64 @@ it) — but the register VM's own arena/escape model under
 reentrancy must be resolved first. R2's real spawn was reverted;
 R1 (re-entrant entryIp, inert) + the compiler fix remain.
 
+### Narrowed diagnosis (the blocker is NOT a full FSM rewrite)
+
+The `INLINE_ALLOC_MISMATCH` cited **only** `intListHandles` and
+`stringListHandles` — and **only** those two. Both are the register
+VM's only **nested-`@list`-in-struct** locals:
+
+```clear
+STRUCT RegisterIntListHandle    { values: Int64[]@list }
+STRUCT RegisterStringListHandle { values: String[]@list }
+MUTABLE intListHandles:    RegisterIntListHandle[]@list    = List[];
+MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
+... intListHandles.append(RegisterIntListHandle{ values: [] });
+```
+
+Under `EFFECTS REENTRANT`, escape analysis conservatively promotes
+`intListHandles` to `:heap`, but the inline
+`RegisterIntListHandle{ values: [] }` constructs the nested `values`
+list `:frame` -> a frame list stored into a heap container =
+`INLINE_ALLOC_MISMATCH`.
+
+The stack VM's reentrant `exec!` does **not** hit this because its
+locals are all **flat** (`Value[]@list`, `Int64[]`, `Float64[]`) —
+no struct-with-nested-`@list`. **That flat-collection discipline is
+the proven-safe model under reentrancy.** Every other register-VM
+collection (fixed `iregs`/`fregs`/`sregs` arrays, flat
+`vlist0..3: RegisterValue[]@list`) did NOT error.
+
+So the blocker is precise and small, NOT "rewrite the giant
+function to FSM": **the two handle tables must be flattened to
+match `exec!`'s flat-collection pattern.**
+
+### Concrete fix path (actionable, scoped)
+
+Two options, in preference order:
+
+1. **Flatten the handle tables (recommended; mirrors exec!).**
+   Replace `RegisterIntListHandle{ values: Int64[]@list }[]@list`
+   with a flat representation: e.g. a single
+   `MUTABLE intHandleValues: Int64[]@list` plus per-handle
+   `(start, len)` offsets in a flat `Int64[]@list`, or reuse the
+   existing flat `vlist*` list-reg machinery for handle storage.
+   Same for string handles. Touch sites: the IHANDLE/SHANDLE
+   opcode family (vm.cht ~2425-2460) + their emission. No compiler
+   change, no FSM rewrite; matches the stack VM's proven shape.
+2. **Compiler escape-analysis propagation.** When a struct literal
+   with an `@list` field is stored into a `:heap` container under a
+   reentrant fn, promote the field-list to `:heap` at construction
+   (EscapeAnalysis, per CLAUDE.md "Adding a New Escape Scenario").
+   More general but a shared-compiler change with broader blast
+   radius; defer unless option 1 proves insufficient.
+
 **Revised gate:** P0 = (a) faithful guest frame-arena
-(`vm-bugs.md`) AND (b) FSM/heap-resident conversion of
-`runRegisterBytecode!` so it survives `EFFECTS REENTRANT` + non-TIGHT
-without `INLINE_ALLOC_MISMATCH` on its own collections. R2-R6 are
-blocked until (b) lands. This is a substantial, separate workstream
-(register-vm.md flags the FSM conversion); not a tail-of-session
-change.
+(`vm-bugs.md`) AND (b) **flatten `intListHandles`/`stringListHandles`
+to flat lists (option 1 above)** so `runRegisterBytecode!` survives
+`EFFECTS REENTRANT` + non-TIGHT. (b) is a contained VM refactor (the
+IHANDLE/SHANDLE opcode family), NOT the giant FSM conversion. R2-R6
+unblock once (a)+(b) land. This is still a dedicated workstream, but
+a precisely scoped one.
 
 ## Ordering & gating
 
