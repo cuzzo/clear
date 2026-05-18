@@ -28,10 +28,15 @@ module Schemas
       freeze
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def kind = :enum
+    sig { returns(T::Boolean) }
     def enum? = true
+    sig { returns(T::Boolean) }
     def union? = false
+    sig { returns(T::Boolean) }
     def struct? = false
+    sig { returns(T::Boolean) }
     def resource? = false
   end
 
@@ -56,10 +61,15 @@ module Schemas
       freeze
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def kind = :resource
+    sig { returns(T::Boolean) }
     def resource? = true
+    sig { returns(T::Boolean) }
     def union? = false
+    sig { returns(T::Boolean) }
     def enum? = false
+    sig { returns(T::Boolean) }
     def struct? = false
   end
 
@@ -83,10 +93,12 @@ module Schemas
     # Value equality on the field shape (not deinit_entries, which is
     # derived). The multi-arm shared-destructure check compares two
     # variants' payloads structurally — this used to be Hash `==`.
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
       other.is_a?(InlineStructVariant) && other.fields == @fields
     end
     alias eql? ==
+    sig { returns(Integer) }
     def hash = @fields.hash
   end
 
@@ -105,10 +117,15 @@ module Schemas
       freeze
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def kind = :union
+    sig { returns(T::Boolean) }
     def union? = true
+    sig { returns(T::Boolean) }
     def enum? = false
+    sig { returns(T::Boolean) }
     def struct? = false
+    sig { returns(T::Boolean) }
     def resource? = false
   end
 
@@ -136,18 +153,25 @@ module Schemas
       freeze
     end
 
+    sig { returns(T::Hash[String, T.untyped]) }
     def field_defaults
       @fields.each_with_object({}) { |(k, f), h| h[k] = f.default if f.default }
     end
 
+    sig { returns(T::Set[String]) }
     def borrowed_fields
       @fields.each_with_object(Set.new) { |(k, f), s| s << k if f.borrowed }
     end
 
+    sig { returns(T.nilable(Symbol)) }
     def kind = nil
+    sig { returns(T::Boolean) }
     def struct? = true
+    sig { returns(T::Boolean) }
     def union? = false
+    sig { returns(T::Boolean) }
     def enum? = false
+    sig { returns(T::Boolean) }
     def resource? = false
   end
 

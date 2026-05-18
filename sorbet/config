@@ -9,6 +9,7 @@
 --ignore=examples/
 --ignore=benchmarks/
 --ignore=tmp/
+--ignore=.claude/
 --ignore=docs/
 --ignore=tools/
 --ignore=gems/decomplex/
