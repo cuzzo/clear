@@ -116,12 +116,11 @@ class RegisterBcEmitter
     # so a future deterministic-replay scheduler can enumerate
     # interleavings. The recording is structural: it consumes the
     # value-kinds we already track and adds nothing to the runtime.
-    # @bg_mode controls whether BG bodies are inlined synchronously
-    # (current behavior) or recorded as schedulable units. Loom mode
-    # will flip this to :defer; today only :inline is exercised.
     @shared_events = []
     @bg_dispatch_points = []
-    @bg_mode = :inline
+    # :fiber emits a real BGSPAWN/FNEXT region; opt-in until capture
+    # marshaling lands, default :inline keeps the allowlist green.
+    @bg_mode = ENV["CLEAR_REGISTER_BG_MODE"] == "fiber" ? :fiber : :inline
     @current_function_name = nil
   end
 
@@ -5011,6 +5010,18 @@ class RegisterBcEmitter
     return nil unless promise
     return nil unless promise.fetch(:payload_kind) == type
 
+    if promise[:fiber]
+      fut = promise.fetch(:reg)
+      case type
+      when :i64, :bool
+        dst = fresh_ireg; emit(FNEXTI, dst, fut); return dst
+      when :f64
+        dst = fresh_freg; emit(FNEXTF, dst, fut); return dst
+      when :string
+        dst = fresh_sreg; emit(FNEXTS, dst, fut); return dst
+      end
+    end
+
     case type
     when :i64    then @ireg_by_name.fetch(name)
     when :f64    then @freg_by_name.fetch(name)
@@ -5036,6 +5047,21 @@ class RegisterBcEmitter
       # body is captured as a schedulable unit instead of being
       # inlined. No bc emitter today drives this path.
       raise Unsupported, "register emitter :defer BG mode is reserved for future loom-mode integration"
+    end
+
+    if @bg_mode == :fiber && (expr.captures || {}).empty?
+      tail = body.last
+      if bg_body_tail_is_expr?(tail) && [:i64, :bool].include?(inferred_expr_type(tail))
+        emit(JMP, 0)
+        over_patch = @ops.length - 1
+        entry_ip = @ops.length
+        body[0...-1].each { |s| compile_stmt(s) }
+        emit(IRET, compile_i64_expr(tail))
+        @ops[over_patch] = @ops.length
+        fid = fresh_ireg
+        emit(BGSPAWN, fid, entry_ip, 0)
+        return { kind: :bg_promise, payload_kind: :i64, reg: fid, fiber: true }
+      end
     end
 
     # The lowering rewrites captured variable references inside the
