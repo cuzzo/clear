@@ -738,3 +738,67 @@ legacy `fn.reentrant == :reentrant` proxy.
 Not blocking R3 (which uses `:MAX_DEPTH(N)`), so filed rather than
 fixed inline; a standalone bug-fix should re-key the gate and add a
 `:THUNK`/`:TAIL_CALL`-in-TIGHT-loop regression test.
+
+## Compiler: COPY of an @list PARAM into a BG deep-copies via unguarded `.items`
+
+Found 2026-05-18 wiring register-VM R3 (the BGSPAWN dispatch arm
+does `BG { runRegisterBytecode!(..., COPY sourceLines, ...) }`
+where `sourceLines: Int64[]@list` is a parameter). Blocks R3 Step 3.
+
+### Minimal reproduction (~18 lines, transpile-tests-shaped)
+
+```cht
+FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+FN worker!(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
+    IF depth <= 0_i64 THEN RETURN consume(sl); END
+    f: ~Int64 = BG { @service -> worker!(COPY sl, depth - 1_i64) OR RAISE; };
+    RETURN NEXT f;
+END
+FN main() RETURNS !Void ->
+    MUTABLE xs: Int64[]@list = List[];
+    xs.append(1_i64); xs.append(2_i64); xs.append(3_i64);
+    n: Int64 = worker!(GIVE xs, 2_i64) OR RAISE;
+    ASSERT n == 3_i64, "reentrant BG COPY @list param";
+END
+```
+
+`./clear build`: `error: no member named 'items' in '[]i64'`.
+
+### Root cause (codegen sites, side by side)
+
+For `sl: Int64[]@list` captured into the BG ctx, the ctx field is
+a slice `[]i64`. Two generated sites:
+
+- A NORMAL use (`consume(sl)`) emits the comptime-resilient form:
+  `if (@hasField(@TypeOf(__x), "items")) __x.items else
+  @constCast(__x[0..])` -- handles ArrayList AND slice.
+- The COPY-into-BG deep-copy emits, UNGUARDED:
+  `const __src = __ctx_0.sl.items;` -- assumes ArrayList; `[]i64`
+  has no `.items` -> hard Zig error.
+
+So the FreshHeapCopy / list-COPY deep-copy lowering hard-codes the
+ArrayList `.items` shape instead of the `@hasField("items")`
+comptime dispatch every other `@list` access uses. Distinct from
+Bug #7 (ctx-field `*const T` vs `T` typing) and the
+nested-@list-root bug: this is the COPY *body* assuming a
+container shape the captured slice doesn't have.
+
+### Architecturally-correct fix (direction)
+
+The list-COPY-into-BG deep-copy must use the same comptime
+`@hasField(@TypeOf(x), "items")` resilient access the normal
+`@list` read path uses (one source of truth for "@list value ->
+backing slice"), OR the captured-@list-param ctx field must carry
+the owned ArrayList type so `.items` is valid (extend Bug #7's
+CapturedValue/dupeCaptured to the slice-represented @list-param
+case). Likely the former (single resilient accessor). Standalone
+bug-fix: reproduce-test + root-cause in the FreshHeapCopy /
+list-COPY lowering + post-mortem the coverage gap (the
+bg_capture_typing fuzz template covers COPY @list param into BG
+but its callee is non-reentrant and the param is consumed
+directly, not deep-copied through the reentrant-call ctx -- the
+exact axis combination here was unsampled).
+
+R3 Step 3 (BGSPAWN/FNEXT runtime, saved /tmp/r3_step3.patch) is
+structurally complete and reverted-pending this fix; not hacked
+around in vm.cht.
