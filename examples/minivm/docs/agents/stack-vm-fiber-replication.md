@@ -218,64 +218,65 @@ it) — but the register VM's own arena/escape model under
 reentrancy must be resolved first. R2's real spawn was reverted;
 R1 (re-entrant entryIp, inert) + the compiler fix remain.
 
-### Narrowed diagnosis (the blocker is NOT a full FSM rewrite)
+### CORRECTION (2026-05-18): retracting the "flatten" workaround
 
-The `INLINE_ALLOC_MISMATCH` cited **only** `intListHandles` and
-`stringListHandles` — and **only** those two. Both are the register
-VM's only **nested-`@list`-in-struct** locals:
+An earlier revision of this section claimed the fix was to "flatten
+the handle tables to match exec!'s flat-collection pattern" and
+asserted the cause was an escape-analysis Condition-7 gap. **Both
+claims are withdrawn.** They were a workaround instinct and an
+unconfirmed diagnosis — exactly what CLAUDE.md forbids ("if you
+find a limitation forcing workarounds, stop, identify the problem,
+fix the language", and "prove the bug with a test first").
 
-```clear
-STRUCT RegisterIntListHandle    { values: Int64[]@list }
-STRUCT RegisterStringListHandle { values: String[]@list }
-MUTABLE intListHandles:    RegisterIntListHandle[]@list    = List[];
-MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
-... intListHandles.append(RegisterIntListHandle{ values: [] });
-```
+Empirically established instead:
 
-Under `EFFECTS REENTRANT`, escape analysis conservatively promotes
-`intListHandles` to `:heap`, but the inline
-`RegisterIntListHandle{ values: [] }` constructs the nested `values`
-list `:frame` -> a frame list stored into a heap container =
-`INLINE_ALLOC_MISMATCH`.
+- **Structs/lists do NOT need to be flat.** Minimal repros — a
+  `Bucket{ values: Int64[]@list }` stored into a heap `Bucket[]@list`,
+  both non-reentrant AND under `EFFECTS REENTRANT` with a
+  BG-recursive spawn and in-place indexed nested-`@list` mutation —
+  **all compile and run correctly** on the native backend. CLEAR
+  supports nested-`@list`-in-struct in heap containers. `exec!`'s
+  flatness is incidental, not a language requirement. "Flatten the
+  VM's data structures" would be a band-aid around a compiler issue
+  and is explicitly NOT the path.
 
-The stack VM's reentrant `exec!` does **not** hit this because its
-locals are all **flat** (`Value[]@list`, `Int64[]`, `Float64[]`) —
-no struct-with-nested-`@list`. **That flat-collection discipline is
-the proven-safe model under reentrancy.** Every other register-VM
-collection (fixed `iregs`/`fregs`/`sregs` arrays, flat
-`vlist0..3: RegisterValue[]@list`) did NOT error.
+- **The `INLINE_ALLOC_MISMATCH` was real** (it occurred in the
+  actual `vm.cht` R2 build) but its precise trigger is **not yet
+  minimally reproduced** — every minimal repro that should exercise
+  the hypothesised path passes. So the "Condition 7 only promotes
+  string-concats" root-cause is **unproven** and must not be acted
+  on. The true trigger is more specific to the full `vm.cht`
+  shape (likely the heavy param-capture set of
+  `BG { runRegisterBytecode!(COPY ops, COPY opcodes, ...) }`
+  combined with the giant function's other escaping locals).
 
-So the blocker is precise and small, NOT "rewrite the giant
-function to FSM": **the two handle tables must be flattened to
-match `exec!`'s flat-collection pattern.**
+### Correct next step (no workaround, no blind fix)
 
-### Concrete fix path (actionable, scoped)
+Per CLAUDE.md bug methodology, the escape mismatch must be
+**faithfully reproduced before any fix**:
 
-Two options, in preference order:
+1. Re-apply the R2 vm.cht changes (the configuration that
+   definitively produced `INLINE_ALLOC_MISMATCH`).
+2. Bisect within it: is the trigger `EFFECTS REENTRANT` alone? +
+   non-TIGHT? + the `BG { runRegisterBytecode!(COPY ops, ...) }`
+   param-capture set? Reduce to the smallest failing CLEAR program.
+3. Only then root-cause in `EscapeAnalysis` and fix at the
+   architecturally-correct place — the canonical heap-promotion
+   must recursively cover nested collection fields uniformly across
+   ALL promotion conditions (RETURNS, reentrant, assign-escape,
+   container-mutator), not a per-condition patch. The RETURNS path
+   already propagates correctly (proven by repro); the gap, if any,
+   is that the promotion paths are **not unified**.
 
-1. **Flatten the handle tables (recommended; mirrors exec!).**
-   Replace `RegisterIntListHandle{ values: Int64[]@list }[]@list`
-   with a flat representation: e.g. a single
-   `MUTABLE intHandleValues: Int64[]@list` plus per-handle
-   `(start, len)` offsets in a flat `Int64[]@list`, or reuse the
-   existing flat `vlist*` list-reg machinery for handle storage.
-   Same for string handles. Touch sites: the IHANDLE/SHANDLE
-   opcode family (vm.cht ~2425-2460) + their emission. No compiler
-   change, no FSM rewrite; matches the stack VM's proven shape.
-2. **Compiler escape-analysis propagation.** When a struct literal
-   with an `@list` field is stored into a `:heap` container under a
-   reentrant fn, promote the field-list to `:heap` at construction
-   (EscapeAnalysis, per CLAUDE.md "Adding a New Escape Scenario").
-   More general but a shared-compiler change with broader blast
-   radius; defer unless option 1 proves insufficient.
+See `compiler-bug-root-causes.md` (this dir) for the cross-cutting
+architectural analysis of every compiler bug found this session.
 
 **Revised gate:** P0 = (a) faithful guest frame-arena
-(`vm-bugs.md`) AND (b) **flatten `intListHandles`/`stringListHandles`
-to flat lists (option 1 above)** so `runRegisterBytecode!` survives
-`EFFECTS REENTRANT` + non-TIGHT. (b) is a contained VM refactor (the
-IHANDLE/SHANDLE opcode family), NOT the giant FSM conversion. R2-R6
-unblock once (a)+(b) land. This is still a dedicated workstream, but
-a precisely scoped one.
+(`vm-bugs.md`) AND (b) faithfully reproduce + root-cause the
+reentrant `INLINE_ALLOC_MISMATCH`, then a unified escape-promotion
+fix (NOT flattening, NOT FSM-rewrite, NOT a Condition-specific
+band-aid). R2-R6 unblock once (a)+(b) land. Dedicated workstream;
+the precise scope of (b) is "reproduce first."
 
 ## Ordering & gating
 

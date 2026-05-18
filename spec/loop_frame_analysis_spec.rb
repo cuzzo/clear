@@ -775,4 +775,60 @@ RSpec.describe LoopFrameAnalysis do
 
   end
 
+  # ===========================================================================
+  # Group G: scan_direct / collect_local_names tolerate absent sub-bodies
+  #
+  # Regression for the compiler bug found 2026-05-18: scan_direct recurses
+  # into s.else_branch / s.default_case / s.body / b[:body], which are
+  # legitimately nil (IF without ELSE, MATCH without DEFAULT, ...). The
+  # method is *designed* to tolerate this (`return unless body.is_a?(Array)`),
+  # but its Sorbet sig declared `body: T::Array`, so Sorbet aborted at the
+  # call boundary before the guard ran. These exercise the exact nil-subtree
+  # recursion paths so the contract can never silently regress.
+  # ===========================================================================
+  describe "Group G: scan_direct tolerates nil sub-bodies (IF/no-ELSE, MATCH/no-DEFAULT)" do
+    it "collect_local_names does not raise on IF without ELSE" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE a = 1_i64;
+          IF a > 0_i64 THEN
+            MUTABLE b = 2_i64;
+            a = a + b;
+          END
+          RETURN;
+        END
+      CLEAR
+      body = main_fn(ast).body
+      names = nil
+      expect { names = LoopFrameAnalysis.collect_local_names(body) }.not_to raise_error
+      expect(names).to include("a")
+    end
+
+    it "collect_local_names does not raise on MATCH without DEFAULT" do
+      ast = run_mir(<<~CLEAR)
+        UNION V { Nil, IntV: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE v: V = V{ IntV: 7 };
+          MUTABLE acc = 0_i64;
+          PARTIAL MATCH v START
+            V.IntV AS i -> acc = acc + i;
+          END
+          RETURN;
+        END
+      CLEAR
+      body = main_fn(ast).body
+      expect { LoopFrameAnalysis.collect_local_names(body) }.not_to raise_error
+    end
+
+    it "scan_direct accepts a nil body directly (designed no-op)" do
+      # Direct contract check: the recursion sites pass s.else_branch
+      # etc. which can be nil. nil must be a graceful no-op, not a
+      # Sorbet boundary abort.
+      expect { LoopFrameAnalysis.scan_direct(nil) { |_| } }.not_to raise_error
+      seen = []
+      LoopFrameAnalysis.scan_direct([]) { |s| seen << s }
+      expect(seen).to be_empty
+    end
+  end
+
 end
