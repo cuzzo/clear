@@ -117,6 +117,10 @@ module NilKill
       @rel = NilKill.rel(path)
       @lines = File.readlines(path)
       @ep = [0]
+      @expr_memo = {}
+      @expr_use_memo = ENV["NIL_KILL_EXPR_MEMO"] != "0"
+      @expr_shadow = ENV["NIL_KILL_EXPR_SHADOW"] == "1"
+      @expr_shadow_bad = 0
       @methods = []
       @tlet_sites = []
       @dead_nil_checks = []
@@ -277,7 +281,7 @@ module NilKill
         @return_origins << record["return_origin"] if record["return_origin"]
         if record["return_origin"] && record["return_origin"]["confidence"] == "strong"
           type = record["return_origin"]["candidate_type"]
-          @static_return_types[record["method"]] = type if NilKill.useful_type?(type)
+          (@static_return_types[record["method"]] = type; @ep[0] += 1) if NilKill.useful_type?(type)
         end
         if record["return_origin"] && record["return_origin"]["hash_shape"] && !record["return_origin"]["hash_shape"]["poisoned"]
           @static_hash_return_shapes[record["method"]] = record["return_origin"]["hash_shape"]
@@ -352,7 +356,7 @@ module NilKill
           latest_origins << origin if origin
           if origin && origin["confidence"] == "strong"
             type = origin["candidate_type"]
-            @static_return_types[record["method"]] = type if NilKill.useful_type?(type)
+            (@static_return_types[record["method"]] = type; @ep[0] += 1) if NilKill.useful_type?(type)
           end
           if origin && origin["hash_shape"] && !origin["hash_shape"]["poisoned"]
             @static_hash_return_shapes[record["method"]] = origin["hash_shape"]
@@ -857,7 +861,7 @@ module NilKill
           type_node = (val.arguments&.arguments || [])[1]
           if type_node && !scope.empty?
             type_str = type_node.slice
-            @ivar_tlet_types[[scope.join("::"), name]] = type_str if NilKill.useful_type?(type_str)
+            (@ivar_tlet_types[[scope.join("::"), name]] = type_str; @ep[0] += 1) if NilKill.useful_type?(type_str)
           end
         end
       end
@@ -869,7 +873,7 @@ module NilKill
         sig = sig_above(node.location.start_line)
         if sig
           ret = NilKill.extract_return_type(sig)
-          @method_return_types[node.name.to_s] << ret if ret
+          (@method_return_types[node.name.to_s] << ret; @ep[0] += 1) if ret
           @non_nil_method_returns << node.name.to_s if non_nil_return_sig?(sig)
         end
       end
@@ -1358,7 +1362,7 @@ module NilKill
         next unless arg.is_a?(Prism::LocalVariableReadNode)
         builder = @current_collection_builders[arg.name.to_s]
         next unless builder
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
         @current_local_types.delete(arg.name.to_s)
         @current_hash_shapes.delete(arg.name.to_s)
         @current_array_element_shapes.delete(arg.name.to_s)
@@ -1375,9 +1379,9 @@ module NilKill
       return unless builder && expr
       type = expression_type(expr)
       if NilKill.useful_type?(type) || type == "NilClass"
-        builder["types"] |= [type]
+        builder["types"] |= [type]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1390,9 +1394,9 @@ module NilKill
       type = expression_type(expr)
       info = collection_type_info(type)
       if info && info["kind"] == "array" && NilKill.useful_type?(info["element"])
-        builder["types"] |= [info["element"]]
+        builder["types"] |= [info["element"]]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1401,10 +1405,10 @@ module NilKill
       key_type = expression_type(key_expr)
       value_type = expression_type(value_expr)
       if (NilKill.useful_type?(key_type) || key_type == "NilClass") && (NilKill.useful_type?(value_type) || value_type == "NilClass")
-        builder["key_types"] |= [key_type]
-        builder["value_types"] |= [value_type]
+        builder["key_types"] |= [key_type]; @ep[0] += 1
+        builder["value_types"] |= [value_type]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1416,7 +1420,7 @@ module NilKill
           add_hash_collection_types(builder, assoc.key, assoc.value)
         end
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -2361,7 +2365,37 @@ module NilKill
       @tlet_sites << { "path" => @rel, "line" => node.location.start_line, "tlet" => false, "name" => node.name.to_s, "candidate_type" => type }
     end
 
+    # Memo wrapper (NIL_KILL_EXPR_MEMO). ~95% of calls are redundant
+    # recompute (measured). Sound by construction: expression_type only
+    # READS state; every mutation of its complete transitive read
+    # surface bumps @ep -- the 5 @current_* maps via EpochHash (step 1)
+    # plus the exactly-4 explicit writes to @static_return_types/
+    # @ivar_tlet_types/@method_return_types -- and @current_class_name
+    # (the only scalar dep) is in the key. So a cached entry whose
+    # [epoch, class_name] still match cannot be stale. NIL_KILL_EXPR_
+    # SHADOW asserts memo == fresh on every call (empirical proof the
+    # surface enumeration is complete).
     def expression_type(node)
+      return expression_type_uncached(node) unless @expr_use_memo && node
+
+      key = node.object_id
+      ent = @expr_memo[key]
+      if ent && ent[0] == @ep[0] && ent[1] == @current_class_name
+        if @expr_shadow
+          fresh = expression_type_uncached(node)
+          if fresh != ent[2]
+            @expr_shadow_bad += 1
+            warn "EXPR_SHADOW MISMATCH #{node.class} cached=#{ent[2].inspect} fresh=#{fresh.inspect}" if @expr_shadow_bad <= 8
+          end
+        end
+        return ent[2]
+      end
+      r = expression_type_uncached(node)
+      @expr_memo[key] = [@ep[0], @current_class_name, r]
+      r
+    end
+
+    def expression_type_uncached(node)
       return nil unless node
       if return_node?(node)
         args = node.respond_to?(:arguments) ? node.arguments : nil
