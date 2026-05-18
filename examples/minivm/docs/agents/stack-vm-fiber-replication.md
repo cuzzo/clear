@@ -452,3 +452,68 @@ EVERY bytecode instruction, the VM's hottest loop) -- it currently
 unified-promotion fix pending, its own commit]. Path (2) probe:
 test whether `BG { runRegisterBytecode!(...) }` inside the still-
 `TIGHT` dispatch `MATCH` compiles (avoids the perf hit entirely).
+
+## R3 gating resolved (2026-05-18): alt-path dead, de-TIGHT required + costed
+
+With the P0 nested-@list-field allocator bug fixed+hardened
+(b538f5dd, 2be29d3d), the two R3 questions were settled empirically.
+
+### 1. Alt-path (keep TIGHT, spawn inside) -- NOT VIABLE
+
+Probe: `EFFECTS REENTRANT` + a `BG { @service ->
+runRegisterBytecode!(COPY ops, ...) }` placed LEXICALLY INSIDE the
+still-TIGHT dispatch MATCH (in the `RegisterOp.Halt` arm, guarded
+by `IF FALSE`) -- exactly where the real BGSPAWN handler lives.
+
+Result: `[Compiler Error] TIGHT loop cannot call @reentrant
+function 'runRegisterBytecode!'`. The `BG { @service -> ... }`
+wrapper does NOT shield the call: the reentrant-in-TIGHT check is
+an EFFECT check (the BG body's effect set includes the reentrant
+call), not a lexical-call check. So a recursive BGSPAWN cannot live
+in a TIGHT loop. **R3 must de-TIGHT the dispatch loop.**
+
+### 2. De-TIGHT now compiles; perf cost measured
+
+The P0 fix unblocked de-TIGHT compilation (it previously failed
+with INLINE_ALLOC_MISMATCH). De-TIGHT line 950 only, register VM,
+vs the TIGHT baseline:
+
+| bench | TIGHT | noTIGHT | delta |
+|---|---|---|---|
+| 01_fib | 108 | 163 | +51% |
+| 02_loop_sum | 276 | 345 | +25% |
+| 03_hashmap | 149 | 191 | +28% |
+| 05_call_loop | 62 | 93 | +50% |
+| 06_float_loop | 69 | 69 | +0% |
+| 08_branch_loop | 89 | 156 | +75% |
+| 09_struct_loop | 44 | 77 | +75% |
+
+Avg ~+43% on the dispatch-heavy hot path. Per `mir_lowering
+lower_while`, a non-tight loop in a runtime fn injects, per
+iteration: (a) `checkYield()` ALWAYS, and (b)
+`saveLoopMark()`/`defer restoreLoopMark()` IFF the body
+frame-allocates (`mark_per_iter`).
+
+- (a) `checkYield` is the ACCEPTED cost: the stack VM's `exec!` is
+  itself a plain non-tight WHILE and pays exactly this per
+  instruction -- it is the project's primary VM at acceptable perf.
+- (b) per-instruction arena mark+rewind is the expensive,
+  *mitigable* part, and is the same mechanism behind the P0. It
+  fires only because the giant dispatch body frame-allocates each
+  iteration.
+
+### R3 next step (the proper workstream)
+
+Reduce/relocate the dispatch loop body's per-iteration frame
+allocations so `mark_per_iter` is false -> de-TIGHT then costs only
+`checkYield` (the stack VM's accepted cost), not arena rewind. This
+is a dispatch-body restructuring task (hoist per-instruction temp
+collections/strings to reused buffers or heap-resident ctx fields;
+note the existing bc_run.rb comment that vm.cht is the tree's one
+stackful task pending an FSM-style heap-resident conversion). Only
+once `mark_per_iter` is false should de-TIGHT land + R3's real
+BGSPAWN/FNEXT opcodes proceed. Do NOT ship a +43% hot-path
+regression to unblock R3.
+
+Tree state: vm.cht reverted to clean TIGHT baseline; all probes
+reverted; suite green.
