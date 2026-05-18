@@ -779,39 +779,45 @@ class MIRLowering
     end
   end
 
-  # True when a receiver's ROOT container is heap-storage. Mirrors
-  # extract_root_var_name's GetField/GetIndex descent so the allocator
-  # resolution and the MIR checker's container attribution agree on the
-  # same root. A nested `@list` living inside a heap-allocated container
-  # element is itself heap-backed, so a `root[i].field.append(x)` op
-  # must use the root's :heap allocator. (INV-16: storage lives on the
-  # declaration; use sites read it -- here, the root declaration.)
+  # Canonical receiver-root resolver. EVERY pass that needs "which
+  # declared container does this receiver act on" must descend through
+  # GetField/GetIndex (and any `.target` chain) via THIS one function.
+  # The MIR checker's container attribution (extract_root_var_name) and
+  # the allocator resolution (receiver_root_heap?) both delegate here so
+  # they cannot drift apart when a new receiver shape is added -- a
+  # single new `when` here keeps both consumers correct. (Project rule:
+  # one canonical walker, not N mirrors. cf. AST.wrapped_children.)
+  sig { params(node: T.untyped).returns(T.untyped) }
+  def root_receiver_node(node)
+    case node
+    when AST::Identifier then node
+    when AST::GetField, AST::GetIndex then root_receiver_node(node.target)
+    else
+      node.respond_to?(:target) ? root_receiver_node(node.target) : nil
+    end
+  end
+
+  # True when a receiver's ROOT container is heap-storage. A nested
+  # `@list` living inside a heap-allocated container element is itself
+  # heap-backed, so a `root[i].field.append(x)` op must use the root's
+  # :heap allocator. (INV-16: storage lives on the declaration; use
+  # sites read it -- here, the root declaration. Same root the checker
+  # attributes the op to, via the shared root_receiver_node.)
   sig { params(node: T.untyped).returns(T::Boolean) }
   def receiver_root_heap?(node)
-    case node
-    when nil then false
-    when AST::Identifier
-      node.storage == :heap || !!(node.symbol&.reg&.respond_to?(:storage) &&
-                                  node.symbol.reg.storage == :heap)
-    when AST::GetField, AST::GetIndex
-      receiver_root_heap?(node.target)
-    else
-      node.respond_to?(:target) ? receiver_root_heap?(node.target) : false
-    end
+    root = root_receiver_node(node)
+    return false unless root.is_a?(AST::Identifier)
+    root.storage == :heap || !!(root.symbol&.reg&.respond_to?(:storage) &&
+                                root.symbol.reg.storage == :heap)
   end
 
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
   sig { params(node: T.untyped).returns(T.nilable(String)) }
   def extract_root_var_name(node)
-    case node
-    when AST::Identifier
-      decl = node.symbol&.reg
-      (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || node.name.to_s
-    when AST::GetField   then extract_root_var_name(node.target)
-    when AST::GetIndex   then extract_root_var_name(node.target)
-    else
-      node.respond_to?(:target) ? extract_root_var_name(node.target) : nil
-    end
+    root = root_receiver_node(node)
+    return nil unless root.is_a?(AST::Identifier)
+    decl = root.symbol&.reg
+    (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || root.name.to_s
   end
 
   # Resolve allocator symbol to Zig string (for InlineZig/RawZig patterns only).

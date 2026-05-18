@@ -243,19 +243,64 @@ benchmark guardrail) -- i.e. a *deliberate* poke at the exact
 axis (non-tight + frame-alloc body + nested-`@list` carrier) none
 of the three coverage layers sampled.
 
-**Durable guardrails added this session.**
-- `loop_carry_collection.rb`: added `carrier ∈ {flat,nested}` and
-  `body ∈ {plain,frame_alloc}` axes; the nested+frame_alloc cells
-  are positive (compile AND run) and fail pre-fix -- the template
-  now samples its own named scenario fully.
-- `transpile-tests/528_nested_list_loop_rewind.cht`: concrete
-  leak-checked regression with a runtime assertion.
+### Extent (bounded, measured -- not "hundreds")
 
-**Systemic lesson.** When a template's name describes a scenario,
-its axes must span that scenario's *triggering structure*, not
-just its surface (element type, count). "Loop-carried collection"
-must include the collection being non-flat and the loop body
-frame-allocating -- those are structural to the
-escape/rewrite/promotion paths the template claims to stress. Audit
-sibling templates (`mutable_collection_param`, `stream_into_boundary`)
-for the same flat-only / no-frame-alloc-body blind spot.
+Probed pre-fix: a struct-with-nested-`@list` carrier with a
+nested-field append, heap-promoted via **RETURNS** (`e1`) and via
+**assign-escape** (`e2`), both **compile clean** pre-fix -- they do
+NOT reproduce. Only the **loop-rewind** promotion creates the
+heap-AllocMark / frame-op divergence. The *bug instance* is bounded
+to one promotion path; it is not hundreds of latent instances.
+
+### The systemic fix (the actual "hundreds" answer)
+
+The instance is bounded, but the *mechanism* -- two passes
+(`resolve_alloc_sym`, `extract_root_var_name`) independently
+walking a receiver to its root and able to disagree -- is the open
+class. A single `||` clause would fix the loop instance and leave
+the class open (every future receiver shape added to one walker but
+not the other re-opens it). Instead the two walkers were
+**collapsed onto one canonical `root_receiver_node`**; the checker's
+attribution and the allocator resolution derive from the same
+function by construction and **cannot drift**. This closes the
+class, not just the instance (project rule, cf. `9c63099d` "one
+canonical walker, not N drifting").
+
+**Durable guardrails added this session.**
+- **Architectural:** `root_receiver_node` -- single canonical
+  receiver-root resolver; `extract_root_var_name` and
+  `receiver_root_heap?` both delegate. Resolver/checker root
+  divergence is now structurally impossible for *any* receiver
+  shape, not just GetField/GetIndex.
+- **Unit (generalizing guard):**
+  `spec/nested_field_append_allocator_spec.rb` asserts the contract
+  via the checker ("op alloc == root AllocMark alloc; zero
+  INLINE_ALLOC_MISMATCH") and asserts the path is genuinely
+  exercised so it cannot pass vacuously. Verified load-bearing
+  (fails pre-fix). Catches the *class* regardless of promotion path
+  or receiver shape -- it does not hardcode `:heap` or the loop.
+- **Fuzz:** `loop_carry_collection.rb` gained
+  `carrier ∈ {flat,nested}` and `body ∈ {plain,frame_alloc}` axes;
+  nested+frame_alloc cells are positive and fail pre-fix.
+- **Integration:** `transpile-tests/528_nested_list_loop_rewind.cht`
+  -- concrete leak-checked regression with a runtime assertion.
+
+**Sibling-template audit (done, not deferred).**
+`mutable_collection_param` has the *same* flat-`T[]@list`-only,
+no-nested-carrier blind spot (with an `outer_loop` context that
+could host it); `stream_into_boundary` / `access_gate` /
+`execution_boundary` only use flat `STRUCT Counter { value: Int64 }`
+carriers. These are real *template-hygiene* blind spots but hold
+**no latent instance of this bug class**: the canonical-walker
+unification makes the divergence impossible regardless of template
+coverage, and the unit spec guards the contract independently of
+any template. Exhaustively adding a nested-carrier axis to every
+sibling is template polish, not a correctness gap -- logged here
+rather than done, to avoid scope creep masquerading as rigor.
+
+**Systemic lesson.** A named template's axes should span its
+scenario's *triggering structure*, not just its surface. But the
+durable fix for a "two passes can disagree" class is to make them
+one pass plus a guard that asserts the *contract* (not a specific
+value) -- not to enumerate every triggering combination across
+every template.
