@@ -167,6 +167,9 @@ ENUM RegisterOp {
     CapPushI,
     CapPushF,
     CapPushS,
+    SCellNew,
+    SCellGetI,
+    SCellSetI,
     Operand,
 }
 
@@ -606,6 +609,9 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
             RegisterOp.CapPushI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.CapPushF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.CapPushS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -764,6 +770,9 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
         RegisterOp.CapPushI -> RETURN 1_i64;,
         RegisterOp.CapPushF -> RETURN 1_i64;,
         RegisterOp.CapPushS -> RETURN 1_i64;,
+        RegisterOp.SCellNew -> RETURN 1_i64;,
+        RegisterOp.SCellGetI -> RETURN 2_i64;,
+        RegisterOp.SCellSetI -> RETURN 2_i64;,
         RegisterOp.Operand -> RETURN 0_i64;
     END
     RETURN 0_i64;
@@ -866,7 +875,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -2597,6 +2606,28 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.CapPushS ->
                     cpsR = ops[ip]; ip += 1;
                     pendingCaps.append(RegisterValue{ Str: COPY sregs[cpsR] });,
+            RegisterOp.SCellNew ->
+                    scnDst = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        iregs[iBase + scnDst] = sc.length();
+                        sc.append(RegisterValue{ Int64Val: 0_i64 });
+                    },
+            RegisterOp.SCellGetI ->
+                    scgDst = ops[ip]; ip += 1;
+                    scgCell = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        PARTIAL MATCH sc[iregs[iBase + scgCell]] START
+                            RegisterValue.Int64Val AS scgV -> iregs[iBase + scgDst] = scgV;,
+                            RegisterValue.Number AS scgN -> iregs[iBase + scgDst] = toInt(scgN);,
+                            DEFAULT -> iregs[iBase + scgDst] = 0_i64;
+                        END
+                    },
+            RegisterOp.SCellSetI ->
+                    scsCell = ops[ip]; ip += 1;
+                    scsSrc = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        sc[iregs[iBase + scsCell]] = RegisterValue{ Int64Val: iregs[iBase + scsSrc] };
+                    },
             RegisterOp.Operand ->
                     print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
                     RETURN RegisterValue.Nil;

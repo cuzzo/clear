@@ -255,6 +255,9 @@ module MiniVM
         Opcode.new(name: :CAPPUSHI, code: 147, arity: 1, vm_name: "CapPushI"),
         Opcode.new(name: :CAPPUSHF, code: 148, arity: 1, vm_name: "CapPushF"),
         Opcode.new(name: :CAPPUSHS, code: 149, arity: 1, vm_name: "CapPushS"),
+        Opcode.new(name: :SCELLNEW,  code: 150, arity: 1, vm_name: "SCellNew"),
+        Opcode.new(name: :SCELLGETI, code: 151, arity: 2, vm_name: "SCellGetI"),
+        Opcode.new(name: :SCELLSETI, code: 152, arity: 2, vm_name: "SCellSetI"),
       ].freeze
 
       OPERANDS_BY_NAME = {
@@ -391,6 +394,9 @@ module MiniVM
         CAPPUSHI: [:i_use],
         CAPPUSHF: [:f_use],
         CAPPUSHS: [:s_use],
+        SCELLNEW:  [:i_def],
+        SCELLGETI: [:i_def, :i_use],
+        SCELLSETI: [:i_use, :i_use],
         JILTF: [:i_use, :i_use, :target],
         JIGTF: [:i_use, :i_use, :target],
         JIEQF: [:i_use, :i_use, :target],
