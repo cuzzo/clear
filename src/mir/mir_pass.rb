@@ -766,7 +766,6 @@ class MIRPass
     return unless entry && entry[:has_moved_guard] && entry[:needs_cleanup]
 
     ti = ident.full_type
-    return if ti.string?
 
     is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     # RC types: only consume on explicit GIVE. AtomicPtr is represented

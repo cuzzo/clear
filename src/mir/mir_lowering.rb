@@ -855,7 +855,7 @@ class MIRLowering
       else
         ti&.zig_type
       end
-    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa
+    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa, :optional_owned
       ti&.zig_type
     when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable, :versioned,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
@@ -1693,10 +1693,10 @@ class MIRLowering
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.each_with_index.map { |a, idx|
       # The annotator stamps was_moved when the callee takes ownership of this
-      # arg on success (param.takes || GIVE). That is the SINGLE source of
-      # truth for "callee takes" — the lowering must not re-derive it from
-      # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
-      takes = a.was_moved
+      # arg on success (param.takes || GIVE). was_moved is the normal signal;
+      # keep MoveNode as a defensive fallback for explicit GIVE wrappers.
+      # COPY into a borrow param is NOT a take.
+      takes = a.was_moved || a.is_a?(AST::MoveNode)
       raw_arg = lower(a)
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
       arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
@@ -1815,9 +1815,9 @@ class MIRLowering
     obj_mir = lower(node.object)
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.map { |a|
-      # Single source of truth: was_moved (set by annotator when callee TAKES).
-      # See note in lower_call_inner.
-      takes = a.was_moved
+      # See note in lower_call_inner: was_moved is the normal ownership-transfer
+      # signal, with MoveNode retained as an explicit GIVE fallback.
+      takes = a.was_moved || a.is_a?(AST::MoveNode)
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.full_type
       if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
@@ -1964,6 +1964,22 @@ class MIRLowering
           dupe_alloc = resolved == :heap ? :heap : alloc_for_node(arg_node)
           mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], dupe_alloc)
         end
+      end
+    end
+
+    # Intrinsic templates inline their arguments directly into Zig. Heap-owning
+    # argument expressions still need the same hoist/cleanup treatment as normal
+    # calls: borrowed sinks clean them after the call, TAKES sinks clean only on
+    # error because ownership transfers on success.
+    stdlib_args_for_hoist = node.matched_stdlib_def&.arg_spec
+    if stdlib_args_for_hoist.is_a?(Array)
+      ast_args_for_hoist = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
+      mir_args = mir_args.each_with_index.map do |arg_mir, i|
+        next arg_mir if node.is_a?(AST::MethodCall) && i == 0
+        ast_arg = ast_args_for_hoist[i]
+        spec = stdlib_args_for_hoist[i]
+        takes = spec.is_a?(Hash) && spec[:takes]
+        hoist_alloc(arg_mir, ast_arg, err_cleanup: takes)
       end
     end
 
@@ -5747,7 +5763,9 @@ class MIRLowering
     if node.value.is_a?(AST::Identifier)
       # Route through lower_identifier so BG capture-map rewrites apply:
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
-      lower_identifier(node.value)
+      ident = lower_identifier(node.value)
+      @pending_stmts << MIR::MoveMark.new(ident.name) if ident.respond_to?(:name)
+      ident
     else
       lower(node.value)
     end
@@ -6114,7 +6132,7 @@ class MIRLowering
       drop_entry = if binding_entry
         binding_entry.dup
       elsif ft.string?
-        { kind: :heap_string, alloc: decl_alloc, has_moved_guard: false }
+        { kind: :heap_string, alloc: decl_alloc, has_moved_guard: true }
       else
         kind = case ft.sync
                when :locked then :locked
@@ -6133,7 +6151,9 @@ class MIRLowering
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
       ft = Type.new(node.full_type)
-      node_alloc = if mir_allocates?(init)
+      node_alloc = if binding_entry && binding_entry[:alloc] == :cleanup
+        :cleanup
+      elsif mir_allocates?(init)
         :heap
       elsif node.respond_to?(:storage) && node.storage == :heap
         :heap

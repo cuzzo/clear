@@ -645,6 +645,8 @@ module CleanupClassifier
       classify_atomic_ptr(ti) ||
       classify_rc_or_link(ti, schema_lookup) ||
       classify_sync(ti, sync) ||
+      classify_optional(ti, schema_lookup) ||
+      classify_owned_string(ti, node) ||
       classify_heap_provenance(ti, node, schema_lookup, sync) ||
       classify_heap_struct_plain(ti, node, schema_lookup, sync) ||
       classify_struct_cleanup_fields(ti, node, schema_lookup) ||
@@ -734,8 +736,8 @@ module CleanupClassifier
     return entry(:list, has_moved_guard: !ti.sharded?) if ti.list_collection?
     return entry(:string_map) if ti.map? && !ti.numeric_map?
     return entry(:numeric_map) if ti.numeric_map?
-    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.pool?
-    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.set_collection?
+    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: true) if ti.pool?
+    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: true) if ti.set_collection?
     nil
   end
 
@@ -798,6 +800,23 @@ module CleanupClassifier
     return entry(:always_mutable) if sync == :always_mutable
     return entry(:versioned) if sync == :versioned
     nil
+  end
+
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  private_class_method def self.classify_optional(ti, schema_lookup)
+    return nil unless ti.optional?
+    inner = ti.wrapped_type
+    return nil unless inner
+    return nil unless inner.needs_cleanup?(schema_lookup) || inner.string?
+    entry(:optional_owned, alloc: :cleanup)
+  end
+
+  sig { params(ti: Type, node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  private_class_method def self.classify_owned_string(ti, node)
+    return nil unless ti.string?
+    value = node.respond_to?(:value) ? node.value : nil
+    return nil unless value.is_a?(AST::CopyNode)
+    entry(:heap_string, alloc: :heap, has_moved_guard: true)
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
@@ -906,7 +925,10 @@ module CleanupClassifier
   private_class_method def self.elem_needs_cleanup?(ti, schema_lookup)
     et = ti.element_type
     return false unless et
-    # Fast path: collection/RC/sync element types always need cleanup.
+    # Fast path: collection/RC/sync/string element types always need cleanup.
+    # Frame-backed lists can hold COPY strings; cleanupAlloc frees heap payloads
+    # and skips frame/rodata payloads.
+    return true if et.string?
     return true if et.needs_cleanup?(schema_lookup)
     # Deeper check for union/struct elements: strings in union payloads are
     # always heap-duped even without explicit heap_provenance? on the type.

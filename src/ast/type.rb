@@ -938,8 +938,6 @@ class Type
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Array[T.untyped]) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
-    return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
-    return [true, "{0}.deinit(rt.heapAlloc())"] if set_collection?
     return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
@@ -1504,6 +1502,10 @@ class Type
   # Plus: RC, NumericMap, Pool, Set.
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_cleanup?(schema_lookup = nil)
+    if optional?
+      inner = wrapped_type
+      return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
+    end
     return true if any_rc? || link? || list_collection? || map? || pool? ||
                    set_collection? || (string? && heap_provenance?) ||
                    (array? && !string?) || any_sync?

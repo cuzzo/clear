@@ -1082,9 +1082,12 @@ class MIREmitter
       guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
+      guarded_defer(name, "#{alloc}.free(#{name})", true, errdefer:)
 
     when :heap_slice, :heap_union, :heap_struct
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
+
+    when :optional_owned
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :atomic_ptr

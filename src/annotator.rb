@@ -4247,7 +4247,10 @@ private
     node.full_type = node.value.full_type
     node.storage   = node.value.storage
 
-    # Consume the source variable — it is affinely transferred
+    # Consume the source variable — it is affinely transferred. Downstream
+    # MIR lowering uses was_moved as the single ownership-transfer signal.
+    node.value.was_moved = true if node.value.respond_to?(:was_moved=)
+    node.was_moved = true if node.respond_to?(:was_moved=)
     og_set_moved(node.value.name, at_token: node.value.token, action: :give)
   end
 

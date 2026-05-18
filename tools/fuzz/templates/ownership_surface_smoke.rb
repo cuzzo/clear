@@ -44,6 +44,7 @@ OWNERSHIP_SURFACE_CELLS = []
   :cleanup_on_all_paths,
   :loop_frame_rewind,
   :error_path_allocator_identity,
+  :move_suppresses_cleanup,
   :alias_non_escape,
   :bg_lifetime_enforcement,
   :collection_mutation_visible_to_mir,
@@ -98,7 +99,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          xs.append("a" + 1_i64.toString());
+          xs.append(COPY "list");
           ASSERT xs.length() == 1_i64, "heap list cleanup shape";
           RETURN;
       END
@@ -118,7 +119,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE set: String[]@set = [];
-          set.insert("set" + 1_i64.toString());
+          set.insert(COPY "set");
           ASSERT set.length() == 1_i64, "set cleanup shape";
           RETURN;
       END
@@ -217,7 +218,7 @@ def ownership_surface_cleanup_cell(shape)
   when :option_owned_payload
     <<~CHT
       FN main() RETURNS Void ->
-          value: ?Int64 = 42_i64;
+          value: ?String = COPY "option";
           ASSERT value.present?(), "optional payload cleanup shape";
           RETURN;
       END
@@ -259,8 +260,8 @@ def ownership_surface_escape_sink_cell(sink)
   when :list_append
     <<~CHT
       FN main() RETURNS Void ->
-          MUTABLE xs: Int64[]@list = [];
-          xs.append(7_i64);
+          MUTABLE xs: String[]@list = [];
+          xs.append(COPY "list");
           ASSERT xs.length() == 1_i64, "list append sink";
           RETURN;
       END
@@ -268,9 +269,9 @@ def ownership_surface_escape_sink_cell(sink)
   when :set_insert
     <<~CHT
       FN main() RETURNS Void ->
-          MUTABLE xs: Int64[]@set = [];
-          xs.insert(7_i64);
-          ASSERT xs.contains?(7_i64), "set insert sink";
+          MUTABLE xs: String[]@set = [];
+          xs.insert(COPY "set");
+          ASSERT xs.contains?("set"), "set insert sink";
           RETURN;
       END
     CHT

@@ -2925,6 +2925,15 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Optionals: clean the payload when present.
+        if (comptime @typeInfo(T) == .optional) {
+            const ChildT = @typeInfo(T).optional.child;
+            if (comptime needsCleanup(ChildT)) {
+                if (ptr.*) |*payload| cleanup(ChildT, alloc, payload);
+            }
+            return;
+        }
+
         // Heap-allocated sync wrappers created by COPY need top-level
         // pointer cleanup. The generic struct-field pointer cleanup below
         // only fires when the pointer is stored inside another value.
@@ -3297,12 +3306,13 @@ pub const CheatLib = struct {
     pub fn needsCleanup(comptime FT: type) bool {
         @setEvalBranchQuota(100000);
         if (FT == []const u8 or FT == []u8) return true;
+        const ft_info = @typeInfo(FT);
+        if (ft_info == .optional) return needsCleanup(ft_info.optional.child);
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
         if (isStringMap(FT)) return true;
         if (isNumericMap(FT)) return true;
         if (isPool(FT)) return true;
-        const ft_info = @typeInfo(FT);
         // Pointers and non-string slices trivially need cleanup (heap data).
         // Check BEFORE recursing to avoid exponential blowup on recursive types.
         if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
