@@ -103,6 +103,12 @@ module NilKill
       @inferred_param_hash_shapes = {}
       @inferred_param_array_element_shapes = {}
       @method_nodes = []
+      # receiver_classes_for_field_shape is a PURE function of its type
+      # string (only pure NilKill string helpers, zero walk state) but
+      # was called ~7x per AST node (~260k/file) with no memo. Cache by
+      # type -- byte-identical by construction (same proven pattern as
+      # RbiReturnIndex#concrete_return_type?).
+      @rcfs_memo = {}
       @current_param_types = {}
       @current_local_types = {}
       @current_collection_builders = {}
@@ -2240,7 +2246,15 @@ module NilKill
       NilKill.static_sorbet_type(types.uniq)
     end
 
+    # Pure function of `type` -> memoize. .dup so every caller still
+    # gets a fresh array (original returned fresh each call); the dup
+    # of a 1-3 element array is nothing vs the strip/split/recursion it
+    # replaces. Byte-identical by construction.
     def receiver_classes_for_field_shape(type)
+      (@rcfs_memo[type] ||= receiver_classes_for_field_shape_uncached(type)).dup
+    end
+
+    def receiver_classes_for_field_shape_uncached(type)
       raw = NilKill.strip_nilable_type(type.to_s)
       return [] if raw.empty? || raw == "T.untyped"
       if raw.start_with?("T.any(")
