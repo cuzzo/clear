@@ -5051,34 +5051,50 @@ class RegisterBcEmitter
 
     if @bg_mode == :fiber
       caps = (expr.captures || {})
-      cap_i64 = ->(t) { raw = (t.respond_to?(:raw) ? t.raw : t).to_s; raw =~ /Int64|\bBool\b/ }
+      cap_kind = lambda do |t|
+        raw = (t.respond_to?(:raw) ? t.raw : t).to_s
+        if raw =~ /Int64|\bBool\b/ then :i64
+        elsif raw =~ /Float64/ then :f64
+        elsif raw =~ /String/ then :string
+        else :other
+        end
+      end
       tail = body.last
-      if bg_body_tail_is_expr?(tail) && [:i64, :bool].include?(inferred_expr_type(tail)) &&
-         caps.values.all? { |t| cap_i64.call(t) }
-        outer = caps.keys.map { |n| [n, @ireg_by_name.fetch(n)] }
+      pk = bg_body_tail_is_expr?(tail) ? inferred_expr_type(tail) : :other
+      pk = :i64 if pk == :bool
+      kinds = caps.transform_values { |t| cap_kind.call(t) }
+      if !%i[i64 f64 string].include?(pk) && tail.is_a?(MIR::Ident)
+        bare = tail.name.to_s.split(".").last
+        pk = kinds[bare] if kinds.key?(bare)
+      end
+      name_map = { i64: @ireg_by_name, f64: @freg_by_name, string: @sreg_by_name }
+      app_op  = { i64: LVAPPI, f64: LVAPPF, string: LVAPPS }
+      cap_op  = { i64: CAPGETI, f64: CAPGETF, string: CAPGETS }
+      if [:i64, :f64, :string].include?(pk) && kinds.values.all? { |k| k != :other }
+        outer = caps.keys.map { |n| [n, kinds[n], name_map[kinds[n]].fetch(n)] }
         emit(JMP, 0)
         over_patch = @ops.length - 1
         entry_ip = @ops.length
-        saved = outer.map { |n, _| [n, @ireg_by_name[n]] }
+        saved = outer.map { |n, k, _| [n, k, name_map[k][n]] }
         saved_pfx = @bg_ctx_prefixes
         @bg_ctx_prefixes = (saved_pfx ? saved_pfx.dup : []).push("__ctx_")
-        outer.each_with_index do |(n, _), i|
-          r = fresh_ireg
-          emit(CAPGETI, r, add_const(i))
-          @ireg_by_name[n] = r
+        outer.each_with_index do |(n, k, _), i|
+          r = (k == :i64 ? fresh_ireg : k == :f64 ? fresh_freg : fresh_sreg)
+          emit(cap_op[k], r, add_const(i))
+          name_map[k][n] = r
         end
         body[0...-1].each { |s| compile_stmt(s) }
-        ret = compile_i64_expr(tail)
-        emit(IRET, ret)
+        ret = pk == :i64 ? compile_i64_expr(tail) : pk == :f64 ? compile_f64_expr(tail) : compile_string_expr(tail)
+        emit(pk == :i64 ? IRET : pk == :f64 ? FRET : SRET, ret)
         @bg_ctx_prefixes = saved_pfx
-        saved.each { |n, r| r.nil? ? @ireg_by_name.delete(n) : @ireg_by_name[n] = r }
+        saved.each { |n, k, r| r.nil? ? name_map[k].delete(n) : name_map[k][n] = r }
         @ops[over_patch] = @ops.length
         cv = 0
         emit(LVNEW, cv)
-        outer.each { |_, r| emit(LVAPPI, cv, r) }
+        outer.each { |_, k, r| emit(app_op[k], cv, r) }
         fid = fresh_ireg
         emit(BGSPAWN, fid, entry_ip, cv)
-        return { kind: :bg_promise, payload_kind: :i64, reg: fid, fiber: true }
+        return { kind: :bg_promise, payload_kind: pk, reg: fid, fiber: true }
       end
     end
 
