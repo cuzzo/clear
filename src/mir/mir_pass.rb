@@ -10,6 +10,7 @@ require "sorbet-runtime"
 
 require_relative "promotion_plan"
 require_relative "escape_analysis"
+require_relative "escape_graph"
 
 class MIRPass
     extend T::Sig
@@ -60,54 +61,30 @@ class MIRPass
   # that the classifier depends on.
   sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def transform!(ast)
-    # E1: compute which functions return heap-owned values (fixed-point over call graph).
-    # [collapse-verdict: LOAD-BEARING — the PRODUCER of return_provenance/
-    #  heap_fns (subsumes return_expr_is_heap?). Deleting it: prspec 7
-    #  failures (allocation_strategy_spec.rb:485 :transitive_callee +6),
-    #  net bundle 0 ok. Definitionally irreducible — nothing else
-    #  computes the result.]
-    heap_fns = EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
+    # The single value-flow escape analysis. ONE rule per declaration:
+    #   storage = :heap iff inherently_heap?(type)
+    #                     ∨ (escapes?(value-flow graph) ∧ @list/String)
+    # Replaces the 5 fragmented proxies (E1 compute_heap_return_fns!,
+    # E2 analyze! 9 conditions, E3a tag_transitive_provenance!, E3b
+    # tag_carry_call_sites!, and the escape half of PromotionClassifier).
+    # Produces heap_fns and stamps storage/provenance on heap decls.
+    # MIRChecker's 7 invariants are unchanged and PROVE the result
+    # (fail-closed: any escape gap surfaces as a located error).
+    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes)
+    @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
 
-    # E3a: propagate heap return_provenance to caller binding type_info.
-    # Must run before PromotionClassifier so HPT downgrade sees stable provenance.
-    # [collapse-verdict: LOAD-BEARING — sole stamper for "promoted return
-    #  bound inside IF branch" (caller_cleanup_spec.rb:95). NOT redundant;
-    #  cannot be deleted incrementally. Only the from-scratch single-escape
-    #  rewrite (option 2) can subsume it.]
-    EscapeAnalysis.tag_transitive_provenance!(@fn_nodes, heap_fns)
-
-    # E3c: propagate caller arg sync into callee param SymbolEntry#sync.
+    # Propagate caller arg sync into callee param SymbolEntry#sync.
     # Runs after annotation has stamped local bindings; before classification
     # passes that read sync (CleanupClassifier, mir_lowering).
     EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
 
-    # Phase 1: classify promotions for all functions.
-    # Must run before E2 so promotion_plans are available for :always_returned detection.
-    # [collapse-verdict: LOAD-BEARING — THE promotion plan; all
-    #  downstream lowering depends on it. Deleting it: prspec 802
-    #  failures, net 57 mir-error, transpilation failed. Producer.]
+    # Phase 1: classify promotions for all functions. Storage is already
+    # decided at declaration time by EscapeGraph; this builds the
+    # (now mostly degenerate) promotion plan downstream lowering reads.
     promotion_plans = {}
     @fn_nodes.each do |name, fn|
       promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
-
-    # E2: per-declaration escape scan.
-    # Applies all 6 escape conditions; replaces the upgrade_* methods below.
-    # Sets fn.heap_carry_return for E3b (tag_carry_call_sites!).
-    # [collapse-verdict: LOAD-BEARING — sole per-declaration escape-
-    #  condition stamper. Deleting it: prspec crashes; allocation_
-    #  strategy_spec 9 failures (cleanup_entry(:alloc)->nil). Producer,
-    #  not redundant.]
-    @bg_heap_upgraded = T.let(EscapeAnalysis.analyze!(
-      @fn_nodes, heap_fns: heap_fns, promotion_plans: promotion_plans
-    ), T.untyped)
-
-    # E3b: stamp heap provenance on call-site expressions for carry-return functions.
-    # Runs after E2 because E2 sets fn.heap_carry_return on loop-carry functions.
-    # [collapse-verdict: LOAD-BEARING — sole stamper for carry-return
-    #  call-site heap provenance; deleting it leaks (transpile aggregated
-    #  DebugAllocator, multiple addresses). NOT redundant.]
-    EscapeAnalysis.tag_carry_call_sites!(@fn_nodes)
 
     # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
     # provenance before classification.

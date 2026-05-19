@@ -30,35 +30,14 @@
 # harvested, not guessed. These are exactly the heap-ownership
 # over-complexity manifesting; the collapse refactor must flip every
 # one of them to :pass with zero regressions elsewhere.
-HOT_KNOWN_FAILING = [
-  # --- DOUBLE FREE: every `:give` (move) producer with a plain
-  #     `RETURNS T` consumed any way (the 527 class -- pervasive, not
-  #     a one-off): the move path and a caller-cleanup path both free.
-  [:list, :give, :bare,             :plain],
-  [:list, :give, :or_raise,         :plain],
-  [:list, :give, :discard,          :plain],
-  [:list, :give, :discard_or_raise, :plain],
-  [:list, :give, :onward,           :plain],
-  # --- LEAK / OWNED_RETURN_WITHOUT_ALLOC: heap-list returned through a
-  #     declared `!T` and bound at the caller -- no caller cleanup is
-  #     paired (E1's AST allowlist / E3a's FuncCall match miss the
-  #     literal & OR_RESCUE shapes; #10/#13 generalized).
-  [:list, :ident,   :or_raise,         :err],
-  [:list, :ident,   :or_fallback,      :err],
-  [:list, :ident,   :discard_or_raise, :err],
-  [:list, :ident,   :onward,           :err],
-  [:list, :literal, :bare,             :err],
-  [:list, :literal, :or_raise,         :err],
-  [:list, :literal, :or_fallback,      :err],
-  [:list, :literal, :discard,          :err],
-  [:list, :literal, :discard_or_raise, :err],
-  [:list, :literal, :onward,           :err],
-  [:list, :call,    :or_raise,         :err],
-  [:list, :call,    :or_fallback,      :err],
-  [:list, :call,    :discard_or_raise, :err],
-  [:list, :call,    :onward,           :err],
-  [:list, :give,    :or_fallback,      :err],
-].freeze
+HOT_KNOWN_FAILING = [].freeze
+# ALL CELLS PASS. The single-value-flow EscapeGraph (one rule: heap iff
+# inherently-heap-by-construction OR escapes; replaces the 5 fragmented
+# proxies) fixed every double-free (`:give,*,:plain`) and every leak
+# (`:literal/:ident/:call,*,:err`). The `:or_fallback,:err` cells also
+# revealed + got a fix for an empty-collection-fallback element-type
+# inference bug (`expr OR []` typed Any[] -> defaulted f64). Manifest
+# now a pure regression net: every cell :pass, zero known-failing.
 
 HOT_CELLS = []
 %i[list string].each do |value|
