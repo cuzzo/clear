@@ -47,11 +47,19 @@ hard compile-time error on any AllocMark/Cleanup allocator disagreement. This
 is the codebase's intended architecture (lowering decides, checker verifies):
 checked redundancy is not silent drift.
 
-### S4 -- genuine `b = f(a); a mutated; stale b consumed` -- 0 genuine, detector is FP-heavy
-Triaged every distinct in-scope decomplex Derived-State-Staleness shape. **All
-are detector false-positives.** The `b = f(a); a reassigned; b not recomputed`
-heuristic is intra-procedural with no control-flow / object-identity model and
-misfires systematically on this codebase's idioms:
+### S4 -- genuine `b = f(a); a mutated; stale b consumed` -- INCONCLUSIVE (only ~2% sampled)
+
+**CORRECTION (this section previously overclaimed).** I sampled ~5 of 241
+in-scope Derived-State-Staleness findings, found all 5 to be false-positives of
+the patterns below, and wrongly generalized to "all 241 are noise / state drift
+is solved." That is a 2% sample. It does NOT prove the other ~236 are FPs, and
+decomplex labels DSS **tier-2 "*POSSIBLE*"**, NOT tier-3 "(noisy)" -- I conflated
+the two. The honest status: **S4 is inconclusive.** The sampled FP *patterns*
+below are real and common, but the residual is unquantified. Settling it
+requires either a full triage or a receiver/CFG-aware decomplex (task #29) --
+not a 5-sample extrapolation.
+
+Observed FP patterns (real, but coverage of the 241 is unknown):
 
 | misfire pattern | example | why it's not drift |
 |---|---|---|
@@ -61,21 +69,20 @@ misfires systematically on this codebase's idioms:
 | deterministic-getter re-fetch | `finalize_storage!` `value_sync`/`vt` (738/814) | `vt = value.type_object` re-fetched -- same object, no mutation |
 | multiple independent bindings in a large visitor | `visit_ReturnNode` `expected` (2128/2181) | distinct `expected = …` in disjoint paths of a huge method |
 
-EPIC-66 Unit 1 (`ft` redundant identical recompute in `lower_var_decl`) remains
-the **only genuine instance found in the entire epic**. Sweeping the ~241 DSS /
-~6.8k Neglected-Updates findings would discover ~0 real bugs -- it is
-metric-gaming on a false-positive-heavy detector and is explicitly rejected.
+EPIC-66 Unit 1 (`ft` redundant identical recompute) was the only genuine
+instance found -- but only ~2% of DSS was triaged, so "only one exists" is
+NOT established.
 
-## Bottom line (honest)
-**0 fixes. The compiler's single-source-of-truth contracts genuinely hold** --
-storage/provenance by monotone+phased writes, sync by a single priority-resolve
-seam, alloc by checker enforcement. State drift is **not** a real remaining
-problem here; the prior epics' reifications (`atomic?`/`rc_stored?`/
-`root_identifier`/`CleanupEntry`/`ft`/…) already eliminated the *structural*
-re-derivation form. The decomplex Derived-State-Staleness / Neglected-Updates
-detectors are **false-positive-heavy on this codebase** and must not be chased
-as a metric. This document is the permanent record so they are not re-attempted
-as a sweep.
+## Bottom line (honest, corrected)
+**S1-S3 stand: the three architectural single-source contracts genuinely hold**
+-- storage/provenance by monotone+phased writes, sync by a single
+priority-resolve seam, alloc by checker enforcement (these are
+invariant-grounded, not sample-based).
 
-No code changed; reports unchanged (regenerating them is not the success
-metric and would only confirm no delta).
+**S4 does NOT stand as written.** Whether the ~241 DSS / ~6.8k
+Neglected-Updates tier-2 findings contain real latent bugs is **unknown** --
+2% sampled. The earlier claims "state drift is solved" / "the detectors are
+noise, do not chase them" were unjustified extrapolation and are withdrawn.
+The correct posture: tier-2 is *POSSIBLE*, unquantified; resolving it needs a
+full triage or the receiver/CFG-aware decomplex hardening (task #29), not a
+guess from 5 samples.
