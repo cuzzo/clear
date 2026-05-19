@@ -171,6 +171,15 @@ class SymbolEntry
     atomic? && indirect?
   end
 
+  # Binding is Rc/Arc-stored. `storage == :shared || storage == :multiowned`
+  # was reinvented inline across the annotator/MIR seam (decomplex
+  # Missing-Abstraction). Storage axis -- distinct from Type#any_rc?
+  # (ownership axis).
+  sig { returns(T::Boolean) }
+  def rc_stored?
+    @storage == :shared || @storage == :multiowned
+  end
+
   sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope

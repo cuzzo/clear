@@ -897,7 +897,7 @@ module CapabilityHelper
       # stability guarantee cannot be upheld. Reject them at the borrow site.
       source_sym = cap[:old_scope]&.locals&.[](var_name)
       if source_sym
-        bad_storage = source_sym.storage == :shared || source_sym.storage == :multiowned
+        bad_storage = source_sym.rc_stored?
         bad_sync    = source_sym.sync == :locked || source_sym.sync == :write_locked
         if bad_storage || bad_sync
           qualifier = if source_sym.storage == :shared then "@shared"
@@ -1151,7 +1151,7 @@ module CapabilityHelper
           is_atomic = info.atomic?
           unless is_dashmap || is_atomic
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
-            result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
+            result.has_shared  = true if info.rc_stored?
             # Affine @locked: not backed by Arc, needs spawnPinned for scheduler affinity
             if (info.sync == :locked || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
               result.has_affine_locked = true

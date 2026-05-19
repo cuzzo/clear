@@ -751,7 +751,7 @@ module EscapeAnalysis
           # @shared:locked + collection to :heap, so the wrapping fact
           # lives on entry.type.ownership instead. Check both axes.
           unified_storage = unify_caller_attr(sites, idx) do |s|
-            next s.storage if s&.storage == :shared || s&.storage == :multiowned
+            next s.storage if s&.rc_stored?
             t = s&.type
             if t.is_a?(Type)
               next :shared     if t.respond_to?(:shared?)     && t.shared?

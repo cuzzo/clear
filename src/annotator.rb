@@ -3023,7 +3023,7 @@ private
     entry.ownership_kind = if entry.resource
       :resource
     elsif type_obj.multiowned? || type_obj.shared? ||
-          entry.storage == :multiowned || entry.storage == :shared
+          entry.rc_stored?
       :rc
     elsif entry.sync
       :sync
@@ -5577,7 +5577,7 @@ private
     rhs_name = node.value.name
     rhs_type = current_scope.resolve_type(rhs_name)
     rhs_info = current_scope.locals[rhs_name]
-    return if rhs_info&.storage == :multiowned || rhs_info&.storage == :shared || rhs_info&.sync
+    return if rhs_info&.rc_stored? || rhs_info&.sync
 
     type_obj = Type.new(rhs_type)
     # A String *binding* is owned/move (CLEAR contract). implicitly_copyable?

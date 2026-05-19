@@ -7470,7 +7470,7 @@ class MIRLowering
     return false unless sym
     # Skip if the binding is already pointer-shaped or sync-wrapped --
     # the helper handles those via comptime dispatch.
-    return false if sym.sync || sym.storage == :shared || sym.storage == :multiowned ||
+    return false if sym.sync || sym.rc_stored? ||
                     sym.storage == :local || sym.storage == :heap
     # Only auto-borrow MUTABLE plain T: an immutable plain T can't be
     # mutated through any path so & buys us nothing (and would be a

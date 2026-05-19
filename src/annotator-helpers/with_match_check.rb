@@ -238,7 +238,7 @@ module WithMatchCheck
         next unless arg.is_a?(AST::Identifier)
         sym = arg.symbol
         next unless sym
-        next if sym.sync || sym.storage == :shared || sym.storage == :multiowned ||
+        next if sym.sync || sym.rc_stored? ||
                 sym.storage == :local || sym.storage == :heap
         next unless sym.respond_to?(:mutable) && sym.mutable
         sym.poly_borrow_target = true if sym.respond_to?(:poly_borrow_target=)
