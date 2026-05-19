@@ -421,7 +421,14 @@ module EffectTracker
     @fn_nodes = T.let(@fn_nodes, T.untyped)
     @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
-    can_fail = {}
+    # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
+    # @nonReentrant / BG-spawn / declared `!T` / transitive ERROR
+    # callee). This is the axis that forces `RETURNS !T` (step 4). It
+    # is kept strictly separate from the alloc FAULT axis below; the
+    # transitive loop runs over THIS map (not the OR'd can_fail) so an
+    # alloc-only-faulting callee never makes a caller error_fallible
+    # (that would re-introduce #3).
+    error_fallible = {}
     @fn_nodes.each do |name, fn_node|
       # The most authoritative failure signal is the EXPLICIT signature:
       # a fn declared `RETURNS !T` is fallible by contract even if its
@@ -436,17 +443,23 @@ module EffectTracker
         rescue StandardError
           false
         end
-      can_fail[name] = @fn_raises_directly[name] == true || declared_fallible || name == "main"
+      error_fallible[name] = @fn_raises_directly[name] == true || declared_fallible || name == "main"
     end
 
-    # Seed imported (cross-module) functions that can fail.
+    # Seed imported (cross-module) functions. Read the callee's
+    # ERROR-only flag, NOT its OR'd can_fail -- an imported fn that is
+    # can_fail solely because it allocates must not seed local ERROR
+    # fallibility. Fallback to can_fail only for extern/legacy sigs
+    # that predate the error_fallible split.
     @call_graph.each do |_, callees|
       callees.each do |c|
-        next if can_fail.key?(c)
+        next if error_fallible.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
         sig = FunctionSignature.unwrap(scope.locals[c]&.type)
-        can_fail[c] = true if sig&.can_fail
+        next unless sig
+        ef = sig.error_fallible.nil? ? sig.can_fail : sig.error_fallible
+        error_fallible[c] = true if ef
       end
     end
 
@@ -461,10 +474,10 @@ module EffectTracker
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
-        next if can_fail[fn_name]
+        next if error_fallible[fn_name]
         prop = @fn_propagating_callees[fn_name] || callees
-        if prop.any? { |c| can_fail[c] }
-          can_fail[fn_name] = true
+        if prop.any? { |c| error_fallible[c] }
+          error_fallible[fn_name] = true
           changed = T.let(true, T::Boolean)
         end
       end
@@ -511,9 +524,17 @@ module EffectTracker
       end
     end
 
+    # can_fail = ERROR ∨ FAULT. Both ride the identical Zig `!T`+try
+    # pipeline (uniform codegen). The ERROR/FAULT split is preserved on
+    # the node so enforce_fallible_returns! (step 4) requires explicit
+    # `RETURNS !T` for error_fallible ONLY -- a FAULT-only fn stays
+    # `RETURNS T` (panics on unhandled OOM; catchable via OR/CATCH).
     @fn_nodes.each do |name, fn_node|
-      fn_node.can_fail = (can_fail[name] == true)
-      fn_node.alloc_fault = (alloc_fault[name] == true)
+      ef = (error_fallible[name] == true)
+      af = (alloc_fault[name] == true)
+      fn_node.error_fallible = ef
+      fn_node.alloc_fault    = af
+      fn_node.can_fail       = ef || af
     end
   end
 
@@ -540,7 +561,15 @@ module EffectTracker
     return unless T.unsafe(FALLIBLE_RETURNS_ENFORCE)
 
     @fn_nodes.each do |name, fn_node|
-      next unless fn_node.can_fail
+      # Surface enforcement applies to the ERROR axis ONLY. An
+      # alloc-only FAULT (can_fail true purely via alloc_fault) never
+      # forces `RETURNS !T`: it stays `RETURNS T`, panics (System/
+      # OutOfMemory) on unhandled OOM, and is catchable anywhere via
+      # OR/CATCH -- because at the Zig level it still rides the uniform
+      # `!T`+try pipeline (step 3). This is the single ERROR-vs-FAULT
+      # decision point; a future STRICT mode flips exactly this gate to
+      # also require/surface the fault. (puck-clear-bugs.md #3/#12)
+      next unless fn_node.error_fallible
       next if name == "main"
       next if fn_node.respond_to?(:extern) && fn_node.extern
       next if fn_node.respond_to?(:synthesized) && fn_node.synthesized

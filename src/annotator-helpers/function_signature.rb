@@ -37,7 +37,7 @@ class FunctionSignature
   attr_accessor :fn_type_params, :owner_type, :owner_type_params
 
   # Computed metadata (set after annotation passes)
-  attr_accessor :needs_rt, :can_fail, :alloc_fault, :return_provenance, :effects, :stack_tier
+  attr_accessor :needs_rt, :can_fail, :alloc_fault, :error_fallible, :return_provenance, :effects, :stack_tier
 
   # Intrinsic marker
   attr_accessor :intrinsic, :zig_pattern
@@ -95,6 +95,7 @@ class FunctionSignature
     sig.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
     sig.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
     sig.alloc_fault = fn.alloc_fault if fn.respond_to?(:alloc_fault)
+    sig.error_fallible = fn.error_fallible if fn.respond_to?(:error_fallible)
     sig.return_provenance = fn.return_provenance if fn.respond_to?(:return_provenance)
     sig.effects = fn.effects if fn.respond_to?(:effects)
     sig.requires = fn.requires if fn.respond_to?(:requires)
