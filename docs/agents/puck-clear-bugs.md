@@ -393,6 +393,38 @@ handed back through an error union isn't paired with a caller-side
 `Cleanup`. This is why the #10 coerce-strip is not a safe fix on its
 own. Distinct from #10 (codegen cast) and #12 (`try` in plain fn).
 
+**Root cause identified (verified by tracing):** the same channel-vs-
+value conflation, this time at the `Type` layer. The parser stamps
+`@collection`/storage on the OUTER error-union type; `Type#payload_type`
+rebuilds the payload from the bare raw symbol (`@payload_type_raw`) and
+DROPS those stamps (`!Int64[]@list` → payload `Int64[]`, collection
+lost). Three derived sites then fail to see the heap collection:
+  1. `EscapeAnalysis.return_expr_is_heap?` keys off AST shape
+     (FuncCall/Identifier/GetField) and misses literal returns
+     (`RETURN [1_i64]`), so the fn never enters `heap_fns`.
+  2. `EscapeAnalysis.tag_transitive_provenance!` (E3a) matches only
+     `val.is_a?(FuncCall)`, so `r = f() OR RAISE` (an OR_RESCUE) never
+     gets heap provenance → no caller cleanup.
+  3. A contract-level check on `fn.return_type` also fails because
+     `payload_type` lost `@collection`.
+
+An attempted multi-point fix (look through OR_RESCUE in E3a; key E1
+off the declared contract reading collection-ness from the OUTER type;
+payload-strip coerced_type for #10) made b13/b10b pass with zero leak,
+BUT broadening `heap_fns` introduced a **double-free + allocator-
+alignment mismatch** in `527_discard_owned_value` (`_ = mkList() OR
+RAISE` — the new caller cleanup collides with the existing
+discard/GIVE-move cleanup path). Reverted: a double-free is strictly
+worse than the original leak.
+
+**The correct single-source fix is `Type#payload_type` itself
+carrying the outer `@collection`/storage/sync stamps** (the annotator
+already hand-carries them at one site, annotator.rb ~186 — proof the
+loss is known). That removes the root for all three derived sites at
+once, but it is high-blast-radius (every `payload_type` caller) and
+must be its own dedicated, fully-validated change with the cleanup-
+machinery double-free interaction worked out — NOT bundled with #3/#11.
+
 ---
 
 ## Summary
