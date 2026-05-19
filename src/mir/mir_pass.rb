@@ -65,6 +65,10 @@ class MIRPass
 
     # E3a: propagate heap return_provenance to caller binding type_info.
     # Must run before PromotionClassifier so HPT downgrade sees stable provenance.
+    # [collapse-verdict: LOAD-BEARING — sole stamper for "promoted return
+    #  bound inside IF branch" (caller_cleanup_spec.rb:95). NOT redundant;
+    #  cannot be deleted incrementally. Only the from-scratch single-escape
+    #  rewrite (option 2) can subsume it.]
     EscapeAnalysis.tag_transitive_provenance!(@fn_nodes, heap_fns)
 
     # E3c: propagate caller arg sync into callee param SymbolEntry#sync.
