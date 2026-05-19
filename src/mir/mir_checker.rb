@@ -537,7 +537,7 @@ class MIRChecker
       next unless cleanups.key?(name)
 
       alloc_sym   = alloc_marks.first.alloc
-      cleanup_sym = T.must(cleanups[name]).first.cleanup_entry[:alloc]
+      cleanup_sym = T.must(cleanups[name]).first.cleanup_entry.alloc
 
       if alloc_sym != cleanup_sym
         @errors << error(:ALLOC_CLEANUP_MISMATCH, name,

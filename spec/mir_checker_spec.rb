@@ -27,7 +27,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("t", :heap),
         MIR::Let.new("t", hc, false, nil, nil),
-        MIR::Cleanup.new("t", { kind: :heap, alloc: :heap, has_moved_guard: false }),
+        MIR::Cleanup.new("t", CleanupEntry.from({ kind: :heap, alloc: :heap, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("dbl", body))
       expect(errors.any? { |e| e.include?("INDIRECT_DOUBLE_BOX") && e.include?("*Val") }).to be true
@@ -38,7 +38,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("t", :heap),
         MIR::Let.new("t", hc, false, nil, nil),
-        MIR::Cleanup.new("t", { kind: :heap, alloc: :heap, has_moved_guard: false }),
+        MIR::Cleanup.new("t", CleanupEntry.from({ kind: :heap, alloc: :heap, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("ok", body))
       expect(errors.none? { |e| e.include?("INDIRECT_DOUBLE_BOX") }).to be true
@@ -60,7 +60,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
-        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :heap, has_moved_guard: false }),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :heap, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("hpt_ok", body))
       expect(errors).to be_empty
@@ -101,7 +101,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("x", :frame),
         MIR::Let.new("x", call, false, nil, nil),
-        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :frame, has_moved_guard: false }),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :frame, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("hpt_bound_frame_alloc", body))
       expect(errors.any? { |e| e.include?("OWNED_RETURN_ALLOC_NOT_HEAP") && e.include?("x") }).to be true
@@ -213,8 +213,8 @@ RSpec.describe MIRChecker do
       iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
       iz.allocs = { key_alloc: :heap, val_alloc: :heap }
       iz.target_var = "map"
-      cleanup = MIR::Cleanup.new("map", { kind: :string_map, alloc: :heap, has_moved_guard: false,
-                                           zig_type: "CheatLib.StringMap(i64)" })
+      cleanup = MIR::Cleanup.new("map", CleanupEntry.from({ kind: :string_map, alloc: :heap, has_moved_guard: false,
+                                           zig_type: "CheatLib.StringMap(i64)" }))
       body = [
         MIR::AllocMark.new("map", :heap),
         MIR::ExprStmt.new(iz, false),
@@ -529,7 +529,7 @@ RSpec.describe MIRChecker do
 
   describe "ALLOC_CLEANUP_MISMATCH" do
     it "detects frame alloc with heap cleanup" do
-      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
       body = [
         MIR::AllocMark.new("data", :frame),
         MIR::Cleanup.new("data", cleanup_entry),
@@ -539,7 +539,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects heap alloc with frame cleanup" do
-      cleanup_entry = { kind: :heap_string, alloc: :frame, has_moved_guard: false }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
       body = [
         MIR::AllocMark.new("data", :heap),
         MIR::Cleanup.new("data", cleanup_entry),
@@ -549,7 +549,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for matching frame alloc and frame cleanup" do
-      cleanup_entry = { kind: :heap_string, alloc: :frame, has_moved_guard: false }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
       body = [
         MIR::AllocMark.new("data", :frame),
         MIR::Cleanup.new("data", cleanup_entry),
@@ -559,7 +559,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for matching heap alloc and heap cleanup" do
-      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: true }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: true })
       body = [
         MIR::AllocMark.new("data", :heap),
         MIR::Cleanup.new("data", cleanup_entry),
@@ -569,7 +569,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for cleanup with no AllocMark (TAKES parameter)" do
-      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
       body = [
         MIR::Cleanup.new("data", cleanup_entry),
       ]
@@ -586,7 +586,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects mismatch inside an if branch" do
-      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
       branch_body = [
         MIR::AllocMark.new("line", :frame),
         MIR::Cleanup.new("line", cleanup_entry),
@@ -797,7 +797,7 @@ RSpec.describe MIRChecker do
       fn1 = fn_def("good", [
         MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call1, false, nil, nil),
-        MIR::Cleanup.new("x", { kind: :heap_slice, alloc: :heap, has_moved_guard: false }),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :heap, has_moved_guard: false })),
       ])
 
       call2 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)

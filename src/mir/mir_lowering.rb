@@ -896,7 +896,7 @@ class MIRLowering
   sig { params(entry: CleanupEntry, ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
   def build_drop_entry!(entry, ti, source_node)
 
-    zig_type = case entry[:kind]
+    zig_type = case entry.kind
     when :heap_slice
       is_bare = T.must(source_node).value.is_a?(AST::CopyNode) && !ti&.list_collection?
       if is_bare
@@ -914,7 +914,7 @@ class MIRLowering
       ti&.zig_type
     end
 
-    elem_zig = case entry[:kind]
+    elem_zig = case entry.kind
     when :list_with_elem_cleanup, :takes_slice
       et = ti&.element_type
       if et
@@ -925,9 +925,9 @@ class MIRLowering
       ti&.element_type ? Type.new(ti.element_type).zig_type : nil
     end
 
-    entry[:zig_type] = zig_type || entry[:zig_type] || "UNKNOWN"
-    entry[:elem_zig_type] = elem_zig || entry[:elem_zig_type]
-    entry[:is_fixed] = ti&.fixed? if entry[:kind] == :array_with_struct_strings
+    entry[:zig_type] = zig_type || entry.zig_type || "UNKNOWN"
+    entry[:elem_zig_type] = elem_zig || entry.elem_zig_type
+    entry[:is_fixed] = ti&.fixed? if entry.kind == :array_with_struct_strings
   end
 
   # Resolve the stdlib alloc: symbol for an AllocMark from the FuncCall node's
@@ -1312,7 +1312,7 @@ class MIRLowering
     # (synthetic functions, specs). uses_alloc tracks stdlib frame calls (append,
     # concat) which are not in cleanup_bindings and are always accurate.
     has_frame_bindings = if node.cleanup_bindings
-                           node.cleanup_bindings.any? { |_, e| e[:alloc] == :frame }
+                           node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
                          else
                            node.uses_frame
                          end
@@ -1412,11 +1412,11 @@ class MIRLowering
     takes_mir = []
     node.params.select { |p| p.takes }.each do |p|
       entry = @current_bindings[p.name.to_s]
-      next unless entry && entry[:needs_cleanup]
+      next unless entry && entry.needs_cleanup?
       ti = p.type || Type.new(:Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
-      takes_mir << MIR::AllocMark.new(p.name.to_s, entry[:alloc], ti)
+      takes_mir << MIR::AllocMark.new(p.name.to_s, entry.alloc, ti)
       takes_mir << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
     end
 
@@ -5921,7 +5921,7 @@ class MIRLowering
       ident_name = zig_safe_name(node.value.name)
       ident_name = @fn_name_rename_map[ident_name] if @fn_name_rename_map&.key?(ident_name)
       entry = @current_bindings[node.value.name.to_s]
-      guarded = (entry && entry[:has_moved_guard]) || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
+      guarded = (entry && entry.has_moved_guard?) || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
       @pending_stmts << MIR::MoveMark.new(ident_name) if guarded
       return
     end
@@ -5939,7 +5939,7 @@ class MIRLowering
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
       ident = lower_identifier(node.value)
       entry = @current_bindings[node.value.name.to_s]
-      guarded = (entry && entry[:has_moved_guard]) || @guarded_cleanup_names&.[](ident.name)
+      guarded = (entry && entry.has_moved_guard?) || @guarded_cleanup_names&.[](ident.name)
       @pending_stmts << MIR::MoveMark.new(ident.name) if guarded && ident.respond_to?(:name) && !ident.name.include?(".")
       ident
     else

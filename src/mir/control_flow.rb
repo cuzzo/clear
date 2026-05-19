@@ -21,6 +21,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
+require_relative "cleanup_entry"
 
 # ==========================================
 # CFG - Control Flow Graph (analysis only)
@@ -443,7 +444,7 @@ class OwnershipDataflow
   #      error unwind) -> no defer needed.
   #   3. Exception: MATCH TAKES unions that are moved on all paths still need
   #      a guard because non-AS branches don't extract ownership.
-  sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, T::Hash[Symbol, T.untyped]]).returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }
+  sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(T::Hash[String, CleanupEntry]) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
 
@@ -455,20 +456,20 @@ class OwnershipDataflow
     end
 
     bindings.each do |var, entry|
-      next unless entry[:needs_cleanup]
+      next unless entry.needs_cleanup?
       df_entry = summary[var]
       next unless df_entry # variable not tracked by dataflow - keep plan
 
       if !df_entry[:needs_cleanup]
         # Moved on ALL paths -> normally no cleanup needed.
         # Exception: MATCH TAKES unions need the defer with a moved guard.
-        if entry[:kind] == :takes_union || match_takes_var?(fn_node, var)
+        if entry.kind == :takes_union || match_takes_var?(fn_node, var)
           entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
           entry[:has_moved_guard] = false
         end
-      elsif !df_entry[:has_moved_guard] && entry[:has_moved_guard]
+      elsif !df_entry[:has_moved_guard] && entry.has_moved_guard?
         # Never moved on any path -> unconditional cleanup, no guard.
         entry[:has_moved_guard] = false
       end
