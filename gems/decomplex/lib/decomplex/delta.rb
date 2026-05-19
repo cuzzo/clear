@@ -29,13 +29,19 @@ module Decomplex
 
         fs.each { |f| findings[fingerprint(title, f)] += 1 }
       end
+      site = Hash.new(0)
+      sections.each do |title, _tier, fs|
+        next unless fs
+
+        fs.each { |f| site_fingerprints(title, f).each { |sfp| site[sfp] += 1 } }
+      end
       cl = {}
       clusters.each do |c|
         cl["#{c[:kind]}#{SEP}#{c[:token]}"] =
           { "n" => c[:n_detectors], "s" => c[:support],
             "fat" => !c[:fat_union].nil? && c[:fat_union] }
       end
-      { "findings" => findings, "clusters" => cl,
+      { "findings" => findings, "site_findings" => site, "clusters" => cl,
         "total" => findings.values.sum }
     end
 
@@ -45,6 +51,21 @@ module Decomplex
       units = RootCause.finding_units(finding)
                        .map { |f, m| "#{f}##{m}" }.uniq.sort.join(",")
       [detector, ents, units].join(SEP)
+    end
+
+    # Per-LEAF identity: one fingerprint per (detector, entities,
+    # single file#method). The aggregate `fingerprint` re-keys a whole
+    # multi-site finding when ANY member changes, so its per-finding
+    # add/resolve is unusable for "which specific sites did this commit
+    # add/remove" on aggregate detectors. ADDITIVE: `fingerprint`,
+    # `findings`, `total`, clusters are unchanged (still report-
+    # reconciled); this only powers the extra `site_*` delta.
+    def site_fingerprints(detector, finding)
+      ents = RootCause.entities(finding)
+                      .map { |k, t| "#{k}:#{t}" }.sort.join(",")
+      RootCause.finding_units(finding)
+               .map { |f, m| "#{f}##{m}" }.uniq
+               .map { |u| [detector, ents, u].join(SEP) }
     end
 
     # base/head: snapshot Hashes (or JSON.parse of them). Returns the
@@ -79,10 +100,29 @@ module Decomplex
         end
       end
 
+      # Site-level (per-leaf) delta -- the precise "which (file#method)
+      # findings did this commit add/remove" that the aggregate
+      # findings delta above cannot answer for multi-site detectors.
+      bs = base["site_findings"] || {}
+      hs = head["site_findings"] || {}
+      s_added = []
+      s_resolved = []
+      s_persisted = 0
+      (bs.keys | hs.keys).each do |k|
+        d = hs[k].to_i - bs[k].to_i
+        if d.negative?  then s_resolved << [k, -d]
+        elsif d.positive? then s_added << [k, d]
+        else s_persisted += 1
+        end
+      end
+
       {
         "resolved" => resolved.sort_by { |_, n| -n },
         "added" => added.sort_by { |_, n| -n },
         "persisted" => persisted,
+        "site_resolved" => s_resolved.sort_by { |_, n| -n },
+        "site_added" => s_added.sort_by { |_, n| -n },
+        "site_persisted" => s_persisted,
         "totals" => { "base" => base["total"].to_i,
                       "head" => head["total"].to_i,
                       "delta" => head["total"].to_i - base["total"].to_i },
@@ -126,6 +166,23 @@ module Decomplex
       o << "**Top added findings:**\n"
       d["added"].first(15).each { |k, n| o << "- (+#{n}) #{label(k)}\n" }
       o << "- (none)\n" if d["added"].empty?
+
+      sa = d["site_added"] || []
+      sr = d["site_resolved"] || []
+      unless sa.empty? && sr.empty?
+        o << "\n**Site-level changes (precise -- exact file#method, " \
+             "robust to membership churn):**\n"
+        o << "- site-added #{sa.size}, site-resolved #{sr.size}, " \
+             "site-persisted #{d['site_persisted']}\n"
+        sa.first(25).each do |k, _|
+          dd, _e, u = k.split(SEP)
+          o << "  - + `#{u}` (#{dd})\n"
+        end
+        sr.first(25).each do |k, _|
+          dd, _e, u = k.split(SEP)
+          o << "  - - `#{u}` (#{dd})\n"
+        end
+      end
       o
     end
   end

@@ -156,6 +156,50 @@ class DeltaTest < Minitest::Test
     f
   end
 
+  # ---- site-level precision: the multi-unit case the aggregate
+  #      fingerprint cannot answer (added additively; total unchanged) --
+
+  def test_site_delta_pinpoints_one_added_member
+    base = [["Decision Pressure", 1,
+             [{ contract: ".storage",
+                sites: %w[f.rb:a:10 f.rb:b:20 f.rb:c:30] }]]]
+    head = [["Decision Pressure", 1,
+             [{ contract: ".storage",
+                sites: %w[f.rb:a:10 f.rb:b:20 f.rb:c:30 f.rb:d:40] }]]]
+    b = D.snapshot(base, RC.cluster(base))
+    h = D.snapshot(head, RC.cluster(head))
+    d = D.diff(b, h)
+
+    # Aggregate findings delta is coarse here (one member changed ->
+    # whole finding re-keys): the documented limitation.
+    assert_equal 1, d["added"].size
+    assert_equal 1, d["resolved"].size
+    assert_equal 0, d["persisted"]
+
+    # Site-level is precise: exactly ONE new (file#method); the other
+    # three persisted; none resolved.
+    assert_equal 1, d["site_added"].size, "exactly one member added"
+    assert_equal 0, d["site_resolved"].size
+    assert_equal 3, d["site_persisted"], "a/b/c persist; only d is new"
+    assert_match(/f\.rb#d/, d["site_added"].first[0])
+
+    # `total` semantics UNCHANGED (still finding-count, report-
+    # reconciled): one finding each side, net 0.
+    assert_equal 1, b["total"]
+    assert_equal 1, h["total"]
+    assert_equal 0, d["totals"]["delta"]
+  end
+
+  def test_site_delta_persists_pure_line_shift
+    base = base_sections
+    b = D.snapshot(base, RC.cluster(base))
+    sh = shift_findings(base, 100)
+    h = D.snapshot(sh, RC.cluster(sh))
+    d = D.diff(b, h)
+    assert_empty d["site_resolved"], "line shift -> no site resolved"
+    assert_empty d["site_added"], "line shift -> no site added"
+  end
+
   # ---- markdown -----------------------------------------------------
 
   def test_to_markdown_states_direction_and_clusters
