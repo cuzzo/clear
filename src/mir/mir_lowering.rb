@@ -6162,7 +6162,7 @@ class MIRLowering
     decl_name = node.name.to_s
     binding_entry = @current_bindings[decl_name]
     copy_decl_needs_drop = node.value.is_a?(AST::CopyNode) && (ft.any_sync? || ft.string?)
-    has_mir_drop = (binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]) ||
+    has_mir_drop = (binding_entry && binding_entry.needs_cleanup? && !binding_entry.match_as?) ||
                    copy_decl_needs_drop
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
@@ -6195,7 +6195,7 @@ class MIRLowering
     decl_alloc = if node.respond_to?(:storage) && node.storage == :heap
       :heap
     else
-      binding_entry&.dig(:alloc) || :heap
+      binding_entry&.alloc || :heap
     end
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
@@ -6333,26 +6333,26 @@ class MIRLowering
       # use per-declaration storage. This avoids using a stale alloc from a same-named
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
-      node_alloc = if binding_entry && binding_entry[:alloc] == :cleanup
+      node_alloc = if binding_entry && binding_entry.alloc == :cleanup
         :cleanup
       elsif mir_allocates?(init)
         :heap
       elsif node.respond_to?(:storage) && node.storage == :heap
         :heap
-      elsif binding_entry && binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
+      elsif binding_entry && binding_entry.alloc == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
         alloc_for_node(node)
       else
-        binding_entry&.dig(:alloc) || decl_alloc
+        binding_entry&.alloc || decl_alloc
       end
       # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
       # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
       # because both AllocMark and Cleanup end up self-consistent at :frame.
-      if binding_entry && binding_entry[:alloc] == :cleanup && node_alloc != :cleanup
+      if binding_entry && binding_entry.alloc == :cleanup && node_alloc != :cleanup
         raise "BUG in lower_var_decl: lowering downgraded :cleanup to " \
               ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
       end
       drop_entry[:alloc] = node_alloc
-      (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry[:has_moved_guard]
+      (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     elsif owned_return_transfer_binding?(binding_entry, init)
