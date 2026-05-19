@@ -606,6 +606,76 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(trimmed_drop).to be false
     end
 
+    # Borrow-return carve-out. `RETURNS x:T` ties the return to a param;
+    # EscapeGraph's borrow_return? suppresses the S-return sink and keeps
+    # the fn out of heap_fns. End-to-end `clear test` of borrow-return
+    # data types fails at PreMirTypeCheck (lifetime MIR lowering isn't
+    # complete for non-`~Void` returns); these specs use run_mir which
+    # calls MIRPass directly, bypassing PreMirTypeCheck.
+    it ":borrow_return (single-binding) — heap-prone return is carved out" do
+      ast = run_mir(<<~CLEAR)
+        FN borrow(x: String) RETURNS x: String -> RETURN x; END
+        FN main() RETURNS Void ->
+            s: String = "hello";
+            r = borrow(s);
+            RETURN;
+        END
+      CLEAR
+      borrow_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "borrow" }
+      expect(borrow_fn.return_provenance).not_to eq(:heap)
+      r_decl = find_decl_in(main_fn(ast), "r")
+      expect(r_decl.storage).not_to eq(:heap)
+    end
+
+    it ":borrow_return (multi-binding) — (a b):T also carves out" do
+      ast = run_mir(<<~CLEAR)
+        FN pick(a: String, b: String) RETURNS (a b): String -> RETURN a; END
+        FN main() RETURNS Void ->
+            x: String = "one";
+            y: String = "two";
+            r = pick(x, y);
+            RETURN;
+        END
+      CLEAR
+      pick_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "pick" }
+      expect(pick_fn.return_provenance).not_to eq(:heap)
+      r_decl = find_decl_in(main_fn(ast), "r")
+      expect(r_decl.storage).not_to eq(:heap)
+    end
+
+    it ":borrow_return (wildcard) — *:T also carves out" do
+      ast = run_mir(<<~CLEAR)
+        FN echo(a: String, b: String) RETURNS *: String -> RETURN a; END
+        FN main() RETURNS Void ->
+            x: String = "one";
+            y: String = "two";
+            r = echo(x, y);
+            RETURN;
+        END
+      CLEAR
+      echo_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "echo" }
+      expect(echo_fn.return_provenance).not_to eq(:heap)
+      r_decl = find_decl_in(main_fn(ast), "r")
+      expect(r_decl.storage).not_to eq(:heap)
+    end
+
+    it ":borrow_return (list payload) — collection return is carved out" do
+      ast = run_mir(<<~CLEAR)
+        FN borrowList(xs: Int64[]@list) RETURNS xs: Int64[]@list -> RETURN xs; END
+        FN main() RETURNS Void ->
+            src: Int64[]@list = [];
+            src.append(1_i64);
+            r = borrowList(src);
+            RETURN;
+        END
+      CLEAR
+      borrow_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "borrowList" }
+      # Only return_provenance is asserted here. r.storage may be :heap
+      # because the annotator pre-stamps list-typed bindings heap from the
+      # return type alone; that's an annotator concern, not EscapeGraph's.
+      expect(borrow_fn.return_provenance).not_to eq(:heap)
+    end
+
   end
 
   # ===========================================================================

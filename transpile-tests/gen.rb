@@ -4,7 +4,7 @@ require 'bundler/setup'
 # Coverage bootstrap MUST run before src/ requires. No-op unless
 # COVERAGE=1. See spec/coverage_bootstrap.rb.
 require_relative '../spec/coverage_bootstrap'
-CoverageBootstrap.start('transpile-tests')
+CoverageBootstrap.start(ENV.fetch('COVERAGE_BOOTSTRAP_NAME', 'transpile-tests'))
 
 require_relative '../src/backends/transpiler'
 

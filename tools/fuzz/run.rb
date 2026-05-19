@@ -16,6 +16,9 @@ require 'digest'
 require 'etc'
 require 'open3'
 require_relative 'generator'
+# Route SimpleCov to a 'fuzz' resultset key (gen.rb defaults to
+# 'transpile-tests') so fuzz cell hits stay attributable.
+ENV['COVERAGE_BOOTSTRAP_NAME'] ||= 'fuzz' if ENV['COVERAGE'] == '1'
 require_relative '../../transpile-tests/gen'
 
 LITEDB_ROOT = File.expand_path('../..', __dir__)
