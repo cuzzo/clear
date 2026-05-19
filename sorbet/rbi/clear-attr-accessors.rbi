@@ -1494,7 +1494,7 @@ class MIRLowering
 end
 
 class MIRPass
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   def cleanup_bindings; end
 end
 
