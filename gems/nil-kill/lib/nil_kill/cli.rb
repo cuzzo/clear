@@ -212,12 +212,15 @@ module NilKill
     # vs collect_ran_untraced) then cannot be computed and would silently
     # degrade to "never_run". Make that a hard, loud failure instead.
     def assert_collect_coverage_produced!
-      return unless Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl")).empty?
-      abort "nil-kill: the traced collect produced NO Ruby Coverage " \
-        "(#{NilKill.rel(RUNTIME_DIR)}/coverage-*.jsonl is empty). The dead-vs-missed " \
-        "split cannot be computed -- Coverage failed to start in the workload " \
-        "(see NilKillRuntimeTrace.start_coverage!). Fix the workload/tracer; do " \
-        "not infer on this collect."
+      cov_bytes = Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl")).sum { |f| File.size(f) }
+      meth_bytes = Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl")).sum { |f| File.size(f) }
+      return if cov_bytes.positive? && meth_bytes.positive?
+      abort "nil-kill: the traced collect produced NO usable evidence " \
+        "(coverage=#{cov_bytes}B, method observations=#{meth_bytes}B in " \
+        "#{NilKill.rel(RUNTIME_DIR)}). Empty .jsonl files exist but hold nothing -- " \
+        "Coverage failed to start, or an exception escaped instrumented src during " \
+        "require and aborted the run before any method returned. The dead-vs-missed " \
+        "split cannot be computed. Fix the workload/tracer; do not infer on this collect."
     end
 
     def collect_commands
