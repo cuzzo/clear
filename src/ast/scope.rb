@@ -170,7 +170,7 @@ class Scope
     # has storage=:shared AND sync=:locked; the case above only sets ownership).
     base_type.sync = entry.sync if entry.sync && !base_type.sync
     base_type.layout = entry.layout if entry.layout && !base_type.layout
-    if entry.sync == :atomic && entry.layout == :indirect && base_type.ownership == :affine
+    if entry.atomic_ptr? && base_type.ownership == :affine
       base_type.ownership = :shared
     end
 

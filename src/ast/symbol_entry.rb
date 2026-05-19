@@ -159,6 +159,18 @@ class SymbolEntry
     @sync == :atomic
   end
 
+  # Mirror of Type#indirect? / Type#atomic_ptr?. The AtomicPtr pair
+  # `sym.sync == :atomic && sym.layout == :indirect` was reinvented inline.
+  sig { returns(T::Boolean) }
+  def indirect?
+    @layout == :indirect
+  end
+
+  sig { returns(T::Boolean) }
+  def atomic_ptr?
+    atomic? && indirect?
+  end
+
   sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope

@@ -6065,7 +6065,7 @@ class MIRLowering
       inner = "CheatLib.RwLocked(#{inner})" if payload.sync == :write_locked
       inner = "CheatLib.RefCell(#{inner})"  if payload.sync == :always_mutable
       inner = "CheatLib.Versioned(#{inner})" if payload.sync == :versioned
-      if payload.sync == :atomic
+      if payload.atomic?
         inner = payload.layout == :indirect ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
       end
       return inner
@@ -6119,7 +6119,7 @@ class MIRLowering
   sig { params(inner_mir: T.any(MIR::ContainerInit, MIR::StructInit), bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.any(MIR::CapWrap, MIR::ContainerInit, MIR::StructInit)) }
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
     # AtomicPtr and primitive Atomic use distinct constructors.
-    is_atomic_ptr = ft.sync == :atomic && ft.layout == :indirect
+    is_atomic_ptr = ft.atomic_ptr?
     sync_fn = case ft.sync
               when :locked         then "lockedCreate"
               when :write_locked   then "rwLockedCreate"
@@ -6137,8 +6137,8 @@ class MIRLowering
     # Atomic wrappers skip the ownership wrap; the cell is the shareable
     # synchronization object.
     own_fn  = case ft.ownership
-              when :shared      then (ft.sync == :atomic ? nil : "arcCreate")
-              when :multiowned  then (ft.sync == :atomic ? nil : "rcCreate")
+              when :shared      then (ft.atomic? ? nil : "arcCreate")
+              when :multiowned  then (ft.atomic? ? nil : "rcCreate")
               end
 
     if sync_fn && own_fn
@@ -7783,7 +7783,7 @@ class MIRLowering
     return false if value_node.is_a?(AST::MoveNode)
     ti = value_node.full_type
     return false unless ti&.any_rc?
-    return false if ti.sync == :atomic && ti.layout == :indirect
+    return false if ti.atomic_ptr?
     rc_map = @rc_unwrap_map || {}
     return false if rc_map.key?(value_node.name)
     true

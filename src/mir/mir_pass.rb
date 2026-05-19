@@ -783,7 +783,7 @@ class MIRPass
 
     ti = ident.full_type
 
-    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
+    is_atomic_ptr = ti.atomic_ptr?
     # RC types: only consume on explicit GIVE. AtomicPtr is represented
     # as shared for escape/lifetime purposes, but its runtime value is a
     # unique heap cell pointer, not an Arc handle.

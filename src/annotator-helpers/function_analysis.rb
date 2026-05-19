@@ -556,7 +556,7 @@ module FunctionAnalysis
     sym = arg_node.symbol
     return false unless sym&.atomic?
     ptype = param.type
-    return true if ptype.is_a?(Type) && ptype.sync == :atomic
+    return true if ptype.is_a?(Type) && ptype.atomic?
     return true if param.sync == :atomic
     return true if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
 
@@ -576,7 +576,7 @@ module FunctionAnalysis
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }
   def explicit_primitive_atomic_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.sync == :atomic && type.primitive?
+    type.is_a?(Type) && type.atomic? && type.primitive?
   end
 
   sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }

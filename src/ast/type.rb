@@ -675,6 +675,13 @@ class Type
     @sync == :atomic
   end
 
+  # AtomicPtr cell: @indirect:atomic. The `sync == :atomic && layout ==
+  # :indirect` pair was reinvented inline ~8x (decomplex Missing-Abstraction).
+  sig { returns(T::Boolean) }
+  def atomic_ptr?
+    atomic? && indirect?
+  end
+
   sig { returns(T::Boolean) }
   def local?
     @sync == :local
@@ -2148,7 +2155,7 @@ class Type
         inner_zig = "CheatLib.Versioned(#{inner_zig})" if @sync == :versioned
         # @indirect:atomic wraps structs in AtomicPtr(T), not bare Atomic(T),
         # because updates publish a refcounted heap payload via a pointer CAS.
-        if @sync == :atomic && @layout == :indirect
+        if atomic_ptr?
           inner_zig = "CheatLib.AtomicPtr(#{inner_zig})"
         elsif @sync == :atomic
           inner_zig = "CheatLib.Atomic(#{inner_zig})"

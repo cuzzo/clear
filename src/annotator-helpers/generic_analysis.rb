@@ -86,7 +86,7 @@ module GenericAnalysis
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
       has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
-      primitive_atomic_param = type_obj.sync == :atomic && type_obj.primitive?
+      primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
       has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
         error!(node, :FN_PARAM_NO_CAPABILITY)

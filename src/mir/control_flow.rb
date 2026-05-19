@@ -903,7 +903,7 @@ class OwnershipDataflow
         return false
       end
     end
-    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
+    is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
@@ -2024,7 +2024,7 @@ class BorrowChecker
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
     ti = ident.full_type
-    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
+    is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end
 end

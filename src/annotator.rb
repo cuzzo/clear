@@ -6222,7 +6222,7 @@ private
     return true if STORAGE_OUTLIVES_DECLARING_SCOPE.include?(info.storage) && info.sync.nil?
     # @indirect:atomic — heap-pinned AtomicPtr cell with own lifetime
     # mechanism (M3.5 promotion).
-    return true if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
+    return true if info.atomic_ptr?
     # Any sync wrapper (Group 1 sync sigils — atomic, locked,
     # write_locked, local, versioned, always_mutable) captures the
     # binding by reference into the fiber frame; lifetime-bound
