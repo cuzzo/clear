@@ -676,6 +676,54 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(borrow_fn.return_provenance).not_to eq(:heap)
     end
 
+    # Branch-coverage drivers for the rarely-walked arms of EscapeGraph's
+    # return-value dispatch -- direct literal returns, OR_RESCUE'd returns,
+    # multi-field aggregate extraction. Each scenario exists in real CLEAR
+    # programs but wasn't exercised by the broader corpus.
+    it ":direct_literal_return — RETURN of a list literal is heap-return" do
+      ast = run_mir(<<~CLEAR)
+        FN mk!() RETURNS !Int64[]@list -> RETURN [1_i64, 2_i64]; END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk!" }
+      expect(mk_fn.return_provenance).to eq(:heap)
+    end
+
+    it ":or_rescue_return — RETURN of `x OR fallback` propagates LHS-as-heap-return" do
+      ast = run_mir(<<~CLEAR)
+        FN inner!() RETURNS !Int64[]@list ->
+            MUTABLE v: Int64[]@list = [];
+            v.append(1_i64);
+            RETURN v;
+        END
+        FN wrap!() RETURNS !Int64[]@list ->
+            RETURN inner!() OR RAISE;
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      wrap_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "wrap!" }
+      expect(wrap_fn.return_provenance).to eq(:heap)
+    end
+
+    it ":aggregate_extract_ident_secondary_field — heap ident in non-first field" do
+      ast = run_mir(<<~CLEAR)
+        STRUCT Pair { first: Int64[]@list, second: Int64[]@list }
+        FN mk!() RETURNS !Pair ->
+            a: Int64[]@list = [];
+            a.append(1_i64);
+            b: Int64[]@list = [];
+            b.append(2_i64);
+            RETURN Pair{ first: a, second: b };
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk!" }
+      a_decl = find_decl_in(mk_fn, "a")
+      b_decl = find_decl_in(mk_fn, "b")
+      expect(a_decl.storage).to eq(:heap)
+      expect(b_decl.storage).to eq(:heap)
+    end
+
   end
 
   # ===========================================================================

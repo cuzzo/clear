@@ -100,7 +100,7 @@ module EscapeGraph
 
     esc_strong  = Set.new
     esc_listret = Set.new
-    each_sink_expr(fn, include_return: false) { |se| referenced_decls(se).each { |d| esc_strong << d } }
+    each_sink_expr(fn) { |se| referenced_decls(se).each { |d| esc_strong << d } }
     loop_carry_names(fn).each   { |d| esc_strong << d }
     bg_capture_names(fn).each   { |d| esc_strong << d }
     callarg_escape_names(fn, fn_nodes).each { |d| esc_strong << d }
@@ -197,8 +197,7 @@ module EscapeGraph
     end
   end
 
-  def each_sink_expr(fn, include_return: true)
-    return_values(fn.body).each { |rv| yield rv } if include_return && !borrow_return?(fn)
+  def each_sink_expr(fn)
     walk(fn.body) do |n|
       case n
       when AST::Assignment
