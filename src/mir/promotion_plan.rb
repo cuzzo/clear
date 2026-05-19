@@ -585,7 +585,7 @@ module CleanupClassifier
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::WhileBindLoop)
       cond = node.condition
-      next unless cond.is_a?(AST::MethodCall) || cond.is_a?(AST::FuncCall)
+      next unless AST.call?(cond)
       next if cond.is_a?(AST::ResolveNode)
       ti = cond.full_type
       inner_ti = ti.wrapped_type
@@ -607,7 +607,7 @@ module CleanupClassifier
       next unless node.is_a?(AST::IfBind)
       node.bindings.each do |b|
         expr = b.expr
-        next unless expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
+        next unless AST.call?(expr)
         next if expr.is_a?(AST::ResolveNode)
         ti = expr.full_type
         inner_ti = ti.wrapped_type

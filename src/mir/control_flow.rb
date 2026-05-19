@@ -1508,7 +1508,7 @@ module LoopFrameAnalysis
     # Any call (stdlib or user-defined) that returns a String may produce a
     # carry value needing heap promotion. This covers both stdlib_allocates=true
     # calls (toString, intToString, etc.) and user-defined string-returning functions.
-    if expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
+    if AST.call?(expr)
       return true if expr.full_type.string?
     end
     case expr

@@ -255,7 +255,7 @@ module FsmTransform
   def suspend_value?(value)
     T.bind(self, T.untyped) rescue nil
     return true if value.is_a?(AST::NextExpr)
-    return false unless value.is_a?(AST::FuncCall) || value.is_a?(AST::MethodCall)
+    return false unless AST.call?(value)
     md = value.matched_stdlib_def
     !!(md && md.emit&.suspends && md.emit&.fsm_setup)
   end

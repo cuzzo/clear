@@ -325,7 +325,7 @@ module FsmTransform
     sig { params(expr: T.untyped).returns(T::Boolean) }
     def suspending_call?(expr)
       T.bind(self, T.untyped) rescue nil
-      (expr.is_a?(AST::FuncCall) || expr.is_a?(AST::MethodCall)) &&
+      (AST.call?(expr)) &&
         io_suspending_call?(expr)
     end
 

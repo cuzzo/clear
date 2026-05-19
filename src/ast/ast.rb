@@ -328,6 +328,16 @@ module AST
     end
   end
 
+  # Is this node a call expression (function or method)? The
+  # `is_a?(AST::FuncCall) || is_a?(AST::MethodCall)` predicate-use was
+  # recomputed inline across the MIR pipeline (decomplex
+  # Missing-Abstraction). Syntactic `case ... when FuncCall, MethodCall`
+  # dispatch arms are NOT this -- leave those.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.call?(node)
+    node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+  end
+
   # The immediately-nested *value* children of a transparent wrapper
   # expression: struct/union-literal field values, list-literal items,
   # and the inner value of a MOVE/COPY/CLONE/SHARE/FREEZE/CapabilityWrap

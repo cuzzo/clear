@@ -524,7 +524,7 @@ class MIRLowering
       pending = flush_pending
       next unless mir
       # Non-void function-like expressions used as statements need explicit discard (_ =)
-      needs_discard = (s.is_a?(AST::FuncCall) || s.is_a?(AST::MethodCall)) ||
+      needs_discard = (AST.call?(s)) ||
                       (s.is_a?(AST::BinaryOp) && (s.op == :OR_RESCUE || s.op == :PIPE_ERR))
       if needs_discard &&
          s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void
@@ -6236,7 +6236,7 @@ class MIRLowering
         # Pass decl_alloc so NEXT ~T[]@list uses the right allocator (heap when result
         # escapes via return, frame when it stays local).
         lower_next_expr(rhs_unwrapped, decl_alloc)
-      elsif rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
+      elsif AST.call?(rhs_unwrapped)
         lower(node.value)
       elsif (rhs_unwrapped.is_a?(AST::CopyNode) || rhs_unwrapped.is_a?(AST::CloneNode)) &&
             rhs_unwrapped.value.respond_to?(:full_type) &&

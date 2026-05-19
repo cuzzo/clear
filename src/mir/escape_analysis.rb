@@ -857,7 +857,7 @@ module EscapeAnalysis
       AST.walk_body(fn.body) do |stmt|
         if stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)
           val = stmt.value
-          if val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall)
+          if AST.call?(val)
             fn_name = val.name.to_s
             if carry_fns.include?(fn_name)
               call_ti = val.full_type
