@@ -1106,7 +1106,7 @@ module CapabilityHelper
           # need the full cell shape so the captured ref keeps identity across
           # fibers.
           unless result.captures.key?(name)
-            cap_type = info.sync == :atomic ? info.type : node.full_type
+            cap_type = info.atomic? ? info.type : node.full_type
             result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
@@ -1148,7 +1148,7 @@ module CapabilityHelper
           is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
           # @shared:atomic is self-synchronizing; pinning would defeat the
           # cross-thread parallelism that atomic storage is meant to allow.
-          is_atomic = info.sync == :atomic
+          is_atomic = info.atomic?
           unless is_dashmap || is_atomic
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
             result.has_shared  = true if info.storage == :shared || info.storage == :multiowned

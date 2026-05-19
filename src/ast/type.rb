@@ -2157,7 +2157,7 @@ class Type
         # because updates publish a refcounted heap payload via a pointer CAS.
         if atomic_ptr?
           inner_zig = "CheatLib.AtomicPtr(#{inner_zig})"
-        elsif @sync == :atomic
+        elsif atomic?
           inner_zig = "CheatLib.Atomic(#{inner_zig})"
         end
       end
@@ -2167,7 +2167,7 @@ class Type
       # value receivers, and lifetime checks make the outer refcount redundant.
       #
       # `@indirect:atomic` uses the same bare-pointer binding layout.
-      if @sync == :atomic && (@ownership == :shared || @ownership == :multiowned || @layout == :indirect)
+      if atomic? && (@ownership == :shared || @ownership == :multiowned || @layout == :indirect)
         return "*#{inner_zig}"
       end
 

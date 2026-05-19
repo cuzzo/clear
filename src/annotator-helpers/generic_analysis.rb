@@ -489,7 +489,7 @@ module GenericAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     caps = ["@shared"]
-    caps << "indirect" if t.layout == :indirect
+    caps << "indirect" if t.indirect?
     caps << T.must(case t.sync
             when :locked then "locked"
             when :write_locked then "writeLocked"

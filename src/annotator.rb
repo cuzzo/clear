@@ -4159,12 +4159,12 @@ private
     # AtomicInt64). The annotator validates that @atomic is only applied to
     # types the runtime supports (Int64, Float64, Bool, sized variants); other
     # primitives error.
-    is_atomic_primitive = node.sync == :atomic && node.layout != :indirect
+    is_atomic_primitive = node.atomic? && !node.indirect?
 
     # `@indirect:atomic` is the struct-as-AtomicPtr form. Reject it on
     # primitives before the generic primitive-capability error so the
     # diagnostic can name the right migration path.
-    if ti.primitive? && node.sync == :atomic && node.layout == :indirect
+    if ti.primitive? && node.atomic_ptr?
       error!(node, :INDIRECT_ATOMIC_PRIMITIVE, type: base_type)
     end
 
@@ -4175,13 +4175,13 @@ private
 
     # Struct atomics need AtomicPtr snapshot semantics; direct atomic ops only
     # make sense for CAS-sized primitive cells.
-    if !ti.primitive? && node.sync == :atomic && node.layout != :indirect
+    if !ti.primitive? && node.atomic? && !node.indirect?
       error!(node, :STRUCT_ATOMIC_NEEDS_INDIRECT, type: base_type)
     end
 
     # AtomicPtr is cross-thread by design; @local is pointless and
     # @multiowned's Rc backing is not thread-safe.
-    if node.sync == :atomic && node.layout == :indirect
+    if node.atomic_ptr?
       if node.ownership == :local
         error!(node, :LOCAL_INDIRECT_ATOMIC)
       elsif node.ownership == :multiowned
@@ -4196,7 +4196,7 @@ private
     # AtomicPtr implies shared ownership because escaping the declaring
     # scope is the point of the construct; local and multiowned cases were
     # rejected above.
-    if node.sync == :atomic && node.layout == :indirect && !node.ownership
+    if node.atomic_ptr? && !node.ownership
       ti.ownership = :shared
     end
     # @indirect forces heap location (same as @local, but different intent).

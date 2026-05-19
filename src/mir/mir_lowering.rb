@@ -5983,7 +5983,7 @@ class MIRLowering
 
     # AtomicPtr and primitive Atomic use different constructors but both use
     # bare-pointer ownership without an outer Arc/Rc wrapper.
-    is_atomic_ptr = node.sync == :atomic && node.layout == :indirect
+    is_atomic_ptr = node.atomic_ptr?
     sync_fn = case node.sync
               when :locked then "lockedCreate"
               when :write_locked then "rwLockedCreate"
@@ -6001,8 +6001,8 @@ class MIRLowering
     # Atomic cells are already thread-safe; AtomicPtr also owns an
     # Arc-managed payload internally, so an outer Arc/Rc would double-wrap.
     own_fn = case node.ownership
-             when :shared then (node.sync == :atomic ? nil : "arcCreate")
-             when :multiowned then (node.sync == :atomic ? nil : "rcCreate")
+             when :shared then (node.atomic? ? nil : "arcCreate")
+             when :multiowned then (node.atomic? ? nil : "rcCreate")
              end
 
     strategy = if node.sync == :local || (node.layout == :indirect && !node.sync && !node.ownership)

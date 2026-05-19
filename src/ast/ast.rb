@@ -46,6 +46,12 @@ module AST
       self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
     end
 
+    # Mirror of Type#atomic? (Param has :sync but no :layout, so no
+    # indirect?/atomic_ptr?). `param.sync == :atomic` was reinvented
+    # inline (decomplex Reification-Miss).
+    sig { returns(T::Boolean) }
+    def atomic? = sync == :atomic
+
     sig { params(val: T.untyped).void }
     def type=(val)
       self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
@@ -1562,12 +1568,24 @@ module AST
   # layout:    nil | :indirect
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) do
     include Locatable
+    extend T::Sig
     # Optional integer rank on @locked(rank: N) / @writeLocked(rank: N).
     # Used by Phase 3 to prove LockCycle freedom: when all participating
     # locks are ranked, acquiring any lock requires the new rank to be
     # strictly greater than every held rank, which makes cycles
     # structurally unrepresentable.
     attr_accessor :lock_rank
+
+    # Mirror of Type#atomic? / indirect? / atomic_ptr?. The
+    # `node.sync == :atomic [&& node.layout == :indirect]` checks were
+    # reinvented inline across visit_CapabilityWrap / lower_cap_wrap
+    # (decomplex Reification-Miss).
+    sig { returns(T::Boolean) }
+    def atomic? = sync == :atomic
+    sig { returns(T::Boolean) }
+    def indirect? = layout == :indirect
+    sig { returns(T::Boolean) }
+    def atomic_ptr? = atomic? && indirect?
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
