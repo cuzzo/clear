@@ -62,6 +62,7 @@ class MIRLowering
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @guarded_cleanup_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @current_fn_snapshot_types = T.let(nil, T.nilable(T::Set[T.untyped]))
     @atomic_emit_raw = T.let(false, T::Boolean)
@@ -1134,6 +1135,7 @@ class MIRLowering
     # had AllocMarks emitted and remap collisions to <name>_L<line>.
     @fn_alloc_marked_names = {}   # safe_name => true (seen at least once)
     @decl_zig_name_map    = {}    # node.object_id => disambiguated Zig name
+    @guarded_cleanup_names = {}   # safe Zig local name => true when a moved guard was emitted
     # Name-keyed fallback used by AST-level markers (SuppressCleanup, Drop,
     # ReassignCleanup) whose lowering doesn't have access to the decl's
     # AST node. Populated by lower_var_decl in lowering order: whichever
@@ -4316,6 +4318,18 @@ class MIRLowering
         [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")], true)
     end
 
+    if promise_type.observable?
+      tt = promise_type.tense_type
+      wt = tt&.optional? ? tt.wrapped_type : tt
+      if wt&.string?
+        inner = lower(node.expr)
+        inner_str = emit_expr(inner)
+        @tmp_counter += 1
+        blk_label = "__obs_next_string_#{@tmp_counter}"
+        return MIR::InlineZig.new("#{blk_label}: {\n    #{inner_str}.wait();\n    break :#{blk_label} try #{inner_str}.materialize(#{@rt_name}.heapAlloc());\n}", "obs_next_string")
+      end
+    end
+
     inner = lower(node.expr)
     MIR::MethodCall.new(inner, "next", [], true)
   end
@@ -5578,6 +5592,7 @@ class MIRLowering
       return eq_lowering
     end
 
+    mark_explicit_moves_for_cleanup(node.condition)
     cond = lower(node.condition)
     # Parser's optional-pattern slot pushes the symbol :Any when no message
     # follows the assertion's condition. Normalize to "assertion failed"
@@ -5758,13 +5773,33 @@ class MIRLowering
     MIR::RcRetain.new(lower(node.value), zig_base, func)
   end
 
+  sig { params(node: T.untyped).void }
+  def mark_explicit_moves_for_cleanup(node)
+    return unless node
+    if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
+      ident_name = zig_safe_name(node.value.name)
+      ident_name = @fn_name_rename_map[ident_name] if @fn_name_rename_map&.key?(ident_name)
+      entry = @current_bindings[node.value.name.to_s]
+      guarded = (entry && entry[:has_moved_guard]) || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
+      @pending_stmts << MIR::MoveMark.new(ident_name) if guarded
+      return
+    end
+    mark_explicit_moves_for_cleanup(node.value) if node.respond_to?(:value)
+    mark_explicit_moves_for_cleanup(node.left) if node.respond_to?(:left)
+    mark_explicit_moves_for_cleanup(node.right) if node.respond_to?(:right)
+    mark_explicit_moves_for_cleanup(node.condition) if node.respond_to?(:condition) && !node.is_a?(AST::IfStatement)
+    node.args&.each { |a| mark_explicit_moves_for_cleanup(a) } if node.respond_to?(:args)
+  end
+
   sig { params(node: AST::MoveNode).returns(MIR::Ident) }
   def lower_move(node)
     if node.value.is_a?(AST::Identifier)
       # Route through lower_identifier so BG capture-map rewrites apply:
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
       ident = lower_identifier(node.value)
-      @pending_stmts << MIR::MoveMark.new(ident.name) if ident.respond_to?(:name)
+      entry = @current_bindings[node.value.name.to_s]
+      guarded = (entry && entry[:has_moved_guard]) || @guarded_cleanup_names&.[](ident.name)
+      @pending_stmts << MIR::MoveMark.new(ident.name) if guarded && ident.respond_to?(:name) && !ident.name.include?(".")
       ident
     else
       lower(node.value)
@@ -6170,6 +6205,7 @@ class MIRLowering
               ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
       end
       drop_entry[:alloc] = node_alloc
+      (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry[:has_moved_guard]
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     elsif owned_return_transfer_binding?(binding_entry, init)

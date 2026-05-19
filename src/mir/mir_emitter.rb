@@ -1042,13 +1042,11 @@ class MIREmitter
       "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
 
     when :pool, :fixed_soa
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{deref}.deinit(#{alloc});\n"
+      guarded_defer(name, "#{deref}.deinit(#{alloc})", g, errdefer:)
 
     when :set
-      kw = errdefer ? "errdefer" : "defer"
       arg = vp ? name : "&#{name}"
-      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", g, errdefer:)
 
     when :rc
       rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc

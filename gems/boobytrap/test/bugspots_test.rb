@@ -3,7 +3,7 @@
 require "minitest/autorun"
 require_relative "../lib/boobytrap"
 
-class BugspotsTest < Minitest::Test
+class BugspotsTest < Digest::Test
   B = Boobytrap::Bugspots
 
   def test_parse_log_keeps_only_fix_commits_with_files

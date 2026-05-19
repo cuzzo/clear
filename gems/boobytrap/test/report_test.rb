@@ -6,7 +6,7 @@ require "json"
 require "fileutils"
 require_relative "../lib/boobytrap"
 
-class ReportTest < Minitest::Test
+class ReportTest < Digest::Test
   def git(dir, *args, date: nil)
     env = {}
     if date

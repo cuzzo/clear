@@ -375,9 +375,13 @@ module EscapeAnalysis
         next unless ti && ti.list_collection?
 
         arg.symbol.storage = :heap
+        sym_t = arg.symbol.type
+        sym_t.provenance = :heap if sym_t.is_a?(Type) && !sym_t.heap_provenance?
         decl = arg.symbol.reg
-        decl.storage = :heap if decl.respond_to?(:storage=)
-        ti.provenance = :heap if ti.respond_to?(:provenance=) && !ti.heap_provenance?
+        if decl
+          decl.storage = :heap if decl.respond_to?(:storage=)
+          decl.full_type.provenance = :heap if decl.respond_to?(:full_type) && decl.full_type.is_a?(Type)
+        end
       end
     end
 

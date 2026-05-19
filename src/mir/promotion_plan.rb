@@ -808,6 +808,10 @@ module CleanupClassifier
     inner = ti.wrapped_type
     return nil unless inner
     return nil unless inner.needs_cleanup?(schema_lookup) || inner.string?
+    # rodata/borrow provenance: the payload is a string literal in the binary
+    # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
+    # skips frame, not rodata) is an invalid free. No cleanup needed.
+    return nil if ti.rodata_provenance? || ti.borrow_provenance?
     entry(:optional_owned, alloc: :cleanup)
   end
 

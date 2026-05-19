@@ -744,16 +744,28 @@ class MIRPass
           walk_consumed(v, names, bindings)
         end
       end
+    when AST::MoveNode
+      if node.value.is_a?(AST::Identifier)
+        add_if_consumed(node.value, names, bindings, true)
+      else
+        walk_consumed(node.value, names, bindings)
+      end
     when AST::FuncCall, AST::MethodCall
       node.args.each do |a|
-        if a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier)
-          add_if_consumed(a.value, names, bindings, true)
-        elsif a.is_a?(AST::Identifier) && a.was_moved
+        if a.is_a?(AST::Identifier) && a.was_moved
           add_if_consumed(a, names, bindings, true)
-        elsif a.is_a?(AST::StructLit) || a.is_a?(AST::CapabilityWrap)
+        else
           walk_consumed(a, names, bindings)
         end
       end
+      walk_consumed(node.object, names, bindings) if node.is_a?(AST::MethodCall)
+    when AST::BinaryOp
+      walk_consumed(node.left, names, bindings)
+      walk_consumed(node.right, names, bindings)
+    when AST::Assert
+      walk_consumed(node.condition, names, bindings)
+    when AST::ReturnNode
+      walk_consumed(node.value, names, bindings)
     end
   end
 

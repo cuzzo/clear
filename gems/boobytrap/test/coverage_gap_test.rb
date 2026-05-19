@@ -5,7 +5,7 @@ require "tempfile"
 require "json"
 require_relative "../lib/boobytrap"
 
-class CoverageGapTest < Minitest::Test
+class CoverageGapTest < Digest::Test
   def with_resultset(hash)
     f = Tempfile.new(["rs", ".json"])
     f.write(JSON.dump(hash))

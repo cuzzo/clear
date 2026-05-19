@@ -238,6 +238,8 @@ module FsmLowering
     mir_list.flatten(1).filter_map { |n|
       out = @_emitter.emit(n)
       next nil if out.nil? || out.strip.empty?
+      stripped = out.strip
+      out = out + ";" if stripped.start_with?("try ") && !stripped.end_with?(";", "}")
       out
     }.join("\n            ")
   end

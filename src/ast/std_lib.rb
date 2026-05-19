@@ -112,6 +112,7 @@ STD_LIB = T.let({
   "first" => {
     args: [:"Any[]"],
     return: :infer_optional_element_type,
+    lifetime: "self",  # peeks element in place; result borrows the container
     zig: "CheatLib.firstOpt({0})",
     bc: true,
     borrows: :all,
@@ -121,6 +122,7 @@ STD_LIB = T.let({
   "last" => {
     args: [:"Any[]"],
     return: :infer_optional_element_type,
+    lifetime: "self",  # peeks element in place; result borrows the container
     zig: "CheatLib.lastOpt({0})",
     bc: true,
     borrows: :all,

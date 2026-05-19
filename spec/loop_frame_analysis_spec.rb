@@ -769,8 +769,9 @@ RSpec.describe LoopFrameAnalysis do
       # The pattern is: allocate __new_resp, cleanup old resp, assign new
       expect(zig).to include("__new_resp")
       expect(zig).to include("CheatLib.cleanup([]const u8")
-      # And the final defer must free resp
-      expect(zig).to include("defer rt.heapAlloc().free(resp)")
+      # And the final defer must free resp (loop-carry reassignment makes resp
+      # move-tracked, so the free is guarded by the _moved flag).
+      expect(zig).to match(/defer if \(!resp_moved\) rt\.heapAlloc\(\)\.free\(resp\)/)
     end
 
   end
