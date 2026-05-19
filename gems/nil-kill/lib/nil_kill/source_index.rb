@@ -1568,7 +1568,7 @@ module NilKill
           ret = known_return_type(callee, node: node, allow_rbi: rbi_return_candidate?(node))
           if ret && NilKill.useful_type?(ret)
             return [{ "kind" => "safe_call", "callee" => callee, "type" => nilable_type(ret), "line" => line, "code" => code,
-              "stdlib" => rbi_return_source?(node) }]
+              "stdlib" => statically_provable_call?(node) }]
           end
           blockers << "safe navigation return may be nil at #{@rel}:#{line}"
           return [{ "kind" => "nil", "type" => "NilClass", "line" => line, "code" => code },
@@ -1576,7 +1576,7 @@ module NilKill
         end
         ret = known_return_type(callee, node: node, allow_rbi: rbi_return_candidate?(node))
         return [{ "kind" => "typed_call", "callee" => callee, "type" => ret, "line" => line, "code" => code,
-          "stdlib" => rbi_return_source?(node) }] if ret && NilKill.useful_type?(ret)
+          "stdlib" => statically_provable_call?(node) }] if ret && NilKill.useful_type?(ret)
         expr_type = expression_type(node)
         return [{ "kind" => "static", "callee" => callee, "type" => expr_type, "line" => line, "code" => code }] if NilKill.useful_type?(expr_type)
         blockers << "untyped callee #{callee} at #{@rel}:#{line}"
@@ -1639,6 +1639,15 @@ module NilKill
 
     def rbi_return_source?(node)
       node.is_a?(Prism::CallNode) && NilKill.rbi_return_type(node.name.to_s, receiver_type_for_call(node))
+    end
+
+    # rbi_return_source? needs the external sorbet RBI payload, which is
+    # absent under isolated test/CI tmp dirs. A call whose return is
+    # provable from core Ruby semantics on a known receiver type
+    # (propagated_core_return_type, e.g. Array[String]#join -> String)
+    # is statically provable without any payload -- grade it the same.
+    def statically_provable_call?(node)
+      rbi_return_source?(node) || NilKill.useful_type?(propagated_core_return_type(node))
     end
 
     def known_return_type(method_name, node: nil, allow_rbi: true)
