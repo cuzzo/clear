@@ -20,14 +20,41 @@ the post-mortem on how these slipped through to this stage.
 | --- | --- | --- |
 | 1 | Lifted temp emitted after its use site | ✅ FIXED (promoted) |
 | 2 | FRAME_NO_REWIND on plain WHILE loops that allocate | ✅ FIXED (promoted) |
-| 3 | Effect inference: `charAt(i) OR ""` makes caller fallible (alloc⇄fail conflation) | ✅ FIXED (promoted) |
+| 3 | Effect inference: `charAt(i) OR ""` makes caller fallible (alloc⇄fail conflation) | ✅ FIXED (alloc-as-FAULT model) |
 | 4–7 | — | removed (working as designed) |
 | 8 | `splitOnce` flagged fallible because it touches `parts[1]` | ⬜ open |
 | 9 | `ByteCode[]@list` field in struct in `@list` clobbered across iters | ✅ FIXED (promoted) |
-| 10 | Error-union return over `@list` mis-lowers (`*const anyerror!T`) | ⬜ open (naive fix leaks → reverted; needs #13) |
+| 10 | Error-union return over `@list` mis-lowers (`*const anyerror!T`) | ✅ FIXED (coerced_type = payload, never `!T`) |
 | 11 | `expr OR <fallback>` over a *user* callee doesn't reset `can_fail` | ✅ FIXED (channel-termination authority) |
-| 12 | Bare arena op (`split`/concat/`makeList`/`append`) in plain fn emits `try` | ⬜ open (found via #3 gate; runtime-side) |
-| 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (found via #3 gate) |
+| 12 | Bare arena op (`split`/concat/`makeList`/`append`) in plain fn emits `try` | ✅ FIXED (alloc-as-FAULT model) |
+| 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (precisely isolated: declared `RETURNS !T@list` returning a LITERAL bound via `r = f() OR RAISE`; callee ∉ E1 heap_fns; safe fix double-frees 527 — needs dedicated cleanup-machinery change) |
+
+### Unified resolution: allocation is a FAULT, not an ERROR
+
+#3/#10/#12 (and most of #13) shared one root: allocation was modelled
+as an ERROR (`!T` in the value type / `can_fail` from `:allocates`).
+The fix (register-machine branch, 7 steps):
+
+- `OutOfMemory` error name, `kind :System` (non-recoverable default).
+- `fn.alloc_fault` axis (implicit, transitive over the #11
+  channel-termination authority, + the declared-collection-return
+  contract so literal returns count).
+- `can_fail = error_fallible || alloc_fault` — a FAULT rides the
+  SAME uniform Zig `!T`+`try` pipeline as an ERROR (no per-site
+  codegen special-casing, no hidden channel).
+- Surface enforcement (`enforce_fallible_returns!`) gates on
+  `error_fallible` ONLY: a FAULT-only fn stays `RETURNS T`. Future
+  STRICT flips exactly this one gate.
+- Unhandled alloc fault panics `[System/OutOfMemory]`; interceptable
+  anywhere via `OR PASS` / `CATCH` (uniform `!T` path).
+- A returned value's `coerced_type` is the PAYLOAD, never `!T` (#10).
+- Deterministic OOM injection (`CLEAR_OOM_AFTER`) proves
+  unhandled-panic + OR-PASS-recovery.
+
+Net: `can_fail = ERROR ∨ FAULT`; `!T`-surface = ERROR only. Verified
+prspec 4820/0, transpile-tests 568/568 0-leak (aggregated clean, no
+527 double-free), fuzz stable 145/145, infallible_signature gate
+50/50 (10 = the isolated #13 residue), OOM-injection 3/3.
 
 Bugs #11, #12, #13 were discovered this session by the exhaustive
 `tools/fuzz/templates/infallible_signature.rb` gate — latent defects the
