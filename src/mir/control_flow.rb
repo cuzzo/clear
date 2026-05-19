@@ -600,6 +600,17 @@ class OwnershipDataflow
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
   end
 
+  # Single source for "the resource captures of a BG node" (empty when
+  # the node has no capture_analysis or no resource captures). Collapses
+  # the `resource_captures(x).each` decision-pressure
+  # chain that decomplex flagged as recomputed across the capture_analysis
+  # root-cause cluster (transfer_stmt / collect_ownership_transfers /
+  # _walk_bg_captures_in_expr / collect_bg_body_gives + siblings).
+  sig { params(node: T.untyped).returns(T::Enumerable[T.untyped]) }
+  def resource_captures(node)
+    node.capture_analysis&.resource_captures || []
+  end
+
   # Transfer function for a single statement.
   sig { params(stmt: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T.untyped) }
   def transfer_stmt(stmt, state)
@@ -672,7 +683,7 @@ class OwnershipDataflow
     when AST::BgBlock, AST::BgStreamBlock
       # BG block: resource captures transfer ownership to the fiber.
       # String captures are promoted (borrowed), not moved.
-      stmt.capture_analysis&.resource_captures&.each do |name|
+      resource_captures(stmt).each do |name|
         mark_moved!(state, name) if state[name]
       end
       # User-written GIVE x inside the BG body (where x is a captured
@@ -752,7 +763,7 @@ class OwnershipDataflow
 
     when AST::BgBlock, AST::BgStreamBlock
       # Resources captured by BG fibers transfer ownership.
-      node.capture_analysis&.resource_captures&.each do |name|
+      resource_captures(node).each do |name|
         step.consumed << name if step.state[name]
       end
       # GIVE x inside the BG body moves the outer x into the fiber.
@@ -838,7 +849,7 @@ class OwnershipDataflow
     return unless expr
     case expr
     when AST::BgBlock, AST::BgStreamBlock
-      expr.capture_analysis&.resource_captures&.each do |name|
+      resource_captures(expr).each do |name|
         consumed << name if state[name]
       end
       collect_bg_body_gives(expr).each do |name|
