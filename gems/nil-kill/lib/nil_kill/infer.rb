@@ -15,8 +15,9 @@ module NilKill
       build_actions
       sorbet_validate_high_actions! if @run_sorbet
       build_flow_graph
-      @store.write
-      Report.new.run
+      evidence = @store.to_h
+      @store.write(evidence)
+      Report.new([], evidence: evidence).run
     end
 
     def load_runtime
@@ -103,7 +104,9 @@ module NilKill
     def index_sources
       SourceIndex.reset_global_shape_indexes
       files = NilKill.target_files
-      files.each { |path| SourceIndex.new(path) }
+      warm_only = ENV["NIL_KILL_IDX_WARM_ONLY"] != "0"
+      files.each { |path| SourceIndex.new(path, warm_only: warm_only) }
+      files.each { |path| SourceIndex.new(path, warm_only: true) } if warm_only
       reuse = ENV["NIL_KILL_IDX_REUSE"] != "0"
       cached = nil
       5.times do
@@ -496,9 +499,7 @@ module NilKill
       row = row.transform_values { |value| value.is_a?(Array) ? value.map { |entry| entry.is_a?(Hash) ? entry.dup : entry } : value }
       producers = Array(row["producers"]).map(&:dup)
       producer_sites = producers.map { |producer| [producer["path"], producer["line"].to_i, producer["code"].to_s] }.to_set
-      shape_by_site = Array(evidence.dig("facts", "hash_shapes")).each_with_object({}) do |shape, index|
-        index[[shape["path"], shape["line"].to_i, shape["code"].to_s]] = shape
-      end
+      shape_by_site = hash_record_shape_by_site(evidence)
       common = Array(row["common_keys"]).map(&:to_s).sort
       union = (common + Array(row["optional_keys"]).map(&:to_s)).uniq.sort
       field_types = Array(row["fields"]).each_with_object(Hash.new { |h, k| h[k] = [] }) do |field, index|
@@ -557,8 +558,7 @@ module NilKill
     def hash_record_cluster_signatures(row, evidence)
       type_name = (row["type_name"] || row["struct_name"]).to_s
       return [] if type_name.empty?
-      existing = Array(evidence.dig("facts", "existing_sigs"))
-      methods_by_location = existing.each_with_object({}) { |method, index| index[[method["path"], method["line"].to_i]] = method }
+      methods_by_location = hash_record_methods_by_location(evidence)
       signatures = []
 
       producer_sites = Array(row["producers"]).map { |producer| [producer["path"], producer["line"].to_i, producer["code"].to_s] }.to_set
@@ -587,7 +587,7 @@ module NilKill
           "name" => name, "from" => from, "type" => to, "method" => method["method"] }
       end
 
-      methods_by_name = existing.group_by { |method| method["method"].to_s }
+      methods_by_name = hash_record_methods_by_name(evidence)
       Array(evidence.dig("facts", "param_origins")).each do |origin|
         next unless producer_sites.include?([origin["path"], origin["line"].to_i, origin["code"].to_s]) ||
           hash_record_origin_shape_matches_row?(origin, row)
@@ -609,6 +609,37 @@ module NilKill
       end
 
       signatures.uniq { |sig| [sig["path"], sig["line"], sig["kind"], sig["name"], sig["from"], sig["type"]] }
+    end
+
+    def hash_record_shape_by_site(evidence)
+      facts = evidence["facts"]
+      if defined?(@hash_record_shape_by_site_facts) && @hash_record_shape_by_site_facts.equal?(facts)
+        return @hash_record_shape_by_site
+      end
+      @hash_record_shape_by_site_facts = facts
+      @hash_record_shape_by_site = Array(facts["hash_shapes"]).each_with_object({}) do |shape, index|
+        index[[shape["path"], shape["line"].to_i, shape["code"].to_s]] = shape
+      end
+    end
+
+    def hash_record_methods_by_location(evidence)
+      facts = evidence["facts"]
+      if defined?(@hash_record_methods_by_location_facts) && @hash_record_methods_by_location_facts.equal?(facts)
+        return @hash_record_methods_by_location
+      end
+      @hash_record_methods_by_location_facts = facts
+      @hash_record_methods_by_location = Array(facts["existing_sigs"]).each_with_object({}) do |method, index|
+        index[[method["path"], method["line"].to_i]] = method
+      end
+    end
+
+    def hash_record_methods_by_name(evidence)
+      facts = evidence["facts"]
+      if defined?(@hash_record_methods_by_name_facts) && @hash_record_methods_by_name_facts.equal?(facts)
+        return @hash_record_methods_by_name
+      end
+      @hash_record_methods_by_name_facts = facts
+      @hash_record_methods_by_name = Array(facts["existing_sigs"]).group_by { |method| method["method"].to_s }
     end
 
     def hash_record_origin_shape_matches_row?(origin, row)
@@ -731,7 +762,7 @@ module NilKill
         next [] if rel_path.empty?
         abs = File.expand_path(rel_path, ROOT)
         next [] unless File.file?(abs)
-        parsed = Prism.parse(File.read(abs))
+        parsed = parsed_hash_record_source(abs)
         next [] unless parsed.success?
         entries.select do |producer|
           line = producer["line"].to_i
@@ -741,6 +772,11 @@ module NilKill
           hash_record_value_escapes?(parsed.value, hash_node)
         end
       end
+    end
+
+    def parsed_hash_record_source(abs)
+      @parsed_hash_record_sources ||= {}
+      @parsed_hash_record_sources[abs] ||= Prism.parse(File.read(abs))
     end
 
     def hash_record_value_escapes?(root, hash_node)
@@ -858,22 +894,28 @@ module NilKill
 
     def hash_record_existing_struct_paths(struct_name)
       return [] if struct_name.empty?
-      @hash_record_existing_struct_paths ||= {}
-      @hash_record_existing_struct_paths[struct_name] ||= begin
-        pattern = /\bclass\s+#{Regexp.escape(struct_name)}\b/
+      hash_record_existing_struct_index[struct_name] || []
+    end
+
+    def hash_record_existing_struct_index
+      @hash_record_existing_struct_index ||= begin
+        index = Hash.new { |h, k| h[k] = [] }
         # ROOT-rooted, NOT cwd-relative: nil-kill runs from many cwds
         # (rspec from gems/nil-kill); a cwd-relative glob silently
         # matches ZERO -> false "no existing struct" -> wrong inference.
         candidates = Dir.glob(File.join(NilKill::ROOT, "src/**/*.rb")) +
                      Dir.glob(File.join(NilKill::ROOT, "gems/*/lib/**/*.rb"))
-        candidates.filter_map do |path|
+        candidates.each do |path|
           next unless File.file?(path)
-          next unless File.read(path).match?(pattern)
-
-          NilKill.rel(path)
+          rel = NilKill.rel(path)
+          File.foreach(path) do |line|
+            next unless line =~ /\bclass\s+([A-Z]\w*)\b/
+            index[$1] << rel
+          end
         rescue StandardError
-          nil
+          next
         end
+        index
       end
     end
 
@@ -969,7 +1011,7 @@ module NilKill
       # those callers at runtime. `usage_scan_files` respects NIL_KILL_TARGETS
       # for test isolation.
       NilKill.usage_scan_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
       end

@@ -3,8 +3,9 @@
 
 module NilKill
   class Report
-    def initialize(argv = [])
+    def initialize(argv = [], evidence: nil)
       @argv = argv.dup
+      @evidence_override = evidence
       @with_links = @argv.delete("--with-links")
       @full = @argv.delete("--full")
       @hygiene_only = @argv.delete("--hygiene")
@@ -12,7 +13,7 @@ module NilKill
     end
 
     def run
-      evidence = Store.read
+      evidence = @evidence_override || Store.read
       @evidence = evidence
       actions = evidence["actions"]
       lines = build_header(evidence)
@@ -43,8 +44,9 @@ module NilKill
       lines = lines.map { |line| format_report_line(line) }
       lines = prepare_linked_report(lines, full: @full) if @with_links
       FileUtils.mkdir_p(File.dirname(@report_path))
-      File.write(@report_path, lines.join("\n") + "\n")
-      puts File.read(@report_path)
+      report = lines.join("\n") + "\n"
+      File.write(@report_path, report)
+      puts report
     end
 
     def build_header(evidence)
@@ -2901,7 +2903,7 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
       end
@@ -3500,10 +3502,15 @@ module NilKill
     end
 
     def hash_shape_site_key(path, line, code)
-      shape = Array(@evidence&.dig("facts", "hash_shapes")).find do |candidate|
-        candidate["path"] == path && candidate["line"].to_i == line.to_i && candidate["code"].to_s == code.to_s
-      end
+      shape = hash_shape_site_index[[path.to_s, line.to_i, code.to_s]]
       Array(shape&.fetch("keys", nil)).map(&:to_s).sort.join("\0") unless shape.nil?
+    end
+
+    def hash_shape_site_index
+      @hash_shape_site_index ||= Array(@evidence&.dig("facts", "hash_shapes")).each_with_object({}) do |shape, index|
+        key = [shape["path"].to_s, shape["line"].to_i, shape["code"].to_s]
+        index[key] ||= shape
+      end
     end
 
     def finalize_hash_record_struct_candidate(cluster)
@@ -3620,18 +3627,31 @@ module NilKill
     def hash_record_struct_path_for_scope(scope)
       parts = Array(scope).map(&:to_s).reject(&:empty?)
       return nil if parts.empty?
+      @hash_record_struct_path_cache ||= {}
       namespace = parts.join("::")
+      return @hash_record_struct_path_cache[namespace] if @hash_record_struct_path_cache.key?(namespace)
       preferred = [
         File.join("src", *parts.map { |part| underscore_const(part) }, "#{underscore_const(parts.last)}.rb"),
         File.join("src", "#{underscore_const(parts.last)}.rb"),
       ]
-      preferred.find { |path| File.file?(File.join(ROOT, path)) } || begin
-        pattern = /^\s*(?:module|class)\s+#{Regexp.escape(parts.last)}\b/
-        Dir.glob(File.join(ROOT, "src/**/*.rb")).find do |path|
-          File.readlines(path).any? { |line| line.match?(pattern) }
-        rescue StandardError
-          false
-        end&.then { |path| NilKill.rel(path) }
+      @hash_record_struct_path_cache[namespace] =
+        preferred.find { |path| File.file?(File.join(ROOT, path)) } ||
+        hash_record_struct_path_index[parts.last]
+    end
+
+    def hash_record_struct_path_index
+      self.class.hash_record_struct_path_index
+    end
+
+    def self.hash_record_struct_path_index
+      @hash_record_struct_path_index ||= Dir.glob(File.join(ROOT, "src/**/*.rb")).each_with_object({}) do |path, index|
+        rel = NilKill.rel(path)
+        File.foreach(path) do |line|
+          next unless line =~ /^\s*(?:module|class)\s+([A-Z]\w*)\b/
+          index[$1] ||= rel
+        end
+      rescue StandardError
+        nil
       end
     end
 
@@ -3664,7 +3684,7 @@ module NilKill
       if evidence.equal?(@evidence) && defined?(@hash_record_struct_pressure_cache) && @hash_record_struct_pressure_cache
         return @hash_record_struct_pressure_cache
       end
-      graph = flow_graph(evidence)
+      graph = FlowGraph.new
       lookups = Array(evidence.dig("facts", "collection_index_lookups")).select { |lookup| hash_record_lookup?(lookup) }
       param_origins = Array(evidence.dig("facts", "param_origins"))
       return_sources = Array(evidence.dig("facts", "return_origins")).flat_map { |origin| Array(origin["sources"]) }
@@ -3988,7 +4008,7 @@ module NilKill
         lines << "- #{status}: #{count}"
       end
       weak = lookups.select { |lookup| lookup["status"] != "typed collection receiver" }
-      graph = flow_graph
+      graph = FlowGraph.new
       grouped = weak.each_with_object(Hash.new { |h, k| h[k] = { "count" => 0, "examples" => [] } }) do |lookup, groups|
         label = hash_record_lookup_key(lookup) ? graph.hash_record_label_for_lookup(lookup) : collection_origin_label(lookup["origin"])
         groups[label]["count"] += 1

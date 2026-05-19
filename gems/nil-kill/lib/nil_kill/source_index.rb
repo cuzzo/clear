@@ -36,6 +36,8 @@ module NilKill
         @shape_table = ShapeSymbolTable.new
         @rbi_field_types = nil
         @noreturn_methods = Set.new
+        @source_lines = {}
+        @parsed_files = {}
       end
 
       def rbi_field_types
@@ -50,6 +52,16 @@ module NilKill
         return unless name && !name.to_s.empty?
         @noreturn_methods ||= Set.new
         @noreturn_methods << name.to_s
+      end
+
+      def source_lines(path)
+        @source_lines ||= {}
+        @source_lines[path] ||= File.readlines(path)
+      end
+
+      def parsed_file(path)
+        @parsed_files ||= {}
+        @parsed_files[path] ||= NilKill.cached_parse_file(path)
       end
 
       def load_rbi_field_types
@@ -116,10 +128,11 @@ module NilKill
       define_method("#{n}=") { |v| instance_variable_set("@#{n}", EpochHash.wrap(v, @ep)) }
     end
 
-    def initialize(path)
+    def initialize(path, warm_only: false)
       @path = path
       @rel = NilKill.rel(path)
-      @lines = File.readlines(path)
+      @lines = self.class.source_lines(path)
+      @warm_only = warm_only
       @ep = [0]
       @expr_memo = {}
       @expr_use_memo = ENV["NIL_KILL_EXPR_MEMO"] != "0"
@@ -168,18 +181,18 @@ module NilKill
       @ivar_tlet_types = {}
       @current_class_name = nil
       @class_like_constants = Set.new
-      parsed = Prism.parse_file(path)
+      parsed = self.class.parsed_file(path)
       if parsed.success?
         collect_struct_declarations(parsed.value, [])
         collect_class_like_constants(parsed.value, [])
         collect_non_nil_method_returns(parsed.value)
         collect_ivar_tlet_names(parsed.value)
         walk(parsed.value, [])
-        recompute_return_origins_with_inferred_shapes
-        recompute_collection_index_lookups_with_inferred_shapes
-        recompute_struct_field_static_with_inferred_locals
+        recompute_return_origins_with_inferred_shapes unless @warm_only
+        recompute_collection_index_lookups_with_inferred_shapes unless @warm_only
+        recompute_struct_field_static_with_inferred_locals unless @warm_only
       end
-      @method_nodes.each { |def_node, record| collect_type_normalizers!(def_node, record) }
+      @method_nodes.each { |def_node, record| collect_type_normalizers!(def_node, record) } unless @warm_only
     end
 
     def summary
@@ -268,8 +281,8 @@ module NilKill
       when Prism::DefNode
         record = method_record(node, scope)
         record["return_origin"] = analyze_return_origin(node, record)
-        @methods << record
-        @return_origins << record["return_origin"] if record["return_origin"]
+        @methods << record unless @warm_only
+        @return_origins << record["return_origin"] if record["return_origin"] && !@warm_only
         if record["return_origin"] && record["return_origin"]["confidence"] == "strong"
           type = record["return_origin"]["candidate_type"]
           (@static_return_types[record["method"]] = type; @ep[0] += 1) if NilKill.useful_type?(type)
@@ -280,33 +293,33 @@ module NilKill
         if record["return_origin"] && record["return_origin"]["array_element_shape"] && !record["return_origin"]["array_element_shape"]["poisoned"]
           @static_array_element_return_shapes[record["method"]] = record["return_origin"]["array_element_shape"]
         end
-        @method_nodes << [node, record]
-        inspect_dispatcher(node, record)
+        @method_nodes << [node, record] unless @warm_only
+        inspect_dispatcher(node, record) unless @warm_only
         scoped_facts(record) { child_walk(node.body, scope) }
       when Prism::CallNode
-        inspect_param_origins(node, scope)
+        inspect_param_origins(node, scope) unless @warm_only
         update_collection_builder_call(node)
-        inspect_call(node)
-        inspect_index_lookup(node, scope)
-        inspect_hash_record_blocker(node, scope)
-        inspect_hash_record_member_call(node, scope)
+        inspect_call(node) unless @warm_only
+        inspect_index_lookup(node, scope) unless @warm_only
+        inspect_hash_record_blocker(node, scope) unless @warm_only
+        inspect_hash_record_member_call(node, scope) unless @warm_only
         inspect_struct_constructor(node)
         inspect_class_constructor_fields(node)
         inspect_attribute_shape_write(node)
         walk_call_children(node, scope)
       when Prism::ArrayNode
-        inspect_array_literal(node)
+        inspect_array_literal(node) unless @warm_only
         child_walk(node, scope)
       when Prism::HashNode
-        inspect_hash_literal(node)
+        inspect_hash_literal(node) unless @warm_only
         child_walk(node, scope)
       when Prism::LocalVariableWriteNode
         update_local_fact(node)
-        inspect_local_container_origin(node)
+        inspect_local_container_origin(node) unless @warm_only
         child_walk(node, scope)
       when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
-        inspect_variable_write(node)
-        inspect_ivar_container_origin(node)
+        inspect_variable_write(node) unless @warm_only
+        inspect_ivar_container_origin(node) unless @warm_only
         child_walk(node, scope)
       else
         child_walk(node, scope)
@@ -474,7 +487,7 @@ module NilKill
           fields = struct_fields(node.value)
           if fields.any?
             rec = { "path" => @rel, "line" => node.location.start_line, "class" => klass, "fields" => fields }
-            @struct_declarations << rec
+            @struct_declarations << rec unless @warm_only
             @struct_fields_by_name[klass] = fields
             self.class.struct_fields_by_name[klass] = fields
             @struct_full_by_name[klass] = klass
@@ -551,8 +564,10 @@ module NilKill
       args = node.arguments&.arguments || []
       args.each_with_index do |arg, idx|
         next if idx >= fields.size || arg.is_a?(Prism::KeywordHashNode)
-        @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
-          "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
+        unless @warm_only
+          @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
+            "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
+        end
         merge_struct_field_static_type(full_class, fields[idx], expression_type(arg))
         merge_struct_field_hash_shape(full_class, fields[idx], hash_shape_for_value(arg))
         merge_struct_field_array_element_shape(full_class, fields[idx], array_element_shape_for_value(arg))
@@ -916,9 +931,9 @@ module NilKill
       { "path" => @rel, "line" => node.location.start_line, "end_line" => node.location.end_line, "class" => scope.join("::"),
         "method" => node.name.to_s, "kind" => node.receiver.is_a?(Prism::SelfNode) ? "class" : "instance",
         "has_sig" => !sig.nil?, "sig" => sig, "params" => method_params, "scope" => scope,
-        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => uses_yield?(node.body),
-        "untraceable_params" => untraceable_param_names(node),
-        "protocols" => param_protocols(node), "noreturn_candidate" => noreturn_candidate }
+        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => @warm_only ? false : uses_yield?(node.body),
+        "untraceable_params" => @warm_only ? [] : untraceable_param_names(node),
+        "protocols" => @warm_only ? {} : param_protocols(node), "noreturn_candidate" => noreturn_candidate }
     end
 
     def contains_explicit_return?(node)
