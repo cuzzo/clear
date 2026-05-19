@@ -4204,7 +4204,7 @@ private
 
     # Lock ranks induce a total order only if every declaration of a type
     # uses the same rank.
-    if node.lock_rank && node.sync && (node.sync == :locked || node.sync == :write_locked)
+    if node.lock_rank && node.sync && (node.locked? || node.sync == :write_locked)
       record_lock_type_rank!(ti.base_type, node.lock_rank, node)
     end
 

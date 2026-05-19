@@ -6005,7 +6005,7 @@ class MIRLowering
              when :multiowned then (node.atomic? ? nil : "rcCreate")
              end
 
-    strategy = if node.sync == :local || (node.indirect? && !node.sync && !node.ownership)
+    strategy = if node.local? || (node.indirect? && !node.sync && !node.ownership)
       :local
     elsif sync_fn && own_fn
       :both

@@ -898,11 +898,11 @@ module CapabilityHelper
       source_sym = cap[:old_scope]&.locals&.[](var_name)
       if source_sym
         bad_storage = source_sym.rc_stored?
-        bad_sync    = source_sym.sync == :locked || source_sym.sync == :write_locked
+        bad_sync    = source_sym.locked? || source_sym.sync == :write_locked
         if bad_storage || bad_sync
           qualifier = if source_sym.storage == :shared then "@shared"
                       elsif source_sym.storage == :multiowned then "@multiowned"
-                      elsif source_sym.sync == :locked then "@locked"
+                      elsif source_sym.locked? then "@locked"
                       else "@writeLocked"
                       end
           remediation = "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
@@ -1137,7 +1137,7 @@ module CapabilityHelper
             result.close_patterns[name] ||= info.close_zig
           end
 
-          result.has_local   = true if info.sync == :local
+          result.has_local   = true if info.local?
           result.has_rc      = true if info.storage == :multiowned
           ti = info.type
           # shared+striped maps (DashMap) are self-synchronizing — per-shard locking
@@ -1150,10 +1150,10 @@ module CapabilityHelper
           # cross-thread parallelism that atomic storage is meant to allow.
           is_atomic = info.atomic?
           unless is_dashmap || is_atomic
-            result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+            result.has_shared  = true if info.locked? || info.sync == :write_locked || info.local?
             result.has_shared  = true if info.rc_stored?
             # Affine @locked: not backed by Arc, needs spawnPinned for scheduler affinity
-            if (info.sync == :locked || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
+            if (info.locked? || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
               result.has_affine_locked = true
             end
             if ti.is_a?(Type) && ti.sharded?
@@ -1193,10 +1193,10 @@ module CapabilityHelper
           if info.close_zig
             result.close_patterns[name] ||= info.close_zig
           end
-          result.has_local  = true if info.sync == :local
-          result.has_shared = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
+          result.has_local  = true if info.local?
+          result.has_shared = true if info.locked? || info.sync == :write_locked || info.local?
           result.has_shared = true if info.storage == :shared
-          if (info.sync == :locked || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
+          if (info.locked? || info.sync == :write_locked) && info.storage != :shared && info.storage != :multiowned
             result.has_affine_locked = true
           end
 

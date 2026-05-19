@@ -1596,6 +1596,10 @@ module AST
     def indirect? = layout == :indirect
     sig { returns(T::Boolean) }
     def atomic_ptr? = atomic? && indirect?
+    sig { returns(T::Boolean) }
+    def locked? = sync == :locked
+    sig { returns(T::Boolean) }
+    def local? = sync == :local
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants

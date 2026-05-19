@@ -3934,7 +3934,7 @@ class PipelineHost
       # WITH alias `t`, and writes through `t.value = ...` route via
       # BOX_STORE back to the same envId the outer binding holds).
       sym = caps.capture_symbols&.dig(s.name)
-      if sym && (sym.sync == :locked || sym.sync == :write_locked || sym.storage == :local)
+      if sym && (sym.locked? || sym.sync == :write_locked || sym.storage == :local)
         # Stamp the inner struct name (when knowable) so the BC pre-decode
         # can stamp `:struct_<Name>` on the worker's local slot — without
         # it, find_field_index for `t.value` walks every struct and may
@@ -4553,7 +4553,7 @@ class PipelineHost
       # WITH alias `t`, and writes through `t.value = ...` route via
       # BOX_STORE back to the same envId the outer binding holds).
       sym = caps.capture_symbols&.dig(s.name)
-      if sym && (sym.sync == :locked || sym.sync == :write_locked || sym.storage == :local)
+      if sym && (sym.locked? || sym.sync == :write_locked || sym.storage == :local)
         fd.boxed_capture = struct_name_hint_for_sym(sym) || true
       end
       fd
