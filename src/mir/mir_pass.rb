@@ -83,6 +83,9 @@ class MIRPass
 
     # Phase 1: classify promotions for all functions.
     # Must run before E2 so promotion_plans are available for :always_returned detection.
+    # [collapse-verdict: LOAD-BEARING — THE promotion plan; all
+    #  downstream lowering depends on it. Deleting it: prspec 802
+    #  failures, net 57 mir-error, transpilation failed. Producer.]
     promotion_plans = {}
     @fn_nodes.each do |name, fn|
       promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
@@ -91,6 +94,10 @@ class MIRPass
     # E2: per-declaration escape scan.
     # Applies all 6 escape conditions; replaces the upgrade_* methods below.
     # Sets fn.heap_carry_return for E3b (tag_carry_call_sites!).
+    # [collapse-verdict: LOAD-BEARING — sole per-declaration escape-
+    #  condition stamper. Deleting it: prspec crashes; allocation_
+    #  strategy_spec 9 failures (cleanup_entry(:alloc)->nil). Producer,
+    #  not redundant.]
     @bg_heap_upgraded = T.let(EscapeAnalysis.analyze!(
       @fn_nodes, heap_fns: heap_fns, promotion_plans: promotion_plans
     ), T.untyped)
