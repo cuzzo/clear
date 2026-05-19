@@ -46,6 +46,14 @@ class MIRLowering
     @struct_schemas = T.let(struct_schemas || {}, T::Hash[Symbol, T.untyped])
     @enum_schemas = T.let(enum_schemas || {}, T::Hash[Symbol, T::Array[T.untyped]])
     @union_schemas = T.let(union_schemas || {}, T::Hash[Symbol, T.untyped])
+    # Single source for struct/union schema resolution. Was rebuilt as an
+    # identical inline `->(name){ @struct_schemas&.dig(name) ||
+    # @union_schemas&.dig(name) }` lambda at 5 sites (decomplex
+    # Missing-Abstraction / Reification-Miss).
+    @schema_lookup = T.let(
+      ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) },
+      T.proc.params(name: T.untyped).returns(T.untyped),
+    )
     @fn_sigs = T.let(fn_sigs || {}, T::Hash[T.untyped, T.untyped])
     @moved_guard_info = T.let(moved_guard_info || {}, T::Hash[String, T::Hash[T.untyped, T.untyped]])
     @rt_name = T.let("rt", String)
@@ -261,7 +269,7 @@ class MIRLowering
     return false unless ti
     ti = ti.payload_type || ti if ti.error_union?
     @union_schemas&.key?(ti.resolved) &&
-      ti.needs_explicit_cleanup?(:heap, ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) })
+      ti.needs_explicit_cleanup?(:heap, @schema_lookup)
   rescue
     false
   end
@@ -5877,7 +5885,7 @@ class MIRLowering
       # cleanups free them. `string?` is OR'd in because runtime
       # needsCleanup([]const u8) is unconditional while
       # String#needs_cleanup? gates on heap_provenance.
-      sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      sl = @schema_lookup
       et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
       elem_owns_heap = et.needs_cleanup?(sl) || et.string?
       needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
@@ -6511,7 +6519,7 @@ class MIRLowering
     # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
     if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
       field_ti = node.name.full_type
-      sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      sl = @schema_lookup
       if field_ti.needs_cleanup?(sl)
         result.needs_field_cleanup = true
       elsif field_ti.string?
@@ -6768,7 +6776,7 @@ class MIRLowering
     if (kind == :array || kind == :list) && receiver_type.list_collection?
       elem_ti = receiver_type.element_type
       if elem_ti
-        sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+        sl = @schema_lookup
         if elem_ti.needs_cleanup?(sl)
           elem_zig = elem_ti.zig_type
           alloc_str = alloc_zig_str(:heap)
@@ -7756,7 +7764,7 @@ class MIRLowering
     return false unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
     val_ti ||= val_node.full_type
     return false unless @union_schemas&.key?(val_ti.resolved)
-    schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+    schema_lookup = @schema_lookup
     return false if val_ti.respond_to?(:implicitly_copyable?) && val_ti.implicitly_copyable?(schema_lookup)
     true
   end
