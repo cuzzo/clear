@@ -1,4 +1,4 @@
-# typed: false
+# typed: true
 # EscapeGraph -- the single value-flow escape analysis. Replaces the 5
 # fragmented escape proxies (compute_heap_return_fns!, analyze!,
 # tag_transitive_provenance!, tag_carry_call_sites!, the escape half
@@ -10,8 +10,10 @@
 # surfaces as a located allocator/leak/double-free error, never a
 # silent miscompile.
 require "set"
+require "sorbet-runtime"
 
 module EscapeGraph
+  extend T::Sig
   module_function
 
   def apply!(fn_nodes)
@@ -37,9 +39,7 @@ module EscapeGraph
     ret = {}
     # Seed from cross-module return_provenance for imported functions
     # whose body isn't re-analyzed here.
-    fn_nodes.each do |n, fn|
-      ret[n] = (fn.respond_to?(:return_provenance) && fn.return_provenance == :heap)
-    end
+    fn_nodes.each { |n, fn| ret[n] = fn.return_provenance == :heap }
     changed = true
     iters = 0
     while changed && iters < 200
@@ -52,7 +52,7 @@ module EscapeGraph
         next if rvals.empty?
         if rvals.any? { |rv| return_value_is_heap?(rv, ret) }
           ret[name] = true
-          fn.return_provenance = :heap if fn.respond_to?(:return_provenance=)
+          fn.return_provenance = :heap
           changed = true
         end
       end
@@ -83,19 +83,13 @@ module EscapeGraph
   # them double-frees the source's field cleanup (174 prStr).
   def node_heap_provenance?(e)
     return false unless e.is_a?(AST::Identifier)
-    sym = e.respond_to?(:symbol) ? e.symbol : nil
-    return false unless sym
-    return false if sym.respond_to?(:is_param) && sym.is_param
-    return false unless sym.respond_to?(:storage) && sym.storage == :heap
+    sym = e.symbol
+    return false if sym.nil? || sym.is_param || sym.storage != :heap
     # An @atomic-or-sync primitive cell has :heap symbol storage in M1
     # but is LOADED on return, not transferred.
-    t = sym.respond_to?(:type) ? sym.type : nil
-    t = t.is_a?(Type) ? t : nil
-    return false if t && ((t.respond_to?(:primitive?) && t.primitive?) ||
-                          (t.respond_to?(:any_sync?) && t.any_sync?))
-    true
-  rescue StandardError
-    false
+    t = sym.type
+    return true unless t.is_a?(Type)
+    !(t.primitive? || t.any_sync?)
   end
 
   def decide_fn(fn, ret_heap, fn_nodes = {})
@@ -174,20 +168,12 @@ module EscapeGraph
   # Type#struct? covers any non-primitive/string/array/map/optional
   # composite, including tagged unions.
   def struct_aggregate?(ti)
-    ti.is_a?(Type) && ti.respond_to?(:struct?) && ti.struct? &&
-      !(ti.respond_to?(:any_sync?) && ti.any_sync?)
-  rescue StandardError
-    false
+    ti.is_a?(Type) && ti.struct? && !ti.any_sync?
   end
 
   def heap_ptr_return?(fn)
     rt = fn.return_type
-    rt = Type.new(rt) if rt && !rt.is_a?(Type)
-    return false unless rt.is_a?(Type)
-    (rt.respond_to?(:indirect?) && rt.indirect?) ||
-      (rt.respond_to?(:heap?) && rt.heap?)
-  rescue StandardError
-    false
+    rt.is_a?(Type) && (rt.indirect? || rt.heap?)
   end
 
   # Mirrors MIRChecker INV-COPY-CLEANUP: capability-free primitive or
@@ -195,11 +181,7 @@ module EscapeGraph
   def cannot_own_heap?(ti)
     return false unless ti.is_a?(Type)
     no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
-    no_caps && (ti.primitive? ||
-                (ti.respond_to?(:generic_instance?) && ti.generic_instance? &&
-                 ti.generic_base == :Id))
-  rescue StandardError
-    false
+    no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
   end
 
 
@@ -238,37 +220,33 @@ module EscapeGraph
       next unless node.is_a?(AST::MethodCall)
       next unless %w[append insert push put].include?(node.name.to_s)
       obj = node.object
-      next unless obj.respond_to?(:symbol) && obj.symbol
-      t = obj.symbol.type
-      ti = t.is_a?(Type) ? t : (Type.new(t) rescue nil)
-      next unless ti && ti.respond_to?(:collection?) && ti.collection?
-      elem_t = ti.respond_to?(:element_type) ? ti.element_type : nil
+      sym = obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField) ? obj.symbol : nil
+      next unless sym
+      ti = sym.type
+      next unless ti.collection?
+      elem_t = ti.element_type
       next unless elem_t && !elem_t.primitive? && !elem_t.string?
       node.args.each { |arg| promote_frame_concats!(arg) }
     end
-  rescue StandardError
-    nil
   end
 
   def promote_frame_concats!(node)
     return unless node
     case node
     when AST::BinaryOp
-      if node.op == :ADD && node.respond_to?(:string_concat) && node.string_concat
-        node.storage = :heap if node.respond_to?(:storage=)
+      if node.op == :ADD && node.string_concat
+        node.storage = :heap
         ti = node.full_type
         ti.provenance = :heap if ti.is_a?(Type)
       end
       promote_frame_concats!(node.left)
       promote_frame_concats!(node.right)
     when AST::StringConcat
-      node.storage = :heap if node.respond_to?(:storage=)
+      node.storage = :heap
       node.parts&.each { |p| promote_frame_concats!(p) }
     else
       AST.wrapped_children(node).each { |c| promote_frame_concats!(c) }
     end
-  rescue StandardError
-    nil
   end
 
   def referenced_decls(expr, acc = [])
@@ -278,8 +256,7 @@ module EscapeGraph
     when AST::Identifier
       acc << e.name.to_s
     when AST::StructLit, AST::UnionVariantLit
-      flds = e.fields
-      flds.each { |k, v| referenced_decls(v.nil? ? k : v, acc) } if flds.respond_to?(:each)
+      e.fields.each { |k, v| referenced_decls(v.nil? ? k : v, acc) }
     when AST::BinaryOp
       # OR_RESCUE aliases the LHS success value. Other binary ops
       # (string concat, arithmetic) produce a fresh value; operands
@@ -312,15 +289,13 @@ module EscapeGraph
       }
       next if rewound.empty?      # loop has no mark_per_iter -> no carry hazard
       walk(body) do |bind|
-        next unless bind.is_a?(AST::BindExpr) && bind.respond_to?(:mode) && bind.mode == :assign
+        next unless bind.is_a?(AST::BindExpr) && bind.mode == :assign
         nm = bind.name
         next unless nm.is_a?(String) && !local_names.include?(nm)
-        ti = bind.respond_to?(:full_type) ? bind.full_type : nil
+        ti = bind.full_type
         next unless ti.is_a?(Type)
-        str_carry = ti.respond_to?(:string?) && ti.string?
-        carry = str_carry ||
-                (ti.respond_to?(:escape_class) && ti.escape_class == :slice_managed &&
-                 !(ti.respond_to?(:numeric_map?) && ti.numeric_map?))
+        str_carry = ti.string?
+        carry = str_carry || (ti.escape_class == :slice_managed && !ti.numeric_map?)
         next unless carry
         out << nm
         # Stamp the carry DECL heap here (not only later via decide_fn)
@@ -334,8 +309,6 @@ module EscapeGraph
       end
     end
     out
-  rescue StandardError
-    out
   end
 
   # A collection arg passed to a TAKES param or a MUTABLE @list param
@@ -346,26 +319,20 @@ module EscapeGraph
     walk(fn.body) do |call|
       next unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
       callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
-      next unless callee.respond_to?(:params) && callee.params
+      next unless callee.is_a?(AST::FunctionDef)
       args = call.args || []
       callee.params.each_with_index do |param, idx|
         arg = args[idx]
         next unless arg
-        src = unwrap(arg)                       # strip GIVE/COPY
+        src = unwrap(arg)
         next unless src.is_a?(AST::Identifier)
-        ti = src.respond_to?(:full_type) ? src.full_type : nil
-        ti = ti.is_a?(Type) ? ti : nil
-        next unless ti && collection_ti?(ti)
-        takes = param.respond_to?(:takes) && param.takes
-        pt = param.respond_to?(:type) ? param.type : nil
-        pt = pt.is_a?(Type) ? pt : (pt ? (Type.new(pt) rescue nil) : nil)
-        mut_list = param.respond_to?(:mutable) && param.mutable &&
-                   pt && pt.respond_to?(:list_collection?) && pt.list_collection?
-        out << src.name.to_s if takes || mut_list
+        ti = src.full_type
+        next unless ti.is_a?(Type) && collection_ti?(ti)
+        pt = param.type
+        mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
+        out << src.name.to_s if param.takes || mut_list
       end
     end
-    out
-  rescue StandardError
     out
   end
 
@@ -378,8 +345,6 @@ module EscapeGraph
       names = bg.capture_analysis&.heap_promote_names
       out.merge(names) if names
     end
-    out
-  rescue StandardError
     out
   end
 
@@ -405,32 +370,25 @@ module EscapeGraph
     when AST::BinaryOp
       aggregate_moved_list_decls(node.left, acc) if node.op == :OR_RESCUE
     when AST::StructLit, AST::UnionVariantLit
-      flds = node.fields
-      if flds.respond_to?(:each)
-        flds.each do |k, v|
-          fv = v.nil? ? k : v
-          if fv.is_a?(AST::Identifier)
-            ft = fv.respond_to?(:full_type) ? fv.full_type : nil
-            acc << fv.name.to_s if collection_ti?(ft)
-          else
-            aggregate_moved_list_decls(fv, acc)   # nested aggregate
-          end
+      node.fields.each do |k, v|
+        fv = v.nil? ? k : v
+        if fv.is_a?(AST::Identifier)
+          acc << fv.name.to_s if collection_ti?(fv.full_type)
+        else
+          aggregate_moved_list_decls(fv, acc)
         end
       end
     end
     acc
-  rescue StandardError
-    acc
   end
 
+  WRAPPER_NODES = T.let(
+    [AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::FreezeNode, AST::ShareNode].freeze,
+    T::Array[T.untyped]
+  )
+
   def unwrap(e)
-    while e.respond_to?(:value) &&
-          (e.is_a?(AST::MoveNode) || e.is_a?(AST::CopyNode) ||
-           (defined?(AST::CloneNode)  && e.is_a?(AST::CloneNode)) ||
-           (defined?(AST::FreezeNode) && e.is_a?(AST::FreezeNode)) ||
-           (defined?(AST::ShareNode)  && e.is_a?(AST::ShareNode)))
-      e = e.value
-    end
+    e = e.value while WRAPPER_NODES.any? { |k| e.is_a?(k) }
     e
   end
 
@@ -445,24 +403,12 @@ module EscapeGraph
   # are NOT inherent either: their backing allocator follows the
   # binding (local non-escaping HashMap stays frame -- 25_index).
   def inherently_heap_ti?(ti)
-    return true if ti.respond_to?(:locked?)       && ti.locked?
-    return true if ti.respond_to?(:write_locked?) && ti.write_locked?
-    return true if ti.respond_to?(:versioned?)    && ti.versioned?
-    return true if ti.respond_to?(:multiowned?)   && ti.multiowned?
-    return true if ti.respond_to?(:shared?)       && ti.shared?
-    false
-  rescue StandardError
-    false
+    ti.locked? || ti.write_locked? || ti.versioned? || ti.multiowned? || ti.shared?
   end
 
   def collection_ti?(ti)
     return false unless ti.is_a?(Type)
-    (ti.respond_to?(:list_collection?) && ti.list_collection?) ||
-      (ti.respond_to?(:map?) && ti.map?) ||
-      (ti.respond_to?(:set_collection?) && ti.set_collection?) ||
-      (ti.respond_to?(:pool?) && ti.pool?)
-  rescue StandardError
-    false
+    ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?
   end
 
   # Returning a string does NOT transfer heap ownership: strings are
@@ -473,8 +419,6 @@ module EscapeGraph
   def ret_heap_type?(ti)
     return false unless ti.is_a?(Type)
     inherently_heap_ti?(ti) || collection_ti?(ti)
-  rescue StandardError
-    false
   end
 
   def stamp_fn!(fn, decisions, _name, heap_decls, ret_heap = {})
@@ -498,18 +442,18 @@ module EscapeGraph
   end
 
   def stamp_node_heap!(n, return_nodes)
-    n.storage = :heap if n.respond_to?(:storage=)
-    ft = n.full_type if n.respond_to?(:full_type)
+    n.storage = :heap
+    ft = n.full_type
     ft.provenance = :heap if ft.is_a?(Type) && !ft.heap_provenance?
-    sym = n.respond_to?(:symbol) ? n.symbol : nil
+    sym = n.symbol
     if sym
-      sym.storage = :heap if sym.respond_to?(:storage=)
-      st = sym.respond_to?(:type) ? sym.type : nil
-      st.provenance = :heap if st.is_a?(Type)
+      sym.storage = :heap
+      sym.type.provenance = :heap
     end
     stamp_return_symbol!(return_nodes, n.name.to_s)
-    v = n.value
-    v.storage = :heap if v.respond_to?(:storage=)
+    case (v = n.value)
+    when AST::Locatable then v.storage = :heap
+    end
   end
 
   def stamp_decl_heap!(fn, name)
@@ -524,10 +468,10 @@ module EscapeGraph
     return_nodes.each do |ret|
       next unless ret.value
       ident = extract_ident(ret.value, var_name)
-      next unless ident&.symbol
-      ident.symbol.storage = :heap if ident.symbol.respond_to?(:storage=)
-      st = ident.symbol.respond_to?(:type) ? ident.symbol.type : nil
-      st.provenance = :heap if st.is_a?(Type)
+      sym = ident&.symbol
+      next unless sym
+      sym.storage = :heap
+      sym.type.provenance = :heap
     end
   end
 
@@ -554,56 +498,46 @@ module EscapeGraph
   end
 
   def borrow_return?(fn)
-    return true if fn.respond_to?(:return_lifetime) && fn.return_lifetime
+    return true if fn.return_lifetime
     rt = fn.return_type
-    rt = Type.new(rt) if rt && !rt.is_a?(Type)
-    rt.is_a?(Type) && rt.respond_to?(:borrow_provenance?) && rt.borrow_provenance?
-  rescue StandardError
-    false
+    rt.is_a?(Type) && rt.borrow_provenance?
   end
 
   def decl?(n)
-    n.is_a?(AST::VarDecl) ||
-      (n.is_a?(AST::BindExpr) && (!n.respond_to?(:mode) || n.mode == :decl))
+    n.is_a?(AST::VarDecl) || (n.is_a?(AST::BindExpr) && n.mode == :decl)
   end
 
   def root_ident_name(lhs)
     return lhs if lhs.is_a?(String)        # BindExpr(:assign).name is a bare String
     n = lhs
-    n = n.target while n.respond_to?(:target) && (n.is_a?(AST::GetField) || n.is_a?(AST::GetIndex))
-    return n.name.to_s if n.is_a?(AST::Identifier)
-    return n.name.to_s if n.respond_to?(:name) && n.name.is_a?(String)
-    nil
+    n = n.target while n.is_a?(AST::GetField) || n.is_a?(AST::GetIndex)
+    n.is_a?(AST::Identifier) ? n.name.to_s : nil
   end
 
+  # Locatable provides full_type uniformly; non-Locatable nodes (rare:
+  # Literal etc. in some contexts) have no resolved type for us to read.
   def type_of(node)
-    t = node.respond_to?(:type_info) ? node.type_info : nil
-    t ||= node.respond_to?(:full_type) ? node.full_type : nil
-    t.is_a?(Type) ? t : (t ? (Type.new(t) rescue nil) : nil)
+    node.is_a?(AST::Locatable) ? node.full_type : nil
   end
+
+  HEAP_STORAGES = T.let(%i[heap multiowned shared].freeze, T::Array[Symbol])
 
   def heap_root_storage?(lhs)
     root = lhs
-    root = root.target while root.respond_to?(:target) && (root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex))
-    sym = root.respond_to?(:symbol) ? root.symbol : nil
-    sym && %i[heap multiowned shared].include?(sym.storage)
-  rescue StandardError
-    false
+    root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
+    sym = root.is_a?(AST::Identifier) ? root.symbol : nil
+    sym && HEAP_STORAGES.include?(sym.storage)
   end
 
 
   def walk(node, &blk)
     case node
-    when nil
-    when Array then node.each { |x| walk(x, &blk) }
-    when AST::FunctionDef then nil  # do not descend into nested fns
-    else
-      blk.call(node) if node.respond_to?(:token)
-      if node.respond_to?(:each_pair)
-        node.each_pair { |_, v| walk(v, &blk) }
-      elsif node.is_a?(Struct)
-        node.to_a.each { |v| walk(v, &blk) }
-      end
+    when nil               then nil
+    when Array             then node.each { |x| walk(x, &blk) }
+    when AST::FunctionDef  then nil  # do not descend into nested fns
+    when AST::Locatable
+      blk.call(node)
+      node.each_pair { |_, v| walk(v, &blk) } if node.is_a?(Struct)
     end
   end
 end
