@@ -6061,10 +6061,10 @@ class MIRLowering
     payload.instance_variable_set(:@zig_type_cache, nil)
     if payload.any_sync? && !(payload.map? && payload.striped?)
       inner = payload.bare_data_type.zig_type
-      inner = "CheatLib.Locked(#{inner})"   if payload.sync == :locked
-      inner = "CheatLib.RwLocked(#{inner})" if payload.sync == :write_locked
+      inner = "CheatLib.Locked(#{inner})"   if payload.locked?
+      inner = "CheatLib.RwLocked(#{inner})" if payload.write_locked?
       inner = "CheatLib.RefCell(#{inner})"  if payload.sync == :always_mutable
-      inner = "CheatLib.Versioned(#{inner})" if payload.sync == :versioned
+      inner = "CheatLib.Versioned(#{inner})" if payload.versioned?
       if payload.atomic?
         inner = payload.indirect? ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
       end

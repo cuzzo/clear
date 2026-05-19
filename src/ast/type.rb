@@ -288,12 +288,12 @@ class Type
     # CapabilityWrap branch in the annotator (annotator.rb:3517).
     @provenance = :heap if indirect?
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
-    @provenance = :rodata if @sync == :symbol
+    @provenance = :rodata if symbol?
     # Pool collection always lives on the heap (owns internal slot array).
     if collection
       @collection = collection
       @zig_type_cache = nil
-      @provenance = :heap if collection == :pool
+      @provenance = :heap if pool?
     end
     @shard_count = shard_count if shard_count
     @is_observable = true if observable
@@ -2152,7 +2152,7 @@ class Type
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if locked?
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
-        inner_zig = "CheatLib.Versioned(#{inner_zig})" if @sync == :versioned
+        inner_zig = "CheatLib.Versioned(#{inner_zig})" if versioned?
         # @indirect:atomic wraps structs in AtomicPtr(T), not bare Atomic(T),
         # because updates publish a refcounted heap payload via a pointer CAS.
         if atomic_ptr?
@@ -2167,7 +2167,7 @@ class Type
       # value receivers, and lifetime checks make the outer refcount redundant.
       #
       # `@indirect:atomic` uses the same bare-pointer binding layout.
-      if atomic? && (@ownership == :shared || @ownership == :multiowned || indirect?)
+      if atomic? && (shared? || multiowned? || indirect?)
         return "*#{inner_zig}"
       end
 

@@ -70,7 +70,7 @@ module AtomicMigrationSuggester
 
     ti = node.full_type
     ti = Type.new(ti) unless ti.is_a?(Type)
-    return nil unless ti.sync == :locked
+    return nil unless ti.locked?
 
     schema = annotator.respond_to?(:lookup_type_schema) ?
              annotator.lookup_type_schema(ti.resolved) : nil

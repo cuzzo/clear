@@ -3150,7 +3150,7 @@ private
       tsym = tscope&.locals&.[](tname)
       sync = tsym&.sync
       layout = tsym.respond_to?(:layout) ? tsym.layout : nil
-      if sync == :locked || sync == :write_locked || tsym&.atomic_ptr?
+      if tsym&.locked? || sync == :write_locked || tsym&.atomic_ptr?
         @in_auto_locked_assign = tname
       end
     end
@@ -3419,7 +3419,7 @@ private
         # alias whose own symbol is plain, or via the no-AS form
         # which auto-unwraps the original name).
         in_with_block = (@with_block_depth || 0) > 0
-        if sync == :locked && !in_auto_lock && !in_with_block
+        if sym.locked? && !in_auto_lock && !in_with_block
           emit_cap_field_needs_with!(node,
             :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
             name: node.target.name, field: node.field, cap: "@locked")
