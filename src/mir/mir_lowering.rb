@@ -243,7 +243,7 @@ class MIRLowering
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node(ast_node)
     zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
-    entry = { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
+    entry = CleanupEntry.from({ kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t })
 
     @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
@@ -294,9 +294,9 @@ class MIRLowering
 
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
-  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def hoist_cleanup_entry(mir, ast_node)
-    case mir
+    raw = case mir
     when MIR::DupeSlice, MIR::ConcatStr
       { kind: :heap_string, alloc: :heap, has_moved_guard: false }
     when MIR::AllocSlice
@@ -352,6 +352,7 @@ class MIRLowering
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
     end
+    raw && CleanupEntry.from(raw)
   end
 
   sig { params(ast_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
@@ -7347,7 +7348,7 @@ class MIRLowering
       # ErrCleanup: if any promote call fails, free partially-promoted fields.
       # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
       stmts << MIR::ErrCleanup.new("__ret",
-        { kind: :struct_with_cleanup_fields, alloc: :heap, has_moved_guard: false, zig_type: zig_type })
+        CleanupEntry.from({ kind: :struct_with_cleanup_fields, alloc: :heap, has_moved_guard: false, zig_type: zig_type }))
       if ret_field_promote[:fields]
         # Per-field promotion: for each named heap field of __ret, emit
         # `try CheatLib.promote(@TypeOf(__ret.f), rt, &__ret.f);`.
@@ -7392,7 +7393,7 @@ class MIRLowering
         MIR::ScopeBlock.new([
           MIR::AllocMark.new("__ret_dupe", :heap, nil),
           MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
-          MIR::ErrCleanup.new("__ret_dupe", { kind: :heap_string, alloc: :heap, has_moved_guard: false }),
+          MIR::ErrCleanup.new("__ret_dupe", CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })),
           MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
         ])
       else

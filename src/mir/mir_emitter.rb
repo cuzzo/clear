@@ -23,6 +23,7 @@
 require "sorbet-runtime"
 
 require_relative "mir"
+require_relative "cleanup_entry"
 
 class MIREmitter
     extend T::Sig
@@ -978,30 +979,30 @@ class MIREmitter
   # Emit cleanup for MIR::Cleanup (defer) and MIR::ErrCleanup (errdefer).
   # errdefer: true  -> always emits `errdefer cleanup(name)` (no moved guard).
   # errdefer: false -> emits `defer cleanup(name)` with optional moved guard
-  #                    based on entry[:has_moved_guard].
+  #                    based on entry.has_moved_guard?.
   # The caller (emit dispatch) decides which; this method applies the template.
   sig { params(node: T.untyped, errdefer: T::Boolean).returns(String) }
   def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
     name = node.name
-    g = !errdefer && entry[:has_moved_guard]
-    zig_type = entry[:zig_type] || "UNKNOWN"
+    g = !errdefer && entry.has_moved_guard?
+    zig_type = entry.zig_type || "UNKNOWN"
     # Cleanup operates on the storage (success) type. After the
     # `RETURNS !T` migration the annotator may stamp a binding with
     # `!T`, but the Zig variable holds `T` post-`try`. Strip a leading
     # `!` so the type argument matches the variable's actual type.
     zig_type = zig_type[1..] if zig_type.start_with?("!")
-    elem_zig = entry[:elem_zig_type] || "UNKNOWN"
+    elem_zig = entry.elem_zig_type || "UNKNOWN"
     elem_zig = elem_zig[1..] if elem_zig.start_with?("!")
     # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
     # TAKES params). Skip the & wrappers and use .* / direct access.
-    vp = entry[:via_pointer]
+    vp = entry.via_pointer?
     deref = vp ? "#{name}.*" : name
 
-    case entry[:kind]
+    case entry.kind
     when :resource
-      close = entry[:resource_close_zig].gsub("{0}", name)
+      close = entry.resource_close_zig.gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)
 
     when :inf_stream
@@ -1049,18 +1050,18 @@ class MIREmitter
       guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", g, errdefer:)
 
     when :rc
-      rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc
-      case entry[:rc_variant]
+      rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
+      case entry.rc_variant
       when :link
-        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})", g, errdefer:)
+        guarded_defer(name, "CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{name})", g, errdefer:)
       when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }", g, errdefer:)
+        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{rc_alloc}, _strong_ref); }", g, errdefer:)
       else
         result = guarded_cleanup(name, zig_type, rc_alloc, g, errdefer:)
-        if entry[:needs_release_fields]
+        if entry.needs_release_fields?
           guard = g ? "if (!#{name}_moved) " : ""
           kw = errdefer ? "errdefer" : "defer"
-          result += "#{kw} #{guard}CheatLib.releaseFields(#{entry[:base_zig]}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
+          result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
         end
         result
       end
@@ -1104,7 +1105,7 @@ class MIREmitter
       guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
 
     when :array_with_struct_strings
-      if entry[:is_fixed]
+      if entry.is_fixed?
         guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
       else
         guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
@@ -1121,7 +1122,7 @@ class MIREmitter
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     else
-      raise "MIREmitter#emit_cleanup: unhandled kind :#{entry[:kind]} for '#{name}'"
+      raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
     end
   end
 
@@ -1536,9 +1537,9 @@ class MIREmitter
     }.join("\n")
   end
 
-  sig { params(entry: T::Hash[Symbol, T.untyped]).returns(String) }
+  sig { params(entry: CleanupEntry).returns(String) }
   def alloc_from_entry(entry)
-    alloc_zig(entry[:alloc])
+    alloc_zig(entry.alloc)
   end
 
   sig { params(sym: Symbol).returns(String) }

@@ -72,4 +72,28 @@ class CleanupEntry < Hash
 
   sig { returns(T.nilable(String)) }
   def elem_zig_type = self[:elem_zig_type]
+
+  sig { returns(T::Boolean) }
+  def via_pointer? = self[:via_pointer] == true
+
+  sig { returns(T::Boolean) }
+  def is_fixed? = self[:is_fixed] == true
+
+  sig { returns(T::Boolean) }
+  def needs_release_fields? = self[:needs_release_fields] == true
+
+  sig { returns(T.nilable(Symbol)) }
+  def rc_variant = self[:rc_variant]
+
+  sig { returns(T.nilable(Symbol)) }
+  def rc_alloc = self[:rc_alloc]
+
+  sig { returns(T.nilable(String)) }
+  def rc_release_func = self[:rc_release_func]
+
+  sig { returns(T.nilable(String)) }
+  def base_zig = self[:base_zig]
+
+  sig { returns(T.nilable(String)) }
+  def resource_close_zig = self[:resource_close_zig]
 end

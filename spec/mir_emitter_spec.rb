@@ -416,7 +416,7 @@ RSpec.describe MIREmitter do
 
   describe "Cleanup" do
     it "emits unguarded defer for list" do
-      entry = { kind: :list, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false }
+      entry = CleanupEntry.from({ kind: :list, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
       node = MIR::Cleanup.new("nums", entry)
       zig = e.emit(node)
       expect(zig).to include("defer CheatLib.cleanup(CheatLib.ArrayListUnmanaged(i64), rt.frameAlloc(), &nums);")
@@ -424,7 +424,7 @@ RSpec.describe MIREmitter do
     end
 
     it "emits guarded defer for heap string" do
-      entry = { kind: :heap_string, alloc: :heap, has_moved_guard: true }
+      entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: true })
       node = MIR::Cleanup.new("name", entry)
       zig = e.emit(node)
       expect(zig).to include("var name_moved = false;")
@@ -432,23 +432,23 @@ RSpec.describe MIREmitter do
     end
 
     it "emits resource cleanup" do
-      entry = { kind: :resource, alloc: :heap, has_moved_guard: false, resource_close_zig: "{0}.deinit()" }
+      entry = CleanupEntry.from({ kind: :resource, alloc: :heap, has_moved_guard: false, resource_close_zig: "{0}.deinit()" })
       node = MIR::Cleanup.new("conn", entry)
       zig = e.emit(node)
       expect(zig).to include("defer conn.deinit();")
     end
 
     it "emits pool cleanup" do
-      entry = { kind: :pool, alloc: :heap, has_moved_guard: false }
+      entry = CleanupEntry.from({ kind: :pool, alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("pool", entry)
       zig = e.emit(node)
       expect(zig).to include("defer pool.deinit(rt.heapAlloc());")
     end
 
     it "emits rc cleanup with release fields" do
-      entry = { kind: :rc, zig_type: "CheatLib.Rc(User)", alloc: :heap,
+      entry = CleanupEntry.from({ kind: :rc, zig_type: "CheatLib.Rc(User)", alloc: :heap,
                 has_moved_guard: false, rc_variant: nil, rc_alloc: :heap,
-                base_zig: "User", needs_release_fields: true }
+                base_zig: "User", needs_release_fields: true })
       node = MIR::Cleanup.new("user_rc", entry)
       zig = e.emit(node)
       expect(zig).to include("CheatLib.cleanup(CheatLib.Rc(User), rt.heapAlloc(), &user_rc)")
@@ -456,7 +456,7 @@ RSpec.describe MIREmitter do
     end
 
     it "emits locked cleanup" do
-      entry = { kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false }
+      entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
       zig = e.emit(node)
       expect(zig).to include("defer CheatLib.lockedDestroy(CheatLib.Locked(Counter), rt.heapAlloc(), counter);")
