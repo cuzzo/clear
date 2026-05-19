@@ -61,6 +61,11 @@ class MIRPass
   sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def transform!(ast)
     # E1: compute which functions return heap-owned values (fixed-point over call graph).
+    # [collapse-verdict: LOAD-BEARING — the PRODUCER of return_provenance/
+    #  heap_fns (subsumes return_expr_is_heap?). Deleting it: prspec 7
+    #  failures (allocation_strategy_spec.rb:485 :transitive_callee +6),
+    #  net bundle 0 ok. Definitionally irreducible — nothing else
+    #  computes the result.]
     heap_fns = EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
 
     # E3a: propagate heap return_provenance to caller binding type_info.
