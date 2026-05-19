@@ -197,6 +197,16 @@ pub fn zigErrorToName(err: anyerror) u32 {
     return ErrorName_None;
 }
 
+// Deterministic OOM fault injection (test-only). When the env var
+// CLEAR_OOM_AFTER=N is set, the runtime's heap allocator is wrapped in
+// a FailingAllocator that returns error.OutOfMemory on the (N+1)th
+// allocation. Used to validate the alloc-FAULT model: an unhandled
+// fault must panic [System/OutOfMemory] (step 5), while `OR PASS` /
+// `CATCH` over the faulting call must recover with no crash/leak.
+// Zero overhead when unset (one getenv at Runtime init). Global is
+// fine: a CLEAR program has one root Runtime; the hook is test-only.
+var __oom_failing: ?std.testing.FailingAllocator = null;
+
 pub const Runtime = struct {
     // Control
     // Pointer (not by-value) so the same memory can be registered with
@@ -251,9 +261,16 @@ pub const Runtime = struct {
     pub fn initFromSlice(
         slice: []u8,
         global_ctx: *EbrContext,
-        heap_allocator: std.mem.Allocator,
+        heap_allocator_in: std.mem.Allocator,
         timeout_ms: u64
     ) !Runtime {
+        // Deterministic OOM injection hook (test-only; see __oom_failing).
+        var heap_allocator = heap_allocator_in;
+        if (std.c.getenv("CLEAR_OOM_AFTER")) |env_ptr| {
+            const n = std.fmt.parseInt(usize, std.mem.span(env_ptr), 10) catch std.math.maxInt(usize);
+            __oom_failing = std.testing.FailingAllocator.init(heap_allocator_in, .{ .fail_index = n });
+            heap_allocator = __oom_failing.?.allocator();
+        }
         // Heap-allocate the ebr so it has a stable address independent
         // of where rt itself lives. owns_ebr=true so deinit cleans up.
         const ebr_ptr = try heap_allocator.create(ThreadLocalEbr);
