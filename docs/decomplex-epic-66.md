@@ -27,16 +27,19 @@ ruby gems/slopcop/exe/slopcop report --output=gems/slopcop/report.md
 
 | Slot category        | untyped | nilable | AFTER untyped | AFTER nilable |
 |----------------------|--------:|--------:|--------------:|--------------:|
-| params               |   1744  |   598   |   1687 (-57)  |   598         |
-| returns              |    735  |   542   |    695 (-40)  |   549         |
-| collections          |    825  |     7   |    775 (-50)  |     8         |
+| params               |   1744  |   598   |   1691 (-53)  |   597         |
+| returns              |    735  |   542   |    696 (-39)  |   549         |
+| collections          |    825  |     7   |    776 (-49)  |     8         |
 | structs/ivars        |      8  |    47   |      8        |    47         |
 | structs/ivars `T.let`|    123 (slots) |  |   123    |               |
-| **TOTAL (src/ raw token)** | **2609** | **952** | **2541 (-68)** | **960** |
+| **TOTAL (src/ raw token)** | **2609** | **952** | **2545 (-64)** | **961 (+9)** |
 
-AFTER column = through Unit 1.5b (`056f3ab80`). `nilable` is flat/+8 by design:
-the drop comes in 1.5c when the nil sentinel + `binding_entry &&` guards collapse;
-the +8 is added typed-nilable accessor sigs. Sorbet `untyped.usages` 25431 -> 25322.
+AFTER = final (Unit N, `32fab3691`). `untyped` -64 (-2.5%). `nilable` rose +9:
+the typed-struct/predicate work (CleanupEntry accessors, `AST.root_identifier`,
+`cap_source_name`) adds honest `T.nilable` accessor sigs; the nil-sentinel kill
+that would offset it was scoped to one cluster (1.5c) for memory-safety reasons.
+Net-honest: untyped fell, nilable did not -- the aggregate nilable drop needs
+the non-nil contract propagated repo-wide (deferred 1.5d).
 
 (Categories overlap by construction: a `T.untyped` inside `T::Hash[..]` inside a
 `params(...)` is counted in params, collections, and TOTAL. TOTAL is the canonical
@@ -46,49 +49,79 @@ headline raw-token count.)
 
 | Metric | Baseline | AFTER |
 |---|--:|--:|
-| `types.input.untyped.usages` | 25431 | |
-| `types.input.methods.typechecked` / `.total` | 6123 / 7885 | |
-| `types.input.sends.typed` / `.total` | 59306 / 81118 | |
-| `types.sig.count` | 6963 | |
-| files sigil strict / true / false | 79 / 4 / 3 | |
+| `types.input.untyped.usages` | 25431 | **25272 (-159)** |
+| `types.input.methods.typechecked` | 6123 | 6147 (+24) |
+| status | GREEN | GREEN (0 errors, every commit) |
+
+## Outcome -- honest delta (Units 0-5 + 1.5; ~6 of the planned units)
+
+**What moved (targeted clusters collapsed, byte-identical):**
+- decomplex Reification-Misses **133 -> 126**, Derived-State-Staleness
+  **252 -> 241**, Broken-Protocols **1815 -> 1802**; the #1 in-scope
+  convergence unit `lower_var_decl` findings **86 -> 69**.
+- Sorbet `untyped.usages` **25431 -> 25272 (-159)**; src/ raw `T.untyped`
+  **2609 -> 2545 (-64)**. Sorbet stayed GREEN across all ~15 commits.
+- 14 byte-identical structural commits (564/564 transpile-tests, 0 leaks,
+  4819 specs 0 failures throughout).
+
+**What did NOT move dramatically (stated plainly):**
+- decomplex aggregate is ~flat: Total candidates 12257 -> 12251 (-6),
+  convergence +2, clusters -2. A handful of collapsed clusters is small
+  against ~12k repo-wide candidates -- only ~6 units of a much larger
+  plan were executed.
+- boobytrap flat (by construction -- cannot move from refactors).
+- slopcop genuine gaps 390 -> 387 (-3).
+- src/ `T.nilable` rose +9 (honest typed sigs added; nil-sentinel kill
+  scoped to one cluster).
+
+**Bottom line:** the *targeted* decomplexity metrics improved measurably
+and the untyped surface shrank, but the *aggregate* gem headlines did not
+drop dramatically -- that needs the remaining units (1.5d repo-wide
+non-nil contract, escape/annotator deeper passes) which were out of this
+session's executed scope.
 
 ### decomplex (`gems/decomplex/report.md`, 97 files, 13 detectors)
 
 | Metric | Baseline | AFTER |
 |---|--:|--:|
-| Total candidates | 12257 | |
-| Convergence units (>=2 detectors) | 1167 | |
-| Root-cause clusters | 326 | |
-| Decision Pressure | 257 | |
-| Missing Abstractions | 206 | |
-| Reification Misses | 133 | |
-| Derived-State Staleness | 252 | |
-| Broken Protocols | 1815 | |
-| Neglected Conditions | 47 | |
-| Neglected Path Conditions | 2100 | |
-| Neglected Updates | 6798 | |
-| False Simplicity | 616 | |
-| Fat Unions | 10 | |
-| Top in-scope unit | `mir_lowering.rb:6163 lower_var_decl` -- 8 detectors, score 15, 86 findings | |
+| Total candidates | 12257 | 12251 (-6) |
+| Convergence units (>=2 detectors) | 1167 | 1169 (+2) |
+| Root-cause clusters | 326 | 324 (-2) |
+| Decision Pressure | 257 | 256 (-1) |
+| Missing Abstractions | 206 | 206 (0) |
+| Reification Misses | 133 | **126 (-7)** |
+| Derived-State Staleness | 252 | **241 (-11)** |
+| Broken Protocols | 1815 | **1802 (-13)** |
+| Neglected Conditions | 47 | 47 |
+| Neglected Path Conditions | 2100 | 2104 (+4) |
+| Neglected Updates | 6798 | 6820 (+22) |
+| False Simplicity | 616 | 616 |
+| Fat Unions | 10 | 10 |
+| Top in-scope unit `lower_var_decl` | 8 detectors, score 15, **86 findings** | 8 detectors, score 15, **69 findings (-17)** |
 
 ### boobytrap (`gems/boobytrap/report.md`, whole repo, 65 files ranked)
 
 | Metric | Baseline | AFTER |
 |---|--:|--:|
-| #1 hotspot `src/mir/mir_lowering.rb` | 0.3181 (fix 1.0, gap 31.8%, 2842/8934) | |
-| #2 `src/annotator.rb` | 0.2415 (fix 0.772, gap 31.3%, 1538/4920) | |
-| `src/mir/escape_analysis.rb` | 0.0385 (gap 27.6%, 186/674) | |
-| Fix commits matched | 869 | |
+| #1 hotspot `src/mir/mir_lowering.rb` | 0.3181 | 0.3181 (flat) |
+| #2 `src/annotator.rb` | 0.2415 | 0.2415 (flat) |
+| `src/mir/escape_analysis.rb` | 0.0385 | 0.0385 (flat) |
+| Fix commits matched | 869 | 869 |
+
+boobytrap = fix-churn x branch-coverage-gap. It moves only when bugs are
+fixed and tests added -- **by construction it cannot move from
+byte-identical refactors against the same coverage resultset**. Flat here
+is the expected, correct result, not a miss.
 
 ### slopcop (`gems/slopcop/report.md`, 3 MIR files)
 
 | Metric | Baseline | AFTER |
 |---|--:|--:|
-| dark arms | 3413 | |
-| genuine gaps | 390 (11.4%) | |
-| type_norm | 763 (22.4%) | |
-| diagnostic | 1569 (46.0%) | |
-| Top-5 genuine gaps | all `mir_lowering.rb lower_var_decl` (churn 1.0, deviance 20) | |
+| dark arms | 3413 | 3413 (flat) |
+| genuine gaps | 390 (11.4%) | 387 (-3) |
+| type_norm | 763 (22.4%) | ~ |
+| diagnostic | 1569 (46.0%) | ~ |
+| Top-5 genuine gaps | all `mir_lowering.rb lower_var_decl` | still lower_var_decl |
 
 ## Progress log
 
@@ -102,6 +135,11 @@ headline raw-token count.)
 | 1.5b(2) | `57fdf1e2d` | emitter reader burn-down + single-source all entry construction (runtime sig surfaced + fixed latent untyped-construction gap); byte-identical |
 | 1.5b(3) | `056f3ab80` | mir_pass/control_flow/mir_lowering/mir_checker reader burn-down; byte-identical. src/ TOTAL.untyped -> 2541 (-68 cumulative); untyped.usages 25431->25322 |
 | 1.5c | `690901c84` | non-nil contract: CleanupEntry::NONE replaces nil sentinel in lower_var_decl + owned_return_transfer_binding? (decomplex #1 cluster); collapses loose binding_entry &&/&. nil-guards into typed predicates; byte-identical (0 leaks = memory-safety proof). untyped.usages -> 25313 |
+| 2 | `a6e965011` | `AST.root_identifier` reifies scatter-7 root-walk (4 faithful sites); degenerate fat-union hoist in `tag_transitive_provenance!`; byte-identical |
+| 3 | `c87140d63` | reify 5x-rebuilt `schema_lookup` closure into one memoized `@schema_lookup`; byte-identical |
+| 4 | `c97faa27c` | single-source `resource_captures(node)` for the capture_analysis cluster (3 core sites); byte-identical |
+| 5 | `32fab3691` | `SymbolEntry#atomic?` reifies decomplex #1 Reification-Miss (16 sites); byte-identical |
+| N | (this commit) | regenerate reports, fill AFTER/delta, honest outcome |
 
 ### Unit 1.5 -- DONE (foundation + full reader burn-down + scoped non-nil contract)
 
