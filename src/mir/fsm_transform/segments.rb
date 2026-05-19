@@ -288,32 +288,27 @@ module FsmTransform
     def classify_suspend(stmt)
       T.bind(self, T.untyped) rescue nil
       case stmt
-      when AST::FuncCall, AST::MethodCall
-        if io_suspending_call?(stmt)
-          IoSuspend.new(stmt, stmt.matched_stdlib_def, nil)
-        end
-      when AST::NextExpr
-        NextSuspend.new(stmt.expr, nil)
+      when AST::FuncCall, AST::MethodCall, AST::NextExpr
+        suspend_for(stmt, nil)
       when AST::VarDecl, AST::BindExpr
-        case stmt.value
-        when AST::FuncCall, AST::MethodCall
-          if io_suspending_call?(stmt.value)
-            IoSuspend.new(stmt.value, stmt.value.matched_stdlib_def, stmt.name)
-          end
-        when AST::NextExpr
-          NextSuspend.new(stmt.value.expr, stmt.name)
-        end
+        suspend_for(stmt.value, stmt.name)
       when AST::Assignment
-        case stmt.value
-        when AST::FuncCall, AST::MethodCall
-          if io_suspending_call?(stmt.value)
-            name = stmt.name.is_a?(String) ? stmt.name : nil
-            IoSuspend.new(stmt.value, stmt.value.matched_stdlib_def, name)
-          end
-        when AST::NextExpr
-          name = stmt.name.is_a?(String) ? stmt.name : nil
-          NextSuspend.new(stmt.value.expr, name)
-        end
+        suspend_for(stmt.value, stmt.name.is_a?(String) ? stmt.name : nil)
+      end
+    end
+
+    # Classify a value-expression as a suspend point. Was inlined as the
+    # identical FuncCall/MethodCall|NextExpr case 3x (top-level, VarDecl/
+    # BindExpr value, Assignment value -- decomplex degenerate-union /
+    # Missing-Abstraction). result_var is the binding name (nil if none).
+    sig { params(v: T.untyped, name: T.untyped).returns(T.untyped) }
+    def suspend_for(v, name)
+      T.bind(self, T.untyped) rescue nil
+      case v
+      when AST::FuncCall, AST::MethodCall
+        IoSuspend.new(v, v.matched_stdlib_def, name) if io_suspending_call?(v)
+      when AST::NextExpr
+        NextSuspend.new(v.expr, name)
       end
     end
 
