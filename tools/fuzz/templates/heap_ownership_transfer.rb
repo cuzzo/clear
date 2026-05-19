@@ -42,7 +42,12 @@ HOT_CELLS = []
   # dropped here -- escape_via_return's struct_with_list covers E1's
   # GetField branch callee-side and a valid in-template construct for
   # it conflates value-shape with the binding-form axis.
-  ret_forms = value == :list ? %i[ident literal call give] : %i[ident literal call]
+  # `:or_rescue` -- producer's RETURN is `mkInner!() OR RAISE`, which
+  # parses to a BinaryOp(:OR_RESCUE) wrapping the inner call. Valid
+  # only for fallible producers (RETURNS !T) since OR RAISE bubbles
+  # an error. Drives the OR_RESCUE arms in return_value_is_heap? and
+  # direct_return_decls that the other ret_forms can't reach.
+  ret_forms = value == :list ? %i[ident literal call give or_rescue] : %i[ident literal call or_rescue]
   ret_forms.each do |ret_form|
     %i[bare or_raise or_fallback discard discard_or_raise onward].each do |bind_form|
       %i[plain err].each do |decl|
@@ -54,6 +59,8 @@ HOT_CELLS = []
         # `OR RAISE` (the :or_raise / :discard_or_raise cells), which
         # operate on the fault CHANNEL, not a surface optional.
         next if bind_form == :or_fallback && decl == :plain
+        # :or_rescue ret_form needs a fallible producer to OR-rescue.
+        next if ret_form == :or_rescue && decl == :plain
 
         key = [value, ret_form, bind_form, decl]
         expected = HOT_KNOWN_FAILING.include?(key) ? :in_dev : :pass
@@ -109,6 +116,9 @@ def hot_producer(value, ret_form, rt)
     "#{inner}\n\nFN mk() RETURNS #{rt} ->\n    RETURN mkInner();\nEND"
   when :give
     "FN mk() RETURNS #{rt} ->\n#{hot_build(value, 'v')}    RETURN GIVE v;\nEND"
+  when :or_rescue
+    inner = "FN mkInner() RETURNS #{rt} ->\n#{hot_build(value, 'v')}    RETURN v;\nEND"
+    "#{inner}\n\nFN mk() RETURNS #{rt} ->\n    RETURN mkInner() OR RAISE;\nEND"
   end
 end
 

@@ -230,7 +230,7 @@ module EscapeGraph
   end
 
   def promote_frame_concats!(node)
-    return unless node
+    return unless node # :nocov: defensive (callers internal-recurse + Array.compact upstream)
     case node
     when AST::BinaryOp
       if node.op == :ADD && node.string_concat
@@ -342,7 +342,7 @@ module EscapeGraph
     out = Set.new
     AST.each_bg_block(fn.body) do |bg|
       names = bg.capture_analysis&.heap_promote_names
-      out.merge(names) if names
+      out.merge(names) if names # :nocov: capture_analysis can be nilable upstream
     end
     out
   end
@@ -444,15 +444,15 @@ module EscapeGraph
     n.storage = :heap
     ft = n.full_type
     ft.provenance = :heap if ft.is_a?(Type) && !ft.heap_provenance?
-    sym = n.symbol
-    if sym
-      sym.storage = :heap
-      sym.type.provenance = :heap
-    end
+    # Annotator stamps symbol on every binding-decl node; MIRPass runs
+    # strictly after. Asserts the contract -- nil here means an
+    # annotator hole.
+    sym = T.must(n.symbol)
+    sym.storage = :heap
+    sym.type.provenance = :heap
     stamp_return_symbol!(return_nodes, n.name.to_s)
-    case (v = n.value)
-    when AST::Locatable then v.storage = :heap
-    end
+    v = n.value
+    v.storage = :heap if v.is_a?(AST::Locatable)
   end
 
   def stamp_decl_heap!(fn, name)
@@ -465,7 +465,7 @@ module EscapeGraph
 
   def stamp_return_symbol!(return_nodes, var_name)
     return_nodes.each do |ret|
-      next unless ret.value
+      next unless ret.value # :nocov: redundant -- return_values_nodes pre-filters
       ident = extract_ident(ret.value, var_name)
       sym = ident&.symbol
       next unless sym
