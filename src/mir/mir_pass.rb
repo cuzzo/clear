@@ -92,6 +92,9 @@ class MIRPass
 
     # E3b: stamp heap provenance on call-site expressions for carry-return functions.
     # Runs after E2 because E2 sets fn.heap_carry_return on loop-carry functions.
+    # [collapse-verdict: LOAD-BEARING — sole stamper for carry-return
+    #  call-site heap provenance; deleting it leaks (transpile aggregated
+    #  DebugAllocator, multiple addresses). NOT redundant.]
     EscapeAnalysis.tag_carry_call_sites!(@fn_nodes)
 
     # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
