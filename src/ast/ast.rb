@@ -306,6 +306,22 @@ module AST
     end
   end
 
+  # Walk a GetField/GetIndex access chain down to the root Identifier it
+  # is anchored at; nil if the chain does not bottom out at an Identifier.
+  #
+  # Single source of truth for "what variable does this lvalue/access
+  # chain ultimately name". Before this, escape analysis, IF-AS source
+  # resolution, capability source naming, and placeholder-root detection
+  # each hand-rolled the same `case node; GetField/GetIndex -> .target`
+  # recursion (decomplex Missing-Abstraction, scatter=7).
+  sig { params(node: T.untyped).returns(T.nilable(AST::Identifier)) }
+  def self.root_identifier(node)
+    case node
+    when AST::GetField, AST::GetIndex then root_identifier(node.target)
+    when AST::Identifier              then node
+    end
+  end
+
   # The immediately-nested *value* children of a transparent wrapper
   # expression: struct/union-literal field values, list-literal items,
   # and the inner value of a MOVE/COPY/CLONE/SHARE/FREEZE/CapabilityWrap

@@ -1293,12 +1293,7 @@ private
   # whether an IF-AS source borrows from a non_escaping binding.
   sig { params(expr: T.untyped).returns(T.nilable(AST::Identifier)) }
   def ifbind_source_root(expr)
-    case expr
-    when AST::Identifier  then expr
-    when AST::GetField    then ifbind_source_root(expr.target)
-    when AST::GetIndex    then ifbind_source_root(expr.target)
-    else                       nil
-    end
+    AST.root_identifier(expr)
   end
 
   sig { params(node: AST::IfBind).returns(Symbol) }

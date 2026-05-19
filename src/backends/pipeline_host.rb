@@ -4494,20 +4494,7 @@ class PipelineHost
 
   sig { params(target: AST::GetField).returns(T::Boolean) }
   def target_rooted_at_placeholder?(target)
-    cur = T.let(target, T.untyped)
-    while cur
-      case cur
-      when AST::Identifier
-        return cur.name == "_"
-      when AST::GetField
-        cur = cur.target
-      when AST::GetIndex
-        cur = cur.target
-      else
-        return false
-      end
-    end
-    false
+    AST.root_identifier(target)&.name == "_"
   end
 
   # In-place EACH variant: items is a *mutable* slice and each worker

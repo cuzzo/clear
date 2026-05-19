@@ -643,11 +643,7 @@ module EscapeAnalysis
   # Extract the root Identifier from a field/index chain (for assign_escape LHS).
   sig { params(node: T.untyped).returns(T.nilable(AST::Identifier)) }
   private_class_method def self.e2_root_ident(node)
-    case node
-    when AST::GetField, AST::GetIndex then e2_root_ident(node.target)
-    when AST::Identifier              then node
-    else nil
-    end
+    AST.root_identifier(node)
   end
 
   # ── Phase E3 ─────────────────────────────────────────────────────────────
@@ -663,11 +659,18 @@ module EscapeAnalysis
     fn_nodes.each do |_name, fn|
       next unless fn&.body
       AST.walk_body(fn.body) do |node|
+        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) ||
+                    node.is_a?(AST::Assignment)
+        # Shared gate (was duplicated verbatim across the VarDecl/BindExpr
+        # and Assignment arms — decomplex degenerate-union: 3 common
+        # members, 0 variant). Hoisted once; the case keeps only the
+        # variant stamping target.
+        val = node.value
+        callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
+        next unless callee_name && heap_fns.include?(callee_name)
+
         case node
         when AST::VarDecl, AST::BindExpr
-          val = node.value
-          callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
-          next unless callee_name && heap_fns.include?(callee_name)
           node.full_type.provenance = :heap
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             # decl is a lookup result (legitimately nil on miss); its
@@ -679,12 +682,9 @@ module EscapeAnalysis
             decl.full_type.provenance = :heap if decl
           end
         when AST::Assignment
-          val = node.value
-          callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
-          next unless callee_name && heap_fns.include?(callee_name)
-          # Same as above: sym.reg is a lookup back-pointer (nil on
-          # miss); type_info is invariant-guaranteed when present.
-          # Guard decl only — no type_info guard, no broken `&.` chain.
+          # sym.reg is a lookup back-pointer (nil on miss); type_info is
+          # invariant-guaranteed when present. Guard decl only — no
+          # type_info guard, no broken `&.` chain.
           sym  = node.name.symbol
           decl = sym&.reg
           decl.full_type.provenance = :heap if decl

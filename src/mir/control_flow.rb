@@ -1769,14 +1769,9 @@ class BorrowChecker
   private
 
   # Extract the root variable name from a capability's var_node.
-  sig { params(var_node: AST::Identifier).returns(String) }
+  sig { params(var_node: AST::Identifier).returns(T.nilable(String)) }
   def cap_source_name(var_node)
-    case var_node
-    when AST::Identifier then var_node.name.to_s
-    when AST::GetField then cap_source_name(var_node.target)
-    when AST::GetIndex then cap_source_name(var_node.target)
-    else nil
-    end
+    AST.root_identifier(var_node)&.name&.to_s
   end
 
   sig { params(token: Lexer::Token).returns(String) }
