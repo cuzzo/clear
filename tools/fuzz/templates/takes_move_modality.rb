@@ -2,15 +2,20 @@
 #
 # An owning collection/array passed to a `TAKES` parameter must transfer the
 # owning container. Implicit move into TAKES is valid CLEAR -- `consume(xs)`
-# needs NO explicit `GIVE`. Three proven lowering bugs live on this surface:
+# needs NO explicit `GIVE`. This template exercises every {shape, modality}
+# combination as a regression gate against three proven lowering bugs
+# (now fixed; cells flipped to :pass):
 #
-#   #37  @list/@set/@pool/@map via `bare`(implicit) or `COPY` -> mis-lowered
-#        (`.items` slice / wrong path) where TAKES expects the owning store.
-#        `GIVE` works for these four shapes today.
-#   #39  dynamic `Int64[]` (no @list) -> TAKES is broken even with `GIVE`
-#        (`expected '[]i64', found 'array_list.Aligned'`).
-#   #40  nested `Int64[][]@list` -> TAKES is broken even with `GIVE`
-#        (`expected '*T', found '*const T'`).
+#   #37  @list/@set/@pool/@map via `bare`(implicit) or `COPY` -- mis-lowered
+#        as a slice; callsite collection? discriminator routes owning
+#        collection args by pointer; COPY of @list -> TAKES routes through
+#        CheatLib.dupeValue for an owning ArrayList. (ad7a29bf3 / cf150a29b)
+#   #39  dynamic `Int64[]` -> TAKES -- broken with GIVE because the slice
+#        path's CopyNode/MoveNode syntax exclusions prevented .items
+#        extraction. Exclusions dropped (cf150a29b).
+#   #40  nested `Int64[][]@list` -> TAKES -- :list_with_elem_cleanup
+#        emitted a mutable `xs.deinit(alloc)` failing on const-bound
+#        anytype params; outer deinit @constCast'd (6e9c6463d).
 #
 # Why the class went undetected: every TAKES-bearing template hardcoded
 # `GIVE` as a literal; the move modality was never a fuzz axis. Worse,
@@ -21,11 +26,8 @@
 # takes_arg/give_arg across collection shapes (registered in
 # surface_registry.rb TEMPLATE_COVERAGE).
 #
-# Expectations encode the LANGUAGE CONTRACT, not the current broken state.
-# Cells the contract says must work but a proven bug breaks are :in_dev
-# (generator.rb:40: reserved, skipped, matrix stays green). Flipping a
-# shape/modality's :in_dev cells to :pass is the regression acceptance test
-# for the bug that gates it:
+# All cells now :pass. Historical gating (flipping :in_dev -> :pass was the
+# regression acceptance test):
 #
 #   shape\modality   give     bare         copy
 #   list/set/pool/map :pass    :in_dev #37  :in_dev #37
@@ -58,21 +60,18 @@ TAKES_MOVE_SHAPE_SPECS = {
            "RETURN xs.length();"],
 }.freeze
 
-# give works today only for the four owning @-collections; dynarr/nested
-# fail their GIVE baseline via #39/#40 so every modality is :in_dev there.
-GIVE_OK_SHAPES = %i[list set pool map].freeze
-
 TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
   %i[give bare copy].map do |modality|
-    expected =
-      if GIVE_OK_SHAPES.include?(shape)
-        # give + bare both pass (bare fixed by the callee-side
-        # collection? discriminator); copy still gated by #37 (separate path).
-        modality == :copy ? :in_dev : :pass
-      else
-        :in_dev                               # dynarr=#39, nested=#40
-      end
-    { shape: shape, modality: modality, expected: expected }
+    # Remaining :in_dev cells:
+    # - COPY of @set/@pool/@map/dyn-array into TAKES collection (#42):
+    #   dupeValue lacks arms for these shapes
+    # - dynarr (give/bare/copy): #39 requires escape-analysis promotion of
+    #   the caller's frame-allocated ArrayList -- a lowering-layer .items
+    #   extraction matches types but mismatches allocators (invalid free).
+    blocked = (modality == :copy && %i[set pool map].include?(shape)) ||
+              shape == :dynarr
+    { shape: shape, modality: modality,
+      expected: blocked ? :in_dev : :pass }
   end
 end
 

@@ -1770,7 +1770,7 @@ class MIRLowering
       # field stores), but a TAKES collection callee expects an owning
       # ArrayList. Produce one via CheatLib.dupeValue on the source binding
       # (the dupeValue ArrayList arm at runtime-header.zig:3284). #37 COPY.
-      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.collection? &&
+      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.list_collection? &&
                        (ti&.list_collection? || (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
@@ -1804,12 +1804,7 @@ class MIRLowering
         end
       elsif callee_wants_mutable_value
         MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !callee_param_type&.collection?
-        # Emit slice (.items) when the callee wants a slice-shaped param.
-        # Shape-driven; CopyNode/MoveNode syntax exclusions removed -- the
-        # safe ItemsAccess (@hasField "items") is a comptime no-op for slice
-        # sources (`@constCast(__x[0..])` fallback), so re-extracting on a
-        # slice that came from a CopyNode/MoveNode result is harmless.
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
@@ -1896,15 +1891,13 @@ class MIRLowering
       callee_param_type = callee_param&.type
       # COPY of an owning collection into a TAKES collection param (#37 COPY):
       # produce owning ArrayList via dupeValue; see lower_func_call note.
-      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.collection? &&
+      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.list_collection? &&
                        (ti&.list_collection? || (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
                   lower(a)
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
-      if ti&.array? && !ti&.string? && !ti&.pool? && !callee_param_type&.collection?
-        # Shape-driven (see lower_func_call): emit slice when callee wants
-        # slice; the safe ItemsAccess is a comptime no-op on slice sources.
+      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
