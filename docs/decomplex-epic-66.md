@@ -101,6 +101,16 @@ headline raw-token count.)
 | 1.5b(1) | `7f7b2a654` | lower_var_decl reader burn-down (decomplex #1 cluster); byte-identical |
 | 1.5b(2) | `57fdf1e2d` | emitter reader burn-down + single-source all entry construction (runtime sig surfaced + fixed latent untyped-construction gap); byte-identical |
 | 1.5b(3) | `056f3ab80` | mir_pass/control_flow/mir_lowering/mir_checker reader burn-down; byte-identical. src/ TOTAL.untyped -> 2541 (-68 cumulative); untyped.usages 25431->25322 |
+| 1.5c | `690901c84` | non-nil contract: CleanupEntry::NONE replaces nil sentinel in lower_var_decl + owned_return_transfer_binding? (decomplex #1 cluster); collapses loose binding_entry &&/&. nil-guards into typed predicates; byte-identical (0 leaks = memory-safety proof). untyped.usages -> 25313 |
+
+### Unit 1.5 -- DONE (foundation + full reader burn-down + scoped non-nil contract)
+
+Cumulative src/ vs baseline: **TOTAL.untyped 2609 -> 2541 (-68)**,
+collections.untyped 825 -> 775, params.untyped 1744 -> 1688, returns.untyped
+735 -> 695. Sorbet `untyped.usages` 25431 -> 25313 (-118). `nilable` ~flat
+(952 -> 959): the aggregate nilable drop needs the non-nil contract propagated
+to *all* lookup sites + the classifier return (a 1.5d / Unit-N follow-on); 1.5c
+was deliberately scoped to the one fully memory-safety-analyzable cluster.
 
 ## Unit 1.5 -- CleanupEntry (Hash -> typed) slices
 
