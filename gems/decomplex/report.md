@@ -20,8 +20,8 @@
 - [Neglected Updates (6820)](#neglected-updates-6820)
 - [Derived-State Staleness (241)](#derivedstate-staleness-241)
 - [Neglected Conditions (47)](#neglected-conditions-47)
-- [Neglected Path Conditions (2099)](#neglected-path-conditions-2099)
-- [Broken Protocols (1794)](#broken-protocols-1794)
+- [Neglected Path Conditions (2095)](#neglected-path-conditions-2095)
+- [Broken Protocols (1800)](#broken-protocols-1800)
 - [False Simplicity (616)](#false-simplicity-616)
 - [Fat Unions (9)](#fat-unions-9)
 - [Run Summary](#run-summary)
@@ -38,8 +38,8 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 - **[tier 2]** [Derived-State Staleness (241)](#derivedstate-staleness-241): b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug
 - **[tier 2]** [Neglected Conditions (47)](#neglected-conditions-47): dispatch/conjunction minus one element -- *POSSIBLE* bug
 - **[tier 2]** [Type-3 Clones (missed rename) (14)](#type3-clones-missed-rename-14): pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug
-- **[tier 3]** [Neglected Path Conditions (2099)](#neglected-path-conditions-2099): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
-- **[tier 3]** [Broken Protocols (1794)](#broken-protocols-1794): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
+- **[tier 3]** [Neglected Path Conditions (2095)](#neglected-path-conditions-2095): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
+- **[tier 3]** [Broken Protocols (1800)](#broken-protocols-1800): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
 - **[tier 3]** [False Simplicity (616)](#false-simplicity-616): looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)
 - **[tier 3]** [Fat Unions (9)](#fat-unions-9): case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*
 
@@ -47,7 +47,7 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest triage signal: agreement outranks any single detector's volume. Tier-weighted (1=3, 2=2, 3=1). **Start here.**_
 
 - `src/ast/type.rb:2030` (compute_zig_type) -- **8 detectors** [score 16, 69 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/mir/mir_lowering.rb:6173` (lower_var_decl) -- **8 detectors** [score 15, 69 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Conditions, Neglected Path Conditions, Neglected Updates
+- `src/mir/mir_lowering.rb:6173` (lower_var_decl) -- **8 detectors** [score 15, 66 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Conditions, Neglected Path Conditions, Neglected Updates
 - `src/annotator-helpers/capabilities.rb:1073` (_unified_capture_walk) -- **7 detectors** [score 14, 178 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/annotator-helpers/function_analysis.rb:187` (resolve_call) -- **7 detectors** [score 13, 183 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator.rb:2896` (visit_BindExpr) -- **7 detectors** [score 13, 81 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
@@ -55,7 +55,7 @@ _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest tria
 - `src/tools/doctor.rb:164` (section_heap) -- **7 detectors** [score 13, 54 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator-helpers/generic_analysis.rb:579` (propagate_collection_metadata!) -- **7 detectors** [score 13, 52 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/backends/pipeline_host.rb:3407` (lower_concurrent) -- **7 detectors** [score 13, 52 findings]: Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Reification Misses
-- `src/annotator.rb:5552` (handle_assign_move) -- **7 detectors** [score 13, 45 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/annotator.rb:5552` (handle_assign_move) -- **7 detectors** [score 13, 44 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator-helpers/pipe_analysis.rb:796` (analyze_pipe_to_named_function) -- **7 detectors** [score 13, 39 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/mir/control_flow.rb:649` (transfer_stmt) -- **7 detectors** [score 13, 36 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Missing Abstractions, Neglected Updates
 - `src/annotator-helpers/pipe_analysis.rb:1453` (analyze_concurrent_op) -- **7 detectors** [score 12, 89 findings]: Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates
@@ -65,7 +65,7 @@ _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest tria
 - `src/annotator.rb:1438` (visit_MatchStatement) -- **6 detectors** [score 11, 280 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator.rb:681` (visit_FunctionDef) -- **6 detectors** [score 11, 131 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator.rb:4765` (visit_WithBlock) -- **6 detectors** [score 11, 127 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
-- `src/annotator-helpers/capabilities.rb:782` (declare_capability_scope!) -- **6 detectors** [score 11, 112 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Reification Misses
+- `src/annotator-helpers/capabilities.rb:782` (declare_capability_scope!) -- **6 detectors** [score 11, 109 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Reification Misses
 - `src/annotator.rb:5484` (visit_NextExpr) -- **6 detectors** [score 11, 81 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator.rb:1964` (visit_WhileBindLoop) -- **6 detectors** [score 11, 59 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/annotator.rb:4316` (visit_CopyNode) -- **6 detectors** [score 11, 57 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
@@ -141,6 +141,9 @@ _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findi
 - **[name]** `struct` -- **4 detectors** [score 8] across 21 unit(s), 25 findings: Broken Protocols, Exact Predicate Aliases, Neglected Path Conditions, Semantic Predicate Aliases
   - FIX: pair the protocol (RAII / ensure); the unpaired site is the deviant
   - `src/ast/schemas.rb:34` (enum?) ; `src/ast/schemas.rb:67` (resource?) ; `src/ast/schemas.rb:123` (union?) ; `src/ast/schemas.rb:169` (struct?)
+- **[name]** `storage` -- **4 detectors** [score 7] across 350 unit(s), 735 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
+  - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
+  - `src/annotator-helpers/with_match_check.rb:305` (family_of_arg) ; `src/annotator-helpers/function_analysis.rb:146` (resolve_call) ; `src/annotator-helpers/function_analysis.rb:747` (declare_and_verify_params) ; `src/annotator-helpers/function_analysis.rb:855` (verify_captures!)
 - **[name]** `stdlib_def` -- **4 detectors** [score 7] across 210 unit(s), 234 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/mir/mir_checker.rb:218` (stdlib_owned_return?) ; `src/mir/mir_checker.rb:793` (expr_has_frame_alloc?) ; `src/mir/mir_lowering.rb:212` (mir_allocates?) ; `src/mir/mir_lowering.rb:6386` (owned_return_transfer_binding?)
@@ -150,9 +153,6 @@ _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findi
 - **[name]** `shard_count` -- **4 detectors** [score 7] across 171 unit(s), 190 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/ast/type.rb:983` (sharded?) ; `src/annotator-helpers/function_analysis.rb:207` (resolve_call) ; `src/annotator-helpers/generic_analysis.rb:420` (generic_shared_payload_binding) ; `src/annotator-helpers/generic_analysis.rb:554` (propagate_declared_type_to_value!)
-- **[name]** `capture_analysis` -- **4 detectors** [score 7] across 170 unit(s), 200 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
-  - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/mir/control_flow.rb:611` (resource_captures) ; `src/mir/control_flow.rb:881` (collect_bg_body_gives) ; `src/mir/control_flow.rb:1118` (check_stmt_reads) ; `src/mir/control_flow.rb:1119` (check_stmt_reads)
 - ...(+303 more)
 
 ## Decision Pressure (256)
@@ -164,7 +164,7 @@ _ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/re
   - `src/annotator-helpers/auto_inference.rb:760` (walk_binops) ; `src/annotator-helpers/capabilities.rb:1073` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1077` (_unified_capture_walk) ; `src/annotator-helpers/capabilities.rb:1085` (_unified_capture_walk)
 - `.emit` -- ELIMINABLE guard-pressure **81** across 29 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator-helpers/capabilities.rb:412` (predicate_impurity_reason) ; `src/annotator-helpers/capabilities.rb:414` (predicate_impurity_reason) ; `src/annotator-helpers/capabilities.rb:415` (predicate_impurity_reason) ; `src/annotator-helpers/effects.rb:691` (scan_suspend_points)
-- `.symbol` -- ELIMINABLE guard-pressure **66** across 45 method(s) -> tighten contract / nil-kill: DELETE  (+7 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
+- `.symbol` -- ELIMINABLE guard-pressure **66** across 45 method(s) -> tighten contract / nil-kill: DELETE  (+8 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator-helpers/capabilities.rb:93` (cap_var_sync) ; `src/annotator-helpers/capabilities.rb:118` (cap_var_layout) ; `src/annotator-helpers/capabilities.rb:142` (validate_capability) ; `src/annotator-helpers/capabilities.rb:164` (validate_capability)
 - `.target` -- ELIMINABLE guard-pressure **60** across 35 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator-helpers/auto_inference.rb:655` (record_index_assign) ; `src/annotator-helpers/capabilities.rb:764` (cap_var_name) ; `src/annotator-helpers/function_analysis.rb:915` (verify_return) ; `src/annotator-helpers/generic_analysis.rb:645` (find_container_source)
@@ -242,7 +242,7 @@ _guard tuple recomputed across >=2 decision units_
   - `src/mir/fsm_transform/recursive_splitter.rb:275` (stmt_introduces_split?) ; `src/mir/fsm_transform/recursive_splitter.rb:298` (contains_suspend_anywhere?) ; `src/mir/fsm_transform/recursive_splitter.rb:398` (emit_pivot) ; `src/mir/fsm_transform.rb:215` (body_needs_conservative?) ; `src/mir/fsm_transform.rb:238` (contains_suspend_anywhere?)
 - **[conjunction]** support=5 scatter=5 rank=25
   - tuple: `entry | entry.needs_cleanup?`
-  - `src/mir/mir_pass.rb:180` (transform_function!) ; `src/mir/mir_pass.rb:235` (walk_for_bg_captures) ; `src/mir/mir_pass.rb:432` (insert_bg_give_suppress!) ; `src/mir/mir_pass.rb:856` (stamp_while_bind_cleanup!) ; `src/mir/mir_pass.rb:870` (stamp_if_bind_cleanup!)
+  - `src/mir/mir_pass.rb:180` (transform_function!) ; `src/mir/mir_pass.rb:235` (walk_for_bg_captures) ; `src/mir/mir_pass.rb:430` (insert_bg_give_suppress!) ; `src/mir/mir_pass.rb:852` (stamp_while_bind_cleanup!) ; `src/mir/mir_pass.rb:866` (stamp_if_bind_cleanup!)
 - **[case_dispatch]** support=5 scatter=5 rank=25
   - tuple: `'END' | 'FN' | 'FOR' | 'IF' | 'START' | 'TEST' | 'WHEN' | 'WHILE'`
   - `src/tools/formatter.rb:508` (find_match_block_end) ; `src/tools/formatter.rb:571` (scan_match_arms) ; `src/tools/formatter.rb:610` (build_match_arm) ; `src/tools/formatter.rb:715` (emit_match_body) ; `src/tools/formatter.rb:1184` (matching_end)
@@ -251,7 +251,7 @@ _guard tuple recomputed across >=2 decision units_
   - `src/tools/formatter.rb:556` (scan_match_arms) ; `src/tools/formatter.rb:911` (emit_fn_signature_wrapped) ; `src/tools/formatter.rb:1019` (emit_fn_params_only_wrapped) ; `src/tools/formatter.rb:1630` (count_depth0_commas) ; `src/tools/formatter.rb:1923` (emit_wrapped_args)
 - **[case_dispatch]** support=5 scatter=4 rank=20
   - tuple: `AST::Assignment | AST::BindExpr | AST::VarDecl`
-  - `src/mir/escape_analysis.rb:672` (tag_transitive_provenance!) ; `src/mir/fsm_transform/liveness.rb:197` (collect_defs) ; `src/mir/mir_pass.rb:695` (collect_consumed_names) ; `src/mir/mir_pass.rb:723` (collect_consumed_names) ; `src/tools/migration_suggester_helpers.rb:88` (walk_recursive)
+  - `src/mir/escape_analysis.rb:672` (tag_transitive_provenance!) ; `src/mir/fsm_transform/liveness.rb:197` (collect_defs) ; `src/mir/mir_pass.rb:693` (collect_consumed_names) ; `src/mir/mir_pass.rb:721` (collect_consumed_names) ; `src/tools/migration_suggester_helpers.rb:88` (walk_recursive)
 - **[case_dispatch]** support=4 scatter=4 rank=16
   - tuple: `AST::GetField | AST::GetIndex | AST::Identifier`
   - `src/annotator-helpers/capabilities.rb:761` (cap_var_name) ; `src/ast/ast.rb:325` (root_identifier) ; `src/ast/parser.rb:3954` (deep_clone_node) ; `src/mir/mir_lowering.rb:796` (root_receiver_node)
@@ -326,7 +326,7 @@ _one decision, multiple names (receiver/polarity folded)_
 - `enum? = resource? = union? = struct? = needs_capture_site_annotation? = mir? = stmt? = expr? = has_own_frame?` == `true`
   - `src/ast/schemas.rb:34` (enum?) ; `src/ast/schemas.rb:67` (resource?) ; `src/ast/schemas.rb:123` (union?) ; `src/ast/schemas.rb:169` (struct?) ; `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:62` (expr?) ; `src/mir/mir.rb:90` (has_own_frame?) ; `src/mir/mir.rb:364` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:431` (expr?) ; `src/mir/mir.rb:547` (expr?) ; `src/mir/mir.rb:558` (expr?) ; `src/mir/mir.rb:573` (expr?) ; `src/mir/mir.rb:609` (expr?) ; `src/mir/mir.rb:1259` (stmt?) ; `src/mir/mir.rb:1291` (stmt?) ; `src/mir/mir.rb:1313` (stmt?) ; `src/mir/mir.rb:1340` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1363` (stmt?) ; `src/mir/mir.rb:1375` (stmt?) ; `src/mir/mir.rb:1389` (stmt?) ; `src/mir/mir.rb:1398` (stmt?) ; `src/mir/mir.rb:1406` (stmt?) ; `src/mir/mir.rb:1414` (stmt?) ; `src/mir/mir.rb:1686` (expr?) ; `src/mir/mir.rb:1766` (expr?) ; `src/mir/mir.rb:1810` (expr?)
 - `wildcard? = union? = struct? = resource? = enum? = needs_capture_site_annotation? = stmt? = expr?` == `false`
-  - `src/ast/ast.rb:1144` (wildcard?) ; `src/ast/ast.rb:1287` (wildcard?) ; `src/ast/ast.rb:1302` (wildcard?) ; `src/ast/schemas.rb:36` (union?) ; `src/ast/schemas.rb:38` (struct?) ; `src/ast/schemas.rb:40` (resource?) ; `src/ast/schemas.rb:69` (union?) ; `src/ast/schemas.rb:71` (enum?) ; `src/ast/schemas.rb:73` (struct?) ; `src/ast/schemas.rb:125` (enum?) ; `src/ast/schemas.rb:127` (struct?) ; `src/ast/schemas.rb:129` (resource?) ; `src/ast/schemas.rb:171` (union?) ; `src/ast/schemas.rb:173` (enum?) ; `src/ast/schemas.rb:175` (resource?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
+  - `src/ast/ast.rb:1154` (wildcard?) ; `src/ast/ast.rb:1297` (wildcard?) ; `src/ast/ast.rb:1312` (wildcard?) ; `src/ast/schemas.rb:36` (union?) ; `src/ast/schemas.rb:38` (struct?) ; `src/ast/schemas.rb:40` (resource?) ; `src/ast/schemas.rb:69` (union?) ; `src/ast/schemas.rb:71` (enum?) ; `src/ast/schemas.rb:73` (struct?) ; `src/ast/schemas.rb:125` (enum?) ; `src/ast/schemas.rb:127` (struct?) ; `src/ast/schemas.rb:129` (resource?) ; `src/ast/schemas.rb:171` (union?) ; `src/ast/schemas.rb:173` (enum?) ; `src/ast/schemas.rb:175` (resource?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
 - `auto? = auto_type?` == `t.is_a?(Type) && t.auto?`
   - `src/annotator-helpers/auto_inference.rb:98` (auto?) ; `src/annotator-helpers/auto_inference.rb:787` (auto?) ; `src/backends/importer.rb:163` (auto_type?)
 
@@ -334,9 +334,9 @@ _one decision, multiple names (receiver/polarity folded)_
 _identical one-line predicate body under >=2 names_
 
 - `needs_cleanup = enum? = resource? = union? = struct? = needs_capture_site_annotation? = mir? = stmt? = expr? = has_own_frame?` == `true`
-  - `src/ast/ast.rb:2001` (needs_cleanup) ; `src/ast/schemas.rb:34` (enum?) ; `src/ast/schemas.rb:67` (resource?) ; `src/ast/schemas.rb:123` (union?) ; `src/ast/schemas.rb:169` (struct?) ; `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:62` (expr?) ; `src/mir/mir.rb:90` (has_own_frame?) ; `src/mir/mir.rb:364` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:431` (expr?) ; `src/mir/mir.rb:547` (expr?) ; `src/mir/mir.rb:558` (expr?) ; `src/mir/mir.rb:573` (expr?) ; `src/mir/mir.rb:609` (expr?) ; `src/mir/mir.rb:1259` (stmt?) ; `src/mir/mir.rb:1291` (stmt?) ; `src/mir/mir.rb:1313` (stmt?) ; `src/mir/mir.rb:1340` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1363` (stmt?) ; `src/mir/mir.rb:1375` (stmt?) ; `src/mir/mir.rb:1389` (stmt?) ; `src/mir/mir.rb:1398` (stmt?) ; `src/mir/mir.rb:1406` (stmt?) ; `src/mir/mir.rb:1414` (stmt?) ; `src/mir/mir.rb:1686` (expr?) ; `src/mir/mir.rb:1766` (expr?) ; `src/mir/mir.rb:1810` (expr?)
+  - `src/ast/ast.rb:2011` (needs_cleanup) ; `src/ast/schemas.rb:34` (enum?) ; `src/ast/schemas.rb:67` (resource?) ; `src/ast/schemas.rb:123` (union?) ; `src/ast/schemas.rb:169` (struct?) ; `src/mir/capture_strategy.rb:79` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:95` (needs_capture_site_annotation?) ; `src/mir/mir.rb:28` (mir?) ; `src/mir/mir.rb:40` (stmt?) ; `src/mir/mir.rb:62` (expr?) ; `src/mir/mir.rb:90` (has_own_frame?) ; `src/mir/mir.rb:364` (expr?) ; `src/mir/mir.rb:417` (expr?) ; `src/mir/mir.rb:431` (expr?) ; `src/mir/mir.rb:547` (expr?) ; `src/mir/mir.rb:558` (expr?) ; `src/mir/mir.rb:573` (expr?) ; `src/mir/mir.rb:609` (expr?) ; `src/mir/mir.rb:1259` (stmt?) ; `src/mir/mir.rb:1291` (stmt?) ; `src/mir/mir.rb:1313` (stmt?) ; `src/mir/mir.rb:1340` (stmt?) ; `src/mir/mir.rb:1349` (stmt?) ; `src/mir/mir.rb:1363` (stmt?) ; `src/mir/mir.rb:1375` (stmt?) ; `src/mir/mir.rb:1389` (stmt?) ; `src/mir/mir.rb:1398` (stmt?) ; `src/mir/mir.rb:1406` (stmt?) ; `src/mir/mir.rb:1414` (stmt?) ; `src/mir/mir.rb:1686` (expr?) ; `src/mir/mir.rb:1766` (expr?) ; `src/mir/mir.rb:1810` (expr?)
 - `wildcard? = union? = struct? = resource? = enum? = needs_capture_site_annotation? = stmt? = expr?` == `false`
-  - `src/ast/ast.rb:1144` (wildcard?) ; `src/ast/ast.rb:1287` (wildcard?) ; `src/ast/ast.rb:1302` (wildcard?) ; `src/ast/schemas.rb:36` (union?) ; `src/ast/schemas.rb:38` (struct?) ; `src/ast/schemas.rb:40` (resource?) ; `src/ast/schemas.rb:69` (union?) ; `src/ast/schemas.rb:71` (enum?) ; `src/ast/schemas.rb:73` (struct?) ; `src/ast/schemas.rb:125` (enum?) ; `src/ast/schemas.rb:127` (struct?) ; `src/ast/schemas.rb:129` (resource?) ; `src/ast/schemas.rb:171` (union?) ; `src/ast/schemas.rb:173` (enum?) ; `src/ast/schemas.rb:175` (resource?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
+  - `src/ast/ast.rb:1154` (wildcard?) ; `src/ast/ast.rb:1297` (wildcard?) ; `src/ast/ast.rb:1312` (wildcard?) ; `src/ast/schemas.rb:36` (union?) ; `src/ast/schemas.rb:38` (struct?) ; `src/ast/schemas.rb:40` (resource?) ; `src/ast/schemas.rb:69` (union?) ; `src/ast/schemas.rb:71` (enum?) ; `src/ast/schemas.rb:73` (struct?) ; `src/ast/schemas.rb:125` (enum?) ; `src/ast/schemas.rb:127` (struct?) ; `src/ast/schemas.rb:129` (resource?) ; `src/ast/schemas.rb:171` (union?) ; `src/ast/schemas.rb:173` (enum?) ; `src/ast/schemas.rb:175` (resource?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:30` (stmt?) ; `src/mir/mir.rb:32` (expr?)
 - `visit_PassStmt = visit_OrRaise = visit_OrBreak = visit_OrPass = visit_OrPrune` == `node.full_type = :Void`
   - `src/annotator.rb:1419` (visit_PassStmt) ; `src/annotator.rb:4116` (visit_OrRaise) ; `src/annotator.rb:4121` (visit_OrBreak) ; `src/annotator.rb:4126` (visit_OrPass) ; `src/annotator.rb:4133` (visit_OrPrune)
 - `emit_rc_retain = emit_rc_downgrade = emit_weak_upgrade` == `"CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"`
@@ -344,7 +344,7 @@ _identical one-line predicate body under >=2 names_
 - `auto? = auto_type?` == `t.is_a?(Type) && t.auto?`
   - `src/annotator-helpers/auto_inference.rb:98` (auto?) ; `src/annotator-helpers/auto_inference.rb:787` (auto?) ; `src/backends/importer.rb:163` (auto_type?)
 - `child_bodies = marker_plan` == `[]`
-  - `src/ast/ast.rb:499` (child_bodies) ; `src/mir/capture_strategy.rb:49` (marker_plan) ; `src/mir/capture_strategy.rb:62` (marker_plan) ; `src/mir/capture_strategy.rb:106` (marker_plan)
+  - `src/ast/ast.rb:509` (child_bodies) ; `src/mir/capture_strategy.rb:49` (marker_plan) ; `src/mir/capture_strategy.rb:62` (marker_plan) ; `src/mir/capture_strategy.rb:106` (marker_plan)
 
 ## Type-3 Clones (missed rename) (14)
 _pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug_
@@ -406,7 +406,7 @@ _b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug_
 - *POSSIBLE* `src/backends/pipeline_rewriter.rb:609` (build_terminal_action): `actions` derived from `inner_it` (line 609); `inner_it` reassigned line 689, `actions` not recomputed
 - *POSSIBLE* `src/backends/pipeline_rewriter.rb:609` (build_terminal_action): `actions` derived from `inner_it_var` (line 609); `inner_it_var` reassigned line 687, `actions` not recomputed
 - *POSSIBLE* `src/backends/pipeline_rewriter.rb:609` (build_terminal_action): `actions` derived from `inner_expr` (line 609); `inner_expr` reassigned line 686, `actions` not recomputed
-- *POSSIBLE* `src/ast/ast.rb:728` (finalize_storage!): `value_sync` derived from `vt` (line 728); `vt` reassigned line 804, `value_sync` not recomputed
+- *POSSIBLE* `src/ast/ast.rb:738` (finalize_storage!): `value_sync` derived from `vt` (line 738); `vt` reassigned line 814, `value_sync` not recomputed
 - *POSSIBLE* `src/mir/mir_lowering.rb:7353` (lower_return): `stmts` derived from `value` (line 7353); `value` reassigned line 7421, `stmts` not recomputed
 - *POSSIBLE* `src/backends/pipeline_rewriter.rb:609` (build_terminal_action): `actions` derived from `set_found` (line 609); `set_found` reassigned line 676, `actions` not recomputed
 - *POSSIBLE* `src/backends/pipeline_rewriter.rb:609` (build_terminal_action): `actions` derived from `assign_val` (line 609); `assign_val` reassigned line 674, `actions` not recomputed
@@ -454,7 +454,7 @@ _dispatch/conjunction minus one element -- *POSSIBLE* bug_
 - *POSSIBLE* (support=4) `src/mir/escape_analysis.rb:827` (param_accepts_caller_sync?) -- MISSING `:always_mutable` from `:always_mutable | :atomic | :local | :locked | :versioned | :write_locked`
 - ...(+22 more)
 
-## Neglected Path Conditions (2099)
+## Neglected Path Conditions (2095)
 _nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)_
 
 - *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1110` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
@@ -482,9 +482,9 @@ _nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1125` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
 - *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1126` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
 - *POSSIBLE* (support=63) `src/backends/pipeline_host.rb:1126` (lower_limit) -- MISSING `list_node.is_a?(AST::Identifier)` from `bc_target? | list_node.full_type.inf_stream? | list_node.is_a?(AST::Identifier)`
-- ...(+2074 more)
+- ...(+2070 more)
 
-## Broken Protocols (1794)
+## Broken Protocols (1800)
 _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 
 - *POSSIBLE* conf=0.99 support=83 `src/annotator.rb:2245` (visit_ReturnNode) does `returns` without `params`
@@ -492,10 +492,10 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* conf=0.98 support=82 `src/annotator.rb:2245` (visit_ReturnNode) does `returns` without `sig`
 - *POSSIBLE* conf=0.98 support=82 `src/mir/mir_lowering.rb:55` (initialize) does `returns` without `extend`
 - *POSSIBLE* conf=0.98 support=82 `src/mir/mir_lowering.rb:55` (initialize) does `returns` without `sig`
-- *POSSIBLE* conf=0.98 support=48 `src/ast/ast.rb:510` (column) does `column` without `line`
+- *POSSIBLE* conf=0.98 support=48 `src/ast/ast.rb:520` (column) does `column` without `line`
 - *POSSIBLE* conf=0.98 support=44 `src/ast/parser.rb:1814` (parse_binary_op) does `parse_expression` without `consume`
 - *POSSIBLE* conf=0.97 support=30 `src/annotator.rb:5721` (promote_to_expr_if!) does `else_branch` without `then_branch`
-- *POSSIBLE* conf=0.97 support=30 `src/mir/mir_pass.rb:877` (stamp_if_bind_cleanup!) does `then_branch` without `else_branch`
+- *POSSIBLE* conf=0.97 support=30 `src/mir/mir_pass.rb:873` (stamp_if_bind_cleanup!) does `then_branch` without `else_branch`
 - *POSSIBLE* conf=0.96 support=43 `src/backends/pipeline_host.rb:3033` (default_obs_alloc_zig) does `transpile_type` without `new`
 - *POSSIBLE* conf=0.96 support=43 `src/mir/mir_lowering.rb:7582` (bare_zig_type) does `transpile_type` without `new`
 - *POSSIBLE* conf=0.96 support=25 `src/mir/escape_analysis.rb:441` (e2_walk_calls) does `walk_body` without `is_a?`
@@ -512,7 +512,7 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* conf=0.95 support=35 `src/backends/pipeline_host.rb:113` (visit) does `visit_mir` without `new`
 - *POSSIBLE* conf=0.95 support=35 `src/backends/pipeline_host.rb:693` (visit_pipeline_expr_mir) does `visit_mir` without `new`
 - *POSSIBLE* conf=0.95 support=21 `src/annotator.rb:881` (validate_and_resolve_sync_policy!) does `statements` without `each`
-- ...(+1769 more)
+- ...(+1775 more)
 
 ## False Simplicity (616)
 _looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)_
@@ -571,5 +571,5 @@ _case dispatch over class consts whose arms read mostly variant-invariant member
 - Detectors: 13 (all shipped, self-tested)
 - Convergence: 1162 unit(s) flagged by >=2 independent detectors
 - Root-cause clusters: 323 (one fix collapses each)
-- Total candidates: 12192
+- Total candidates: 12194
 - Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to (see docs/agents/design.md)

@@ -223,3 +223,44 @@ aggregate drop" was not achieved and is not achievable without either a separate
 annotator-helpers epic or accepting correctness regressions. Every one of the
 ~21 commits is byte-identical (564/564 transpile, 0 leaks, Sorbet GREEN,
 4819 specs 0 failures).
+
+---
+
+## PHASE 3 (P3u1-3 + closeout) -- final delta vs original baseline `dc4590a59`
+
+| metric | baseline | P2-end | P3-FINAL | total Δ |
+|---|--:|--:|--:|--:|
+| src/ **T.nilable** | 952 | 959 (+7) | **951** | **-1 (net negative -- the rise reversed)** |
+| src/ T.untyped | 2609 | 2549 | 2547 | -62 (-2.4%) |
+| Sorbet **untyped.usages** | 25431 | 25155 | **25089** | **-342 (-1.34%)** |
+| Sorbet methods.typechecked | 6123 | 6156 | 6158 | +35 |
+| decomplex Reification-Misses | 133 | 83 | 83 | **-50 (-37.6%)** |
+| decomplex Broken-Protocols | 1815 | 1794 | 1800 | -15 |
+| decomplex Fat-Unions | 10 | 9 | 9 | -1 |
+| decomplex Total candidates | 12257 | 12192 | 12194 | -63 (-0.51%) |
+| boobytrap / slopcop | -- | flat / -3 | flat | by construction |
+
+### P3 unit outcomes
+- **P3u1** `e6355bac4` -- `SymbolEntry#rc_stored?` (storage-axis
+  Missing-Abstraction), 7 sites. byte-identical.
+- **P3u2** `1c5cf30bf` -- `AST.call?` (FuncCall|MethodCall
+  Missing-Abstraction), 8 ||-form sites. byte-identical.
+- **P3u3** `1cdb4307e` -- **U7 done correctly.** Root cause of U7's
+  failure identified: it flipped the 8 sigs non-nil but left the SOURCE
+  `WalkCtx.new(bindings: nil)` producing nil -> sorbet-runtime sig raise
+  on CATCH (not logic). Fixed at source (nil -> {}); the 2 specs U7
+  broke now PASS. **nilable 959 -> 951** -- the genuine lever, and the
+  +7 regression from the typed-struct phase is now net-negative vs
+  baseline. byte-identical, full-suite gated.
+
+### Honest bottom line (cumulative, all phases)
+The **alarming `T.nilable` rise was diagnosed and reversed**: it was
+`T.untyped -> T.nilable` precision-gain plus the U7-correctable source
+bug, not new nullability. Net vs baseline: nilable -1, untyped -62,
+`untyped.usages` -342, Reification-Misses -37.6%. The **aggregate
+decomplex headline stays ~flat (-0.51%)** -- unchanged conclusion: ~11k
+of 12k candidates are low-signal volume detectors deliberately excluded;
+chasing them is churn, not simplification. ~25 commits, every one
+byte-identical (564/564 transpile, 0 leaks, srb GREEN, 4819 specs 0
+failures). U7-as-planned and U10 were correctly NOT forced; U7 was then
+solved at its true root in P3u3.
