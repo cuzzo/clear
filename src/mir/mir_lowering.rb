@@ -6332,14 +6332,13 @@ class MIRLowering
       # use per-declaration storage. This avoids using a stale alloc from a same-named
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
-      ft = Type.new(node.full_type)
       node_alloc = if binding_entry && binding_entry[:alloc] == :cleanup
         :cleanup
       elsif mir_allocates?(init)
         :heap
       elsif node.respond_to?(:storage) && node.storage == :heap
         :heap
-      elsif binding_entry && binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft&.needs_heap_backing?
+      elsif binding_entry && binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
         alloc_for_node(node)
       else
         binding_entry&.dig(:alloc) || decl_alloc
