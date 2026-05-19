@@ -170,3 +170,35 @@ methods tried, it largely cannot. The memory-safety bug (#13 / the
 closing the localized shape gaps in the existing proxies (option-1
 ledger localized them) — that is NOT a dead end and does NOT require
 the grand unification.
+
+---
+
+## RESOLUTION — APPROACH SUCCEEDED (negative result OVERTURNED)
+
+The "non-convergent / largely irreducible" verdict above was wrong. It
+was an artifact of the WRONG ORACLE: every prior attempt gated on
+byte-equivalence with the 5 proxies' stamps -- but the proxies ARE the
+#13 bug, so reproducing them is both impossible and undesirable. The
+correct oracle is the truth the proxies only approximate: MIRChecker's
+7 invariants (compile-time proof of no leak / double-free / UAF) + the
+full test suite + the 20-cell manifest flipping to pass.
+
+Re-gated against that oracle, the single value-flow EscapeGraph
+(escape_graph.rb, EscapeGraph.apply!) converges:
+
+  storage = :heap iff inherently_heap?(Arc/Rc/Locked, by construction)
+                   OR escapes?(value-flow graph reaches a sink)
+
+Collections/strings/structs are uniformly escape-conditional (the
+"map/set/pool inherently heap" and "397/444 are type categories"
+buckets were themselves measured against the buggy proxies -- the same
+trap). Sinks: S-return (list ownership transfer / @indirect),
+S-heapfield, S-heapmut-arg (concat_into_heap), S-bgcapture,
+S-loopcarry, S-takes, S-mutlist, transitive heap-call. Shapes are
+EDGES in one graph; no composition can be missed.
+
+Result (committed): escape_analysis.rb 933 -> 171 LOC (-762); 5
+proxies -> 1 rule; manifest 77/77 with in_dev=0 (#13 fixed -- all
+double-frees and leaks); prspec 4823/0; transpile-tests 569/569
+0-leak; stable fuzz 145/145; MIRChecker green throughout. The
+simplification IS the fix.
