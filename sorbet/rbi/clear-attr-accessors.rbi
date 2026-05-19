@@ -1313,6 +1313,10 @@ end
 
 class FunctionSignature
   sig { returns(T.untyped) }
+  def alloc_fault; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def alloc_fault=(value); end
+  sig { returns(T.untyped) }
   def arg_spec; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def arg_spec=(value); end
@@ -1336,6 +1340,10 @@ class FunctionSignature
   def emit; end
   sig { params(value: T.nilable(IntrinsicEmit)).returns(T.nilable(IntrinsicEmit)) }
   def emit=(value); end
+  sig { returns(T.untyped) }
+  def error_fallible; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_fallible=(value); end
   sig { returns(T.untyped) }
   def extern; end
   sig { params(value: T.untyped).returns(T.untyped) }

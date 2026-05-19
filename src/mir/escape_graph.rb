@@ -1,4 +1,4 @@
-# typed: true
+# typed: strict
 # EscapeGraph -- the single value-flow escape analysis. Replaces the 5
 # fragmented escape proxies (compute_heap_return_fns!, analyze!,
 # tag_transitive_provenance!, tag_carry_call_sites!, the escape half
@@ -16,6 +16,10 @@ module EscapeGraph
   extend T::Sig
   module_function
 
+  FnNodes = T.type_alias { T::Hash[T.untyped, T.untyped] }
+  RetHeap = T.type_alias { T::Hash[T.untyped, T::Boolean] }
+
+  sig { params(fn_nodes: FnNodes).returns([T::Set[String], T::Set[String]]) }
   def apply!(fn_nodes)
     # Loop-carry / concat-into-heap promotions must run BEFORE the RET
     # fixpoint so a `RETURN resp` of a loop-promoted heap string is
@@ -26,21 +30,22 @@ module EscapeGraph
       promote_heapmut_concats!(fn)
     end
     ret_heap = compute_ret_heap_fixpoint(fn_nodes)
-    heap_decls = Set.new
+    heap_decls = T.let(Set.new, T::Set[String])
     fn_nodes.each do |name, fn|
       next unless fn&.body
       stamp_fn!(fn, decide_fn(fn, ret_heap, fn_nodes), name, heap_decls, ret_heap)
     end
-    heap_fns = ret_heap.each_with_object(Set.new) { |(n, h), s| s << n if h }
+    heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
     [heap_fns, heap_decls]
   end
 
+  sig { params(fn_nodes: FnNodes).returns(RetHeap) }
   def compute_ret_heap_fixpoint(fn_nodes)
-    ret = {}
+    ret = T.let({}, RetHeap)
     # Seed from cross-module return_provenance for imported functions
     # whose body isn't re-analyzed here.
     fn_nodes.each { |n, fn| ret[n] = fn.return_provenance == :heap }
-    changed = true
+    changed = T.let(true, T::Boolean)
     iters = 0
     while changed && iters < 200
       changed = false
@@ -60,6 +65,7 @@ module EscapeGraph
     ret
   end
 
+  sig { params(rv: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
   def return_value_is_heap?(rv, ret_heap)
     e = unwrap(rv)
     case e
@@ -81,6 +87,7 @@ module EscapeGraph
   # field/match-alias borrows (`w.inner`, `Value.Str AS s`) -- those
   # carry :heap on their type but are not ownership transfers; counting
   # them double-frees the source's field cleanup (174 prStr).
+  sig { params(e: T.untyped).returns(T::Boolean) }
   def node_heap_provenance?(e)
     return false unless e.is_a?(AST::Identifier)
     sym = e.symbol
@@ -92,14 +99,15 @@ module EscapeGraph
     !(t.primitive? || t.any_sync?)
   end
 
+  sig { params(fn: T.untyped, ret_heap: RetHeap, fn_nodes: FnNodes).returns(T::Hash[String, Symbol]) }
   def decide_fn(fn, ret_heap, fn_nodes = {})
-    decls = {}
+    decls = T.let({}, T::Hash[String, T.untyped])
     walk(fn.body) do |n|
       decls[n.name.to_s] = n if decl?(n)
     end
 
-    esc_strong  = Set.new
-    esc_listret = Set.new
+    esc_strong  = T.let(Set.new, T::Set[String])
+    esc_listret = T.let(Set.new, T::Set[String])
     each_sink_expr(fn) { |se| referenced_decls(se).each { |d| esc_strong << d } }
     loop_carry_names(fn).each   { |d| esc_strong << d }
     bg_capture_names(fn).each   { |d| esc_strong << d }
@@ -120,8 +128,8 @@ module EscapeGraph
       end
     end
 
-    reassigned_heap = Set.new
-    init_refs = {}
+    reassigned_heap = T.let(Set.new, T::Set[String])
+    init_refs = T.let({}, T::Hash[String, T::Array[String]])
     decls.each do |dn, dnode|
       init_refs[dn] = referenced_decls(dnode.value)
       reassigned_heap << dn if decl_value_is_heap_call?(dnode.value, ret_heap)
@@ -134,7 +142,7 @@ module EscapeGraph
       reassigned_heap << root if decl_value_is_heap_call?(n.value, ret_heap)
     end
     [esc_strong, esc_listret].each do |esc|
-      changed = true
+      changed = T.let(true, T::Boolean)
       while changed
         changed = false
         esc.to_a.each do |a|
@@ -143,7 +151,7 @@ module EscapeGraph
       end
     end
 
-    result = {}
+    result = T.let({}, T::Hash[String, Symbol])
     decls.each do |dn, dnode|
       ti = type_of(dnode)
       heap =
@@ -167,29 +175,32 @@ module EscapeGraph
 
   # Type#struct? covers any non-primitive/string/array/map/optional
   # composite, including tagged unions.
+  sig { params(ti: T.untyped).returns(T::Boolean) }
   def struct_aggregate?(ti)
-    ti.is_a?(Type) && ti.struct? && !ti.any_sync?
+    !!(ti.is_a?(Type) && ti.struct? && !ti.any_sync?)
   end
 
+  sig { params(fn: T.untyped).returns(T::Boolean) }
   def heap_ptr_return?(fn)
     rt = fn.return_type
-    rt.is_a?(Type) && (rt.indirect? || rt.heap?)
+    !!(rt.is_a?(Type) && (rt.indirect? || rt.heap?))
   end
 
   # Mirrors MIRChecker INV-COPY-CLEANUP: capability-free primitive or
   # Id<T> is a Copy handle and never owns heap.
+  sig { params(ti: T.untyped).returns(T::Boolean) }
   def cannot_own_heap?(ti)
     return false unless ti.is_a?(Type)
     no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
-    no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+    !!(no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id)))
   end
 
-
+  sig { params(expr: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
   def decl_value_is_heap_call?(expr, ret_heap)
     e = unwrap(expr)
     case e
     when AST::BinaryOp
-      e.op == :OR_RESCUE && decl_value_is_heap_call?(e.left, ret_heap)
+      !!(e.op == :OR_RESCUE && decl_value_is_heap_call?(e.left, ret_heap))
     when AST::FuncCall
       ret_heap[e.name.to_s] == true
     else
@@ -197,13 +208,14 @@ module EscapeGraph
     end
   end
 
-  def each_sink_expr(fn)
+  sig { params(fn: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def each_sink_expr(fn, &blk)
     walk(fn.body) do |n|
       case n
       when AST::Assignment
         if (n.name.is_a?(AST::GetField) || n.name.is_a?(AST::GetIndex)) &&
            heap_root_storage?(n.name)
-          yield n.value                        # S-heapfield
+          blk.call(n.value)                       # S-heapfield
         end
       end
     end
@@ -214,6 +226,7 @@ module EscapeGraph
   # embedded string field). String/primitive element types are excluded
   # because heap-promoting their concats LEAKS on deinit (matches old
   # E2 cond7 element-type gate).
+  sig { params(fn: T.untyped).void }
   def promote_heapmut_concats!(fn)
     walk(fn.body) do |node|
       next unless node.is_a?(AST::MethodCall)
@@ -229,6 +242,7 @@ module EscapeGraph
     end
   end
 
+  sig { params(node: T.untyped).void }
   def promote_frame_concats!(node)
     return unless node # :nocov: defensive (callers internal-recurse + Array.compact upstream)
     case node
@@ -248,6 +262,7 @@ module EscapeGraph
     end
   end
 
+  sig { params(expr: T.untyped, acc: T::Array[String]).returns(T::Array[String]) }
   def referenced_decls(expr, acc = [])
     return acc if expr.nil?
     e = unwrap(expr)
@@ -273,8 +288,9 @@ module EscapeGraph
   # Outer-scope binding reassigned inside a per-iteration-rewound loop
   # escapes the iteration frame. Reuses LoopFrameAnalysis's mark_per_iter
   # determination (single source of truth).
+  sig { params(fn: T.untyped).returns(T::Set[String]) }
   def loop_carry_names(fn)
-    out = Set.new
+    out = T.let(Set.new, T::Set[String])
     walk(fn.body) do |node|
       body = case node
              when AST::WhileLoop then (node.tight ? nil : node.do_branch)
@@ -313,8 +329,9 @@ module EscapeGraph
   # A collection arg passed to a TAKES param or a MUTABLE @list param
   # must be heap: the callee frees / reallocs using its own allocator,
   # which must match the source (INV-1 single allocator per binding).
+  sig { params(fn: T.untyped, fn_nodes: FnNodes).returns(T::Set[String]) }
   def callarg_escape_names(fn, fn_nodes)
-    out = Set.new
+    out = T.let(Set.new, T::Set[String])
     walk(fn.body) do |call|
       next unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
       callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
@@ -338,8 +355,9 @@ module EscapeGraph
   # capture_analysis.heap_promote_names deliberately excludes string
   # captures (those use the in-fiber bg_string-dupe mechanism, not heap
   # storage). Reading the stamp avoids re-deriving the exclusion here.
+  sig { params(fn: T.untyped).returns(T::Set[String]) }
   def bg_capture_names(fn)
-    out = Set.new
+    out = T.let(Set.new, T::Set[String])
     AST.each_bg_block(fn.body) do |bg|
       names = bg.capture_analysis&.heap_promote_names
       out.merge(names) if names # :nocov: capture_analysis can be nilable upstream
@@ -349,6 +367,7 @@ module EscapeGraph
 
   # Decls returned directly (through GIVE/COPY/OR_RESCUE unwrap), not
   # nested in a Struct/Union literal (those are deep-copied, not moved).
+  sig { params(rv: T.untyped).returns(T::Array[String]) }
   def direct_return_decls(rv)
     e = unwrap(rv)
     case e
@@ -363,6 +382,7 @@ module EscapeGraph
   # field. Discriminator: the field-value node's type is still
   # list_collection? (a same-shape @list field); a CopyNode / plain-
   # slice-coerced field loses that type and is deep-copied instead.
+  sig { params(node: T.untyped, acc: T::Array[String]).returns(T::Array[String]) }
   def aggregate_moved_list_decls(node, acc = [])
     return acc if node.nil?
     case node
@@ -386,11 +406,13 @@ module EscapeGraph
     T::Array[T.untyped]
   )
 
+  sig { params(e: T.untyped).returns(T.untyped) }
   def unwrap(e)
     e = e.value while WRAPPER_NODES.any? { |k| e.is_a?(k) }
     e
   end
 
+  sig { params(decl_node: T.untyped).returns(T::Boolean) }
   def inherently_heap?(decl_node)
     ti = type_of(decl_node)
     ti.is_a?(Type) && inherently_heap_ti?(ti)
@@ -401,10 +423,12 @@ module EscapeGraph
   # heap fires MIRChecker OWNED_RETURN_WITHOUT_ALLOC). map/set/pool
   # are NOT inherent either: their backing allocator follows the
   # binding (local non-escaping HashMap stays frame -- 25_index).
+  sig { params(ti: Type).returns(T::Boolean) }
   def inherently_heap_ti?(ti)
     ti.locked? || ti.write_locked? || ti.versioned? || ti.multiowned? || ti.shared?
   end
 
+  sig { params(ti: T.untyped).returns(T::Boolean) }
   def collection_ti?(ti)
     return false unless ti.is_a?(Type)
     ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?
@@ -415,11 +439,18 @@ module EscapeGraph
   # type-level :heap (e.g. an @indirect field borrow `RETURN w.inner`)
   # is NOT used here either -- that's not an ownership transfer.
   # node_heap_provenance? handles the legitimate loop-carry-local case.
+  sig { params(ti: T.untyped).returns(T::Boolean) }
   def ret_heap_type?(ti)
     return false unless ti.is_a?(Type)
     inherently_heap_ti?(ti) || collection_ti?(ti)
   end
 
+  sig do
+    params(
+      fn: T.untyped, decisions: T::Hash[String, Symbol], _name: T.untyped,
+      heap_decls: T::Set[String], ret_heap: RetHeap,
+    ).void
+  end
   def stamp_fn!(fn, decisions, _name, heap_decls, ret_heap = {})
     return_nodes = return_values_nodes(fn.body)
     walk(fn.body) do |n|
@@ -440,14 +471,15 @@ module EscapeGraph
     end
   end
 
+  sig { params(n: T.untyped, return_nodes: T::Array[T.untyped]).void }
   def stamp_node_heap!(n, return_nodes)
     n.storage = :heap
     ft = n.full_type
     ft.provenance = :heap if ft.is_a?(Type) && !ft.heap_provenance?
     # Annotator stamps symbol on every binding-decl node; MIRPass runs
-    # strictly after. Asserts the contract -- nil here means an
-    # annotator hole.
-    sym = T.must(n.symbol)
+    # strictly after. Raises if nil -- means an annotator hole.
+    sym = n.symbol
+    Kernel.raise "EscapeGraph: stamp_node_heap! got nil symbol on #{n.class}" if sym.nil?
     sym.storage = :heap
     sym.type.provenance = :heap
     stamp_return_symbol!(return_nodes, n.name.to_s)
@@ -455,6 +487,7 @@ module EscapeGraph
     v.storage = :heap if v.is_a?(AST::Locatable)
   end
 
+  sig { params(fn: T.untyped, name: String).void }
   def stamp_decl_heap!(fn, name)
     return_nodes = return_values_nodes(fn.body)
     walk(fn.body) do |n|
@@ -463,6 +496,7 @@ module EscapeGraph
     end
   end
 
+  sig { params(return_nodes: T::Array[T.untyped], var_name: String).void }
   def stamp_return_symbol!(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value # :nocov: redundant -- return_values_nodes pre-filters
@@ -474,6 +508,7 @@ module EscapeGraph
     end
   end
 
+  sig { params(node: T.untyped, var_name: String).returns(T.untyped) }
   def extract_ident(node, var_name)
     case node
     when AST::Identifier
@@ -484,51 +519,58 @@ module EscapeGraph
     end
   end
 
+  sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
   def return_values(body)
-    vs = []
+    vs = T.let([], T::Array[T.untyped])
     walk(body) { |n| vs << n.value if n.is_a?(AST::ReturnNode) && n.value }
     vs
   end
 
+  sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
   def return_values_nodes(body)
-    ns = []
+    ns = T.let([], T::Array[T.untyped])
     walk(body) { |n| ns << n if n.is_a?(AST::ReturnNode) && n.value }
     ns
   end
 
+  sig { params(fn: T.untyped).returns(T::Boolean) }
   def borrow_return?(fn)
     return true if fn.return_lifetime
     rt = fn.return_type
-    rt.is_a?(Type) && rt.borrow_provenance?
+    !!(rt.is_a?(Type) && rt.borrow_provenance?)
   end
 
+  sig { params(n: T.untyped).returns(T::Boolean) }
   def decl?(n)
-    n.is_a?(AST::VarDecl) || (n.is_a?(AST::BindExpr) && n.mode == :decl)
+    !!(n.is_a?(AST::VarDecl) || (n.is_a?(AST::BindExpr) && n.mode == :decl))
   end
 
+  sig { params(lhs: T.untyped).returns(T.nilable(String)) }
   def root_ident_name(lhs)
     return lhs if lhs.is_a?(String)        # BindExpr(:assign).name is a bare String
-    n = lhs
+    n = T.let(lhs, T.untyped)
     n = n.target while n.is_a?(AST::GetField) || n.is_a?(AST::GetIndex)
     n.is_a?(AST::Identifier) ? n.name.to_s : nil
   end
 
   # Locatable provides full_type uniformly; non-Locatable nodes (rare:
   # Literal etc. in some contexts) have no resolved type for us to read.
+  sig { params(node: T.untyped).returns(T.nilable(Type)) }
   def type_of(node)
     node.is_a?(AST::Locatable) ? node.full_type : nil
   end
 
   HEAP_STORAGES = T.let(%i[heap multiowned shared].freeze, T::Array[Symbol])
 
+  sig { params(lhs: T.untyped).returns(T::Boolean) }
   def heap_root_storage?(lhs)
-    root = lhs
+    root = T.let(lhs, T.untyped)
     root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
     sym = root.is_a?(AST::Identifier) ? root.symbol : nil
-    sym && HEAP_STORAGES.include?(sym.storage)
+    !!(sym && HEAP_STORAGES.include?(sym.storage))
   end
 
-
+  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def walk(node, &blk)
     case node
     when nil               then nil

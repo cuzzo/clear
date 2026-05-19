@@ -127,6 +127,8 @@ class FunctionSignature
     @zig_pattern = zig_pattern
     @needs_rt          = T.let(nil, T.untyped)
     @can_fail          = T.let(nil, T.untyped)
+    @alloc_fault       = T.let(nil, T.untyped)
+    @error_fallible    = T.let(nil, T.untyped)
     @return_provenance = T.let(nil, T.untyped)
     @effects           = T.let(nil, T.untyped)
     @return_strategy   = T.let(nil, T.untyped)
