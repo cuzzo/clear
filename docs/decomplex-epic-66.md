@@ -166,3 +166,60 @@ nil-sentinel for "no cleanup". It is decomplex's #1 in-scope convergence cluster
 - **1.5c** -- non-nil contract: `CleanupEntry::NONE` replaces the nil sentinel;
   collapse the `binding_entry && ...` decision-pressure guards. This is the big
   `nilable` + Decision-Pressure drop. Subsumes/de-risks Units 3-4.
+
+---
+
+## COMPLETION PHASE (U6-U10 + closeout) -- final delta vs original baseline `dc4590a59`
+
+| metric | baseline | FINAL | delta |
+|---|--:|--:|--:|
+| decomplex **Reification-Misses** | 133 | **83** | **-50 (-37.6%)** |
+| decomplex Derived-State-Staleness | 252 | 241 | -11 (-4.4%) |
+| decomplex Broken-Protocols | 1815 | 1794 | -21 (-1.2%) |
+| decomplex Missing-Abstractions | 206 | 204 | -2 |
+| decomplex Fat-Unions | 10 | 9 | -1 |
+| decomplex Decision-Pressure | 257 | 256 | -1 |
+| decomplex Total candidates | 12257 | 12192 | -65 (-0.53%) |
+| decomplex convergence units | 1167 | 1162 | -5 |
+| Sorbet **untyped.usages** | 25431 | **25155** | **-276 (-1.09%)** |
+| Sorbet methods.typechecked | 6123 | 6156 | +33 |
+| src/ T.untyped | 2609 | 2549 | -60 (-2.3%) |
+| src/ params/returns/collections untyped | 1744/735/825 | 1694/697/776 | -50/-38/-49 |
+| src/ T.nilable | 952 | 959 | +7 |
+| boobytrap #1/#2 | 0.3181/0.2415 | 0.3181/0.2415 | flat (by construction) |
+| slopcop genuine gaps | 390 | 388 | -3 |
+
+### Unit outcomes
+- **U6** `ac25d2e31` -- Type/SymbolEntry atomic?/atomic_ptr? completion. byte-identical.
+- **U7** REJECTED on correctness. The 8 mir_pass `bindings: T.nilable` params are
+  load-bearing, NOT spurious: `nil` = CATCH-clause context (`empty_ctx`) -> skip;
+  `{}` = real fn no-cleanup -> proceed. `return unless bindings` distinguishes
+  them; collapsing nil->{} broke CATCH return-handling (2 spec failures).
+  Reverted. The earlier 1.5d spurious-nilable kill (`690901c84`/`ade2745eb`)
+  was the safe subset; this is its hard boundary.
+- **U8** `f21643bb5` -- classify_suspend value-classification reified (3x dup -> 1
+  helper). The other 2 plan targets were detector false-positives (recurse_branches!
+  genuine per-type variance; transfer_stmt already in prescribed shape) -- not chased.
+- **U9** `b0626e5e5` -- AST::CapabilityWrap/Param predicates + full object-receiver
+  sweep. Drove Reification-Misses 133->83. NOT zero: ~3 irreducible bare-LOCAL
+  `sync == :atomic` (no object to host a predicate -- decomplex heuristic noise,
+  not a branch-that-should-not-exist) + the recurse_branches! false-positive remain.
+- **U10** ASSESSED, not forced. Top Decision-Pressure (`.full_type` 234, `.value`
+  110) is annotator-helpers -- out of the `src/mir/**`+core scope, already
+  MIR-side-tightened by the prior epic, and a U7-class cross-subsystem risk.
+  In-scope `.capture_analysis` residue is cross-class / single-use with no
+  byte-identical single-source. Surfacing the limitation > band-aiding it.
+
+### Honest bottom line
+The **targeted high-signal** metric moved materially: Reification-Misses **-37.6%**,
+Sorbet untyped.usages **-276**. The **aggregate** decomplex headline is still
+modest (-0.53%) and `T.nilable` rose +7 -- because the volume detectors
+(Neglected-Updates ~6.8k / Neglected-Path ~2.1k / Broken-Protocols ~1.8k =
+~11k of 12k) are low-signal *POSSIBLE* and were **deliberately excluded** (chasing
+them is churn, not simplification), and the genuine remaining `nilable`/
+Decision-Pressure levers (load-bearing CATCH nil; annotator-helpers `.full_type`)
+were correctly **not forced** on correctness/scope grounds (U7, U10). "Dramatic
+aggregate drop" was not achieved and is not achievable without either a separate
+annotator-helpers epic or accepting correctness regressions. Every one of the
+~21 commits is byte-identical (564/564 transpile, 0 leaks, Sorbet GREEN,
+4819 specs 0 failures).
