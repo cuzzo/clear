@@ -159,7 +159,7 @@ class Scope
     when :heap
       if entry.locked?
         base_type.sync = :locked
-      elsif entry.sync == :write_locked
+      elsif entry.write_locked?
         base_type.sync = :write_locked
       else
         base_type.provenance = :heap

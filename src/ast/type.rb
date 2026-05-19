@@ -2150,7 +2150,7 @@ class Type
           inner_zig = bare_data_type.zig_type(is_param: is_param, is_field: is_field)
         end
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if locked?
-        inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
+        inner_zig = "CheatLib.RwLocked(#{inner_zig})" if write_locked?
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
         inner_zig = "CheatLib.Versioned(#{inner_zig})" if versioned?
         # @indirect:atomic wraps structs in AtomicPtr(T), not bare Atomic(T),

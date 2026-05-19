@@ -3150,7 +3150,7 @@ private
       tsym = tscope&.locals&.[](tname)
       sync = tsym&.sync
       layout = tsym.respond_to?(:layout) ? tsym.layout : nil
-      if tsym&.locked? || sync == :write_locked || tsym&.atomic_ptr?
+      if tsym&.locked? || tsym&.write_locked? || tsym&.atomic_ptr?
         @in_auto_locked_assign = tname
       end
     end
@@ -3423,7 +3423,7 @@ private
           emit_cap_field_needs_with!(node,
             :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
             name: node.target.name, field: node.field, cap: "@locked")
-        elsif sync == :write_locked && !in_auto_lock && !in_with_block
+        elsif sym.write_locked? && !in_auto_lock && !in_with_block
           emit_cap_field_needs_with!(node,
             :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
             name: node.target.name, field: node.field, cap: "@writeLocked")
@@ -4204,7 +4204,7 @@ private
 
     # Lock ranks induce a total order only if every declaration of a type
     # uses the same rank.
-    if node.lock_rank && node.sync && (node.locked? || node.sync == :write_locked)
+    if node.lock_rank && node.sync && (node.locked? || node.write_locked?)
       record_lock_type_rank!(ti.base_type, node.lock_rank, node)
     end
 

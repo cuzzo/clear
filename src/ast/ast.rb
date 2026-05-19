@@ -1602,6 +1602,8 @@ module AST
     def local? = sync == :local
     sig { returns(T::Boolean) }
     def multiowned? = ownership == :multiowned
+    sig { returns(T::Boolean) }
+    def write_locked? = sync == :write_locked
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
