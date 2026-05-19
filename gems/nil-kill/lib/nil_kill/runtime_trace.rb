@@ -519,6 +519,11 @@ module NilKillRuntimeTrace
   def self.register_collection_owner(value, owner)
     return unless value.is_a?(Array) || value.is_a?(Hash) || (defined?(Set) && value.is_a?(Set))
 
+    if value.frozen?
+      record_collection_snapshot(value, owner)
+      return
+    end
+
     oid = value.object_id
     unless @objects.key?(oid)
       # @objects is keyed by object_id and was NEVER evicted -> every
@@ -544,9 +549,7 @@ module NilKillRuntimeTrace
       # present for every live non-frozen registered object (both set
       # here, both die with the object; the finalizer only deletes
       # @objects when the object -- and its ivar -- are already gone).
-      # Frozen collections raise at `super(...)` before the gate, so
-      # skipping the marker on them is byte-identical.
-      value.instance_variable_set(:@__nil_kill_traced, true) unless value.frozen?
+      value.instance_variable_set(:@__nil_kill_traced, true)
     end
     owners = @objects[oid]
     owners[owner_identity_key(owner)] ||= owner
