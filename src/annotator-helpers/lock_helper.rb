@@ -397,7 +397,7 @@ module LockHelper
       has_atomic_ptr = (node.capabilities || []).any? { |c|
         next false unless c[:capability] == :SNAPSHOT
         sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
-        sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
+        sym && sym.atomic? && sym.respond_to?(:layout) && sym.layout == :indirect
       }
       possible = Set.new([has_atomic_ptr ? :AtomicConflict : :MvccConflict])
     else

@@ -152,6 +152,13 @@ class SymbolEntry
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,
   # annotator visit_*, escape_analysis) read and write this; both paths
   # delegate to `lifetime` so there's a single source of truth.
+  # Mirror of Type#atomic?. Was reinvented inline as `sym.sync == :atomic`
+  # across the annotator seam (decomplex #1 Reification-Miss).
+  sig { returns(T::Boolean) }
+  def atomic?
+    @sync == :atomic
+  end
+
   sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope

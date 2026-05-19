@@ -1300,7 +1300,7 @@ module FixableHelper
   sig { params(source_sym: SymbolEntry, source_name: String).returns(T.nilable(Fix)) }
   def build_atomic_escape_migration_fix(source_sym, source_name)
     T.bind(self, SemanticAnnotator) rescue nil
-    return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.sync == :atomic
+    return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.atomic?
     return nil unless @source_code
     reg = source_sym.respond_to?(:reg) ? source_sym.reg : nil
     return nil unless reg && reg.token

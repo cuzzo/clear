@@ -4890,7 +4890,7 @@ private
     has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
       next false unless c[:capability] == :SNAPSHOT
       sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
-      sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
+      sym && sym.atomic? && sym.respond_to?(:layout) && sym.layout == :indirect
     }
 
     # Missing per-WITH conflict handlers fall back to SYNC POLICY. Stamp the
@@ -4964,7 +4964,7 @@ private
     return unless root.is_a?(AST::Identifier)
     sym = root.symbol
     return unless sym
-    return unless sym.sync == :atomic
+    return unless sym.atomic?
     return unless sym.respond_to?(:layout) && sym.layout == :indirect
 
     error!(assignment_node, :INDIRECT_ATOMIC_FIELD_WRITE,
@@ -5034,14 +5034,14 @@ private
   # Does this capability's binding potentially run as `:atomic` at runtime?
   #   - concrete sync `:atomic` (covers primitive @atomic and
   #     indirect:atomic via sym.layout == :indirect, both flagged
-  #     by sym.sync == :atomic);
+  #     by sym.atomic?);
   #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
   #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
   sig { params(cap: AST::Capability).returns(T::Boolean) }
   def cap_admits_atomic?(cap)
     sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
     return false unless sym
-    return true if sym.sync == :atomic
+    return true if sym.atomic?
     fams = sym.respond_to?(:sync_families) ? sym.sync_families : nil
     return false unless fams.is_a?(Set)
     expanded = WithMatchCheck.expand_snapshotted(fams)

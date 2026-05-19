@@ -539,10 +539,10 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    return false unless sym&.sync == :atomic
+    return false unless sym&.atomic?
     return false if sym.respond_to?(:layout) && sym.layout == :indirect
     return false if param.sync == :atomic
-    return false if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
+    return false if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
     return false if expected_type_obj.any? || expected_type_obj.fn_type?
     return false if expected_type_obj.shared? || expected_type_obj.any_sync?
 
@@ -554,11 +554,11 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    return false unless sym&.sync == :atomic
+    return false unless sym&.atomic?
     ptype = param.type
     return true if ptype.is_a?(Type) && ptype.sync == :atomic
     return true if param.sync == :atomic
-    return true if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
+    return true if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
 
     requires = signature.requires
     families = requires && requires[param.name.to_s]
@@ -570,7 +570,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    sym&.sync == :atomic && !(sym.respond_to?(:layout) && sym.layout == :indirect)
+    sym&.atomic? && !(sym.respond_to?(:layout) && sym.layout == :indirect)
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }

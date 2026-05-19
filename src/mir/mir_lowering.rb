@@ -1242,7 +1242,7 @@ class MIRLowering
       # Atomic params need `anytype` so call sites pass the cell itself,
       # allowing WITH MATCH comptime probes to dispatch by actual family.
       sym = param.symbol
-      atomic_sync = sym && (sym.sync == :atomic ||
+      atomic_sync = sym && (sym.atomic? ||
                             (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
       zig_t = if p_type_obj.shared? && p_type_obj.resolved.to_s.match?(/\A[A-Z]\z/)
         "CheatLib.Arc(#{p_type_obj.resolved})"
@@ -3429,7 +3429,7 @@ class MIRLowering
       # AtomicPtr commits surface AtomicConflict; Versioned commits surface
       # MvccConflict.
       sym = var_node.symbol
-      is_atomic_ptr = sym && sym.sync == :atomic && sym.layout == :indirect
+      is_atomic_ptr = sym && sym.atomic? && sym.layout == :indirect
       conflict_error = is_atomic_ptr ? :AtomicConflict : :MvccConflict
       conflict_action = emit_conflict_action_zig(
         node.lock_error_clause, with_label, node, conflict_error,
@@ -4840,7 +4840,7 @@ class MIRLowering
     capture_map = @do_capture_map || {}
     if capture_map.key?(node.name)
       ident = MIR::Ident.new(capture_map[node.name])
-      if node.symbol&.sync == :atomic && !@atomic_emit_raw && !node.atomic_borrow && node.symbol&.layout != :indirect
+      if node.symbol&.atomic? && !@atomic_emit_raw && !node.atomic_borrow && node.symbol&.layout != :indirect
         return MIR::MethodCall.new(ident, "load", [], false)
       end
       return ident
@@ -4855,7 +4855,7 @@ class MIRLowering
 
     # Atomic reads normally lower to `.load()`, but raw emission and
     # atomic-borrow call sites need the cell reference itself.
-    if node.symbol&.sync == :atomic && !@atomic_emit_raw
+    if node.symbol&.atomic? && !@atomic_emit_raw
       return ident if node.atomic_borrow
       # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
       # cell pointer and AtomicPtr has no `.load()` method.
