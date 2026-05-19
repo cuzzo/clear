@@ -6,14 +6,20 @@ module NilKill
     def initialize(argv)
       @dry_run = argv.include?("--dry-run") || ENV["DRY_RUN"] == "1"
       @all = argv.include?("--all")
-      @evidence = Store.read
+    end
+
+    # Lazily loaded: the `apply_actions` path (used by infer's sorbet
+    # pre-validate bisection) never needs evidence, so constructing an
+    # Apply must not eagerly JSON.parse the multi-100MB evidence.json.
+    def evidence
+      @evidence ||= Store.read
     end
 
     def run
       if @all && ENV["NIL_KILL_UNSAFE_APPLY_ALL"] != "1"
         abort "`apply --all` would apply review actions without verification. Use `loop --hash-records -- <verify command...>` for reviewed fixes, or set NIL_KILL_UNSAFE_APPLY_ALL=1 for debugging."
       end
-      actions = @evidence["actions"].select { |a| @all || a["confidence"] == HIGH }
+      actions = evidence["actions"].select { |a| @all || a["confidence"] == HIGH }
       apply_actions(actions)
     end
 

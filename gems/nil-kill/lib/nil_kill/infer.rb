@@ -1435,8 +1435,14 @@ module NilKill
 
     def sorbet_validate_batch(actions, snapshot)
       return [] if actions.empty?
-      snapshot.each { |path, content| File.write(path, content) }
-      Apply.new([]).apply_actions(actions)
+      # Restore only files a prior node actually dirtied: files no node
+      # wrote already equal the snapshot, so the pre-`srb tc` tree is
+      # bitwise-identical to a full restore (same srb result, same tree).
+      snapshot.each do |path, content|
+        next if File.file?(path) && File.read(path) == content
+        File.write(path, content)
+      end
+      (@validate_applier ||= Apply.new([])).apply_actions(actions)
       return [] if sorbet_clean?
       return actions if actions.size == 1
       mid = actions.size / 2
@@ -1444,8 +1450,17 @@ module NilKill
         sorbet_validate_batch(actions.drop(mid), snapshot)
     end
 
+    def sorbet_validate_cache_dir
+      @sorbet_validate_cache_dir ||= begin
+        dir = File.join(TMP_DIR, "srb-cache")
+        FileUtils.mkdir_p(dir)
+        dir
+      end
+    end
+
     def sorbet_clean?
-      _, _, status = Open3.capture3({ "SRB_YES" => "1", "NO_COLOR" => "1" }, "bundle", "exec", "srb", "tc")
+      _, _, status = Open3.capture3({ "SRB_YES" => "1", "NO_COLOR" => "1" },
+        "bundle", "exec", "srb", "tc", "--cache-dir", sorbet_validate_cache_dir)
       status.success?
     end
 
