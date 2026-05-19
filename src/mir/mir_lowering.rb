@@ -1751,11 +1751,10 @@ class MIRLowering
     # Standard call
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.each_with_index.map { |a, idx|
-      # The annotator stamps was_moved when the callee takes ownership of this
-      # arg on success (param.takes || GIVE). was_moved is the normal signal;
-      # keep MoveNode as a defensive fallback for explicit GIVE wrappers.
-      # COPY into a borrow param is NOT a take.
-      takes = a.was_moved || a.is_a?(AST::MoveNode)
+      # The annotator stamps was_moved when the callee takes ownership of
+      # this arg on success (param.takes || GIVE) -- the single ownership
+      # signal (INV-13). COPY into a borrow param is NOT a take.
+      takes = a.was_moved == true
       raw_arg = lower(a)
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
       arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
@@ -1874,9 +1873,8 @@ class MIRLowering
     obj_mir = lower(node.object)
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
     args_mir = node.args.map { |a|
-      # See note in lower_call_inner: was_moved is the normal ownership-transfer
-      # signal, with MoveNode retained as an explicit GIVE fallback.
-      takes = a.was_moved || a.is_a?(AST::MoveNode)
+      # was_moved is the single ownership-transfer signal (INV-13).
+      takes = a.was_moved == true
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.full_type
       if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
@@ -6258,8 +6256,9 @@ class MIRLowering
       inner = MIR::ContainerInit.new(bare_zig, :list_capacity, decl_alloc, ft.capacity)
       has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     else
+      # Structural unwrap only; the move decision reads was_moved (INV-13).
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
-      is_move = node.value.is_a?(AST::MoveNode)
+      is_move = node.value.was_moved == true
       # Propagate VarDecl heap storage to StructLit so lower_struct_lit emits HeapCreate.
       # upgrade_heap_ptr_returns_to_heap! sets decl.storage = :heap but not decl.value.storage.
       rhs.storage = :heap if node.storage == :heap && rhs.is_a?(AST::StructLit)
