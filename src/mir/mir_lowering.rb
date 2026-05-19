@@ -6161,9 +6161,9 @@ class MIRLowering
     # For same-name vars in different scopes, alloc is overridden per-declaration
     # via alloc_for_node(node) which reads the storage set by escape analysis.
     decl_name = node.name.to_s
-    binding_entry = @current_bindings[decl_name]
+    binding_entry = @current_bindings[decl_name] || CleanupEntry::NONE
     copy_decl_needs_drop = node.value.is_a?(AST::CopyNode) && (ft.any_sync? || ft.string?)
-    has_mir_drop = (binding_entry && binding_entry.needs_cleanup? && !binding_entry.match_as?) ||
+    has_mir_drop = (binding_entry.needs_cleanup? && !binding_entry.match_as?) ||
                    copy_decl_needs_drop
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
@@ -6196,7 +6196,7 @@ class MIRLowering
     decl_alloc = if node.respond_to?(:storage) && node.storage == :heap
       :heap
     else
-      binding_entry&.alloc || :heap
+      (binding_entry.present? && binding_entry.alloc) || :heap
     end
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
@@ -6313,7 +6313,7 @@ class MIRLowering
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
     if has_mir_drop
-      drop_entry = if binding_entry
+      drop_entry = if binding_entry.present?
         binding_entry.dup
       elsif ft.string?
         CleanupEntry.from({ kind: :heap_string, alloc: decl_alloc, has_moved_guard: true })
@@ -6334,21 +6334,21 @@ class MIRLowering
       # use per-declaration storage. This avoids using a stale alloc from a same-named
       # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
       # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
-      node_alloc = if binding_entry && binding_entry.alloc == :cleanup
+      node_alloc = if binding_entry.present? && binding_entry.alloc == :cleanup
         :cleanup
       elsif mir_allocates?(init)
         :heap
       elsif node.respond_to?(:storage) && node.storage == :heap
         :heap
-      elsif binding_entry && binding_entry.alloc == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
+      elsif binding_entry.present? && binding_entry.alloc == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
         alloc_for_node(node)
       else
-        binding_entry&.alloc || decl_alloc
+        (binding_entry.present? && binding_entry.alloc) || decl_alloc
       end
       # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
       # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
       # because both AllocMark and Cleanup end up self-consistent at :frame.
-      if binding_entry && binding_entry.alloc == :cleanup && node_alloc != :cleanup
+      if binding_entry.present? && binding_entry.alloc == :cleanup && node_alloc != :cleanup
         raise "BUG in lower_var_decl: lowering downgraded :cleanup to " \
               ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
       end
@@ -6357,17 +6357,18 @@ class MIRLowering
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     elsif owned_return_transfer_binding?(binding_entry, init)
-      mir_alloc = resolve_decl_stdlib_alloc(node) || T.must(binding_entry)[:alloc] || :heap
+      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || :heap
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::TransferMark.new(safe_name, :moved)]
     else
       let_node
     end
   end
 
-  sig { params(binding_entry: T.nilable(CleanupEntry), init: T.untyped).returns(T::Boolean) }
+  sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
-    return false unless binding_entry && binding_entry[:needs_cleanup] == false
-    return false unless binding_entry[:alloc] == :heap || binding_entry[:alloc] == :cleanup
+    return false if binding_entry.needs_cleanup?
+    return false unless binding_entry.present?
+    return false unless binding_entry.alloc == :heap || binding_entry.alloc == :cleanup
 
     if init.is_a?(MIR::Call)
       return !!init.heap_provenance

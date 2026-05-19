@@ -58,6 +58,15 @@ class CleanupEntry < Hash
   sig { returns(Symbol) }
   def alloc = T.cast(self[:alloc], Symbol)
 
+  # Total presence predicates -- safe on the NONE sentinel.
+  # `present?` is true only for a real classifier-produced entry;
+  # NONE replaces the old `nil` "this binding needs no cleanup".
+  sig { returns(T::Boolean) }
+  def none? = equal?(NONE)
+
+  sig { returns(T::Boolean) }
+  def present? = !equal?(NONE)
+
   sig { returns(T::Boolean) }
   def needs_cleanup? = self[:needs_cleanup] == true
 
@@ -96,4 +105,11 @@ class CleanupEntry < Hash
 
   sig { returns(T.nilable(String)) }
   def resource_close_zig = self[:resource_close_zig]
+
+  # The non-nil sentinel for "this binding needs no cleanup".
+  # Replaces the old `nil` returned by an absent cleanup_bindings lookup.
+  # `needs_cleanup?` is false and it carries no :alloc/:kind, so every
+  # consumer guard (`.needs_cleanup?`, `.present?`, alloc/kind checks)
+  # yields exactly what `nil` did -- without the nil-guard.
+  NONE = T.let(new.freeze, CleanupEntry)
 end
