@@ -3982,6 +3982,14 @@ class PipelineHost
         case body_kind
         when :expr
           expr_mir = visit_mir(conc_op.op.expression)
+          # Bounded-concurrent SELECT worker ABI: the worker fn is typed
+          # `!T` and returns the RAW error union; CheatLib.concurrent-
+          # ListSelect performs error propagation. The worker must NOT
+          # try-unwrap locally -- that would swallow the error before the
+          # helper sees it. (Latent until declared-`!T` callees were
+          # correctly classified can_fail; see concurrency_spec "leaves
+          # error propagation to the runtime helper".)
+          expr_mir.try_wrap = false if expr_mir.is_a?(MIR::Call) || expr_mir.is_a?(MIR::MethodCall)
           expr_type = conc_op.op.expression.full_type
           ret_type = Type.new(return_type)
           if expr_type && Type.new(expr_type).integer? && ret_type.float?

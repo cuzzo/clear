@@ -12,12 +12,15 @@ becomes part of the gate.
 
 ## Inventory
 
-| File | Bug | Failure shape |
+All four reproducers below have been FIXED and promoted into
+`transpile-tests/` proper (no `bug` prefix):
+
+| Was | Bug | Now |
 | --- | --- | --- |
-| `bug1_or_fallback_in_if_condition_hoist.cht` | #1 | Zig emits `if (...__tmp_N...)` before declaring `__tmp_N`. |
-| `bug2_while_loop_with_local_split_no_rewind.cht` | #2 | `[FRAME_NO_REWIND]` from MIR ownership check at build time. |
-| `bug3_or_fallback_doesnt_propagate_fallibility.cht` | #3 | "Function 'X' can fail (raises directly via RAISE)" even though it never RAISEs. |
-| `bug9_list_in_struct_in_list.cht` | #9 | Runtime: `items[1].data[0]` returns the wrong value (storage shared across iterations). |
+| `bug1_or_fallback_in_if_condition_hoist.cht` | #1 | `transpile-tests/or_fallback_in_if_condition_hoist.cht` |
+| `bug2_while_loop_with_local_split_no_rewind.cht` | #2 | `transpile-tests/while_loop_with_local_split_no_rewind.cht` |
+| `bug3_or_fallback_doesnt_propagate_fallibility.cht` | #3 | `transpile-tests/or_fallback_doesnt_propagate_fallibility.cht` (alloc-conflation de-conflated; residuals #11/#12/#13 filed) |
+| `bug9_list_in_struct_in_list.cht` | #9 | `transpile-tests/list_in_struct_in_list.cht` |
 (FIXED + promoted, via the architectural /plan collapse-divergent-
 path work -- each killed a bug by collapsing an Nth re-derivation
 onto the one canonical source:

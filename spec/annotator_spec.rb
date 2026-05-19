@@ -234,8 +234,8 @@ RSpec.describe SemanticAnnotator do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
-          # Post-#338: the body raises (frame allocation can fail), so the
-          # fn's auto-derived return type is `!Float64[]`, not `Float64[]`.
+          # The fn explicitly declares `RETURNS !Float64[]`, so the
+          # return value's coerced_type is the declared error union.
           expect(return_node.value.coerced_type).to eq(:"!Float64[]")
         end
       end

@@ -422,8 +422,21 @@ module EffectTracker
     @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
     can_fail = {}
-    @fn_nodes.each do |name, _|
-      can_fail[name] = @fn_raises_directly[name] == true || name == "main"
+    @fn_nodes.each do |name, fn_node|
+      # The most authoritative failure signal is the EXPLICIT signature:
+      # a fn declared `RETURNS !T` is fallible by contract even if its
+      # body has no RAISE (e.g. an interface fn, or one whose only error
+      # is a propagated callee). Before the #3 de-conflation this was
+      # accidentally covered by the alloc/heap_ret proxy; it must be an
+      # explicit axis, not a side effect of "allocates".
+      declared_fallible =
+        begin
+          rt = fn_node.return_type
+          rt.is_a?(Type) && rt.respond_to?(:error_union?) && rt.error_union?
+        rescue StandardError
+          false
+        end
+      can_fail[name] = @fn_raises_directly[name] == true || declared_fallible || name == "main"
     end
 
     # Seed imported (cross-module) functions that can fail.
@@ -1149,6 +1162,14 @@ module EffectTracker
       when AST::FunctionDef
         # Don't descend into nested function definitions.
       when AST::Raise, AST::OrRaise
+        found[0] = true
+      when AST::BgBlock, AST::BgStreamBlock
+        # A BG / BG STREAM spawn lowers to `try CheatLib.Promise(T).spawn`
+        # / `try CheatLib.SplitStream(T).spawnNew` + `try alloc.create` --
+        # genuine Zig `try` (the scheduler can fail to spawn), NOT arena
+        # bump-alloc. So the enclosing fn is genuinely fallible. This is
+        # a real failure source like RAISE, not the alloc/`needs_rt`
+        # proxy removed for puck-clear-bugs.md #3.
         found[0] = true
       when AST::WithBlock
         # MVCC: SNAPSHOT-transactions emit `Versioned.update[Multi](...)

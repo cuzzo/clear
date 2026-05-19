@@ -140,6 +140,27 @@ signatures to flip.
 treating any `OR <expr>` over a fallible expression as still fallible
 when it should be reset to "infallible" by the `OR` consumer.
 
+**FIXED** (register-machine branch). Real root cause was narrower and
+different from the suspicion: `annotator.rb:779` conflated "genuinely
+raises" with "allocates / needs the runtime" in the single
+`@fn_raises_directly` flag (`uses_frame || uses_heap || uses_alloc ||
+heap_ret || ...`). Every string-touching function was therefore seeded
+`can_fail`. Fix = de-conflate: `@fn_raises_directly` is now genuine
+failure only (`scan_for_raises` + PRE + `@nonReentrant` + fn-pointer);
+the alloc terms were redundant for their real consumer `needs_rt`
+(which already ORs them independently). `scan_for_raises` also now
+recognizes `BgBlock`/`BgStreamBlock` (they emit a real `try
+spawnNew`), and `compute_can_fail!` gained an explicit
+declared-`RETURNS !T` axis (the most authoritative failure signal,
+previously masked by the alloc proxy). Regression-gated by
+`tools/fuzz/templates/infallible_signature.rb` and promoted to
+`transpile-tests/or_fallback_doesnt_propagate_fallibility.cht`.
+
+The exhaustive gate surfaced three residual latent defects the
+over-rejection had been masking — see #11, #12, #13. The canonical
+reproducer (charAt OR-absorbed, no bare arena op) is fully fixed; the
+residuals are distinct bugs with their own root causes.
+
 ---
 
 > **Entries #4–#7 removed.** They were CLEAR working as designed
@@ -224,6 +245,123 @@ STRUCT Program   {
 ```
 
 This is what `vm.cht` does today. The C/Go/Rust ports won't have to.
+
+---
+
+## 10. Error-union return over a `@list` mis-lowers (`*const anyerror!T`)
+
+A function that *correctly* declares an error union over a list return
+type fails Zig codegen:
+
+```cht
+FN build(a: String) RETURNS !Int64[]@list ->
+  RETURN [1_i64];
+END
+```
+
+```
+error: expected type '*const T', found '*const anyerror!T'
+note: pointer type child 'anyerror!array_list.Aligned(i64,null)'
+      cannot cast into pointer type child 'array_list.Aligned(i64,null)'
+```
+
+The list return temp keeps its `anyerror!array_list...` wrapper instead
+of being unwrapped before the heap-promotion/return path takes its
+address. Only the `error-union + @list-return` combination is affected;
+`!Int64`, `!String`, and a plain `Int64[]@list` return all lower fine.
+
+This is independent of #3 (which is the *annotator* wrongly forcing
+`!T`); #10 is the *codegen* path for a return type the author declared
+on purpose. The `infallible_signature` fuzz template marks every
+`heap_list + error_union` cell `:in_dev` so it reserves matrix space
+without masking the #3 signal; flip those cells to `:pass` once #10 is
+fixed.
+
+**Workaround**: return the list through an out-param or a wrapping
+struct, or make the function infallible (no error union) when it
+returns a `@list`.
+
+**STILL OPEN.** An attempted fix (stamp the return value's
+`coerced_type` with the payload type instead of the error union)
+*does* make it compile, but the returned `@list` then LEAKS at the
+caller (DebugAllocator catches it) — trading a compile error for an
+INV-2 violation, which is strictly worse. The naive coerce-strip was
+reverted. A correct fix must also pair caller-side cleanup for a
+`@list` returned across an error-union boundary — see #13.
+
+---
+
+## 11. `expr OR <fallback>` over a user callee doesn't reset can_fail
+
+The residual half of #3. With the alloc-conflation fixed, a function
+whose ONLY fallibility is a user callee absorbed by `OR <value>` is
+still forced to `!T`:
+
+```cht
+FN flaky(s: String) RETURNS !String -> ... END
+FN sub(a: String) RETURNS String ->
+  h = flaky(a) OR "fallback";   # error consumed -> sub is infallible
+  RETURN COPY h;
+END
+```
+
+`compute_can_fail!`'s transitive propagation walks `@call_graph`, a
+callee-NAME set, and cannot see that the callsite is OR-absorbed, so
+`flaky.can_fail` flows into `sub`. The builtin variant (`charAt(i) OR
+""`) is unaffected because stdlib callees aren't in `@call_graph` —
+that is why #3's canonical reproducer passes while this doesn't.
+
+**Root cause**: per-callsite absorption is known only at the annotator
+OR-RESCUE site; the shared `@call_graph` (also feeding `needs_rt` /
+reentrance, which need every callee regardless of absorption) can't
+carry it. The fix needs a separate "fallibility-propagating callees"
+set that excludes callees whose every callsite is absorbed — new
+structure, deliberately not bolted onto this change.
+
+Gated `:in_dev` in `infallible_signature.rb`
+(`fallible_callee_absorbed` + plain).
+
+---
+
+## 12. Bare arena-allocating op in a plain (non-error) fn emits `try`
+
+Exposed by #3's de-conflation (was masked because #3 rejected these at
+the annotator before codegen):
+
+```cht
+FN f(a: String) RETURNS Int64 ->
+  parts = a.split(" ");   # -> `const __tmp = try CheatLib.split(...)`
+  RETURN 7_i64;
+END
+```
+
+`CheatLib.split` / `std.mem.concat` / `CheatLib.makeList` / list
+`append` are declared fallible (`error{OutOfMemory}`), so a bare
+unabsorbed use lowers to `try CheatLib.<op>` — illegal in a plain
+non-error fn (`error: expected type 'i64', found 'error{OutOfMemory}'`).
+Per the #3 thesis these arena ops bump-allocate and panic on OOM, so
+they should be infallible (no `try`); the real fix is runtime-side
+(drop the error union from the arena CheatLib op signatures), not in
+the annotator. The #3 alloc-conflation was effectively a band-aid for
+exactly this codegen reality ("it allocates, so force `!T` so the
+`try` is legal").
+
+Gated `:in_dev` in `infallible_signature.rb`
+(`alloc_concat`/`alloc_split`/`alloc_list_build` + plain, and any
+heap-`@list` return).
+
+---
+
+## 13. `@list` returned across an error-union boundary leaks at the caller
+
+Found while attempting #10. `FN f() RETURNS !Int64[]@list -> RETURN
+[1_i64]; END` with `r = f() OR RAISE;` compiles (under the attempted
+#10 coerce-strip) and asserts correctly, but the returned list is
+never freed at the caller — `[DebugAllocator] memory ... leaked`
+(array_list backing buffer). The success-path ownership of a `@list`
+handed back through an error union isn't paired with a caller-side
+`Cleanup`. This is why the #10 coerce-strip is not a safe fix on its
+own. Distinct from #10 (codegen cast) and #12 (`try` in plain fn).
 
 ---
 

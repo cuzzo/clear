@@ -773,10 +773,20 @@ private
     node.uses_alloc = (ctx.alloc_count > 0)
     node.uses_rt    = ctx.needs_rt
     node.stack_vars_bytes = ctx.stack_vars_bytes
-    # Seed for compute_can_fail! post-pass: direct failure sources.
-    ret_type_obj = signature.return_type
-    heap_ret     = ret_type_obj.is_a?(Type) && (ret_type_obj.heap? || ret_type_obj.dynamic?)
-    @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || node.uses_alloc || heap_ret ||
+    # Seed for compute_can_fail! post-pass: GENUINE failure sources only.
+    # A function is fallible iff a failure can propagate to its caller:
+    #   - scan_for_raises  : RAISE / OrRaise / RAISE-bubbling WithBlock
+    #   - PRE clauses       : a failed PRE emits `return error.CheatError`
+    #   - @nonReentrant     : StackGuard/enterDepth emit `try ...` (raise)
+    #   - fn-pointer call   : conservatively fallible (target may raise)
+    # These STAY. What must NOT be here is "allocates / needs the
+    # runtime" (uses_frame, uses_heap, uses_alloc, heap_ret): CLEAR's
+    # arena model bump-allocates and panics on OOM -- it does not return
+    # an error union -- so `charAt`/`split`/concat/list-build/heap-return
+    # are NOT failure. Conflating allocation with failure forced every
+    # string-touching `RETURNS T` to `RETURNS !T` with a lying "raises
+    # directly via RAISE" diagnostic (puck-clear-bugs.md #3).
+    @fn_raises_directly[node.name] =
       (@fn_has_fnptr[node.name] == true) ||
       (node.reentrant == :non_reentrant) ||
       (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
