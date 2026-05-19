@@ -286,7 +286,7 @@ module CleanupClassifier
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   # @return [Hash] { var_name => entry_hash } or empty hash
-  sig { params(fn_node: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).returns(T.nilable(T::Hash[String, CleanupEntry])) }
+  sig { params(fn_node: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).returns(T::Hash[String, CleanupEntry]) }
   def self.classify(fn_node, fn_nodes:, schema_lookup:)
     return {} unless fn_node.body
 

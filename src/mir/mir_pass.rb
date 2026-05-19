@@ -48,7 +48,7 @@ class MIRPass
   def initialize(fn_nodes:, schema_lookup:)
     @fn_nodes = fn_nodes
     @schema_lookup = schema_lookup
-    @cleanup_bindings = T.let({}, T::Hash[String, T.nilable(T::Hash[String, CleanupEntry])])
+    @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
     @fn_has_catch = T.let(false, T::Boolean)
   end
 

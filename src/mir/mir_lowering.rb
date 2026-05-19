@@ -1419,8 +1419,8 @@ class MIRLowering
     # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
     takes_mir = []
     node.params.select { |p| p.takes }.each do |p|
-      entry = @current_bindings[p.name.to_s]
-      next unless entry && entry.needs_cleanup?
+      entry = @current_bindings[p.name.to_s] || CleanupEntry::NONE
+      next unless entry.needs_cleanup?
       ti = p.type || Type.new(:Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
@@ -5928,8 +5928,8 @@ class MIRLowering
     if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
       ident_name = zig_safe_name(node.value.name)
       ident_name = @fn_name_rename_map[ident_name] if @fn_name_rename_map&.key?(ident_name)
-      entry = @current_bindings[node.value.name.to_s]
-      guarded = (entry && entry.has_moved_guard?) || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
+      entry = @current_bindings[node.value.name.to_s] || CleanupEntry::NONE
+      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
       @pending_stmts << MIR::MoveMark.new(ident_name) if guarded
       return
     end
@@ -5946,8 +5946,8 @@ class MIRLowering
       # Route through lower_identifier so BG capture-map rewrites apply:
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
       ident = lower_identifier(node.value)
-      entry = @current_bindings[node.value.name.to_s]
-      guarded = (entry && entry.has_moved_guard?) || @guarded_cleanup_names&.[](ident.name)
+      entry = @current_bindings[node.value.name.to_s] || CleanupEntry::NONE
+      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](ident.name)
       @pending_stmts << MIR::MoveMark.new(ident.name) if guarded && ident.respond_to?(:name) && !ident.name.include?(".")
       ident
     else
