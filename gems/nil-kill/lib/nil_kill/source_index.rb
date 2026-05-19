@@ -168,6 +168,9 @@ module NilKill
       @method_nodes = []
       # Pure function of the type string -> memoize by type.
       @rcfs_memo = {}
+      # Symbol -> String memo: node.name.to_s on hot AST walks otherwise
+      # allocates a fresh String per visit for repeated method names.
+      @sym_str = {}
       self.current_param_types = {}
       self.current_local_types = {}
       self.current_collection_builders = {}
@@ -2247,14 +2250,20 @@ module NilKill
       struct_field_shape_for_call(node, self.class.struct_field_array_element_shapes)
     end
 
+    def sym_to_s(sym)
+      @sym_str[sym] ||= sym.to_s
+    end
+
     def struct_field_shape_for_call(node, index)
       receiver_type = expression_type(node.receiver)
-      receiver_classes_for_field_shape(receiver_type).each do |klass|
-        shape = index[[klass, node.name.to_s]]
+      name = sym_to_s(node.name)
+      classes = receiver_classes_for_field_shape(receiver_type)
+      classes.each do |klass|
+        shape = index[[klass, name]]
         return dup_hash_shape(shape) if shape
       end
-      if receiver_classes_for_field_shape(receiver_type).empty?
-        matching = index.select { |(_klass, field), _shape| field == node.name.to_s }.values
+      if classes.empty?
+        matching = index.select { |(_klass, field), _shape| field == name }.values
         return dup_hash_shape(matching.first) if matching.size == 1
       end
       nil
@@ -2263,8 +2272,9 @@ module NilKill
     def struct_field_static_type_for_call(node)
       return nil unless node.is_a?(Prism::CallNode) && node.receiver
       receiver_type = expression_type(node.receiver)
+      name = sym_to_s(node.name)
       types = receiver_classes_for_field_shape(receiver_type).flat_map do |klass|
-        Array(self.class.struct_field_static_types[[klass, node.name.to_s]])
+        Array(self.class.struct_field_static_types[[klass, name]])
       end
       NilKill.static_sorbet_type(types.uniq)
     end

@@ -500,6 +500,7 @@ module NilKill
       producers = Array(row["producers"]).map(&:dup)
       producer_sites = producers.map { |producer| [producer["path"], producer["line"].to_i, producer["code"].to_s] }.to_set
       shape_by_site = hash_record_shape_by_site(evidence)
+      row_keys, common_keys_s = hash_record_row_key_sets(row)
       common = Array(row["common_keys"]).map(&:to_s).sort
       union = (common + Array(row["optional_keys"]).map(&:to_s)).uniq.sort
       field_types = Array(row["fields"]).each_with_object(Hash.new { |h, k| h[k] = [] }) do |field, index|
@@ -511,7 +512,7 @@ module NilKill
       Array(evidence.dig("facts", "return_origins")).each do |origin|
         sources = Array(origin["sources"])
         next unless sources.any? { |source| producer_sites.include?([origin["path"], source["line"].to_i, source["code"].to_s]) } ||
-          hash_record_origin_shape_matches_row?(origin, row)
+          hash_record_origin_shape_matches_row?(origin, row_keys, common_keys_s)
         sources.each do |source|
           next unless source["code"].to_s.start_with?("{") && source["code"].to_s.end_with?("}")
           shape = shape_by_site[[origin["path"], source["line"].to_i, source["code"].to_s]]
@@ -560,11 +561,12 @@ module NilKill
       return [] if type_name.empty?
       methods_by_location = hash_record_methods_by_location(evidence)
       signatures = []
+      row_keys, common_keys_s = hash_record_row_key_sets(row)
 
       producer_sites = Array(row["producers"]).map { |producer| [producer["path"], producer["line"].to_i, producer["code"].to_s] }.to_set
       Array(evidence.dig("facts", "return_origins")).each do |origin|
         next unless Array(origin["sources"]).any? { |source| producer_sites.include?([origin["path"], source["line"].to_i, source["code"].to_s]) } ||
-          hash_record_origin_shape_matches_row?(origin, row)
+          hash_record_origin_shape_matches_row?(origin, row_keys, common_keys_s)
         method = methods_by_location[[origin["path"], origin["line"].to_i]]
         next unless method
         from = NilKill.extract_return_type(method["sig"].to_s)
@@ -590,7 +592,7 @@ module NilKill
       methods_by_name = hash_record_methods_by_name(evidence)
       Array(evidence.dig("facts", "param_origins")).each do |origin|
         next unless producer_sites.include?([origin["path"], origin["line"].to_i, origin["code"].to_s]) ||
-          hash_record_origin_shape_matches_row?(origin, row)
+          hash_record_origin_shape_matches_row?(origin, row_keys, common_keys_s)
         matches = hash_record_signature_candidate_methods(origin, methods_by_name)
         next unless matches.size == 1
         method = matches.first
@@ -642,13 +644,19 @@ module NilKill
       @hash_record_methods_by_name = Array(facts["existing_sigs"]).group_by { |method| method["method"].to_s }
     end
 
-    def hash_record_origin_shape_matches_row?(origin, row)
-      row_keys = (Array(row["common_keys"]) + Array(row["optional_keys"])).map(&:to_s).sort
+    # row_keys / common_keys_s depend only on `row`; callers hoist them
+    # out of their per-origin loops via hash_record_row_key_sets.
+    def hash_record_origin_shape_matches_row?(origin, row_keys, common_keys_s)
       return false if row_keys.empty?
       [origin["hash_shape"], origin["array_element_shape"]].compact.any? do |shape|
         keys = Hash(shape["keys"]).keys.map(&:to_s).sort
-        keys.any? && (keys - row_keys).empty? && (Array(row["common_keys"]).map(&:to_s) - keys).empty?
+        keys.any? && (keys - row_keys).empty? && (common_keys_s - keys).empty?
       end
+    end
+
+    def hash_record_row_key_sets(row)
+      common_keys_s = Array(row["common_keys"]).map(&:to_s)
+      [(common_keys_s + Array(row["optional_keys"]).map(&:to_s)).sort, common_keys_s]
     end
 
     def hash_record_shape_matches_shape?(left, right)
@@ -849,7 +857,7 @@ module NilKill
         node = stack.pop
         next unless node
         yield node
-        stack.concat(node.child_nodes.compact) if node.respond_to?(:child_nodes)
+        node.child_nodes.each { |child| stack << child if child } if node.respond_to?(:child_nodes)
       end
     end
 

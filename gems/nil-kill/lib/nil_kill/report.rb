@@ -810,7 +810,7 @@ module NilKill
       names = Array(evidence.dig("facts", "existing_sigs")).filter_map { |method| method["method"].to_s }.to_set
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage(parsed.value, :statement, names, usage)
       rescue StandardError
@@ -983,7 +983,7 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
       rescue StandardError
