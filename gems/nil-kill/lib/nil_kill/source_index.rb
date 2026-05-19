@@ -186,10 +186,7 @@ module NilKill
       @class_like_constants = Set.new
       parsed = self.class.parsed_file(path)
       if parsed.success?
-        collect_struct_declarations(parsed.value, [])
-        collect_class_like_constants(parsed.value, [])
-        collect_non_nil_method_returns(parsed.value)
-        collect_ivar_tlet_names(parsed.value)
+        collect_prescan(parsed.value, [], [])
         walk(parsed.value, [])
         recompute_return_origins_with_inferred_shapes unless @warm_only
         recompute_collection_index_lookups_with_inferred_shapes unless @warm_only
@@ -233,7 +230,7 @@ module NilKill
     def each_ast(node, &blk)
       return unless node.is_a?(Prism::Node)
       yield node
-      node.child_nodes.compact.each { |c| each_ast(c, &blk) }
+      node.compact_child_nodes.each { |c| each_ast(c, &blk) }
     end
 
     # A local receiver is resolved through its in-method assignment
@@ -331,7 +328,7 @@ module NilKill
 
     def child_walk(node, scope)
       return unless node&.respond_to?(:child_nodes)
-      node.child_nodes.compact.each { |child| walk(child, scope) }
+      node.compact_child_nodes.each { |child| walk(child, scope) }
     end
 
     def walk_call_children(node, scope)
@@ -427,7 +424,7 @@ module NilKill
           end
         end
       end
-      node.child_nodes.compact.each { |child| refill_struct_constructor_types(child, index) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| refill_struct_constructor_types(child, index) } if node.respond_to?(:child_nodes)
     end
 
     def collect_local_container_origins(node)
@@ -439,7 +436,7 @@ module NilKill
       when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
         inspect_ivar_container_origin(node)
       end
-      node.child_nodes.compact.each { |child| collect_local_container_origins(child) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_local_container_origins(child) } if node.respond_to?(:child_nodes)
     end
 
     def collect_collection_index_facts(node, scope)
@@ -455,16 +452,16 @@ module NilKill
       when Prism::LocalVariableWriteNode
         update_local_fact(node)
         inspect_local_container_origin(node)
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
       else
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
       end
     end
 
     def collect_call_collection_index_facts(node, scope)
       block = node.block
       unless block && block.respond_to?(:body)
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) }
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) }
         return
       end
       old_hash_shapes = @current_hash_shapes
@@ -473,20 +470,35 @@ module NilKill
         shape = block_param_shapes_for_call(node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
       end
-      node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) }
+      node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) }
     ensure
       self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
-    def collect_struct_declarations(node, scope)
+    # Fused single-traversal replacement for the four pure pre-walk
+    # collectors (struct_declarations / class_like_constants /
+    # non_nil_method_returns / ivar_tlet_names). They each independently
+    # DFS'd the whole file; this performs the union of their per-node
+    # work in one DFS. cscope is the const_name-derived scope used by
+    # the struct + class-constant logic; iscope is the constant_path
+    # .slice-derived scope used by the ivar T.let logic (the two scope
+    # strings can differ, so both are threaded). non_nil ignores scope.
+    # Accumulators are disjoint and the single DFS order matches each
+    # original collector's DFS order, so output is byte-identical.
+    def collect_prescan(node, cscope, iscope)
       case node
       when Prism::ClassNode, Prism::ModuleNode
-        child_scope = scope + [const_name(node.constant_path)]
-        node.child_nodes.compact.each { |child| collect_struct_declarations(child, child_scope) } if node.respond_to?(:child_nodes)
+        name = const_name(node.constant_path)
+        full_name = (cscope + [name]).join("::")
+        @class_like_constants.add(full_name)
+        @class_like_constants.add(name)
+        child_c = cscope + [name]
+        child_i = iscope + [node.constant_path.slice]
+        node.compact_child_nodes.each { |child| collect_prescan(child, child_c, child_i) }
         return
       when Prism::ConstantWriteNode
         if struct_new_call?(node.value) || data_define_call?(node.value)
-          klass = (scope + [node.name.to_s]).join("::")
+          klass = (cscope + [node.name.to_s]).join("::")
           fields = struct_fields(node.value)
           if fields.any?
             rec = { "path" => @rel, "line" => node.location.start_line, "class" => klass, "fields" => fields }
@@ -505,30 +517,31 @@ module NilKill
               self.class.struct_full_by_name[short] = klass
             end
           end
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_struct_declarations(child, scope) } if node.respond_to?(:child_nodes)
-    end
-
-    def collect_class_like_constants(node, scope)
-      case node
-      when Prism::ClassNode, Prism::ModuleNode
-        name = const_name(node.constant_path)
-        full_name = (scope + [name]).join("::")
-        @class_like_constants.add(full_name)
-        @class_like_constants.add(name)
-        child_scope = scope + [name]
-        node.child_nodes.compact.each { |child| collect_class_like_constants(child, child_scope) } if node.respond_to?(:child_nodes)
-        return
-      when Prism::ConstantWriteNode
-        if struct_new_call?(node.value) || data_define_call?(node.value)
           name = node.name.to_s
-          full_name = (scope + [name]).join("::")
+          full_name = (cscope + [name]).join("::")
           @class_like_constants.add(full_name)
           @class_like_constants.add(name)
         end
+      when Prism::InstanceVariableWriteNode
+        val = node.value
+        if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
+          name = node.name.to_s
+          @ivar_tlet_names.add(name)
+          type_node = (val.arguments&.arguments || [])[1]
+          if type_node && !iscope.empty?
+            type_str = type_node.slice
+            (@ivar_tlet_types[[iscope.join("::"), name]] = type_str; @ep[0] += 1) if NilKill.useful_type?(type_str)
+          end
+        end
+      when Prism::DefNode
+        sig = sig_above(node.location.start_line)
+        if sig
+          ret = NilKill.extract_return_type(sig)
+          (@method_return_types[node.name.to_s] << ret; @ep[0] += 1) if ret
+          @non_nil_method_returns << node.name.to_s if non_nil_return_sig?(sig)
+        end
       end
-      node.child_nodes.compact.each { |child| collect_class_like_constants(child, scope) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_prescan(child, cscope, iscope) } if node.respond_to?(:compact_child_nodes)
     end
 
     def struct_new_call?(node)
@@ -814,7 +827,7 @@ module NilKill
           arms << { "helper" => helper, "classes" => classes } unless classes.empty?
         end
       end
-      node.child_nodes.compact.each { |child| collect_dispatch_arms(child, param_name, arms) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_dispatch_arms(child, param_name, arms) } if node.respond_to?(:child_nodes)
     end
 
     def dispatch_helper_call(statements, param_name)
@@ -846,39 +859,6 @@ module NilKill
       namespaces = constants.filter_map { |type| type.include?("::") ? type.split("::").first : nil }.uniq
       return "review" if namespaces.size == 1 && constants.size == types.size
       types.uniq.size == types.size ? "high" : "review"
-    end
-
-    def collect_ivar_tlet_names(node, scope = [])
-      case node
-      when Prism::ClassNode, Prism::ModuleNode
-        new_scope = scope + [node.constant_path.slice]
-        node.child_nodes.compact.each { |child| collect_ivar_tlet_names(child, new_scope) }
-        return
-      when Prism::InstanceVariableWriteNode
-        val = node.value
-        if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
-          name = node.name.to_s
-          @ivar_tlet_names.add(name)
-          type_node = (val.arguments&.arguments || [])[1]
-          if type_node && !scope.empty?
-            type_str = type_node.slice
-            (@ivar_tlet_types[[scope.join("::"), name]] = type_str; @ep[0] += 1) if NilKill.useful_type?(type_str)
-          end
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_ivar_tlet_names(child, scope) } if node.respond_to?(:child_nodes)
-    end
-
-    def collect_non_nil_method_returns(node)
-      if node.is_a?(Prism::DefNode)
-        sig = sig_above(node.location.start_line)
-        if sig
-          ret = NilKill.extract_return_type(sig)
-          (@method_return_types[node.name.to_s] << ret; @ep[0] += 1) if ret
-          @non_nil_method_returns << node.name.to_s if non_nil_return_sig?(sig)
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_non_nil_method_returns(child) } if node.respond_to?(:child_nodes)
     end
 
     def non_nil_return_sig?(sig)
@@ -943,7 +923,7 @@ module NilKill
       return false unless node
       return false if nested_scope_node?(node)
       return true if return_node?(node)
-      node.respond_to?(:child_nodes) && node.child_nodes.compact.any? { |child| contains_explicit_return?(child) }
+      node.respond_to?(:child_nodes) && node.compact_child_nodes.any? { |child| contains_explicit_return?(child) }
     end
 
     def noreturn_body?(node)
@@ -1056,7 +1036,7 @@ module NilKill
       end
       update_local_fact(node) if node.is_a?(Prism::LocalVariableWriteNode)
       update_collection_builder_call(node) if node.is_a?(Prism::CallNode)
-      node.child_nodes.compact.each { |child| collect_local_type_facts(child) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_local_type_facts(child) } if node.respond_to?(:child_nodes)
     end
 
     def collect_branch_local_type_facts(node)
@@ -1460,7 +1440,7 @@ module NilKill
         results << (values.first || :bare_return)
         return
       end
-      node.child_nodes.compact.each { |child| collect_explicit_returns(child, results) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_explicit_returns(child, results) } if node.respond_to?(:child_nodes)
     end
 
     def implicit_return_expression(node)
@@ -1500,7 +1480,7 @@ module NilKill
       when Prism::IfNode, Prism::CaseNode, Prism::RescueNode
         true
       else
-        node.respond_to?(:child_nodes) && node.child_nodes.compact.any? { |child| branching_return_expression?(child) }
+        node.respond_to?(:child_nodes) && node.compact_child_nodes.any? { |child| branching_return_expression?(child) }
       end
     end
 
@@ -1925,7 +1905,7 @@ module NilKill
           reasons << "operation #{node.class.name.split("::").last}"
         end
       end
-      node.child_nodes.compact.each { |child| collect_unknown_expression_reasons(child, reasons) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_unknown_expression_reasons(child, reasons) } if node.respond_to?(:child_nodes)
     end
 
     def param_protocols(node)
@@ -1965,7 +1945,7 @@ module NilKill
           @ivar_param_origins[[@current_class_name, node.name.to_s]] << source if @current_class_name
         end
       end
-      node.child_nodes.compact.each { |child| collect_protocols(child, protocols, param_names) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_protocols(child, protocols, param_names) } if node.respond_to?(:child_nodes)
     end
 
     def unwrap_alias_source(node)
@@ -2027,7 +2007,7 @@ module NilKill
     def uses_yield?(node)
       return false unless node&.respond_to?(:child_nodes)
       return true if node.is_a?(Prism::YieldNode)
-      node.child_nodes.compact.any? { |child| uses_yield?(child) }
+      node.compact_child_nodes.any? { |child| uses_yield?(child) }
     end
 
     def inspect_call(node)
