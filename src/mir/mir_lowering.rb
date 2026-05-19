@@ -224,13 +224,13 @@ class MIRLowering
   #   up on error). Use when the value is consumed by a TAKES arg, a struct/union
   #   field init, or any position where the receiver takes ownership on success.
   #   false (default) => emit Cleanup (defer; freed on all paths).
-  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean)).returns(T.untyped) }
-  def hoist_alloc(expr, ast_node = nil, err_cleanup: false)
+  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean), mutable: T::Boolean).returns(T.untyped) }
+  def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false)
     return expr unless mir_allocates?(expr) || call_union_return_needs_hoist?(expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     @pending_stmts << MIR::AllocMark.new(name, :heap, nil)
-    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
       cleanup = err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
@@ -1770,12 +1770,20 @@ class MIRLowering
       # field stores), but a TAKES collection callee expects an owning
       # ArrayList. Produce one via CheatLib.dupeValue on the source binding
       # (the dupeValue ArrayList arm at runtime-header.zig:3284). #37 COPY.
-      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.list_collection? &&
-                       (ti&.list_collection? || (ti&.array? && !ti&.string?))
+      # CheatLib.dupeValue has comptime arms for ArrayList (list_collection?),
+      # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
+      # variants share isStringMap-shape via the inner-field heuristic.
+      copy_to_owning = a.is_a?(AST::CopyNode) &&
+                       callee_param_type&.collection? &&
+                       (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
+                        (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
                   lower(a)
-      arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
+      # copy_to_owning: hoist into a `var` temp so &__tmp resolves to *T (not
+      # *const T); the callee's anytype binding then allows mutable methods
+      # (xs.deinit, xs.count, ...) on the duplicated owning container.
+      arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
       arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
       # Array/List args: convert to slice via .items (skip strings - already []const u8).
       #
@@ -1891,12 +1899,20 @@ class MIRLowering
       callee_param_type = callee_param&.type
       # COPY of an owning collection into a TAKES collection param (#37 COPY):
       # produce owning ArrayList via dupeValue; see lower_func_call note.
-      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.list_collection? &&
-                       (ti&.list_collection? || (ti&.array? && !ti&.string?))
+      # CheatLib.dupeValue has comptime arms for ArrayList (list_collection?),
+      # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
+      # variants share isStringMap-shape via the inner-field heuristic.
+      copy_to_owning = a.is_a?(AST::CopyNode) &&
+                       callee_param_type&.collection? &&
+                       (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
+                        (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
                   lower(a)
-      arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
+      # copy_to_owning: hoist into a `var` temp so &__tmp resolves to *T (not
+      # *const T); the callee's anytype binding then allows mutable methods
+      # (xs.deinit, xs.count, ...) on the duplicated owning container.
+      arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
       if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?

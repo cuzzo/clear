@@ -62,16 +62,12 @@ TAKES_MOVE_SHAPE_SPECS = {
 
 TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
   %i[give bare copy].map do |modality|
-    # Remaining :in_dev cells:
-    # - COPY of @set/@pool/@map/dyn-array into TAKES collection (#42):
-    #   dupeValue lacks arms for these shapes
-    # - dynarr (give/bare/copy): #39 requires escape-analysis promotion of
-    #   the caller's frame-allocated ArrayList -- a lowering-layer .items
-    #   extraction matches types but mismatches allocators (invalid free).
-    blocked = (modality == :copy && %i[set pool map].include?(shape)) ||
-              shape == :dynarr
+    # Remaining :in_dev cells -- dynarr (give/bare/copy) gated by #39
+    # (requires escape-analysis promotion of the caller's frame-allocated
+    # ArrayList; lowering-layer .items extraction matches types but
+    # mismatches allocators -> Invalid free at runtime).
     { shape: shape, modality: modality,
-      expected: blocked ? :in_dev : :pass }
+      expected: shape == :dynarr ? :in_dev : :pass }
   end
 end
 

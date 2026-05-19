@@ -3296,6 +3296,58 @@ pub const CheatLib = struct {
             return result;
         }
 
+        // Set(T): allocate fresh and re-insert each element. Set.insert dupes
+        // string keys internally, so this is correct for both string and
+        // non-string element shapes. (#42 -- COPY of @set into TAKES.)
+        if (comptime isSetType(T)) {
+            var result: T = .{};
+            errdefer result.deinit(alloc);
+            var src_mut = value;
+            var it = src_mut.keyIterator();
+            while (it.next()) |k| try result.insert(alloc, k.*);
+            return result;
+        }
+
+        // Pool(T): preallocate same capacity, re-insert each alive slot's
+        // value. IDs may differ between source and copy -- COPY semantics =
+        // new owning value with same observable contents (count/iteration).
+        // Recursively dupes element values when their type needs cleanup.
+        // (#42 -- COPY of @pool into TAKES.)
+        if (comptime isPool(T)) {
+            var result = try T.initCapacity(alloc, value.capacity);
+            errdefer result.deinit(alloc);
+            const max_used = value.capacity - value.free_top;
+            for (value.slots[0..max_used]) |slot| {
+                if (!slot.alive) continue;
+                const ElemT = @TypeOf(slot.value);
+                const v = if (comptime needsCleanup(ElemT))
+                    try dupeValue(ElemT, slot.value, alloc)
+                else
+                    slot.value;
+                _ = try result.insert(alloc, v);
+            }
+            return result;
+        }
+
+        // StringMap(V): allocate fresh and re-put each (key, value). put()
+        // dupes the string key internally. Values are recursively duped via
+        // dupeValue when they need cleanup. (#42 -- COPY of @map into TAKES.)
+        if (comptime isStringMap(T)) {
+            var result: T = .{};
+            errdefer result.deinit(alloc, alloc);
+            var src_mut = value;
+            var it = src_mut.inner.iterator();
+            while (it.next()) |entry| {
+                const ValT = @TypeOf(entry.value_ptr.*);
+                const v = if (comptime needsCleanup(ValT))
+                    try dupeValue(ValT, entry.value_ptr.*, alloc)
+                else
+                    entry.value_ptr.*;
+                try result.put(alloc, alloc, entry.key_ptr.*, v);
+            }
+            return result;
+        }
+
         return value;
     }
 
