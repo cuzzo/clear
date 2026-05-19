@@ -48,6 +48,15 @@ module Decomplex
       when :DEFS then defstack += [node.children[1].to_s]
       when :ATTRASGN
         recv, msg, = node.children
+        # `obj[k] = v` is indexed-container mutation, not a named-attribute
+        # state edit -- same noise class as the lvar exclusion above; left
+        # in, its `[]` "attribute" manufactures spurious pairs with every
+        # real attr.
+        if msg == :[]=
+          node.children.each { |c| walk(c, defstack) }
+          return
+        end
+
         attr = msg.to_s.sub(/=$/, "")
         @writes << Write.new(attr: attr, recv: slice(recv), file: @file,
                              defn: defstack.last || "(top-level)",

@@ -49,4 +49,21 @@ class CoUpdateTest < Minitest::Test
     RB
     assert_empty r.neglected_updates(min_support: 3)
   end
+
+  # Regression: indexed assignment must not manufacture `["[]", *]`
+  # pairs, and must not mask a real attr pairing.
+  def test_indexed_assignment_is_not_mined
+    r = scan(<<~RB)
+      def build; e = {}; e[:kind] = 1; e[:alloc] = 2; e; end
+      def from(h); e = {}; h.each { |k, v| e[k] = v }; e; end
+      def a(n); n.storage = :heap; n.provenance = :heap; end
+      def b(n); n.storage = :heap; n.provenance = :heap; end
+      def c(n); n.storage = :heap; n.provenance = :heap; end
+    RB
+    pairs = r.co_written_pairs(min_support: 3)
+    assert_equal 1, pairs.size
+    assert_equal %w[provenance storage], pairs.first[:pair]
+    refute(pairs.any? { |h| h[:pair].include?("[]") })
+    assert_empty r.neglected_updates(min_support: 3)
+  end
 end
