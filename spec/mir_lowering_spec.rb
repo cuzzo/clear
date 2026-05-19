@@ -3340,8 +3340,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
   it "raises when a heap DeepCopy strategy lacks a cleanup mapping" do
     expect {
-      lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :full_value, :heap), nil)
-    }.to raise_error(/DeepCopy with unknown strategy :full_value/)
+      lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :unknown_strategy, :heap), nil)
+    }.to raise_error(/DeepCopy with unknown strategy :unknown_strategy/)
   end
 
   it "classifies capability wrappers and share promotion cleanup entries" do

@@ -324,6 +324,13 @@ class MIRLowering
         { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: mir.elem_type }
       when :union
         { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
+      when :full_value
+        # CheatLib.dupeValue result -- same type as source (ArrayList for @list,
+        # struct for synced, etc.). Cleanup via the comptime shim through :list.
+        ti = Type.from_node(ast_node)
+        zig_t = ti&.zig_type
+        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless zig_t
+        { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
       else
         raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
               "mir_allocates? returned true but no cleanup entry defined. Add a case."
@@ -1755,7 +1762,19 @@ class MIRLowering
       # this arg on success (param.takes || GIVE) -- the single ownership
       # signal (INV-13). COPY into a borrow param is NOT a take.
       takes = a.was_moved == true
-      raw_arg = lower(a)
+      ti = a.full_type
+      callee_param = callee_sig ? callee_sig.params[idx] : nil
+      callee_param_type = callee_param ? (callee_param.type || Type.new(:Any)) : nil
+      # COPY of an owning collection into a TAKES collection param: the
+      # default lower_copy produces a []T slice (right for struct/union
+      # field stores), but a TAKES collection callee expects an owning
+      # ArrayList. Produce one via CheatLib.dupeValue on the source binding
+      # (the dupeValue ArrayList arm at runtime-header.zig:3284). #37 COPY.
+      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.collection? &&
+                       (ti&.list_collection? || (ti&.array? && !ti&.string?))
+      raw_arg = copy_to_owning ?
+                  MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
+                  lower(a)
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
       arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
       # Array/List args: convert to slice via .items (skip strings - already []const u8).
@@ -1768,19 +1787,10 @@ class MIRLowering
       # treatment of `@map`/`@pool` mutable params and lets Zig's
       # auto-deref handle the in-callee `xs.append(...)` / `xs.items`
       # access uniformly.
-      ti = a.full_type
-      callee_param = nil
-      if callee_sig
-        params_list = callee_sig.params
-        callee_param = params_list[idx]
-      end
       callee_wants_mutable_list =
         callee_param && callee_param.mutable &&
         callee_param.type.respond_to?(:list_collection?) &&
         callee_param.type.list_collection?
-      callee_param_type = if callee_param
-        callee_param.type || Type.new(:Any)
-      end
       callee_wants_mutable_value =
         callee_param && callee_param.mutable && a.is_a?(AST::Identifier) &&
         !callee_wants_mutable_list &&
@@ -1794,7 +1804,12 @@ class MIRLowering
         end
       elsif callee_wants_mutable_value
         MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !callee_param_type&.collection?
+        # Emit slice (.items) when the callee wants a slice-shaped param.
+        # Shape-driven; CopyNode/MoveNode syntax exclusions removed -- the
+        # safe ItemsAccess (@hasField "items") is a comptime no-op for slice
+        # sources (`@constCast(__x[0..])` fallback), so re-extracting on a
+        # slice that came from a CopyNode/MoveNode result is harmless.
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
@@ -1875,12 +1890,21 @@ class MIRLowering
     args_mir = node.args.each_with_index.map { |a, idx|
       # was_moved is the single ownership-transfer signal (INV-13).
       takes = a.was_moved == true
-      arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.full_type
       # UFCS: the receiver is param[0], so args[i] -> params[i+1].
       callee_param = callee_sig&.params&.[](idx + 1)
       callee_param_type = callee_param&.type
-      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
+      # COPY of an owning collection into a TAKES collection param (#37 COPY):
+      # produce owning ArrayList via dupeValue; see lower_func_call note.
+      copy_to_owning = a.is_a?(AST::CopyNode) && callee_param_type&.collection? &&
+                       (ti&.list_collection? || (ti&.array? && !ti&.string?))
+      raw_arg = copy_to_owning ?
+                  MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
+                  lower(a)
+      arg = hoist_alloc(raw_arg, a, err_cleanup: takes)
+      if ti&.array? && !ti&.string? && !ti&.pool? && !callee_param_type&.collection?
+        # Shape-driven (see lower_func_call): emit slice when callee wants
+        # slice; the safe ItemsAccess is a comptime no-op on slice sources.
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
@@ -5881,25 +5905,15 @@ class MIRLowering
     elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
       elem_type = ti.element_type
       elem_zig = transpile_type(elem_type)
-      # Copy-depth must mirror the list's cleanup recursion or a
-      # shallow copy aliases the source's owned payloads and both
-      # cleanups free them. `string?` is OR'd in because runtime
-      # needsCleanup([]const u8) is unconditional while
-      # String#needs_cleanup? gates on heap_provenance.
+      # Default: slice copy (matches the []T storage of struct/union fields,
+      # where most COPYs land). Owning-collection TAKES consumers need an
+      # owning ArrayList instead -- that override is applied at the callsite
+      # (lower_func_call/method_call, #37 COPY).
       sl = @schema_lookup
       et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
       elem_owns_heap = et.needs_cleanup?(sl) || et.string?
       needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
       strategy = needs_deep ? :list_deep : :list_shallow
-      # Canonical resilient backing access (Step B): the deep-copy
-      # needs the list's element slice, but `source` may be an
-      # ArrayList, a slice (captured @list param in a BG ctx), or a
-      # *const ArrayList (pointer-passed param). The unguarded
-      # `safe: false` form emitted bare `.items` and broke for the
-      # non-ArrayList shapes (vm-bugs.md "COPY of an @list PARAM into
-      # a BG ... unguarded .items", 57f23367). `safe: true` is the
-      # ONE comptime @hasField dispatch every other backing access
-      # uses -- zero runtime cost, correct for every representation.
       src = ti&.list_collection? ? MIR::ItemsAccess.new(source, true) : source
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
     else
