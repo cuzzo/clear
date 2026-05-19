@@ -1794,7 +1794,7 @@ class MIRLowering
         end
       elsif callee_wants_mutable_value
         MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
@@ -1872,12 +1872,15 @@ class MIRLowering
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
-    args_mir = node.args.map { |a|
+    args_mir = node.args.each_with_index.map { |a, idx|
       # was_moved is the single ownership-transfer signal (INV-13).
       takes = a.was_moved == true
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.full_type
-      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      # UFCS: the receiver is param[0], so args[i] -> params[i+1].
+      callee_param = callee_sig&.params&.[](idx + 1)
+      callee_param_type = callee_param&.type
+      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||

@@ -66,7 +66,9 @@ TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
   %i[give bare copy].map do |modality|
     expected =
       if GIVE_OK_SHAPES.include?(shape)
-        modality == :give ? :pass : :in_dev   # bare/copy gated by #37
+        # give + bare both pass (bare fixed by the callee-side
+        # collection? discriminator); copy still gated by #37 (separate path).
+        modality == :copy ? :in_dev : :pass
       else
         :in_dev                               # dynarr=#39, nested=#40
       end
