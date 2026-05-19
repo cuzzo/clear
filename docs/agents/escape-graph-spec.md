@@ -28,18 +28,30 @@ cannot miss a shape because there is no per-shape code.
 - per-function synthetic node `RET[fn]` (the interprocedural return summary)
 - per-parameter node `PARAM[fn, i]`
 
-## DECISION RULE (refined — Stage B characterization correction)
+## DECISION RULE (corrected — Stage B characterization, 444-miss bucketing)
 
-`storage(D) = :heap` iff:
-  **inherently_heap?(D)**  — type is map / set / pool (a heap hashtable
-  regardless of escape; only `@list` and `String` are frame-vs-heap by
-  escape) — **OR** — **escapes?(D) ∧ heap_source?(D)**.
+`storage(D) = :heap` iff **inherently_heap?(D)** ∨ **(escapes?(D) ∧
+heap_source?(D))**.
 
-The original `escapes? ∧ source?` rule alone was incomplete: a purely
-local map (`counts = {..}`, never returned/captured) does not escape
-yet MUST be heap (its backing store is a heap table). Surfaced by the
-gate on `14_hashmap`; this is the rodata / frame-arena / always-heap
-trichotomy made explicit.
+**The key correction (the real simplification):** escape analysis only
+matters for the *frame-capable* types — **`@list` and `String`**. Every
+other heap-backed type is heap by its **TYPE alone, escape-independent**:
+
+  `inherently_heap?` = map ∨ set ∨ pool (heap hashtable)
+                     ∨ sync/storage-wrapped (`@locked`/`@shared`/
+                       `@multiowned`/`@atomic`/`@versioned` → Arc/Rc/
+                       Locked)
+                     ∨ `requires_move?` non-Copy-owned (owns heap
+                       resources), excluding @list/String themselves.
+
+The gate proved this empirically: of 444 corpus misses, **397 (89%)
+were these type categories, not escape-reachability** (217
+requires_move + 180 sync-wrapped + 3 map/set/pool). Only ~46 (37
+String + 9 @list + 1) are genuine escape-reachability cases. So the
+"single question = does it escape?" framing was wrong; the correct,
+*simpler* model is: heap is a **pure type predicate** for everything
+except `@list`/`String`, where it is `type ∧ escapes?`. This shrinks
+the entire escape-graph surface to two types.
 
 ## SOURCES (a node is heap-origin if it is / contains)
 
@@ -118,3 +130,43 @@ heap decl ⇒ exactly one AllocMark + one guarded Cleanup; every move
 (return/GIVE/TAKES/store) ⇒ MoveMark first. `MIRChecker green ∧ net
 green ⟺ escape decisions are cleanup-consistent for every exercised
 shape`. The graph decides; the checker proves.
+
+---
+
+## STAGE B VERDICT — APPROACH DROPPED (negative result)
+
+The single-unified-analysis approach was built and gated twice:
+
+| Model | DISQUALIFYING (under; UAF risk) | NEW_HEAP_OLD_FRAME (over; perf/ABRT) |
+|---|---|---|
+| v1 heuristic (type predicates + name allowlist) | 444 → 36 | 113 → 830 |
+| v2 authoritative (registry `return_alloc` + Type + escape) | 36 → **34** | 830 → **796** |
+
+The v2 fix was architecturally correct (it removed the name-list
+anti-pattern and read the registry's authoritative `return_alloc`),
+yet it moved the numbers by ~5% — **noise**. This is the decisive
+evidence: the non-convergence is **not** caused by using heuristics
+instead of ground truth. Reading the same authoritative inputs the
+proxies read still does not reproduce their decision: **34 decls
+under-classified (UAF) + 796 over-classified (a clean superset would
+heap-allocate ~800 values the corpus-tuned proxies deliberately keep
+on the frame — a real perf/ABRT regression).**
+
+**Conclusion:** the 5 proxies' combined decision function is not
+reproducible by a clean unified analysis within iterative reach —
+neither by heuristic re-derivation (v1) nor by authoritative-input
+re-derivation (v2). A substantial fraction of the ~1500 LOC is
+**essential, corpus-tuned, escape-conditional nuance**, not
+fragmentation hiding a simple model. Per the pre-agreed protocol
+(Stage B non-convergence ⇒ STOP, do not wire, do not patch around),
+the approach is **dropped**. EscapeGraph + the env hook are removed;
+production was never altered (read-only/env-gated throughout).
+
+The Stage-A spec, the characterization gate methodology, and these
+numbers are retained as the documented negative result: they answer
+"surely this can be simplified" with a measurement — within the
+methods tried, it largely cannot. The memory-safety bug (#13 / the
+20-cell manifest, incl. double-frees) remains separately tractable by
+closing the localized shape gaps in the existing proxies (option-1
+ledger localized them) — that is NOT a dead end and does NOT require
+the grand unification.
