@@ -56,7 +56,7 @@ class StringConcatRewriter
       node.then_branch&.map! { |s| rewrite_in_node!(s) }
       node.else_branch&.map! { |s| rewrite_in_node!(s) }
     when AST::MatchStatement
-      node.cases.each { |c| c[:body]&.map! { |s| rewrite_in_node!(s) } }
+      node.cases.each { |c| c.body&.map! { |s| rewrite_in_node!(s) } }
       node.default_case.map! { |s| rewrite_in_node!(s) } if node.default_case
     when AST::WhileLoop
       b = node.do_branch

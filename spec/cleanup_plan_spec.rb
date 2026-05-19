@@ -476,7 +476,7 @@ RSpec.describe CleanupClassifier do
   # has_moved_guard tests
   # =========================================================================
   describe "has_moved_guard" do
-    context "pool is a resource with guard" do
+    context "pool is an owned collection with guard" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           STRUCT Pt { x: Float64, y: Float64 }
@@ -487,10 +487,10 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "pool has _moved guard (resource-like cleanup)" do
+      it "pool has _moved guard through collection cleanup" do
         entry = plan["pool"]
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:kind]).to eq(:resource)
+        expect(entry[:kind]).to eq(:pool)
       end
     end
   end

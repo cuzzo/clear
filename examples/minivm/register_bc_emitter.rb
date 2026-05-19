@@ -2221,7 +2221,7 @@ class RegisterBcEmitter
   end
 
   def compile_with_block_bindings(stmt)
-    borrows = stmt.stdlib_def && stmt.stdlib_def[:borrows]
+    borrows = stmt.stdlib_def&.emit&.borrows
     raise Unsupported, "register emitter expected borrows on with_block_bindings" unless borrows.is_a?(Array) && borrows.first
     src_name = borrows.first.to_s
     src = @value_by_name[src_name]
@@ -2249,7 +2249,7 @@ class RegisterBcEmitter
     src_caps = caps_for_value(src)
     if src_caps && %i[locked write_locked].include?(src_caps[:sync])
       record_shared_event(:acquire, src_name, src[:kind], caps: src_caps)
-      fallible = (stmt.stdlib_def && stmt.stdlib_def[:fallible_clauses]) || []
+      fallible = stmt.stdlib_def&.emit&.fallible_clauses || []
       cell_reg = cell_backed_field_cell(src)
       if cell_reg
         @with_lock_releases ||= []

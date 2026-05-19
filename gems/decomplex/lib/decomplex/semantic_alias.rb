@@ -18,8 +18,9 @@ module Decomplex
   # zero points-to (per the design boundary): receiver stripping is a
   # syntactic canonicalisation, not alias analysis.
   class SemanticAlias
-    Pred = Struct.new(:name, :canon, :file, :line, keyword_init: true)
-    Use  = Struct.new(:canon, :file, :defn, :line, :raw, keyword_init: true)
+    Pred = Struct.new(:name, :canon, :file, :line, :span, keyword_init: true)
+    Use  = Struct.new(:canon, :file, :defn, :line, :raw, :span,
+                      keyword_init: true)
 
     def self.scan(files)
       preds = []
@@ -53,7 +54,9 @@ module Decomplex
         @uses << Use.new(canon: c, file: @file,
                          defn: defstack.last || "(top-level)",
                          line: node.first_lineno,
-                         raw: Ast.slice(node, @lines))
+                         raw: Ast.slice(node, @lines),
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
       end
       node.children.each { |ch| walk(ch, defstack) }
     end
@@ -87,7 +90,9 @@ module Decomplex
       return unless stmts.size == 1
 
       @preds << Pred.new(name: name, canon: canon(Ast.slice(stmts.first, @lines)),
-                         file: @file, line: node.first_lineno)
+                         file: @file, line: node.first_lineno,
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
     end
 
     class Report
@@ -104,7 +109,8 @@ module Decomplex
           next if names.size < 2
 
           { canon: c, names: names,
-            sites: ps.map { |p| "#{p.file}:#{p.name}:#{p.line}" } }
+            sites: ps.map { |p| "#{p.file}:#{p.name}:#{p.line}" },
+            spans: ps.to_h { |p| ["#{p.file}:#{p.name}:#{p.line}", p.span] } }
         end.sort_by { |h| -h[:names].size }
       end
 
@@ -119,7 +125,9 @@ module Decomplex
           next if u.defn.end_with?("?") && ps.any? { |p| p.name == u.defn }
 
           { predicate: ps.first.name, canon: u.canon,
-            at: "#{u.file}:#{u.defn}:#{u.line}", raw: u.raw }
+            at: "#{u.file}:#{u.defn}:#{u.line}",
+            spans: { "#{u.file}:#{u.defn}:#{u.line}" => u.span },
+            raw: u.raw }
         end.sort_by { |h| h[:predicate] }
       end
     end

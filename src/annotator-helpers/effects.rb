@@ -359,12 +359,12 @@ module EffectTracker
     @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     @fn_nodes.each do |name, fn_node|
-      raw = fn_node.full_type.is_a?(Type) ? fn_node.full_type.raw : fn_node.full_type
-      ret_type = raw.is_a?(FunctionSignature) ? raw.return_type : nil
+      fsig = FunctionSignature.unwrap(fn_node.full_type)
+      ret_type = fsig&.return_type
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
-      has_takes_heap = fn_node.params&.any? { |p|
-        next unless p[:takes]
-        ti = Type.new(p[:type] || :Any)
+      has_takes_heap = fn_node.params.any? { |p|
+        next unless p.takes
+        ti = Type.new(p.type || :Any)
         ti.string? || ti.array? || ti.list_collection? || ti.map?
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
@@ -388,8 +388,7 @@ module EffectTracker
         next if needs_rt.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.locals[c]&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
         needs_rt[c] = true if sig&.needs_rt
       end
     end
@@ -433,8 +432,7 @@ module EffectTracker
         next if can_fail.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.locals[c]&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.locals[c]&.type)
         can_fail[c] = true if sig&.can_fail
       end
     end
@@ -690,7 +688,7 @@ module EffectTracker
       node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
     when AST::FuncCall, AST::MethodCall
       if func_call_suspends?(node)
-        kind = node.matched_stdlib_def && node.matched_stdlib_def[:suspends] ? :io : :call
+        kind = node.matched_stdlib_def&.emit&.suspends ? :io : :call
         points << { id: points.size, kind: kind, node: node }
       end
       node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
@@ -706,11 +704,8 @@ module EffectTracker
   sig { params(node: AST::WithBlock).returns(T::Boolean) }
   def with_block_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    caps = node.capabilities
-    return false unless caps.is_a?(Array)
-    caps.any? do |c|
-      cap = c.is_a?(Hash) ? c[:capability] : nil
-      cap == :EXCLUSIVE || cap == :write_locked_read
+    node.capabilities.any? do |c|
+      c.capability == :EXCLUSIVE || c.capability == :write_locked_read
     end
   end
 
@@ -718,7 +713,7 @@ module EffectTracker
   def func_call_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.untyped)
-    return true if node.matched_stdlib_def && node.matched_stdlib_def[:suspends]
+    return true if node.matched_stdlib_def&.emit&.suspends
     return false if node.respond_to?(:fn_var_call) && node.fn_var_call
     callee = @fn_nodes[node.name]
     return false unless callee

@@ -64,21 +64,21 @@ module FunctionAnalysis
     return_type
   end
 
-  sig { params(params: T::Array[T::Hash[Symbol, T.untyped]], return_type: Symbol).returns(FunctionSignature) }
+  sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, SemanticAnnotator) rescue nil
     normalized_params = params.map do |param|
-      {
-        name: param[:name],
-        type: param[:type],
-        required: param[:default].nil?,
-        default: param[:default],
-        mutable: param[:mutable] || false,
-        takes: param[:takes] || false
-      }
+      AST::Param.new(
+        name: param.name,
+        type: param.type,
+        required: param.default.nil?,
+        default: param.default,
+        mutable: param.mutable || false,
+        takes: param.takes || false
+      )
     end
 
-    FunctionSignature.new(params: normalized_params, return_type: return_type)
+    FunctionSignature.new(params: normalized_params, return_type: Type.new(return_type))
   end
 
   # Resolve a function call: look up the function, dispatch based on type
@@ -102,11 +102,18 @@ module FunctionAnalysis
     end
 
     func_type = scope.resolve_type(func_name)
+    entry = scope.locals[func_name]
+    fsig = FunctionSignature.unwrap(func_type)
 
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
 
-    elsif func_type.is_a?(FunctionSignature)
+    # Direct call to a defined/imported/extern function. The authoritative
+    # fact is the binding's storage (:static for FN/IMPORT/EXTERN decls),
+    # NOT the storage shape of the signature — a fn-typed param/local
+    # holds the same Type-wrapped FunctionSignature but is :stack and
+    # routes to the fn_var_call path below.
+    elsif fsig && entry&.storage == :static && (func_type = fsig)
       node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
       if node.respond_to?(:extern_call=) && func_type.extern
         node.extern_call = true
@@ -125,17 +132,16 @@ module FunctionAnalysis
 
       if func_type.extern
         args.each do |arg|
-          ti = arg.type_info rescue nil
-          if ti&.respond_to?(:soa?) && ti.soa?
+          if arg.full_type.soa?
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
-        params = func_type.params || []
+        params = func_type.params
         params.each_with_index do |p, i|
-          if p[:comptime] && args[i].is_a?(AST::Identifier)
+          if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
             args[i].full_type = :Type  # Mark as type-value, not a variable
           end
@@ -178,7 +184,7 @@ module FunctionAnalysis
         # The original `!T` is stashed on `error_union_type` so
         # OR-RESCUE handlers (which read the LHS's union to pick
         # `catch`/`orelse`) can still see the un-stripped form.
-        if node.full_type.is_a?(Type) && node.full_type.respond_to?(:error_union?) &&
+        if node.full_type.respond_to?(:error_union?) &&
            node.full_type.error_union?
           node.error_union_type = node.full_type if node.respond_to?(:error_union_type=)
           outer = node.full_type
@@ -216,10 +222,10 @@ module FunctionAnalysis
       end
 
 
-    elsif func_type.is_a?(Type) && func_type.fn_type?
+    elsif fsig
       node.fn_var_call = true if node.respond_to?(:fn_var_call=)
       lookup_scope_for(func_name)&.mark_read(func_name)
-      sig = func_type.raw
+      sig = fsig
       synthetic_sig = FunctionSignature.new(
         params: sig.params,
         return_type: sig.return_type
@@ -240,25 +246,25 @@ module FunctionAnalysis
     # String returns only get heap_promoted_call from callee.returns_promoted
     # (not from type alone) because stdlib string functions like readFile use
     # frameAlloc internally — the caller shouldn't try to free those.
-    if node.type_info.is_a?(Type)
+    if node.full_type
       callee_node = @fn_nodes[func_name]
-      sig_return_heap = func_type.is_a?(FunctionSignature) && func_type.return_provenance == :heap
+      sig_return_heap = fsig && fsig.return_provenance == :heap
       if callee_node&.return_provenance == :heap || sig_return_heap
-        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
-      elsif node.type_info&.needs_escape_promotion? && !node.type_info&.string?
-        node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+        node.full_type.provenance = :heap
+      elsif node.full_type.needs_escape_promotion? && !node.full_type.string?
+        node.full_type.provenance = :heap
       else
         # Union return types with heap variants need heap_promoted_call
         # when the callee allocates at all (frame, heap, or alloc).
-        ret_type = node.type_info
+        ret_type = node.full_type
         if ret_type
           ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
           schema = lookup_type_schema(ret_sym)
-          if schema.is_a?(Hash) && schema[:kind] == :union
-            has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+          if Schemas.union?(schema)
+            has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
             callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
             if has_heap && callee_allocates
-              node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+              node.full_type.provenance = :heap
             end
           end
         end
@@ -266,38 +272,38 @@ module FunctionAnalysis
     end
   end
 
-  sig { params(config: T::Hash[Symbol, T.untyped]).returns(T.nilable(FunctionSignature)) }
+  sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }
   def normalize_intrinsic_signature(config)
     T.bind(self, SemanticAnnotator) rescue nil
-    return nil if config[:args] == :Varargs
+    return nil if config.arg_spec == :Varargs
 
-    params = config[:args].each_with_index.map do |arg_def, i|
+    params = config.arg_spec.each_with_index.map do |arg_def, i|
       if arg_def.is_a?(Hash)
         # Extended format: { type: :Int64, mutable: true, takes: false }
-        {
+        AST::Param.new(
           name: arg_def[:name] || "arg#{i}",
           type: arg_def[:type],
           required: true,
           mutable: arg_def[:mutable] || false,
           takes: arg_def[:takes] || false
-        }
+        )
       else
         # Simple format: just a type symbol
-        {
+        AST::Param.new(
           name: "arg#{i}",
           type: arg_def,
           required: true,
           mutable: false,
           takes: false
-        }
+        )
       end
     end
 
     FunctionSignature.new(
       params: params,
-      return_type: config[:return],
+      return_type: config.return_type,
       intrinsic: true,
-      zig_pattern: config[:zig]
+      zig_pattern: config.emit&.zig
     )
   end
 
@@ -305,7 +311,7 @@ module FunctionAnalysis
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     params = signature.params
-    min_args = params.count { |param| param[:required] }
+    min_args = params.count { |param| param.required }
     max_args = params.size
     given_args = node.args.size
 
@@ -318,12 +324,12 @@ module FunctionAnalysis
     end
 
     if given_args < max_args
-      params[given_args...max_args].each do |param|
-        next if param[:required]
-        default = param[:default]
+      (params[given_args...max_args] || []).each do |param|
+        next if param.required
+        default = param.default
         injected = case default
         when AST::DefaultLit
-          type_name = param[:type].is_a?(Symbol) ? param[:type].to_s : param[:type].to_s
+          type_name = param.type.to_s
           AST::StructLit.new(default.token, type_name, {}, nil)
         else
           default.dup
@@ -338,17 +344,17 @@ module FunctionAnalysis
     atomic_bare_value_args = []
 
     node.args.each_with_index do |arg_node, i|
-      param = params[i]
-      next if param[:comptime]  # comptime type params are not type-checked
+      param = T.must(params[i])
+      next if param.comptime  # comptime type params are not type-checked
       verify_param_lifetime!(arg_node, param, signature)
 
-      if param[:mutable]
+      if param.mutable
         if !arg_node.is_a?(AST::Identifier)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param[:name])
+          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param.name)
         end
 
         if current_scope.is_immutable?(arg_node.name)
-          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param[:name])
+          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param.name)
         end
 
         # Mark only the SymbolEntry as mutated-through-call. The callee receives a mutable reference
@@ -368,13 +374,13 @@ module FunctionAnalysis
 
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
-      if param[:takes] || is_give
+      if param.takes || is_give
         # Reject borrowed values passed to TAKES params.
         # Container index access (arr[i], map[key]) returns a borrow -
         # you cannot take ownership of data inside a container.
         # Use .remove(i) or COPY arr[i] instead.
         if inner_node.container_borrow
-          arg_ti = inner_node.type_info
+          arg_ti = inner_node.full_type
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti.is_a?(Type) ?
             (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
@@ -386,7 +392,7 @@ module FunctionAnalysis
 
         # Ensure @list args to TAKES params are heap-owned (implicit COPY).
         if inner_node.is_a?(AST::Identifier)
-          owned = ensure_owned_value!(inner_node, param[:type])
+          owned = ensure_owned_value!(inner_node, param.type)
           node.args[i] = owned if owned
         end
 
@@ -401,7 +407,7 @@ module FunctionAnalysis
         move_if_not_copyable!(
           inner_node,
           action: is_give ? :give : :takes,
-          consumer_param_type: param[:type],
+          consumer_param_type: param.type,
         )
         inner_node.was_moved = true
         arg_node.was_moved = true
@@ -413,17 +419,17 @@ module FunctionAnalysis
       end
 
       # Weak refs must be RESOLVE'd before passing to concrete params.
-      arg_ti = arg_node.respond_to?(:type_info) ? arg_node.type_info : nil
-      expected_raw = param[:type]
+      arg_ti = arg_node.respond_to?(:full_type) ? arg_node.full_type : nil
+      expected_raw = param.type
       if arg_ti&.link? && expected_raw != :Any
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
         unless param_type_obj&.link?
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param[:name])
+          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param.name)
         end
       end
 
-      expected = param[:type]
+      expected = param.type
       actual = arg_node.resolved_type
 
       match = false
@@ -439,7 +445,7 @@ module FunctionAnalysis
         elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
               actual_type_obj.raw.reentrant && !expected_type_obj.raw.reentrant
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param[:name])
+          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)
         end
       end
 
@@ -506,7 +512,7 @@ module FunctionAnalysis
       current_path = get_path_to_root(arg_node)
 
       next if current_path.nil?
-      is_mutable = param[:mutable]
+      is_mutable = param.mutable
 
       encountered_args.each_with_index do |prev, prev_index|
         # Mutable aliases conflict when their root paths overlap.
@@ -528,34 +534,34 @@ module FunctionAnalysis
     warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
   end
 
-  sig { params(arg_node: T.untyped, expected_type_obj: Type, param: T::Hash[Symbol, T.untyped]).returns(T::Boolean) }
+  sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
   def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.sync == :atomic
     return false if sym.respond_to?(:layout) && sym.layout == :indirect
-    return false if param[:sync] == :atomic
-    return false if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+    return false if param.sync == :atomic
+    return false if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
     return false if expected_type_obj.any? || expected_type_obj.fn_type?
     return false if expected_type_obj.shared? || expected_type_obj.any_sync?
 
     expected_type_obj.primitive?
   end
 
-  sig { params(arg_node: T.untyped, param: T::Hash[Symbol, T.untyped], signature: FunctionSignature).returns(T::Boolean) }
+  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def atomic_cell_to_atomic_param?(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.sync == :atomic
-    ptype = param[:type]
+    ptype = param.type
     return true if ptype.is_a?(Type) && ptype.sync == :atomic
-    return true if param[:sync] == :atomic
-    return true if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+    return true if param.sync == :atomic
+    return true if param.symbol&.respond_to?(:sync) && param.symbol.sync == :atomic
 
     requires = signature.requires
-    families = requires && requires[param[:name].to_s]
+    families = requires && requires[param.name.to_s]
     families.respond_to?(:include?) && families.include?(:ATOMIC)
   end
 
@@ -587,13 +593,13 @@ module FunctionAnalysis
       "will require an explicit @inconsistent call-site annotation.")
   end
 
-  sig { params(arg_node: T.untyped, param: T::Hash[Symbol, T.untyped], signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
+  sig { params(arg_node: T.untyped, param: AST::Param, signature: FunctionSignature).returns(T.nilable(T::Boolean)) }
   def verify_param_lifetime!(arg_node, param, signature)
     T.bind(self, SemanticAnnotator) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
 
     @og = T.let(@og, T.untyped)
-    if param[:mutable] && !@og.can_write?(arg_node.name)
+    if param.mutable && !@og.can_write?(arg_node.name)
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
@@ -602,7 +608,7 @@ module FunctionAnalysis
     lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
     return true if lifetime_paths.empty?
 
-    borrow_type = param[:mutable] ? :mutable : :immutable
+    borrow_type = param.mutable ? :mutable : :immutable
     return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
     # If `param` is named in the lifetime sources (any of the multi-
@@ -613,9 +619,9 @@ module FunctionAnalysis
       next [:wildcard] if p == :wildcard
       [p.to_s.split(".").first]
     end
-    return true unless base_paths.include?(:wildcard) || base_paths.include?(param[:name])
+    return true unless base_paths.include?(:wildcard) || base_paths.include?(param.name)
 
-    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param[:name])
+    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param.name)
   end
 
   # `node.return_lifetime` shapes:
@@ -682,14 +688,14 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     path = get_path_to_root(source_node)
     root_param_name = T.must(path).first.to_s
-    param = node.params.find { |p| p[:name] == root_param_name }
+    param = node.params.find { |p| p.name == root_param_name }
 
     if param.nil?
       error!(node, :LIFETIME_ROOT_NOT_PARAM, name: root_param_name)
     end
 
     # Extract the resolved type name (Type objects from parse_type_annotation)
-    param_type = param[:type]
+    param_type = param.type
     current_type_name = param_type.is_a?(Type) ? param_type.resolved : param_type.to_sym
 
     T.must(path).drop(1).each do |field_sym|
@@ -704,7 +710,8 @@ module FunctionAnalysis
       end
 
       # Check if the field exists in the schema
-      next_type = schema[field_name] || schema[field_sym] # handle string/sym keys
+      sf = schema.fields[field_name] || schema.fields[field_sym] # handle string/sym keys
+      next_type = sf&.type
 
       if next_type.nil?
         error!(node, :LIFETIME_NO_FIELD, type: current_type_name, field: field_name)
@@ -720,30 +727,30 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     node.params.each do |param|
       # Validate Defaults
-      if param[:default]
-        if param[:default].is_a?(AST::DefaultLit)
+      if param.default
+        if param.default.is_a?(AST::DefaultLit)
           # DEFAULT is only valid for struct-type params
-          param_type_sym = param[:type].is_a?(Symbol) ? param[:type] : param[:type].to_sym rescue nil
+          param_type_sym = param.type&.resolved
           schema = lookup_type_schema(param_type_sym) if param_type_sym
-          unless schema.is_a?(Hash) && !schema[:kind]
-            error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param[:type])
+          unless Schemas.struct?(schema)
+            error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param.type)
           end
           # Validate all fields of the struct have defaults
-          field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
+          field_names = schema.fields.keys
           unless field_names.empty?
-            field_defaults = schema[:field_defaults] || {}
+            field_defaults = schema.field_defaults || {}
             missing = field_names.reject { |f| field_defaults.key?(f) }
             if missing.any?
-              error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param[:name], type: param[:type], missing: missing.join(', '))
+              error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
             end
           end
-          param[:default].full_type = param[:type].to_sym rescue param[:type]
+          param.default.full_type = param.type
         else
-          visit(param[:default])
-          def_type = param[:default].resolved_type
-          param_type = param[:type]
+          visit(param.default)
+          def_type = param.default.resolved_type
+          param_type = param.type
           unless is_safe_autocast?(def_type, param_type)
-            error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param[:name], expected: param_type, got: def_type)
+            error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param.name, expected: param_type, got: def_type)
           end
         end
       end
@@ -751,12 +758,12 @@ module FunctionAnalysis
       # Seed sync for cross-module helpers where caller-sync propagation
       # cannot see call sites. Visible callers still override this later.
       param_sync = nil
-      if param[:sync]
-        param_sync = param[:sync]
-      elsif param[:type].is_a?(Type) && param[:type].any_sync?
-        param_sync = param[:type].sync
+      if param.sync
+        param_sync = param.sync
+      elsif param.type&.any_sync?
+        param_sync = param.type.sync
       elsif node.respond_to?(:requires) && node.requires
-        families = node.requires[param[:name].to_s]
+        families = node.requires[param.name.to_s]
         if families
           # Polymorphic family seeds are only defaults; visible callers
           # override them during caller-sync propagation.
@@ -779,33 +786,33 @@ module FunctionAnalysis
       # the bare-cell form.
       param_layout = nil
       if param_sync == :atomic
-        param_t = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type])
+        param_t = param.type
         param_layout = :indirect if param_t.respond_to?(:struct?) && param_t.struct?
       end
       current_scope.declare(
-        param[:name], nil, param[:type], param[:mutable], false, nil, :stack,
+        param.name, nil, param.type, param.mutable, false, nil, :stack,
         Set.new, [], sync: param_sync, layout: param_layout
       )
-      # Stash the SymbolEntry on the param hash so downstream passes don't
+      # Stash the SymbolEntry on the Param so downstream passes don't
       # need to find an Identifier reference in the body.
-      param[:symbol] = current_scope.locals[param[:name]]
-      param[:symbol].is_param = true
-      param[:symbol].param_decl_token = param[:name_token]
+      param.symbol = current_scope.locals[param.name]
+      param.symbol.is_param = true
+      param.symbol.param_decl_token = param.name_token
       # Preserve REQUIRES disjunctions for call-site effect resolution.
       if node.respond_to?(:requires) && node.requires
-        fams = node.requires[param[:name].to_s]
-        param[:symbol].sync_families = fams if fams.is_a?(Set) && !fams.empty?
+        fams = node.requires[param.name.to_s]
+        param.symbol.sync_families = fams if fams.is_a?(Set) && !fams.empty?
       end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
-      current_scope.locals[param[:name]].takes = true if param[:takes]
-      classify_ownership!(current_scope.locals[param[:name]])
-      og_declare(param[:name], nil, param[:type])
+      current_scope.locals[param.name].takes = true if param.takes
+      classify_ownership!(current_scope.locals[param.name])
+      og_declare(param.name, nil, param.type)
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
-      unless param[:takes]
-        @og[param[:name]]&.kind = :borrowed
+      unless param.takes
+        @og[param.name]&.kind = :borrowed
       end
-      param[:type]
+      param.type
     end
   end
 
@@ -816,10 +823,9 @@ module FunctionAnalysis
     return if node.captures.nil? || node.captures.empty?
 
     node.captures.each do |cap|
-      # cap is likely a hash: { name: "x" }
-      cap_name = cap[:name]
+      cap_name = cap.name
 
-      if cap[:default]
+      if cap.default
         error!(node, :CAPTURE_NO_DEFAULT, name: cap_name)
       end
 
@@ -837,7 +843,7 @@ module FunctionAnalysis
 
       entry = owner_scope.locals[cap_name]
 
-      if cap[:mutable] && !entry.mutable
+      if cap.mutable && !entry.mutable
         emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
       end
 
@@ -845,8 +851,8 @@ module FunctionAnalysis
       owner_scope.mark_read(cap_name)
 
       # Enrich the capture node with the resolved type
-      cap[:type] = entry.type
-      cap[:storage] = entry.storage
+      cap.type = entry.type
+      cap.storage = entry.storage
     end
   end
 
@@ -857,13 +863,13 @@ module FunctionAnalysis
 
     node.captures.each do |cap|
       current_scope.declare(
-        cap[:name],
+        cap.name,
         nil,
-        cap[:type],
-        cap[:mutable],
+        cap.type,
+        cap.mutable,
         false,
         nil,
-        cap[:storage]
+        cap.storage
       )
     end
   end
@@ -908,7 +914,7 @@ module FunctionAnalysis
     # Union variant constructors (Value.Nil, Shape.Point) create new values, not borrows.
     if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
       schema = lookup_type_schema(node.target.name.to_sym) rescue nil
-      return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
+      return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
     lifetime_paths = current_fn_ctx&.lifetime || []
@@ -1003,10 +1009,10 @@ module FunctionAnalysis
     pred.call(type)
   end
 
-  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  sig { params(definitions: T::Array[T.untyped], args: T::Array[T.untyped]).returns(T.untyped) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, SemanticAnnotator) rescue nil
-    definitions.find do |config|
+    matched = definitions.find do |config|
       next true if config[:args] == :Varargs  # Varargs accepts anything
 
       # Arity check
@@ -1022,7 +1028,7 @@ module FunctionAnalysis
           expected = spec[:type]
           next false unless is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.type_info.is_a?(Type) ? arg.type_info : nil
+          arg_type = arg.full_type
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true
@@ -1031,6 +1037,7 @@ module FunctionAnalysis
         end
       end
     end
+    matched && IntrinsicRegistry.fs(matched)
   end
 
   # Formats intrinsic args for error messages

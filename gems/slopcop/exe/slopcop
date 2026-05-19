@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/slopcop"
+
+def usage
+  warn <<~U
+    slopcop -- top true coverage gaps, ranked by fix-churn
+
+      slopcop report [--repo=.] [--coverage=coverage/.resultset.json] \\
+                   [--output=report.md] [--files=a.rb,b.rb] \\
+                   [--ffi=meth1,meth2] [--top=N]
+
+    --files  repo-relative .rb to triage (default: CLEAR's lowering passes)
+    --ffi    project external-boundary method names (the per-project
+             lexicon; the gem ships none -- it is general)
+  U
+  exit 1
+end
+
+usage if ARGV.empty? || %w[-h --help].include?(ARGV[0])
+usage unless ARGV[0] == "report"
+
+# CLEAR's project lexicon lives HERE (the caller), not in the gem.
+CLEAR_FFI_BOUNDARY = %w[
+  build_extern_trampoline_call build_extern_trampoline_method
+  build_extern_trampoline_common lower_extern_direct_call
+  lower_require lower_module
+].freeze
+
+opts = { repo: ".", coverage: "coverage/.resultset.json", output: nil,
+         top: 50, ffi: CLEAR_FFI_BOUNDARY,
+         files: %w[src/mir/mir_lowering.rb src/mir/control_flow.rb
+                   src/mir/escape_analysis.rb] }
+ARGV[1..].each do |a|
+  case a
+  when /\A--repo=(.+)/     then opts[:repo] = Regexp.last_match(1)
+  when /\A--coverage=(.+)/ then opts[:coverage] = Regexp.last_match(1)
+  when /\A--output=(.+)/   then opts[:output] = Regexp.last_match(1)
+  when /\A--files=(.+)/    then opts[:files] = Regexp.last_match(1).split(",")
+  when /\A--ffi=(.+)/      then opts[:ffi] = Regexp.last_match(1).split(",")
+  when /\A--top=(\d+)/     then opts[:top] = Regexp.last_match(1).to_i
+  else usage
+  end
+end
+
+md = SlopCop::Report.new(
+  files: opts[:files], repo: opts[:repo], resultset: opts[:coverage],
+  ffi_boundary: opts[:ffi], top: opts[:top],
+  # links must resolve from wherever the report is written.
+  link_base: (opts[:output] ? File.dirname(opts[:output]) : nil)
+).to_markdown
+
+if opts[:output]
+  File.write(opts[:output], md)
+  warn "wrote #{opts[:output]}"
+else
+  puts md
+end

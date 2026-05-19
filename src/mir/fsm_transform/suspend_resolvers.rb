@@ -61,11 +61,12 @@ module FsmTransform
       id = ctx[:id]
       bg_rt = ctx[:bg_rt]
 
-      setup_ops      = stdlib_def[:fsm_setup] || []
-      finish_block   = stdlib_def[:fsm_finish_block] || []
-      finish_value   = stdlib_def[:fsm_finish_value]
-      state_decls    = stdlib_def[:fsm_state_decls] || []
-      state_finalize = stdlib_def[:fsm_state_finalize] || []
+      em             = stdlib_def.emit
+      setup_ops      = em&.fsm_setup || []
+      finish_block   = em&.fsm_finish_block || []
+      finish_value   = em&.fsm_finish_value
+      state_decls    = em&.fsm_state_decls || []
+      state_finalize = em&.fsm_state_finalize || []
 
       # Lower call args via the surrounding capture-map context.
       arg_mirs = (io_tail.call_node.respond_to?(:args) ?

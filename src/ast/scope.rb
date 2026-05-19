@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "./symbol_entry"
+require_relative "./schemas"
 
 class Scope
     extend T::Sig
@@ -54,7 +55,7 @@ class Scope
   #
   # The cost: storage / sync / type changes that happen AFTER the body
   # has been visited (notably `EscapeAnalysis.propagate_caller_sync!`,
-  # which mutates `param[:symbol]`) do NOT propagate to the deep-copied
+  # which mutates `param.symbol`) do NOT propagate to the deep-copied
   # entries inside nested scopes. A pass that reads `node.symbol.storage`
   # off an Identifier inside a nested scope sees the pre-propagation
   # value.
@@ -62,7 +63,7 @@ class Scope
   # The rule for any post-annotation pass that needs a param's CURRENT
   # storage / sync:
   #
-  #   * mutate `param[:symbol]` (the function-level entry)
+  #   * mutate `param.symbol` (the function-level entry)
   #   * read against `Scope.live_param_syms(fn)` to refresh stale
   #     references
   #
@@ -101,7 +102,7 @@ class Scope
 
   # Build a {param_name => live SymbolEntry} map from a FunctionDef.
   #
-  # The "live" entry is the one stored on `param[:symbol]` -- the entry
+  # The "live" entry is the one stored on `param.symbol` -- the entry
   # that lives at the function scope and that `propagate_caller_sync!`
   # mutates in place. Any pass that has a `capture_symbols` (or similar)
   # cache of SymbolEntry references collected during annotation should
@@ -113,8 +114,8 @@ class Scope
   sig { params(fn: AST::FunctionDef).returns(T::Hash[String, SymbolEntry]) }
   def self.live_param_syms(fn)
     return {} unless fn.respond_to?(:params)
-    (fn.params || []).each_with_object({}) do |p, h|
-      h[p[:name].to_s] = p[:symbol] if p[:symbol]
+    fn.params.each_with_object({}) do |p, h|
+      h[p.name.to_s] = p.symbol if p.symbol
     end
   end
 
@@ -138,11 +139,7 @@ class Scope
     entry = @locals[name]
     return Type.new(:Any) if entry.nil?
 
-    stored = entry.type
-
-    # If already a Type (e.g. from parse_type_annotation), clone and overlay storage
-    # If a non-Symbol (e.g. a function signature Hash), wrap as-is
-    base_type = stored.is_a?(Type) ? stored : Type.new(stored)
+    base_type = entry.type
 
     # Overlay storage-derived capabilities onto the type
     case entry.storage
@@ -213,7 +210,7 @@ class Scope
 
   # Returns the new SymbolEntry on success, nil if the binding wasn't found
   # in the cap's old_scope (caller is responsible for emitting a diagnostic).
-  sig { params(capability: T::Hash[Symbol, T.untyped]).returns(T.nilable(SymbolEntry)) }
+  sig { params(capability: AST::Capability).returns(T.nilable(SymbolEntry)) }
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
     local = capability[:old_scope].locals[name]
@@ -292,7 +289,7 @@ module ScopeHelper
       scope
     else
       fn_scope = lookup_scope_for(name)
-      fn_scope && fn_scope.resolve_type(name).is_a?(FunctionSignature) ? fn_scope : nil
+      fn_scope && FunctionSignature.unwrap(fn_scope.resolve_type(name)) ? fn_scope : nil
     end
   end
 

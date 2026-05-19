@@ -16,7 +16,8 @@ module Decomplex
   # identifier in every other member. A member that spells them with
   # two names has a missed rename = bug candidate.
   class Type3Clone
-    Block = Struct.new(:skeleton, :names, :file, :defn, :line, keyword_init: true)
+    Block = Struct.new(:skeleton, :names, :file, :defn, :line, :span,
+                       keyword_init: true)
 
     HOLE_TYPES = %i[LVAR DVAR IVAR LASGN DASGN IASGN].freeze
     MIN_TOKENS = 8
@@ -47,7 +48,11 @@ module Decomplex
           if sk.size >= MIN_TOKENS
             blocks << Block.new(skeleton: sk, names: nm, file: @file,
                                 defn: defstack.last || "(top-level)",
-                                line: stmts.first.first_lineno)
+                                line: stmts.first.first_lineno,
+                                span: [stmts.first.first_lineno,
+                                       stmts.first.first_column,
+                                       stmts.last.last_lineno,
+                                       stmts.last.last_column])
           end
         end
       end
@@ -111,6 +116,8 @@ module Decomplex
                 file: m.file, defn: m.defn, line: m.line,
                 at: "#{m.file}:#{m.defn}:#{m.line}",
                 ref_at: "#{ref.file}:#{ref.defn}:#{ref.line}",
+                spans: { "#{m.file}:#{m.defn}:#{m.line}" => m.span,
+                         "#{ref.file}:#{ref.defn}:#{ref.line}" => ref.span },
                 ref_name: ref_name, divergent: spellings,
                 clone_size: members.size
               }

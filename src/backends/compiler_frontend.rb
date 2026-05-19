@@ -16,6 +16,7 @@ require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
 require_relative "../mir/control_flow"
+require_relative "../mir/pre_mir_type_check"
 
 class CompilerFrontend
     extend T::Sig
@@ -62,6 +63,11 @@ class CompilerFrontend
     # generation -- mir_lowering still walks the TestBlock directly.
     synthesize_test_body_wrappers!(T.must(ast), fn_nodes)
 
+    # AST→MIR boundary invariant: every evaluatable node must carry a
+    # resolved type by now. A nil full_type here is a compiler bug
+    # (annotator failed to stamp it), surfaced before MIR consumes it.
+    PreMirTypeCheck.verify!(T.must(ast))
+
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir_pass.transform!(T.must(ast))
 
@@ -70,7 +76,7 @@ class CompilerFrontend
     union_schemas = {}
     T.must(ast).statements.each do |stmt|
       case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
       when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
       end
@@ -86,8 +92,8 @@ class CompilerFrontend
     # determine needs_rt/can_fail for cross-module calls.
     annotator.scope_stack.first.locals.each do |name, entry|
       next if fn_sigs.key?(name)
-      sig = entry.type
-      next unless sig.is_a?(FunctionSignature) && sig.module_alias
+      sig = entry.fn_signature
+      next unless sig && sig.module_alias
       fn_sigs[name] = sig
     end
 

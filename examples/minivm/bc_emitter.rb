@@ -338,6 +338,17 @@ class BcEmitter
 
   private
 
+  # `stdlib_def` is either a legacy Hash literal (set directly in
+  # mir_lowering for InlineZig nodes) or a FunctionSignature (from
+  # `matched_stdlib_def` via IntrinsicRegistry). The ownership-effect
+  # keys the emitter reads (`:tag`, `:borrows`, `:elem`,
+  # `:fallible_clauses`) live on the signature's `emit` struct.
+  def sd_get(sd, key)
+    return nil unless sd
+    return sd[key] if sd.is_a?(Hash)
+    sd.emit && sd.emit.public_send(key)
+  end
+
   # ================================================================
   # Top-level processing
   # ================================================================
@@ -1103,7 +1114,7 @@ class BcEmitter
         # In both cases, bind the alias to the same slot value as the source.
         # The VM has no Arc/lock indirection — alias and source share storage.
         # The source is named in stdlib_def[:borrows].
-        sources = (mir_node.stdlib_def && mir_node.stdlib_def[:borrows]) || []
+        sources = sd_get(mir_node.stdlib_def, :borrows) || []
 
         # Prefetch captured-field sources. When this WITH runs inside a
         # synthesized worker (bounded concurrent / DO / BG), the lock target
@@ -1144,7 +1155,7 @@ class BcEmitter
         # skips these so we don't double-emit LOCK_ACQUIRE; instead the
         # explicit dispatch (after the regex pass) emits LOCK_ACQUIRE +
         # IS_ERR + branch + action_mir + retry loop.
-        fallible_clauses = (mir_node.stdlib_def && mir_node.stdlib_def[:fallible_clauses]) || []
+        fallible_clauses = sd_get(mir_node.stdlib_def, :fallible_clauses) || []
         fallible_var_names = fallible_clauses.map { |c| c[:var_name].to_s }.to_set
         # Emit fallible-acquire dispatch BEFORE the bare-acquire regex pass
         # and BEFORE the alias-setup passes. On runtime success path, the
@@ -1870,9 +1881,9 @@ class BcEmitter
   # pool-element AS-bindings and to stamp the capture slot's struct hint.
   def pool_get_components(expr)
     return nil unless expr.is_a?(MIR::InlineBc) && expr.op == :get
-    tag = expr.stdlib_def && expr.stdlib_def[:tag]
+    tag = sd_get(expr.stdlib_def, :tag)
     return nil unless tag == :pool_method
-    elem = expr.stdlib_def[:elem]
+    elem = sd_get(expr.stdlib_def, :elem)
     [expr.args[0], expr.args[1], elem]
   end
 
@@ -3534,7 +3545,7 @@ class BcEmitter
       # `set.insert(x)` and `list.{append,insert,push}(x)` collide on op name.
       # Dispatch on receiver shape: sets live in the env pool as MapRef and
       # need SET_INSERT; lists go through the list-push native.
-      tag = node.stdlib_def && node.stdlib_def[:tag]
+      tag = sd_get(node.stdlib_def, :tag)
       arg_hint = expr_type_hint(node.args[0])
       if tag == :set_method || arg_hint == :set
         compile_expr_to_value(node.args[0])
@@ -3646,7 +3657,7 @@ class BcEmitter
       # (id 13) calls listLen which doesn't reach into the pool. Emit
       # MAP_LENGTH for those receivers; otherwise the count native handles
       # list/string uniformly. Result lands on vstack as Int64Val (:any).
-      tag = node.stdlib_def && node.stdlib_def[:tag]
+      tag = sd_get(node.stdlib_def, :tag)
       arg_hint = expr_type_hint(node.args[0])
       compile_expr_to_value(node.args[0])
       if arg_hint == :set || arg_hint == :map
@@ -3663,7 +3674,7 @@ class BcEmitter
     when :get
       # POOL_METHODS["get"]: pool.get(id) -> ?T. Pool is modeled as a list;
       # list-ref handles in-bounds; otherwise yields Nil.
-      tag = node.stdlib_def && node.stdlib_def[:tag]
+      tag = sd_get(node.stdlib_def, :tag)
       if tag == :pool_method
         compile_expr_to_value(node.args[0]); pop_type
         compile_expr_to_value(node.args[1]); pop_type
@@ -3677,7 +3688,7 @@ class BcEmitter
       # uses LIST_REMOVE_AT which pushes (new_list, removed_elem) so we can
       # both rebuild the receiver and produce the removed element as the
       # expression value. pool.remove(id) is in-place: set list[id] = Nil.
-      tag = node.stdlib_def && node.stdlib_def[:tag]
+      tag = sd_get(node.stdlib_def, :tag)
       arg_hint = expr_type_hint(node.args[0])
       if tag == :set_method || arg_hint == :set
         compile_expr_to_value(node.args[0])
@@ -3746,7 +3757,7 @@ class BcEmitter
       # (id 41) only handles strings. Use SET_CONTAINS / MAP_CONTAINS for
       # collection-typed receivers; pool.contains?(id) checks if the
       # backing list has a non-Nil entry at index id.
-      tag = node.stdlib_def && node.stdlib_def[:tag]
+      tag = sd_get(node.stdlib_def, :tag)
       arg_hint = expr_type_hint(node.args[0])
       if tag == :pool_method
         # pool.contains?(id) -> (list-ref(pool, id) != Nil)

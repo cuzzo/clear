@@ -211,6 +211,31 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  bc-lower-coverage:
+    name: bc-lowering coverage (@target==:bc arms)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COVERAGE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      # Pure Ruby: re-lowers the existing .cht corpus with target: :bc
+      # to cover the @target==:bc lowering arms. No Zig / no clear build
+      # (lowering runs before the bytecode VM; the incomplete _bc_runner
+      # is never executed).
+      - run: bundle exec ruby tools/bc_lower_coverage.rb
+      - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/coverage.xml
+          flags: ruby,bc-lower
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   register-vm-allowlist:
     name: Register-VM allowlist (transpile-tests via --vm=register)
     # DISABLED: the register VM compiles vm.cht to a native binary per

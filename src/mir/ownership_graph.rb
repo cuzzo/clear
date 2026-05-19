@@ -29,6 +29,12 @@ class OwnershipGraph
     def moved?;   state == :moved; end
     sig { returns(T::Boolean) }
     def dropped?; state == :dropped; end
+    # Carrier struct: member stays :type_info; expose the project-wide
+    # canonical accessor name so readers use one name everywhere.
+    sig { returns(T.untyped) }
+    def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def full_type=(val); self.type_info = val; end
   end
 
   Edge = Struct.new(:from, :to, :kind, keyword_init: true)
@@ -99,7 +105,7 @@ class OwnershipGraph
     # Create target node with source's type
     @nodes[to] = Node.new(
       path: to, kind: source.kind, state: :live,
-      type_info: source.type_info, scope_depth: source.scope_depth, line: source.line
+      type_info: source.full_type, scope_depth: source.scope_depth, line: source.line
     )
 
     # Invalidate source and all owned children; record the move site

@@ -63,7 +63,6 @@ class Parser
     @tokens = tokens
     @pos = T.let(0, Integer)
     @source_code = source_code
-    @last_indirect_consumed = T.let(false, T::Boolean)
     @last_requires_clauses = T.let({}, T::Hash[T.untyped, T.untyped])
     @suppress_struct_lit = T.let(false, T::Boolean)
     # `gradual` controls whether omitted type annotations on
@@ -833,8 +832,8 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
-  sig { returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
-  def parse_argument_list()
+  sig { params(as_param: T::Boolean).returns(T::Array[T.untyped]) }
+  def parse_argument_list(as_param: true)
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
       is_mutable = match!(:KEYWORD, 'MUTABLE')
@@ -872,7 +871,18 @@ class Parser
         end
       end
 
-      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
+      # Shared by FN-param and USE-capture parsing. Params build an
+      # AST::Param directly (single representation, no Hash seam);
+      # USE-captures stay Hashes (distinct downstream shape).
+      if as_param
+        AST::Param.new(name: p_name, type: p_type, default: default_val,
+                       mutable: is_mutable, takes: takes,
+                       comptime: is_comptime, name_token: name_tok)
+      else
+        AST::Capture.new(name: p_name, type: p_type, default: default_val,
+                         mutable: is_mutable, takes: takes,
+                         comptime: is_comptime, name_token: name_tok)
+      end
     end
      .last # always ignore the first token
   end
@@ -1197,7 +1207,7 @@ class Parser
           p_name = T.must(consume(:VAR_ID)).value
           consume(:CHAR, ':')
           p_type = parse_type_annotation
-          { name: p_name, type: p_type }
+          AST::Param.new(name: p_name, type: p_type)
         end
         ret_type = nil
         if match!(:KEYWORD, 'RETURNS')
@@ -1216,30 +1226,19 @@ class Parser
         var_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
-          # parse_type_annotation records consumed @indirect so recursive union
-          # fields can preserve indirect payloads.
-          indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
             fname = T.must(fname_tok).value
             consume(:CHAR, ':')
             ftype = parse_type_annotation
-            indirect_fields << fname if @last_indirect_consumed
-            @last_indirect_consumed = false
             reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
             [fname, ftype]
           end
-          var_data = { kind: :inline_struct, fields: field_pairs.to_h }
-          var_data[:indirect_fields] = indirect_fields unless indirect_fields.empty?
-          variants[var_name] = var_data
+          variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
           vtype = parse_type_annotation
           reject_auto_in_aggregate_field!(T.must(vtype), var_name, nil, "UNION variant payload")
-          if @last_indirect_consumed
-            @last_indirect_consumed = false
-            vtype = { kind: :indirect_payload, type: vtype }
-          end
           variants[var_name] = vtype
         else
           # Unit variant: Point
@@ -1309,7 +1308,7 @@ class Parser
 
     captures = []
     if match!(:KEYWORD, 'USE')
-      captures = parse_argument_list()
+      captures = parse_argument_list(as_param: false)
     end
 
     # Return lifetime syntax:
@@ -1510,11 +1509,11 @@ class Parser
         end
 
         clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
-        catch_clauses << {
+        catch_clauses << AST::CatchClause.new(
           items: items,
           filters: filters,
           body: clause_body,
-        }
+        )
       end
       if match?(:KEYWORD, 'DEFAULT')
         consume(:KEYWORD, 'DEFAULT')
@@ -2021,7 +2020,7 @@ class Parser
       if match?(:CHAR, '&&')
         error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
-      bindings = [{ expr: condition, name: T.must(name_tok).value, name_token: name_tok }]
+      bindings = [AST::Binding.new(expr: condition, name: T.must(name_tok).value, name_token: name_tok)]
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -2054,7 +2053,7 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
-  sig { params(if_token: Lexer::Token, bindings: T::Array[T::Hash[Symbol, T.untyped]]).returns(AST::IfBind) }
+  sig { params(if_token: Lexer::Token, bindings: T::Array[AST::Binding]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
@@ -2071,12 +2070,12 @@ class Parser
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
   # Returns nil if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
-  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[T::Hash[T.untyped, T.untyped]])) }
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[AST::Binding])) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
       if node.op == :BIND_VAR
-        return node.paren_bind ? [{ expr: node.left, name: node.right.name, name_token: node.right.token }] : nil
+        return node.paren_bind ? [AST::Binding.new(expr: node.left, name: node.right.name, name_token: node.right.token)] : nil
       elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
         left_binds  = extract_paren_bindings(node.left, if_token)
         right_binds = extract_paren_bindings(node.right, if_token)
@@ -2155,11 +2154,11 @@ class Parser
         consume(:KEYWORD, 'WHEN')
         condition = parse_expression
         consume(:ARROW)
-        cases << { kind: :when, value: condition, body: [parse_expression] }
+        cases << AST::MatchCase.new(kind: :when, value: condition, body: [parse_expression])
       elsif match?(:CHAR, '{')
         pattern = parse_struct_pattern
         consume(:ARROW)
-        cases << { kind: :struct_pattern, value: pattern, body: [parse_expression] }
+        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: [parse_expression])
       else
         @suppress_struct_lit = true
         first_pattern = parse_expression
@@ -2184,10 +2183,10 @@ class Parser
         end
         consume(:ARROW)
         if extra_patterns.empty?
-          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression] }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: [parse_expression])
         else
-          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: [parse_expression] }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: [parse_expression])
         end
       end
       match!(:CHAR, ',')
@@ -2256,12 +2255,12 @@ class Parser
         condition = parse_expression
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :when, value: condition, body: body }
+        cases << AST::MatchCase.new(kind: :when, value: condition, body: body)
       elsif match?(:CHAR, '{')
         pattern = parse_struct_pattern
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
-        cases << { kind: :struct_pattern, value: pattern, body: body }
+        cases << AST::MatchCase.new(kind: :struct_pattern, value: pattern, body: body)
       else
         # Suppress struct literal parsing so TypeName.Variant{ ... } doesn't get
         # consumed as a constructor — the { starts a destructuring pattern.
@@ -2291,10 +2290,10 @@ class Parser
         consume(:ARROW)
         body = parse_block_body([',', 'DEFAULT', 'WHEN', 'END'])
         if extra_patterns.empty?
-          cases << { kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, binding: binding, destructure: destructure, body: body)
         else
-          cases << { kind: :eq, value: first_pattern, extra_values: extra_patterns,
-                     binding: binding, destructure: destructure, body: body }
+          cases << AST::MatchCase.new(kind: :eq, value: first_pattern, extra_values: extra_patterns,
+                     binding: binding, destructure: destructure, body: body)
         end
       end
       match!(:CHAR, ',')  # consume comma separator between cases if present
@@ -2326,14 +2325,14 @@ class Parser
         # `_` as value means wildcard — ignore this field's value
         if current.type == :VAR_ID && current.value == '_'
           consume(:VAR_ID)
-          fields << { name: name, value: :wildcard, name_token: name_tok }
+          fields << AST::PatternField.new(name: name, value: :wildcard, name_token: name_tok)
         else
-          fields << { name: name, value: parse_expression, name_token: name_tok }
+          fields << AST::PatternField.new(name: name, value: parse_expression, name_token: name_tok)
         end
       else
         # Bare name: destructuring bind — extract field into a local variable.
         # { x, y } means bind subject.x to x, subject.y to y.
-        fields << { name: name, value: :bind, name_token: name_tok }
+        fields << AST::PatternField.new(name: name, value: :bind, name_token: name_tok)
       end
 
       match!(:CHAR, ',')  # optional comma between fields
@@ -2360,25 +2359,25 @@ class Parser
   # present, `kind` is nil and the annotator resolves it from the
   # registered (type, kind) entry.
   # Parse a single CATCH item: a bare TYPE_ID that's either a kind (if
-  # in ERROR_KINDS) or a type. Returns { form:, name:, token: }.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  # in ERROR_KINDS) or a type.
+  sig { returns(AST::CatchItem) }
   def parse_catch_item
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
-    { form: form, name: T.must(tok).value, token: tok }
+    AST::CatchItem.new(form: form, name: T.must(tok).value, token: T.must(tok))
   end
 
   # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
-  # STRING literal (message). Returns { form:, value:, token: }.
-  sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  # STRING literal (message).
+  sig { returns(T.nilable(AST::CatchFilter)) }
   def parse_catch_filter
     if match?(:TYPE_ID)
       tok = consume(:TYPE_ID)
-      { form: :type, value: T.must(tok).value, token: tok }
+      AST::CatchFilter.new(form: :type, value: T.must(tok).value, token: T.must(tok))
     elsif match?(:STRING)
       tok = current
       str_expr = parse_expression
-      { form: :message, value: str_expr, token: tok }
+      AST::CatchFilter.new(form: :message, value: str_expr, token: tok)
     else
       error!(current, :CATCH_WITH_BAD_INNER)
     end
@@ -2485,7 +2484,7 @@ class Parser
 
       reject_auto_in_aggregate_field!(T.must(type), name, name_tok, "STRUCT")
 
-      [name, { type: type, default: default_val, borrowed: borrowed }]
+      [name, AST::StructField.new(type: type, default: default_val, borrowed: borrowed)]
     end
     pairs.to_h
   end
@@ -2556,8 +2555,8 @@ class Parser
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
       if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
-        consume(:CHAR, '[')
-        consume(:CHAR, ']')
+        # List[] / List[1, 2, 3] -- empty or element-initialized.
+        _, ctor_items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
         collection = { "List" => :list, "Pool" => :pool, "Set" => :set }.fetch(name)
         is_soa = false
         shard_count = nil
@@ -2570,7 +2569,7 @@ class Parser
           shard_count = mods[:shard_count]
           is_soa = mods[:soa]
         end
-        node = AST::ListLit.new(type_token, [], storage)
+        node = AST::ListLit.new(type_token, ctor_items, storage)
         node.instance_variable_set(:@constructor_collection, collection)
         node.instance_variable_set(:@constructor_soa, is_soa)
         node.instance_variable_set(:@constructor_shard_count, shard_count)
@@ -2632,7 +2631,7 @@ class Parser
       params = parse_argument_list()
       captures = []
       if match!(:KEYWORD, 'USE')
-        captures = parse_argument_list()
+        captures = parse_argument_list(as_param: false)
       end
       consume(:ARROW, '->')
       body = parse_expression
@@ -2756,7 +2755,7 @@ class Parser
     end
     Type.new(FunctionSignature.new(
       params: param_types.each_with_index.map { |t, i|
-        { name: "arg#{i}", type: t, required: true, mutable: false, takes: false }
+        AST::Param.new(name: "arg#{i}", type: t, required: true, mutable: false, takes: false)
       },
       return_type: return_type,
       reentrant: allows_reentrant
@@ -2806,22 +2805,8 @@ class Parser
       optional_prefix = "?"
     end
 
-    # Check for heap prefix: %Type — tracked as location, not embedded in the symbol.
-    is_heap = false
-    if match?(:PERCENT)
-      consume(:PERCENT)
-      is_heap = true
-    end
-
-    # Audit#3 — clear diagnostic for `?Auto` / `!Auto` / `~Auto` /
-    # `%Auto`. Combining a prefix with `Auto` has no defined
-    # semantics yet (would `?Auto` infer a nullable T or a regular
-    # T?), so reject explicitly with a message pointing at the
-    # offending Auto keyword. Without this check the parser would
-    # fall through to `consume(:TYPE_ID)` and emit a generic
-    # "Expected TYPE_ID, got Auto" error.
     if match?(:KEYWORD, 'Auto')
-      prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{is_heap ? '%' : ''}"
+      prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}"
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
 
@@ -2941,14 +2926,10 @@ class Parser
     observable  = caps&.dig(:observable) || false
     observable_token = caps&.dig(:observable_token)
 
-    # Plain @indirect on non-array types is a union-field signal, not a
-    # heap-boxed Type layout. @indirect:atomic is the exception because it
-    # represents the AtomicPtr surface.
-    is_indirect = false if is_indirect && !inner.start_with?("[") && sync != :atomic
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
-    loc = is_heap ? :heap : (is_indirect ? :heap : nil)
+    loc = is_indirect ? :heap : nil
     layout = is_indirect ? :indirect : nil
     # Mirror CapabilityWrap's auto-promotion so @indirect:atomic has the same
     # ownership whether it appears in an expression or a type annotation.
@@ -3184,7 +3165,6 @@ class Parser
       result[:sync] = :symbol
     when "@indirect"
       error!(token, :DUPLICATE_LAYOUT_CAP) if result[:is_indirect]
-      @last_indirect_consumed = true
       result[:is_indirect] = true
     when "@soa"
       error!(token, :DUPLICATE_SOA_CAP) if result[:is_soa]
@@ -3313,7 +3293,7 @@ class Parser
         guard_expr = parse_expression
       end
 
-      capabilities << { capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable, guard_expr: guard_expr }
+      capabilities << AST::Capability.new(capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable, guard_expr: guard_expr)
 
       # Check for comma (continue) or opening brace (done)
       break unless match!(:CHAR, ',')
@@ -3381,13 +3361,13 @@ class Parser
       alias_mutable = true if match!(:KEYWORD, 'MUTABLE')
       alias_name = T.must(consume(:VAR_ID)).value
 
-      capabilities << {
+      capabilities << AST::Capability.new(
         capability: :SNAPSHOT,
         var_node: var_node,
         alias: alias_name,
         alias_mutable: alias_mutable,
         snapshot_token: snapshot_tok,
-      }
+      )
       any_mutable ||= alias_mutable
 
       break unless match!(:CHAR, ',')
@@ -3462,13 +3442,13 @@ class Parser
 
     # `view_token` lets fixable errors replace VIEW with MATERIALIZED VIEW
     # using the exact source span.
-    node = AST::WithBlock.new(with_token, [{
+    node = AST::WithBlock.new(with_token, [AST::Capability.new(
       capability: capability,
       var_node: var_node,
       alias: alias_name,
       alias_mutable: false,
       view_token: view_token,
-    }], body)
+    )], body)
     node.view_kind = view_kind
     node
   end

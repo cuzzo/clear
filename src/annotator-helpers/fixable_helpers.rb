@@ -257,7 +257,7 @@ module FixableHelper
     # wrong keyword would either compile-error (CLONE on plain T) or
     # do something semantically different from what the user wants
     # (deep-COPY on an Arc handle when a refcount bump suffices).
-    type = og_node.respond_to?(:type_info) ? og_node.type_info : nil
+    type = og_node.respond_to?(:full_type) ? og_node.full_type : nil
     is_shared = type.respond_to?(:shared?)     ? type.shared?     : false
     is_multi  = type.respond_to?(:multiowned?) ? type.multiowned? : false
     is_split  = type.respond_to?(:split?)      ? type.split?      : false
@@ -1481,7 +1481,7 @@ module FixableHelper
   sig { params(decl: T.untyped, slot: AutoConstraintCollector::Slot).returns(T.untyped) }
   def emit_auto_shape_resolved_finding!(decl, slot)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless decl && decl.type.is_a?(Type)
+    return unless decl&.type
     return if decl.type.auto?  # not yet wrapped — skip
     type_str = auto_type_source_form(decl.type)
     name = decl.respond_to?(:name) ? decl.name : "<binding>"
@@ -1625,7 +1625,7 @@ module FixableHelper
     case slot.kind
     when :param
       param = slot.decl_node.params[slot.index]
-      "parameter '#{param[:name]}' of `#{slot.fn_name}`"
+      "parameter '#{param.name}' of `#{slot.fn_name}`"
     when :return
       "return type of `#{slot.fn_name}`"
     when :local

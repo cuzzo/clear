@@ -152,7 +152,7 @@ class FunctionCFG
         stmt.cases.each do |c|
           case_block = cfg.new_block
           current_block.add_successor(case_block)
-          case_exit = build_body(c[:body] || [], case_block, exit_target, cfg)
+          case_exit = build_body(c.body, case_block, exit_target, cfg)
           case_exit.add_successor(join_block) if case_exit
         end
         if stmt.default_case
@@ -506,10 +506,10 @@ class OwnershipDataflow
   sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def init_entry_state
     state = {}
-    (@fn_node.params || []).each do |p|
-      next unless p[:takes]
-      name = p[:name].to_s
-      ti = p[:type].is_a?(Type) ? p[:type] : (Type.new(p[:type] || :Any) rescue nil)
+    @fn_node.params.each do |p|
+      next unless p.takes
+      name = p.name.to_s
+      ti = p.type || Type.new(:Any)
       needs = ti ? ti.needs_explicit_cleanup?(:heap, @schema_lookup) : true
       state[name] = OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: needs)
     end
@@ -620,10 +620,9 @@ class OwnershipDataflow
       lhs = stmt.name
       lhs_is_map = lhs.is_a?(AST::GetIndex) && (Type.from_node(lhs.target)&.map? rescue false)
       skip_rhs_move = if lhs_is_map
-        val_ti_raw = stmt.value.type_info rescue nil
-        val_resolved = val_ti_raw && (val_ti_raw.is_a?(Type) ? val_ti_raw.resolved : val_ti_raw)
-        schema = val_resolved && @schema_lookup&.call(val_resolved)
-        !!Schemas.as_union_schema(schema)
+        val_resolved = stmt.value.full_type.resolved
+        schema = @schema_lookup&.call(val_resolved)
+        Schemas.union?(schema)
       else
         false
       end
@@ -1299,7 +1298,7 @@ module LoopFrameAnalysis
       walk_stmts!(stmt.then_branch)
       walk_stmts!(stmt.else_branch)
     when AST::MatchStatement
-      stmt.cases.each { |c| walk_stmts!(c[:body]) }
+      stmt.cases.each { |c| walk_stmts!(c.body) }
       walk_stmts!(stmt.default_case)
     when AST::WithBlock
       walk_stmts!(stmt.body)
@@ -1498,8 +1497,7 @@ module LoopFrameAnalysis
     # carry value needing heap promotion. This covers both stdlib_allocates=true
     # calls (toString, intToString, etc.) and user-defined string-returning functions.
     if expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
-      ti = expr.type_info rescue nil
-      return true if ti.is_a?(Type) && ti.string?
+      return true if expr.full_type.string?
     end
     case expr
     when AST::Identifier
@@ -1547,8 +1545,7 @@ module LoopFrameAnalysis
       # Identifiers are already handled by :dupe_string_literal in lower_indexed_assignment
       # (for map puts) and are a no-op for struct fields -- skip them to avoid double-dupe.
       next if val.is_a?(AST::Identifier)
-      val_ti = val.type_info rescue nil
-      next unless val_ti.is_a?(Type) && val_ti.string?
+      next unless val.full_type.string?
       # Promote the value expression so the concat/dupe uses heapAlloc.
       promote_value_to_heap!(val)
     end
@@ -1560,9 +1557,8 @@ module LoopFrameAnalysis
   sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   def self.promote_value_to_heap!(node)
     return unless node
-    ti = node.type_info rescue nil
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    return unless ti.is_a?(Type) && ti.string?
+    ti = node.full_type
+    return unless ti.string?
     return if ti.heap_provenance?  # already heap
     case node
     when AST::BinaryOp
@@ -1598,8 +1594,7 @@ module LoopFrameAnalysis
   def self.promote_to_heap!(ident_node)
     decl_node = ident_node.symbol&.reg
     return unless decl_node
-    decl_ti = decl_node.type_info rescue nil
-    return unless decl_ti.is_a?(Type)
+    decl_ti = decl_node.full_type
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
     decl_ti.provenance = :heap
     decl_node.storage = :heap
@@ -1644,7 +1639,7 @@ module LoopFrameAnalysis
         scan_direct(s.then_branch, &block)
         scan_direct(s.else_branch, &block)
       when AST::MatchStatement
-        s.cases.each { |c| scan_direct(c[:body], &block) }
+        s.cases.each { |c| scan_direct(c.body, &block) }
         scan_direct(s.default_case, &block) if s.default_case
       when AST::WithBlock
         scan_direct(s.body, &block)
@@ -1830,7 +1825,7 @@ class BorrowChecker
       check_stmts(stmt.body)
 
     when AST::MatchStatement
-      stmt.cases.each { |c| check_stmts(c[:body]) }
+      stmt.cases.each { |c| check_stmts(c.body) }
       check_stmts(stmt.default_case)
 
     when AST::DoBlock
@@ -1976,9 +1971,7 @@ class BorrowChecker
     return if source.is_a?(AST::CopyNode)
 
     if source.is_a?(AST::Identifier)
-      ti = source.type_info rescue nil
-      ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      return if ti.is_a?(Type) && ti.shared?
+      return if source.full_type.shared?
       names << source.name.to_s
       return
     end
@@ -2023,9 +2016,7 @@ class BorrowChecker
 
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = ident.type_info rescue nil
-    return true unless ti
-    ti = Type.new(ti) if !ti.is_a?(Type)
+    ti = ident.full_type
     is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end

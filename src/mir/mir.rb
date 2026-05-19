@@ -17,6 +17,7 @@
 # New nodes here use distinct names to coexist during migration.
 
 require "sorbet-runtime"
+require_relative "../annotator-helpers/intrinsic_registry"
 
 module MIR
   # Common interface for all MIR nodes.
@@ -1372,6 +1373,12 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    # Carrier struct: member stays :type_info; expose the project-wide
+    # canonical accessor name so readers use one name everywhere.
+    sig { returns(T.untyped) }
+    def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def full_type=(val); self.type_info = val; end
   end
 
   # Marks function exit with escaped vars. Subsumes old MIR::Return.
@@ -1807,5 +1814,29 @@ module MIR
                               :map_kind, :stdlib_def, :key_zig, :val_zig,
                               :resolved_allocs, :template_kind) do
     include Expr
+  end
+
+  # Hard flip (EPIC #65): every stdlib_def carrier coerces its payload
+  # to a FunctionSignature on write. No Hash backdoor -- readers still
+  # doing entry[:zig]/.dig(:...) will fail loudly, which is the
+  # intended map of remaining reader-migration work.
+  module StdlibDefFsCoercion
+    extend T::Sig
+    sig { params(v: T.untyped).returns(T.untyped) }
+    def stdlib_def=(v)
+      super(IntrinsicRegistry.fs(v))
+    end
+
+    # Struct positional construction (`InlineBc.new(op, args, hash)`)
+    # assigns the member directly, bypassing the setter -- re-run it
+    # through the coercing setter so the carrier is always FS.
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      T.unsafe(self).stdlib_def = T.unsafe(self).stdlib_def
+    end
+  end
+  [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
+    k.prepend(StdlibDefFsCoercion)
   end
 end

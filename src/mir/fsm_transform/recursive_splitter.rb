@@ -381,15 +381,8 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return false unless sus.is_a?(Segments::NextSuspend)
-      ft = sus.promise_ast.full_type
-      return true if ft.nil?
-      # Type may already be a Type-like object (test fixtures) or a
-      # raw symbol that needs Type.new(...) wrapping. Try to call
-      # future? directly first; only wrap if the object doesn't
-      # answer.
-      pt = ft.respond_to?(:future?) ? ft : (Type.new(ft) rescue nil)
-      return true if pt.nil?
-      return true unless pt.respond_to?(:future?) && pt.future?
+      pt = sus.promise_ast.full_type
+      return true unless pt.future?
       return true if pt.respond_to?(:stream?) && pt.stream?
       return true if pt.respond_to?(:promise_list?) && pt.promise_list?
       false

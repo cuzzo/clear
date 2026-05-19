@@ -60,6 +60,8 @@ alias rather than as a standalone report.
 | **polarity canonicalization** — `if x..else` / `unless x` / `if !x` folded before mining | 1,2,3 | normalization pre-pass in all spec miners | [x] |
 | **derived-state def-use** — `b = f(a)`, both feed decisions; flag when only one is refreshed | 1 | program slicing; DynaMine | [x] |
 | **Type-3 clone + divergence** — pasted block, one variable inconsistently renamed/dropped | 3 | CP-Miner (Li et al. OSDI'04); DECKARD; CCFinder | [x] |
+| **false simplicity** — local syntax understating non-local behaviour: hidden dispatch/mutation/context/IO, callback inversion, metaprogramming, monkeypatch/reopen; one category, support×scatter | 2,3 | Engler "Bugs as Deviant Behavior" (the #8 protocol pair is Broken Protocols above); shallow triggers vs RuboCop/Reek catalogued in [false-simplicity.md](../false-simplicity.md) | [x] |
+| **fat union (product-vs-sum)** — `case <disc> when ClassA…` whose arms read mostly variant-invariant members (or members used outside the dispatch); the common core should be a struct + a small union. Measures+ranks the cohesion evidence; **extraction routes to nil-kill** | 1,2 | Fowler "Replace Conditional with Polymorphism"; sum-vs-product / data-clump; nil-kill owns the rewrite | [x] |
 | ~~data-clump → value object~~ — **DROPPED**, owned by `nil-kill` (see below) | 1,2 | — | ⊘ |
 
 ## Existing systems and why they do not cover this
@@ -77,7 +79,11 @@ alias rather than as a standalone report.
 - **Flog** — per-method complexity (ABC-like). A count, not a
   structural-duplication or missing-decision signal.
 - **RuboCop** — style + a few correctness cops; pattern-based, single
-  file, no cross-site frequency mining.
+  file, no cross-site frequency mining. Its `Style/Send` (off by
+  default), `Style/GlobalVars`, `Rails/Output`, `Security/Open`, etc.
+  cover only scattered, binary, differently-framed slivers of the
+  false-simplicity category — not one blast-radius-ranked category;
+  the gap is catalogued in [false-simplicity.md](../false-simplicity.md).
 - **debride** — dead-method detection. Orthogonal (finds *unused*, not
   *duplicated/half-applied*).
 - **RubyCritic** — aggregates the above; inherits their blind spot.

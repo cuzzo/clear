@@ -39,8 +39,8 @@ module PipeAnalysis
   sig { params(node: T.untyped).returns(T::Boolean) }
   def finite_stream_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? ||
-      node.type_info&.bounded_stream? || node.type_info&.open_stream?
+    node.is_a?(AST::RangeLit) || node.full_type.dynamic_stream? ||
+      node.full_type.bounded_stream? || node.full_type.open_stream?
   end
 
   # Observable Phase 2.2 + COLLECT-default: a fold-terminal whose
@@ -61,7 +61,7 @@ module PipeAnalysis
     # fold eagerly to a scalar -- there's no fiber producing values
     # while a reader could WITH VIEW the accumulator. Exclude them.
     return if node.left.is_a?(AST::RangeLit)
-    ti = node.left.type_info
+    ti = node.left.full_type
     return unless ti && ti.future? &&
                   (ti.dynamic_stream? || ti.inf_stream? || ti.open_stream? || ti.bounded_stream?)
     node.observable_terminal = true
@@ -109,22 +109,22 @@ module PipeAnalysis
   sig { params(node: T.untyped).returns(T::Boolean) }
   def bounded_stream_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.type_info&.bounded_stream?
+    node.full_type.bounded_stream?
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
   def finite_stream_element_type(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return range_element_type(node) if node.is_a?(AST::RangeLit)
-    return node.type_info.open_stream_element_type.resolved if node.type_info&.open_stream?
-    node.type_info.tense_type.element_type.resolved
+    return node.full_type.open_stream_element_type.resolved if node.full_type.open_stream?
+    node.full_type.tense_type.element_type.resolved
   end
 
   # Element type for an InfStream source (~T[INF]).
   sig { params(node: T.untyped).returns(Symbol) }
   def inf_stream_element_type(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    node.type_info.inf_stream_element_type.resolved
+    node.full_type.inf_stream_element_type.resolved
   end
 
   sig { returns(T.nilable(T::Boolean)) }
@@ -220,6 +220,13 @@ module PipeAnalysis
     when AST::CollectOp
       analyze_collect_op(node)
     end
+
+    # Every analyze_* above stamps node.full_type with the pipeline's
+    # type AFTER this op. The op node itself evaluates to exactly that
+    # (a transform op -> the post-op stream type; a terminal -> its
+    # result / Void). Stamp it so no pipeline op reaches MIR untyped.
+    # Sole owner of a pipeline op node's type — assign unconditionally.
+    node.right.full_type = node.full_type
   end
 
   # COLLECT: pipe-terminal that joins a `~T@observable` and returns
@@ -230,7 +237,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(Symbol) }
   def analyze_collect_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_t = node.left.type_info
+    lhs_t = node.left.full_type
     unless lhs_t&.future? && lhs_t&.observable?
       ty = lhs_t&.resolved || "<unknown>"
       error!(node, :COLLECT_NEEDS_OBSERVABLE, got: ty)
@@ -259,7 +266,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.type_info&.inf_stream? &&
+    is_inf    = node.left.full_type.inf_stream? &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
     is_stream = (finite_stream_source?(node.left) || is_inf) &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) ||
@@ -270,7 +277,7 @@ module PipeAnalysis
     elsif is_stream
       finite_stream_element_type(node.left)
     else
-      node.left.type_info.element_type.resolved
+      node.left.full_type.element_type.resolved
     end
 
     # Create a temporary Scope for the body
@@ -300,11 +307,11 @@ module PipeAnalysis
     when AST::IndexOp
       # INDEX returns HashMap<KeyType, ElementType[]>
       key_type = node.right.expression.resolved_type
-      node.full_type = :"HashMap<#{item_type}[]>"
+      node.full_type = Type.new(:"HashMap<#{item_type}[]>")
       node.right.full_type = key_type
     when AST::OrderByOp
       # ORDER_BY returns the same list type, sorted
-      node.full_type = :"#{item_type}[]"
+      node.full_type = Type.new(:"#{item_type}[]")
       node.right.full_type = node.right.expression.resolved_type
     end
 
@@ -319,7 +326,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_take_while_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.type_info&.inf_stream?
+    is_inf    = node.left.full_type.inf_stream?
     is_stream = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "TAKE_WHILE", allow_range: is_stream, allow_stream: is_stream)
     item_type = if is_inf
@@ -327,7 +334,7 @@ module PipeAnalysis
     elsif is_stream
       finite_stream_element_type(node.left)
     else
-      node.left.type_info.element_type.resolved
+      node.left.full_type.element_type.resolved
     end
 
     with_new_scope do
@@ -348,7 +355,7 @@ module PipeAnalysis
   def analyze_window_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     require_array_input!(node, "WINDOW")
-    item_type = node.left.type_info.element_type.resolved
+    item_type = node.left.full_type.element_type.resolved
 
     # Validate the size argument is numeric
     visit(node.right.size)
@@ -364,8 +371,8 @@ module PipeAnalysis
     end
 
     # Result is a list of whatever the expression produces
-    expr_type = node.right.expression.full_type || node.right.expression.resolved_type
-    node.full_type = :"#{expr_type}[]"
+    expr_type = node.right.expression.full_type_or(node.right.expression.resolved_type)
+    node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -422,7 +429,7 @@ module PipeAnalysis
     end
 
     # Determine input element type (works for arrays and all stream types)
-    left_ti = node.left.type_info
+    left_ti = node.left.full_type
     item_type = if left_ti&.inf_stream?
       left_ti.inf_stream_element_type.resolved
     elsif left_ti&.open_stream? || left_ti&.dynamic_stream?
@@ -441,8 +448,8 @@ module PipeAnalysis
       visit(bw.expression)
     end
 
-    expr_type = bw.expression.full_type || bw.expression.resolved_type
-    node.full_type = :"#{expr_type}[]"
+    expr_type = bw.expression.full_type_or(bw.expression.resolved_type)
+    node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -451,11 +458,11 @@ module PipeAnalysis
   def analyze_join_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     require_array_input!(node, "JOIN")
-    left_type = node.left.type_info.element_type.resolved
+    left_type = node.left.full_type.element_type.resolved
 
     # Visit and validate the right source
     visit(node.right.right_source)
-    rhs_type_info = node.right.right_source.type_info
+    rhs_type_info = node.right.right_source.full_type
     unless node.right.right_source.metatype == :array || rhs_type_info&.collection?
       error!(node.right.right_source, :JOIN_RIGHT_NEEDS_LIST, got: node.right.right_source.resolved_type)
     end
@@ -477,6 +484,10 @@ module PipeAnalysis
       unless key_expr.body.resolved_type == :Bool
         error!(key_expr, :JOIN_LAMBDA_NEEDS_BOOL, got: key_expr.body.resolved_type)
       end
+      # The JOIN key lambda IS a predicate ((left,right)->Bool). Type
+      # the LambdaLit via the standard lambda-signature builder (same
+      # as visit_LambdaLit) — its return is the Bool just validated.
+      key_expr.full_type = build_lambda_signature(params, :Bool)
     else
       # Shared key form: _.field applied to both sides
       # Validate the key expression with _ as left type
@@ -495,12 +506,12 @@ module PipeAnalysis
     join_type_name = :"JoinResult_#{left_type}_#{right_type}"
     unless current_scope.resolve_type_definition(join_type_name)
       current_scope.declare_type(join_type_name, Schemas::StructSchema.new(fields: {
-        "left"  => left_type,
-        "right" => :"?#{right_type}",
+        "left"  => AST::StructField.new(type: left_type),
+        "right" => AST::StructField.new(type: :"?#{right_type}"),
       }))
     end
 
-    node.full_type = :"#{join_type_name}[]"
+    node.full_type = Type.new(:"#{join_type_name}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -527,7 +538,7 @@ module PipeAnalysis
     # Also accepts range/stream sources for the fused lazy path.
     is_stream = finite_stream_source?(node.left)
     require_array_input!(node, "REDUCE", allow_range: is_stream, allow_stream: is_stream)
-    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     # Analyze the initial value to get the accumulator type
     visit(node.right.initial_value)
@@ -586,7 +597,7 @@ module PipeAnalysis
     # LIMIT: list |> LIMIT n
     # Also accepts range and stream sources (fused lazy path).
     is_range  = node.left.is_a?(AST::RangeLit)
-    lhs_ti    = node.left.type_info
+    lhs_ti    = node.left.full_type
     is_stream = lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream? || lhs_ti&.inf_stream?
     require_array_input!(node, "LIMIT", allow_range: is_range || is_stream, allow_stream: is_stream)
 
@@ -608,7 +619,7 @@ module PipeAnalysis
     end
 
     # Result type is a materialized list of the element type
-    node.full_type = :"#{item_type}[]"
+    node.full_type = Type.new(:"#{item_type}[]")
     node.storage = :frame
   end
 
@@ -619,7 +630,7 @@ module PipeAnalysis
     # Optional inner binding: UNNEST _.arr AS $o  parses as UNNEST BIND_VAR(_.arr, $o)
     # because :pipe_expression uses parse_expression(1) which consumes AS at prec 2.
     require_array_input!(node, "UNNEST")
-    item_type = node.left.type_info.element_type.resolved
+    item_type = node.left.full_type.element_type.resolved
 
     # Detect inner binding: UNNEST expr AS @name -> expression is BIND_VAR(expr, @name)
     inner_bind_name = nil
@@ -642,7 +653,7 @@ module PipeAnalysis
 
     # Result type is the element type of the nested array
     nested_element_type = T.must(expr_type.element_type).resolved
-    node.full_type = :"#{nested_element_type}[]"
+    node.full_type = Type.new(:"#{nested_element_type}[]")
     node.right.full_type = node.right.expression.full_type
     node.storage = :frame
 
@@ -659,7 +670,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # DISTINCT: list |> DISTINCT _.field (or just DISTINCT _)
     # Returns a Set of unique key values (T[]@set or T[N]@set).
-    lhs_type  = node.left.type_info
+    lhs_type  = node.left.full_type
     is_inf    = lhs_type&.inf_stream?
     is_stream = finite_stream_source?(node.left) || is_inf
 
@@ -756,7 +767,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     # 1. Validate Arity: Must accept exactly 1 argument (the pipe input)
     params = sig.params
-    min_args = params.count { |p| p[:required] }
+    min_args = params.count { |p| p.required }
     max_args = params.size
 
     if min_args < 1 || max_args > 1
@@ -769,13 +780,13 @@ module PipeAnalysis
 
     # 2. Validate Type: The Input must match Parameter 1
     if max_args >= 1
-      param = params[0]
-      expected = param[:type]
+      param = T.must(params[0])
+      expected = param.type
       actual = node.left.resolved_type
 
       # Type.accepts? handles slice coercion (Number[3] -> Number[])
       unless is_safe_autocast?(actual, expected)
-        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param[:name]}'", index: 1, expected: expected, got: actual)
+        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param.name}'", index: 1, expected: expected, got: actual)
       end
     end
 
@@ -792,7 +803,7 @@ module PipeAnalysis
   def analyze_each_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # EACH accepts arrays, collections, and finite streams.
-    lhs_type  = node.left.type_info
+    lhs_type  = node.left.full_type
     is_pool   = lhs_type&.pool?
     is_list   = lhs_type&.list_collection?
     is_array  = node.left.metatype == :array
@@ -830,7 +841,7 @@ module PipeAnalysis
   def analyze_skip_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # SKIP: list |> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
-    is_inf   = node.left.type_info&.inf_stream?
+    is_inf   = node.left.full_type.inf_stream?
     is_range = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
     item_type = if is_inf
@@ -838,7 +849,7 @@ module PipeAnalysis
     elsif is_range
       finite_stream_element_type(node.left)
     else
-      node.left.type_info.element_type.resolved
+      node.left.full_type.element_type.resolved
     end
 
     visit(node.right.count)
@@ -855,7 +866,7 @@ module PipeAnalysis
   def analyze_tap_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # TAP: list |> TAP { body } -> same list type (pass-through); also accepts range/stream source.
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     is_inf   = lhs_type&.inf_stream?
     is_range = finite_stream_source?(node.left) || is_inf
     is_pool  = lhs_type&.pool?
@@ -897,7 +908,7 @@ module PipeAnalysis
     # FIND: list |> FIND predicate  → ?ElemType (first match or null; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "FIND", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -908,7 +919,7 @@ module PipeAnalysis
       error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "FIND", got: node.right.expression.resolved_type)
     end
 
-    node.full_type = :"?#{item_type}"
+    node.full_type = Type.new(:"?#{item_type}")
     node.storage   = :stack
     mark_observable_terminal!(node, terminal: :find, raw: :"~?#{item_type}")
   end
@@ -919,7 +930,7 @@ module PipeAnalysis
     # ANY: list |> ANY predicate  → Bool (short-circuits; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "ANY", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -941,7 +952,7 @@ module PipeAnalysis
     # ALL: list |> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "ALL", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -963,7 +974,7 @@ module PipeAnalysis
     # COUNT: list |> COUNT predicate  → Int64 (also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "COUNT", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -992,7 +1003,7 @@ module PipeAnalysis
     # SUM: list |> SUM expr  → upsized numeric type (int→Int64/UInt64, float→same float)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "SUM", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1015,7 +1026,7 @@ module PipeAnalysis
     # AVERAGE: list |> AVERAGE expr  → Float64 (0 for empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "AVERAGE", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1038,7 +1049,7 @@ module PipeAnalysis
     # MIN: list |> MIN expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MIN", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1061,7 +1072,7 @@ module PipeAnalysis
     # MAX: list |> MAX expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MAX", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.full_type.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1091,7 +1102,7 @@ module PipeAnalysis
 
     # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
     key_type = if shard_node
-      ti = shard_node.target_map.type_info
+      ti = shard_node.target_map.full_type
       (ti&.numeric_map? && ti&.key_type&.resolved) || :String
     else
       :String
@@ -1142,9 +1153,7 @@ module PipeAnalysis
     if node.is_a?(AST::Identifier)
       entry = node.symbol
       if entry
-        t = entry.type
-        t = Type.new(t) unless t.is_a?(Type)
-        names << node.name if t.sharded? && entry.sync.nil?
+        names << node.name if entry.type.sharded? && entry.sync.nil?
       end
     end
     return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -1165,9 +1174,7 @@ module PipeAnalysis
     if node.is_a?(AST::Identifier)
       entry = node.symbol
       return false unless entry
-      t = entry.type
-      t = Type.new(t) unless t.is_a?(Type)
-      return t.sharded? && entry.sync.nil?
+      return entry.type.sharded? && entry.sync.nil?
     end
     return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
     node.class.members.any? do |member|
@@ -1188,7 +1195,7 @@ module PipeAnalysis
   sig { params(smooth_node: T.untyped, conc: T.untyped, proxy: AST::BinaryOp).void }
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = smooth_node.left.type_info
+    lhs_type = smooth_node.left.full_type
     is_range = finite_stream_source?(smooth_node.left)
     is_array = smooth_node.left.metatype == :array
     is_list  = lhs_type&.list_collection?
@@ -1278,7 +1285,7 @@ module PipeAnalysis
       if node.is_a?(AST::Assignment) && node.name.is_a?(AST::GetIndex)
         gi = node.name
         if gi.target.is_a?(AST::Identifier)
-          ti = gi.target.type_info
+          ti = gi.target.full_type
           if ti.is_a?(Type) && ti.sharded? && gi.target.symbol&.sync.nil?
             results << { map_name: gi.target.name, key_expr: gi.index, map_token: gi.target.token }
           end
@@ -1308,7 +1315,7 @@ module PipeAnalysis
     nodes.each do |node|
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
-        ti = node.target.type_info
+        ti = node.target.full_type
         if ti.is_a?(Type) && ti.sharded? && node.target.symbol&.sync.nil?
           results << { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
         end
@@ -1331,7 +1338,7 @@ module PipeAnalysis
     shard_op = node.right  # ShardOp node
 
     # LHS must be iterable (range or array)
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     is_range = node.left.is_a?(AST::RangeLit)
     is_array = node.left.metatype == :array
     is_list  = lhs_type&.list_collection?
@@ -1360,7 +1367,7 @@ module PipeAnalysis
     # Target must be a @sharded map — NOT :locked. Visit before key type check
     # so we can validate numeric key type against the map's declared key type.
     visit(shard_op.target_map)
-    target_info = shard_op.target_map.type_info
+    target_info = shard_op.target_map.full_type
     target_sync = shard_op.target_map.respond_to?(:symbol) ? shard_op.target_map.symbol&.sync : nil
     unless target_info&.sharded? && target_sync.nil?
       error!(shard_op.target_map, :SHARD_TARGET_BAD, remediation: "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
@@ -1416,7 +1423,7 @@ module PipeAnalysis
   def queue_backed_concurrent_source?(node)
     T.bind(self, SemanticAnnotator) rescue nil
     lhs = node.left
-    lhs_type = lhs.type_info
+    lhs_type = lhs.full_type
     shard_concurrent_source?(lhs) || bounded_stream_source?(lhs) ||
       lhs_type&.inf_stream? || lhs_type&.dynamic_stream? ||
       lhs_type&.open_stream? || lhs.is_a?(AST::RangeLit)
@@ -1433,14 +1440,14 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     conc    = node.right   # the ConcurrentOp node
     options = conc.options
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
 
     # Detect SHARD predecessor: (range) |> SHARD(key, map) |> CONCURRENT EACH { ... }
     # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
     shard_node = nil
     if shard_concurrent_source?(node.left)
       shard_node = node.left.right
-      target_info = shard_node.target_map.type_info
+      target_info = shard_node.target_map.full_type
       conc.shard_context = {
         map_var: shard_node.target_map,
         shard_count: target_info&.shard_count,
@@ -1484,6 +1491,22 @@ module PipeAnalysis
       end
     end
 
+    # CONCURRENT option values that are bare identifiers (size: MICRO,
+    # etc.) are compile-time keyword selectors consumed structurally
+    # via .name — never runtime values. Same compile-time-marker
+    # category as a type-name ident; stamp the codebase's :Type marker
+    # (not a guess: it is not an evaluatable value).
+    options.each_value do |v|
+      if v.is_a?(AST::Identifier)
+        # Keyword selector (MICRO/STANDARD/...): compile-time marker.
+        v.full_type = Type.new(:Type)
+      else
+        # A real value option (workers: 2, parallel: TRUE) — annotate
+        # it normally so it gets its true type.
+        visit(v)
+      end
+    end
+
     # Validate that only known option keys are used
     options.each_key do |key|
       unless VALID_CONCURRENT_OPTIONS.include?(key)
@@ -1499,8 +1522,8 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_select_family_op(node)
-      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? ||
-            node.left.type_info&.open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.full_type.inf_stream? || node.left.full_type.dynamic_stream? ||
+            node.left.full_type.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_select_family_op(node)
       else
         analyze_select_family_op(proxy)
@@ -1508,8 +1531,8 @@ module PipeAnalysis
     when AST::EachOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_each_op(node)
-      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? ||
-            node.left.type_info&.open_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.full_type.inf_stream? || node.left.full_type.dynamic_stream? ||
+            node.left.full_type.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_each_op(node)
       elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
@@ -1539,7 +1562,7 @@ module PipeAnalysis
         # the same capture machinery as bounded/stream and BG/DO.
         # Repro: transpile-tests/257_concurrent_capture_locked_param.cht.
         with_new_scope(current_scope) do
-          item_type = node.left.type_info.element_type.resolved
+          item_type = node.left.full_type.element_type.resolved
           current_scope.declare("_", nil, item_type, true, false, nil, :stack)
           conc.capture_analysis = analyze_fiber_captures(conc.op.body, is_parallel: false)
         end
@@ -1567,7 +1590,7 @@ module PipeAnalysis
     if inner_expr.is_a?(AST::BinaryOp) && inner_expr.op == :OR_RESCUE
       modifier = inner_expr.right
       if modifier.is_a?(AST::OrPrune) || modifier.is_a?(AST::OrRaise)
-        inner_fn_type = inner_expr.left.type_info
+        inner_fn_type = inner_expr.left.full_type
         # CLEAR's auto-propagate strips `!T` from a fallible call's
         # full_type (saving the union on `error_union_type`). The
         # OR PRUNE / OR RAISE validators must honor that fallback so
@@ -1587,20 +1610,29 @@ module PipeAnalysis
     # methods. REDUCE ops (SUM/COUNT/etc.) and array sources still use the proxy.
     stream_op_analyzed = (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp) || conc.op.is_a?(AST::EachOp)) &&
                          (bounded_stream_source?(node.left) ||
-                          node.left.type_info&.inf_stream? ||
-                          node.left.type_info&.dynamic_stream? ||
-                          node.left.type_info&.open_stream? ||
+                          node.left.full_type.inf_stream? ||
+                          node.left.full_type.dynamic_stream? ||
+                          node.left.full_type.open_stream? ||
                           node.left.is_a?(AST::RangeLit))
     unless stream_op_analyzed
       node.full_type = proxy.full_type
       node.storage   = (node.full_type == :Void) ? :stack : :heap
     end
+
+    # CONCURRENT wraps an inner op (conc.op) and analyzes it through a
+    # throwaway proxy SMOOTH, bypassing analyze_higher_order_op's
+    # op-stamp. The wrapped op evaluates to the pipeline's post-op
+    # type just computed here — stamp it (and its WHERE/SELECT
+    # expression sub-node) so no wrapped op reaches MIR untyped.
+    inner = conc.op
+    inner.full_type = node.full_type_or(proxy.full_type)
+    nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_concurrent_bounded_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     item_type = lhs_type.stream_element_type.resolved
     is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
                   %w[true TRUE].include?(node.right.options["parallel"].name)
@@ -1620,12 +1652,12 @@ module PipeAnalysis
       error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
-    node.full_type = case node.right.op
+    node.full_type = Type.new(case node.right.op
     when AST::SelectOp
       :"#{node.right.op.expression.full_type}[]"
     when AST::WhereOp
       :"#{item_type}[]"
-    end
+    end)
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -1633,7 +1665,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(Symbol) }
   def analyze_concurrent_bounded_each_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     item_type = lhs_type.stream_element_type.resolved
     is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
                   %w[true TRUE].include?(node.right.options["parallel"].name)
@@ -1659,7 +1691,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(Integer) }
   def analyze_concurrent_stream_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     item_type = if lhs_type&.inf_stream?
       inf_stream_element_type(node.left)
     else
@@ -1683,10 +1715,10 @@ module PipeAnalysis
       error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
-    node.full_type = case node.right.op
+    node.full_type = Type.new(case node.right.op
     when AST::SelectOp then :"#{node.right.op.expression.full_type}[]"
     when AST::WhereOp  then :"#{item_type}[]"
-    end
+    end)
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
@@ -1695,7 +1727,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(Symbol) }
   def analyze_concurrent_stream_each_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     item_type = if lhs_type&.inf_stream?
       inf_stream_element_type(node.left)
     else
@@ -1740,7 +1772,7 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp, op_name: String, allow_range: T::Boolean, allow_stream: T::Boolean).returns(NilClass) }
   def require_array_input!(node, op_name, allow_range: false, allow_stream: false)
     T.bind(self, SemanticAnnotator) rescue nil
-    lhs_type = node.left.type_info
+    lhs_type = node.left.full_type
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
@@ -1758,7 +1790,7 @@ module PipeAnalysis
   sig { params(range_node: AST::RangeLit).returns(Type) }
   def range_element_type(range_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    range_node.start.full_type || :Number
+    range_node.start.full_type_or(:Number)
   end
 
   # =========================================================
@@ -1782,8 +1814,8 @@ module PipeAnalysis
     accessed = @pipeline_accessed_fields
     return if accessed.empty?
 
-    schema = Schemas.as_struct_schema(lookup_type_schema(item_type))
-    return unless schema
+    schema = lookup_type_schema(item_type)
+    return unless Schemas.field_bearing?(schema)
 
     total = schema.fields.keys.size
     return if total < SOA_MIN_FIELDS

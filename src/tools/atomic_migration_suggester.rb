@@ -68,18 +68,18 @@ module AtomicMigrationSuggester
     val = val.value if val.is_a?(AST::CapabilityWrap)
     return nil unless val.is_a?(AST::StructLit)
 
-    ti = node.type_info
+    ti = node.full_type
     ti = Type.new(ti) unless ti.is_a?(Type)
     return nil unless ti.sync == :locked
 
     schema = annotator.respond_to?(:lookup_type_schema) ?
              annotator.lookup_type_schema(ti.resolved) : nil
-    schema = Schemas.as_struct_schema(schema)
-    return nil unless schema && schema.methods.empty?
+    return nil unless Schemas.field_bearing?(schema) && schema.methods.empty?
     fields = schema.fields
     return nil unless fields.size == 1
 
-    field_name, field_type = fields.first
+    field_name, field_def = fields.first
+    field_type = field_def.is_a?(AST::StructField) ? field_def.type : field_def
     field_resolved = field_type.is_a?(Type) ? field_type.resolved : field_type
     return nil unless ATOMIC_ELIGIBLE_FIELD_TYPES.include?(field_resolved)
 

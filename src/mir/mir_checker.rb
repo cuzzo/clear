@@ -148,8 +148,40 @@ class MIRChecker
     verify_raw_justified!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
     verify_unhoisted_allocs!(fn_def.body) if strict
+    verify_heap_create_single_indirection!(fn_def.body)
 
     @errors
+  end
+
+  # INV-INDIRECT-SINGLE-BOX: a HeapCreate is exactly one indirection
+  # (`HeapCreate(T)` -> `*T`), so its cell type must never itself be a
+  # pointer. A `*`-typed cell is a `**U` double box -> UAF on read.
+  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_heap_create_single_indirection!(body)
+    each_heap_create(body) do |hc|
+      zt = hc.zig_type
+      next unless zt.is_a?(String) && zt.lstrip.start_with?("*")
+      @errors << error(:INDIRECT_DOUBLE_BOX, @fn_name,
+        "HeapCreate cell type is `#{zt}` (already a pointer) — boxing it yields a double indirection")
+    end
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.untyped).returns(T.untyped) }
+  def each_heap_create(stmts, &blk)
+    walk_mir(stmts) do |node|
+      [node.respond_to?(:init) ? node.init : nil,
+       node.respond_to?(:expr) ? node.expr : nil,
+       node.respond_to?(:value) ? node.value : nil].each do |root|
+        deep_each_expr(root) { |e| yield e if e.is_a?(MIR::HeapCreate) }
+      end
+    end
+  end
+
+  sig { params(expr: T.untyped, blk: T.untyped).returns(T.untyped) }
+  def deep_each_expr(expr, &blk)
+    return unless expr
+    yield expr
+    each_sub_expr(expr) { |sub| deep_each_expr(sub, &blk) }
   end
 
   sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }
@@ -168,16 +200,23 @@ class MIRChecker
     return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
-      ret = init.stdlib_def[:return]
-      return !(ret == :Void || ret.nil?)
+      # Receiver-dependent (Proc-resolved) returns -- collection
+      # intrinsics like pool.insert/get -- are not a static owned-
+      # return declaration; their ownership is governed by
+      # allocates/borrows, handled elsewhere. Only a static return
+      # type counts here (matches pre-FS behavior, which read only
+      # the static `:return` key).
+      return false unless init.stdlib_def.fixed_return?
+      ret = init.stdlib_def.return_type
+      return !ret.void?
     end
     false
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
-    return false unless node.stdlib_def&.dig(:allocates)
-    return true if node.stdlib_def[:return_alloc] == :heap
+    return false unless node.stdlib_def&.emit&.allocates
+    return true if node.stdlib_def.emit&.return_alloc == :heap
     return false unless node.is_a?(MIR::InlineZig)
 
     allocs = node.allocs
@@ -390,9 +429,10 @@ class MIRChecker
       leaks << error(:HPT_LEAK, "try-catch",
         "heap-returning try/catch result not bound to variable (leak)")
     end
-    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node)
-      ret = node.stdlib_def[:return]
-      unless ret == :Void || ret.nil?
+    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
+       node.stdlib_def.fixed_return?
+      ret = node.stdlib_def.return_type
+      unless ret.void?
         label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
         leaks << error(:HPT_LEAK, node.reason,
           "#{label} with allocates:true result not bound to variable (leak)")
@@ -507,7 +547,7 @@ class MIRChecker
       # INV-COPY-CLEANUP: primitives and Id<T> (value types that can never own
       # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
       # or visit_CopyNode missed the gate.
-      if (ti = alloc_marks.first.type_info).is_a?(Type)
+      if (ti = alloc_marks.first.full_type)
         no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
         if no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
           @errors << error(:COPY_CLEANUP, name,
@@ -750,7 +790,7 @@ class MIRChecker
     return false unless expr
     case expr
     when MIR::InlineZig
-      return false if expr.stdlib_def&.dig(:mutates_receiver)
+      return false if expr.stdlib_def&.emit&.mutates_receiver
       expr.allocs&.any? { |_k, v| v == :frame }
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap

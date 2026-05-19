@@ -186,7 +186,7 @@ RSpec.describe "BORROWED escape lockdown" do
       expect { annotate(<<~CLEAR) }.not_to raise_error
         STRUCT Node { id: Int64 }
         FN main() RETURNS Void ->
-          n: %Node = Node{ id: 1 };
+          n: Node @indirect = Node{ id: 1 };
           WITH BORROWED n AS ref {
             x = ref.id;
           }

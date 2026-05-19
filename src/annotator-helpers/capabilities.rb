@@ -92,7 +92,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_sync = var_node.symbol&.sync
     return sym_sync if sym_sync
-    return var_node.full_type.sync if var_node.full_type.is_a?(Type)
+    return var_node.full_type.sync if var_node.full_type
     nil
   end
 
@@ -101,8 +101,8 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    if var_node.full_type.is_a?(Type)
-      case T.must(var_node.full_type).ownership
+    if var_node.full_type
+      case var_node.full_type.ownership
       when :shared     then return :shared
       when :multiowned then return :multiowned
       end
@@ -117,7 +117,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
-    return T.must(var_node.full_type).layout if var_node.full_type.is_a?(Type)
+    return var_node.full_type.layout if var_node.full_type
     nil
   end
 
@@ -409,10 +409,10 @@ module CapabilityHelper
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
     if call.matched_stdlib_def
       md = call.matched_stdlib_def
-      return "allocates" if md[:allocates]
-      return "can fail" if md[:can_fail]
-      return "suspends" if md[:suspends]
-      return "mutates its receiver" if md[:mutates_receiver]
+      return "allocates" if md.emit&.allocates
+      return "can fail" if md.can_fail
+      return "suspends" if md.emit&.suspends
+      return "mutates its receiver" if md.emit&.mutates_receiver
       return nil
     end
 
@@ -457,7 +457,7 @@ module CapabilityHelper
         }
         visit(gcap[:guard_expr])
 
-        guard_type = gcap[:guard_expr].type_info
+        guard_type = gcap[:guard_expr].full_type
         unless guard_type && guard_type.resolved == :Bool
           error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
@@ -510,7 +510,7 @@ module CapabilityHelper
       end
     end
 
-    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
+    param_names = fn_node.params.map { |p| p.name.to_s }
     prev_ctx = @current_predicate_context
     begin
       pre_clauses.each do |entry|
@@ -521,7 +521,7 @@ module CapabilityHelper
         }
         visit(expr)
 
-        pred_type = expr.type_info
+        pred_type = expr.full_type
         unless pred_type && pred_type.resolved == :Bool
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
@@ -555,11 +555,11 @@ module CapabilityHelper
       error!(fn_node, :DEBUG_POST_NOT_WITH_CATCH)
     end
 
-    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
-    rejected = (fn_node.params || []).filter_map do |p|
-      sym = current_scope.locals[p[:name].to_s]
+    param_names = fn_node.params.map { |p| p.name.to_s }
+    rejected = fn_node.params.filter_map do |p|
+      sym = current_scope.locals[p.name.to_s]
       next unless sym && %i[locked write_locked versioned atomic].include?(sym.sync)
-      p[:name].to_s
+      p.name.to_s
     end.to_set
 
     rt = fn_node.return_type
@@ -587,7 +587,7 @@ module CapabilityHelper
           }
           visit(expr)
 
-          pred_type = expr.type_info
+          pred_type = expr.full_type
           unless pred_type && pred_type.resolved == :Bool
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
@@ -636,7 +636,7 @@ module CapabilityHelper
   # @param node [AST::WithBlock] the WITH block (for error reporting)
   # @param cap [Hash] the capability entry { :capability, :var_node, :alias }
   # @param expanded [Array] accumulator for resolved capabilities
-  sig { params(node: AST::WithBlock, cap: T::Hash[Symbol, T.untyped], expanded: T::Array[T::Hash[Symbol, T.untyped]]).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: T::Array[AST::Capability]).void }
   def acquire_capability!(node, cap, expanded)
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
@@ -719,15 +719,33 @@ module CapabilityHelper
         error!(node, :BORROW_WILDCARD_NEEDS_STRUCT, name: var_node.target.name, type: target_type)
       end
 
-      fields = schema.is_a?(Schemas::StructSchema) ? schema.fields : schema
+      fields = schema.fields
       fields.each do |field_name, _|
         field_node = AST::GetField.new(var_node.token, var_node.target, field_name)
-        expanded << {
+        # Eager producer: resolve the field's type now (same mechanism
+        # as the input cap, line 644) so every expanded cap carries a
+        # real resolved_type -- the cap.resolved_type || old_scope
+        # fallback chain becomes dead.
+        visit(field_node) rescue nil
+        expanded << AST::Capability.new(
           capability: cap[:capability],
           var_node: field_node,
-          old_scope: cap[:old_scope]
-        }
+          old_scope: cap[:old_scope],
+          resolved_type: field_node.full_type
+        )
       end
+      # The per-field caps above each alias the base variable name; the
+      # base binding must remain the struct type (a field cap declaring
+      # `p` as a field's type would break `p.field` inside the block).
+      # Re-assert the whole-struct cap last so the base keeps its type.
+      base_t = var_node.target.full_type
+      base_t = Type.new(base_t) unless base_t.is_a?(Type)
+      expanded << AST::Capability.new(
+        capability: cap[:capability],
+        var_node: var_node.target,
+        old_scope: cap[:old_scope],
+        resolved_type: base_t
+      )
     else
       expanded << cap
     end
@@ -748,7 +766,7 @@ module CapabilityHelper
     end
   end
 
-  sig { params(cap: T::Hash[Symbol, T.untyped]).returns(T.nilable(String)) }
+  sig { params(cap: AST::Capability).returns(T.nilable(String)) }
   def declare_capability_scope!(cap)
     T.bind(self, SemanticAnnotator) rescue nil
     @og = T.let(@og, T.untyped)
@@ -815,7 +833,7 @@ module CapabilityHelper
       if cap[:alias] && !syn
         alias_name = cap[:alias]
         is_mutable = !!cap[:alias_mutable]
-        resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
+        resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         sym = current_scope.locals[alias_name]
         sym.non_escaping  = true
@@ -826,7 +844,7 @@ module CapabilityHelper
       # Observables Phase 2.3 / 2.4. Bind alias to `?T` where T is the
       # inner element type of the tense source. VIEW is immutable +
       # non_escaping (borrow); MATERIALIZED_VIEW is owned and may escape.
-      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
       st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
       inner = st.future? && st.tense_type ? st.tense_type : st
       # Wrap as ?T so the binding is null until the first item lands.
@@ -855,7 +873,7 @@ module CapabilityHelper
       # capture, GIVE, COPY-to-non-temp, pipeline-binding crossing the
       # WITH) is rejected by the existing non_escaping checks at the
       # use site.
-      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
       st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
       # Strip Group-1 sigils so the alias's `.type` is the bare inner T.
       # The alias's SymbolEntry already keeps sync/layout=nil (declare
@@ -893,7 +911,7 @@ module CapabilityHelper
         end
       end
       alias_name = cap[:alias] || var_name
-      resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
+      resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
@@ -1088,7 +1106,7 @@ module CapabilityHelper
           # need the full cell shape so the captured ref keeps identity across
           # fibers.
           unless result.captures.key?(name)
-            cap_type = info.sync == :atomic ? info.type : node.type_info
+            cap_type = info.sync == :atomic ? info.type : node.full_type
             result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
@@ -1168,7 +1186,7 @@ module CapabilityHelper
           info = current_scope.locals[name]
           next unless info
           result.has_outer_ref = true
-          result.captures[name] ||= var_node.type_info
+          result.captures[name] ||= var_node.full_type
           # Also record the live SymbolEntry so mir_lowering can re-resolve
           # types after EscapeAnalysis.propagate_caller_sync! stamps params.
           result.capture_symbols[name] ||= info

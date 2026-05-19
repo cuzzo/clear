@@ -178,8 +178,8 @@ class MIREmitter
   sig { params(node: MIR::InlineBc).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
-    pattern = entry[:zig].dup
+    raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry.emit&.zig
+    pattern = entry.emit.zig.to_s.dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -216,7 +216,7 @@ class MIREmitter
   def sharded_map_template(node)
     op = node.stdlib_def
     kind = node.template_kind || :zig
-    op[kind] or raise "ShardedMap: op has no :#{kind} template (op keys=#{op.keys})"
+    op.emit&.public_send(kind) or raise "ShardedMap: op has no :#{kind} template (emit=#{op.emit.inspect})"
   end
 
   sig { params(pattern: String, node: T.untyped).returns(String) }
@@ -242,8 +242,8 @@ class MIREmitter
   sig { params(node: T.untyped).returns(String) }
   def emit_raw_bc_as_zig(node)
     entry = node.stdlib_def
-    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry[:zig]
-    pattern = entry[:zig].dup
+    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry.emit&.zig
+    pattern = entry.emit.zig.to_s.dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
   end
@@ -1042,13 +1042,11 @@ class MIREmitter
       "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
 
     when :pool, :fixed_soa
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{deref}.deinit(#{alloc});\n"
+      guarded_defer(name, "#{deref}.deinit(#{alloc})", g, errdefer:)
 
     when :set
-      kw = errdefer ? "errdefer" : "defer"
       arg = vp ? name : "&#{name}"
-      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", g, errdefer:)
 
     when :rc
       rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc
@@ -1082,9 +1080,12 @@ class MIREmitter
       guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
+      guarded_defer(name, "#{alloc}.free(#{name})", true, errdefer:)
 
     when :heap_slice, :heap_union, :heap_struct
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
+
+    when :optional_owned
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :atomic_ptr

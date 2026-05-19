@@ -48,6 +48,15 @@ missing_from_docs.each do |name|
   gaps << "template #{name} is registered, but README does not document it"
 end
 
+FuzzSurfaceRegistry::GLOBAL_REQUIRED_SURFACES.each do |surface|
+  required = FuzzSurfaceRegistry.surface(surface)
+  covered = FuzzSurfaceRegistry::TEMPLATE_COVERAGE.values.flat_map { |coverage| coverage.fetch(surface, []) }.uniq
+  missing = required - covered
+  next if missing.empty?
+
+  gaps << "global #{surface} missing: #{missing.join(', ')}"
+end
+
 FuzzSurfaceRegistry::REQUIRED_SURFACES_BY_TEMPLATE.each do |template, surfaces|
   unless templates.include?(template)
     gaps << "coverage registry references missing template #{template}"

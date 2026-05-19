@@ -3,16 +3,45 @@
 
 require_relative "../lib/decomplex"
 
+def collect_files(args)
+  args.flat_map do |a|
+    File.directory?(a) ? Dir.glob(File.join(a, "**", "*.rb")) : [a]
+  end.select { |f| File.file?(f) }
+end
+
+# decomplex delta BASELINE.json FILE_OR_DIR...
+#   diff a fresh run against a saved baseline snapshot. Line-
+#   insensitive: a finding that only moved lines is "persisted".
+if ARGV[0] == "delta"
+  require_relative "../lib/decomplex/report"
+  baseline = ARGV[1]
+  abort "usage: decomplex delta BASELINE.json FILE..." unless baseline && File.file?(baseline)
+
+  files = collect_files(ARGV[2..])
+  abort "no .rb files" if files.empty?
+  rep = Decomplex::Report.new(files)
+  head = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
+  base = JSON.parse(File.read(baseline))
+  puts Decomplex::Delta.to_markdown(Decomplex::Delta.diff(base, head))
+  exit 0
+end
+
 if ARGV[0] == "report"
   require_relative "../lib/decomplex/report"
   args = ARGV[1..]
   out_path = nil
+  json_path = nil
   args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
-  files = args.flat_map do |a|
-    File.directory?(a) ? Dir.glob(File.join(a, "**", "*.rb")) : [a]
-  end.select { |f| File.file?(f) }
+  args = args.reject { |a| a =~ /\A--emit-json=(.+)/ && (json_path = Regexp.last_match(1)) }
+  files = collect_files(args)
   abort "no .rb files" if files.empty?
-  md = Decomplex::Report.new(files).to_markdown
+  rep = Decomplex::Report.new(files)
+  if json_path
+    snap = Decomplex::Delta.snapshot(rep.sections_data, rep.root_clusters)
+    File.write(json_path, JSON.dump(snap))
+    warn "wrote baseline snapshot #{json_path}"
+  end
+  md = rep.to_markdown
   if out_path
     File.write(out_path, md)
     warn "wrote #{out_path} (#{files.size} files)"

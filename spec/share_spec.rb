@@ -78,7 +78,7 @@ RSpec.describe "SHARE keyword" do
     CLEAR
 
     share = ast.statements.last.body[1].value
-    expect(share.type_info).to be_shared
+    expect(share.full_type).to be_shared
   end
 
   it "rejects bare values passed to T@shared parameters and suggests SHARE" do

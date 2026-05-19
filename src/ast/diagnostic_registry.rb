@@ -1817,6 +1817,13 @@ module DiagnosticRegistry
       cause: "The MIR has a Cleanup node naming a binding the AllocMark side never declared. Means the lowering emitted cleanup for a value the allocator never tracked — runtime would try to free unknown memory.",
       fix_hint: "Lowering bug — the cleanup classifier disagreed with the alloc classifier. Trace the binding name through promotion_plan.rb.",
     },
+    INDIRECT_DOUBLE_BOX: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR::HeapCreate boxes a value whose Zig type is already a pointer (double indirection).",
+      cause: "A heap box is exactly one level of indirection: `HeapCreate(T)` produces `*T`. If T is itself `*U` the result is `**U` — a double box. Reading it yields a dangling `*U` after the inner allocation is cleaned up (UAF), and the field/binding type no longer matches. This is the failure mode the @indirect single-source layout guards against.",
+      fix_hint: "Lowering bug — the HeapCreate cell type must be the BARE pointee (`transpile_type(base)`), never the already-pointerized field/binding type. Check the @indirect hoist sites in src/mir/mir_lowering.rb (lower_struct_lit / lower_union_variant_lit) use `field_type.resolved`, not `zig_type`.",
+    },
     ALLOC_CLEANUP_MISMATCH: {
       severity: :error, category: :mir,
       template: "%{message}",
@@ -2471,7 +2478,7 @@ module DiagnosticRegistry
     INTRINSIC_REJECTED: {
       severity: :error, category: :type,
       template: "%{message}",
-      summary:  "Stdlib intrinsic rejected this call (matched_def[:reject_when] fired).",
+      summary:  "Stdlib intrinsic rejected this call (the matched signature's reject_when fired).",
       cause: "A stdlib intrinsic (`.negative?`, `.zero?`, ...) rejected this call because the argument type isn't allowed. The stdlib uses `reject_when` patterns to rule out call shapes that look valid but produce wrong results — e.g. `.negative?` on an unsigned int.",
       fix_hint: "Check the message for the specific reject reason. Often the fix is to remove the call entirely (the answer is statically known) or use a different intrinsic.",
     },

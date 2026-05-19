@@ -3,6 +3,35 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill runtime trace" do
+  it "evicts @objects entries when a tracked collection is GC'd (no unbounded leak), keeping live collections linked" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    rt = NilKillRuntimeTrace
+    owner = lambda do |name|
+      { owner_kind: "method_param", name: name,
+        path: File.join(NilKill::ROOT, "x.rb"), line: 1, bucket: nil }
+    end
+
+    live = [1, 2, 3]
+    rt.register_collection_owner(live, owner.call("live"))
+    expect(rt.objects.key?(live.object_id)).to be(true)        # linked while alive
+    rt.record_collection_mutation(live, elem: 99)              # still attributable
+    expect(rt.objects.key?(live.object_id)).to be(true)
+
+    # 20k transient collections that immediately go out of scope.
+    # Before the fix @objects grew to 20_001 forever; the finalizer
+    # must evict them on GC. Loose bound -> robust to finalizer
+    # scheduling.
+    20_000.times do |i|
+      transient = [i]
+      rt.register_collection_owner(transient, owner.call("t"))
+      GC.start if (i % 5_000).zero?
+    end
+    4.times { GC.start }
+
+    expect(rt.objects.size).to be < 1_000
+    expect(rt.objects.key?(live.object_id)).to be(true)        # live survives eviction
+  end
+
   it "captures method returns, T.let values, and struct fields in a subprocess" do
     Dir.mktmpdir("nil-kill-runtime", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")

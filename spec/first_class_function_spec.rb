@@ -168,7 +168,7 @@ RSpec.describe SemanticAnnotator do
     describe "Type#accepts? full signature matching (Phase 2)" do
       def fn_type(params, ret)
         Type.new(FunctionSignature.new(
-          params: params.map.with_index { |t, i| { name: "arg#{i}", type: Type.new(t), required: true, mutable: false, takes: false } },
+          params: params.map.with_index { |t, i| AST::Param.new(name: "arg#{i}", type: Type.new(t), required: true, mutable: false, takes: false) },
           return_type: Type.new(ret)
         ))
       end

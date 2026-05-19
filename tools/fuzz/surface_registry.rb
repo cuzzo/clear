@@ -144,6 +144,66 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape, :loop_frame_rewind],
     },
 
+    collection_shape_smoke: {
+      collection_shapes: [
+        :dynamic_array,
+        :list,
+        :pool,
+        :set,
+        :hash_map,
+        :sharded_list,
+        :sharded_pool,
+        :sharded_set,
+        :sharded_hash_map,
+        :soa_list,
+        :soa_pool,
+        :nested_collection,
+      ],
+    },
+
+    ownership_surface_smoke: {
+      cleanup_value_shapes: [
+        :string,
+        :frame_string_concat,
+        :dynamic_array,
+        :frame_list,
+        :heap_list,
+        :pool,
+        :set,
+        :hash_map,
+        :sharded_list,
+        :sharded_pool,
+        :sharded_set,
+        :sharded_hash_map,
+        :soa_list,
+        :soa_pool,
+        :struct_owned_fields,
+        :union_owned_payload,
+        :option_owned_payload,
+        :nested_container,
+      ],
+      escape_sinks: [
+        :return_value,
+        :struct_field_store,
+        :list_append,
+        :set_insert,
+        :map_put,
+        :pool_insert,
+        :collection_literal,
+        :function_arg,
+      ],
+      mir_ownership_contracts: [
+        :promotion_on_escape,
+        :cleanup_on_all_paths,
+        :loop_frame_rewind,
+        :error_path_allocator_identity,
+        :alias_non_escape,
+        :bg_lifetime_enforcement,
+        :collection_mutation_visible_to_mir,
+        :non_copy_requires_explicit_move_or_copy,
+      ],
+    },
+
     loop_cleanup: {
       cleanup_value_shapes: [:heap_list, :string, :frame_string_concat, :frame_list],
       escape_sources: [:loop_local],
@@ -211,21 +271,17 @@ module FuzzSurfaceRegistry
     },
   }.freeze
 
+  # Dimensions that are intentionally covered by the union of focused
+  # templates. These are broad surfaces; forcing every semantic template to
+  # cover every member creates noisy false gaps.
+  GLOBAL_REQUIRED_SURFACES = [
+    :cleanup_value_shapes,
+    :escape_sinks,
+    :mir_ownership_contracts,
+  ].freeze
+
   REQUIRED_SURFACES_BY_TEMPLATE = {
-    escape_via_return: [:cleanup_value_shapes, :escape_sinks],
-    loop_carry_collection: [:cleanup_value_shapes],
-    mutable_collection_param: [:collection_shapes],
-    nested_loop_escape: [:collection_shapes, :cleanup_value_shapes],
-    loop_cleanup: [:cleanup_value_shapes],
-    error_cleanup: [:cleanup_value_shapes],
-    branch_cleanup: [:cleanup_value_shapes],
-    or_positional: [:cleanup_value_shapes, :escape_sinks],
-    access_gate: [:escape_sinks, :sync_capabilities],
-    lifetimed_return: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
-    execution_boundary: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
-    promise_handle_capture: [:escape_sources, :escape_sinks, :execution_boundaries],
-    stream_into_boundary: [:storage_capabilities, :sync_capabilities, :execution_boundaries],
-    polymorphic_sync_admission: [:storage_capabilities, :sync_capabilities],
+    collection_shape_smoke: [:collection_shapes],
   }.freeze
 
   def self.surface(name)

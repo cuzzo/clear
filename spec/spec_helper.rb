@@ -71,6 +71,7 @@ if ENV["COVERAGE"] == "1"
     add_filter "/vendor/"
     add_filter "/examples/"
     add_filter "/benchmarks/"
+    add_filter "/tools/"
 
     # Subsystem groups so the index page surfaces where coverage is
     # concentrated vs. missing.

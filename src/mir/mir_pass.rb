@@ -198,7 +198,8 @@ class MIRPass
     if has_catch
       empty_ctx = WalkCtx.new(bindings: nil, promo: nil)
       fn.catch_clauses.each do |clause|
-        clause[:body] = transform_body(clause[:body], empty_ctx) if clause[:body]
+        tb = transform_body(clause.body, empty_ctx)
+        clause.body = tb if tb
       end
       if fn.default_catch.is_a?(Array)
         fn.default_catch = transform_body(fn.default_catch, empty_ctx)
@@ -245,7 +246,7 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         walk_for_bg_captures(stmt.body, bindings)
       when AST::MatchStatement
-        stmt.cases.each { |c| walk_for_bg_captures(c[:body], bindings) }
+        stmt.cases.each { |c| walk_for_bg_captures(c.body, bindings) }
         walk_for_bg_captures(stmt.default_case, bindings)
       when AST::WithBlock
         walk_for_bg_captures(stmt.body, bindings)
@@ -347,7 +348,7 @@ class MIRPass
     when AST::ForRange, AST::ForEach
       stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::MatchStatement
-      stmt.cases.each { |c| c[:body] = transform_body(c[:body], ctx) if c[:body] }
+      stmt.cases.each { |c| c.body = transform_body(c.body, ctx) if c.body }
       if stmt.default_case
         stmt.default_case = transform_body(stmt.default_case, ctx)
       end
@@ -502,7 +503,7 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         annotate_bg_exits_in_body!(stmt.body)
       when AST::MatchStatement
-        stmt.cases.each { |c| annotate_bg_exits_in_body!(c[:body]) }
+        stmt.cases.each { |c| annotate_bg_exits_in_body!(c.body) }
         annotate_bg_exits_in_body!(stmt.default_case)
       when AST::WithBlock
         annotate_bg_exits_in_body!(stmt.body)
@@ -531,9 +532,7 @@ class MIRPass
     return unless last_expr
     return if last_expr.is_a?(AST::Assignment)
 
-    ft = last_expr.full_type
-    return unless ft
-    t = ft.is_a?(Type) ? ft : Type.new(ft)
+    t = last_expr.full_type
     return if t.void?
 
     bg_node.exit_promote = { strategy: :string_dupe } if bg_exit_needs_string_dupe?(last_expr, t)
@@ -551,7 +550,7 @@ class MIRPass
     return true  if t.frame?
     # No explicit provenance: check the stdlib def for frame allocation.
     msd = expr.matched_stdlib_def
-    msd.is_a?(Hash) && msd[:return_alloc] == :frame
+    !!(msd && msd.emit&.return_alloc == :frame)
   end
 
   # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.
@@ -566,9 +565,8 @@ class MIRPass
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       if stmt.is_a?(AST::YieldExpr)
-        ft = stmt.expr.full_type
-        t = ft.is_a?(Type) ? ft : (ft ? Type.new(ft) : nil)
-        stmt.yield_dupe = true if t && bg_exit_needs_string_dupe?(stmt.expr, t)
+        t = stmt.expr.full_type
+        stmt.yield_dupe = true if bg_exit_needs_string_dupe?(stmt.expr, t)
       else
         case stmt
         when AST::WhileLoop    then walk_stream_yields(stmt.do_branch)
@@ -620,10 +618,7 @@ class MIRPass
   sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode).returns(T.nilable(T::Boolean)) }
   def insert_catch_string_dupe!(result, ret_node)
     return unless ret_node.value
-    ft = ret_node.value.full_type
-    return unless ft
-    t = Type.new(ft)
-    return unless t.string?
+    return unless ret_node.value.full_type.string?
     ret_node.catch_string_dupe_ret = true
   end
 
@@ -670,9 +665,7 @@ class MIRPass
   def or_rescue_needs_fallback_dupe?(or_node)
     return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
     left = or_node.left
-    ti = left.type_info rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
+    return true if left.full_type.heap_provenance?
     if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(left)
     end
@@ -682,9 +675,7 @@ class MIRPass
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def or_rescue_needs_fallback_dupe_left?(expr)
     return false unless expr
-    ti = expr.type_info rescue nil
-    ti = ti.is_a?(Type) ? ti : nil
-    return true if ti&.heap_provenance?
+    return true if expr.full_type.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(expr.left)
     end
@@ -710,9 +701,7 @@ class MIRPass
             # consumed -- its cleanup defer must fire normally.
             lhs = stmt.name
             if lhs.is_a?(AST::GetIndex)
-              target_ti = (lhs.target.type_info rescue nil)
-              target_ti = target_ti.is_a?(Type) ? target_ti : (target_ti ? Type.new(target_ti) : nil)
-              target_ti&.map? ? nil : stmt.value
+              lhs.target.full_type.map? ? nil : stmt.value
             else
               stmt.value
             end
@@ -759,16 +748,28 @@ class MIRPass
           walk_consumed(v, names, bindings)
         end
       end
+    when AST::MoveNode
+      if node.value.is_a?(AST::Identifier)
+        add_if_consumed(node.value, names, bindings, true)
+      else
+        walk_consumed(node.value, names, bindings)
+      end
     when AST::FuncCall, AST::MethodCall
       node.args.each do |a|
-        if a.is_a?(AST::MoveNode) && a.value.is_a?(AST::Identifier)
-          add_if_consumed(a.value, names, bindings, true)
-        elsif a.is_a?(AST::Identifier) && a.was_moved
+        if a.is_a?(AST::Identifier) && a.was_moved
           add_if_consumed(a, names, bindings, true)
-        elsif a.is_a?(AST::StructLit) || a.is_a?(AST::CapabilityWrap)
+        else
           walk_consumed(a, names, bindings)
         end
       end
+      walk_consumed(node.object, names, bindings) if node.is_a?(AST::MethodCall)
+    when AST::BinaryOp
+      walk_consumed(node.left, names, bindings)
+      walk_consumed(node.right, names, bindings)
+    when AST::Assert
+      walk_consumed(node.condition, names, bindings)
+    when AST::ReturnNode
+      walk_consumed(node.value, names, bindings)
     end
   end
 
@@ -780,10 +781,9 @@ class MIRPass
     entry = bindings[name]
     return unless entry && entry[:has_moved_guard] && entry[:needs_cleanup]
 
-    ti = ident.type_info
-    return if ti&.string?
+    ti = ident.full_type
 
-    is_atomic_ptr = ti && ti.sync == :atomic && ti.layout == :indirect
+    is_atomic_ptr = ti.sync == :atomic && ti.layout == :indirect
     # RC types: only consume on explicit GIVE. AtomicPtr is represented
     # as shared for escape/lifetime purposes, but its runtime value is a
     # unique heap cell pointer, not an Arc handle.
@@ -804,9 +804,8 @@ class MIRPass
     entry = bindings[stmt.name.to_s]
     return unless entry && entry[:needs_cleanup] && entry[:kind] != :resource
 
-    ti = stmt.type_info
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    zig_type = ti ? (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s) : "UNKNOWN"
+    ti = stmt.full_type
+    zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = { kind: entry[:kind], alloc: entry[:alloc], zig_type: zig_type }
   end
 
@@ -823,8 +822,8 @@ class MIRPass
     has_as_cleanup = T.let(false, T::Boolean)
 
     stmt.cases.each do |c|
-      next unless c[:binding]
-      as_entry = bindings[c[:binding].to_s]
+      next unless c.binding
+      as_entry = bindings[c.binding.to_s]
       next unless as_entry && as_entry[:needs_cleanup]
 
       has_as_cleanup = true
@@ -835,14 +834,14 @@ class MIRPass
       if src_entry && src_entry[:needs_cleanup]
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
-      mir_prefix << MIR::Alloc.new(stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc])
+      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry[:kind], as_entry[:alloc])
       drop = MIR::Drop.new(
-        stmt.token, c[:binding].to_s, as_entry[:kind], as_entry[:alloc],
+        stmt.token, c.binding.to_s, as_entry[:kind], as_entry[:alloc],
         true, nil, nil, nil
       )
       drop.cleanup_entry = as_entry
       mir_prefix << drop
-      c[:body] = mir_prefix + (c[:body] || [])
+      c.body = mir_prefix + c.body
     end
 
     # Ensure source has moved guard so _moved variable exists for suppression.
@@ -867,10 +866,10 @@ class MIRPass
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      entry = T.must(bindings)[b[:name].to_s]
+      entry = T.must(bindings)[b.name.to_s]
       next unless entry && entry[:needs_cleanup]
-      mir_prefix << MIR::Alloc.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc])
-      drop = MIR::Drop.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc],
+      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry[:kind], entry[:alloc])
+      drop = MIR::Drop.new(stmt.token, b.name.to_s, entry[:kind], entry[:alloc],
                            true, nil, nil, nil)
       drop.cleanup_entry = entry
       mir_prefix << drop
@@ -888,17 +887,14 @@ class MIRPass
     target_node = stmt.name.target
 
     # Look up the INDEX_OPS :set entry for this container type.
-    target_ti = target_node.type_info rescue nil
-    target_ti = Type.new(target_ti) if target_ti && !target_ti.is_a?(Type)
+    target_ti = target_node.full_type
     set_op = resolve_container_set_op(target_ti)
     return unless set_op && set_op[:takes_value]
 
     # Check if the value type needs frame-to-heap promotion.
     # Strings are handled by the :dupe_string_literal transform in the lowerer;
     # :container_promote only fires for !string? values.
-    val_ti = stmt.value.type_info rescue nil
-    return unless val_ti
-    val_ti = Type.new(val_ti) unless val_ti.is_a?(Type)
+    val_ti = stmt.value.full_type
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
     # Annotate directly on Assignment node (no MIR::Promote needed).

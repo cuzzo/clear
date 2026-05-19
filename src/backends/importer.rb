@@ -144,7 +144,7 @@ class ModuleImporter
 
       offending = []
       stmt.params.each do |p|
-        offending << "param '#{p[:name]}'" if auto_type?(p[:type])
+        offending << "param '#{p.name}'" if auto_type?(p.type)
       end
       offending << "return type" if auto_type?(stmt.return_type)
       next if offending.empty?
@@ -187,7 +187,7 @@ class ModuleImporter
     union_schemas = {}
     ast.statements.each do |stmt|
       case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.fields)
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
       when AST::UnionDef  then union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(variants: stmt.variants)
       end
@@ -235,8 +235,9 @@ class ModuleImporter
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       entry = annotator.scope_stack.first.locals[stmt.name]
-      next unless entry&.type.is_a?(FunctionSignature)
-      FunctionSignature.sync_from_function_def!(entry.type, stmt)
+      sig = entry&.fn_signature
+      next unless sig
+      FunctionSignature.sync_from_function_def!(sig, stmt)
     end
     nil
   end

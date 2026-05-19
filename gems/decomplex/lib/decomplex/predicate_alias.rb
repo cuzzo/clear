@@ -13,7 +13,8 @@ module Decomplex
   # the most damning form of plague B and the literal invariant-#16
   # violation pattern (frame? vs provenance == :frame, etc.).
   class PredicateAlias
-    Pred = Struct.new(:name, :body, :file, :defn, :line, keyword_init: true)
+    Pred = Struct.new(:name, :body, :file, :defn, :line, :span,
+                      keyword_init: true)
 
     def self.scan(files)
       preds = []
@@ -57,7 +58,9 @@ module Decomplex
       return if txt.empty? || txt.length > 200
 
       @preds << Pred.new(name: name, body: txt, file: @file,
-                         defn: name, line: node.first_lineno)
+                         defn: name, line: node.first_lineno,
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
     end
 
     def slice(node)
@@ -87,7 +90,8 @@ module Decomplex
           next if names.size < 2
 
           { body: body, names: names,
-            sites: ps.map { |p| "#{p.file}:#{p.name}:#{p.line}" } }
+            sites: ps.map { |p| "#{p.file}:#{p.name}:#{p.line}" },
+            spans: ps.to_h { |p| ["#{p.file}:#{p.name}:#{p.line}", p.span] } }
         end.sort_by { |h| -h[:names].size }
       end
 
@@ -108,7 +112,8 @@ module Decomplex
           next if s.defn == pred.name
 
           { predicate: pred.name, body: hit,
-            inline_at: "#{s.file}:#{s.defn}:#{s.line}" }
+            inline_at: "#{s.file}:#{s.defn}:#{s.line}",
+            spans: { "#{s.file}:#{s.defn}:#{s.line}" => s.span } }
         end
       end
     end

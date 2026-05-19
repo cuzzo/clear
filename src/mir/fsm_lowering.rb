@@ -119,7 +119,7 @@ module FsmLowering
         result_mir.concat(last_pending)
 
         last_is_assign = last_step[:expr].is_a?(AST::Assignment)
-        expr_type = last_step[:expr].full_type || :Void
+        expr_type = last_step[:expr].full_type
         is_step_void = expr_type.nil? || expr_type == :Void ||
           (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
 
@@ -198,7 +198,7 @@ module FsmLowering
       return MIR::Let.new(step[:binding], mir, false, nil, nil)
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
-    expr_type = step[:expr].full_type || :Void
+    expr_type = step[:expr].full_type
     is_void_step = expr_type.nil? || expr_type == :Void ||
       (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
     MIR::ExprStmt.new(mir, !is_void_step)
@@ -238,6 +238,8 @@ module FsmLowering
     mir_list.flatten(1).filter_map { |n|
       out = @_emitter.emit(n)
       next nil if out.nil? || out.strip.empty?
+      stripped = out.strip
+      out = out + ";" if stripped.start_with?("try ") && !stripped.end_with?(";", "}")
       out
     }.join("\n            ")
   end
@@ -247,7 +249,7 @@ module FsmLowering
   # isn't a lock-suspending capability or its target isn't a BG
   # capture. Consumed by FsmTransform::Emit.expand_lock_segment
   # (per-cap fan-out) for both single-cap and multi-cap WITH.
-  sig { params(cap: T::Hash[Symbol, T.untyped], with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
+  sig { params(cap: AST::Capability, with_node: AST::WithBlock, ctx_id: Integer, captured: T::Hash[String, Type]).returns(T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]])) }
   def fsm_cap_metadata(cap, with_node, ctx_id, captured)
     T.bind(self, MIRLowering) rescue nil
     return nil unless cap[:capability] == :EXCLUSIVE ||

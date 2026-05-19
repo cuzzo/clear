@@ -14,7 +14,8 @@ module Decomplex
   # def) units. Neglected = a guarded action that is a high-support
   # guard set minus exactly one atom.
   class PathCondition
-    Site = Struct.new(:guards, :action, :file, :defn, :line, keyword_init: true)
+    Site = Struct.new(:guards, :action, :file, :defn, :line, :span,
+                      keyword_init: true)
 
     def self.scan(files)
       sites = []
@@ -79,7 +80,9 @@ module Decomplex
 
       @sites << Site.new(guards: members, action: Ast.slice(node, @lines)[0, 80],
                          file: @file, defn: defstack.last || "(top-level)",
-                         line: node.first_lineno)
+                         line: node.first_lineno,
+                         span: [node.first_lineno, node.first_column,
+                                node.last_lineno, node.last_column])
     end
 
     class Report
@@ -95,7 +98,8 @@ module Decomplex
 
           { guards: gs, support: sts.size, scatter: scatter,
             rank: sts.size * scatter,
-            sites: sts.map { |s| "#{s.file}:#{s.defn}:#{s.line}" } }
+            sites: sts.map { |s| "#{s.file}:#{s.defn}:#{s.line}" },
+            spans: sts.to_h { |s| ["#{s.file}:#{s.defn}:#{s.line}", s.span] } }
         end.sort_by { |h| -h[:rank] }
       end
 
@@ -110,7 +114,9 @@ module Decomplex
 
             out << { pattern: gs, support: sup,
                      missing: (gs - s.guards).first,
-                     at: "#{s.file}:#{s.defn}:#{s.line}", action: s.action }
+                     at: "#{s.file}:#{s.defn}:#{s.line}",
+                     spans: { "#{s.file}:#{s.defn}:#{s.line}" => s.span },
+                     action: s.action }
           end
         end
         out.uniq.sort_by { |h| -h[:support] }

@@ -3,12 +3,294 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
+require_relative "../annotator-helpers/intrinsic_registry"
 
 # ==========================================
 # AST
 # ==========================================
 module AST
     extend T::Sig
+
+  # A node's value-type is, for these kinds, a pure function of its
+  # structure — so it is DERIVED, never stamped. The full_type getter
+  # below memoizes the derived Type into @type_object; the pre-MIR
+  # invariant walk (which calls .full_type on every node) materializes
+  # it, so type_info / resolved_type work downstream with no extra
+  # code. An annotator-set value always wins (`||=`).
+  LITERAL_VALUE_TYPE = T.let({
+    STRING: :String, NUMBER: :Number, FLOAT64: :Float64,
+    INT64: :Int64, BOOLEAN: :Bool, SYMBOL: :Symbol, NIL: :Void
+  }.freeze, T::Hash[Symbol, Symbol])
+  BOOL_BINOPS = %i[LT GT LTE GTE EQ NEQ AND OR].freeze
+  # Statements / control-flow evaluate to Void unless the annotator
+  # promoted them to an expression (IF/MATCH as a value), in which
+  # case @type_object is already set and wins.
+  module StatementVoidType
+    extend T::Sig
+    sig { returns(Type) }
+    def full_type
+      @type_object = T.let(@type_object, T.nilable(Type))
+      @type_object ||= Type.new(:Void)
+    end
+  end
+
+  Param = Struct.new(:name, :type, :default, :mutable, :takes,
+                     :comptime, :name_token, :required, :sync, :symbol,
+                     keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { params(val: T.untyped).void }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+  end
+
+  Capture = Struct.new(:name, :type, :default, :mutable, :takes,
+                       :comptime, :name_token, :storage,
+                       keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      # mutable/takes/comptime arrive from match! (a Token when the
+      # keyword is present, nil/false otherwise) -- normalize to Bool.
+      self[:mutable]  = !!self[:mutable]
+      self[:takes]    = !!self[:takes]
+      self[:comptime] = !!self[:comptime]
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { returns(String) }
+    def name; self[:name]; end
+
+    sig { returns(T.nilable(Type)) }
+    def type; self[:type]; end
+
+    sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    sig { returns(T.nilable(AST::Locatable)) }
+    def default; self[:default]; end
+
+    sig { returns(T::Boolean) }
+    def mutable; self[:mutable]; end
+
+    sig { returns(T::Boolean) }
+    def takes; self[:takes]; end
+
+    sig { returns(T::Boolean) }
+    def comptime; self[:comptime]; end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def name_token; self[:name_token]; end
+
+    sig { returns(T.nilable(Symbol)) }
+    def storage; self[:storage]; end
+
+    sig { params(val: T.nilable(Symbol)).void }
+    def storage=(val); self[:storage] = val; end
+  end
+
+  MatchCase = Struct.new(:kind, :value, :body, :binding, :destructure, :extra_values,
+                         :indirect_payload_as,
+                         keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      self[:body] = [] if self[:body].nil?
+      self[:extra_values] = [] if self[:extra_values].nil?
+      self[:indirect_payload_as] = false if self[:indirect_payload_as].nil?
+    end
+
+    sig { returns(Symbol) }
+    def kind
+      self[:kind]
+    end
+
+    sig { returns(AST::Locatable) }
+    def value
+      self[:value]
+    end
+
+    sig { returns(T::Array[AST::Locatable]) }
+    def body
+      self[:body]
+    end
+
+    sig { params(val: T::Array[AST::Locatable]).void }
+    def body=(val)
+      self[:body] = val
+    end
+
+    sig { returns(T.nilable(String)) }
+    def binding
+      self[:binding]
+    end
+
+    sig { returns(T.nilable(AST::StructPattern)) }
+    def destructure
+      self[:destructure]
+    end
+
+    sig { returns(T::Array[AST::Locatable]) }
+    def extra_values
+      self[:extra_values]
+    end
+
+    sig { returns(T::Boolean) }
+    def indirect_payload_as
+      self[:indirect_payload_as]
+    end
+
+    sig { params(val: T::Boolean).void }
+    def indirect_payload_as=(val)
+      self[:indirect_payload_as] = val
+    end
+
+  end
+
+  Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture,
+                       keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      self[:unwrapped_type] = Type.new(:Untyped) if self[:unwrapped_type].nil?
+    end
+
+    sig { returns(AST::Locatable) }
+    def expr
+      self[:expr]
+    end
+
+    sig { returns(String) }
+    def name
+      self[:name]
+    end
+
+    sig { returns(Lexer::Token) }
+    def name_token
+      self[:name_token]
+    end
+
+    sig { returns(Type) }
+    def unwrapped_type
+      self[:unwrapped_type]
+    end
+
+    sig { params(val: Type).void }
+    def unwrapped_type=(val)
+      self[:unwrapped_type] = val
+    end
+
+    sig { returns(T.nilable(SymbolEntry)) }
+    def symbol
+      self[:symbol]
+    end
+
+    sig { params(val: T.nilable(SymbolEntry)).void }
+    def symbol=(val)
+      self[:symbol] = val
+    end
+
+    sig { returns(T.nilable(String)) }
+    def capture
+      self[:capture]
+    end
+
+  end
+
+  Capability = Struct.new(:capability, :var_node, :alias, :alias_mutable, :guard_expr,
+                          :snapshot_token, :view_token, :resolved_type, :old_scope,
+                          keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      self[:resolved_type] = Type.new(:Untyped) if self[:resolved_type].nil?
+    end
+
+    sig { returns(Type) }
+    def resolved_type
+      self[:resolved_type]
+    end
+
+    sig { params(val: Type).void }
+    def resolved_type=(val)
+      self[:resolved_type] = val
+    end
+
+  end
+
+  # The value of a struct-pattern field: the :wildcard sentinel
+  # (`c: _`), the :bind sentinel (bare `a`), or the bound expression /
+  # nested pattern AST node (`b: x`). A real 3-way typed sum -- NOT
+  # T.untyped. Named once here and reused on every slot/param that
+  # carries it.
+  PatternFieldValue = T.type_alias { T.any(Symbol, AST::Locatable) }
+
+  # One field of a struct-destructuring pattern (StructPattern#fields
+  # element), e.g. `a` / `b: x` / `c: _` inside `MATCH v { a, b: x }`.
+  # `value` is the PatternFieldValue sum, encapsulated behind
+  # wildcard? / bind? / expr so no reader re-derives it via raw
+  # `== :wildcard` / `== :bind` symbol comparisons.
+  PatternField = Struct.new(:name, :value, :name_token, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(String) }
+    def name
+      self[:name]
+    end
+
+    sig { returns(Lexer::Token) }
+    def name_token
+      self[:name_token]
+    end
+
+    sig { returns(PatternFieldValue) }
+    def value
+      self[:value]
+    end
+
+    sig { params(val: PatternFieldValue).void }
+    def value=(val)
+      self[:value] = val
+    end
+
+    sig { returns(T::Boolean) }
+    def wildcard?
+      self[:value] == :wildcard
+    end
+
+    sig { returns(T::Boolean) }
+    def bind?
+      self[:value] == :bind
+    end
+
+    # The bound expression / nested pattern, or nil for the :wildcard /
+    # :bind sentinels. Readers that want "the AST node" use this.
+    sig { returns(T.nilable(AST::Locatable)) }
+    def expr
+      v = self[:value]
+      v.is_a?(AST::Locatable) ? v : nil
+    end
+
+  end
 
   # Walk all statements in a body, recursing into control flow branches.
   # Yields each statement node. Handles IfStatement, MatchStatement,
@@ -220,7 +502,9 @@ module AST
     sig { returns(T.untyped) }
     def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
-    def matched_stdlib_def=(val); @matched_stdlib_def = T.let(val, T.untyped); end
+    def matched_stdlib_def=(val)
+      @matched_stdlib_def = T.let(IntrinsicRegistry.fs(val), T.untyped)
+    end
 
     sig { void }
     def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
@@ -310,11 +594,29 @@ module AST
       T.must(@type_object)
     end
 
-    # Returns the Type object directly. Callers use type_info for rich access
-    # and == / .to_s / Type.new(full_type) for interop.
-    sig { returns(T.nilable(Type)) }
+    # :Untyped sentinel (not nil) so no caller branches on nil; PreMirTypeCheck rejects it at the AST->MIR boundary.
+    sig { returns(Type) }
     def full_type
-      @type_object
+      @type_object ||= Type.new(:Untyped)
+    end
+
+    sig do
+      params(default: T.nilable(T.any(Type, Symbol, String)),
+             blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
+        .returns(T.any(Type, Symbol, String))
+    end
+    def full_type_or(default = nil, &blk)
+      ft = full_type
+      return ft unless ft.untyped?
+      return blk.call if blk
+      default.nil? ? ft : default
+    end
+
+    # True when the node carries a real (stamped) type, i.e. full_type
+    # is not the :Untyped sentinel.
+    sig { returns(T::Boolean) }
+    def typed?
+      !full_type.untyped?
     end
 
     sig { params(val: T.untyped).returns(T.nilable(Type)) }
@@ -372,9 +674,14 @@ module AST
     # @yield [name] Block to look up struct schema by name
     # @return [Symbol] The storage location
     #
-    sig { params(final_type: T.untyped, schema_lookup: T.untyped).returns(Symbol) }
+    sig { params(final_type: T.any(Symbol, Type), schema_lookup: T.untyped).returns(Symbol) }
     def finalize_storage!(final_type, &schema_lookup)
       T.bind(self, T.untyped) rescue nil
+      # Normalize the Symbol|Type input to a Type once at the seam, so
+      # the body never re-derives via final_type.is_a?(Type). A Symbol
+      # tag yields a bare Type (no shard/sync/soa/observable) -- exactly
+      # what the old `is_a?(Type) && ...` false-branch produced.
+      final_type = Type.new(final_type) unless final_type.is_a?(Type)
       # Calculate slot size
       type_obj = Type.new(final_type)
       @slot_size = T.let(type_obj.slot_size(&schema_lookup), T.nilable(Integer))
@@ -401,18 +708,17 @@ module AST
 
       # Build a Type that carries the resolved base type plus storage-derived capabilities.
       # For fn_type, preserve the full type object — do not reduce to the return-type symbol.
-      t = if final_type.is_a?(Type) && final_type.fn_type?
+      t = if final_type.fn_type?
         final_type
       else
-        base_sym = final_type.is_a?(Type) ? final_type.resolved : final_type
-        new_t = Type.new(base_sym)
+        new_t = Type.new(final_type.resolved)
         # Carry shard_count + sync + soa through finalize — not encoded in the base symbol.
         # Check both final_type and the value's type_info (for constructor sugar: List[], Pool[]).
-        val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
-        new_t.shard_count = final_type.shard_count if final_type.is_a?(Type) && final_type.shard_count
+        val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
+        new_t.shard_count = final_type.shard_count if final_type.shard_count
         new_t.shard_count ||= val_ti.shard_count if val_ti&.shard_count
-        new_t.sync = final_type.sync if final_type.is_a?(Type) && final_type.sync
-        new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
+        new_t.sync = final_type.sync if final_type.sync
+        new_t.soa = final_type.soa if final_type.soa
         new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
         new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
         # Carry @observable through finalize_storage! — without this the
@@ -422,16 +728,16 @@ module AST
         # too so OBSERVABLE_WRAPPERS can pick the right wrapper Zig type;
         # without it the lookup falls back to a default and silently
         # emits the wrong wrapper.
-        new_t.is_observable = true if (final_type.is_a?(Type) && final_type.observable?) ||
+        new_t.is_observable = true if final_type.observable? ||
                                        (val_ti.respond_to?(:observable?) && val_ti.observable?)
-        if final_type.is_a?(Type) && final_type.observable_terminal
+        if final_type.observable_terminal
           new_t.observable_terminal = final_type.observable_terminal
         elsif val_ti.respond_to?(:observable_terminal) && val_ti.observable_terminal
           new_t.observable_terminal = val_ti.observable_terminal
         end
-        new_t.elem_ownership = final_type.elem_ownership if final_type.is_a?(Type) && final_type.elem_ownership
+        new_t.elem_ownership = final_type.elem_ownership if final_type.elem_ownership
         new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
-        new_t.elem_sync = final_type.elem_sync if final_type.is_a?(Type) && final_type.elem_sync
+        new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
         new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
         # Propagate @link_source from value's type
         if val_ti&.link?
@@ -441,7 +747,7 @@ module AST
         new_t
       end
       # Propagate @link ownership from the value's LinkNode
-      val_ti = respond_to?(:value) && value.respond_to?(:type_info) ? value.type_info : nil
+      val_ti = respond_to?(:value) && value.respond_to?(:full_type) ? value.full_type : nil
       if val_ti&.link?
         storage = :link
       end
@@ -487,13 +793,6 @@ module AST
       self.storage = storage
 
       storage
-    end
-
-    # -- NEW PREFERRED ACCESSOR --
-    # Use this in new code to get the rich object
-    sig { returns(T.nilable(Type)) }
-    def type_info
-      @type_object
     end
 
     # -- REFACTORED HELPERS --
@@ -556,6 +855,31 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
+
+    # Seam: a function's declared/inferred return is always a Type
+    # (or nil when undeclared — the implicit-return signal that
+    # inference consumes). Coerced at BOTH construction (positional
+    # Struct init from parser/synthetic builders) and post-parse
+    # assignment (return inference, auto-infer) so no reader needs
+    # an `is_a?(Type)` Symbol/Type discriminator.
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      rt = self[:return_type]
+      self[:return_type] = Type.new(rt) unless rt.nil? || rt.is_a?(Type)
+      self[:params] = self[:params] || []
+    end
+
+    sig { params(val: T.untyped).void }
+    def return_type=(val)
+      self[:return_type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
+
+    sig { params(val: T::Array[T.untyped]).void }
+    def params=(val)
+      self[:params] = val
+    end
+
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     # True when the user wrote RETURNS explicitly; fallible-signature checks
     # only enforce on user-authored return types.
@@ -661,13 +985,53 @@ module AST
     # call resolution, same UFCS at call sites at the language level.
     attr_accessor :is_method
   end
-  StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
+  StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      self[:borrowed] = false if self[:borrowed].nil?
+    end
+
+    sig { returns(T.any(Type, Symbol)) }
+    def type; self[:type]; end
+    sig { params(val: T.any(Type, Symbol)).void }
+    def type=(val); self[:type] = val; end
+
+    sig { returns(T.nilable(AST::Locatable)) }
+    def default; self[:default]; end
+
+    sig { returns(T::Boolean) }
+    def borrowed; self[:borrowed]; end
+  end
+
+  StructDef    = Struct.new(:token, :name, :field_decls, :visibility, :type_params) do
+    extend T::Sig
+    include Locatable
+    sig { returns(T::Hash[String, AST::StructField]) }
+    def field_decls; self[:field_decls]; end
+  end
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
+    extend T::Sig
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
   end
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
+    include StatementVoidType
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
     attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
@@ -680,16 +1044,43 @@ module AST
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
+    extend T::Sig
     include Locatable
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :compound_op
     attr_accessor :auto_atomic_op
+
+    # Seam: same contract as VarDecl#type — annotated/inferred type is
+    # always a Type (or nil when unannotated). Coerced at construction
+    # and post-parse assignment so no reader needs an `is_a?(Type)`
+    # Symbol/Type discriminator.
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      t = self[:type]
+      self[:type] = Type.new(t) unless t.nil? || t.is_a?(Type)
+    end
+
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def type=(val)
+      self[:type] = val.nil? || val.is_a?(Type) ? val : Type.new(val)
+    end
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     extend T::Sig
     include Locatable
+    # Derived: comparison/logical -> Bool; otherwise an operand's type.
+    sig { returns(Type) }
+    def full_type
+      @type_object ||=
+        if BOOL_BINOPS.include?(op)
+          Type.new(:Bool)
+        else
+          Type.new(left.full_type.resolved || right.full_type.resolved || :Any)
+        end
+    end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :storage        # :heap when carry-var concat is promoted to heap
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
@@ -709,7 +1100,15 @@ module AST
     # pipeline lowering switches to fiber-spawn-with-accumulator codegen.
     attr_accessor :observable_dest
   end
-  UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
+  UnaryOp      = Struct.new(:token, :op, :right) do
+    extend T::Sig
+    include Locatable
+    # Derived: NOT -> Bool; otherwise the operand's type.
+    sig { returns(Type) }
+    def full_type
+      @type_object ||= op == :NOT ? Type.new(:Bool) : Type.new(right.full_type.resolved || :Any)
+    end
+  end
   # Parser-only placeholder for call-site override syntax; the annotator
   # rejects it until runtime semantics are implemented.
   CallSiteOverride = Struct.new(:token, :kind, :n, :inner) { include Locatable }
@@ -723,7 +1122,16 @@ module AST
     def wildcard?; false end
     def name; self[:name].to_s end
   end
-  Literal      = Struct.new(:token, :type, :value, :storage) { include Locatable }
+  Literal      = Struct.new(:token, :type, :value, :storage) do
+    extend T::Sig
+    include Locatable
+    # Derived: a literal's value-type is a pure function of its token
+    # kind. Never nil, never stamped.
+    sig { returns(Type) }
+    def full_type
+      @type_object ||= Type.new(LITERAL_VALUE_TYPE.fetch(self[:type], :Any))
+    end
+  end
   ListLit      = Struct.new(:token, :items, :storage) { 
     extend T::Sig
     include Locatable 
@@ -751,11 +1159,30 @@ module AST
     # the name. Populated by the parser so `clear fix` can locate a
     # misspelled field-name for a fixable edit span.
     attr_accessor :field_tokens
+    # Set of field names the schema marks BORROWED, stamped by the
+    # annotator. MIR lowering reads this instead of re-resolving the
+    # struct schema (single-source-of-truth: the annotator already
+    # knows which fields are borrowed when it validates the literal).
+    attr_accessor :borrowed_field_names
   end
-  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
+  LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) do
+    extend T::Sig
+    include Locatable
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:params] = self[:params] || []
+    end
+
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def params=(val)
+      self[:params] = val || []
+    end
+  end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [then_branch, else_branch].compact
@@ -768,11 +1195,24 @@ module AST
   # single binding emits: if (expr) |y| { ... }
   # multi binding emits labeled block: blk: { const y = expr1 orelse break :blk; const a = expr2 orelse break :blk; ... }
   IfBind       = Struct.new(:token, :bindings, :then_branch, :else_branch) do
+    extend T::Sig
     include Locatable
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:bindings] = [] if self[:bindings].nil?
+    end
+
+    sig { params(val: T::Array[AST::Binding]).void }
+    def bindings=(val)
+      self[:bindings] = val
+    end
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
@@ -782,14 +1222,21 @@ module AST
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T.untyped]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
     attr_accessor :tight
   end
-  BreakNode    = Struct.new(:token) { include Locatable }
-  ContinueNode = Struct.new(:token) { include Locatable }
+  BreakNode    = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
+  end
+  ContinueNode = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
+  end
   FuncCall     = Struct.new(:token, :name, :args) do
     extend T::Sig
     include Locatable
@@ -842,6 +1289,9 @@ module AST
     # assignment — writes go through visit_assignment_field's
     # auto-lock path instead.
     attr_accessor :is_assignment_lhs
+    # Set by visit_GetField when this reads an @indirect (heap-boxed) field:
+    # the value is a one-level pointer that lower_get_field must deref.
+    attr_accessor :indirect_field
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
     sig { returns(String) }
@@ -878,6 +1328,18 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:capabilities] = [] if self[:capabilities].nil?
+    end
+
+    sig { params(val: T::Array[AST::Capability]).void }
+    def capabilities=(val)
+      self[:capabilities] = val
+    end
+
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
     attr_accessor :lock_error_clause
@@ -989,9 +1451,75 @@ module AST
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops
+  CatchItem = Struct.new(:form, :name, :token, keyword_init: true) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def form; self[:form]; end
+    sig { returns(String) }
+    def name; self[:name]; end
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+  end
+
+  CatchFilter = Struct.new(:form, :value, :token, keyword_init: true) do
+    extend T::Sig
+    sig { returns(Symbol) }
+    def form; self[:form]; end
+    sig { returns(T.any(String, AST::Locatable)) }
+    def value; self[:value]; end
+    sig { returns(Lexer::Token) }
+    def token; self[:token]; end
+  end
+
+  CatchClause = Struct.new(:items, :filters, :body, :kinds, :types,
+                           :filter_types, :filter_messages,
+                           keyword_init: true) do
+    extend T::Sig
+
+    sig { params(kw: T.untyped).void }
+    def initialize(**kw)
+      super
+      self[:items]           = [] if self[:items].nil?
+      self[:filters]         = [] if self[:filters].nil?
+      self[:body]            = [] if self[:body].nil?
+      self[:kinds]           = [] if self[:kinds].nil?
+      self[:types]           = [] if self[:types].nil?
+      self[:filter_types]    = [] if self[:filter_types].nil?
+      self[:filter_messages] = [] if self[:filter_messages].nil?
+    end
+
+    sig { returns(T::Array[CatchItem]) }
+    def items; self[:items]; end
+    sig { returns(T::Array[CatchFilter]) }
+    def filters; self[:filters]; end
+    sig { returns(T::Array[AST::Locatable]) }
+    def body; self[:body]; end
+    sig { params(val: T::Array[AST::Locatable]).void }
+    def body=(val); self[:body] = val; end
+
+    sig { returns(T::Array[Symbol]) }
+    def kinds; self[:kinds]; end
+    sig { params(val: T::Array[Symbol]).void }
+    def kinds=(val); self[:kinds] = val; end
+
+    sig { returns(T::Array[String]) }
+    def types; self[:types]; end
+    sig { params(val: T::Array[String]).void }
+    def types=(val); self[:types] = val; end
+
+    sig { returns(T::Array[String]) }
+    def filter_types; self[:filter_types]; end
+    sig { params(val: T::Array[String]).void }
+    def filter_types=(val); self[:filter_types] = val; end
+
+    sig { returns(T::Array[AST::Locatable]) }
+    def filter_messages; self[:filter_messages]; end
+    sig { params(val: T::Array[AST::Locatable]).void }
+    def filter_messages=(val); self[:filter_messages] = val; end
+  end
+
   # CATCH block: error handler at function bottom. Multiple CATCH clauses + optional DEFAULT.
-  # catch_clauses: [{ error_name: String|nil, with_msg: String|nil, body: [ASTNode] }]
-  # default_body: [ASTNode] or nil
+  # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) { include Locatable }
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
@@ -1037,28 +1565,57 @@ module AST
   # StructPattern: destructuring pattern for MATCH.
   # fields: Array of { name: String, value: ASTNode | :wildcard }
   # partial: Boolean — true when `...` is present (remaining fields ignored)
-  StructPattern     = Struct.new(:token, :fields, :partial) { include Locatable }
+  StructPattern     = Struct.new(:token, :fields, :partial) do
+    extend T::Sig
+    include Locatable
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:fields] = [] if self[:fields].nil?
+    end
+
+    sig { params(val: T::Array[AST::PatternField]).void }
+    def fields=(val)
+      self[:fields] = val
+    end
+  end
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
   # ExternFnDecl: EXTERN FN name<T>(params) RETURNS type [EFFECTS :alloc] FROM "module"
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
-  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) {
+  ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects) do
+    extend T::Sig
     include Locatable
     attr_accessor :owner_type        # "TypeName" for method declarations (nil for free functions)
     attr_accessor :owner_type_params # [:T, :U] for TypeName<T, U>.method
     attr_accessor :fn_type_params    # [:T] for fnName<T>(...)
-  }
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:params] = self[:params] || []
+    end
+
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def params=(val)
+      self[:params] = val || []
+    end
+  end
   # ExternStructDecl: EXTERN STRUCT Name { fields } [CLOSE "method"] FROM "module"
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
-  ExternStructDecl = Struct.new(:token, :name, :fields, :from_module) {
+  ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module) do
+    extend T::Sig
     include Locatable
     attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
     attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
-  }
+    sig { returns(T::Hash[String, AST::StructField]) }
+    def field_decls; self[:field_decls]; end
+  end
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
   EnumDef          = Struct.new(:token, :name, :variants, :visibility) { include Locatable }
@@ -1067,7 +1624,7 @@ module AST
   # { "VariantName" => value } where value is:
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
-  #   { kind: :inline_struct, fields: { "f" => Type } } — inline struct payload (new)
+  #   Schemas::InlineStructVariant                 — inline struct payload
   # methods (optional): Array of { token:, name:, params: [{name:, type:},...], return_type: }
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility) do
@@ -1175,9 +1732,21 @@ module AST
     extend T::Sig
     include Locatable
     include HasBodies
+
+    sig { params(args: T.untyped).void }
+    def initialize(*args)
+      super
+      self[:cases] = [] if self[:cases].nil?
+    end
+
+    sig { params(val: T::Array[AST::MatchCase]).void }
+    def cases=(val)
+      self[:cases] = val
+    end
+
     sig { returns(T::Array[T.untyped]) }
     def child_bodies
-      bodies = cases.filter_map { |c| c[:body] }
+      bodies = cases.map(&:body)
       bodies << default_case if default_case
       bodies
     end
@@ -1192,6 +1761,7 @@ module AST
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
@@ -1202,6 +1772,7 @@ module AST
   ForEach           = Struct.new(:token, :var_name, :collection, :body, :deferred_drops, :is_mutable) do
     extend T::Sig
     include Locatable
+    include StatementVoidType
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
@@ -1394,6 +1965,13 @@ module MIR
     attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
     sig { returns(TrueClass) }
     def needs_cleanup; true; end
+    # Carrier struct: the type lives in the :type_info member, NOT
+    # Locatable's @type_object. Override Locatable so the canonical
+    # full_type accessor reads/writes the member (member name kept).
+    sig { returns(T.untyped) }
+    def full_type; type_info; end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def full_type=(val); self.type_info = val; end
   end
 
   # Promote: escape promotion inserted before return statements.

@@ -77,11 +77,17 @@ memory-safety bugs in CLEAR (catalogued #1/#2/#9):
     or co-call protocol in many places, one place omits step *k*.
     (Neglected condition, neglected path condition, broken protocol,
     type-3 clone)
+ 4. **False simplicity** -- code whose local syntax understates its
+    non-local behaviour: hidden dynamic dispatch, hidden mutation,
+    hidden global/context dependency, hidden IO/effects, callback
+    control-inversion, metaprogramming, monkeypatch/reopen.
+    (False simplicity; see [docs/false-simplicity.md](docs/false-simplicity.md))
 
-Ten detectors, each grounded in prior art (PR-Miner, Engler "Bugs as
-Deviant Behavior", Chang/Podgurski/Yang neglected conditions, DynaMine
-inconsistent-update, CP-Miner, JADET, SLAM/BLAST predicate
-abstraction). Full catalogue and citations:
+Eleven detectors, each grounded in prior art (PR-Miner, Engler "Bugs
+as Deviant Behavior", Chang/Podgurski/Yang neglected conditions,
+DynaMine inconsistent-update, CP-Miner, JADET, SLAM/BLAST predicate
+abstraction; false simplicity's shallow triggers vs. RuboCop/Reek are
+catalogued honestly in its design doc). Full catalogue and citations:
 [docs/agents/design.md](docs/agents/design.md).
 
 ### Reading the report

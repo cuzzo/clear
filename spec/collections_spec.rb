@@ -56,7 +56,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
         bind = fn_node.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "items" }
-        expect(bind.type_info.list_collection?).to be true
+        expect(bind.full_type.list_collection?).to be true
       end
 
       it "raises when @list is applied to a non-array type" do
@@ -103,7 +103,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
         bind = fn_node.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "pool" }
-        expect(bind.type_info.pool?).to be true
+        expect(bind.full_type.pool?).to be true
       end
 
       it "raises when @pool is applied to a non-array type" do
@@ -164,8 +164,8 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
         bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "id" }
-        expect(bind.type_info.generic_instance?).to be true
-        expect(bind.type_info.generic_base).to eq(:Id)
+        expect(bind.full_type.generic_instance?).to be true
+        expect(bind.full_type.generic_base).to eq(:Id)
       end
 
       it "emits u64 as the Zig type for Id<T>" do

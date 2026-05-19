@@ -324,7 +324,7 @@ module FsmTransform
     def io_suspending_call?(call_node)
       T.bind(self, T.untyped) rescue nil
       md = call_node.matched_stdlib_def
-      !!(md && md[:suspends] && md[:fsm_setup])
+      !!(md && md.emit&.suspends && md.emit&.fsm_setup)
     end
 
     sig { params(expr: T.untyped).returns(T::Boolean) }

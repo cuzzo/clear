@@ -68,11 +68,27 @@
 # for tied). Walkers consume that uniform list and compare each
 # source's declaring scope against the destination.
 require "sorbet-runtime"
+# `type=` calls `Type.new` unconditionally (a hard, non-lazy dependency),
+# so Type must be loaded with this file. type.rb -> function_signature.rb
+# -> intrinsic_emit/function_return; none require scope/symbol_entry, so
+# this is acyclic and also makes FunctionSignature available for
+# `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
+require_relative "type"
+
+# Scope and SymbolEntry are a mutual back-reference: scope.rb requires
+# this file, so this file cannot require scope.rb. `# typed: strict`
+# forces every ivar through the eager `T.let`, which needs `Scope`
+# resolvable at first `SymbolEntry.new`. This guarded forward
+# declaration is a pure no-op in the real load path (scope.rb defines
+# Scope first); loaded in isolation it creates the bare constant that
+# scope.rb later reopens (same constant, not a shadow), so `@scope`
+# can be typed `T.nilable(Scope)` without restructuring the cycle.
+class Scope; end unless defined?(Scope)
 
 class SymbolEntry
     extend T::Sig
 
-  attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
+  attr_accessor :reg, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,
                 :mutated,        # set by mark_var_mutated when the binding
                                  # is reassigned, field/index-assigned, or
@@ -100,6 +116,37 @@ class SymbolEntry
                                      # Forces Zig `var` storage so &binding yields *T, not *const T.
                 :poly_borrow_target  # address is taken at a universal-polymorphic call site;
                                      # forces mutable Zig storage so the callee can write back.
+
+  # The binding's type. Single coercing seam: every input is laundered
+  # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
+  # discriminator. A function binding is a Type whose @raw is its
+  # FunctionSignature (Type#fn_type?); a legacy bare Symbol becomes
+  # Type.new(sym); an unresolved binding becomes Type.new(:Untyped) so
+  # the pre-MIR invariant can catch it. Mirrors FunctionSignature#return_type=.
+  sig { returns(Type) }
+  attr_reader :type
+
+  # The laundering seam input is a real bounded union, not untyped:
+  # a legacy Symbol tag, a String type name, a Type, a function
+  # binding's FunctionSignature, or nil (unresolved). Normalized to a
+  # single Type. The runtime sig now enforces the accepted domain --
+  # anything outside it is a compiler bug, surfaced here.
+  sig { params(val: T.any(Symbol, String, Type, FunctionSignature, NilClass)).void }
+  def type=(val)
+    @type = val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val))
+  end
+
+  # A function binding is a Type whose @raw is its FunctionSignature
+  # (Type#fn_type?). Readers that need the signature unwrap through
+  # here so no site re-derives the Symbol/Type/FunctionSignature split.
+  # The sig block is lazy (built on first call, by which point the full
+  # compiler — including FunctionSignature — is loaded), so referencing
+  # the constant here is safe despite the type.rb<->function_signature
+  # require ordering.
+  sig { returns(T.nilable(FunctionSignature)) }
+  def fn_signature
+    @type.fn_type? ? @type.raw : nil
+  end
 
   # Backward-compat alias for `lifetime == :current_scope`.
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,
@@ -152,7 +199,8 @@ class SymbolEntry
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)
     @reg = reg
-    @type = type
+    @type = T.let(Type.new(:Untyped), Type)
+    self.type = type
     @mutable = mutable
     @storage = storage
     @sync = sync
@@ -165,17 +213,17 @@ class SymbolEntry
     @resource = resource
     @close_zig = close_zig
     @lifetime = T.let(nil, T.untyped)
-    @borrowed_alias = T.let(nil, T.nilable(T::Boolean))
+    @borrowed_alias = T.let(false, T::Boolean)
     @sync_families = T.let(nil, T.untyped)
-    @mutable_ref_target = T.let(nil, T.nilable(T::Boolean))
-    @poly_borrow_target = T.let(nil, T.nilable(T::Boolean))
-    @mutated = T.let(nil, T.nilable(T::Boolean))
-    @read = T.let(nil, T.nilable(T::Boolean))
-    @scope = T.let(nil, T.untyped)
+    @mutable_ref_target = T.let(false, T::Boolean)
+    @poly_borrow_target = T.let(false, T::Boolean)
+    @mutated = T.let(false, T::Boolean)
+    @read = T.let(false, T::Boolean)
+    @scope = T.let(nil, T.nilable(Scope))
     @scope_depth = T.let(nil, T.nilable(Integer))
     @ownership_kind = T.let(nil, T.nilable(Symbol))
-    @takes = T.let(nil, T.nilable(T::Boolean))
-    @is_param = T.let(nil, T.nilable(T::Boolean))
+    @takes = T.let(false, T::Boolean)
+    @is_param = T.let(false, T::Boolean)
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
   end

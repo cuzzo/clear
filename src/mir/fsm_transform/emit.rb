@@ -503,9 +503,15 @@ module FsmTransform
           all_promoted = (liveness && liveness.cross_segment_vars || {}).keys +
                          conservative_promoted
           if all_promoted.any?
+            promoted_names = all_promoted.uniq
             lowered = lowering.promote_fsm_decls_to_fields(
-              lowered, all_promoted.uniq, "__ctx_#{id}",
+              lowered, promoted_names, "__ctx_#{id}",
             )
+            promoted_names.each do |promoted_name|
+              lowered = lifted_ctx_cleanup_to_destroy!(
+                lowered, promoted_name, "__ctx_#{id}", ctx
+              )
+            end
           end
           [lowered, *raw_stmts].reject { |s| s.is_a?(String) && s.strip.empty? }
         end
@@ -666,6 +672,31 @@ module FsmTransform
                 "destroyTask via ctx[:fsm_destroy_lines]."
         end
       end
+    end
+
+    sig { params(code: T.untyped, name: String, ctx_ref: String, ctx: T::Hash[Symbol, T.untyped]).returns(String) }
+    def lifted_ctx_cleanup_to_destroy!(code, name, ctx_ref, ctx)
+      text = code.is_a?(Array) ? code.join("\n") : code.to_s
+      escaped_ctx = Regexp.escape(ctx_ref)
+      escaped_name = Regexp.escape(name)
+      text = text.lines.reject do |line|
+        if line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_]\w*_moved\)\s+)?#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
+          cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
+          cleanup = cleanup.sub(/\Aif \(![A-Za-z_]\w*_moved\)\s+/, "")
+          cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
+          ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
+          true
+        elsif line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_]\w*_moved\)\s+)?CheatLib\.cleanup\([^\n]*&#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
+          cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
+          cleanup = cleanup.sub(/\Aif \(![A-Za-z_]\w*_moved\)\s+/, "")
+          cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
+          ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
+          true
+        else
+          false
+        end
+      end.join
+      text
     end
 
     # Expand ONE LockSuspend spec into the per-cap fan-out.

@@ -437,7 +437,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :ADD, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.intAdd(a, b)")
     end
 
@@ -456,7 +456,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :EQ, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to include("CheatLib.eql(name,")
     end
 
@@ -474,7 +474,7 @@ RSpec.describe MIRLowering do
       node = make_binop(left, :WRAP_ADD, right)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to eq("CheatLib.wrapAdd(a, b)")
     end
 
@@ -600,7 +600,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers simple struct definition" do
-      fields = { name: { type: :String }, age: { type: :Int64 } }
+      fields = { name: AST::StructField.new(type: :String), age: AST::StructField.new(type: :Int64) }
       node = AST::StructDef.new(tok, "User", fields, nil, nil)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::StructDef)
@@ -611,7 +611,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers generic struct to FnDef returning anonymous StructDef" do
-      fields = { value: { type: :T } }
+      fields = { value: AST::StructField.new(type: :T) }
       node = AST::StructDef.new(tok, "Box", fields, nil, ["T"])
       result = lowering.lower(node)
       expect(result).to be_a(MIR::FnDef)
@@ -657,7 +657,7 @@ RSpec.describe MIRLowering do
       pub_struct = AST::StructDef.new(tok, "PubThing", {}, :pub, nil)
       pkg_enum = AST::EnumDef.new(tok, "PkgThing", [:A], nil)
       private_struct = AST::StructDef.new(tok, "PrivateThing", {}, :private, nil)
-      inline_union = AST::UnionDef.new(tok, "Value", { Pair: { kind: :inline_struct, fields: {} } }, :pub)
+      inline_union = AST::UnionDef.new(tok, "Value", { Pair: Schemas::InlineStructVariant.new(fields: {}) }, :pub)
       ast = AST::Program.new(tok, [pub_struct, pkg_enum, private_struct, inline_union])
       type_defs = <<~ZIG
         const PubThing = struct {};
@@ -923,7 +923,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ExprStmt)
       expect(result.expr).to be_a(MIR::InlineZig)
-      expect(result.expr.stdlib_def).to include(:value_transforms)
+      expect(result.expr.stdlib_def.emit.value_transforms).not_to be_nil
       expect(emit(result)).to include("CheatLib.setAt(items, 0,")
     end
 
@@ -1047,7 +1047,7 @@ RSpec.describe MIRLowering do
       case_val.full_type = :Direction
       case_body = [make_lit(:NUMBER, 1.0)]
 
-      cases = [{ value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1066,11 +1066,11 @@ RSpec.describe MIRLowering do
       case_val.full_type = :Result
       case_body = [make_lit(:NUMBER, 1.0)]
 
-      cases = [{ value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
-      l = lowering(union_schemas: { Result: { Ok: :Int64, Err: :String } })
+      l = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::IfChain)
       zig = emit(result)
@@ -1084,7 +1084,7 @@ RSpec.describe MIRLowering do
       case_val = make_lit(:STRING, "quit")
       case_body = [make_lit(:NUMBER, 0, full_type: :Int64)]
 
-      cases = [{ value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
       node.string_match = true
@@ -1102,7 +1102,7 @@ RSpec.describe MIRLowering do
       case_body = [make_lit(:STRING, "one")]
       default_body = [make_lit(:STRING, "other")]
 
-      cases = [{ value: case_val, body: case_body }]
+      cases = [AST::MatchCase.new(kind: :eq, value: case_val, body: case_body)]
       node = AST::MatchStatement.new(tok, expr, cases, default_body, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1114,11 +1114,12 @@ RSpec.describe MIRLowering do
 
     it "lowers integer match arms with extra values into a shared switch prong" do
       expr = make_id("x", full_type: :Int64)
-      cases = [{
+      cases = [AST::MatchCase.new(
+        kind: :eq,
         value: make_lit(:INT64, 1, full_type: :Int64),
         extra_values: [make_lit(:INT64, 2, full_type: :Int64), make_lit(:INT64, 3, full_type: :Int64)],
         body: [make_lit(:STRING, "small")]
-      }]
+      )]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1133,7 +1134,7 @@ RSpec.describe MIRLowering do
       expr = make_id("dir", full_type: :Direction)
       north = AST::GetField.new(tok, make_id("Direction"), "North")
       north.full_type = :Direction
-      node = AST::MatchStatement.new(tok, expr, [{ value: north, body: [make_lit(:NUMBER, 1.0)] }], nil, nil, nil, false, nil)
+      node = AST::MatchStatement.new(tok, expr, [AST::MatchCase.new(kind: :eq, value: north, body: [make_lit(:NUMBER, 1.0)])], nil, nil, nil, false, nil)
       node.full_type = :Void
 
       result = lowering(enum_schemas: { Direction: [:North, :South] }).lower(node)
@@ -1144,7 +1145,7 @@ RSpec.describe MIRLowering do
 
     it "lowers expression-mode match to a BlockExpr" do
       expr = make_id("x", full_type: :Int64)
-      cases = [{ value: make_lit(:INT64, 1, full_type: :Int64), body: [make_lit(:INT64, 10, full_type: :Int64)] }]
+      cases = [AST::MatchCase.new(kind: :eq, value: make_lit(:INT64, 1, full_type: :Int64), body: [make_lit(:INT64, 10, full_type: :Int64)])]
       node = AST::MatchStatement.new(tok, expr, cases, [make_lit(:INT64, 0, full_type: :Int64)], nil, nil, true, nil)
       node.full_type = :Int64
       node.expr_mode = true
@@ -1161,16 +1162,17 @@ RSpec.describe MIRLowering do
       ok.full_type = :Result
       err = AST::GetField.new(tok, make_id("Result"), "Err")
       err.full_type = :Result
-      cases = [{
+      cases = [AST::MatchCase.new(
+        kind: :eq,
         value: ok,
         extra_values: [err],
         binding: "payload",
         body: [make_lit(:NUMBER, 1.0)]
-      }]
+      )]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
-      result = lowering(union_schemas: { Result: { Ok: :Int64, Err: :Int64 } }).lower(node)
+      result = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :Int64 }) }).lower(node)
 
       expect(result).to be_a(MIR::IfChain)
       expect(result.branches.length).to eq(2)
@@ -1182,7 +1184,7 @@ RSpec.describe MIRLowering do
     it "lowers WHEN guard arms before subject equality dispatch" do
       expr = make_id("x", full_type: :Int64)
       guard = make_lit(:BOOLEAN, true, full_type: :Boolean)
-      cases = [{ kind: :when, value: guard, body: [make_lit(:STRING, "guarded")] }]
+      cases = [AST::MatchCase.new(kind: :when, value: guard, body: [make_lit(:STRING, "guarded")])]
       node = AST::MatchStatement.new(tok, expr, cases, nil, nil, nil, false, nil)
       node.full_type = :Void
 
@@ -1347,7 +1349,7 @@ RSpec.describe MIRLowering do
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Value
 
-      l = lowering(union_schemas: { Value: { Num: :Number, Str: :String } })
+      l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
@@ -1361,7 +1363,7 @@ RSpec.describe MIRLowering do
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Value
 
-      l = lowering(union_schemas: { Value: { Num: :Number, Str: :String } })
+      l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
@@ -1467,7 +1469,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
+      expect(result.stdlib_def.emit.borrows).to eq(:all)
       expect(emit(result)).to include("CheatLib.assert(true,")
     end
 
@@ -1621,8 +1623,8 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers function with params" do
-      params = [{ name: "x", type: :Int64, mutable: false },
-                { name: "y", type: :Number, mutable: false }]
+      params = [AST::Param.new(name: "x", type: :Int64, mutable: false),
+                AST::Param.new(name: "y", type: :Number, mutable: false)]
       fn = make_fn("add", params: params, return_type: :Number)
       result = lowering.lower(fn)
       zig = emit(result)
@@ -1633,8 +1635,8 @@ RSpec.describe MIRLowering do
     it "stack struct param uses anytype — SROA candidate, no const-ptr" do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
-      params = [{ name: "p", type: :Point, mutable: false }]
-      l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
+      params = [AST::Param.new(name: "p", type: :Point, mutable: false)]
+      l = lowering(struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Number, "y" => :Number }) })
       fn = make_fn("sum3", params: params)
       result = l.lower(fn)
       zig = emit(result)
@@ -1688,7 +1690,7 @@ RSpec.describe MIRLowering do
     end
 
     it "handles mutable scalar param shadows" do
-      params = [{ name: "count", type: :Int64, mutable: true }]
+      params = [AST::Param.new(name: "count", type: :Int64, mutable: true)]
       body_stmt = make_id("count")
       fn = make_fn("inc", params: params, body: [body_stmt])
       result = lowering.lower(fn)
@@ -1784,7 +1786,7 @@ RSpec.describe MIRLowering do
     it "adds release defers to IF RESOLVE bindings before the then body" do
       link = make_id("weak_node", full_type: :"Node@link")
       cond = AST::ResolveNode.new(tok, link)
-      node = AST::IfBind.new(tok, [{ expr: cond, name: "node", name_token: tok }], [AST::BreakNode.new(tok)], nil)
+      node = AST::IfBind.new(tok, [AST::Binding.new(expr: cond, name: "node", name_token: tok)], [AST::BreakNode.new(tok)], nil)
 
       result = lowering.lower(node)
 
@@ -1867,10 +1869,10 @@ RSpec.describe MIRLowering do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
       sig = Struct.new(:needs_rt, :can_fail, :params, :return_type)
-                  .new(false, false, [{ name: "p", type: :Point, mutable: false, takes: false }], :Int64)
+                  .new(false, false, [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)], :Int64)
       l = lowering(
         fn_sigs: { "sum3" => sig },
-        struct_schemas: { Point: { x: :Int64, y: :Int64 } }
+        struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Int64, "y" => :Int64 }) }
       )
       arg = make_id("point", full_type: :Point)
       node = AST::FuncCall.new(tok, "sum3", [arg])
@@ -1910,8 +1912,8 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "bump", [arg])
       node.full_type = :Void
       sig = FunctionSignature.new(
-        params: [{ name: "count", type: Type.new(:Int64), mutable: true }],
-        return_type: :Void
+        params: [AST::Param.new(name: "count", type: Type.new(:Int64), mutable: true)],
+        return_type: Type.new(:Void)
       )
 
       result = lowering(fn_sigs: { "bump" => sig }).lower(node)
@@ -1927,7 +1929,7 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "identity", [arg])
       node.full_type = :Int64
       node.generic_type_args = [:Int64]
-      sig = FunctionSignature.new(params: [{ name: "x", type: Type.new(:Int64) }], return_type: :Int64)
+      sig = FunctionSignature.new(params: [AST::Param.new(name: "x", type: Type.new(:Int64))], return_type: Type.new(:Int64))
       sig.needs_rt = true
 
       result = lowering(fn_sigs: { "identity" => sig }).lower(node)
@@ -2003,7 +2005,7 @@ RSpec.describe MIRLowering do
       body = make_lit(:NUMBER, 42, full_type: :Int64)
       body.coerced_type = :Int64
       node = AST::LambdaLit.new(tok, [], nil, body, nil, nil)
-      node.full_type = FunctionSignature.new(params: [], return_type: :Int64)
+      node.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
       result = lowering.lower(node)
       expect(result).to be_a(MIR::LambdaExpr)
       zig = emit(result)
@@ -3239,7 +3241,7 @@ RSpec.describe MIRLowering do
         node = AST::BinaryOp.new(tok, left, :OR_RESCUE, struct_lit)
         node.full_type = :Node
 
-        l = lowering(struct_schemas: { Node: { "label" => { type: Type.new(:String) } } })
+        l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
         result = l.lower(node)
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)

@@ -83,11 +83,11 @@ module ThunkTransform
       ret_zig = ret_zig_type(fn_node, lowering)
       assert_non_fallible_ret!(fn_node, ret_zig)
 
-      param_field_decls = (fn_node.params || []).map { |p|
+      param_field_decls = fn_node.params.map { |p|
         "#{p[:name]}: #{param_zig_type(p, lowering)},"
       }
 
-      param_init_fields = (fn_node.params || []).map { |p|
+      param_init_fields = fn_node.params.map { |p|
         ".#{p[:name]} = #{p[:name]}"
       }
 
@@ -101,7 +101,7 @@ module ThunkTransform
       }
 
       recurse_arg_inits = plan.recurse_args.each_with_index.map { |arg, i|
-        param = (fn_node.params || [])[i]
+        param = fn_node.params[i]
         raise "thunk arg/param count mismatch in '#{fn_node.name}'" if param.nil?
         rendered = qualify_params(render_expr(arg, lowering), fn_node)
         ".#{param[:name]} = #{rendered}"
@@ -186,7 +186,7 @@ module ThunkTransform
     def qualify_params(zig_text, fn_node)
       T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
-      (fn_node.params || []).each do |p|
+      fn_node.params.each do |p|
         name = p[:name]
         out = out.gsub(/(?<![A-Za-z0-9_.])#{Regexp.escape(name)}(?![A-Za-z0-9_])/, "current.#{name}")
       end
@@ -232,13 +232,13 @@ module ThunkTransform
       variants = cycle_fns.map { |cf|
         {
           name: cf.name,
-          param_field_decls: (cf.params || []).map { |p|
+          param_field_decls: cf.params.map { |p|
             "#{p[:name]}: #{param_zig_type(p, lowering)},"
           },
         }
       }
 
-      initial_fields = (fn_node.params || []).map { |p|
+      initial_fields = fn_node.params.map { |p|
         ".#{p[:name]} = #{p[:name]}"
       }
 
@@ -278,7 +278,7 @@ module ThunkTransform
 
       target_fn = own_plan.target_fn
       target_args = own_plan.target_args
-      target_params = (find_cycle_member(cf, target_fn).params || [])
+      target_params = find_cycle_member(cf, target_fn).params
       raise "thunk: target arg/param count mismatch for '#{cf.name}' -> '#{target_fn}'" \
         if target_args.length != target_params.length
       arg_inits = target_args.each_with_index.map { |arg, i|
@@ -308,7 +308,7 @@ module ThunkTransform
     def qualify_with_f(zig_text, cf)
       T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
-      (cf.params || []).each do |p|
+      cf.params.each do |p|
         name = p[:name]
         out = out.gsub(/(?<![A-Za-z0-9_.])#{Regexp.escape(name)}(?![A-Za-z0-9_])/, "f.#{name}")
       end

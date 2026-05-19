@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require 'set'
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
@@ -20,8 +22,11 @@ require_relative '../ast/std_lib'
 # Nested METHOD calls (`length(filter(xs, p))` with both METHODs)
 # rewrite inside-out to method chains (`xs.filter(p).length()`).
 module MethodRewriter
+  extend T::Sig
+
   module_function
 
+  sig { params(source: String).returns(String) }
   def rewrite(source)
     tokens = ::Lexer.new(source).tokenize
     ast = ::Parser.new(tokens, source).parse
@@ -45,6 +50,7 @@ module MethodRewriter
   # User declarations always take precedence over stdlib — if the
   # user wrote `FN length(xs) -> ...`, calls to `length(xs)` stay in
   # prefix form regardless of stdlib's flag.
+  sig { params(ast: AST::Program).returns(Set) }
   def collect_method_names(ast)
     user_methods = Set.new
     user_fns = Set.new
@@ -85,17 +91,18 @@ module MethodRewriter
     -> { MAP_METHODS rescue nil },
   ].freeze
 
+  sig { returns(Set) }
   def stdlib_method_names
     @stdlib_method_names ||= begin
       names = Set.new
       STDLIB_REGISTRIES.each do |loader|
         registry = loader.call
         next unless registry.is_a?(Hash)
-        registry.each do |name, defs|
+        IntrinsicRegistry.sigs(registry).each do |name, defs|
           list = defs.is_a?(Array) ? defs : [defs]
           list.each do |d|
-            next unless d.is_a?(Hash)
-            next unless d[:is_method]
+            next unless d.is_a?(FunctionSignature)
+            next unless d.emit&.is_method
             # Skip stdlib functions whose Zig lowering is FSM-based
             # (suspending I/O calls like readFile / writeFile / accept).
             # Their MIR/FSM lowering reads the call's positional args
@@ -119,9 +126,12 @@ module MethodRewriter
   # yields, and the `fsm_*` keys carry the templates the FSM emitter
   # reads. Either alone wouldn't be enough — `suspends: true` is also
   # set on plain async helpers that don't go through FSM.
+  sig { params(defn: FunctionSignature).returns(T::Boolean) }
   def fsm_lowered?(defn)
-    return false unless defn[:suspends]
-    defn.keys.any? { |k| k.to_s.start_with?("fsm_") }
+    em = defn.emit
+    return false unless em&.suspends
+    !!(em.fsm_setup || em.fsm_state_decls || em.fsm_finish_block ||
+       em.fsm_state_finalize || em.fsm_finish_value)
   end
 
   # Post-order walk: collect edits for inner calls first so outer
@@ -156,6 +166,7 @@ module MethodRewriter
   # (e.g., contains a comment we'd rather not move). Source span is
   # the byte range from the start of the callee name to the closing
   # `)`, inclusive.
+  sig { params(call: AST::FuncCall, source: String).returns(T.nilable(Hash)) }
   def compute_edit(call, source)
     start_off = offset_for(source, call.token.line, call.token.column)
     return nil unless start_off
@@ -242,6 +253,7 @@ module MethodRewriter
 
   # ---- Source / span helpers ----
 
+  sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
   def offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
@@ -257,6 +269,7 @@ module MethodRewriter
     target
   end
 
+  sig { params(source: String, off: Integer).returns(Integer) }
   def next_non_ws(source, off)
     while off < source.length && (source[off] == ' ' || source[off] == "\t")
       off += 1
@@ -267,6 +280,7 @@ module MethodRewriter
   # Find matching ')' for '(' at `open_off`, respecting nested parens,
   # brackets, braces, and string literals. Returns the byte offset of
   # the matching ')' or nil if unbalanced.
+  sig { params(source: String, open_off: Integer).returns(Integer) }
   def match_paren(source, open_off)
     depth = 0
     i = open_off
@@ -313,6 +327,7 @@ module MethodRewriter
 
   # Split args_text into [start, end_exclusive] spans by top-level
   # commas. Respects nested parens / brackets / braces and strings.
+  sig { params(args_text: String).returns(Array) }
   def split_args_by_comma(args_text)
     spans = []
     depth = 0
@@ -368,6 +383,7 @@ module MethodRewriter
   # produces inside-out edits which are nested (overlapping). To get
   # the chain rewrite (`xs.filter(p).length()`) we apply the inner
   # edit first to the *replacement string* of the outer edit.
+  sig { params(source: String, edits: Array).returns(String) }
   def apply_edits(source, edits)
     # Post-order has inner edits first. Group: an inner edit is one
     # whose span is strictly inside an outer edit's span. Process by
@@ -385,6 +401,7 @@ module MethodRewriter
   # the inner's original source text). Returns a flat list of
   # non-overlapping outer edits with replacements that include all
   # inner rewrites embedded.
+  sig { params(edits: Array, source: String).returns(Array) }
   def resolve_nested_edits(edits, source)
     outers = []
     edits.each do |e|
@@ -404,6 +421,7 @@ module MethodRewriter
     outers
   end
 
+  sig { params(source: String, edits: Array).returns(String) }
   def apply_flat_edits(source, edits)
     return source if edits.empty?
     # Apply right-to-left so unaffected positions remain valid.

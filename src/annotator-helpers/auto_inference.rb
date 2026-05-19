@@ -76,12 +76,12 @@ class AutoConstraintCollector
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def register_signature_slots
     @fn_nodes.each do |name, fn|
-      (fn.params || []).each_with_index do |param, i|
-        next unless auto?(param[:type])
+      fn.params.each_with_index do |param, i|
+        next unless auto?(param.type)
         @slots[[:param, name, i]] = Slot.new(
           kind: :param, fn_name: name, index: i,
           decl_node: fn, sources: [],
-          auto_token: param[:type].auto_token,
+          auto_token: param.type.auto_token,
         )
       end
       if auto?(fn.return_type)
@@ -149,8 +149,8 @@ class AutoConstraintCollector
   def record_call_site(call_node)
     callee = @fn_nodes[call_node.name]
     return unless callee
-    (callee.params || []).each_with_index do |param, i|
-      next unless auto?(param[:type])
+    callee.params.each_with_index do |param, i|
+      next unless auto?(param.type)
       arg = call_node.args && call_node.args[i]
       next unless arg
       slot = @slots[[:param, callee.name, i]]
@@ -348,12 +348,12 @@ class AutoUnifier
   def initialize(slots, type_of: nil)
     @slots = slots
     # `type_of` lets callers plug in a custom source-type resolver.
-    # Default reads `node.type_info` (CLEAR's existing per-node type
+    # Default reads `node.full_type` (CLEAR's existing per-node type
     # accessor — set by the annotator on AST nodes during body
     # validation). The tolerant body-pass populates type_info on each
     # constraint source before this unifier runs.
     @type_of = T.let(type_of || ->(node) {
-      node.respond_to?(:type_info) ? node.type_info : nil
+      node.respond_to?(:full_type) ? node.full_type : nil
     }, T.untyped)
   end
 
@@ -569,7 +569,7 @@ class ShapeEvidenceCollector
     return if node.nil?
     case node
     when AST::BindExpr, AST::VarDecl
-      yield node if node.type.is_a?(Type) && node.type.auto?
+      yield node if node.type&.auto?
       walk_for_shape_decls(node.value, &block)
     when AST::FunctionDef
       # Don't recurse into nested function definitions.
@@ -712,9 +712,9 @@ class OperatorEvidenceCollector
   sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Array[T.untyped]]) }
   def build_name_map(fn)
     map = {}
-    (fn.params || []).each_with_index do |param, i|
+    fn.params.each_with_index do |param, i|
       slot_id = [:param, fn.name, i]
-      map[param[:name]] = slot_id if @slots.key?(slot_id)
+      map[param.name] = slot_id if @slots.key?(slot_id)
     end
     walk_for_local_decls(fn.body) do |decl|
       slot_id = [:local, decl.object_id]

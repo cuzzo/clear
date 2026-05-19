@@ -35,7 +35,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions that use heap" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -62,7 +62,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions calling heap-using functions" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -151,7 +151,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "promotes micro to standard when function needs runtime" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -207,7 +207,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "errors when user picks @micro for a function that needs @standard" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -226,7 +226,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "rejects @micro:canSmash with the same not-yet-supported error" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -245,7 +245,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "does not error for auto-sized (no user override) calls" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !%Point ->
+        FN make() RETURNS !Point @indirect ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
