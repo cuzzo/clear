@@ -1,54 +1,23 @@
 # typed: false
-# EscapeGraph -- the single value-flow escape analysis.
+# EscapeGraph -- the single value-flow escape analysis. Replaces the 5
+# fragmented escape proxies (compute_heap_return_fns!, analyze!,
+# tag_transitive_provenance!, tag_carry_call_sites!, the escape half
+# of PromotionClassifier). See docs/agents/escape-graph-spec.md.
 #
-# Replaces the 5 fragmented proxies (E1 compute_heap_return_fns!, E2
-# analyze!/per_fn_scan! 9 conditions, E3a tag_transitive_provenance!,
-# E3b tag_carry_call_sites!, and the escape half of PromotionClassifier).
-# See docs/agents/escape-graph-spec.md.
+#   storage(D) = :heap iff inherently_heap?(D) (Arc/Rc/Locked) ∨ escapes?(D)
 #
-# ONE rule per value-producing declaration D:
-#
-#   storage(D) = :heap  iff  inherently_heap?(D)  ∨  escapes?(D)
-#
-#   inherently_heap?(D) = D's TYPE is heap-backed BY CONSTRUCTION,
-#       escape-independent:
-#       map ∨ set ∨ pool (heap hashtable/slab)
-#       ∨ any_sync? ∨ multiowned? ∨ shared?   (Arc/Rc/Locked control
-#                                               block IS heap).
-#       Everything else -- structs (even requires_move? structs that
-#       own heap fields), lists, strings -- is escape-conditional: a
-#       non-escaping value lives in the frame; its owned fields clean
-#       up at frame scope (SROA may even keep it :stack). This was
-#       proven by the real oracle (SROA spec + manifest), NOT by
-#       reproducing the buggy proxies' over-conservative buckets.
-#   escapes?(D)         = D's node reaches a SINK in the value-flow
-#                         graph (intra fixpoint + interprocedural RET
-#                         fixpoint). Shapes are EDGES, not branches:
-#                         no per-shape code, so no shape can be missed.
-#
-# Everything downstream (MIR AllocMark/Cleanup/MoveMark, emitter,
-# MIRChecker's 7 invariants) is unchanged. The graph DECIDES; the
-# checker PROVES (fail-closed: any escape gap surfaces as a located
-# allocator/leak/double-free error, never a silent miscompile).
+# MIRChecker (7 invariants) is the fail-closed oracle: any escape gap
+# surfaces as a located allocator/leak/double-free error, never a
+# silent miscompile.
 require "set"
 
 module EscapeGraph
   module_function
 
-  # Wire point: replaces compute_heap_return_fns! + analyze! +
-  # tag_transitive_provenance! + tag_carry_call_sites!. Stamps
-  # storage/provenance on heap decls and returns the heap-return fn set
-  # (the `heap_fns` PromotionClassifier consumes).
-  #
-  # @param fn_nodes [Hash{String=>AST::FunctionDef}]
-  # @return [Array(Set<String>, Set<String>)]
-  #   [0] names of functions whose return value is heap-owned (heap_fns)
-  #   [1] names of decls stamped :heap (so BG-promotion guards skip them)
   def apply!(fn_nodes)
-    # Promotion pre-pass: loop-carry string values and concat-into-heap
-    # args are stamped :heap BEFORE the RET fixpoint so a `RETURN resp`
-    # of a loop-carry-promoted heap string is seen as a heap return
-    # (caller must own/free it).
+    # Loop-carry / concat-into-heap promotions must run BEFORE the RET
+    # fixpoint so a `RETURN resp` of a loop-promoted heap string is
+    # seen as heap-return.
     fn_nodes.each do |_n, fn|
       next unless fn&.body
       loop_carry_names(fn)           # side-effect: promote carry values
@@ -64,12 +33,10 @@ module EscapeGraph
     [heap_fns, heap_decls]
   end
 
-  # ---- interprocedural: RET[fn] heap fixpoint (replaces E1) ----
-
   def compute_ret_heap_fixpoint(fn_nodes)
     ret = {}
-    # Seed from the cross-module return_provenance stamp (the authority
-    # for imported functions whose body we may not re-analyze here).
+    # Seed from cross-module return_provenance for imported functions
+    # whose body isn't re-analyzed here.
     fn_nodes.each do |n, fn|
       ret[n] = (fn.respond_to?(:return_provenance) && fn.return_provenance == :heap)
     end
@@ -93,11 +60,6 @@ module EscapeGraph
     ret
   end
 
-  # A returned value makes RET[fn] heap iff it is an inherently-heap
-  # type, a frame-capable (list/String) value (escapes by return), or a
-  # call to an already-heap-return fn. No stdlib name-lists: stdlib
-  # heap results carry their heap-owning TYPE, so the type fallback
-  # covers them (the old proxy used heap_fns + type, no name list).
   def return_value_is_heap?(rv, ret_heap)
     e = unwrap(rv)
     case e
@@ -114,23 +76,19 @@ module EscapeGraph
     end
   end
 
-  # True only when the return value is a bare Identifier that names a
-  # LOCAL heap-owned decl the function itself owns (e.g. a loop-carry-
-  # promoted `resp`). A returned field/borrow/match-alias (`w.inner`,
-  # a `Value.Str AS s` binding, a param) carries :heap on its type too
-  # but is NOT an ownership transfer -- counting it double-frees the
-  # source's field cleanup (174 `prStr`). So: Identifier + non-param
-  # symbol whose storage is :heap.
+  # Only counts a returned IDENTIFIER naming a local heap-owned decl
+  # the fn itself owns (loop-carry-promoted `resp`). Excludes returned
+  # field/match-alias borrows (`w.inner`, `Value.Str AS s`) -- those
+  # carry :heap on their type but are not ownership transfers; counting
+  # them double-frees the source's field cleanup (174 prStr).
   def node_heap_provenance?(e)
     return false unless e.is_a?(AST::Identifier)
     sym = e.respond_to?(:symbol) ? e.symbol : nil
     return false unless sym
     return false if sym.respond_to?(:is_param) && sym.is_param
     return false unless sym.respond_to?(:storage) && sym.storage == :heap
-    # A returned primitive / @atomic-or-sync cell is LOADED/unwrapped
-    # (`c.*.load()`), not an ownership transfer -- even though M1 gives
-    # the cell :heap symbol storage. Only genuine heap-owned values
-    # (String/collection, no sync cap) transfer ownership on return.
+    # An @atomic-or-sync primitive cell has :heap symbol storage in M1
+    # but is LOADED on return, not transferred.
     t = sym.respond_to?(:type) ? sym.type : nil
     t = t.is_a?(Type) ? t : nil
     return false if t && ((t.respond_to?(:primitive?) && t.primitive?) ||
@@ -140,56 +98,27 @@ module EscapeGraph
     false
   end
 
-  # ---- per-function decision (replaces E2 + E3a + E3b) ----
-
-  # storage stamp = :heap ONLY for heap-ownership-capable types:
-  #   - inherent (map/set/pool/sync): heap by construction
-  #   - a list that escapes (incl. S-return: returning a list transfers
-  #     heap ownership to the caller) or is bound from a heap source
-  #   - a string that escapes via a NON-return sink (loop-carry, heap
-  #     field/container store, BG capture). A *returned* frame string is
-  #     NOT heap on the callee side: codegen heap-dupes at the RETURN
-  #     site and the CALLER's binding carries the allocator. This is the
-  #     list-vs-string return-ownership distinction in the language,
-  #     encoded once -- not per-shape code.
-  # Structs/unions/primitives are NEVER storage-stamped here: RVO/SROA
-  # keep them :stack and their owned heap fields are CleanupClassifier's
-  # per-field concern (matrix: struct_with_list/indirect_int storage
-  # :stack, cleanup :heap/:frame).
   def decide_fn(fn, ret_heap, fn_nodes = {})
     decls = {}
     walk(fn.body) do |n|
       decls[n.name.to_s] = n if decl?(n)
     end
 
-    # Two sink classes:
-    #   STRONG -- value is stored where it must outlive the frame
-    #     (heap field/container store, BG capture, loop-carry, and
-    #     RETURN when the return type is @indirect/heap-ptr). ANY type
-    #     stamped :heap.
-    #   PLAIN-RETURN -- a normal `RETURN x` whose return type is not
-    #     @indirect. RVO/copy for primitives/structs/rodata; codegen
-    #     heap-dupe for frame strings (callee local stays frame); only
-    #     @list transfers heap ownership to the caller -> @list only.
     esc_strong  = Set.new
     esc_listret = Set.new
     each_sink_expr(fn, include_return: false) { |se| referenced_decls(se).each { |d| esc_strong << d } }
-    loop_carry_names(fn).each   { |d| esc_strong << d }  # S-loopcarry
-    bg_capture_names(fn).each   { |d| esc_strong << d }  # S-bgcapture
-    callarg_escape_names(fn, fn_nodes).each { |d| esc_strong << d }  # S-takes / S-mutlist
+    loop_carry_names(fn).each   { |d| esc_strong << d }
+    bg_capture_names(fn).each   { |d| esc_strong << d }
+    callarg_escape_names(fn, fn_nodes).each { |d| esc_strong << d }
     if !borrow_return?(fn)
       if heap_ptr_return?(fn)
-        # @indirect/heap-ptr return: the returned address must survive
-        # frame rewind -> ANY referenced decl (incl. nested) escapes.
         return_values(fn.body).each { |rv| referenced_decls(rv).each { |d| esc_strong << d } }
       else
-        # Plain return: a DIRECTLY returned list is moved out (ownership
-        # transfer -> heap). A list referenced inside a returned
-        # Struct/Union literal escapes ONLY if it is MOVED into a
-        # same-shape `@list` field (the field-value node keeps its
-        # list_collection? type); if the field type is a plain slice
-        # the transpiler DEEP-COPIES it (dupeValue/blk_copy) and the
-        # source stays frame -- PromotionClassifier owns that dupe.
+        # Plain return: a directly-returned list is moved out. A list
+        # nested in a returned aggregate escapes ONLY if the field-value
+        # node keeps its list_collection? type (moved into a @list
+        # field); a plain-slice field is deep-copied by the transpiler
+        # (dupeValue/blk_copy) so the source stays frame.
         return_values(fn.body).each do |rv|
           direct_return_decls(rv).each       { |d| esc_listret << d }
           aggregate_moved_list_decls(rv).each { |d| esc_listret << d }
@@ -197,9 +126,6 @@ module EscapeGraph
       end
     end
 
-    # Reverse value-flow: a's init/assign references b ⇒ b ──▶ a.
-    # Also: a binding REASSIGNED from a heap-returning call owns heap
-    # (e.g. `result = makeList()` inside an IF branch -- old E3a).
     reassigned_heap = Set.new
     init_refs = {}
     decls.each do |dn, dnode|
@@ -228,39 +154,25 @@ module EscapeGraph
       ti = type_of(dnode)
       heap =
         if struct_aggregate?(ti)
-          # A struct/union binding is RVO'd to :stack; its owned heap
-          # fields are CleanupClassifier's per-field concern (matrix:
-          # struct_with_list/union_pure/indirect_int -> :stack). It is
-          # heap ONLY when an Arc/Rc wrapper (inherent) or a STRONG
-          # sink forces its address to outlive the frame (@indirect
-          # return / heap-field store). NOT via list-return or a
-          # transitive heap call (that would double-free the RVO'd /
-          # dupeUnionValue'd copy).
+          # Structs/unions RVO to :stack with per-field cleanup; flat-
+          # heap only via inherent (Arc) or a strong sink. NOT via
+          # list-return / transitive call (would double-free the RVO'd
+          # / dupeUnionValue'd copy -- 174 union_match_struct_fields).
           inherently_heap?(dnode) || esc_strong.include?(dn)
         else
           inherently_heap?(dnode) ||
             esc_strong.include?(dn) ||
             (collection_ti?(ti) && esc_listret.include?(dn)) ||
-            # Transitive heap ownership: x = heapReturningFn() (at decl
-            # or via reassignment). Ownership comes from the callee's
-            # heap-return contract, not x's (often collection-erased)
-            # inferred type -- so this is NOT type-gated.
             reassigned_heap.include?(dn)
         end
-      # Never stamp a value that CAN NEVER own heap (the exact predicate
-      # MIRChecker's INV-COPY-CLEANUP enforces -- read the authority,
-      # don't re-derive). Primitives / Id<T> without caps are Copy
-      # handles (e.g. `pid = pool.insert(...)` -> Id<User>).
       heap = false if heap && cannot_own_heap?(ti)
       result[dn] = heap ? :heap : :frame
     end
     result
   end
 
-  # A user-defined struct OR union/enum (Type#struct? is true for any
-  # non-primitive/string/array/map/optional composite -- it covers
-  # tagged unions too). These are RVO'd to :stack with per-field
-  # cleanup; never flat-heap-stamped except via a strong sink.
+  # Type#struct? covers any non-primitive/string/array/map/optional
+  # composite, including tagged unions.
   def struct_aggregate?(ti)
     ti.is_a?(Type) && ti.respond_to?(:struct?) && ti.struct? &&
       !(ti.respond_to?(:any_sync?) && ti.any_sync?)
@@ -268,9 +180,6 @@ module EscapeGraph
     false
   end
 
-  # The function's return type is an @indirect / heap-pointer: the
-  # returned value's address must survive frame rewind, so the returned
-  # binding (any type) must be heap-allocated. (Old E2 condition 3.)
   def heap_ptr_return?(fn)
     rt = fn.return_type
     rt = Type.new(rt) if rt && !rt.is_a?(Type)
@@ -281,8 +190,8 @@ module EscapeGraph
     false
   end
 
-  # Mirrors MIRChecker INV-COPY-CLEANUP exactly: a capability-free
-  # primitive or Id<T> is a Copy handle and can never own heap memory.
+  # Mirrors MIRChecker INV-COPY-CLEANUP: capability-free primitive or
+  # Id<T> is a Copy handle and never owns heap.
   def cannot_own_heap?(ti)
     return false unless ti.is_a?(Type)
     no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
@@ -294,10 +203,6 @@ module EscapeGraph
   end
 
 
-  # The decl's initializer is a call to a user fn whose RET is heap
-  # (E-call / transitive provenance: x = heapRetFn() ⇒ x owns heap).
-  # Stdlib heap results are NOT matched here -- the binding's own type
-  # carries heap provenance for those (no stdlib name-list smell).
   def decl_value_is_heap_call?(expr, ret_heap)
     e = unwrap(expr)
     case e
@@ -309,8 +214,6 @@ module EscapeGraph
       false
     end
   end
-
-  # ---- SINKS (spec §SINKS) ----
 
   def each_sink_expr(fn, include_return: true)
     return_values(fn.body).each { |rv| yield rv } if include_return && !borrow_return?(fn)
@@ -325,14 +228,11 @@ module EscapeGraph
     end
   end
 
-  # S-heapmut-arg (concat_into_heap): a frame string-concat passed into
-  # a collection mutator whose ELEMENT type is a user-defined composite
-  # (union/struct) dangles after the enclosing frame rewinds -- the
-  # container's cleanup recursively frees the embedded string fields, so
-  # the frame string is a true UAF. Promote the concat (incl. inside
-  # Struct/Union literal fields) to heap. Element-type gate matches old
-  # E2 cond7: String/primitive-element lists keep frame-allocated
-  # cleanup, so a heap string there would LEAK on deinit.
+  # Frame string-concat appended to a collection with composite element
+  # type dangles after frame rewind (container cleanup frees the
+  # embedded string field). String/primitive element types are excluded
+  # because heap-promoting their concats LEAKS on deinit (matches old
+  # E2 cond7 element-type gate).
   def promote_heapmut_concats!(fn)
     walk(fn.body) do |node|
       next unless node.is_a?(AST::MethodCall)
@@ -350,9 +250,6 @@ module EscapeGraph
     nil
   end
 
-  # Stamp every frame string-concat in `node` (descending wrapper /
-  # Struct / Union / list literals via the canonical AST.wrapped_children)
-  # to heap so the transpiler emits std.mem.concat(heapAlloc, ...).
   def promote_frame_concats!(node)
     return unless node
     case node
@@ -374,8 +271,6 @@ module EscapeGraph
     nil
   end
 
-  # ---- value-flow EDGES: which decl names does this expr reach ----
-
   def referenced_decls(expr, acc = [])
     return acc if expr.nil?
     e = unwrap(expr)
@@ -386,12 +281,9 @@ module EscapeGraph
       flds = e.fields
       flds.each { |k, v| referenced_decls(v.nil? ? k : v, acc) } if flds.respond_to?(:each)
     when AST::BinaryOp
-      # OR_RESCUE passes the LHS success value through (alias) -> recurse
-      # left. Every other binary op (string concat `a + b`, arithmetic,
-      # comparison) produces a FRESH value; its operands are read by
-      # value and do NOT escape through the result. Recursing them
-      # wrongly drags concat operands into a loop-carry's escape set
-      # (`resp = resp + result` must not heap-stamp the frame `result`).
+      # OR_RESCUE aliases the LHS success value. Other binary ops
+      # (string concat, arithmetic) produce a fresh value; operands
+      # are read by value and don't escape through the result.
       referenced_decls(e.left, acc) if e.op == :OR_RESCUE
     when AST::FuncCall
       e.args.each { |a| referenced_decls(a, acc) }
@@ -402,11 +294,9 @@ module EscapeGraph
     acc
   end
 
-  # S-loopcarry: a binding declared OUTSIDE a per-iteration-rewound
-  # loop but reassigned a fresh frame value INSIDE it escapes the
-  # iteration frame (read in the next iteration / after the loop). Uses
-  # LoopFrameAnalysis -- the existing authority for "does this loop get
-  # mark_per_iter" -- so this reads a stamp, it does not re-derive.
+  # Outer-scope binding reassigned inside a per-iteration-rewound loop
+  # escapes the iteration frame. Reuses LoopFrameAnalysis's mark_per_iter
+  # determination (single source of truth).
   def loop_carry_names(fn)
     out = Set.new
     walk(fn.body) do |node|
@@ -433,12 +323,10 @@ module EscapeGraph
                  !(ti.respond_to?(:numeric_map?) && ti.numeric_map?))
         next unless carry
         out << nm
-        # The carry decl is heap (it survives per-iteration rewind);
-        # its reassignment value must allocate from the SAME (heap)
-        # allocator, or `resp = resp + x` concats into the frame that
-        # restoreLoopMark then rewinds -> UAF + invalid heap-free.
-        # Fully stamp the carry DECL heap here (not only via decide_fn)
-        # so the RET fixpoint sees a `RETURN resp` of a heap string.
+        # Stamp the carry DECL heap here (not only later via decide_fn)
+        # so the RET fixpoint sees `RETURN resp` as a heap return. The
+        # reassignment value must allocate heap too, else restoreLoopMark
+        # rewinds the concat buffer -> UAF + invalid heap-free.
         if str_carry
           LoopFrameAnalysis.promote_value_to_heap!(bind.value)
           stamp_decl_heap!(fn, nm)
@@ -450,13 +338,9 @@ module EscapeGraph
     out
   end
 
-  # S-takes / S-mutlist: a collection identifier passed as a call arg
-  # into (a) a TAKES param of a heap-cleanup collection type -- the
-  # callee frees with heapAlloc, so the source must be heap (INV-1
-  # single-allocator); or (b) a MUTABLE @list param -- the callee's
-  # .append reallocs against the receiver's allocator, so a frame
-  # source's growth buffer dies at the callee frame mark (UAF/leak).
-  # Old E2 cond8/cond9; the spec's E-arg-takes / E-arg-mutlist edges.
+  # A collection arg passed to a TAKES param or a MUTABLE @list param
+  # must be heap: the callee frees / reallocs using its own allocator,
+  # which must match the source (INV-1 single allocator per binding).
   def callarg_escape_names(fn, fn_nodes)
     out = Set.new
     walk(fn.body) do |call|
@@ -485,12 +369,9 @@ module EscapeGraph
     out
   end
 
-  # S-bgcapture: a value captured by a BG/stream fiber outlives the
-  # declaring frame. Uses capture_analysis.heap_promote_names -- the
-  # capture-analysis authority for which captures need heap promotion
-  # (it deliberately EXCLUDES string captures: those use the in-fiber
-  # bg_string-dupe mechanism, not heap storage). Reads the stamp; does
-  # not re-derive by walking identifiers.
+  # capture_analysis.heap_promote_names deliberately excludes string
+  # captures (those use the in-fiber bg_string-dupe mechanism, not heap
+  # storage). Reading the stamp avoids re-deriving the exclusion here.
   def bg_capture_names(fn)
     out = Set.new
     AST.each_bg_block(fn.body) do |bg|
@@ -502,9 +383,8 @@ module EscapeGraph
     out
   end
 
-  # Decls returned DIRECTLY as the return value (through GIVE/COPY/
-  # OR_RESCUE unwrap) -- NOT nested inside a Struct/Union/call literal
-  # (those are deep-copied by the transpiler, not moved).
+  # Decls returned directly (through GIVE/COPY/OR_RESCUE unwrap), not
+  # nested in a Struct/Union literal (those are deep-copied, not moved).
   def direct_return_decls(rv)
     e = unwrap(rv)
     case e
@@ -515,11 +395,10 @@ module EscapeGraph
     end
   end
 
-  # List decls referenced as a Struct/Union literal FIELD VALUE in the
-  # return, where the field-value node still carries a list_collection?
-  # type -> the @list container is moved into the aggregate (escape).
-  # A CopyNode / plain-slice-coerced field is deep-copied (not moved):
-  # its node type is no longer list_collection?, so it is excluded.
+  # List decls moved (not deep-copied) into a returned Struct/Union
+  # field. Discriminator: the field-value node's type is still
+  # list_collection? (a same-shape @list field); a CopyNode / plain-
+  # slice-coerced field loses that type and is deep-copied instead.
   def aggregate_moved_list_decls(node, acc = [])
     return acc if node.nil?
     case node
@@ -544,7 +423,6 @@ module EscapeGraph
     acc
   end
 
-  # Unwrap GIVE/COPY/clone/freeze/share wrappers (E-wrap).
   def unwrap(e)
     while e.respond_to?(:value) &&
           (e.is_a?(AST::MoveNode) || e.is_a?(AST::CopyNode) ||
@@ -556,26 +434,17 @@ module EscapeGraph
     e
   end
 
-  # ---- the type predicates (the corrected DECISION RULE) ----
-
   def inherently_heap?(decl_node)
     ti = type_of(decl_node)
     ti.is_a?(Type) && inherently_heap_ti?(ti)
   end
 
-  # Inherently heap = heap-backed BY CONSTRUCTION, escape-independent:
-  # an Arc/Rc/Locked wrapper IS a heap control block (ContainerInit
-  # always heap-allocates it). NOT map/set/pool: their backing allocator
-  # follows the BINDING's allocator (frame vs heap), so a local non-
-  # escaping HashMap lives in the frame -- proven by the real oracle
-  # (25_index `grouped`, baseline :frame), not by the buggy proxies'
-  # over-conservative "map = always heap" bucket. Collections are
-  # uniformly escape-conditional, exactly like list/string/struct.
+  # Arc/Rc/Locked control block is heap by construction. @atomic is
+  # NOT (a lock-free CPU cell, often inline primitive -- marking it
+  # heap fires MIRChecker OWNED_RETURN_WITHOUT_ALLOC). map/set/pool
+  # are NOT inherent either: their backing allocator follows the
+  # binding (local non-escaping HashMap stays frame -- 25_index).
   def inherently_heap_ti?(ti)
-    # Arc/Rc/Locked control block IS heap by construction. NOT @atomic
-    # (a lock-free CPU cell, often a stack/inline primitive -- no alloc;
-    # marking it heap fires MIRChecker OWNED_RETURN_WITHOUT_ALLOC) nor
-    # @local/@raw/@symbol (data-access modes, not heap wrappers).
     return true if ti.respond_to?(:locked?)       && ti.locked?
     return true if ti.respond_to?(:write_locked?) && ti.write_locked?
     return true if ti.respond_to?(:versioned?)    && ti.versioned?
@@ -586,8 +455,6 @@ module EscapeGraph
     false
   end
 
-  # Any heap-owning collection container (list/map/set/pool). Uniformly
-  # escape-conditional: returned/moved-out -> heap; local -> frame.
   def collection_ti?(ti)
     return false unless ti.is_a?(Type)
     (ti.respond_to?(:list_collection?) && ti.list_collection?) ||
@@ -598,32 +465,25 @@ module EscapeGraph
     false
   end
 
-  # RET[fn] is heap for collection ownership transfer (or an inherent
-  # Arc/Rc/Locked). A string-returning fn does NOT make the caller's
-  # binding heap-owned: strings are codegen-duped at the RETURN site /
-  # bg_string-duped at capture. (Matches old E1's `!ti.string?` carve-out.)
+  # Returning a string does NOT transfer heap ownership: strings are
+  # codegen-duped at the RETURN site / bg_string-duped at capture. A
+  # type-level :heap (e.g. an @indirect field borrow `RETURN w.inner`)
+  # is NOT used here either -- that's not an ownership transfer.
+  # node_heap_provenance? handles the legitimate loop-carry-local case.
   def ret_heap_type?(ti)
     return false unless ti.is_a?(Type)
-    # Collection ownership transfer / Arc-Rc-Locked only. Type-level
-    # :heap provenance is NOT used here: a returned @indirect field
-    # borrow (`RETURN w.inner`) carries :heap on its type but is not an
-    # ownership transfer. The genuine loop-carry-local case is handled
-    # precisely by node_heap_provenance? (Identifier -> owned heap decl).
     inherently_heap_ti?(ti) || collection_ti?(ti)
   rescue StandardError
     false
   end
 
-  # ---- stamping (the contract PromotionClassifier/CleanupClassifier read) ----
-
   def stamp_fn!(fn, decisions, _name, heap_decls, ret_heap = {})
     return_nodes = return_values_nodes(fn.body)
     walk(fn.body) do |n|
       next unless decl?(n)
-      # Every `_ = expr` discard is an INDEPENDENT declaration; the
-      # name-keyed `decisions` map collapses them, so a discarded
-      # heap-returning call must be stamped per-node here (else the
-      # hoisted HPT temp gets no cleanup -> leak).
+      # Each `_ = expr` is an independent declaration; the name-keyed
+      # `decisions` map collapses them, so discards must be stamped
+      # per-node here (else the hoisted HPT temp leaks).
       if n.name.to_s == "_"
         if decl_value_is_heap_call?(n.value, ret_heap)
           heap_decls << "_"
@@ -637,9 +497,6 @@ module EscapeGraph
     end
   end
 
-  # Stamp ONE declaration node (and its symbol + the return identifier
-  # reaching it) :heap. The single per-decl stamp contract that
-  # PromotionClassifier / CleanupClassifier read.
   def stamp_node_heap!(n, return_nodes)
     n.storage = :heap if n.respond_to?(:storage=)
     ft = n.full_type if n.respond_to?(:full_type)
@@ -655,8 +512,6 @@ module EscapeGraph
     v.storage = :heap if v.respond_to?(:storage=)
   end
 
-  # Pre-pass stamp of a loop-carry string DECL by name, so the RET
-  # fixpoint sees `RETURN <carry>` as a heap return.
   def stamp_decl_heap!(fn, name)
     return_nodes = return_values_nodes(fn.body)
     walk(fn.body) do |n|
@@ -686,8 +541,6 @@ module EscapeGraph
     end
   end
 
-  # ---- helpers ----
-
   def return_values(body)
     vs = []
     walk(body) { |n| vs << n.value if n.is_a?(AST::ReturnNode) && n.value }
@@ -715,7 +568,7 @@ module EscapeGraph
   end
 
   def root_ident_name(lhs)
-    return lhs if lhs.is_a?(String)        # BindExpr(:assign).name is the bare var name
+    return lhs if lhs.is_a?(String)        # BindExpr(:assign).name is a bare String
     n = lhs
     n = n.target while n.respond_to?(:target) && (n.is_a?(AST::GetField) || n.is_a?(AST::GetIndex))
     return n.name.to_s if n.is_a?(AST::Identifier)
@@ -743,7 +596,7 @@ module EscapeGraph
     case node
     when nil
     when Array then node.each { |x| walk(x, &blk) }
-    when AST::FunctionDef then nil  # do not descend nested fns
+    when AST::FunctionDef then nil  # do not descend into nested fns
     else
       blk.call(node) if node.respond_to?(:token)
       if node.respond_to?(:each_pair)

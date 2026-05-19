@@ -1,17 +1,7 @@
 # typed: strict
-# src/escape_analysis.rb - cross-module sync propagation.
-#
-# The 5 escape/heap-ownership proxies that used to live here (E1
-# compute_heap_return_fns!, E2 analyze!/per_fn_scan! + its e2_* helpers,
-# E3a tag_transitive_provenance!, E3b tag_carry_call_sites!) have been
-# REPLACED by the single value-flow analysis in escape_graph.rb
-# (EscapeGraph.apply!). One rule -- heap iff inherently-heap-by-
-# construction OR escapes -- subsumes all of them. ~760 LOC deleted.
-#
-# What remains is the orthogonal concern this module also owned:
-# propagate_caller_sync! flows caller arg sync (and Arc-storage) into
-# callee param SymbolEntries (Group-1 capability propagation). It is
-# NOT escape analysis and is unaffected by the EscapeGraph refactor.
+# Cross-module sync propagation: flows caller arg sync (and Arc-
+# storage) into callee param SymbolEntries (Group-1 capability
+# propagation). Escape/heap-ownership analysis moved to escape_graph.rb.
 
 require "sorbet-runtime"
 

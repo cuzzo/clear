@@ -31,13 +31,6 @@
 # over-complexity manifesting; the collapse refactor must flip every
 # one of them to :pass with zero regressions elsewhere.
 HOT_KNOWN_FAILING = [].freeze
-# ALL CELLS PASS. The single-value-flow EscapeGraph (one rule: heap iff
-# inherently-heap-by-construction OR escapes; replaces the 5 fragmented
-# proxies) fixed every double-free (`:give,*,:plain`) and every leak
-# (`:literal/:ident/:call,*,:err`). The `:or_fallback,:err` cells also
-# revealed + got a fix for an empty-collection-fallback element-type
-# inference bug (`expr OR []` typed Any[] -> defaulted f64). Manifest
-# now a pure regression net: every cell :pass, zero known-failing.
 
 HOT_CELLS = []
 %i[list string].each do |value|
