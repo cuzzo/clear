@@ -6170,9 +6170,7 @@ class MIRLowering
     # via alloc_for_node(node) which reads the storage set by escape analysis.
     decl_name = node.name.to_s
     binding_entry = @current_bindings[decl_name] || CleanupEntry::NONE
-    copy_decl_needs_drop = node.value.is_a?(AST::CopyNode) && (ft.any_sync? || ft.string?)
-    has_mir_drop = (binding_entry.needs_cleanup? && !binding_entry.match_as?) ||
-                   copy_decl_needs_drop
+    has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
@@ -6321,20 +6319,10 @@ class MIRLowering
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
     if has_mir_drop
-      drop_entry = if binding_entry.present?
-        binding_entry.dup
-      elsif ft.string?
-        CleanupEntry.from({ kind: :heap_string, alloc: decl_alloc, has_moved_guard: true })
-      else
-        kind = case ft.sync
-               when :locked then :locked
-               when :write_locked then :write_locked
-               when :versioned then :versioned
-               when :always_mutable then :always_mutable
-               else :heap_struct
-               end
-        CleanupEntry.from({ kind: kind, alloc: decl_alloc, has_moved_guard: false })
-      end
+      # has_mir_drop implies binding_entry.needs_cleanup?, so the entry is
+      # always present (NONE.needs_cleanup? is false). The cleanup recipe is
+      # inherited from the classifier, never synthesized here (INV-14).
+      drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.full_type, node)
       # Escape-analysis heap stamp takes precedence.
       # Same-name collision fix: if cleanup_bindings says :heap but this declaration's

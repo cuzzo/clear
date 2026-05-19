@@ -1245,8 +1245,19 @@ RSpec.describe MIRLowering do
       node = AST::VarDecl.new(tok, "dst", nil, copy, false)
       node.full_type = locked_type
       node.var_used = true
+      node.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
+                                    mutable: true, storage: :stack, sync: :locked)
 
-      result = lowering.lower(node)
+      # CleanupClassifier is the cleanup-recipe authority; lowering inherits
+      # from @current_bindings (INV-14). Drive it as the pipeline does
+      # rather than the removed destination-synthesis fallback.
+      fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [node],
+                                nil, nil, nil, nil, false)
+      low = lowering
+      low.instance_variable_set(:@current_bindings,
+        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+
+      result = low.lower(node)
       expect(result).to be_a(Array)
       expect(result[0]).to be_a(MIR::AllocMark)
       expect(result[1]).to be_a(MIR::Let)
@@ -2308,6 +2319,8 @@ RSpec.describe MIRLowering do
       decl = AST::VarDecl.new(tok, "dst", nil, copy, false)
       decl.full_type = locked_type
       decl.var_used = true
+      decl.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
+                                    mutable: true, storage: :stack, sync: :locked)
       branch = {
         body: [decl],
         capture_analysis: nil,
@@ -2318,9 +2331,17 @@ RSpec.describe MIRLowering do
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
-      zig = emit(lowering.lower(node))
+      # Cleanup recipe inherited from the classifier (INV-14), as the pipeline
+      # wires it -- not the removed destination-synthesis fallback.
+      fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [decl],
+                                nil, nil, nil, nil, false)
+      low = lowering
+      low.instance_variable_set(:@current_bindings,
+        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+
+      zig = emit(low.lower(node))
       expect(zig).to include("var dst = try CheatLib.dupeValue")
-      expect(zig).to include("defer CheatLib.lockedDestroy")
+      expect(zig).to include("defer if (!dst_moved) CheatLib.lockedDestroy")
     end
 
     it "lowers DoBlock with stack tier" do
