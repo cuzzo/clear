@@ -109,6 +109,15 @@ class MIRPass
     #  DebugAllocator, multiple addresses). NOT redundant.]
     EscapeAnalysis.tag_carry_call_sites!(@fn_nodes)
 
+    # [Stage B characterization — READ-ONLY, env-gated. After all old
+    #  escape stamps are applied, diff the standalone EscapeGraph vs
+    #  them. Never mutates production state. No effect unless
+    #  ESCAPE_CHARACTERIZE=<path> is set.]
+    if ENV["ESCAPE_CHARACTERIZE"]
+      require_relative "escape_graph"
+      EscapeGraph.characterize!(@fn_nodes, ENV["ESCAPE_CHARACTERIZE"])
+    end
+
     # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
     # provenance before classification.
     LoopFrameAnalysis.analyze!(@fn_nodes)

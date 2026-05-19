@@ -28,6 +28,19 @@ cannot miss a shape because there is no per-shape code.
 - per-function synthetic node `RET[fn]` (the interprocedural return summary)
 - per-parameter node `PARAM[fn, i]`
 
+## DECISION RULE (refined — Stage B characterization correction)
+
+`storage(D) = :heap` iff:
+  **inherently_heap?(D)**  — type is map / set / pool (a heap hashtable
+  regardless of escape; only `@list` and `String` are frame-vs-heap by
+  escape) — **OR** — **escapes?(D) ∧ heap_source?(D)**.
+
+The original `escapes? ∧ source?` rule alone was incomplete: a purely
+local map (`counts = {..}`, never returned/captured) does not escape
+yet MUST be heap (its backing store is a heap table). Surfaced by the
+gate on `14_hashmap`; this is the rodata / frame-arena / always-heap
+trichotomy made explicit.
+
 ## SOURCES (a node is heap-origin if it is / contains)
 
 - collection/string/map literal or builder: `[..]`, `"a"+"b"`, `Map{}`,
