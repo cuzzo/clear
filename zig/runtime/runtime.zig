@@ -657,6 +657,16 @@ pub const Runtime = struct {
                  std.debug.print("\n[Scheduler] Task Timed Out! Killing it.\n", .{});
             } else if (err == error.StreamClosed) {
                  // InfStream generator received a close signal — clean exit, not a crash.
+            } else if (err == error.OutOfMemory) {
+                 // Allocation FAULT (kind :System / ErrorName.OutOfMemory)
+                 // that no OR/CATCH intercepted. CLEAR's model: OOM
+                 // panics by DEFAULT. Reaching this terminal means the
+                 // fault propagated unhandled to the task boundary, so
+                 // it must abort hard (not the print-and-continue path)
+                 // — otherwise a crashed fiber would exit "normally".
+                 // Intercept with `OR PASS` / `CATCH` to recover.
+                 // (puck-clear-bugs.md #3/#12)
+                 std.debug.panic("CLEAR fault: out of memory [System/OutOfMemory] — unhandled allocation fault. Recover with `expr OR PASS` / `CATCH` at any call stage.", .{});
             } else {
                  std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
             }
