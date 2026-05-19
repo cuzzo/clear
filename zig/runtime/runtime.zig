@@ -91,6 +91,11 @@ pub const ErrorName_MaxDepthExceeded: u32 = 5;
 // stable stdlib id for atomic CAS retry exhaustion.
 pub const ErrorName_MvccConflict: u32 = 6;
 pub const ErrorName_AtomicConflict: u32 = 7;
+// 8 GuardFail / 9 PreconditionFail are compiler-side only (raised via
+// @intFromEnum(ErrorName.X) in generated code, never from a Zig error).
+// OutOfMemory (10) DOES originate as Zig's `error.OutOfMemory`, so it
+// needs a stable const + a zigErrorToName mapping. kind :System.
+pub const ErrorName_OutOfMemory: u32 = 10;
 
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
@@ -183,6 +188,7 @@ pub fn zigErrorToName(err: anyerror) u32 {
     if (std.mem.eql(u8, name, "Deadlock"))            return ErrorName_Deadlock;
     if (std.mem.eql(u8, name, "UnexpectedRecursion")) return ErrorName_UnexpectedRecursion;
     if (std.mem.eql(u8, name, "MaxDepthExceeded"))    return ErrorName_MaxDepthExceeded;
+    if (std.mem.eql(u8, name, "OutOfMemory"))         return ErrorName_OutOfMemory;
     // Versioned commit-retry exhaustion maps to MvccConflict; atomic CAS
     // retry exhaustion raises AtomicConflict directly.
     if (std.mem.eql(u8, name, "UpdateRetriesExhausted")) return ErrorName_MvccConflict;

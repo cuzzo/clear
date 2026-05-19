@@ -45,7 +45,13 @@ module AST
   ERROR_NAME_ATOMIC_CONFLICT      = 7
   ERROR_NAME_GUARD_FAIL           = 8
   ERROR_NAME_PRECONDITION_FAIL  = 9
-  ERROR_NAME_USER_FIRST           = 10
+  # Allocation FAULT (OOM). Originates as Zig's built-in
+  # `error.OutOfMemory` from the allocator; runtime.zig's
+  # zigErrorToName maps it to this stable id. kind :System
+  # (non-recoverable by default — panics unless an OR/CATCH
+  # intercepts the fault). See puck-clear-bugs.md #3/#12.
+  ERROR_NAME_OUT_OF_MEMORY        = 10
+  ERROR_NAME_USER_FIRST           = 11
 
   # Mutable registry. Seeded with the five stdlib types and extended
   # by the annotator on first use. Hash shape:
@@ -66,6 +72,7 @@ module AST
     AtomicConflict:      { kind: :Transient, zig_name: "AtomicConflict",      id: ERROR_NAME_ATOMIC_CONFLICT,      first_site: nil },
     GuardFail:           { kind: :Transient, zig_name: "GuardFail",           id: ERROR_NAME_GUARD_FAIL,           first_site: nil },
     PreconditionFail:  { kind: :Input,     zig_name: "PreconditionFail",  id: ERROR_NAME_PRECONDITION_FAIL,  first_site: nil },
+    OutOfMemory:         { kind: :System,    zig_name: "OutOfMemory",         id: ERROR_NAME_OUT_OF_MEMORY,        first_site: nil },
   }, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   # Counter for the next user-type id. Reset on a per-program basis via

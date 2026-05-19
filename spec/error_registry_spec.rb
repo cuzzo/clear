@@ -72,8 +72,8 @@ RSpec.describe AST do
       expect(AST::ERROR_TYPES.key?(:Conflict)).to be false
     end
 
-    it "user types start at id 10 (after the stdlib/control-flow types)" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(10)
+    it "user types start at id 11 (after the stdlib/control-flow types, incl. OutOfMemory=10)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(11)
     end
   end
 
@@ -165,7 +165,7 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=10 sorted by id" do
+    it "includes user types at >=11 sorted by id (OutOfMemory=10 is stdlib)" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
@@ -173,8 +173,9 @@ RSpec.describe AST do
       expect(ids).to eq(ids.sort)
       expect(entries).to include([:GuardFail, 8])
       expect(entries).to include([:PreconditionFail, 9])
-      expect(entries).to include([:UserA, 10])
-      expect(entries).to include([:UserB, 11])
+      expect(entries).to include([:OutOfMemory, 10])
+      expect(entries).to include([:UserA, 11])
+      expect(entries).to include([:UserB, 12])
     end
   end
 
