@@ -14,6 +14,26 @@ up into `transpile-tests/<NNN>_<name>.cht` to make the fix gate.
 See also [`puck-clear-retrospective.md`](puck-clear-retrospective.md) for
 the post-mortem on how these slipped through to this stage.
 
+## Status
+
+| # | Bug | State |
+| --- | --- | --- |
+| 1 | Lifted temp emitted after its use site | ✅ FIXED (promoted) |
+| 2 | FRAME_NO_REWIND on plain WHILE loops that allocate | ✅ FIXED (promoted) |
+| 3 | Effect inference: `charAt(i) OR ""` makes caller fallible (alloc⇄fail conflation) | ✅ FIXED (promoted) |
+| 4–7 | — | removed (working as designed) |
+| 8 | `splitOnce` flagged fallible because it touches `parts[1]` | ⬜ open |
+| 9 | `ByteCode[]@list` field in struct in `@list` clobbered across iters | ✅ FIXED (promoted) |
+| 10 | Error-union return over `@list` mis-lowers (`*const anyerror!T`) | ⬜ open (naive fix leaks → reverted; needs #13) |
+| 11 | `expr OR <fallback>` over a *user* callee doesn't reset `can_fail` | ⬜ open (found via #3 gate) |
+| 12 | Bare arena op (`split`/concat/`makeList`/`append`) in plain fn emits `try` | ⬜ open (found via #3 gate; runtime-side) |
+| 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (found via #3 gate) |
+
+Bugs #11, #12, #13 were discovered this session by the exhaustive
+`tools/fuzz/templates/infallible_signature.rb` gate — latent defects the
+#3 over-rejection had been masking. #10 was found earlier by the same
+gate. None are regressions; each is a distinct root cause.
+
 ---
 
 ## 1. Lifted temp emitted AFTER its use site (hoisting bug)
