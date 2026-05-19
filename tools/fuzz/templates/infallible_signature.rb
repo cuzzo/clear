@@ -95,18 +95,6 @@ INFALLIBLE_SIG_FAIL_SOURCES.each do |fs|
           :in_dev
         elsif arena_codegen_12
           :in_dev
-        elsif fs == :fallible_callee_absorbed && decl == :plain
-          # `h = isigFlaky(a) OR "fallback"` consumes the callee's
-          # error -> the caller is infallible and `RETURNS T` is legal.
-          # But compute_can_fail!'s transitive @call_graph propagation
-          # (effects.rb) is a callee-NAME proxy that cannot see the
-          # per-callsite OR-absorption, so it still forces `!T`. This is
-          # the residual "OR fallback doesn't propagate fallibility"
-          # facet of puck-clear-bugs.md #3 (now #11): the alloc-
-          # conflation half is fixed; the absorbed-user-callee half
-          # needs per-callsite absorption tracking the shared call graph
-          # can't carry. Reserve the cells; flip to :pass when #11 lands.
-          :in_dev
         elsif decl == :plain && true_fallible
           :compile_error            # under-declared, must be rejected
         else

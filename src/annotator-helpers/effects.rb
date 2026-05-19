@@ -450,12 +450,20 @@ module EffectTracker
       end
     end
 
+    # Propagate failure ONLY through callees whose error channel is not
+    # locally terminated. `@fn_propagating_callees` is the single
+    # authority (set by scan_for_calls): a callee reached only via
+    # `f() OR <fallback>` does not carry failure into fn_name, so it is
+    # absent here even though it stays in the shared @call_graph.
+    # (puck-clear-bugs.md #11)
+    @fn_propagating_callees = T.let(@fn_propagating_callees, T.untyped)
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
         next if can_fail[fn_name]
-        if callees.any? { |c| can_fail[c] }
+        prop = @fn_propagating_callees[fn_name] || callees
+        if prop.any? { |c| can_fail[c] }
           can_fail[fn_name] = true
           changed = T.let(true, T::Boolean)
         end
@@ -1062,36 +1070,62 @@ module EffectTracker
   sig { params(node: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def scan_for_calls(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    calls    = Set.new
-    has_fnptr = T.let([false], T::Array[T::Boolean])
+    calls      = Set.new
+    unabsorbed = Set.new   # callees whose error CHANNEL does not terminate
+                           # locally (i.e. can propagate failure to this fn).
+                           # `calls` keeps every callee (shared @call_graph
+                           # users need that); `unabsorbed` is the authority
+                           # for can_fail propagation.
+    has_fnptr  = T.let([false], T::Array[T::Boolean])
+
+    # `expr OR <rhs>` terminates the error channel UNLESS rhs itself
+    # re-propagates it. OrRaise / OrExit / OR RETURN / OR EXIT-expr all
+    # forward the failure, so they do NOT absorb. A value / ELSE / OrPass
+    # / OrPrune / OrBreak consumes it. Conservative: anything not in this
+    # propagating set counts as absorbing only for the OR-RESCUE *left*.
+    propagating_or_rhs = [AST::OrRaise, AST::OrExit, AST::ThrowNode, AST::ReturnNode]
 
     traverse = T.let(nil, T.untyped)
-    traverse = lambda do |n|
+    traverse = lambda do |n, absorbed|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
         # terminals
       when Array
-        n.each { |item| traverse.call(item) }
+        n.each { |item| traverse.call(item, absorbed) }
       when Hash
-        n.each_value { |v| traverse.call(v) }
+        n.each_value { |v| traverse.call(v, absorbed) }
       when AST::FunctionDef
         # Don't descend into nested function definitions (own scope).
+      when AST::BinaryOp
+        if n.op == :OR_RESCUE
+          rhs_propagates = propagating_or_rhs.any? { |k| n.right.is_a?(k) }
+          # Left side: its error is consumed here unless the rhs forwards
+          # it. Right side (the fallback expr) keeps the ambient context
+          # -- if the fallback itself calls something fallible, that DOES
+          # propagate.
+          traverse.call(n.left, absorbed || !rhs_propagates)
+          traverse.call(n.right, absorbed)
+        else
+          traverse.call(n.left, absorbed)
+          traverse.call(n.right, absorbed)
+        end
       when AST::FuncCall
         if n.fn_var_call
           has_fnptr[0] = true
         else
           calls.add(n.name)
+          unabsorbed.add(n.name) unless absorbed
         end
-        traverse.call(n.args)
+        traverse.call(n.args, absorbed)
       else
         if n.respond_to?(:each_pair)
-          n.each_pair { |_, v| traverse.call(v) }
+          n.each_pair { |_, v| traverse.call(v, absorbed) }
         end
       end
     end
 
-    traverse.call(node)
-    [calls, has_fnptr[0]]
+    traverse.call(node, false)
+    [calls, has_fnptr[0], unabsorbed]
   end
 
   # Post-pass: detect indirect mutual recursion in the call graph.

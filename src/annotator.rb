@@ -102,6 +102,7 @@ class SemanticAnnotator
     @match_pattern_context = T.let(false, T::Boolean) # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     # Reentrancy analysis
     @call_graph  = T.let({}, T::Hash[T.untyped, T.untyped])  # name => Set of directly-called function names (excluding self-calls)
+    @fn_propagating_callees = T.let({}, T::Hash[T.untyped, T.untyped]) # name => Set of callees whose error channel can propagate (NOT OR-absorbed); authority for can_fail (#11)
     @fn_has_fnptr = T.let({}, T::Hash[T.untyped, T.untyped]) # name => true if function calls a fn-type variable or lambda
     @fn_nodes    = T.let({}, T::Hash[T.untyped, T.untyped])  # name => FunctionDef node (for error reporting in the post-pass)
     # Performance analysis
@@ -696,10 +697,16 @@ private
     final_return_type = analyze_routine(node, node.body, declared_return, is_implicit_return)
 
     # 4.5 Reentrancy analysis: scan body after annotation so fn_var_call flags are set.
-    called_names, has_fnptr = scan_for_calls(node.body)
+    called_names, has_fnptr, unabsorbed_calls = scan_for_calls(node.body)
     directly_recursive = called_names.include?(node.name)
     # Record in call graph for the later indirect-cycle post-pass.
     @call_graph[node.name]   = called_names - [node.name]
+    # Single authority for can_fail propagation: only callees whose error
+    # channel is NOT locally terminated (e.g. NOT `f() OR <fallback>`)
+    # can propagate failure to this fn. The shared @call_graph keeps
+    # every callee (reentrancy / needs_rt need that); this is the subset
+    # that actually carries the error channel. (puck-clear-bugs.md #11)
+    @fn_propagating_callees[node.name] = (unabsorbed_calls || called_names) - [node.name]
     @fn_has_fnptr[node.name] = has_fnptr
 
     if directly_recursive

@@ -25,7 +25,7 @@ the post-mortem on how these slipped through to this stage.
 | 8 | `splitOnce` flagged fallible because it touches `parts[1]` | ⬜ open |
 | 9 | `ByteCode[]@list` field in struct in `@list` clobbered across iters | ✅ FIXED (promoted) |
 | 10 | Error-union return over `@list` mis-lowers (`*const anyerror!T`) | ⬜ open (naive fix leaks → reverted; needs #13) |
-| 11 | `expr OR <fallback>` over a *user* callee doesn't reset `can_fail` | ⬜ open (found via #3 gate) |
+| 11 | `expr OR <fallback>` over a *user* callee doesn't reset `can_fail` | ✅ FIXED (channel-termination authority) |
 | 12 | Bare arena op (`split`/concat/`makeList`/`append`) in plain fn emits `try` | ⬜ open (found via #3 gate; runtime-side) |
 | 13 | `@list` returned across an error-union boundary leaks at caller | ⬜ open (found via #3 gate) |
 
@@ -334,12 +334,22 @@ that is why #3's canonical reproducer passes while this doesn't.
 **Root cause**: per-callsite absorption is known only at the annotator
 OR-RESCUE site; the shared `@call_graph` (also feeding `needs_rt` /
 reentrance, which need every callee regardless of absorption) can't
-carry it. The fix needs a separate "fallibility-propagating callees"
-set that excludes callees whose every callsite is absorbed — new
-structure, deliberately not bolted onto this change.
+carry it.
 
-Gated `:in_dev` in `infallible_signature.rb`
-(`fallible_callee_absorbed` + plain).
+**FIXED.** `scan_for_calls` now returns a third set, `unabsorbed` —
+the callees whose error channel is NOT locally terminated. Threading
+an `absorbed` flag through the AST walk, the `.left` of an
+`OR_RESCUE` whose rhs does not re-propagate (anything but
+`OrRaise`/`OrExit`/`OR RETURN`/`OR EXIT`-expr) is marked absorbed.
+`@fn_propagating_callees` stores this per fn and is the SINGLE
+authority `compute_can_fail!` propagates over; `@call_graph` is
+unchanged (reentrancy/needs_rt still see every callee). This is the
+"channel terminates here" fact owned in one place and read, not
+re-derived from the callee-name proxy. Conservative: an unrecognized
+rhs counts as propagating, so the fix never wrongly marks a fallible
+fn infallible. The `fallible_callee_absorbed` gate cells are live
+again (scalar/heap_string pass; heap_list still `:in_dev` under #12,
+the orthogonal arena-op `try`).
 
 ---
 
