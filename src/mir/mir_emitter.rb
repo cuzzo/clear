@@ -1032,7 +1032,12 @@ class MIREmitter
       "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
 
     when :list_with_elem_cleanup
-      body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{deref}.deinit(rt.frameAlloc()); }"
+      # Dual-allocator cleanup: elements via cleanupAlloc (mixed-provenance:
+      # heap-string fields in frame structs), outer container via frameAlloc.
+      # The shim form (CheatLib.cleanup) uses one alloc for both -- wrong
+      # here. Inline form preserved; outer deinit @constCast'd so a const-
+      # bound anytype param (callee TAKES nested @list, #40) compiles.
+      body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } @constCast(&#{deref}).deinit(rt.frameAlloc()); }"
       guarded_defer(name, body, g, errdefer:)
 
     when :list, :string_map, :numeric_map
