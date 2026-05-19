@@ -212,15 +212,30 @@ module NilKill
     # vs collect_ran_untraced) then cannot be computed and would silently
     # degrade to "never_run". Make that a hard, loud failure instead.
     def assert_collect_coverage_produced!
-      cov_bytes = Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl")).sum { |f| File.size(f) }
-      meth_bytes = Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl")).sum { |f| File.size(f) }
-      return if cov_bytes.positive? && meth_bytes.positive?
-      abort "nil-kill: the traced collect produced NO usable evidence " \
-        "(coverage=#{cov_bytes}B, method observations=#{meth_bytes}B in " \
-        "#{NilKill.rel(RUNTIME_DIR)}). Empty .jsonl files exist but hold nothing -- " \
-        "Coverage failed to start, or an exception escaped instrumented src during " \
-        "require and aborted the run before any method returned. The dead-vs-missed " \
-        "split cannot be computed. Fix the workload/tracer; do not infer on this collect."
+      cov = Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl"))
+      meth = Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl"))
+      cov_bytes = cov.sum { |f| File.size(f) }
+      meth_bytes = meth.sum { |f| File.size(f) }
+      if cov_bytes.zero? || meth_bytes.zero?
+        abort "nil-kill: the traced collect produced NO usable evidence " \
+          "(coverage=#{cov_bytes}B, method observations=#{meth_bytes}B in " \
+          "#{NilKill.rel(RUNTIME_DIR)}). Empty .jsonl files exist but hold nothing -- " \
+          "Coverage failed to start, or an exception escaped instrumented src during " \
+          "require and aborted the run before any method returned. The dead-vs-missed " \
+          "split cannot be computed. Fix the workload/tracer; do not infer on this collect."
+      end
+      by_pid = Hash.new { |h, k| h[k] = {} }
+      cov.each { |f| (p = f[/-(\d+)\.jsonl\z/, 1]) && by_pid[p][:cov] = File.size(f) }
+      meth.each { |f| (p = f[/-(\d+)\.jsonl\z/, 1]) && by_pid[p][:meth] = File.size(f) }
+      ran = by_pid.values.select { |v| v[:cov].to_i.positive? }
+      aborted = ran.count { |v| v[:meth].to_i.zero? }
+      return unless aborted.positive? && aborted > ran.size - aborted
+      abort "nil-kill: #{aborted}/#{ran.size} traced processes produced src coverage " \
+        "but ZERO method observations -- a systemic instrumentation abort (an " \
+        "exception escaping instrumented src during require zeroed those processes' " \
+        "evidence). Aggregate .jsonl is non-empty only because other stages traced " \
+        "normally; inference would use partial, misleading evidence. Fix the " \
+        "workload/tracer; do not infer on this collect."
     end
 
     def collect_commands
