@@ -1,0 +1,28 @@
+UNION Value { A: Int64, B: Int64, C }
+
+FN makeValue(i: Int64) RETURNS Value ->
+    r = i MOD 3_i64;
+    IF r == 0_i64 THEN
+        RETURN Value{ A: i };
+    ELSE_IF r == 1_i64 THEN
+        RETURN Value{ B: i * 2_i64 };
+    END
+    RETURN Value.C;
+END
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 100000_i64) DO
+        v = makeValue(i);
+        MATCH v START
+            Value.A AS n -> total = total + n;,
+            Value.B AS n -> total = total - n;,
+            Value.C -> total = total + 1_i64;
+        END
+    END
+    totalMs = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

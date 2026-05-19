@@ -1015,7 +1015,9 @@ module EffectTracker
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
-      if fn&.reentrant == :reentrant
+      # Only plain :reentrant is unbounded native stack; :thunk /
+      # :tail_call / :max_depth are bounded and TIGHT-safe.
+      if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
       node.args.each { |a| validate_tight_node!(a, loop_node) }
@@ -1024,7 +1026,9 @@ module EffectTracker
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
-      if fn&.reentrant == :reentrant
+      # Only plain :reentrant is unbounded native stack; :thunk /
+      # :tail_call / :max_depth are bounded and TIGHT-safe.
+      if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
       validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)

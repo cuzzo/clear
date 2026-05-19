@@ -1,0 +1,6 @@
+STRUCT Point { x: Int64, y: Int64 }
+
+FN main() RETURNS Int64 ->
+    p = Point { x: 20_i64, y: 22_i64 };
+    RETURN p.x + p.y;
+END

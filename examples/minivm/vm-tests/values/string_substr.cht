@@ -1,0 +1,4 @@
+FN main() RETURNS String ->
+    s = "register-vm";
+    RETURN substr(s, 0_i64, 8_i64);
+END

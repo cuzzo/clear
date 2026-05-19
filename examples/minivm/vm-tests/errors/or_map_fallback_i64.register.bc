@@ -1,0 +1,9 @@
+register instructions:
+0000 MNEW m0
+0002 ICONST r0 0 ; I:99
+0005 MGETI r0 m0 1 r0
+0010 IRET r0
+0012 HALT
+consts:
+I:99
+S:7:missing

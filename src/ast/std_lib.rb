@@ -249,6 +249,17 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # byteAt(string, index) → Int64 — O(1) byte-level numeric access.
+  # Out-of-range returns 0 rather than raising. Used by the register VM
+  # bytecode parser; not a method to discourage misuse from CLEAR code.
+  "byteAt" => {
+    args: [STRING_TYPE, :Int64],
+    return: :Int64,
+    zig: "CheatLib.byteAt({0}, {1})",
+    bc: true,
+    borrows: :all,
+  },
+
   # bytes(string) → Int64 — byte length (O(1), explicit intent)
   "bytes" => {
     args: [STRING_TYPE],

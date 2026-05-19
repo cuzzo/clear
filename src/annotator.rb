@@ -2904,7 +2904,9 @@ private
     visit(node.value)
 
     scope = current_scope
-    if !scope.locals.key?(node.name)
+    # `_` is a discard sink: every `_ = expr;` is an independent
+    # declaration, never a reassignment.
+    if !scope.locals.key?(node.name) || node.name == "_"
       # Declaration path
       promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
       promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
@@ -6603,7 +6605,7 @@ private
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T::Set[T.untyped]) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[T.untyped])) }
   def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
   sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Set[T.untyped])) }
   def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)

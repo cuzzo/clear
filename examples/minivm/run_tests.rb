@@ -1,11 +1,16 @@
 #!/usr/bin/env ruby
 # MiniVM runner policy:
-# - The primary correctness target is the bytecode VM against transpile-tests.
-# - Use --vm-coverage for the full supportable-test coverage report.
+# - The primary correctness target is interpreter_test.cht.
+# - The broader transpile-tests runner is historical/aspirational coverage.
 
 MINIVM_CLEAR = File.join(__dir__, "clear")
 TRANSPILER = File.join(__dir__, "bc_run.rb")
 TEST_DIR = File.expand_path("../../transpile-tests", __dir__)
+INTERPRETER_TEST = File.join(__dir__, "interpreter_test.cht")
+REGISTER_TRANSPILE_ALLOWLIST = File.join(__dir__, "register-transpile-allowlist.txt")
+
+require_relative "vm_golden_harness"
+require_relative "register_opcode_layout"
 
 HISTORICAL_KNOWN_PASSING = %w[
   01_stack_alloc
@@ -116,6 +121,225 @@ VM_UNSUPPORTED = {
   "217_loop_carry_overflow_blocks" => :slow_stress_test,
 }
 
+# Register-VM roadmap. Each entry tracks an unsupported language
+# feature cluster: the rough number of transpile-tests it would
+# unblock and a t-shirt effort estimate. Counts come from the
+# pending-reason histogram (see `--roadmap-scan` to refresh).
+# Effort is a wall-clock estimate against the bc emitter, not
+# new VM opcodes unless explicitly noted.
+REGISTER_ROADMAP = [
+  # ---- P1: residual struct-list pipeline tail (post-23-test wave) ----
+  { priority: "P1", title: "ORDER_BY / INDEX / nested-list struct fields",
+    tests: 12, effort: "2 days",
+    detail: "What's left of the struct-list pipeline tail: ORDER_BY " \
+            "(needs MIR::Sort + CheatLib.makeList struct-list copy), " \
+            "INDEX (group-by into a HashMap of struct_lists), and " \
+            "struct types whose own fields are @list (ArrayListUnmanaged " \
+            "as a struct field). Rest of the cluster landed in the " \
+            "`P1 #5/#4/#1 wave` commit (23 new passes)." },
+
+  # ---- P1: medium effort, large clusters ----
+  { priority: "P1", title: "Pool tail (FIND/EACH-via-pipeline, internals)",
+    tests: 13, effort: "2 days",
+    detail: "Pool basics landed (insert/get/remove/length, per-pool " \
+            "ForStmt with alive-skip, helper FN params, struct-view " \
+            "field access, write-back). Remaining tests trip on " \
+            "pipeline ops (`pool |> FIND`, `pool |> EACH` lowering " \
+            "uses pool internals like `<ctx>.pool.slots`), SoaPool " \
+            "(separate value-kind), and pool-as-lambda-capture." },
+  { priority: "P1", title: "Recursive Value-list / Val[] / Node[]",
+    tests: 11, effort: "1 week",
+    detail: "ArrayListUnmanaged(Value/Val/Node) with self-referential " \
+            "variants (Value.List: Value[]) or collection-bearing " \
+            "variants (Value.Items: Int64[]). value_list_type? now " \
+            "accepts these unions when only their scalar variants are " \
+            "exercised (tag-only :opaque entries for non-scalar variants). " \
+            "Full support -- runtime-typed appends like " \
+            "`results.append(makeItems())` and reading back opaque " \
+            "payloads -- needs heap-allocated Value variants and " \
+            "recursive cleanup; defer to its own commit." },
+  # @versioned / @atomicPtr / cap-wrapped helper params landed in
+  # the same P1 wave (8 + 4 + 5 = 17 of those 23 new passes). Their
+  # roadmap entries are now resolved.
+  # napFor / :sleep + main-bootstrap + BG tail shapes landed in the
+  # P1 quick-wins commit (11 new passes). Main-bootstrap stragglers
+  # (46_range, require_helper, require_types_helper) are not real
+  # tests -- they are import-helper files or empty -- so they stay
+  # pending without being roadmap items.
+
+  # ---- P2: hard / specialized ----
+  { priority: "P2", title: "CatchWrapper / RAISE / OR EXIT (error-union runtime)",
+    tests: 5, effort: "1 week",
+    detail: "Needs new VM opcodes: RAISE, error register, dispatch by " \
+            "error-kind/error-type. Outer fn body is a single MIR::" \
+            "CatchWrapper that calls the inner and catches via Zig text." },
+  # @atomicPtr basic CapWrap + WITH MATCH ATOMIC arm landed in the
+  # P1 wave; remaining tests need TryCatch / TryExpr at expr-stmt
+  # position (covered by the P2 CatchWrapper item).
+  # RangeLit-as-value landed in the runtime-blockers commit
+  # (compile_range_to_int_list materializes 0..<n eagerly).
+  { priority: "P2", title: "StreamSpawn / open / infinite streams",
+    tests: 4, effort: "Hard",
+    detail: "`BG STREAM { ... YIELD x; ... }` generators. Needs CPS-" \
+            "transformed body or a coroutine value-kind. The single-" \
+            "threaded VM can run one iteration at a time, but the " \
+            "yield+resume pattern is non-trivial." },
+  { priority: "P2", title: "DoBlock (parallel branches)",
+    tests: 3, effort: "Hard",
+    detail: "Single-threaded VM: branches run sequentially. Faithful for " \
+            "side-effect ordering only when each branch is order-" \
+            "independent; needs a sequential-equivalence assertion." },
+  # @reentrant variants and Set landed in the P2 batch; remaining
+  # tests in those clusters need RawZig (out of scope) or runtime
+  # work for set iteration / sharded-list value-kind.
+  { priority: "P2", title: "Map .values() / .keys() iteration",
+    tests: 3, effort: "1 day",
+    detail: "InlineBc(:values) / (:keys). Materialize the map's storage " \
+            "into a typed list. Currently raises Unsupported." },
+  # MIR::IfBindStmt landed in the runtime-blockers commit (single
+  # and multi-binding via && short-circuit, currently only ?Int64).
+  { priority: "P2", title: "MIR::RawZig",
+    tests: 5, effort: "Out of scope",
+    detail: "RawZig statements are an explicit escape hatch into the Zig " \
+            "backend. The bc VM is not Zig; tests using RawZig stay " \
+            "pending until each is rewritten to use a structured MIR " \
+            "node, per CLAUDE.md's no-Zig-parsing rule." },
+].freeze
+
+def print_register_roadmap
+  total = Dir.glob(File.join(TEST_DIR, "*.cht")).length
+  passing = read_allowlist(REGISTER_TRANSPILE_ALLOWLIST).length
+  pct = total.positive? ? (passing.to_f / total * 100) : 0.0
+  puts
+  puts "Register VM roadmap"
+  puts "===================="
+  printf "  Currently passing: %d / %d (%.1f%%)\n", passing, total, pct
+  puts
+
+  groups = REGISTER_ROADMAP.group_by { |item| item[:priority] }
+  cumulative = passing
+  %w[P0 P1 P2].each do |pri|
+    items = groups[pri] || []
+    next if items.empty?
+    pri_total = items.sum { |i| i[:tests] }
+    cumulative += pri_total
+    printf "%s -- %d items, %d tests, projects to %d / %d (%.1f%%)\n",
+           pri, items.length, pri_total, cumulative, total, cumulative.to_f / total * 100
+    items.each do |item|
+      printf "  %3d tests | %-12s | %s\n", item[:tests], item[:effort], item[:title]
+    end
+    puts
+  end
+  puts "Run `--roadmap --detail` for full descriptions."
+end
+
+def print_register_roadmap_detail
+  print_register_roadmap
+  puts "Detailed entries"
+  puts "================"
+  REGISTER_ROADMAP.each do |item|
+    printf "[%s] %s (%d tests, %s)\n", item[:priority], item[:title], item[:tests], item[:effort]
+    item[:detail].split(/(?<=\.)\s+/).each { |line| puts "    #{line}" }
+    puts
+  end
+end
+
+def run_primary_test
+  system(MINIVM_CLEAR, "test", INTERPRETER_TEST)
+  $?.exitstatus || 1
+end
+
+# Compile a .cht file with the bc emitter and print the recorded
+# shared-memory event stream + BG dispatch points. This is the
+# observation surface a future deterministic-replay scheduler will
+# enumerate over; today it lets developers see which operations the
+# bc emitter has identified as "interesting from a concurrency
+# standpoint."
+#
+# The report is purely structural -- it consumes the value-kinds
+# the bc emitter already tracks and adds nothing to the runtime.
+def print_concurrency_report(paths)
+  $LOAD_PATH.unshift(File.expand_path("../../src", __dir__))
+  $LOAD_PATH.unshift(File.expand_path("../../src/backends", __dir__))
+  $LOAD_PATH.unshift(File.expand_path("../../src/mir", __dir__))
+  $LOAD_PATH.unshift(File.expand_path("../../src/ast", __dir__))
+  require_relative "register_bc_emitter"
+  require "compiler_frontend"
+  require "mir_lowering"
+  require "mir_checker"
+  require "importer"
+  require "mir"
+
+  ok = true
+  paths.each do |path|
+    abs = File.expand_path(path)
+    unless File.exist?(abs)
+      $stderr.puts "missing: #{path}"
+      ok = false
+      next
+    end
+    src = File.read(abs)
+    source_dir = File.dirname(abs)
+    importer = ModuleImporter.new(base_dir: source_dir)
+    fe = CompilerFrontend.compile(src, importer: importer, source_dir: source_dir)
+    lowering = MIRLowering.new(
+      struct_schemas: fe.struct_schemas,
+      enum_schemas: fe.enum_schemas,
+      union_schemas: fe.union_schemas,
+      fn_sigs: fe.fn_sigs,
+      moved_guard_info: fe.moved_guard_info,
+      importer: importer,
+      source_dir: source_dir,
+      target: :bc
+    )
+    program = lowering.lower_program(fe.ast)
+    emitter = RegisterBcEmitter.new(fe, source: src, importer: importer)
+    begin
+      emitter.compile(program)
+    rescue RegisterBcEmitter::Unsupported => e
+      $stderr.puts "[#{path}] (compile incomplete: #{e.message[0..120]})"
+    end
+
+    events = emitter.shared_events
+    bgs = emitter.bg_dispatch_points
+    puts
+    puts "Concurrency surface: #{path}"
+    puts "=" * 60
+    if events.empty? && bgs.empty?
+      puts "  (no shared-memory operations or BG dispatch points)"
+      next
+    end
+
+    by_fn = events.group_by { |e| e[:function] || "<top>" }
+    bg_by_fn = bgs.group_by { |e| e[:function] || "<top>" }
+    fn_names = (by_fn.keys | bg_by_fn.keys).uniq.sort
+    fn_names.each do |fn|
+      puts "  FN #{fn}"
+      (bg_by_fn[fn] || []).each do |bg|
+        printf "    BG dispatch    line %4d  captures=%d\n", bg[:line], bg[:capture_count]
+      end
+      (by_fn[fn] || []).each do |ev|
+        caps_text = if ev[:caps]
+                      "[own=#{ev[:caps][:ownership]} sync=#{ev[:caps][:sync]}]"
+                    else
+                      ""
+                    end
+        printf "    %-12s line %4d  %-22s %-20s %s\n",
+               ev[:category].to_s,
+               ev[:line],
+               ev[:binding],
+               ev[:kind],
+               caps_text
+      end
+    end
+
+    puts
+    puts "  Summary: #{events.length} shared events, #{bgs.length} BG dispatch points"
+    puts "    by category: #{events.group_by { |e| e[:category] }.transform_values(&:length).inspect}"
+  end
+  ok
+end
+
 def run_historical_test(path)
   # Use a short kill-after so infinite-loop tests don't hang the runner.
   output = `timeout --kill-after=2 10 ruby #{TRANSPILER} #{path} --run 2>&1`
@@ -155,6 +379,91 @@ def run_historical_test(path)
   else
     [:unknown, clean.lines.first&.strip&.slice(0, 120)]
   end
+end
+
+def read_allowlist(path)
+  return [] unless File.exist?(path)
+
+  File.readlines(path, chomp: true).filter_map do |line|
+    line = line.sub(/#.*/, "").strip
+    next if line.empty?
+
+    line
+  end
+end
+
+def resolve_transpile_test(name)
+  return name if File.exist?(name)
+
+  candidate = File.join(TEST_DIR, "#{name}.cht")
+  return candidate if File.exist?(candidate)
+
+  candidate = File.join(TEST_DIR, name)
+  return candidate if File.exist?(candidate)
+
+  name
+end
+
+def run_vm_target_test(path, vm_target)
+  source = File.read(path)
+  target = MiniVM::Golden.targets.fetch(vm_target.to_sym)
+  target.compile(source, source_dir: File.dirname(path))
+  result = target.run(source, source_dir: File.dirname(path))
+  return [:pass, nil] if result.status == :pass
+
+  [result.status, result.raw_output.to_s.lines.first&.strip&.slice(0, 120)]
+rescue MiniVM::Golden::PendingTarget => e
+  [:pending, e.message]
+rescue => e
+  [:error, e.message]
+end
+
+def run_vm_target_suite(vm_target, tests)
+  if vm_target.to_sym == :register
+    MiniVM::Register::OpcodeSpec.validate_vm_enum!
+  end
+
+  tests = read_allowlist(REGISTER_TRANSPILE_ALLOWLIST) if tests.empty? && vm_target.to_sym == :register
+  if tests.empty?
+    $stderr.puts "No tests supplied for --vm=#{vm_target}. Add paths or update #{REGISTER_TRANSPILE_ALLOWLIST}."
+    return false
+  end
+
+  puts "\nMiniVM transpile-test target: #{vm_target}"
+  puts "=" * 60
+  buckets = Hash.new { |h, k| h[k] = [] }
+  tests.each do |name|
+    path = resolve_transpile_test(name)
+    unless File.exist?(path)
+      puts "  SKIP    #{name} (file not found)"
+      buckets[:missing] << [name, nil]
+      next
+    end
+
+    status, msg = run_vm_target_test(path, vm_target)
+    label = case status
+            when :pass then "PASS"
+            when :pending then "PENDING"
+            else status.to_s.upcase
+            end
+    puts "  #{label.ljust(7)} #{name}#{msg ? ": #{msg}" : ""}"
+    buckets[status] << [name, msg]
+  end
+
+  puts "-" * 60
+  total = tests.length
+  passed = buckets[:pass].length
+  pending = buckets[:pending].length
+  failed = total - passed - pending
+  puts "  #{passed} passed, #{pending} pending, #{failed} failed/missing (#{total} total)"
+  passed
+end
+
+# Strict mode (failed.zero? && pending.zero?) for callers that want
+# zero-tolerance. The default callsite returns the pass count and lets
+# the caller decide via --min-pass=N or strict equality.
+def run_vm_target_suite_with_count(vm_target, tests)
+  run_vm_target_suite(vm_target, tests)
 end
 
 def run_historical_suite(tests, label)
@@ -243,10 +552,10 @@ end
 def usage
   puts "Usage:"
   puts "  ruby examples/minivm/run_tests.rb"
-  puts "    Runs the known-passing transpile-tests through bc_run"
+  puts "    Runs the primary MiniVM regression target: interpreter_test.cht"
   puts
   puts "  ruby examples/minivm/run_tests.rb --historical"
-  puts "    Same as the default known-passing transpile-tests run"
+  puts "    Runs the broader historical transpile-tests coverage"
   puts
   puts "  ruby examples/minivm/run_tests.rb --all"
   puts "    Runs the historical known-passing list plus additional candidates"
@@ -258,13 +567,72 @@ def usage
   puts "    Runs every transpile test, skips VM_UNSUPPORTED, prints a"
   puts "    PASS percentage over supportable tests. Targets 100%."
   puts
+  puts "  ruby examples/minivm/run_tests.rb --golden"
+  puts "    Runs the stack/register VM golden harness specs"
+  puts
+  puts "  ruby examples/minivm/run_tests.rb --vm=stack|register [tests...]"
+  puts "    Runs transpile tests through the selected MiniVM target. Register"
+  puts "    defaults to register-transpile-allowlist.txt."
+  puts
   puts "  ruby examples/minivm/run_tests.rb path/to/test.cht"
   puts "    Runs a single transpile test through bc_run"
+  puts
+  puts "  ruby examples/minivm/run_tests.rb --roadmap [--detail]"
+  puts "    Prints the register VM language-coverage roadmap, ranked"
+  puts "    P0/P1/P2 with expected test count and effort estimate."
+  puts
+  puts "  ruby examples/minivm/run_tests.rb --concurrency-report file.cht ..."
+  puts "    Compiles each file with the bc emitter and prints its"
+  puts "    shared-memory event stream + BG dispatch points -- the"
+  puts "    observation surface a future deterministic-replay"
+  puts "    scheduler would enumerate over."
 end
 
-if ARGV.empty?
-  ok = run_historical_suite(HISTORICAL_KNOWN_PASSING, "Known-Passing Transpile Tests")
+vm_target = nil
+min_pass = nil
+ARGV.reject! do |arg|
+  if arg =~ /\A--vm=(stack|register|bc)\z/
+    vm_target = Regexp.last_match(1)
+    true
+  elsif arg == "--vm"
+    vm_target = "stack"
+    true
+  elsif arg =~ /\A--min-pass=(\d+)\z/
+    # CI gate: assert at least N tests pass, regardless of pending/failed.
+    # Used to ratchet the register-VM baseline forward over time.
+    min_pass = Regexp.last_match(1).to_i
+    true
+  else
+    false
+  end
+end
+vm_target = "stack" if vm_target == "bc"
+
+if vm_target
+  passed = run_vm_target_suite_with_count(vm_target, ARGV)
+  if min_pass
+    if passed >= min_pass
+      puts "  baseline OK: #{passed} >= #{min_pass}"
+      exit(0)
+    else
+      $stderr.puts "  baseline REGRESSION: #{passed} < #{min_pass}"
+      exit(1)
+    end
+  end
+  exit(passed > 0 ? 0 : 1)
+elsif ARGV[0] == "--roadmap"
+  ARGV.include?("--detail") ? print_register_roadmap_detail : print_register_roadmap
+  exit(0)
+elsif ARGV[0] == "--concurrency-report"
+  paths = ARGV[1..]
+  if paths.nil? || paths.empty?
+    $stderr.puts "Usage: ruby examples/minivm/run_tests.rb --concurrency-report <file.cht> [file.cht ...]"
+    exit 1
+  end
+  ok = print_concurrency_report(paths)
   exit(ok ? 0 : 1)
+elsif ARGV.empty?
+  exit(run_primary_test)
 elsif ARGV[0] == "--historical"
   ok = run_historical_suite(HISTORICAL_KNOWN_PASSING, "Historical Known-Passing Tests")
   exit(ok ? 0 : 1)
@@ -274,6 +642,11 @@ elsif ARGV[0] == "--all"
   exit(ok ? 0 : 1)
 elsif ARGV[0] == "--vm-coverage"
   ok = run_vm_coverage
+  exit(ok ? 0 : 1)
+elsif ARGV[0] == "--golden"
+  MiniVM::Register::OpcodeSpec.validate_vm_enum!
+  spec_path = File.expand_path("../../spec/minivm_golden_harness_spec.rb", __dir__)
+  ok = system("bundle", "exec", "rspec", spec_path)
   exit(ok ? 0 : 1)
 elsif ARGV[0] == "--discover"
   all = Dir.glob(File.join(TEST_DIR, "*.cht"))

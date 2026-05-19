@@ -1,0 +1,23 @@
+# R6.5 hammer: 3 real BG fibers each WHILE-loop 5 read-modify-write
+# increments of one shared @shared:locked counter. Each holds the
+# per-cell lock ACROSS a yield (napFor sleeps inside WITH EXCLUSIVE),
+# so the other fibers must genuinely spin-wait rather than interleave
+# the RMW. A lost/torn update under contention shows as value != 15.
+# This is the property that was vacuous before R6 (WITH was a no-op).
+
+STRUCT Counter { value: Int64 }
+
+FN napFor(ms: Int64) RETURNS !Void -> sleep(ms); RETURN; END
+
+FN main() RETURNS Void ->
+    MUTABLE c = Counter{ value: 0 } @shared:locked;
+    iters = 5_i64;
+    f1: ~Void = BG { MUTABLE i: Int64 = 0; WHILE i < iters DO WITH EXCLUSIVE c AS x { v = x.value; napFor(2); x.value = v + 1; } i = i + 1; END };
+    f2: ~Void = BG { MUTABLE i: Int64 = 0; WHILE i < iters DO WITH EXCLUSIVE c AS x { v = x.value; napFor(2); x.value = v + 1; } i = i + 1; END };
+    f3: ~Void = BG { MUTABLE i: Int64 = 0; WHILE i < iters DO WITH EXCLUSIVE c AS x { v = x.value; napFor(2); x.value = v + 1; } i = i + 1; END };
+    NEXT f1;
+    NEXT f2;
+    NEXT f3;
+    WITH c AS r { ASSERT r.value == 15, "3 fibers x 5, lock held across yield, no lost update"; }
+    RETURN;
+END

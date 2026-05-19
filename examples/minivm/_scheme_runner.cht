@@ -401,11 +401,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 60 THEN
         s = getStr(evaled[1]);
-        RETURN Value{ Str: uppercase(s) };
+        RETURN Value{ Str: upcase(s) };
     END
     IF id == 61 THEN
         s = getStr(evaled[1]);
-        RETURN Value{ Str: lowercase(s) };
+        RETURN Value{ Str: downcase(s) };
     END
     IF id == 62 THEN
         # list-set!: return new list with element at idx replaced (functional update)

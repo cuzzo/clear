@@ -1,0 +1,3 @@
+FN main() RETURNS Int64 ->
+    RETURN toInt(42.9);
+END

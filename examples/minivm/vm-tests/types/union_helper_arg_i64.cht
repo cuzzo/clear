@@ -1,0 +1,13 @@
+UNION Token { IntVal: Int64, Done }
+
+FN tokenKind(t: Token) RETURNS Int64 ->
+    PARTIAL MATCH t START
+        Token.IntVal -> RETURN 1_i64;,
+        Token.Done -> RETURN 2_i64;
+    END
+END
+
+FN main() RETURNS Int64 ->
+    t: Token = Token{ IntVal: 7_i64 };
+    RETURN tokenKind(t);
+END

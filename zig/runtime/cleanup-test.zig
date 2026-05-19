@@ -760,3 +760,45 @@ test "cleanup: recursive union slice" {
     buf[1] = RecValue{ .Number = 42.0 };
     CheatLib.cleanup([]RecValue, alloc, &buf);
 }
+
+test "CapturedValue: only *const (borrow) strips; *T / value / slice passthrough" {
+    const LI = std.ArrayListUnmanaged(i64);
+    try std.testing.expect(CheatLib.CapturedValue(*const LI) == LI);
+    try std.testing.expect(CheatLib.CapturedValue(*LI) == *LI);
+    try std.testing.expect(CheatLib.CapturedValue(LI) == LI);
+    try std.testing.expect(CheatLib.CapturedValue([]const u8) == []const u8);
+}
+
+test "dupeCaptured: borrowed @list param deep-copies into an independent owned list" {
+    const LI = std.ArrayListUnmanaged(i64);
+    const alloc = std.testing.allocator;
+
+    var src = LI.empty;
+    defer src.deinit(alloc);
+    try src.append(alloc, 1);
+    try src.append(alloc, 2);
+    try src.append(alloc, 3);
+
+    const sp: *const LI = &src;
+    var dup = try CheatLib.dupeCaptured(*const LI, sp, alloc);
+    defer dup.deinit(alloc);
+
+    try std.testing.expect(@TypeOf(dup) == LI);
+    try std.testing.expectEqual(@as(usize, 3), dup.items.len);
+    try std.testing.expectEqualSlices(i64, &[_]i64{ 1, 2, 3 }, dup.items);
+    dup.items[0] = 99;
+    try std.testing.expectEqual(@as(i64, 1), src.items[0]);
+}
+
+test "dupeCaptured: owned-value source path matches dupeValue (no regression)" {
+    const LI = std.ArrayListUnmanaged(i64);
+    const alloc = std.testing.allocator;
+    var src = LI.empty;
+    defer src.deinit(alloc);
+    try src.append(alloc, 7);
+
+    var dup = try CheatLib.dupeCaptured(LI, src, alloc);
+    defer dup.deinit(alloc);
+    try std.testing.expectEqual(@as(usize, 1), dup.items.len);
+    try std.testing.expectEqual(@as(i64, 7), dup.items[0]);
+}

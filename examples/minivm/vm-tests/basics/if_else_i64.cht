@@ -1,0 +1,9 @@
+FN main() RETURNS Int64 ->
+    MUTABLE x = 0_i64;
+    IF 3_i64 > 2_i64 THEN
+        x = 7_i64;
+    ELSE
+        x = 9_i64;
+    END
+    RETURN x;
+END

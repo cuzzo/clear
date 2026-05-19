@@ -1620,9 +1620,16 @@ module LoopFrameAnalysis
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
   # nested loops and function definitions.
+  #
+  # `body` is always an Array (non-nil): a statement body. then_branch /
+  # else_branch / WithBlock#body / DoBlock branch bodies are array
+  # invariants (the parser uses `[]` for an absent else, never nil).
+  # Only MatchStatement#default_case is `[ASTNode] or nil` by AST design
+  # (ast.rb:1171) -- so that ONE recurse site is guarded here (mirrors
+  # `bodies << default_case if default_case` in ast.rb). No nil ever
+  # reaches scan_direct, so the contract sig is strictly non-nil.
   sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.scan_direct(body, &block)
-    return unless body.is_a?(Array)
     body.each do |s|
       yield s
       case s
@@ -1633,7 +1640,7 @@ module LoopFrameAnalysis
         scan_direct(s.else_branch, &block)
       when AST::MatchStatement
         s.cases.each { |c| scan_direct(c.body, &block) }
-        scan_direct(s.default_case, &block)
+        scan_direct(s.default_case, &block) if s.default_case
       when AST::WithBlock
         scan_direct(s.body, &block)
       when AST::DoBlock

@@ -1,0 +1,11 @@
+ENUM Op { Get, Put }
+
+FN main() RETURNS Int64 ->
+    MUTABLE n: Int64 = 0_i64;
+    PARTIAL MATCH Op.Put START
+        Op.Get -> n = 1_i64;,
+        Op.Put -> n = 2_i64;,
+        DEFAULT -> n = 3_i64;
+    END
+    RETURN n;
+END

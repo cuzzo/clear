@@ -1,0 +1,13 @@
+register instructions:
+0000 ICONST r0 0 ; I:10
+0003 ICONST r1 1 ; I:3
+0006 IADD r0 r0 r1
+0010 ICONST r2 2 ; I:2
+0013 IMUL r1 r1 r2
+0017 IADD r0 r0 r1
+0021 IRET r0
+0023 HALT
+consts:
+I:10
+I:3
+I:2

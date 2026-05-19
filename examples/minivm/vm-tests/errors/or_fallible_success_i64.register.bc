@@ -1,0 +1,9 @@
+register instructions:
+0000 ICALL r0 9 argc=0 iframe=1 fframe=0
+0006 IRET r0
+0008 HALT
+0009 ICONST r0 0 ; I:7
+0012 IRET r0
+0014 HALT
+consts:
+I:7

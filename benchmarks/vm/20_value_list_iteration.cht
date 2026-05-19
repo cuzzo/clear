@@ -1,0 +1,42 @@
+UNION Val { Nil, Str: String, Num: Float64 }
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE items: Val[]@list = List[];
+
+    FOR i IN (0_i64 ..< 100000_i64) DO
+        m3 = i MOD 3_i64;
+        IF m3 == 0_i64 THEN
+            items.append(Val{ Str: COPY ("tag_" + i.toString()) });
+        ELSE_IF m3 == 1_i64 THEN
+            items.append(Val{ Num: toFloat(i) });
+        ELSE
+            items.append(Val.Nil);
+        END
+    END
+
+    pushMs = timestampMs() - t0;
+    t1 = timestampMs();
+
+    MUTABLE numCount: Int64 = 0_i64;
+    MUTABLE numSum: Float64 = 0.0;
+    MUTABLE strCount: Int64 = 0_i64;
+    MUTABLE nilCount: Int64 = 0_i64;
+    n = items.length();
+    FOR j IN (0_i64 ..< n) DO
+        e = items[j];
+        PARTIAL MATCH e START
+            Val.Num AS x -> numCount = numCount + 1_i64; numSum = numSum + x;,
+            Val.Str -> strCount = strCount + 1_i64;,
+            Val.Nil -> nilCount = nilCount + 1_i64;
+        END
+    END
+
+    iterMs = timestampMs() - t1;
+    totalMs = pushMs + iterMs;
+    print("nums=${numCount.toString()} strs=${strCount.toString()}");
+    print("nils=${nilCount.toString()}");
+    print("Push: ${pushMs.toString()} ms | Iter: ${iterMs.toString()} ms");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

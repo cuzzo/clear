@@ -1,0 +1,4 @@
+FN main() RETURNS String ->
+    s = "clear";
+    RETURN charAt(s, 2_i64);
+END

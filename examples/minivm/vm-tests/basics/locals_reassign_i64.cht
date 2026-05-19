@@ -1,0 +1,5 @@
+FN main() RETURNS Int64 ->
+    MUTABLE x = 1_i64;
+    x = x + 2_i64;
+    RETURN x;
+END

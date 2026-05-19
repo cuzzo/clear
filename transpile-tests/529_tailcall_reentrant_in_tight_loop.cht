@@ -1,0 +1,17 @@
+# Regression: a :TAIL_CALL reentrant fn (bounded native stack) must
+# be callable inside a TIGHT loop.
+FN sumTo(n: Int64, acc: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
+    IF n <= 0_i64 THEN RETURN acc; END
+    RETURN sumTo(n - 1_i64, acc + n);
+END
+
+FN main() RETURNS Void ->
+    MUTABLE total: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    TIGHT WHILE i < 3_i64 DO
+        total = total + sumTo(5_i64, 0_i64);
+        i = i + 1_i64;
+    END
+    ASSERT total == 45_i64, "TAIL_CALL reentrant (constant native stack) in TIGHT loop";
+    RETURN;
+END

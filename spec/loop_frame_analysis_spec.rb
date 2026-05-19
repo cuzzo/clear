@@ -776,4 +776,84 @@ RSpec.describe LoopFrameAnalysis do
 
   end
 
+  # ===========================================================================
+  # Group G: AST invariant -- IfStatement#else_branch is ALWAYS an Array
+  #
+  # Root cause of the 2026-05-18 compiler bug: PipelineRewriter constructed
+  # AST::IfStatement.new(..., nil) for an absent else, violating the parser
+  # invariant (parser uses `[]`, never nil). scan_direct then correctly
+  # received a contract-violating nil. The architecturally-correct fix is
+  # to keep scan_direct's contract strictly non-nil and stop nil at the
+  # source (PipelineRewriter -> []; MatchStatement#default_case, which IS
+  # `[ASTNode] or nil` by AST design, is guarded at the one recurse site).
+  # scan_direct is NEVER called with nil; its sig must stay non-nilable.
+  # These lock the invariant + the end-to-end paths.
+  # ===========================================================================
+  describe "Group G: IfStatement#else_branch invariant (never nil) + scan_direct strict contract" do
+    # Walk every IfStatement in the (pipeline-rewritten) tree.
+    def each_if_statement(node, &blk)
+      return unless node
+      blk.call(node) if node.is_a?(AST::IfStatement)
+      if node.respond_to?(:to_a)
+        node.to_a.each { |c| [c].flatten.each { |x| each_if_statement(x, &blk) if x.is_a?(Struct) } }
+      end
+    end
+
+    it "PipelineRewriter never produces a nil else_branch (parser invariant upheld)" do
+      # A pipeline that exercises PipelineRewriter's synthesized
+      # IfStatements (WHERE predicate, FIND, AVG, limit/skip, ANY/ALL).
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          xs: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64];
+          s = xs |> WHERE _ > 1_i64 |> SUM _;
+          ASSERT s == 9_i64, "where+sum";
+          RETURN;
+        END
+      CLEAR
+      offenders = []
+      ast.statements.each { |st| each_if_statement(st) { |iff| offenders << iff if iff.else_branch.nil? } }
+      expect(offenders).to be_empty,
+        "PipelineRewriter must use [] (not nil) for an absent else_branch; " \
+        "#{offenders.size} IfStatement(s) violated the AST invariant"
+    end
+
+    it "collect_local_names runs on IF without ELSE (no nil reaches scan_direct)" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE a = 1_i64;
+          IF a > 0_i64 THEN
+            MUTABLE b = 2_i64;
+            a = a + b;
+          END
+          RETURN;
+        END
+      CLEAR
+      names = nil
+      expect { names = LoopFrameAnalysis.collect_local_names(main_fn(ast).body) }.not_to raise_error
+      expect(names).to include("a")
+    end
+
+    it "collect_local_names runs on PARTIAL MATCH without DEFAULT (default_case nil guarded at recurse site)" do
+      ast = run_mir(<<~CLEAR)
+        UNION V { Nil, IntV: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE v: V = V{ IntV: 7 };
+          MUTABLE acc = 0_i64;
+          PARTIAL MATCH v START
+            V.IntV AS i -> acc = acc + i;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect { LoopFrameAnalysis.collect_local_names(main_fn(ast).body) }.not_to raise_error
+    end
+
+    it "scan_direct's contract is strictly non-nil (passing nil is a type error, not a no-op)" do
+      # Encodes the CORRECT contract: scan_direct walks a statement body,
+      # which is always an Array. nil must NOT be silently accepted --
+      # that was the band-aid. Callers must never pass nil.
+      expect { LoopFrameAnalysis.scan_direct(nil) { |_| } }.to raise_error(TypeError)
+    end
+  end
+
 end

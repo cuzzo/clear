@@ -1,0 +1,36 @@
+register instructions:
+0000 SCONST s0 0 ; S:11:hello world
+0003 SCONST s1 1 ; S:5:world
+0006 SCONST s2 2 ; S:5:clear
+0009 NCALL ret=string s0 replace argc=3 s0 s1 s2
+0020 SCONST s1 3 ; S:5:MiXeD
+0023 NCALL ret=string s1 lowercase argc=1 s1
+0030 SCONST s2 3 ; S:5:MiXeD
+0033 NCALL ret=string s2 uppercase argc=1 s2
+0040 SCONST s3 4 ; S:11:hello clear
+0043 SEQ r1 s0 s3
+0047 ICONST r0 5 ; I:0
+0050 JF r1 60
+0053 SCONST s0 6 ; S:5:mixed
+0056 SEQ r0 s1 s0
+0060 ICONST r1 5 ; I:0
+0063 JF r0 76
+0066 SCONST s0 7 ; S:5:MIXED
+0069 SEQ r0 s2 s0
+0073 IMOV r1 r0
+0076 JF r1 84
+0079 ICONST r0 8 ; I:1
+0082 IRET r0
+0084 ICONST r0 5 ; I:0
+0087 IRET r0
+0089 HALT
+consts:
+S:11:hello world
+S:5:world
+S:5:clear
+S:5:MiXeD
+S:11:hello clear
+I:0
+S:5:mixed
+S:5:MIXED
+I:1

@@ -1,0 +1,24 @@
+instructions:
+0000 LOAD_CONST_I64    0 ; I:5
+0002 STORE_ISLOT       0
+0004 LOAD_ISLOT        0
+0006 I_TO_VAL
+0007 STORE_NAME        1
+0009 JUMP              18
+0011 LOAD_SLOT         0
+0013 LOAD_NAME         2
+0015 ADD
+0016 BC_RET
+0017 POP
+0018 MAKE_BC_FN        11 1
+0021 STORE_SLOT        0
+0023 LOAD_SLOT         0
+0025 LOAD_CONST_I64    3 ; I:7
+0027 I_TO_VAL
+0028 CALL              1
+0030 HALT
+consts:
+I:5
+SYM:__cap_1_base
+SYM:__cap_1_base
+I:7

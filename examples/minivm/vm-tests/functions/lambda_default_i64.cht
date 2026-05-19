@@ -1,0 +1,4 @@
+FN main() RETURNS Int64 ->
+    f = %(n=4: Int64) -> n * 3_i64;
+    RETURN f();
+END

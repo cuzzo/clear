@@ -1,0 +1,19 @@
+register instructions:
+0000 SCONST s0 0 ; S:4:done
+0003 ICONST r0 1 ; I:0
+0006 ICONST r1 2 ; I:3
+0009 JILTF r0 r1 36
+0013 SCONST s1 3 ; S:3:tmp
+0016 NCALL ret=string s2 Int64.toString argc=1 r0
+0023 SCONCAT s1 s1 s2
+0027 ICONST r1 4 ; I:1
+0030 IADD r0 r0 r1
+0034 JMP 6
+0036 SRET s0
+0038 HALT
+consts:
+S:4:done
+I:0
+I:3
+S:3:tmp
+I:1

@@ -1,0 +1,4 @@
+FN main() RETURNS Int64 ->
+    s = "clear";
+    RETURN s.length();
+END

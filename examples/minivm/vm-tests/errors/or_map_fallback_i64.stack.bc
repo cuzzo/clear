@@ -1,0 +1,20 @@
+instructions:
+0000 MAP_NEW
+0001 STORE_SLOT        0
+0003 LOAD_SLOT         0
+0005 LOAD_CONST        0 ; S:7:missing
+0007 MAP_GET
+0008 STORE_NAME        1
+0010 NOT
+0011 NOT
+0012 JUMP_IF_FALSE     18
+0014 LOAD_NAME         2
+0016 JUMP              21
+0018 LOAD_CONST_I64    3 ; I:99
+0020 I_TO_VAL
+0021 HALT
+consts:
+S:7:missing
+SYM:__orelse_3
+SYM:__orelse_3
+I:99

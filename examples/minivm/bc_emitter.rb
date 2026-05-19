@@ -220,7 +220,8 @@ class BcEmitter
     # variants (the payload Pair has no field named "Variant"). Building
     # the set up front gives an O(1) check inside compile_field_get.
     @union_variant_names = Set.new
-    (@result.union_schemas || {}).each do |_uname, variants|
+    (@result.union_schemas || {}).each do |_uname, schema|
+      variants = schema.respond_to?(:variants) ? schema.variants : schema
       (variants || {}).each_key { |vname| @union_variant_names << vname.to_s }
     end
     # Don't shadow any registered struct field names (a non-inline-struct
@@ -238,7 +239,8 @@ class BcEmitter
     # find_field_index can resolve `ci.radius` after a MATCH-capture
     # unpacks the payload via pairCdr (which returns Value.Vector of the
     # variant's fields in declaration order).
-    (@result.union_schemas || {}).each do |_uname, variants|
+    (@result.union_schemas || {}).each do |_uname, schema|
+      variants = schema.respond_to?(:variants) ? schema.variants : schema
       (variants || {}).each do |vname, spec|
         next unless spec.is_a?(Hash) && spec[:kind] == :inline_struct
         fields = spec[:fields]
@@ -830,6 +832,7 @@ class BcEmitter
       # is on the (untyped) value stack. This catches stmt-position InlineBc
       # (e.g. `:assert` pushes :any nil) as well as Let/ExprStmt.
       t = pop_type
+      next if mir_node.is_a?(MIR::ReturnStmt) && mir_node.value && !void_expr?(mir_node.value)
       emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
     end
   end
@@ -861,6 +864,9 @@ class BcEmitter
     (n.is_a?(MIR::ExprStmt) && n.discard && n.expr.is_a?(MIR::Ident)) ||
     # Zig-only boilerplate added by the lowering — no bytecode equivalent
     (n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::Call) && n.expr.callee == "@setEvalBranchQuota") ||
+    (n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::MethodCall) &&
+     n.expr.receiver.is_a?(MIR::Ident) && n.expr.receiver.name.to_s == "rt" &&
+     n.expr.method.to_s == "checkYield") ||
     # Void ReturnStmt (bare RETURN;) — AST already filters it; MIR should too
     (n.is_a?(MIR::ReturnStmt) && (n.value.nil? || void_expr?(n.value)))
   end
@@ -941,6 +947,11 @@ class BcEmitter
         emit_op(has_value ? BC_RET : BC_RET_VOID)
         @helper_fn_returned = true
         push_type(:void) unless has_value
+      elsif has_value
+        # exec! returns the final Value-stack top at HALT. A value-returning
+        # top-level main therefore needs to leave its result there; typed
+        # stack results must be boxed first.
+        ensure_value_stack
       end
     when MIR::InlineBc
       compile_inline_bc(mir_node)
@@ -2009,7 +2020,7 @@ class BcEmitter
     emit_op(POP)  # discard the Nil pushed by MAP_PUT
   end
 
-  # MIR::Sort lowers `items |> ORDER_BY <key>` to a comparator-as-expression
+  # MIR::Sort lowers `items s> ORDER_BY <key>` to a comparator-as-expression
   # (key_a, key_b) over placeholder identifiers `a` and `b`. The Zig backend
   # emits `std.mem.sort` with an anonymous-struct lessThan; the VM has no
   # in-place sort native and no closures, so we expand structurally to an
@@ -3943,10 +3954,10 @@ class BcEmitter
       # Fallback: pop one, leave the other. Best effort; tests dependent on
       # correctness will still fail the assertion rather than the compile.
       emit_op(POP); push_type(:any); return
-    when :lowercase
+    when :lowercase, :downcase
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(NATIVE_CALL, NATIVES["lowercase"], 1); push_type(:any); return
-    when :uppercase
+    when :uppercase, :upcase
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(NATIVE_CALL, NATIVES["uppercase"], 1); push_type(:any); return
     when :replace
@@ -4478,7 +4489,7 @@ class BcEmitter
       # Auto-try propagation: when the MIR call is marked try_wrap (the
       # callee can_fail), and we're inside a helper, check IS_ERR and
       # propagate the error sentinel via BC_RET. This mirrors Zig's
-      # `try fn()` short-circuit and is what makes `valid = u |> failable`
+      # `try fn()` short-circuit and is what makes `valid = u s> failable`
       # actually exit the function on failure rather than letting the
       # error sentinel get bound to `valid` and ignored. Skip when the
       # callee's return type is not an error union (can_fail can come

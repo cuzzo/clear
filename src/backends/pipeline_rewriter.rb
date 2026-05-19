@@ -392,7 +392,7 @@ class PipelineRewriter
       div.full_type = Type.new(:Float64)
       avg_assign = AST::Assignment.new(token, avg_var, div)
       avg_assign.full_type = Type.new(:Float64)
-      guard = AST::IfStatement.new(token, cond, [avg_assign], nil)
+      guard = AST::IfStatement.new(token, cond, [avg_assign], [])
       guard.full_type = Type.new(:Void)
       body << guard
 
@@ -517,7 +517,7 @@ class PipelineRewriter
     when AST::WhereOp
       pred = replace_placeholder(stage.expression, current_val)
       then_branch = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
-      if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, nil)
+      if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::SelectOp
@@ -565,7 +565,7 @@ class PipelineRewriter
       skip_n = stage.count.dup
       cond = AST::BinaryOp.new(token, cnt_ident.dup, :LTE, skip_n)
       cond.full_type = Type.new(:Bool)
-      skip_if = AST::IfStatement.new(token, cond, [AST::ContinueNode.new(token)], nil)
+      skip_if = AST::IfStatement.new(token, cond, [AST::ContinueNode.new(token)], [])
       skip_if.full_type = Type.new(:Void)
 
       rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
@@ -592,7 +592,7 @@ class PipelineRewriter
       limit_n = stage.count.dup
       cond = AST::BinaryOp.new(token, cnt_ident.dup, :GT, limit_n)
       cond.full_type = Type.new(:Bool)
-      limit_if = AST::IfStatement.new(token, cond, [AST::BreakNode.new(token)], nil)
+      limit_if = AST::IfStatement.new(token, cond, [AST::BreakNode.new(token)], [])
       limit_if.full_type = Type.new(:Void)
 
       rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
@@ -617,7 +617,7 @@ class PipelineRewriter
       one = AST::Literal.new(token, :INT64, 1)
       increment = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, one))
       increment.full_type = Type.new(:Void)
-      if_stmt = AST::IfStatement.new(token, expr, [increment], nil)
+      if_stmt = AST::IfStatement.new(token, expr, [increment], [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::AverageOp
@@ -634,14 +634,14 @@ class PipelineRewriter
       expr = replace_placeholder(terminal.expression, current_val)
       set_true = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, true))
       set_true.full_type = Type.new(:Void)
-      if_stmt = AST::IfStatement.new(token, expr, [set_true, AST::BreakNode.new(token)], nil)
+      if_stmt = AST::IfStatement.new(token, expr, [set_true, AST::BreakNode.new(token)], [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::AllOp
       expr = replace_placeholder(terminal.expression, current_val)
       set_false = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, false))
       set_false.full_type = Type.new(:Void)
-      if_stmt = AST::IfStatement.new(token, AST::UnaryOp.new(token, :NOT, expr), [set_false, AST::BreakNode.new(token)], nil)
+      if_stmt = AST::IfStatement.new(token, AST::UnaryOp.new(token, :NOT, expr), [set_false, AST::BreakNode.new(token)], [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::ReduceOp
@@ -654,7 +654,7 @@ class PipelineRewriter
       expr = replace_placeholder(terminal.expression, current_val)
       assign = AST::Assignment.new(token, res_ident, current_val.dup)
       assign.full_type = Type.new(:Void)
-      if_stmt = AST::IfStatement.new(token, expr, [assign, AST::BreakNode.new(token)], nil)
+      if_stmt = AST::IfStatement.new(token, expr, [assign, AST::BreakNode.new(token)], [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::MinOp, AST::MaxOp
@@ -676,7 +676,7 @@ class PipelineRewriter
       set_found = AST::Assignment.new(token, found_ident, AST::Literal.new(token, :BOOLEAN, true))
       set_found.full_type = Type.new(:Void)
 
-      if_stmt = AST::IfStatement.new(token, cond, [assign_val, set_found], nil)
+      if_stmt = AST::IfStatement.new(token, cond, [assign_val, set_found], [])
       if_stmt.full_type = Type.new(:Void)
       [if_stmt]
     when AST::EachOp

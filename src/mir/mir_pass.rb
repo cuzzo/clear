@@ -595,6 +595,10 @@ class MIRPass
         t = type_obj ? Type.new(type_obj) : nil
         next unless t && t.needs_escape_promotion?
         next if t.needs_pointer_passing?
+        # A captured param is borrowed `*const T`: in-place
+        # promoteList(&param) discards const, and the COPY capture
+        # strategy already deep-copies it. Only locals are promotable.
+        next if bg.capture_analysis&.capture_symbols&.dig(name)&.is_param
         next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
         if t.list_collection?
           result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil, list_elem_zig_type(t))

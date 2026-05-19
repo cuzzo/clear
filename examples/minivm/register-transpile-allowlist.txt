@@ -1,0 +1,579 @@
+# Transpile-test corpus for the register VM milestone.
+#
+# Keep this list to tests that are intended to become runnable under:
+#   clear test --vm=register
+#
+# Tranche 1 intentionally allows pending entries so the benchmark/reporting
+# path exists before the register runner does.
+#
+# REMOVED 2026-05-17: 66_list_loop_arena, 189_string_concat_loop_growth,
+# 190_frame_peak_string_loop, 197_frame_peak_nested_while_server,
+# 200_frame_peak_large_alloc_loop, 205_frame_peak_list_build_in_fn.
+# These never robustly passed -- they only ever passed by an incidental
+# --stack-check tier coincidence that masks the OPEN guest-frame-arena
+# bug (docs/agents/vm-bugs.md). Any runtime frame-size change flips the
+# tier and re-crashes them, so gating CI on them is unsound. They return
+# when the faithful guest-arena fix lands. The other frame_peak/escape
+# tests (191-196, 200_escape_*, 201/202_escape_*) pass robustly and stay.
+01_stack_alloc
+02_heap_leak_cheat
+03_string_mutation
+04_stack_return
+05_move_frees
+06_heap_return
+07_loop_scope
+11_smooth_pipe
+12_while_loop
+13_if_else
+45_match
+46_match_when
+47_match_destructure
+51_enum
+52_union
+69_union_return
+69_inline_union_variants
+71_union_default_methods
+72_union_method_visibility
+77_match_string
+19_copy_struct
+20_subfield_move
+21_subfield_return
+23_optional
+100_for_range
+112_control_flow_shorthand
+104_string_return_escape
+107_match_destructure_bind
+113_hashmap_value_overwrite
+09_array
+10_concat
+106_string_interpolation
+55_string_ops
+56_else_if_chain
+56_match_enum_exhaustive
+57_match_union_capture
+57_line_parser
+58_string_return_leak
+105_string_expr_return
+65_int_division
+69_numeric_types
+110_integer_overflow
+111_clock_random
+112_overflow_operators
+247_if_expr
+248_match_expr
+157_test_basic
+160_test_structs
+152_return_borrow_from_local
+153_union_return_frame_data
+155_copy_in_union_return
+159_mixed_return_promotion
+174_union_match_struct_fields
+180_hpt_return_string_no_leak
+186_string_replace_case
+93_tight_loop
+
+# Candidate future tranche coverage:
+# 95_local
+
+# Promoted from the bc-emitter compile-OK survey on 2026-05-08.
+# These tests compile and run end-to-end on the register VM with all
+# assertions passing; they were already supported by the emitter but
+# hadn't been added to the allowlist.
+118_hashmap_string_loop
+119_hashmap_string_readback
+158_test_private_access
+159_test_setup_isolation
+161_test_benchmark
+162_test_smash
+163_test_stub_returns
+164_test_stub_captures
+165_test_combined
+166_test_profile
+166_test_stub_sequence
+167_test_stub_with
+168_test_predicates
+171_give_copy_union
+174_frame_preserve_rewind
+179_hashmap_structlit_no_double_dupe
+191_frame_peak_func_call_loop
+192_frame_peak_list_build_loop
+193_frame_peak_hashmap_put_loop
+194_frame_peak_tostring_loop
+195_frame_peak_nested_concat_loop
+196_frame_peak_while_string_reassign
+198_line_parse_startswith
+200_escape_callee_string_to_list
+201_escape_loop_string_reassign
+202_escape_loop_map_put
+207_hpt_return_union_no_leak
+208_copy_union_match_cleanup
+209_union_promoted_string_cleanup
+211_loop_list_resize
+213_loop_outer_string_from_fn
+214_loop_outer_string_concat_nonlocal
+215_loop_multi_preserve
+22_heap_subfield_move
+245_lambda_inferred_type
+254_same_name_in_elif_branches
+275_takes_list_param_length
+368_gradual_basic
+369_gradual_ambiguity
+370_negative_predicate
+371_first_last
+372_string_predicates
+49_visibility
+50_require
+51_require_types
+55_generic_union
+59_string_temp_takes
+60_heap_temp_ownership
+61_string_move
+70_union_method_requirements
+90_list_return
+
+# Pipeline foundation: ForStmt over list locals + BlockExpr-yields-
+# accumulator pattern. Unblocks scalar REDUCE/SUM/SELECT/WHERE/EACH.
+109_pipeline_chaining
+110_pipeline_reduce
+66_take_while
+
+# inferred_expr_type fix for getAt on f64/string lists + LSSPLIT.
+08_where
+14_hashmap
+71_hashmap_union_in_loop
+15_select
+
+# Pipeline-over-non-local-source ForStmt iter + struct_list (ArrayInit
+# with struct elements via field-decomposed parallel arrays).
+26_reduce
+27_order_by
+66_aggregation_ops
+
+# MIR::Pipeline pass-through (lazy ranges), IterRange ForStmt,
+# Int64-list IndexGet, struct-arg helper FNs via inline path,
+# BlockExpr accumulator type inference.
+101_for_each
+220_lazy_range_each
+221_lazy_select_where
+223_lazy_range_reduce
+373_fixed_array_to_slice_param
+71_tap_skip
+89_frame_alloc
+
+# Smalls round: ItemsAccess unwrap in ForStmt iter + list arg paths,
+# codepointCount + readFile + writeFile natives.
+16_file_io
+276_takes_list_param_iter
+277_takes_alloc_list
+374_mutable_list_param_append
+375_borrow_list_param_read
+376_borrow_list_param_in_callee_for
+377_list_to_slice_callee
+378_mutable_list_param_forward
+53_writefile
+67_string_utf8
+72_string_escapes
+65_collection_query_ops
+279_takes_alloc_map
+70_hashmap_across_frames
+
+# Tranche 1: @multiowned / @shared on scalar-fielded structs.
+# Field-decomposed (no actual rc/arc allocation in the bc VM); the
+# .ctrl.data unwrap layers in the MIR's FieldGet chain are skipped
+# at value_for_field_get since the bc emitter holds field regs
+# directly. Cleanup is vacuous because we don't allocate.
+31_multiowned
+35_shared
+38_move_ownership
+
+# Tranche 2: @locked WITH EXCLUSIVE/SHARED. Single-threaded VM
+# treats the lock as a no-op; with_block_bindings InlineZig is
+# pattern-detected (reason field, not Zig parsing) and the bound
+# inner is mirrored as a struct view.
+40_locked
+265_possible_deadlock_escape
+
+# Tranche 3: @local + @locked(rank: N) (rwLocked).
+266_lock_rank
+42_write_locked
+
+# Tranche 4: BG simple + simple captures. Single-threaded bc VM
+# inlines the BG body synchronously; NEXT is a no-op pass-through.
+# FSM transform is skipped for the :bc target so the body's MIR
+# remains structured; capture refs (`__ctx_N.x`) are stripped at
+# Ident lookup. Faithful for pure-compute BG bodies; tests that
+# rely on actual fiber concurrency need the full spawn path.
+58_bg
+172_bg_string_return
+173_nested_bg
+
+# Tranche 5: bounded streams `~T[N]`. The literal lowers to
+# MakeList(elem_type="__bc_stream__") with BgBlock items; the bc
+# emitter inlines each body synchronously into a typed list and
+# stashes a runtime cursor. NEXT reads at cursor and increments,
+# matching compiled CLEAR's FIFO spawn-order semantics. Open /
+# infinite streams and stream pipelines are subsequent tranches.
+73_bounded_stream
+
+# Tranche 6: CONCURRENT pipelines. The lowering rewrites each
+# CONCURRENT(workers: N) operator into a sequential ForStmt-builds-
+# accumulator BlockExpr; the bc emitter unwraps MIR::Pipeline and
+# MIR::ItemsAccess to that body and runs it serially. Behavior
+# matches compiled CLEAR for pure-data SELECT/WHERE/REDUCE; ordering
+# effects from real fiber concurrency are out of scope. The list
+# `.append(allocator, val)` MethodCall (emitted by the pipeline
+# accumulator) routes to LAPPENDI/LFAPPEND/LSAPPEND with the
+# AllocatorRef stripped.
+59_bg_concurrent
+84_concurrent_raise
+210_concurrent_pipeline
+286_fsm_io_pipeline
+354_concurrent_batch
+
+# Tranche 7: sharded / striped containers. Sharding (and lock-
+# striping) are runtime concurrency strategies; under the single-
+# threaded bc VM `HashMap@sharded(N)` and `HashMap@sharded(N):locked`
+# behave identically to the unsharded map. The type-shape predicates
+# accept PartitionedStringMap / PartitionedNumericMap /
+# MutexShardedStringMap so storage routes through the existing
+# int_map / numeric_int_map paths.
+96_sharded_map
+98_striped_map
+351_shard_concurrent_frame_key
+
+# Tranche 8: REQUIRES / family polymorphism for sync-wrapped struct
+# helper params. Capability-wrapped scalar structs (`@multiowned`,
+# `@shared`, `@locked`, `@writeLocked`, `@local`) share the field-
+# decomposed layout in the bc VM, so passing one to a helper FN
+# that takes the underlying struct by `anytype` (the common shape
+# for `REQUIRES c: LOCKED` / `WITH POLYMORPHIC EXCLUSIVE c` callees)
+# routes through the same path as a plain struct. Single-threaded
+# VM has no observable difference between the cap families.
+# `@versioned` (MVCC) requires its own value-kind and remains
+# pending.
+201_capability_passthrough
+253_bg_capture_locked_param
+274_copy_slice_borrow_no_leak
+275_fsm_mixed_with_stackful
+282_fsm_next_chain
+65_bg_string_capture
+73_service_os_thread
+74_shared_promise
+97_stack_heap_interop
+
+# Tranche 9: TryExpr stripping + @reentrant scaffold elision. The
+# bc VM has no error-union runtime, so `try expr` strips the
+# wrapper at the i64/f64/string/value paths (the inner expression
+# carries any actual side effect). `@reentrant` / `@nonReentrant`
+# annotations decorate every fn with a `safety.StackGuard.enter` /
+# push / defer pop prologue; the bc VM is single-threaded with its
+# own stack-frame management, so these three statements are
+# detected and elided.
+#
+# Error-union runtime (commit 2): RAISE / OR RAISE / CATCH for
+# Int64-return wrappers now lower to ERAISE/EGUARD/ECLR/EMATCHK/
+# EMATCHN/EMATCHM/EFLAG (see docs/agents/register-error-union.md).
+# 271 exercises every CATCH form (kind, type, WITH-filter, multi,
+# message). OR EXIT, String/Bool-return wrappers, and
+# MIR::TryCatch/TryExpr-at-stmt remain pending for follow-up commits.
+88_reentrant
+299_thunk_not_logical
+271_catch_unified
+# Commit 3: String/Bool-return CatchWrapper via inline-aware error
+# propagation (emit_err_propagate jumps to the inline exit instead
+# of EGUARD frame-pop, since fallible String fns are inlined).
+76_catch_blocks
+78_snapshot_ambiguous
+# Commit 4: MIR::TryExpr at statement position (`call() OR RAISE;`
+# with the result discarded) -- compile inner + emit_err_propagate.
+381_mutable_list_indexed_set
+# Commit 6: OR EXIT (unified grammar). Structured InlineBc :or_exit
+# (mir_lowering :bc, both stmt + binding position) -> EREWRITE
+# partial error-field override; additive propagating-catch TryCatch
+# (does not touch the static value-fallback heuristic). 272 covers
+# all 7 inherit/override forms (msg-only, kind, kind+msg, kind+type,
+# full, type-only, type+msg).
+272_or_exit_unified
+
+# Tranche 10: side-effect-only BG bodies and bare MethodCall
+# statements. A BG body whose last statement is not an expression
+# (e.g. `WITH EXCLUSIVE c AS inner { inner.value += 1; }`) lowers
+# to a `~Void` Promise; the bc emitter detects the non-expression
+# tail and inlines every stmt verbatim, returning a void payload.
+# `NEXT p;` parses as a bare MIR::MethodCall in statement position
+# (not wrapped in an ExprStmt); compile_stmt_inner now wraps it on
+# the way through, and the no-op handler shortcuts NEXT-on-void.
+277_fsm_with_lock
+278_fsm_with_rc_arc
+279_fsm_with_rwlock
+292_fsm_with_multi_cap
+
+# P0 roadmap item: struct-list pipeline accumulators + helpers
+# returning cap-wrapped scalar structs. compile_list_value routes
+# struct elem types through compile_struct_array_init (empty case
+# allocates per-field empty lists); the InlineBc :append and the
+# pipeline-emitted MethodCall("append") arms decompose the source
+# struct into per-field appends. compile_struct_list_index_get is
+# now reachable from FieldGet on InlineBc(:getAt) so
+# `<struct_list>[i].field` works. value_type recognizes
+# Rc/Arc/Locked/RwLocked/WriteLocked/Local wrappers around scalar
+# structs as cap_struct return types so helpers like makeNode()
+# returning `!Node @multiowned` inline cleanly. Bool returns from
+# helpers coerce to i64 for the call site.
+28_limit
+32_multiowned_return
+36_shared_return
+39_move_return
+41_locked_return
+43_write_locked_return
+79_concurrent_select
+80_concurrent_where
+82_concurrent_pin
+232_select_struct_fusion
+
+# P1 quick wins:
+# - napFor / sleep no-op: bc VM has no clock; treat InlineBc(:sleep)
+#   as a stmt-level no-op and inferred-type :void.
+# - __rt_bg* / __rt_fsm* runtime aliases recognized as runtime-arg
+#   so cross-fn calls inside BG/FSM bodies drop the leading rt arg
+#   correctly.
+# - BG body inference order: compile priors first, then infer the
+#   tail's type from the populated registers. Lets a BG body that
+#   ends in `Ident(localBoundEarlier)` resolve. inferred_expr_type
+#   now handles MethodCall("next") by looking up the promise's
+#   payload kind. tail-shape recognizer also accepts BlockExpr and
+#   MethodCall.
+54_writefile_bg
+62_list_in_loop
+256_sleep_int_literal
+264_multi_lock_sort
+268_multi_lock_sort_forced_contention
+276_fsm_next_2state
+284_fsm_io_sleep
+289_fsm_if_io
+290_fsm_with_then_io
+293_fsm_with_suspend_in_cs
+366_multi_lock_retry_recovers
+
+# P1 #5 + #4 + #1 quick-tail wave (all in one commit):
+#
+# #5 Helper FN params for cap-wrapped containers:
+# - WITH-block bindings recognize the `pt.ctrl.data.*` shape that
+#   bare `WITH pt { ... }` emits on cap-wrapped values, in addition
+#   to the existing `<var>.get();` shape used by EXCLUSIVE/SHARED.
+# - compile_value_expr's MIR::Ident handler resolves __ctx_<id>
+#   prefixes so BG bodies referencing captured names work through
+#   the value path (DeepCopy of an outer struct, etc.).
+#
+# #4 @versioned / MVCC cells:
+# - versionedCreate / atomicPtrCreate accepted in CapWrap, mapped
+#   to :versioned_struct / :atomic_ptr_struct value-kinds.
+# - WITH SNAPSHOT (read), WITH SNAPSHOT MUTABLE (transaction), and
+#   multi-cell WITH SNAPSHOT all bind the alias as a struct view
+#   over the cell's underlying fields. Single-threaded VM has no
+#   concurrent writers; the txn always succeeds first try.
+# - WITH MATCH dispatch picks the arm that matches the cell's
+#   binding kind (VERSIONED / LOCKED / WRITE_LOCKED / SHARED /
+#   ATOMIC / LOCAL) and inlines that arm's body, with the alias
+#   bound from the prelude's `const va = guard.get();` line.
+#
+# #1 Struct-list pipeline tail (partial):
+# - compile_container_init_value handles `T[]@list` (empty
+#   ArrayListUnmanaged(T)) for struct T, allocating per-field
+#   parallel arrays via compile_struct_array_init.
+# - Struct-list value-expr lookup: MIR::IndexGet on an Ident-bound
+#   struct_list materializes a struct view (parity with the
+#   InlineBc(:getAt) path).
+# - struct_list[i] = struct_view writes each field of the view
+#   back into the corresponding parallel array via LSETI/LFSET
+#   (string-list set-by-index would need a new opcode).
+# - rt.* runtime hooks (setError, checkYield, freeSnapshot, etc.)
+#   no-op as ExprStmts since the bc VM has no error/yield runtime.
+# - MIR::StructDef / EnumDef / UnionTypeDef as inline stmts
+#   no-op (already handled at module-collection time).
+203_escape_loop_struct_append
+258_bg_body_copy_capture
+281_bg_body_copy_struct
+282_bg_body_copy_list
+287_fsm_loop_io
+288_fsm_for_range_io
+328_versioned_snapshot_read
+329_versioned_snapshot_mutable
+330_versioned_multi_cell
+331_versioned_three_cells
+333_with_match_per_arm_dispatch
+334_with_match_arc_unwrap
+33_multiowned_param
+341_atomic_polymorphic_compile
+342_atomic_ptr_read
+343_atomic_ptr_mutate
+344_atomic_ptr_with_match_read
+345_atomic_ptr_with_match_mutate
+348_sync_policy_fallback
+365_multi_lock_with_on_hammer
+37_shared_param
+81_concurrent_each
+85_concurrent_edge_cases
+
+# P1 #2: Pool / @pool. New :pool value-kind backed by parallel
+# arrays per struct field plus an i64 alive-flags array. Pool IDs
+# are slot indices (no generation; the bc VM is single-threaded so
+# removed slots are never reused while any test runs).
+#
+# - compile_pool_init allocates the per-field empty lists + alive
+#   array.
+# - InlineBc :insert appends to every parallel array + 1 to alive,
+#   returning the slot index as the u64 ID.
+# - InlineBc :get returns the alive flag (i64); comparisons against
+#   `nil` / `null` / `NIL` resolve to `flag != 0`.
+# - InlineBc :remove writes 0 to alive[id]; the slot stays in place.
+# - InlineBc :length sums the alive flags via a small loop.
+# - ForStmt over a pool: skip dead slots; bind capture as a struct
+#   view + alive_reg so `IF item == nil CONTINUE` works.
+# - Pool helper-fn args inline by passing the pool's info hash; the
+#   callee's body sees @pool_info[name] = caller's info.
+# - Bare `pool.insert(...)` / `pool.remove(...)` as ExprStmts route
+#   through compile_inline_bc_stmt via a new InlineBc/InlineZig
+#   ExprStmt fallback.
+278_takes_alloc_pool
+
+# P1 follow-up wave: BlockExpr-as-stmt + atomic primitives + BG
+# tail-shape (BlockExpr returning :void).
+#
+# - compile_stmt now accepts MIR::BlockExpr by inlining the body.
+#   This unblocks several BG bodies whose tail is a side-effect-only
+#   WITH wrapper (BlockExpr with no value-producing break) -- the
+#   inferred_expr_type treats them as :void so compile_bg_block_value
+#   compiles via the void-payload branch.
+# - @shared:atomic on a scalar (Int64/Float64/String) lowers as
+#   atomicCreate / atomicValueCreate. New :atomic_primitive value-
+#   kind binds directly to the scalar reg map. Single-threaded VM
+#   has nothing atomic to honor, so load = read, store/fetchAdd/
+#   fetchSub = mutate. compile_atomic_method handles the load form
+#   in compile_i64_expr / compile_f64_expr; the mutators are
+#   handled in compile_expr_stmt as MethodCall ExprStmts.
+# - inferred_expr_type for BlockExpr returns :void when no value-
+#   producing break is found, instead of falling through to
+#   :unsupported.
+262_with_on_timeout
+263_with_lock_contention
+267_retry_resolves
+280_fsm_with_on_clause
+281_fsm_with_retry
+332_versioned_conflict_actions
+337_atomic_basic_ops
+340_atomic_method_ops
+367_with_on_clause_in_non_main_fn
+
+# P1 #3: partial -- value_list_type? now accepts unions with non-
+# scalar variants by tagging them as :opaque (tag preserved, payload
+# content not stored). Tests that only exercise the scalar variants
+# of such a union now pass. Tests that *append* a runtime-typed
+# union value (e.g. results.append(makeItems())) or *read back* the
+# opaque payload still need the full recursive Value-list machinery
+# (heap-allocated variants + recursive cleanup), which is not in
+# scope for this commit.
+157_list_elem_heap_string_leak
+
+# P2 wave: @set + bare Call/TryExpr ExprStmts + safety.* no-ops
+#
+# - @set as a presence-flag map: `T[]@set = Set[]` lowers to
+#   CheatLib.Set(T). The bc emitter recognizes the type and creates
+#   a HashMap<T, Int64> (numeric_int_map for T=Int64, int_map for
+#   T=String). insert/contains?/remove/length route through the
+#   existing map opcodes; insert writes 1 as the presence flag,
+#   contains? reads via MGETI/NMGETI with a 0 fallback, remove is
+#   MDELETE/NMDELETE.
+# - DISTINCT pipeline lowers to MethodCall("insert") on the result
+#   set; ExprStmt of MethodCall("insert", set) routes through the
+#   set-insert helpers.
+# - ExprStmts of MIR::TryExpr / MIR::Call were unsupported; now
+#   they delegate to compile_inline_bc_stmt / compile_call_stmt.
+# - safety.* runtime helpers (StackGuard.enter/push/pop, plus the
+#   @nonReentrant variant safety.enterDepth/exitDepth) are now
+#   elided as Calls/DeferStmts -- the bc VM has no analogous
+#   reentrancy tracking, so they're no-ops.
+30_distinct
+66_set
+301_thunk_max_depth
+
+# Runtime additions: indexOf native + RangeLit-as-value + IfBindStmt
+#
+# - vm.cht gets a new native (id 20) for `indexOf(haystack, needle)`,
+#   returning -1 when not found (CLEAR's `?Int64` collapsed to a
+#   sentinel). compile_i64_inline_bc emits N_STRING_INDEX_OF for
+#   `:indexOf`.
+# - MIR::RangeLit as a value (e.g. `~Int64[] = 0..<n`) materializes
+#   eagerly into an int_list via a tight loop in the emitter.
+# - MIR::IfBindStmt now compiles: evaluate the optional Int64 expr,
+#   bind the capture if non-nil (-1 sentinel), run then-body /
+#   else-body. Handles multi-binding via && (each binding short-
+#   circuits to else on first nil).
+68_string_raw
+227_variable_stream_pipelines
+251_if_bind
+252_if_multi_bind
+
+# Runtime-faithful collection handles for struct fields and maps.
+#
+# - Struct-list fields that are themselves lists now store runtime
+#   list handles, so nested reads/mutations like `nodes[i].keys`
+#   operate on the original bucket rather than on a detached clone.
+# - INDEX over struct lists creates per-field dynamic maps from key
+#   to real list handles, preserving group buckets for subsequent
+#   length/index/field access.
+# - HashMap<Struct> stores scalar fields and list-handle fields in
+#   per-field maps, so replacing a struct with a populated list field
+#   avoids frame-backed list ownership leaks while keeping lookup
+#   semantics observable through the struct value.
+25_index
+167_nested_list_index_field
+181_hashmap_struct_list_field
+
+# Polymorphic WITH mutate-flow: WITH POLYMORPHIC c AS x [GUARD
+# cond] { body } [ON GuardFail gfail]. Single-threaded VM no-ops the
+# lock/family wrapper; structured body/guard handled directly.
+350_polymorphic_unified_tick
+360_polymorphic_flow_guard_return
+
+# OR PASS sentinel (catch -> MIR::Ident "undefined"): the ECLR is
+# the whole handler. Heap @list returned through a fallible fn via
+# OR PASS resolves through the value-position TryCatch routing.
+524_or_pass_heap_list_cleanup
+# 532: single-i64-field @shared:locked struct -> SCELL store cell.
+532_register_shared_cell_scalar
+# 533: cell-backed @shared:locked struct shared into a real BG fiber.
+533_register_fiber_shared_cell
+# 534: two void BG fibers share a @shared:locked cell under WITH EXCLUSIVE.
+534_register_void_fiber_shared_cell
+# 535: R6.5 hammer - 3 fibers RMW a shared @shared:locked counter, lock held across yield.
+535_register_lock_hammer
+
+# --- Roadmap sweep: already-passing tests promoted to regression coverage ---
+24_error_returns
+78_hashmap_methods
+86_then_chain
+92_var_mutated_sroa
+168_struct_list_field_move
+229_shard_numeric_keys
+255_same_name_reassign_in_elif
+283_or_optional_struct_lit_no_leak
+335_with_match_arm_raise
+352_shard_concurrent_error
+353_shard_concurrent_capacity
+382_mutable_param_updates_caller
+382_returned_list_cleanup_leak
+503_match_multi_arm_union_as
+504_match_multi_arm_union_destructure
+509_match_multi_arm_string
+510_match_multi_arm_with_default
+512_match_multi_arm_generic_union
+514_match_multi_arm_mixed_with_single_as
+515_match_multi_arm_when_on_union
+516_match_multi_arm_payload_arith
+517_match_method_shadow_resolution
+521_bg_capture_promise_handle
+522_bg_capture_promise_relay
+527_discard_owned_value
+528_nested_list_loop_rewind
+531_bgcopy_string_list_element_ownership

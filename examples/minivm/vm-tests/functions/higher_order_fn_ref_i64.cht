@@ -1,0 +1,12 @@
+FN double(n: Int64) RETURNS Int64 ->
+    RETURN n * 2_i64;
+END
+
+FN apply(cb: FN(Int64) -> Int64, n: Int64) RETURNS !Int64
+    REQUIRES cb: NON_REENTRANT ->
+    RETURN cb(n);
+END
+
+FN main() RETURNS Int64 ->
+    RETURN apply(double, 8_i64) OR 0_i64;
+END

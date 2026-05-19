@@ -117,6 +117,21 @@ module DiagnosticRegistry
       template: "Cannot initialize fixed-array '%{name}' to an unknown size. You must TRUNCATE to a specific size, or use `[]` to create a dynamic array.",
       summary:  "Fixed-size array `T[N]` requires a literal capacity.",
     },
+    MUTABLE_BARE_NEEDS_TYPE: {
+      severity: :error, category: :syntax,
+      template: "MUTABLE bare declaration requires an explicit type annotation.",
+      summary:  "`MUTABLE x;` (no `=` initializer) needs an explicit `: T[N]` so the parser can synthesize the default-zero list.",
+    },
+    MUTABLE_BARE_NEEDS_FIXED: {
+      severity: :error, category: :syntax,
+      template: "MUTABLE bare declaration requires a fixed-size array type T[N]; got %{type}.",
+      summary:  "Only `T[N]` (fixed-size primitive arrays) support default-init via `MUTABLE x: T[N];`. Use `= [...]` for other shapes.",
+    },
+    MUTABLE_BARE_BAD_ELEMENT: {
+      severity: :error, category: :syntax,
+      template: "MUTABLE bare declaration: cannot default-init element type %{type}; provide an explicit `= [...]` initializer.",
+      summary:  "`MUTABLE xs: T[N];` only synthesizes zeros for primitive element types (Int, Float, String, Bool).",
+    },
     FIXED_ARRAY_SIZE_MISMATCH: {
       severity: :error, category: :type,
       template: "Cannot initialize array of size %{size} to fixed-size '%{name}'",

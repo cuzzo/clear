@@ -1,0 +1,21 @@
+register instructions:
+0000 SCONST s0 0 ; S:5:hello
+0003 SCONST s1 1 ; S:1:
+0006 SCONCAT s0 s0 s1
+0010 SCONST s1 2 ; S:5:world
+0013 SCONCAT s0 s0 s1
+0017 SCONST s1 3 ; S:11:hello world
+0020 SEQ r0 s0 s1
+0024 JF r0 32
+0027 ICONST r0 4 ; I:1
+0030 IRET r0
+0032 ICONST r0 5 ; I:0
+0035 IRET r0
+0037 HALT
+consts:
+S:5:hello
+S:1:
+S:5:world
+S:11:hello world
+I:1
+I:0

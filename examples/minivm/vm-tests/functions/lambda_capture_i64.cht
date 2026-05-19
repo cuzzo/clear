@@ -1,0 +1,5 @@
+FN main() RETURNS Int64 ->
+    base = 5_i64;
+    f = %(n: Int64) USE(base) -> n + base;
+    RETURN f(7_i64);
+END

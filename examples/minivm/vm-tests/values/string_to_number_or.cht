@@ -1,0 +1,5 @@
+FN main() RETURNS Float64 ->
+    parsed = toNumber("42.5") OR 0.0;
+    fallback = toNumber("nope") OR 1.5;
+    RETURN parsed + fallback;
+END

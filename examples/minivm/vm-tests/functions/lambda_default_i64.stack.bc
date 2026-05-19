@@ -1,0 +1,18 @@
+instructions:
+0000 JUMP              10
+0002 LOAD_SLOT         0
+0004 LOAD_CONST_I64    0 ; I:3
+0006 I_TO_VAL
+0007 MUL
+0008 BC_RET
+0009 POP
+0010 MAKE_BC_FN        2 1
+0013 STORE_SLOT        0
+0015 LOAD_SLOT         0
+0017 LOAD_CONST_I64    1 ; I:4
+0019 I_TO_VAL
+0020 CALL              1
+0022 HALT
+consts:
+I:3
+I:4

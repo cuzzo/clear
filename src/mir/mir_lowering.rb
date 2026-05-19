@@ -524,15 +524,36 @@ class MIRLowering
       # Inject source map comment for this user-visible statement.
       # Placed after pending (hoisted synthetic temps have no user source line).
       line = s.token&.line
+      col  = s.token&.column
       result << MIR::Comment.new("CLR:#{line}") if line
       # lower_var_decl may return [AllocMark, Let, Cleanup] when the binding needs cleanup.
       if mir.is_a?(Array)
-        result.concat(mir.compact)
+        mir.compact.each do |m|
+          stamp_source_line!(m, line, col)
+          result << m
+        end
       else
+        stamp_source_line!(mir, line, col)
         result << mir
       end
     }
     result
+  end
+
+  # Stamps `MIR::Stmt#source_line` (and `source_column`) from the
+  # originating AST node's token. Used by the register VM emitter for
+  # per-statement crash-message attribution and per-instruction
+  # debugger position lookup. Lifting this from the per-stmt comment
+  # injection in lower_body keeps it as the single source of truth so
+  # cleanup defers, hoist temps, and other synthesized statements all
+  # inherit their parent statement's position. No-op when `line` is
+  # nil (synthesized fragments may have no AST origin).
+  sig { params(node: T.untyped, line: T.nilable(Integer), column: T.nilable(Integer)).void }
+  def stamp_source_line!(node, line, column = nil)
+    return unless line
+    return unless node.respond_to?(:source_line=)
+    node.source_line ||= line
+    node.source_column ||= column if node.respond_to?(:source_column=) && column
   end
 
   # Like lower_body, but the last user-visible statement becomes break :label expr
@@ -724,6 +745,13 @@ class MIRLowering
       # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
+        # A nested-collection-field mutation (`root[i].field.append(x)`)
+        # must inherit the ROOT container's allocator -- the same root
+        # the MIR checker attributes the op to via extract_root_var_name.
+        # The leaf receiver (GetField/GetIndex) carries no storage stamp,
+        # so resolving from it alone yields :frame while the checker sees
+        # the heap-promoted root -> INLINE_ALLOC_MISMATCH.
+        receiver_root_heap?(obj) ||
         obj.storage == :heap || obj.symbol&.reg&.storage == :heap ||
           # Pointer-passed `@list` parameter: the receiver crosses a frame
           # boundary into this function. The caller's frame allocator is
@@ -738,6 +766,7 @@ class MIRLowering
           (obj.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(obj.name))
       elsif node.mutates_receiver
         first = node.args&.first
+        receiver_root_heap?(first) ||
         first&.storage == :heap || first&.symbol&.reg&.storage == :heap ||
           (first.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(first.name))
       end
@@ -749,18 +778,36 @@ class MIRLowering
     end
   end
 
+  # Shared by extract_root_var_name (checker attribution) and
+  # receiver_root_heap? (allocator resolution); they must agree on the
+  # root or an op's allocator diverges from its AllocMark.
+  sig { params(node: T.untyped).returns(T.untyped) }
+  def root_receiver_node(node)
+    case node
+    when AST::Identifier then node
+    when AST::GetField, AST::GetIndex then root_receiver_node(node.target)
+    else
+      node.respond_to?(:target) ? root_receiver_node(node.target) : nil
+    end
+  end
+
+  # A nested @list inside a heap container element is itself heap-
+  # backed, so `root[i].field.append(x)` must use the root's allocator.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def receiver_root_heap?(node)
+    root = root_receiver_node(node)
+    return false unless root.is_a?(AST::Identifier)
+    root.storage == :heap || !!(root.symbol&.reg&.respond_to?(:storage) &&
+                                root.symbol.reg.storage == :heap)
+  end
+
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
   sig { params(node: T.untyped).returns(T.nilable(String)) }
   def extract_root_var_name(node)
-    case node
-    when AST::Identifier
-      decl = node.symbol&.reg
-      (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || node.name.to_s
-    when AST::GetField   then extract_root_var_name(node.target)
-    when AST::GetIndex   then extract_root_var_name(node.target)
-    else
-      node.respond_to?(:target) ? extract_root_var_name(node.target) : nil
-    end
+    root = root_receiver_node(node)
+    return nil unless root.is_a?(AST::Identifier)
+    decl = root.symbol&.reg
+    (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || root.name.to_s
   end
 
   # Resolve allocator symbol to Zig string (for InlineZig/RawZig patterns only).
@@ -3988,7 +4035,13 @@ class MIRLowering
     # legacy use_fsm / use_fsm_io / use_fsm_next), B2-WITH
     # accepts :shared (matching legacy use_fsm_with). The outer
     # guard is just `spawn_form == :fsm`.
-    if node.spawn_form == :fsm
+    # Skip the FSM transform for the :bc target. The bytecode VM has no
+    # state-machine runtime; the FSM path consumes the body into Zig text
+    # and leaves run_body=[] which the bc emitter cannot lower. The
+    # legacy stackful-fiber lowering below populates run_body so the bc
+    # emitter has structured MIR to walk -- the BG body executes
+    # synchronously inline in the bc VM (single-threaded, deterministic).
+    if node.spawn_form == :fsm && @target != :bc
       transform_ctx = {
         node: node,
         blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,
@@ -4368,6 +4421,37 @@ class MIRLowering
     stmts = []
     rt_name = @rt_name
     line = node.token.line.to_s
+
+    # Register VM: structured sibling of the InlineZig sequence below.
+    # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
+    # reassignment as one InlineBc with structured fields. The Zig
+    # backend path (target != :bc) is byte-for-byte unchanged.
+    if @target == :bc
+      bc_kind = nil
+      bc_name_id = nil
+      bc_clear_type = false
+      if node.kind
+        bc_kind = node.kind.to_s
+        if node.error_name
+          bc_name_id = AST.id_of_type(node.error_name.to_sym)
+        else
+          bc_clear_type = true
+        end
+      elsif node.error_name && AST.error_type?(node.error_name.to_sym)
+        bc_kind = AST.kind_of_type(node.error_name.to_sym).to_s
+        bc_name_id = AST.id_of_type(node.error_name.to_sym)
+      end
+      msg_mir = node.message ? lower(node.message) : nil
+      reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
+        kind: bc_kind, name_id: bc_name_id,
+        clear_type: bc_clear_type, has_message: !node.message.nil?,
+        line: node.token.line.to_i
+      })
+      return MIR::ScopeBlock.new([
+        MIR::ExprStmt.new(reassign, false),
+        MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+      ])
+    end
 
     if node.kind
       stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind"), false)
@@ -5150,6 +5234,38 @@ class MIRLowering
     # clears the type explicitly (to avoid carrying a stale type
     # from the prior context that no longer matches the new kind).
     if node.right.is_a?(AST::OrExit)
+      if is_error && @target == :bc
+        # Register VM: structured sibling (no Zig text). One InlineBc
+        # carries the reassignment; RETURN error.CheatError propagates
+        # via the bc error-union (EGUARD / inline-exit).
+        ex = node.right
+        bc_kind = nil
+        bc_name_id = nil
+        bc_clear_type = false
+        if ex.kind
+          bc_kind = ex.kind.to_s
+          if ex.error_name
+            bc_name_id = AST.id_of_type(ex.error_name.to_sym)
+          else
+            bc_clear_type = true
+          end
+        elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
+          bc_kind = AST.kind_of_type(ex.error_name.to_sym).to_s
+          bc_name_id = AST.id_of_type(ex.error_name.to_sym)
+        end
+        msg_mir = ex.message ? lower(ex.message) : nil
+        reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
+          kind: bc_kind, name_id: bc_name_id,
+          clear_type: bc_clear_type, has_message: !ex.message.nil?,
+          line: (node.token&.line || 0).to_i
+        })
+        catch_block = MIR::ScopeBlock.new([
+          MIR::ExprStmt.new(reassign, false),
+          MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+        ])
+        return try_catch_with_provenance(left, catch_block, "__exit_err")
+      end
+
       if is_error
         rt_name = @rt_name
         ex = node.right
@@ -5588,7 +5704,13 @@ class MIRLowering
     # Zig's stdlib testing helpers so failures get a structured diff
     # instead of a bare `assertion failed` panic. Falls back to
     # CheatLib.assert for non-equality conditions and for `!=`.
-    if (eq_lowering = try_lower_equality_assert(node))
+    #
+    # Skip for the :bc (register VM) target: the bytecode VM cannot
+    # execute raw Zig, so an InlineZig assert helper would leave the
+    # test register-pending forever. The CheatLib.assert fallback path
+    # below evaluates the condition as a normal MIR expression and
+    # routes through the runtime's bool-assert opcode.
+    if @target != :bc && (eq_lowering = try_lower_equality_assert(node))
       return eq_lowering
     end
 
@@ -5748,9 +5870,26 @@ class MIRLowering
     elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
       elem_type = ti.element_type
       elem_zig = transpile_type(elem_type)
-      needs_deep = node.respond_to?(:deep_copy) && node.deep_copy
+      # Copy-depth must mirror the list's cleanup recursion or a
+      # shallow copy aliases the source's owned payloads and both
+      # cleanups free them. `string?` is OR'd in because runtime
+      # needsCleanup([]const u8) is unconditional while
+      # String#needs_cleanup? gates on heap_provenance.
+      sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+      et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
+      elem_owns_heap = et.needs_cleanup?(sl) || et.string?
+      needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
       strategy = needs_deep ? :list_deep : :list_shallow
-      src = ti&.list_collection? ? MIR::ItemsAccess.new(source, false) : source
+      # Canonical resilient backing access (Step B): the deep-copy
+      # needs the list's element slice, but `source` may be an
+      # ArrayList, a slice (captured @list param in a BG ctx), or a
+      # *const ArrayList (pointer-passed param). The unguarded
+      # `safe: false` form emitted bare `.items` and broke for the
+      # non-ArrayList shapes (vm-bugs.md "COPY of an @list PARAM into
+      # a BG ... unguarded .items", 57f23367). `safe: true` is the
+      # ONE comptime @hasField dispatch every other backing access
+      # uses -- zero runtime cost, correct for every representation.
+      src = ti&.list_collection? ? MIR::ItemsAccess.new(source, true) : source
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
@@ -6128,7 +6267,15 @@ class MIRLowering
       end
     end
 
-    safe_name = zig_safe_name(node.name)
+    # `_` is not a valid Zig binding identifier; a discarded value that
+    # still needs cleanup must bind to a unique temp. binding_entry
+    # stays keyed by `_` so its cleanup recipe is preserved.
+    if node.name.to_s == "_"
+      @tmp_counter += 1
+      safe_name = "__discard_#{@tmp_counter}"
+    else
+      safe_name = zig_safe_name(node.name)
+    end
 
     # Disambiguate when two variables in the same function would share a Zig
     # name AND both emit AllocMarks (has_mir_drop).  The MIR checker's flat

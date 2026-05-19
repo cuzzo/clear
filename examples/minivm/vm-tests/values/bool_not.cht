@@ -1,0 +1,6 @@
+FN main() RETURNS Int64 ->
+    IF !startsWith?("clear", "zz") THEN
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

@@ -1,0 +1,17 @@
+instructions:
+0000 LOAD_CONST        0 ; S:0:
+0002 STORE_SLOT        0
+0004 LOAD_SLOT         0
+0006 LOAD_CONST        1 ; S:4:SET=
+0008 CONCAT
+0009 STORE_SLOT        0
+0011 LOAD_SLOT         0
+0013 LOAD_CONST        2 ; S:2:1;
+0015 CONCAT
+0016 STORE_SLOT        0
+0018 LOAD_SLOT         0
+0020 HALT
+consts:
+S:0:
+S:4:SET=
+S:2:1;

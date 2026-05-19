@@ -1,0 +1,749 @@
+REQUIRE "register_debugger_types.cht";
+
+# Resolve the bases / IP for a given frame index. Frame 0 is the
+# innermost (currently-executing) frame; frame N>=1 walks N callers
+# up the frame stack. Each ICall pushes the caller's `iBase`/`fBase`
+# and the return IP onto `frameIBases`/`frameFBases`/`frameRetIps`,
+# so `frame N = frame*Bases[length-N]` (and the same for return-ip)
+# for N>=1. Defined here (not in vm.cht's body) because vm.cht
+# REQUIREs this file before its own definitions are visible.
+FN frameContextIBase(
+    frameIndex: Int64,
+    iBase: Int64,
+    frameIBases: Int64[]@list
+) RETURNS Int64 ->
+    IF frameIndex == 0_i64 THEN RETURN iBase; END
+    idx = frameIBases.length() - frameIndex;
+    IF idx < 0_i64 || idx >= frameIBases.length() THEN RETURN iBase; END
+    RETURN frameIBases[idx];
+END
+
+FN frameContextFBase(
+    frameIndex: Int64,
+    fBase: Int64,
+    frameFBases: Int64[]@list
+) RETURNS Int64 ->
+    IF frameIndex == 0_i64 THEN RETURN fBase; END
+    idx = frameFBases.length() - frameIndex;
+    IF idx < 0_i64 || idx >= frameFBases.length() THEN RETURN fBase; END
+    RETURN frameFBases[idx];
+END
+
+FN frameContextIp(
+    frameIndex: Int64,
+    ip: Int64,
+    frameRetIps: Int64[]@list
+) RETURNS Int64 ->
+    IF frameIndex == 0_i64 THEN RETURN ip; END
+    idx = frameRetIps.length() - frameIndex;
+    IF idx < 0_i64 || idx >= frameRetIps.length() THEN RETURN ip; END
+    RETURN frameRetIps[idx];
+END
+
+# Stdin-based debugger pause for the register VM. The runner is
+# compiled via the Zig backend (`clear build vm.cht`), not via the
+# register VM, so it can use `readLine!` and `print` directly -- no
+# file polling, no temp files, no external driver.
+#
+# Action codes (returned to the dispatch loop's trap arm):
+#    0 = continue (resume execution)
+#    1 = step      (advance one source line, then re-pause)
+#    2 = step-i    (advance one bytecode instruction, then re-pause)
+#    3 = next      (step over -- advance one source line at current
+#                   call depth, skipping into callees)
+#    4 = finish    (run until the current frame returns, then re-pause)
+#   -1 = quit      (terminate the VM)
+#
+# REPL commands:
+#   :c  / :continue   -> action 0
+#   :s  / :step       -> action 1
+#   :si               -> action 2
+#   :n  / :next       -> action 3
+#   :fin / :finish    -> action 4
+#   :q  / :quit       -> action -1
+#   :p NAME           -> print one binding's current value
+#   :info             -> print all visible bindings at this pause
+#   :l  / :list       -> show ~10 source lines around the pause line
+#   :bt / :backtrace  -> show the call stack
+#   :b LINE           -> add a breakpoint at the given source line
+#                        (file inferred from the current pause)
+#   :bd N             -> disable breakpoint id N
+#   :info b           -> list breakpoints
+#   :up / :down       -> move the inspection cursor up/down the
+#                        call stack (frame 0 = innermost). After
+#                        moving, `:p` and `:info` read locals from
+#                        that frame.
+#   :frame N          -> jump to frame N directly.
+#   :rs / :reverse-step -> undo the most recent recorded register
+#                        write and resnapshot. Requires recording
+#                        (gated on debug session). v1 grain is
+#                        per-write, not per-source-line.
+#   :step?            -> show the current step counter and the
+#                        number of recorded events (debug only).
+#   anything else     -> help, keep prompting
+
+FN debugPrintHelp() RETURNS Void ->
+    print("commands:");
+    print("  :c / :continue        resume");
+    print("  :s / :step            step one source line");
+    print("  :si                   step one bytecode instruction");
+    print("  :n / :next            step over (skip into callees)");
+    print("  :fin / :finish        run until current frame returns");
+    print("  :p NAME               print one binding");
+    print("  :info                 print all visible bindings");
+    print("  :l / :list            show source around current line");
+    print("  :bt / :backtrace      print call stack");
+    print("  :b LINE               add breakpoint at LINE (current file)");
+    print("  :bd N                 disable breakpoint id N");
+    print("  :info b               list breakpoints");
+    print("  :up / :down           move inspection cursor up/down the stack");
+    print("  :frame N              jump inspection to frame N (0 = innermost)");
+    print("  :rs / :reverse-step   undo the most recent recorded register write");
+    print("  :step?                show the current step counter (debug only)");
+    print("  :q / :quit            terminate the VM");
+    RETURN;
+END
+
+# Print all visible bindings frozen in `varSnapshot`.
+FN debugPrintInfo!(varSnapshot: HashMap<String>) RETURNS !Void ->
+    keys = varSnapshot.keys();
+    IF keys.length() == 0_i64 THEN
+        print("no bindings in scope");
+    ELSE
+        FOR ki IN (0_i64 ..< keys.length()) DO
+            k = keys[ki];
+            v = varSnapshot[k] OR "";
+            # Snapshot values carry a `Type = value` prefix when the
+            # emitter resolved a type for the binding (the colon form
+            # mirrors source: `x: Int64 = 10`). Untyped bindings just
+            # show the value.
+            IF contains?(v, " = ") THEN
+                print(k + ": " + v);
+            ELSE
+                print(k + " = " + v);
+            END
+        END
+    END
+    RETURN;
+END
+
+# Show ~10 source lines around the pause line, marking the current
+# line with `>`. When a column > 0 is supplied, also draws a `^`
+# caret on the line below, pointing at that column. Reads the file
+# fresh each call -- cheap; the user is at an interactive prompt
+# and we want changes-on-disk to show.
+FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void ->
+    raw = readFile(sourcePath) OR "";
+    IF raw.length() == 0_i64 THEN
+        print("no source available for " + sourcePath);
+        RETURN;
+    END
+    lines = split(raw, "\n");
+    radius: Int64 = 5_i64;
+    MUTABLE startLine: Int64 = line - radius;
+    IF startLine < 1_i64 THEN startLine = 1_i64; END
+    MUTABLE endLine: Int64 = line + radius;
+    IF endLine > lines.length() THEN endLine = lines.length(); END
+    FOR li IN (startLine ..< (endLine + 1_i64)) DO
+        MUTABLE marker: String = " ";
+        IF li == line THEN marker = ">"; END
+        liStr = li.toString() OR "?";
+        # `lines` is 0-indexed but CLEAR source lines are 1-based.
+        idx = li - 1_i64;
+        IF idx >= 0_i64 && idx < lines.length() THEN
+            print(marker + " " + liStr + "  " + lines[idx]);
+            # Caret line below the active source line, if a non-zero
+            # column was supplied. The caret offset matches the column
+            # (1-based); we pad the prefix to match the line-number
+            # width plus the marker / spaces (`> NN  `) so the `^`
+            # lines up under the source character.
+            IF li == line && column > 0_i64 THEN
+                # Match the source-line `print` prefix exactly:
+                #   marker (2 chars, "> " or "  ") + " " + liStr + "  "
+                # = 5 + linenum-width chars before the source content.
+                MUTABLE pad: String = "     ";
+                FOR pi IN (0_i64 ..< liStr.length()) DO pad = pad + " "; END
+                MUTABLE caretSpaces: String = "";
+                FOR ci IN (1_i64 ..< column) DO caretSpaces = caretSpaces + " "; END
+                print(pad + caretSpaces + "^");
+            END
+        END
+    END
+    RETURN;
+END
+
+# Print the call stack, innermost (#0) at the top. Each frame shows
+# the IP of the *next* instruction to execute when we return there
+# (i.e. the IP recorded by ICALL/FCALL at the call site). The frame
+# matching `activeFrame` is marked with a leading `*` so `:up` /
+# `:down` / `:frame N` are visible against the stack.
+FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine: Int64, currentColumn: Int64, sourceLines: Int64[]@list, sourceColumns: Int64[]@list, activeFrame: Int64) RETURNS !Void ->
+    currentIpStr = currentIp.toString() OR "?";
+    currentLineStr = currentLine.toString() OR "?";
+    MUTABLE marker0: String = "  ";
+    IF activeFrame == 0_i64 THEN marker0 = "* "; END
+    MUTABLE colSuffix0: String = "";
+    IF currentColumn > 0_i64 THEN colSuffix0 = ":" + (currentColumn.toString() OR "?"); END
+    print(marker0 + "#0  ip=" + currentIpStr + " (line " + currentLineStr + colSuffix0 + ")");
+    # Walk the return-IP stack from innermost to outermost.
+    MUTABLE i: Int64 = frameRetIps.length() - 1_i64;
+    MUTABLE depth: Int64 = 1_i64;
+    TIGHT WHILE i >= 0_i64 DO
+        retIp = frameRetIps[i];
+        # Inline `sourceLineFor` / column lookup -- declared later in
+        # vm.cht (after this file is REQUIREd), so we can't call them.
+        MUTABLE retLine: Int64 = 0_i64;
+        IF retIp >= 0_i64 && retIp < sourceLines.length() THEN
+            retLine = sourceLines[retIp];
+        END
+        MUTABLE retCol: Int64 = 0_i64;
+        IF retIp >= 0_i64 && retIp < sourceColumns.length() THEN
+            retCol = sourceColumns[retIp];
+        END
+        depthStr = depth.toString() OR "?";
+        retIpStr = retIp.toString() OR "?";
+        retLineStr = retLine.toString() OR "?";
+        MUTABLE marker: String = "  ";
+        IF depth == activeFrame THEN marker = "* "; END
+        MUTABLE colSuffix: String = "";
+        IF retCol > 0_i64 THEN colSuffix = ":" + (retCol.toString() OR "?"); END
+        print(marker + "#" + depthStr + "  ip=" + retIpStr + " (line " + retLineStr + colSuffix + ")");
+        i -= 1_i64;
+        depth += 1_i64;
+    END
+    RETURN;
+END
+
+# List all breakpoints. The `enabled` column is derived live from
+# `isBreakpoint[ip]` rather than the entry snapshot, so `:bd N` is
+# reflected on the next `:info b`.
+FN debugPrintBreakpoints!(
+    breakpointEntries: BreakpointEntry[]@list,
+    isBreakpoint: Int64[]@list
+) RETURNS !Void ->
+    IF breakpointEntries.length() == 0_i64 THEN
+        print("no breakpoints set");
+        RETURN;
+    END
+    FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
+        b: BreakpointEntry = breakpointEntries[bi];
+        idStr = b.id.toString() OR "?";
+        lineStr = b.sourceLine.toString() OR "?";
+        ipStr = b.ip.toString() OR "?";
+        MUTABLE state: String = "off";
+        IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() && isBreakpoint[b.ip] != 0_i64 THEN
+            state = "on";
+        END
+        print("  #" + idStr + "  line " + lineStr + "  ip=" + ipStr + "  " + state);
+    END
+    RETURN;
+END
+
+# Add a runtime breakpoint at the requested CLEAR source line. The
+# line->ip map is the existing parallel `sourceLines` array; we pick
+# the first IP whose source line matches (byebug-style "one pause
+# per line" semantics, same as `BC_PAUSE_ON`).
+FN debugAddBreakpoint!(
+    line: Int64,
+    sourceLines: Int64[]@list,
+    MUTABLE isBreakpoint: Int64[]@list,
+    MUTABLE breakpointEntries: BreakpointEntry[]@list
+) RETURNS !Void ->
+    IF line <= 0_i64 THEN
+        print("invalid line number");
+        RETURN;
+    END
+    MUTABLE targetIp: Int64 = -1_i64;
+    FOR bi IN (0_i64 ..< sourceLines.length()) DO
+        IF sourceLines[bi] == line THEN
+            targetIp = bi;
+            BREAK;
+        END
+    END
+    IF targetIp < 0_i64 THEN
+        print("no executable code on line " + (line.toString() OR "?"));
+        RETURN;
+    END
+    IF targetIp >= isBreakpoint.length() THEN
+        print("ip out of range");
+        RETURN;
+    END
+    isBreakpoint[targetIp] = 1_i64;
+    nextId = breakpointEntries.length() + 1_i64;
+    breakpointEntries.append(BreakpointEntry{
+        id: nextId,
+        sourceLine: line,
+        ip: targetIp,
+        enabled: 1_i64
+    });
+    idStr = nextId.toString() OR "?";
+    lineStr = line.toString() OR "?";
+    ipStr = targetIp.toString() OR "?";
+    print("breakpoint #" + idStr + " set at line " + lineStr + " (ip=" + ipStr + ")");
+    RETURN;
+END
+
+# Disable a breakpoint by id. We don't physically remove or mutate
+# the list entry -- ids stay stable so the user can keep referencing
+# them in a session. `:info b` derives the `on/off` column from the
+# live `isBreakpoint[ip]` flag, so zeroing the flag is enough.
+FN debugDeleteBreakpoint!(
+    id: Int64,
+    MUTABLE isBreakpoint: Int64[]@list,
+    breakpointEntries: BreakpointEntry[]@list
+) RETURNS !Void ->
+    MUTABLE found: Bool = FALSE;
+    FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
+        b: BreakpointEntry = breakpointEntries[bi];
+        IF b.id == id THEN
+            IF b.ip >= 0_i64 && b.ip < isBreakpoint.length() THEN
+                isBreakpoint[b.ip] = 0_i64;
+            END
+            found = TRUE;
+        END
+    END
+    IF found == FALSE THEN
+        print("no breakpoint with id " + (id.toString() OR "?"));
+    ELSE
+        print("breakpoint #" + (id.toString() OR "?") + " disabled");
+    END
+    RETURN;
+END
+
+# Find the active function's entry IP for the var-name lookup: max
+# `funcEntryIp` among `varNames` entries that is still <= `currentIp`.
+# Without this filter, names from a different function (same physical
+# register, different semantics) would shadow each other in the
+# snapshot map.
+FN activeFunctionEntryIp(varNames: RegisterVarName[]@list, currentIp: Int64) RETURNS Int64 ->
+    MUTABLE bestEntry: Int64 = 0_i64;
+    FOR ni IN (0_i64 ..< varNames.length()) DO
+        e = varNames[ni].funcEntryIp;
+        IF e <= currentIp && e > bestEntry THEN bestEntry = e; END
+    END
+    RETURN bestEntry;
+END
+
+# Build a `name -> formatted-value` snapshot of the named bindings
+# visible at `(ip, pauseLine)`, reading register values from the
+# given `(iBase, fBase)` window of the register files. The bases
+# are passed in (rather than implicit) so the REPL can re-snapshot
+# at any frame after `:up` / `:down` / `:frame N`.
+#
+# Two-pass shadow resolution: the emitter writes one row per
+# binding `(funcEntryIp, sourceLine, kind, physIdx, name)`. Multiple
+# rows can share `(kind, physIdx)` because the linear-scan allocator
+# reuses a physical register across non-overlapping lifetimes. The
+# visible name at `pauseLine` is the binding with the largest
+# `sourceLine < pauseLine` among those matching the active function
+# -- byebug's "visible after the assignment line completes" semantic.
+# Strict `<` (not `<=`) because pause-at-line-N happens before line N's
+# instructions execute, so a binding declared on line N hasn't yet
+# taken effect.
+FN snapshotRegisterVars!(
+    varNames: RegisterVarName[]@list,
+    ip: Int64,
+    pauseLine: Int64,
+    iregs: Int64[],
+    fregs: Float64[],
+    sregs: String[],
+    iBase: Int64,
+    fBase: Int64
+) RETURNS !HashMap<String> ->
+    MUTABLE varSnapshot: HashMap<String> = {};
+    bestEntry = activeFunctionEntryIp(varNames, ip);
+
+    MUTABLE winnerIdx: HashMap<Int64> = {};
+    MUTABLE winnerLine: HashMap<Int64> = {};
+    FOR vni IN (0_i64 ..< varNames.length()) DO
+        vEntry = varNames[vni];
+        IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+            key = vEntry.kind + ":" + vEntry.physIdx.toString();
+            existing = winnerLine[key] OR -1_i64;
+            IF vEntry.sourceLine > existing THEN
+                winnerLine[key] = vEntry.sourceLine;
+                winnerIdx[key] = vni;
+            END
+        END
+    END
+
+    FOR vni IN (0_i64 ..< varNames.length()) DO
+        vEntry = varNames[vni];
+        IF vEntry.funcEntryIp == bestEntry && vEntry.sourceLine < pauseLine THEN
+            key = vEntry.kind + ":" + vEntry.physIdx.toString();
+            chosen = winnerIdx[key] OR -1_i64;
+            IF chosen == vni THEN
+                # Render values typed when the emitter supplied a type
+                # name: `x: Int64 = 10` instead of `x = 10`. Strings get
+                # the same `Type =` prefix; the value itself stays bare
+                # (no quotes) so it prints as the user would write it.
+                MUTABLE typedPrefix: String = "";
+                IF vEntry.typeName.length() > 0_i64 THEN
+                    typedPrefix = vEntry.typeName + " = ";
+                END
+                IF vEntry.kind == "i" THEN
+                    ridx = iBase + vEntry.physIdx;
+                    IF ridx >= 0_i64 && ridx < 512_i64 THEN
+                        valStr = iregs[ridx].toString() OR "?";
+                        varSnapshot[COPY vEntry.name] = typedPrefix + valStr;
+                    END
+                ELSE_IF vEntry.kind == "f" THEN
+                    ridx = fBase + vEntry.physIdx;
+                    IF ridx >= 0_i64 && ridx < 512_i64 THEN
+                        valStr = fregs[ridx].toString() OR "?";
+                        varSnapshot[COPY vEntry.name] = typedPrefix + valStr;
+                    END
+                ELSE_IF vEntry.kind == "s" THEN
+                    IF vEntry.physIdx >= 0_i64 && vEntry.physIdx < 256_i64 THEN
+                        varSnapshot[COPY vEntry.name] = typedPrefix + sregs[vEntry.physIdx];
+                    END
+                END
+            END
+        END
+    END
+    RETURN varSnapshot;
+END
+
+# Frame open/close and alloc recording are deferred to a follow-up
+# commit -- packing two Int64 base values plus a return-ip into the
+# unified event needs an extra column or per-kind splits, neither of
+# which earns a place in the foundation tranche. Time-travel for v1
+# replays register writes only; frame transitions are reconstructed
+# from the surviving frame stack at the pause site (correct for
+# `:rs` within a single frame, approximate across calls).
+
+# Walk the trace events backward, undoing each register-write event
+# whose `step` is in `(toStep, fromStep]`. Restores the register
+# files to what they were just after `step == toStep`.
+FN replayBackward!(
+    events: TraceEvent[]@list,
+    traceStrings: String[]@list,
+    fromStep: Int64,
+    toStep: Int64,
+    MUTABLE iregs: Int64[],
+    MUTABLE fregs: Float64[],
+    MUTABLE sregs: String[]
+) RETURNS !Void ->
+    MUTABLE i: Int64 = events.length() - 1_i64;
+    TIGHT WHILE i >= 0_i64 DO
+        e = events[i];
+        IF e.step <= toStep THEN BREAK; END
+        IF e.step <= fromStep THEN
+            IF e.kind == 1_i64 THEN
+                IF e.slot >= 0_i64 && e.slot < iregs.length() THEN
+                    iregs[e.slot] = e.iBefore;
+                END
+            ELSE_IF e.kind == 2_i64 THEN
+                IF e.slot >= 0_i64 && e.slot < fregs.length() THEN
+                    fregs[e.slot] = e.fBefore;
+                END
+            ELSE_IF e.kind == 3_i64 THEN
+                IF e.slot >= 0_i64 && e.slot < sregs.length() && e.iBefore >= 0_i64 && e.iBefore < traceStrings.length() THEN
+                    sregs[e.slot] = COPY traceStrings[e.iBefore];
+                END
+            END
+        END
+        i = i - 1_i64;
+    END
+    RETURN;
+END
+
+FN registerDebugPause!(
+    sourcePath: String,
+    line: Int64,
+    column: Int64,
+    ip: Int64,
+    varNames: RegisterVarName[]@list,
+    MUTABLE iregs: Int64[],
+    MUTABLE fregs: Float64[],
+    MUTABLE sregs: String[],
+    iBase: Int64,
+    fBase: Int64,
+    frameIBases: Int64[]@list,
+    frameFBases: Int64[]@list,
+    frameRetIps: Int64[]@list,
+    sourceLines: Int64[]@list,
+    sourceColumns: Int64[]@list,
+    MUTABLE isBreakpoint: Int64[]@list,
+    MUTABLE breakpointEntries: BreakpointEntry[]@list,
+    traceEvents: TraceEvent[]@list,
+    traceStrings: String[]@list,
+    currentStep: Int64
+) RETURNS !Int64 ->
+    lineStr = line.toString() OR "?";
+    ipStr = ip.toString() OR "?";
+    MUTABLE colSuffix: String = "";
+    IF column > 0_i64 THEN colSuffix = ":" + (column.toString() OR "?"); END
+    print("register-vm trap " + sourcePath + ":" + lineStr + colSuffix + " (ip=" + ipStr + ")");
+
+    # Snapshot of the current frame's bindings. Recomputed when the
+    # user moves the inspection cursor with `:up` / `:down` /
+    # `:frame N` so `:p` and `:info` reflect that frame's locals.
+    MUTABLE currentFrame: Int64 = 0_i64;
+    MUTABLE viewIp: Int64 = ip;
+    MUTABLE viewLine: Int64 = line;
+    MUTABLE viewColumn: Int64 = column;
+    MUTABLE varSnapshot = snapshotRegisterVars!(
+        varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
+    );
+    # Time-travel scrub cursor: index into `traceEvents` for the
+    # next event to undo on `:rs` (or re-apply on `:fs`). Starts at
+    # the live tail; `:rs` decrements, `:fs` increments. Crossing
+    # zero means "before the program started"; crossing the length
+    # means "all caught up to the live state."
+    MUTABLE traceCursor: Int64 = traceEvents.length();
+
+    MUTABLE action: Int64 = 0_i64;
+    MUTABLE polling = TRUE;
+    TIGHT WHILE polling DO
+        print("(rdb) ");
+        cmd = readLine!();
+        trimmed = trim(cmd);
+        # EOF (closed stdin or empty input on a closed pipe) is treated
+        # as `:c` so non-interactive callers (test drivers, batch
+        # scripts) don't spin-loop on the help message after running
+        # out of commands.
+        IF trimmed == "" THEN
+            action = 0_i64; polling = FALSE;
+        ELSE_IF trimmed == ":c" || trimmed == ":continue" THEN
+            action = 0_i64; polling = FALSE;
+        ELSE_IF trimmed == ":s" || trimmed == ":step" THEN
+            action = 1_i64; polling = FALSE;
+        ELSE_IF trimmed == ":si" THEN
+            action = 2_i64; polling = FALSE;
+        ELSE_IF trimmed == ":n" || trimmed == ":next" THEN
+            action = 3_i64; polling = FALSE;
+        ELSE_IF trimmed == ":fin" || trimmed == ":finish" THEN
+            action = 4_i64; polling = FALSE;
+        ELSE_IF trimmed == ":q" || trimmed == ":quit" THEN
+            action = -1_i64; polling = FALSE;
+        ELSE_IF trimmed == ":info" THEN
+            debugPrintInfo!(varSnapshot);
+        ELSE_IF trimmed == ":info b" THEN
+            debugPrintBreakpoints!(breakpointEntries, isBreakpoint);
+        ELSE_IF trimmed == ":l" || trimmed == ":list" THEN
+            debugPrintList!(sourcePath, viewLine, viewColumn);
+        ELSE_IF trimmed == ":bt" || trimmed == ":backtrace" THEN
+            debugPrintBacktrace!(frameRetIps, ip, line, column, sourceLines, sourceColumns, currentFrame);
+        ELSE_IF trimmed == ":up" THEN
+            IF currentFrame >= frameRetIps.length() THEN
+                print("already at outermost frame");
+            ELSE
+                currentFrame = currentFrame + 1_i64;
+                fIBase = frameContextIBase(currentFrame, iBase, frameIBases);
+                fFBase = frameContextFBase(currentFrame, fBase, frameFBases);
+                viewIp = frameContextIp(currentFrame, ip, frameRetIps);
+                # Walk forward to the next non-zero source-line entry.
+                # Caller-frame ips can land on an operand-position slot
+                # (sourceLines[i] == 0), e.g. when frameRetIps stores
+                # the ip immediately after the call's operands; the
+                # next opcode's line is what we want for `:p` filtering.
+                viewLine = 0_i64;
+                viewColumn = 0_i64;
+                MUTABLE probe: Int64 = viewIp;
+                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                    viewLine = sourceLines[probe];
+                    IF probe < sourceColumns.length() THEN
+                        viewColumn = sourceColumns[probe];
+                    END
+                    probe = probe + 1_i64;
+                END
+                varSnapshot = snapshotRegisterVars!(
+                    varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
+                );
+                print("#" + (currentFrame.toString() OR "?") + "  ip=" + (viewIp.toString() OR "?") + " (line " + (viewLine.toString() OR "?") + ")");
+            END
+        ELSE_IF trimmed == ":down" THEN
+            IF currentFrame == 0_i64 THEN
+                print("already at innermost frame");
+            ELSE
+                currentFrame = currentFrame - 1_i64;
+                fIBase = frameContextIBase(currentFrame, iBase, frameIBases);
+                fFBase = frameContextFBase(currentFrame, fBase, frameFBases);
+                viewIp = frameContextIp(currentFrame, ip, frameRetIps);
+                # Walk forward to the next non-zero source-line entry.
+                # Caller-frame ips can land on an operand-position slot
+                # (sourceLines[i] == 0), e.g. when frameRetIps stores
+                # the ip immediately after the call's operands; the
+                # next opcode's line is what we want for `:p` filtering.
+                viewLine = 0_i64;
+                viewColumn = 0_i64;
+                MUTABLE probe: Int64 = viewIp;
+                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                    viewLine = sourceLines[probe];
+                    IF probe < sourceColumns.length() THEN
+                        viewColumn = sourceColumns[probe];
+                    END
+                    probe = probe + 1_i64;
+                END
+                varSnapshot = snapshotRegisterVars!(
+                    varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
+                );
+                print("#" + (currentFrame.toString() OR "?") + "  ip=" + (viewIp.toString() OR "?") + " (line " + (viewLine.toString() OR "?") + ")");
+            END
+        ELSE_IF startsWith?(trimmed, ":frame ") THEN
+            arg = substr(trimmed, 7_i64, trimmed.length() - 7_i64);
+            target = toInt(trim(arg)) OR -1_i64;
+            IF target < 0_i64 || target > frameRetIps.length() THEN
+                print("frame index out of range (0.." + (frameRetIps.length().toString() OR "?") + ")");
+            ELSE
+                currentFrame = target;
+                fIBase = frameContextIBase(currentFrame, iBase, frameIBases);
+                fFBase = frameContextFBase(currentFrame, fBase, frameFBases);
+                viewIp = frameContextIp(currentFrame, ip, frameRetIps);
+                # Walk forward to the next non-zero source-line entry.
+                # Caller-frame ips can land on an operand-position slot
+                # (sourceLines[i] == 0), e.g. when frameRetIps stores
+                # the ip immediately after the call's operands; the
+                # next opcode's line is what we want for `:p` filtering.
+                viewLine = 0_i64;
+                viewColumn = 0_i64;
+                MUTABLE probe: Int64 = viewIp;
+                TIGHT WHILE probe < sourceLines.length() && viewLine == 0_i64 DO
+                    viewLine = sourceLines[probe];
+                    IF probe < sourceColumns.length() THEN
+                        viewColumn = sourceColumns[probe];
+                    END
+                    probe = probe + 1_i64;
+                END
+                varSnapshot = snapshotRegisterVars!(
+                    varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
+                );
+                print("#" + (currentFrame.toString() OR "?") + "  ip=" + (viewIp.toString() OR "?") + " (line " + (viewLine.toString() OR "?") + ")");
+            END
+        ELSE_IF startsWith?(trimmed, ":p ") THEN
+            # `:p NAME` -- print named variable's current value at the
+            # currently-selected frame (innermost by default; moved by
+            # `:up` / `:down` / `:frame N`).
+            name = substr(trimmed, 3_i64, trimmed.length() - 3_i64);
+            IF varSnapshot.contains?(name) THEN
+                value = varSnapshot[name] OR "";
+                IF contains?(value, " = ") THEN
+                    print(name + ": " + value);
+                ELSE
+                    print(name + " = " + value);
+                END
+            ELSE
+                print("no variable named '" + name + "' in scope");
+            END
+        ELSE_IF startsWith?(trimmed, ":b ") THEN
+            arg = substr(trimmed, 3_i64, trimmed.length() - 3_i64);
+            target = toInt(trim(arg)) OR -1_i64;
+            debugAddBreakpoint!(target, sourceLines, isBreakpoint, breakpointEntries);
+        ELSE_IF startsWith?(trimmed, ":bd ") THEN
+            arg = substr(trimmed, 4_i64, trimmed.length() - 4_i64);
+            target = toInt(trim(arg)) OR -1_i64;
+            IF target < 0_i64 THEN
+                print("usage: :bd N (breakpoint id)");
+            ELSE
+                debugDeleteBreakpoint!(target, isBreakpoint, breakpointEntries);
+            END
+        ELSE_IF trimmed == ":dumpevents" THEN
+            FOR di IN (0_i64 ..< traceEvents.length()) DO
+                e = traceEvents[di];
+                idxStr = di.toString() OR "?";
+                stepStr = e.step.toString() OR "?";
+                kindStr = e.kind.toString() OR "?";
+                slotStr = e.slot.toString() OR "?";
+                ibStr = e.iBefore.toString() OR "?";
+                iaStr = e.iAfter.toString() OR "?";
+                print("  [" + idxStr + "] step=" + stepStr + " kind=" + kindStr + " slot=" + slotStr + " iBefore=" + ibStr + " iAfter=" + iaStr);
+            END
+        ELSE_IF trimmed == ":step?" THEN
+            stepStr = currentStep.toString() OR "?";
+            evtStr = traceEvents.length().toString() OR "?";
+            print("step=" + stepStr + " events=" + evtStr);
+        ELSE_IF trimmed == ":rs" || trimmed == ":reverse-step" THEN
+            # Walk one register-write event back. Multiple register
+            # writes can happen in a single step (e.g. cmp ops emit
+            # only one). For v1, "reverse-step" means "undo the most
+            # recent recorded register write" -- finer than a true
+            # source-line reverse, but enough to demo the trace and
+            # to inspect prior register state. A full reverse-line
+            # command lands once frame events are recorded too.
+            #
+            # NOTE: passing a non-MUTABLE `traceEvents` here intentionally;
+            # we read the last event's `before` value to restore state but
+            # don't remove the event -- popping would erase the trace as
+            # the user scrubs back. A proper "scrub cursor" with forward
+            # replay (`:fs`) lands when the trace is keyed by step rather
+            # than by length.
+            IF traceEvents.length() == 0_i64 THEN
+                print("no recorded events to reverse");
+            ELSE
+                # Find the event matching the *current* trace cursor.
+                # We track scrub position with `traceCursor`; each :rs
+                # decrements, each :fs (forward-step, future) increments.
+                IF traceCursor <= 0_i64 THEN
+                    print("at start of trace -- nothing earlier to undo");
+                ELSE
+                    targetIdx = traceCursor - 1_i64;
+                    target = traceEvents[targetIdx];
+                    IF target.kind == 1_i64 THEN
+                        IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
+                            iregs[target.slot] = target.iBefore;
+                        END
+                    ELSE_IF target.kind == 2_i64 THEN
+                        IF target.slot >= 0_i64 && target.slot < fregs.length() THEN
+                            fregs[target.slot] = target.fBefore;
+                        END
+                    ELSE_IF target.kind == 3_i64 THEN
+                        IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iBefore >= 0_i64 && target.iBefore < traceStrings.length() THEN
+                            sregs[target.slot] = COPY traceStrings[target.iBefore];
+                        END
+                    END
+                    traceCursor = targetIdx;
+                    stepStr = target.step.toString() OR "?";
+                    MUTABLE kindStr: String = "?";
+                    IF target.kind == 1_i64 THEN kindStr = "ireg";
+                    ELSE_IF target.kind == 2_i64 THEN kindStr = "freg";
+                    ELSE_IF target.kind == 3_i64 THEN kindStr = "sreg";
+                    END
+                    slotStr = target.slot.toString() OR "?";
+                    print("reversed step " + stepStr + " (" + kindStr + " #" + slotStr + ")");
+                    # Snapshot the now-restored register state for `:p`/`:info`.
+                    varSnapshot = snapshotRegisterVars!(
+                        varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
+                    );
+                END
+            END
+        ELSE_IF trimmed == ":fs" || trimmed == ":forward-step" THEN
+            # Re-apply the next recorded event (the one undone by the
+            # most recent `:rs`). Lets the user scrub back and forth
+            # through the trace without losing it.
+            IF traceCursor >= traceEvents.length() THEN
+                print("at end of trace -- nothing later to redo");
+            ELSE
+                target = traceEvents[traceCursor];
+                IF target.kind == 1_i64 THEN
+                    IF target.slot >= 0_i64 && target.slot < iregs.length() THEN
+                        iregs[target.slot] = target.iAfter;
+                    END
+                ELSE_IF target.kind == 2_i64 THEN
+                    IF target.slot >= 0_i64 && target.slot < fregs.length() THEN
+                        fregs[target.slot] = target.fAfter;
+                    END
+                ELSE_IF target.kind == 3_i64 THEN
+                    IF target.slot >= 0_i64 && target.slot < sregs.length() && target.iAfter >= 0_i64 && target.iAfter < traceStrings.length() THEN
+                        sregs[target.slot] = COPY traceStrings[target.iAfter];
+                    END
+                END
+                traceCursor = traceCursor + 1_i64;
+                stepStr = target.step.toString() OR "?";
+                MUTABLE kindStr: String = "?";
+                IF target.kind == 1_i64 THEN kindStr = "ireg";
+                ELSE_IF target.kind == 2_i64 THEN kindStr = "freg";
+                ELSE_IF target.kind == 3_i64 THEN kindStr = "sreg";
+                END
+                slotStr = target.slot.toString() OR "?";
+                print("re-applied step " + stepStr + " (" + kindStr + " #" + slotStr + ")");
+                varSnapshot = snapshotRegisterVars!(
+                    varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
+                );
+            END
+        ELSE
+            debugPrintHelp();
+        END
+    END
+    RETURN action;
+END

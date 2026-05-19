@@ -1,0 +1,20 @@
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    MUTABLE total: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< 200000_i64) DO
+        r = i MOD 5_i64;
+        IF r == 0_i64 THEN
+            total = total + i;
+        ELSE_IF r == 1_i64 THEN
+            total = total - i;
+        ELSE_IF r == 2_i64 THEN
+            total = total + (i * 2_i64);
+        ELSE
+            total = total + 1_i64;
+        END
+    END
+    totalMs = timestampMs() - t0;
+    print("total = ${total.toString()}");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    RETURN;
+END

@@ -526,10 +526,10 @@ RSpec.describe MIREmitter do
       expect(zig).to include("rt.heapAlloc().alloc(i64, __src.len)")
     end
 
-    it "emits deep list copy with union elements" do
+    it "emits deep list copy via the canonical per-element dupeValue" do
       node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "Value", :list_deep, :heap)
       zig = e.emit(node)
-      expect(zig).to include("dupeUnionValue(Value, __src[__i], rt.heapAlloc())")
+      expect(zig).to include("dupeValue(Value, __src[__i], rt.heapAlloc())")
       expect(zig).to include("errdefer rt.heapAlloc().free(__buf)")
     end
 

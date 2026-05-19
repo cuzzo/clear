@@ -206,7 +206,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
   EFFECTS REENTRANT
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
-    WITH EXCLUSIVE pool AS p {
+    WITH POLYMORPHIC EXCLUSIVE pool AS p {
         IF p[envId] AS env THEN
             IF env.vars.contains?(name) THEN
                 RETURN COPY (env.vars[name] OR Value.Nil);

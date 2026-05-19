@@ -1,0 +1,10 @@
+FN main() RETURNS Int64 ->
+    s = "clear";
+    IF startsWith?(s, "cl") THEN
+        IF startsWith?(s, "zz") THEN
+            RETURN 0_i64;
+        END
+        RETURN 1_i64;
+    END
+    RETURN 0_i64;
+END

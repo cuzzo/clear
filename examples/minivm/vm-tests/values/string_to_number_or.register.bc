@@ -1,0 +1,15 @@
+register instructions:
+0000 SCONST s0 0 ; S:4:42.5
+0003 FCONST f0 1 ; F:0.0
+0006 NCALL ret=f64 f0 toNumberOr argc=2 s0 f0
+0015 SCONST s0 2 ; S:4:nope
+0018 FCONST f1 3 ; F:1.5
+0021 NCALL ret=f64 f1 toNumberOr argc=2 s0 f1
+0030 FADD f0 f0 f1
+0034 FRET f0
+0036 HALT
+consts:
+S:4:42.5
+F:0.0
+S:4:nope
+F:1.5

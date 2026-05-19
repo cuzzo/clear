@@ -1,0 +1,8 @@
+STRUCT Counter { value: Int64, step: Int64 }
+
+FN main() RETURNS Int64 ->
+    MUTABLE c = Counter { value: 10_i64, step: 3_i64 };
+    c.value = c.value + c.step;
+    c.step = c.step * 2_i64;
+    RETURN c.value + c.step;
+END

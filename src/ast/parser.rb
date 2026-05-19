@@ -117,7 +117,7 @@ class Parser
   # COMMANDS
   stmt(:KEYWORD, 'REQUIRE') { T.bind(self, Parser); parse_require }
   stmt(:KEYWORD, 'EXTERN')  { T.bind(self, Parser); parse_extern_decl }
-  stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
+  stmt(:KEYWORD, 'MUTABLE') { T.bind(self, Parser); parse_mutable_var_decl }
   stmt(:KEYWORD, 'FN')      { T.bind(self, Parser); parse_function_def }
   stmt(:KEYWORD, 'METHOD')  { T.bind(self, Parser); parse_function_def(:package, is_method: true) }
   stmt(:KEYWORD, 'PUB')     { T.bind(self, Parser); parse_visibility_decl(:pub) }
@@ -885,6 +885,59 @@ class Parser
       end
     end
      .last # always ignore the first token
+  end
+
+  # `MUTABLE name: T = expr;` (with initializer)
+  # `MUTABLE name: T[N];`     (bare, fixed-size primitive array, zero-default)
+  #
+  # The bare form requires an explicit fixed-size array type whose element
+  # type has a known zero literal (Int64/Float64/String/Bool family). It
+  # synthesizes a ListLit of N zeroes so the rest of the pipeline lowers
+  # the declaration via the existing fixed-array path.
+  sig { returns(AST::VarDecl) }
+  def parse_mutable_var_decl
+    start_token = consume(:KEYWORD, 'MUTABLE')
+    name = T.must(consume(:VAR_ID)).value
+    type_annotation = nil
+    if match!(:CHAR, ':')
+      type_annotation = parse_type_annotation
+    end
+
+    if match!(:CHAR, '=')
+      value = parse_expression
+      consume(:CHAR, ';')
+      return AST::VarDecl.new(start_token, name, type_annotation, value, true)
+    end
+
+    consume(:CHAR, ';')
+    unless type_annotation
+      error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
+    end
+    value = synthesize_default_for_type(T.must(start_token), type_annotation)
+    AST::VarDecl.new(start_token, name, type_annotation, value, true)
+  end
+
+  # Build a default-initialized AST value for a `T[N]` annotation. Used by
+  # `parse_mutable_var_decl` when no `= expr` was given. Restricted to
+  # fixed-size raw arrays of element types with an obvious zero (primitives
+  # and String); other types must be initialized explicitly.
+  sig { params(tok: Lexer::Token, type: T.untyped).returns(AST::ListLit) }
+  def synthesize_default_for_type(tok, type)
+    unless type.is_a?(Type) && type.fixed?
+      error!(tok, :MUTABLE_BARE_NEEDS_FIXED, type: type.respond_to?(:resolved) ? type.resolved : type)
+    end
+    elem = type.element_type
+    elem_resolved = elem.respond_to?(:resolved) ? elem.resolved : elem
+    zero_proc = case elem_resolved
+                when :Int64, :Int32, :Int16, :Int8 then ->{ AST::Literal.new(tok, :INT64, 0, :stack) }
+                when :Float64, :Float32 then ->{ AST::Literal.new(tok, :NUMBER, 0.0, :stack) }
+                when :String then ->{ AST::Literal.new(tok, :STRING, "", :stack) }
+                when :Bool, :Boolean then ->{ AST::Literal.new(tok, :BOOLEAN, false, :stack) }
+                else
+                  error!(tok, :MUTABLE_BARE_BAD_ELEMENT, type: elem_resolved.inspect)
+                end
+    items = Array.new(type.capacity.to_i) { zero_proc.call }
+    AST::ListLit.new(tok, items, :stack)
   end
 
   sig { returns(AST::RequireNode) }

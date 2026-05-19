@@ -38,6 +38,20 @@ module MIR
     include Emittable
     sig { returns(T::Boolean) }
     def stmt?; true; end
+
+    # Source-line stamp used by the register VM emitter to attribute
+    # opcodes to their originating CLEAR statement. Set by `lower_body`
+    # in mir_lowering.rb from the AST node's `token.line`. nil when the
+    # statement was synthesized by lowering (e.g. cleanup defers, hoist
+    # temps) and has no user-visible source line.
+    sig { returns(T.nilable(Integer)) }
+    attr_accessor :source_line
+    # Companion to `source_line`. Captures the AST node's `token.column`
+    # so visualization layers can pinpoint the in-line position (LSP
+    # ranges, debugger source-list carets, time-travel scrub UIs).
+    # Same nil semantics as `source_line` for synthesized fragments.
+    sig { returns(T.nilable(Integer)) }
+    attr_accessor :source_column
   end
 
   module Expr
@@ -152,7 +166,7 @@ module MIR
   # mutable: false -> const, true -> var
   # annotation: optional explicit type string (nil -> Zig infers)
   # suppression: optional "_ = &name;" or "_ = name;" for Zig warnings
-  Let = Struct.new(:name, :init, :mutable, :annotation, :suppression) do
+  Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :alias_safe) do
     include Stmt
   end
 

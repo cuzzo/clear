@@ -1,0 +1,33 @@
+# Regression: `_ = <owned expr>;` discard must bind a unique temp
+# and still be cleaned up (no leak), not emit literal Zig `_`.
+FN mkList() RETURNS !Int64[]@list ->
+    MUTABLE xs: Int64[]@list = List[];
+    xs.append(7_i64);
+    RETURN GIVE xs;
+END
+
+STRUCT Bag { items: Int64[]@list }
+
+FN mkBag() RETURNS !Bag ->
+    MUTABLE ys: Int64[]@list = List[];
+    ys.append(9_i64);
+    RETURN Bag{ items: GIVE ys };
+END
+
+FN run() RETURNS !Void ->
+    # Discarded owned values: must compile to a real temp AND be freed.
+    _ = mkList() OR RAISE;
+    _ = mkBag() OR RAISE;
+    # The same functions, bound, prove they actually produce the values
+    # (the discard path must not corrupt or alter behavior).
+    keep: Int64[]@list = mkList() OR RAISE;
+    bag: Bag = mkBag() OR RAISE;
+    ASSERT length(keep) == 1_i64, "discard path leaves mkList correct";
+    ASSERT length(bag.items) == 1_i64, "discard path leaves mkBag correct";
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    run() OR PASS;
+    RETURN;
+END

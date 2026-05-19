@@ -1,0 +1,7 @@
+register instructions:
+0000 FCONST f0 0 ; F:42.9
+0003 NCALL ret=i64 r0 toInt argc=1 f0
+0010 IRET r0
+0012 HALT
+consts:
+F:42.9

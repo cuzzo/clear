@@ -1,0 +1,15 @@
+register instructions:
+0000 FCONST f0 0 ; F:1.5
+0003 FCONST f1 1 ; F:2.5
+0006 JFLTF f0 f1 17
+0010 ICONST r0 2 ; I:7
+0013 IRET r0
+0015 JMP 22
+0017 ICONST r0 3 ; I:9
+0020 IRET r0
+0022 HALT
+consts:
+F:1.5
+F:2.5
+I:7
+I:9

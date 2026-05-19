@@ -183,4 +183,28 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
+
+  describe "Bug #7 (FIXED): COPY of an @list fn-param captured into BG" do
+    let(:src) { <<~CHT }
+      FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+
+      FN runit(ops: Int64[]@list) RETURNS !Int64 ->
+          p: ~Int64 = BG { consume(COPY ops); };
+          RETURN NEXT p;
+      END
+
+      FN main() RETURNS !Void ->
+          MUTABLE arr: Int64[]@list = List[];
+          arr.append(1_i64); arr.append(2_i64); arr.append(3_i64);
+          n: Int64 = runit(GIVE arr) OR RAISE;
+          ASSERT n == 3, "@list-param + COPY captures into BG";
+      END
+    CHT
+
+    it "compiles and runs cleanly (ctx field is the owned dupe type)" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
+    end
+  end
+
 end

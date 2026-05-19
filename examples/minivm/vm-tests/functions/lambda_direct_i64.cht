@@ -1,0 +1,4 @@
+FN main() RETURNS Int64 ->
+    f = %(n: Int64) -> n * 2_i64;
+    RETURN f(21_i64);
+END

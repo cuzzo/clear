@@ -1,0 +1,9 @@
+UNION Flag { Off, On }
+
+FN main() RETURNS Int64 ->
+    f = Flag.On;
+    PARTIAL MATCH f START
+        Flag.On -> RETURN 1_i64;,
+        DEFAULT -> RETURN 0_i64;
+    END
+END

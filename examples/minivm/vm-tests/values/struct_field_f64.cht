@@ -1,0 +1,6 @@
+STRUCT Point { x: Float64, y: Float64 }
+
+FN main() RETURNS Float64 ->
+    p = Point { x: 2.5, y: 4.5 };
+    RETURN p.x + p.y;
+END

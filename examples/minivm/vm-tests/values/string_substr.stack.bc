@@ -1,0 +1,14 @@
+instructions:
+0000 LOAD_CONST        0 ; S:11:register-vm
+0002 STORE_SLOT        0
+0004 LOAD_SLOT         0
+0006 LOAD_CONST_I64    1 ; I:0
+0008 I_TO_VAL
+0009 LOAD_CONST_I64    2 ; I:8
+0011 I_TO_VAL
+0012 NATIVE_CALL       43 3
+0015 HALT
+consts:
+S:11:register-vm
+I:0
+I:8

@@ -18,7 +18,8 @@ class ModuleImporter
     :struct_schemas,  # transpiler's @struct_schemas for RC cleanup propagation
     :union_schemas,   # transpiler's @union_schemas for MATCH dispatch
     :enum_schemas,    # transpiler's @enum_schemas for MATCH dispatch
-    :type_defs        # Zig type definitions (structs/unions/enums) for file-scope emission
+    :type_defs,       # Zig type definitions (structs/unions/enums) for file-scope emission
+    :mir_items        # full MIR items list, including FnDef bodies, for the bc emitter
   )
 
   # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
@@ -26,6 +27,9 @@ class ModuleImporter
   # --pkg flag. Computed from this file's location: src/backends/importer.rb
   # → ../../stdlib relative to __FILE__.
   STDLIB_ROOT = T.let(File.expand_path('../../stdlib', __dir__), String)
+
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  attr_reader :module_cache
 
   sig { params(base_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
@@ -221,7 +225,8 @@ class ModuleImporter
       struct_schemas,
       union_schemas,
       enum_schemas,
-      type_defs
+      type_defs,
+      result[:items]
     )
   end
 

@@ -1,0 +1,47 @@
+instructions:
+0000 LOAD_CONST        0 ; S:11:hello world
+0002 LOAD_CONST        1 ; S:5:world
+0004 LOAD_CONST        2 ; S:5:clear
+0006 NATIVE_CALL       102 3
+0009 STORE_SLOT        0
+0011 LOAD_CONST        3 ; S:5:MiXeD
+0013 NATIVE_CALL       100 1
+0016 STORE_SLOT        1
+0018 LOAD_CONST        4 ; S:5:MiXeD
+0020 NATIVE_CALL       101 1
+0023 STORE_SLOT        2
+0025 LOAD_SLOT         0
+0027 LOAD_CONST        5 ; S:11:hello clear
+0029 EQ
+0030 JUMP_IF_FALSE     39
+0032 LOAD_SLOT         1
+0034 LOAD_CONST        6 ; S:5:mixed
+0036 EQ
+0037 JUMP              41
+0039 LOAD_CONST        7 ; B:false
+0041 JUMP_IF_FALSE     50
+0043 LOAD_SLOT         2
+0045 LOAD_CONST        8 ; S:5:MIXED
+0047 EQ
+0048 JUMP              52
+0050 LOAD_CONST        9 ; B:false
+0052 JUMP_IF_FALSE     58
+0054 LOAD_CONST_I64    10 ; I:1
+0056 I_TO_VAL
+0057 POP
+0058 LOAD_CONST_I64    11 ; I:0
+0060 I_TO_VAL
+0061 HALT
+consts:
+S:11:hello world
+S:5:world
+S:5:clear
+S:5:MiXeD
+S:5:MiXeD
+S:11:hello clear
+S:5:mixed
+B:false
+S:5:MIXED
+B:false
+I:1
+I:0

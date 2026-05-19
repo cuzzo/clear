@@ -1,0 +1,7 @@
+FN add(a: Int64, b: Int64) RETURNS Int64 ->
+    RETURN a + b;
+END
+
+FN main() RETURNS Int64 ->
+    RETURN add(20_i64, 22_i64);
+END

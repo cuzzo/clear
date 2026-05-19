@@ -1292,7 +1292,7 @@ RSpec.describe ZigTranspiler do
       expect(lines).to eq(1)
     end
 
-    it "deep-copies @list of non-Copy unions (dupeUnionValue per element)" do
+    it "deep-copies @list of non-Copy unions (canonical dupeValue per element)" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String, List: Value[] }
         FN main() RETURNS Void ->
@@ -1303,8 +1303,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Non-Copy union elements need deep copy
-      expect(zig).to include("dupeUnionValue")
+      expect(zig).to include("dupeValue")
     end
 
     it "shallow-copies @list of Copy unions into union field (memcpy)" do

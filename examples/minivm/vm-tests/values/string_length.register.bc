@@ -1,0 +1,7 @@
+register instructions:
+0000 SCONST s0 0 ; S:5:clear
+0003 NCALL ret=i64 r0 String.length argc=1 s0
+0010 IRET r0
+0012 HALT
+consts:
+S:5:clear

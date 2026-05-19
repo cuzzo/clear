@@ -775,6 +775,17 @@ pub const CheatLib = struct {
         return @intCast(std.unicode.utf8CountCodepoints(str) catch str.len);
     }
 
+    // O(1) byte-level access. Returns the i-th byte as i64 (matches CLEAR's
+    // Int64 numeric type), or 0 for out-of-bounds / negative index. Used by
+    // the register VM bytecode parser; does NOT raise on out-of-range.
+    pub fn byteAt(str: []const u8, index: anytype) i64 {
+        const idx = @as(i64, @intCast(index));
+        if (idx < 0) return 0;
+        const i: usize = @intCast(idx);
+        if (i >= str.len) return 0;
+        return @intCast(str[i]);
+    }
+
     // UTF-8 codepoint access: returns the i-th codepoint as a multi-byte slice.
     // O(n) per call — iterates from the start. Returns "" on out-of-bounds or invalid UTF-8.
     pub fn charAtCodepoint(alloc: std.mem.Allocator, str: []const u8, index: anytype) ![]const u8 {
@@ -3286,6 +3297,32 @@ pub const CheatLib = struct {
         }
 
         return value;
+    }
+
+    /// The owned type a COPY-captured binding becomes in the fiber.
+    /// Strips ONLY a `*const T` borrow (immutable param passed by
+    /// pointer); a non-const `*T` owned box (*Locked, Arc) keeps its
+    /// pointer shape, which the body+cleanup pipeline relies on.
+    pub fn CapturedValue(comptime S: type) type {
+        const info = @typeInfo(S);
+        if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and
+            @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
+        {
+            return info.pointer.child;
+        }
+        return S;
+    }
+
+    /// `dupeValue`, but derefs a `*const T` borrow first so the
+    /// result is an owned value, not a `*const` alias of the caller.
+    pub fn dupeCaptured(comptime S: type, src: S, alloc: std.mem.Allocator) std.mem.Allocator.Error!CapturedValue(S) {
+        const info = @typeInfo(S);
+        if (info == .pointer and info.pointer.size == .one and info.pointer.is_const and
+            @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
+        {
+            return try dupeValue(info.pointer.child, src.*, alloc);
+        }
+        return try dupeValue(S, src, alloc);
     }
 
     fn isLockWrapper(comptime T: type) bool {

@@ -1,0 +1,2715 @@
+# Register bytecode VM for examples/minivm.
+#
+# This file intentionally only interprets already-emitted register bytecode.
+# The Ruby harness writes ops/consts files, then builds a tiny generated main
+# that calls runRegisterBytecode!(...).
+
+REQUIRE "register_debugger_types.cht";
+REQUIRE "register_debugger.cht";
+
+UNION RegisterValue {
+    Nil,
+    Int64Val: Int64,
+    Number: Float64,
+    Str: String,
+    # futureTable index; produced by BGSPAWN, consumed by FNEXT.
+    Future: Int64,
+}
+
+ENUM RegisterOp {
+    IConst,
+    IRet,
+    Halt,
+    IMov,
+    IAdd,
+    ISub,
+    IMul,
+    IDiv,
+    ILt,
+    IGt,
+    IEq,
+    INeq,
+    ILte,
+    IGte,
+    Jmp,
+    Jf,
+    FConst,
+    FRet,
+    FMov,
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    FLt,
+    FGt,
+    FEq,
+    FNeq,
+    FLte,
+    FGte,
+    IMod,
+    ICall,
+    FCall,
+    NCall,
+    IPrint,
+    Reserved34,
+    Reserved35,
+    Reserved36,
+    IPrint2,
+    SConst,
+    SRet,
+    SMov,
+    SConcat,
+    LNew,
+    LAppendI,
+    LGetI,
+    LLen,
+    MNew,
+    MPutI,
+    MGetI,
+    LFNew,
+    LFAppend,
+    LFGet,
+    SEq,
+    LSSet,
+    LSetI,
+    LFSet,
+    LFLen,
+    MLen,
+    MContains,
+    MDelete,
+    NMPutI,
+    NMGetI,
+    NMContains,
+    NMDelete,
+    NMNew,
+    NMLen,
+    JILtF,
+    JIGtF,
+    JIEqF,
+    JINeqF,
+    JILteF,
+    JIGteF,
+    JFLtF,
+    JFGtF,
+    JFEqF,
+    JFNeqF,
+    JFLteF,
+    JFGteF,
+    Trap,
+    SPrint,
+    LSNew,
+    LSAppend,
+    LSGet,
+    LSLen,
+    LSJoin,
+    VMNew,
+    VMPutNil,
+    VMPutI,
+    VMPutF,
+    VMPutS,
+    VMGetTag,
+    VMGetI,
+    VMGetF,
+    VMGetS,
+    MPutIR,
+    MGetIR,
+    MContainsR,
+    VMPutNilR,
+    VMPutIR,
+    VMPutFR,
+    VMPutSR,
+    VMGetTagR,
+    VMGetIR,
+    VMGetFR,
+    VMGetSR,
+    LVNew,
+    LVAppNil,
+    LVAppI,
+    LVAppF,
+    LVAppS,
+    LVLen,
+    LVGetTag,
+    LVGetI,
+    LVGetF,
+    LVGetS,
+    LSSplit,
+    MKeys,
+    MValues,
+    NMKeys,
+    NMValues,
+    IHNew,
+    IHAppend,
+    IHGet,
+    IHLen,
+    SHNew,
+    SHAppend,
+    SHGet,
+    SHLen,
+    NMFNew,
+    NMPutF,
+    NMGetF,
+    ERaise,
+    EGuard,
+    EClr,
+    EMatchK,
+    EFlag,
+    EMatchN,
+    EMatchM,
+    ERewrite,
+    BgSpawn,
+    FNextI,
+    FNextF,
+    FNextS,
+    CapGetI,
+    CapGetF,
+    CapGetS,
+    CapNew,
+    CapPushI,
+    CapPushF,
+    CapPushS,
+    SCellNew,
+    SCellGetI,
+    SCellSetI,
+    LockAcq,
+    LockRel,
+    Operand,
+}
+
+STRUCT PackedRegisterProgram {
+    ops: Int64[]@list,
+    opcodes: RegisterOp[]@list,
+}
+
+STRUCT RegisterIntListHandle {
+    values: Int64[]@list,
+}
+
+STRUCT RegisterStringListHandle {
+    values: String[]@list,
+}
+
+# Per-binding metadata recorded by the emitter when --debug is set:
+# the function this binding lives in (`funcEntryIp`), the CLEAR
+# source line at which this binding became live (`sourceLine`), the
+# register kind ("i" / "f" / "s"), the physical register index
+# assigned by the allocator, and the user-visible CLEAR name.
+# Multiple bindings can share `(kind, physIdx)` over a function's
+# lifetime (linear-scan reuse) -- the REPL snapshot picks the binding
+# with the largest `sourceLine < currentPauseLine` so `:p NAME`
+# resolves to whatever the user actually sees at the pause site
+# (byebug's "visible after assignment completes" semantic). Absent in
+# non-debug runs.
+# Note: `RegisterVarName` and `BreakpointEntry` structs live in
+# `register_debugger_types.cht` (REQUIREd above) so they're visible
+# to `register_debugger.cht` -- which is also REQUIREd from the top
+# of this file and would otherwise see neither.
+
+FN loadRegisterOps!(path: String) RETURNS !Int64[] ->
+    raw = readFile(path) OR RAISE;
+    parts = split(raw, ",");
+    MUTABLE ops: Int64[]@list = List[];
+    FOR pi IN (0_i64 ..< parts.length()) DO
+        part = trim(parts[pi]);
+        IF part.length() > 0 THEN
+            n = toInt(part) OR 0_i64;
+            ops.append(n);
+        END
+    END
+    RETURN ops;
+END
+
+FN readPackedU8(bytes: String, cursor: Int64) RETURNS Int64 ->
+    RETURN byteAt(bytes, cursor);
+END
+
+# Source-line table loader. Each entry is a little-endian u32 parallel to
+# `ops`: opcode-position entries hold the CLEAR source line of that
+# instruction; operand-position entries hold 0. The runner consults this
+# on error to format "<file>:<line>" instead of just "ip=<N>". Always
+# present (emitted by bc_run.rb) -- see register_bc_emitter.rb.
+FN loadRegisterSourceLines!(path: String) RETURNS !Int64[]@list ->
+    bytes: String@raw = readFile(path) OR RAISE;
+    MUTABLE lines: Int64[]@list = List[];
+    MUTABLE cursor: Int64 = 0_i64;
+    TIGHT WHILE cursor + 4_i64 <= bytes.length() DO
+        word = readPackedU32(bytes, cursor);
+        lines.append(word);
+        cursor += 4_i64;
+    END
+    RETURN lines;
+END
+
+# Variable-names loader. Format from bc_run.rb (current schema, 8
+# fields):
+#   `<funcEntryIp>:<sourceLine>:<sourceColumn>:<endSourceLine>:<kind>:<physIdx>:<name>:<typeName>`
+# Older 5/6/7-field rows still parse so mid-rebase debug runs aren't
+# a hard failure. Missing or empty file returns []; the REPL's `:p
+# NAME` then reports every name as out-of-scope. `<sourceColumn>` is
+# the binding's column at decl (used for byte-precise highlighting
+# in `:l` and visualization). `<endSourceLine>` is the last line
+# where the binding is live (`-1` means "until function return").
+# `<typeName>` may be empty when the emitter didn't resolve a type.
+FN loadRegisterVarNames!(path: String) RETURNS !RegisterVarName[]@list ->
+    raw = readFile(path) OR "";
+    MUTABLE entries: RegisterVarName[]@list = List[];
+    parts = split(raw, "\n");
+    TIGHT FOR pi IN (0_i64 ..< parts.length()) DO
+        entry = trim(parts[pi]);
+        IF entry.length() == 0_i64 THEN PASS;
+        ELSE
+            fields = split(entry, ":");
+            IF fields.length() == 8_i64 THEN
+                funcIp = toInt(fields[0]) OR -1_i64;
+                srcLine = toInt(fields[1]) OR -1_i64;
+                srcCol = toInt(fields[2]) OR 0_i64;
+                endSrc = toInt(fields[3]) OR -1_i64;
+                physIdx = toInt(fields[5]) OR -1_i64;
+                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                    entries.append(RegisterVarName{
+                        funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: srcCol,
+                        endSourceLine: endSrc,
+                        kind: COPY fields[4], physIdx: physIdx,
+                        name: COPY fields[6], typeName: COPY fields[7]
+                    });
+                END
+            ELSE_IF fields.length() == 7_i64 THEN
+                funcIp = toInt(fields[0]) OR -1_i64;
+                srcLine = toInt(fields[1]) OR -1_i64;
+                endSrc = toInt(fields[2]) OR -1_i64;
+                physIdx = toInt(fields[4]) OR -1_i64;
+                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                    entries.append(RegisterVarName{
+                        funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
+                        endSourceLine: endSrc,
+                        kind: COPY fields[3], physIdx: physIdx,
+                        name: COPY fields[5], typeName: COPY fields[6]
+                    });
+                END
+            ELSE_IF fields.length() == 6_i64 THEN
+                funcIp = toInt(fields[0]) OR -1_i64;
+                srcLine = toInt(fields[1]) OR -1_i64;
+                physIdx = toInt(fields[3]) OR -1_i64;
+                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                    entries.append(RegisterVarName{
+                        funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
+                        endSourceLine: -1_i64,
+                        kind: COPY fields[2], physIdx: physIdx,
+                        name: COPY fields[4], typeName: COPY fields[5]
+                    });
+                END
+            ELSE_IF fields.length() == 5_i64 THEN
+                funcIp = toInt(fields[0]) OR -1_i64;
+                srcLine = toInt(fields[1]) OR -1_i64;
+                physIdx = toInt(fields[3]) OR -1_i64;
+                IF funcIp >= 0_i64 && srcLine >= 0_i64 && physIdx >= 0_i64 THEN
+                    entries.append(RegisterVarName{
+                        funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
+                        endSourceLine: -1_i64,
+                        kind: COPY fields[2], physIdx: physIdx,
+                        name: COPY fields[4], typeName: ""
+                    });
+                END
+            END
+        END
+    END
+    RETURN entries;
+END
+
+# Breakpoint loader. Reads instruction-start IPs (one per line, decimal)
+# from `_register_breakpoints.txt`. Empty file (or missing) returns an
+# empty list -- the runner then runs without trap rewrites. bc_run.rb
+# writes this file when invoked with `--pause-on=file:line`; see the
+# `--debug` path there.
+FN loadRegisterBreakpoints!(path: String) RETURNS !Int64[]@list ->
+    raw = readFile(path) OR "";
+    MUTABLE bps: Int64[]@list = List[];
+    parts = split(raw, "\n");
+    FOR pi IN (0_i64 ..< parts.length()) DO
+        entry = trim(parts[pi]);
+        IF entry.length() > 0 THEN
+            n = toInt(entry) OR -1_i64;
+            IF n >= 0_i64 THEN bps.append(n); END
+        END
+    END
+    RETURN bps;
+END
+
+# Source-path table loader. Maps file_id (= 0-indexed line) to the
+# CLEAR source path. Today there is one entry (the main file); a
+# future multi-file (module-imported) attribution will append more
+# entries and stamp non-zero file_ids on MIR statements.
+FN loadRegisterSourcePaths!(path: String) RETURNS !String[]@list ->
+    raw: String@raw = readFile(path) OR RAISE;
+    MUTABLE paths: String[]@list = List[];
+    parts = split(raw, "\n");
+    FOR pi IN (0_i64 ..< parts.length()) DO
+        entry = parts[pi];
+        IF entry.length() > 0 THEN paths.append(entry); END
+    END
+    RETURN paths;
+END
+
+# Returns the CLEAR source line for the instruction starting at `ip`,
+# or 0 if unknown / out of range. Cheap (one bounds-checked load).
+FN sourceLineFor(sourceLines: Int64[]@list, ip: Int64) RETURNS Int64 ->
+    IF ip < 0_i64 || ip >= sourceLines.length() THEN RETURN 0_i64; END
+    RETURN sourceLines[ip];
+END
+
+# Returns the source path for file_id (0 = main file) or empty string
+# if unknown. Today every line attributes to file_id 0; the parameter
+# is plumbed through for the future multi-file path.
+FN sourcePathFor(sourcePaths: String[]@list, fileId: Int64) RETURNS String ->
+    IF fileId < 0_i64 || fileId >= sourcePaths.length() THEN RETURN ""; END
+    RETURN sourcePaths[fileId];
+END
+
+# Note: `activeFunctionEntryIp` and `snapshotRegisterVars!` live in
+# `register_debugger.cht` so the REPL can call them on `:up` /
+# `:down` / `:frame N` (vm.cht is REQUIRED *after* this file in
+# `register_debugger.cht`, so any helpers the REPL needs have to be
+# declared before the REPL itself).
+
+# Find the next instruction-start IP after `ip`. Walks the parallel
+# `opcodes` array forward, skipping operand-position entries (which
+# carry the `Operand` sentinel). Returns -1 if none.
+FN nextOpcodeIp(opcodes: RegisterOp[], ip: Int64) RETURNS Int64 ->
+    MUTABLE i: Int64 = ip + 1_i64;
+    TIGHT WHILE i < opcodes.length() DO
+        IF opcodes[i] != RegisterOp.Operand THEN RETURN i; END
+        i += 1_i64;
+    END
+    RETURN -1_i64;
+END
+
+# Find the next instruction-start IP whose source line differs from
+# `currentLine`. Used by the `:s` step-source-line command. Walks
+# forward via `nextOpcodeIp`, returning the first opcode whose
+# `sourceLines[ip]` is non-zero and != currentLine. -1 if none.
+FN nextDifferentLineIp(opcodes: RegisterOp[], sourceLines: Int64[]@list, ip: Int64, currentLine: Int64) RETURNS Int64 ->
+    MUTABLE candidate: Int64 = nextOpcodeIp(opcodes, ip);
+    TIGHT WHILE candidate >= 0_i64 DO
+        candLine = sourceLineFor(sourceLines, candidate);
+        IF candLine > 0_i64 && candLine != currentLine THEN RETURN candidate; END
+        candidate = nextOpcodeIp(opcodes, candidate);
+    END
+    RETURN -1_i64;
+END
+
+# Format a runtime VM error with source-line context. Always returns a
+# string the caller can `print()`. Falls back to ip-only when the line
+# table has no entry for `ip` (e.g., synthesized HALT padding).
+FN formatVmError(message: String, ip: Int64, sourceLines: Int64[]@list, sourcePaths: String[]@list) RETURNS !String ->
+    line = sourceLineFor(sourceLines, ip);
+    ipStr = ip.toString() OR RAISE;
+    IF line > 0_i64 THEN
+        lineStr = line.toString() OR RAISE;
+        # file_id stays 0 today (single-file). When MIR-stamped multi-file
+        # attribution lands, look up the file_id parallel to sourceLines.
+        path = sourcePathFor(sourcePaths, 0_i64);
+        IF path.length() > 0_i64 THEN
+            RETURN "REGISTER VM ERROR (" + path + ":" + lineStr + ", ip=" + ipStr + "): " + message;
+        END
+        RETURN "REGISTER VM ERROR (line " + lineStr + ", ip=" + ipStr + "): " + message;
+    END
+    RETURN "REGISTER VM ERROR (ip=" + ipStr + "): " + message;
+END
+
+FN readPackedU16(bytes: String, cursor: Int64) RETURNS Int64 ->
+    RETURN byteAt(bytes, cursor) + byteAt(bytes, cursor + 1) * 256_i64;
+END
+
+FN readPackedU32(bytes: String, cursor: Int64) RETURNS Int64 ->
+    RETURN byteAt(bytes, cursor) + byteAt(bytes, cursor + 1) * 256_i64 + byteAt(bytes, cursor + 2) * 65536_i64 + byteAt(bytes, cursor + 3) * 16777216_i64;
+END
+
+FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
+    bytes: String@raw = readFile(path) OR RAISE;
+    MUTABLE ops: Int64[]@list = List[];
+    MUTABLE opcodes: RegisterOp[]@list = List[];
+    IF bytes.length() < 4 THEN RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes }; END
+    # RBC1
+    IF byteAt(bytes, 0) != 82_i64 || byteAt(bytes, 1) != 66_i64 || byteAt(bytes, 2) != 67_i64 || byteAt(bytes, 3) != 49_i64 THEN
+        RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes };
+    END
+
+    MUTABLE cursor: Int64 = 4;
+    TIGHT WHILE cursor < bytes.length() DO
+        opcodeRaw = readPackedU8(bytes, cursor);
+        cursor += 1;
+        ops.append(opcodeRaw);
+        opcodes.append(CAST(opcodeRaw AS RegisterOp));
+        op: RegisterOp = CAST(opcodeRaw AS RegisterOp);
+        MATCH op START
+            RegisterOp.IConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Halt -> PASS;,
+            RegisterOp.IMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IAdd -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ISub -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IMul -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IDiv -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ILt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IGt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.INeq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ILte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IGte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Jmp -> ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Jf -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FAdd -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FSub -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FMul -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FDiv -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FLt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FGt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNeq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FLte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FGte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IMod -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ICall ->
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);
+                argc = readPackedU8(bytes, cursor);
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
+            RegisterOp.FCall ->
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);
+                argc = readPackedU8(bytes, cursor);
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
+            RegisterOp.NCall ->
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                argc = readPackedU8(bytes, cursor);
+                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
+            RegisterOp.IPrint -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Reserved34 -> PASS;,
+            RegisterOp.Reserved35 -> PASS;,
+            RegisterOp.Reserved36 -> PASS;,
+            RegisterOp.IPrint2 -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SConcat -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LAppendI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MContains -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MDelete -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMContains -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMDelete -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JILtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIGtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIEqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JINeqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JILteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIGteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFLtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFGtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFEqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFNeqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFLteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFGteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Trap -> PASS;,
+            RegisterOp.SPrint -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSJoin -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutNil -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetTag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MPutIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MGetIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MContainsR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutNilR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutFR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutSR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetTagR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetFR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetSR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppNil -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetTag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSSplit -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MKeys -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMKeys -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERaise -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EGuard -> PASS;,
+            RegisterOp.EClr -> PASS;,
+            RegisterOp.EMatchK -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EFlag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchN -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchM -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERewrite -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.BgSpawn -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapNew -> PASS;,
+            RegisterOp.CapPushI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockAcq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockRel -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Operand -> PASS;
+        END
+    END
+    RETURN PackedRegisterProgram{ ops: ops, opcodes: opcodes };
+END
+
+FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
+    MATCH op START
+        RegisterOp.IConst -> RETURN 2_i64;,
+        RegisterOp.IRet -> RETURN 1_i64;,
+        RegisterOp.Halt -> RETURN 0_i64;,
+        RegisterOp.IMov -> RETURN 2_i64;,
+        RegisterOp.IAdd -> RETURN 3_i64;,
+        RegisterOp.ISub -> RETURN 3_i64;,
+        RegisterOp.IMul -> RETURN 3_i64;,
+        RegisterOp.IDiv -> RETURN 3_i64;,
+        RegisterOp.ILt -> RETURN 3_i64;,
+        RegisterOp.IGt -> RETURN 3_i64;,
+        RegisterOp.IEq -> RETURN 3_i64;,
+        RegisterOp.INeq -> RETURN 3_i64;,
+        RegisterOp.ILte -> RETURN 3_i64;,
+        RegisterOp.IGte -> RETURN 3_i64;,
+        RegisterOp.Jmp -> RETURN 1_i64;,
+        RegisterOp.Jf -> RETURN 2_i64;,
+        RegisterOp.FConst -> RETURN 2_i64;,
+        RegisterOp.FRet -> RETURN 1_i64;,
+        RegisterOp.FMov -> RETURN 2_i64;,
+        RegisterOp.FAdd -> RETURN 3_i64;,
+        RegisterOp.FSub -> RETURN 3_i64;,
+        RegisterOp.FMul -> RETURN 3_i64;,
+        RegisterOp.FDiv -> RETURN 3_i64;,
+        RegisterOp.FLt -> RETURN 3_i64;,
+        RegisterOp.FGt -> RETURN 3_i64;,
+        RegisterOp.FEq -> RETURN 3_i64;,
+        RegisterOp.FNeq -> RETURN 3_i64;,
+        RegisterOp.FLte -> RETURN 3_i64;,
+        RegisterOp.FGte -> RETURN 3_i64;,
+        RegisterOp.IMod -> RETURN 3_i64;,
+        RegisterOp.ICall -> RETURN 5_i64 + ops[ip + 3] * 2_i64;,
+        RegisterOp.FCall -> RETURN 5_i64 + ops[ip + 3] * 2_i64;,
+        RegisterOp.NCall -> RETURN 4_i64 + ops[ip + 4] * 2_i64;,
+        RegisterOp.IPrint -> RETURN 3_i64;,
+        RegisterOp.Reserved34 -> RETURN 0_i64;,
+        RegisterOp.Reserved35 -> RETURN 0_i64;,
+        RegisterOp.Reserved36 -> RETURN 0_i64;,
+        RegisterOp.IPrint2 -> RETURN 5_i64;,
+        RegisterOp.SConst -> RETURN 2_i64;,
+        RegisterOp.SRet -> RETURN 1_i64;,
+        RegisterOp.SMov -> RETURN 2_i64;,
+        RegisterOp.SConcat -> RETURN 3_i64;,
+        RegisterOp.LNew -> RETURN 1_i64;,
+        RegisterOp.LAppendI -> RETURN 2_i64;,
+        RegisterOp.LGetI -> RETURN 3_i64;,
+        RegisterOp.LLen -> RETURN 2_i64;,
+        RegisterOp.MNew -> RETURN 1_i64;,
+        RegisterOp.MPutI -> RETURN 3_i64;,
+        RegisterOp.MGetI -> RETURN 4_i64;,
+        RegisterOp.LFNew -> RETURN 1_i64;,
+        RegisterOp.LFAppend -> RETURN 2_i64;,
+        RegisterOp.LFGet -> RETURN 3_i64;,
+        RegisterOp.SEq -> RETURN 3_i64;,
+        RegisterOp.LSSet -> RETURN 3_i64;,
+        RegisterOp.LSetI -> RETURN 3_i64;,
+        RegisterOp.LFSet -> RETURN 3_i64;,
+        RegisterOp.LFLen -> RETURN 2_i64;,
+        RegisterOp.MLen -> RETURN 2_i64;,
+        RegisterOp.MContains -> RETURN 3_i64;,
+        RegisterOp.MDelete -> RETURN 2_i64;,
+        RegisterOp.NMPutI -> RETURN 3_i64;,
+        RegisterOp.NMGetI -> RETURN 4_i64;,
+        RegisterOp.NMContains -> RETURN 3_i64;,
+        RegisterOp.NMDelete -> RETURN 2_i64;,
+        RegisterOp.NMNew -> RETURN 1_i64;,
+        RegisterOp.NMLen -> RETURN 2_i64;,
+        RegisterOp.JILtF -> RETURN 3_i64;,
+        RegisterOp.JIGtF -> RETURN 3_i64;,
+        RegisterOp.JIEqF -> RETURN 3_i64;,
+        RegisterOp.JINeqF -> RETURN 3_i64;,
+        RegisterOp.JILteF -> RETURN 3_i64;,
+        RegisterOp.JIGteF -> RETURN 3_i64;,
+        RegisterOp.JFLtF -> RETURN 3_i64;,
+        RegisterOp.JFGtF -> RETURN 3_i64;,
+        RegisterOp.JFEqF -> RETURN 3_i64;,
+        RegisterOp.JFNeqF -> RETURN 3_i64;,
+        RegisterOp.JFLteF -> RETURN 3_i64;,
+        RegisterOp.JFGteF -> RETURN 3_i64;,
+        RegisterOp.Trap -> RETURN 0_i64;,
+        RegisterOp.SPrint -> RETURN 1_i64;,
+        RegisterOp.LSNew -> RETURN 1_i64;,
+        RegisterOp.LSAppend -> RETURN 2_i64;,
+        RegisterOp.LSGet -> RETURN 3_i64;,
+        RegisterOp.LSLen -> RETURN 2_i64;,
+        RegisterOp.LSJoin -> RETURN 3_i64;,
+        RegisterOp.VMNew -> RETURN 1_i64;,
+        RegisterOp.VMPutNil -> RETURN 2_i64;,
+        RegisterOp.VMPutI -> RETURN 3_i64;,
+        RegisterOp.VMPutF -> RETURN 3_i64;,
+        RegisterOp.VMPutS -> RETURN 3_i64;,
+        RegisterOp.VMGetTag -> RETURN 4_i64;,
+        RegisterOp.VMGetI -> RETURN 3_i64;,
+        RegisterOp.VMGetF -> RETURN 3_i64;,
+        RegisterOp.VMGetS -> RETURN 3_i64;,
+        RegisterOp.MPutIR -> RETURN 3_i64;,
+        RegisterOp.MGetIR -> RETURN 4_i64;,
+        RegisterOp.MContainsR -> RETURN 3_i64;,
+        RegisterOp.VMPutNilR -> RETURN 2_i64;,
+        RegisterOp.VMPutIR -> RETURN 3_i64;,
+        RegisterOp.VMPutFR -> RETURN 3_i64;,
+        RegisterOp.VMPutSR -> RETURN 3_i64;,
+        RegisterOp.VMGetTagR -> RETURN 4_i64;,
+        RegisterOp.VMGetIR -> RETURN 3_i64;,
+        RegisterOp.VMGetFR -> RETURN 3_i64;,
+        RegisterOp.VMGetSR -> RETURN 3_i64;,
+        RegisterOp.LVNew -> RETURN 1_i64;,
+        RegisterOp.LVAppNil -> RETURN 1_i64;,
+        RegisterOp.LVAppI -> RETURN 2_i64;,
+        RegisterOp.LVAppF -> RETURN 2_i64;,
+        RegisterOp.LVAppS -> RETURN 2_i64;,
+        RegisterOp.LVLen -> RETURN 2_i64;,
+        RegisterOp.LVGetTag -> RETURN 3_i64;,
+        RegisterOp.LVGetI -> RETURN 3_i64;,
+        RegisterOp.LVGetF -> RETURN 3_i64;,
+        RegisterOp.LVGetS -> RETURN 3_i64;,
+        RegisterOp.LSSplit -> RETURN 3_i64;,
+        RegisterOp.MKeys -> RETURN 2_i64;,
+        RegisterOp.MValues -> RETURN 2_i64;,
+        RegisterOp.NMKeys -> RETURN 2_i64;,
+        RegisterOp.NMValues -> RETURN 2_i64;,
+        RegisterOp.IHNew -> RETURN 1_i64;,
+        RegisterOp.IHAppend -> RETURN 2_i64;,
+        RegisterOp.IHGet -> RETURN 3_i64;,
+        RegisterOp.IHLen -> RETURN 2_i64;,
+        RegisterOp.SHNew -> RETURN 1_i64;,
+        RegisterOp.SHAppend -> RETURN 2_i64;,
+        RegisterOp.SHGet -> RETURN 3_i64;,
+        RegisterOp.SHLen -> RETURN 2_i64;,
+        RegisterOp.NMFNew -> RETURN 1_i64;,
+        RegisterOp.NMPutF -> RETURN 3_i64;,
+        RegisterOp.NMGetF -> RETURN 4_i64;,
+        RegisterOp.ERaise -> RETURN 4_i64;,
+        RegisterOp.EGuard -> RETURN 0_i64;,
+        RegisterOp.EClr -> RETURN 0_i64;,
+        RegisterOp.EMatchK -> RETURN 2_i64;,
+        RegisterOp.EFlag -> RETURN 1_i64;,
+        RegisterOp.EMatchN -> RETURN 2_i64;,
+        RegisterOp.EMatchM -> RETURN 2_i64;,
+        RegisterOp.ERewrite -> RETURN 5_i64;,
+        RegisterOp.BgSpawn -> RETURN 3_i64;,
+        RegisterOp.FNextI -> RETURN 2_i64;,
+        RegisterOp.FNextF -> RETURN 2_i64;,
+        RegisterOp.FNextS -> RETURN 2_i64;,
+        RegisterOp.CapGetI -> RETURN 2_i64;,
+        RegisterOp.CapGetF -> RETURN 2_i64;,
+        RegisterOp.CapGetS -> RETURN 2_i64;,
+        RegisterOp.CapNew -> RETURN 0_i64;,
+        RegisterOp.CapPushI -> RETURN 1_i64;,
+        RegisterOp.CapPushF -> RETURN 1_i64;,
+        RegisterOp.CapPushS -> RETURN 1_i64;,
+        RegisterOp.SCellNew -> RETURN 1_i64;,
+        RegisterOp.SCellGetI -> RETURN 2_i64;,
+        RegisterOp.SCellSetI -> RETURN 2_i64;,
+        RegisterOp.LockAcq -> RETURN 3_i64;,
+        RegisterOp.LockRel -> RETURN 1_i64;,
+        RegisterOp.Operand -> RETURN 0_i64;
+    END
+    RETURN 0_i64;
+END
+
+FN decodeRegisterOpcodes!(ops: Int64[]) RETURNS !RegisterOp[] ->
+    MUTABLE decoded: RegisterOp[]@list = List[];
+    MUTABLE ip: Int64 = 0;
+    TIGHT WHILE ip < ops.length() DO
+        op: RegisterOp = CAST(ops[ip] AS RegisterOp);
+        arity = registerOpArity(ops, ip, op);
+        decoded.append(op);
+        FOR ai IN (0_i64 ..< arity) DO
+            decoded.append(RegisterOp.Operand);
+        END
+        ip += 1 + arity;
+    END
+    RETURN decoded;
+END
+
+FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
+    IF startsWith?(line, "I:") THEN
+        numStr = substr(line, 2, line.length() - 2);
+        intVal = toInt(numStr) OR 0_i64;
+        RETURN RegisterValue{ Int64Val: intVal };
+    END
+    IF startsWith?(line, "F:") THEN
+        numStr = substr(line, 2, line.length() - 2);
+        n = toNumber(numStr) OR 0.0;
+        RETURN RegisterValue{ Number: n };
+    END
+    IF startsWith?(line, "S:") THEN
+        MUTABLE colonPos: Int64 = 2;
+        TIGHT WHILE colonPos < line.length() && charAt(line, colonPos) != ":" DO
+            colonPos += 1;
+        END
+        IF colonPos < line.length() THEN
+            RETURN RegisterValue{ Str: substr(line, colonPos + 1, line.length() - colonPos - 1) };
+        END
+    END
+    RETURN RegisterValue.Nil;
+END
+
+FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
+    raw = readFile(path) OR RAISE;
+    MUTABLE consts: RegisterValue[]@list = List[];
+    MUTABLE pos: Int64 = 0;
+    n = raw.length();
+    TIGHT WHILE pos < n DO
+        MUTABLE lineEnd: Int64 = pos;
+        TIGHT WHILE lineEnd < n && charAt(raw, lineEnd) != "\n" DO
+            lineEnd += 1;
+        END
+        line = substr(raw, pos, lineEnd - pos);
+        IF line.length() > 0 THEN
+            consts.append(parseRegisterConstLine!(line) OR RAISE);
+        END
+        pos = lineEnd + 1;
+    END
+    RETURN consts;
+END
+
+FN getRegisterConstInt(consts: RegisterValue[], idx: Int64) RETURNS Int64 ->
+    PARTIAL MATCH consts[idx] START
+        RegisterValue.Int64Val AS i -> RETURN i;,
+        RegisterValue.Number AS n -> RETURN toInt(n);,
+        DEFAULT -> RETURN 0_i64;
+    END
+    RETURN 0_i64;
+END
+
+FN getRegisterConstFloat(consts: RegisterValue[], idx: Int64) RETURNS Float64 ->
+    PARTIAL MATCH consts[idx] START
+        RegisterValue.Number AS n -> RETURN n;,
+        RegisterValue.Int64Val AS i -> RETURN toFloat(i);,
+        DEFAULT -> RETURN 0.0;
+    END
+    RETURN 0.0;
+END
+
+FN getRegisterConstString(consts: RegisterValue[], idx: Int64) RETURNS !String ->
+    PARTIAL MATCH consts[idx] START
+        RegisterValue.Str AS s -> RETURN COPY s;,
+        RegisterValue.Int64Val AS i -> RETURN i.toString();,
+        RegisterValue.Number AS n -> RETURN registerFloatToString(n) OR RAISE;,
+        DEFAULT -> RETURN "";
+    END
+    RETURN "";
+END
+
+FN intResult(v: Int64) RETURNS RegisterValue ->
+    RETURN RegisterValue{ Int64Val: v };
+END
+
+FN floatResult(v: Float64) RETURNS RegisterValue ->
+    RETURN RegisterValue{ Number: v };
+END
+
+FN stringResult(v: String) RETURNS !RegisterValue ->
+    RETURN RegisterValue{ Str: COPY v };
+END
+
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+    # Debugger breakpoints are checked per-instruction by consulting a
+    # parallel flag array `isBreakpoint`. Zero overhead on the success
+    # path: when `breakpointIps` is empty we bypass the build and the
+    # per-dispatch IF short-circuits.
+    debuggerActive = breakpointIps.length() > 0_i64;
+    MUTABLE isBreakpoint: Int64[]@list = List[];
+    MUTABLE breakpointEntries: BreakpointEntry[]@list = List[];
+    IF debuggerActive THEN
+        FOR oi IN (0_i64 ..< opcodes.length()) DO
+            isBreakpoint.append(0_i64);
+        END
+        FOR bi IN (0_i64 ..< breakpointIps.length()) DO
+            bpIp = breakpointIps[bi];
+            IF bpIp >= 0_i64 && bpIp < opcodes.length() THEN
+                isBreakpoint[bpIp] = 1_i64;
+                bpLine = sourceLineFor(sourceLines, bpIp);
+                breakpointEntries.append(BreakpointEntry{
+                    id: bi + 1_i64,
+                    sourceLine: bpLine,
+                    ip: bpIp,
+                    enabled: 1_i64
+                });
+            END
+        END
+    END
+    # Step-over (`:n`) entry depth. -1 means no step-over is active.
+    # While set to a non-negative value, breakpoints fired at greater
+    # call depths are silently re-armed at the function-return ip and
+    # the dispatch loop resumes -- the user only pauses again once
+    # control returns to the original frame.
+    MUTABLE stepOverDepth: Int64 = -1_i64;
+    # Raw fixed-size register files. Sized to match
+    # examples/minivm/register_opcode_layout.rb's RegisterFileLimits;
+    # the AllocatorRewriter enforces per-segment caps statically and
+    # ICall/FCall enforces nextITop/nextFTop <= cap at runtime.
+    MUTABLE iregs: Int64[512];
+    MUTABLE fregs: Float64[512];
+    MUTABLE sregs: String[256];
+    MUTABLE list0: Int64[]@list = List[];
+    MUTABLE list1: Int64[]@list = List[];
+    MUTABLE list2: Int64[]@list = List[];
+    MUTABLE list3: Int64[]@list = List[];
+    MUTABLE flist0: Float64[]@list = List[];
+    MUTABLE flist1: Float64[]@list = List[];
+    MUTABLE flist2: Float64[]@list = List[];
+    MUTABLE flist3: Float64[]@list = List[];
+    MUTABLE slist0: String[]@list = List[];
+    MUTABLE slist1: String[]@list = List[];
+    MUTABLE slist2: String[]@list = List[];
+    MUTABLE slist3: String[]@list = List[];
+    MUTABLE vmap0: HashMap<RegisterValue> = {};
+    MUTABLE vmap1: HashMap<RegisterValue> = {};
+    MUTABLE vmap2: HashMap<RegisterValue> = {};
+    MUTABLE vmap3: HashMap<RegisterValue> = {};
+    MUTABLE vlist0: RegisterValue[]@list = List[];
+    MUTABLE vlist1: RegisterValue[]@list = List[];
+    MUTABLE vlist2: RegisterValue[]@list = List[];
+    MUTABLE vlist3: RegisterValue[]@list = List[];
+    # Separate from vlist0..3 (guests clobber those via LVNew).
+    MUTABLE captureSlots: RegisterValue[]@list = List[];
+    # futureResolved keyed by id.toString() (no HashMap<Int64>).
+    MUTABLE futureTable: ~RegisterValue[]@list = List[];
+    MUTABLE futureResolved: HashMap<RegisterValue> = {};
+    # Dedicated BGSPAWN capture-marshal channel; never the guest
+    # vlist0..3 (those are clobbered by LVNew).
+    MUTABLE pendingCaps: RegisterValue[]@list = List[];
+    MUTABLE map0: HashMap<Int64> = {};
+    MUTABLE map1: HashMap<Int64> = {};
+    MUTABLE map2: HashMap<Int64> = {};
+    MUTABLE map3: HashMap<Int64> = {};
+    MUTABLE nmap0: HashMap<Int64, Int64> = {};
+    MUTABLE nmap1: HashMap<Int64, Int64> = {};
+    MUTABLE nmap2: HashMap<Int64, Int64> = {};
+    MUTABLE nmap3: HashMap<Int64, Int64> = {};
+    MUTABLE nfmap0: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap1: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap2: HashMap<Int64, Float64> = {};
+    MUTABLE nfmap3: HashMap<Int64, Float64> = {};
+    MUTABLE intListHandles: RegisterIntListHandle[]@list = List[];
+    MUTABLE stringListHandles: RegisterStringListHandle[]@list = List[];
+    MUTABLE frameIBases: Int64[]@list = List[];
+    MUTABLE frameFBases: Int64[]@list = List[];
+    MUTABLE frameITops: Int64[]@list = List[];
+    MUTABLE frameFTops: Int64[]@list = List[];
+    MUTABLE frameRetIps: Int64[]@list = List[];
+    MUTABLE frameRetDsts: Int64[]@list = List[];
+    MUTABLE iBase: Int64 = 0_i64;
+    MUTABLE fBase: Int64 = 0_i64;
+    # Error-union runtime control state (VM-internal machinery, not a
+    # guest runtime structure). Faithful: errKind uses the compiler's
+    # ErrorKind ids (Transient=0..Unknown=6); errName uses the
+    # per-program error-registry u32 ids. See
+    # docs/agents/register-error-union.md.
+    MUTABLE errored: Int64 = 0_i64;
+    MUTABLE errKind: Int64 = 0_i64;
+    MUTABLE errName: Int64 = 0_i64;
+    MUTABLE errMsg: String = "";
+    MUTABLE errLine: Int64 = 0_i64;
+    MUTABLE iTop: Int64 = 256_i64;
+    MUTABLE fTop: Int64 = 256_i64;
+
+    # Time-travel trace state. `recordingActive` is gated on
+    # `debuggerActive` for now -- recording without a debugger
+    # session has no consumer. `step` is a monotonic dispatch
+    # counter; each opcode arm increments it once. Events are
+    # appended via the `record*!` helpers in register_debugger.cht.
+    MUTABLE recordingActive: Int64 = 0_i64;
+    IF debuggerActive THEN recordingActive = 1_i64; END
+    MUTABLE step: Int64 = 0_i64;
+    MUTABLE traceEvents: TraceEvent[]@list = List[];
+    MUTABLE traceStrings: String[]@list = List[];
+    # Monotonic alloc-id for trace's kind=4 (allocation) events.
+    # Each container creation (LNew / MNew / LFNew / NMNew) increments
+    # this and records an event so visualizers can attribute future
+    # writes to the originating allocation.
+    MUTABLE traceAllocId: Int64 = 0_i64;
+
+    FOR ci IN (0_i64 ..< initCaps.length()) DO
+        captureSlots.append(COPY initCaps[ci]);
+    END
+    MUTABLE ip: Int64 = entryIp;
+    TIGHT WHILE ip < ops.length() DO
+        # Snapshot the instruction-start ip for error-site line lookup;
+        # `ip` itself advances past the opcode and operands as we decode.
+        instructionIp = ip;
+        step = step + 1_i64;
+        # Breakpoint check. Short-circuits to a single Int64 == 0 test
+        # when no breakpoints are set (common case). On hit: invoke the
+        # file-based debugger pause (`registerDebugPause!`). Action
+        # codes from the REPL: 0 continue, 1 step-source-line, 2
+        # step-instruction, -1 quit.
+        IF debuggerActive && isBreakpoint[ip] != 0_i64 THEN
+            # Step-over filter: while a `:n` is active, suppress pauses
+            # that fire deeper than the entry depth. We re-arm the BP
+            # at the return-IP of the originating frame so we naturally
+            # re-pause once control returns to the user's frame, then
+            # continue dispatching without prompting.
+            IF stepOverDepth >= 0_i64 && frameRetIps.length() > stepOverDepth THEN
+                isBreakpoint[ip] = 0_i64;
+                IF stepOverDepth < frameRetIps.length() THEN
+                    retTarget = frameRetIps[stepOverDepth];
+                    IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
+                        isBreakpoint[retTarget] = 1_i64;
+                    END
+                END
+            ELSE
+                line = sourceLineFor(sourceLines, ip);
+                col  = sourceLineFor(sourceColumns, ip);
+                path = sourcePathFor(sourcePaths, 0_i64);
+                action = registerDebugPause!(
+                    path, line, col, ip,
+                    varNames, iregs, fregs, sregs,
+                    iBase, fBase, frameIBases, frameFBases, frameRetIps,
+                    sourceLines, sourceColumns, isBreakpoint, breakpointEntries,
+                    traceEvents, traceStrings, step
+                ) OR 0_i64;
+                # Clear the current breakpoint so we don't re-trap here.
+                # Step actions arm a one-shot BP at the appropriate
+                # next-target IP; `:n` additionally records the entry
+                # depth so the deeper-frame filter above can suppress.
+                isBreakpoint[ip] = 0_i64;
+                stepOverDepth = -1_i64;
+                IF action == -1_i64 THEN RETURN RegisterValue.Nil; END
+                IF action == 2_i64 THEN
+                    # Step-instruction: pause at the very next opcode.
+                    nextIp = nextOpcodeIp(opcodes, ip);
+                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                        isBreakpoint[nextIp] = 1_i64;
+                    END
+                ELSE_IF action == 1_i64 THEN
+                    # Step-source-line: pause at the next opcode whose
+                    # source line differs from the current one.
+                    nextIp = nextDifferentLineIp(opcodes, sourceLines, ip, line);
+                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                        isBreakpoint[nextIp] = 1_i64;
+                    END
+                ELSE_IF action == 3_i64 THEN
+                    # Step-over (`:n`): like `:s`, but the trap-arm
+                    # filter above silently skips pauses deeper than
+                    # the current call depth.
+                    nextIp = nextDifferentLineIp(opcodes, sourceLines, ip, line);
+                    IF nextIp >= 0_i64 && nextIp < isBreakpoint.length() THEN
+                        isBreakpoint[nextIp] = 1_i64;
+                    END
+                    stepOverDepth = frameRetIps.length();
+                ELSE_IF action == 4_i64 THEN
+                    # Finish: arm a BP at the return-IP of the current
+                    # frame so the next pause happens once we return
+                    # to the caller. With no caller (top frame), there
+                    # is nothing to finish to -- act as `:c`.
+                    IF frameRetIps.length() > 0_i64 THEN
+                        retTarget = frameRetIps[frameRetIps.length() - 1_i64];
+                        IF retTarget >= 0_i64 && retTarget < isBreakpoint.length() THEN
+                            isBreakpoint[retTarget] = 1_i64;
+                        END
+                    END
+                END
+            END
+        END
+        opcode = opcodes[ip];
+        ip += 1;
+
+        MATCH opcode START
+            RegisterOp.IConst ->
+                # ICONST dst const_idx
+                    dst = ops[ip]; ip += 1;
+                    constIdx = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = getRegisterConstInt(consts, constIdx);
+                    IF recordingActive == 1_i64 THEN
+                        traceEvents.append(TraceEvent{
+                            step: step, kind: 1_i64, slot: slot,
+                            iBefore: oldVal, iAfter: iregs[slot],
+                            fBefore: 0.0, fAfter: 0.0, ip: instructionIp
+                        });
+                    END,
+            RegisterOp.IRet ->
+                # IRET src
+                    src = ops[ip]; ip += 1;
+                    IF frameRetIps.length() > 0 THEN
+                        retVal = iregs[iBase + src];
+                        last = frameRetIps.length() - 1;
+                        retDst = frameRetDsts[last];
+                        ip = frameRetIps[last];
+                        iBase = frameIBases[last];
+                        fBase = frameFBases[last];
+                        iTop = frameITops[last];
+                        fTop = frameFTops[last];
+                        frameRetIps.pop();
+                        frameRetDsts.pop();
+                        frameIBases.pop();
+                        frameFBases.pop();
+                        frameITops.pop();
+                        frameFTops.pop();
+                        iregs[iBase + retDst] = retVal;
+                    ELSE
+                    RETURN intResult(iregs[iBase + src]);
+                    END,
+            RegisterOp.Halt ->
+                # HALT
+                    RETURN RegisterValue.Nil;,
+            RegisterOp.ERaise ->
+                # ERAISE kindConst nameConst msgConst lineConst
+                # Sets VM error state. Faithful: errKind uses the
+                # compiler's ErrorKind ids; errName the registry u32 id.
+                    kc = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    lc = ops[ip]; ip += 1;
+                    errKind = getRegisterConstInt(consts, kc);
+                    errName = getRegisterConstInt(consts, nc);
+                    errMsg = getRegisterConstString(consts, mc) OR RAISE;
+                    errLine = getRegisterConstInt(consts, lc);
+                    errored = 1_i64;,
+            RegisterOp.EGuard ->
+                # EGUARD -- if errored, return from the current function
+                # immediately (propagate one frame up). No return value;
+                # `errored` is the cross-frame signal.
+                    IF errored == 1_i64 THEN
+                        IF frameRetIps.length() > 0 THEN
+                            last = frameRetIps.length() - 1;
+                            ip = frameRetIps[last];
+                            iBase = frameIBases[last];
+                            fBase = frameFBases[last];
+                            iTop = frameITops[last];
+                            fTop = frameFTops[last];
+                            frameRetIps.pop();
+                            frameRetDsts.pop();
+                            frameIBases.pop();
+                            frameFBases.pop();
+                            frameITops.pop();
+                            frameFTops.pop();
+                        ELSE
+                            RETURN RegisterValue.Nil;
+                        END
+                    END,
+            RegisterOp.EClr ->
+                # ECLR -- a CATCH clause handled the error.
+                    errored = 0_i64;
+                    errKind = 0_i64;
+                    errName = 0_i64;
+                    errMsg = "";
+                    errLine = 0_i64;,
+            RegisterOp.EMatchK ->
+                # EMATCHK dst kindConst -> dst = (errored and
+                # errKind == kind) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    kc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errKind == getRegisterConstInt(consts, kc) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EFlag ->
+                # EFLAG dst -- dst = errored ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = errored;
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EMatchN ->
+                # EMATCHN dst nameConst -> dst = (errored and
+                # errName == name) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errName == getRegisterConstInt(consts, nc) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.EMatchM ->
+                # EMATCHM dst msgConst -> dst = (errored and
+                # errMsg == msg) ? 1 : 0
+                    dst = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    IF errored == 1_i64 && errMsg == (getRegisterConstString(consts, mc) OR RAISE) THEN
+                        iregs[slot] = 1_i64;
+                    ELSE
+                        iregs[slot] = 0_i64;
+                    END
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.ERewrite ->
+                # EREWRITE kindC nameC msgC lineC maskC -- OR EXIT
+                # partial override of the active error. Unset mask
+                # bits inherit the field set by the failing call.
+                # CLEAR has no `%`; use MOD. errored is unchanged.
+                    kc = ops[ip]; ip += 1;
+                    nc = ops[ip]; ip += 1;
+                    mc = ops[ip]; ip += 1;
+                    lc = ops[ip]; ip += 1;
+                    mask = getRegisterConstInt(consts, ops[ip]); ip += 1;
+                    IF (mask MOD 2_i64) == 1_i64 THEN errKind = getRegisterConstInt(consts, kc); END
+                    IF ((mask / 2_i64) MOD 2_i64) == 1_i64 THEN errName = getRegisterConstInt(consts, nc); END
+                    IF ((mask / 4_i64) MOD 2_i64) == 1_i64 THEN errMsg = getRegisterConstString(consts, mc) OR RAISE; END
+                    IF ((mask / 8_i64) MOD 2_i64) == 1_i64 THEN errLine = getRegisterConstInt(consts, lc); END,
+            RegisterOp.IMov ->
+                # IMOV dst src
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + src];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.IAdd ->
+                # IADD dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + left] + iregs[iBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.ISub ->
+                # ISUB dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + left] - iregs[iBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.IMul ->
+                # IMUL dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + left] * iregs[iBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.IDiv ->
+                # IDIV dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + left] / iregs[iBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.ILt ->
+                # ILT dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] < iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.IGt ->
+                # IGT dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] > iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.IEq ->
+                # IEQ dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] == iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.INeq ->
+                # INEQ dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] != iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.ILte ->
+                # ILTE dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] <= iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.IGte ->
+                # IGTE dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] >= iregs[iBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.Jmp ->
+                # JMP target
+                    ip = ops[ip];,
+            RegisterOp.Jf ->
+                # JF cond target
+                    cond = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + cond] == 0_i64 THEN ip = target; END,
+            RegisterOp.JILtF ->
+                # JILTF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] >= iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.JIGtF ->
+                # JIGTF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] <= iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.JIEqF ->
+                # JIEQF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] != iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.JINeqF ->
+                # JINEQF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] == iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.JILteF ->
+                # JILTEF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] > iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.JIGteF ->
+                # JIGTEF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF iregs[iBase + left] < iregs[iBase + right] THEN ip = target; END,
+            RegisterOp.FConst ->
+                # FCONST dst const_idx
+                    dst = ops[ip]; ip += 1;
+                    constIdx = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = getRegisterConstFloat(consts, constIdx);
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FRet ->
+                # FRET src
+                    src = ops[ip]; ip += 1;
+                    IF frameRetIps.length() > 0 THEN
+                        retVal = fregs[fBase + src];
+                        last = frameRetIps.length() - 1;
+                        retDst = frameRetDsts[last];
+                        ip = frameRetIps[last];
+                        iBase = frameIBases[last];
+                        fBase = frameFBases[last];
+                        iTop = frameITops[last];
+                        fTop = frameFTops[last];
+                        frameRetIps.pop();
+                        frameRetDsts.pop();
+                        frameIBases.pop();
+                        frameFBases.pop();
+                        frameITops.pop();
+                        frameFTops.pop();
+                        fregs[fBase + retDst] = retVal;
+                    ELSE
+                    RETURN floatResult(fregs[fBase + src]);
+                    END,
+            RegisterOp.FMov ->
+                # FMOV dst src
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = fregs[fBase + src];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FAdd ->
+                # FADD dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = fregs[fBase + left] + fregs[fBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FSub ->
+                # FSUB dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = fregs[fBase + left] - fregs[fBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FMul ->
+                # FMUL dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = fregs[fBase + left] * fregs[fBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FDiv ->
+                # FDIV dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    fslot = fBase + dst;
+                    fOldVal = fregs[fslot];
+                    fregs[fslot] = fregs[fBase + left] / fregs[fBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+            RegisterOp.FLt ->
+                # FLT dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] < fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.FGt ->
+                # FGT dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] > fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.FEq ->
+                # FEQ dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] == fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.FNeq ->
+                # FNEQ dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] != fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.FLte ->
+                # FLTE dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] <= fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.FGte ->
+                # FGTE dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] >= fregs[fBase + right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.IMod ->
+                # IMOD dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    slot = iBase + dst;
+                    oldVal = iregs[slot];
+                    iregs[slot] = iregs[iBase + left] MOD iregs[iBase + right];
+                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.ICall ->
+                # ICALL dst target argc iframe fframe arg...
+                    dst = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    argc = ops[ip]; ip += 1;
+                    iFrame = ops[ip]; ip += 1;
+                    fFrame = ops[ip]; ip += 1;
+                    nextIBase = iTop;
+                    nextFBase = fTop;
+                    nextITop = nextIBase + iFrame;
+                    nextFTop = nextFBase + fFrame;
+                    IF nextITop > 512_i64 THEN print(formatVmError("i frame overflow", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)"); RETURN RegisterValue.Nil; END
+                    IF nextFTop > 512_i64 THEN print(formatVmError("f frame overflow", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)"); RETURN RegisterValue.Nil; END
+                    MUTABLE iArg: Int64 = 0;
+                    MUTABLE fArg: Int64 = 0;
+                    FOR ai IN (0_i64 ..< argc) DO
+                        argKind = ops[ip]; ip += 1;
+                        argReg = ops[ip]; ip += 1;
+                        IF argKind == 1 THEN
+                            fregs[nextFBase + fArg] = fregs[fBase + argReg];
+                            fArg += 1;
+                        ELSE
+                            iregs[nextIBase + iArg] = iregs[iBase + argReg];
+                            iArg += 1;
+                        END
+                    END
+                    frameIBases.append(iBase);
+                    frameFBases.append(fBase);
+                    frameITops.append(iTop);
+                    frameFTops.append(fTop);
+                    frameRetIps.append(ip);
+                    frameRetDsts.append(dst);
+                    iBase = nextIBase;
+                    fBase = nextFBase;
+                    iTop = nextITop;
+                    fTop = nextFTop;
+                    ip = target;,
+            RegisterOp.FCall ->
+                # FCALL dst target argc iframe fframe arg...
+                    dst = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    argc = ops[ip]; ip += 1;
+                    iFrame = ops[ip]; ip += 1;
+                    fFrame = ops[ip]; ip += 1;
+                    nextIBase = iTop;
+                    nextFBase = fTop;
+                    nextITop = nextIBase + iFrame;
+                    nextFTop = nextFBase + fFrame;
+                    IF nextITop > 512_i64 THEN print(formatVmError("i frame overflow", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)"); RETURN RegisterValue.Nil; END
+                    IF nextFTop > 512_i64 THEN print(formatVmError("f frame overflow", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)"); RETURN RegisterValue.Nil; END
+                    MUTABLE iArg: Int64 = 0;
+                    MUTABLE fArg: Int64 = 0;
+                    FOR ai IN (0_i64 ..< argc) DO
+                        argKind = ops[ip]; ip += 1;
+                        argReg = ops[ip]; ip += 1;
+                        IF argKind == 1 THEN
+                            fregs[nextFBase + fArg] = fregs[fBase + argReg];
+                            fArg += 1;
+                        ELSE
+                            iregs[nextIBase + iArg] = iregs[iBase + argReg];
+                            iArg += 1;
+                        END
+                    END
+                    frameIBases.append(iBase);
+                    frameFBases.append(fBase);
+                    frameITops.append(iTop);
+                    frameFTops.append(fTop);
+                    frameRetIps.append(ip);
+                    frameRetDsts.append(dst);
+                    iBase = nextIBase;
+                    fBase = nextFBase;
+                    iTop = nextITop;
+                    fTop = nextFTop;
+                    ip = target;,
+            RegisterOp.NCall ->
+                # NCALL ret_kind dst native_id argc (arg_kind arg_reg)*
+                    retKind = ops[ip]; ip += 1;
+                    dst = ops[ip]; ip += 1;
+                    nativeId = ops[ip]; ip += 1;
+                    argc = ops[ip]; ip += 1;
+                    MUTABLE argKind0: Int64 = -1;
+                    MUTABLE argReg0: Int64 = 0;
+                    MUTABLE argKind1: Int64 = -1;
+                    MUTABLE argReg1: Int64 = 0;
+                    MUTABLE argKind2: Int64 = -1;
+                    MUTABLE argReg2: Int64 = 0;
+                    IF argc > 0 THEN
+                        argKind0 = ops[ip]; ip += 1;
+                        argReg0 = ops[ip]; ip += 1;
+                    END
+                    IF argc > 1 THEN
+                        argKind1 = ops[ip]; ip += 1;
+                        argReg1 = ops[ip]; ip += 1;
+                    END
+                    IF argc > 2 THEN
+                        argKind2 = ops[ip]; ip += 1;
+                        argReg2 = ops[ip]; ip += 1;
+                    END
+                    PARTIAL MATCH nativeId START
+                        0 -> iregs[iBase + dst] = timestampMs();,
+                        1 -> fregs[fBase + dst] = random();,
+                        2 -> iregs[iBase + dst] = randomInt(iregs[iBase + argReg0]);,
+                        3 -> sregs[dst] = iregs[iBase + argReg0].toString();,
+                        4 -> iregs[iBase + dst] = sregs[argReg0].length();,
+                        5 -> IF startsWith?(sregs[argReg0], sregs[argReg1]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+                        6 -> IF contains?(sregs[argReg0], sregs[argReg1]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+                        7 -> sregs[dst] = charAt(sregs[argReg0], iregs[iBase + argReg1]);,
+                        8 -> sregs[dst] = substr(sregs[argReg0], iregs[iBase + argReg1], iregs[iBase + argReg2]);,
+                        9 -> fregs[fBase + dst] = toNumber(sregs[argReg0]) OR fregs[fBase + argReg1];,
+                        10 -> iregs[iBase + dst] = registerFloatToInt(fregs[fBase + argReg0]);,
+                        11 -> fregs[fBase + dst] = toFloat(iregs[iBase + argReg0]);,
+                        12 -> sregs[dst] = replace(sregs[argReg0], sregs[argReg1], sregs[argReg2]);,
+                        13 -> sregs[dst] = downcase(sregs[argReg0]);,
+                        14 -> sregs[dst] = upcase(sregs[argReg0]);,
+                        15 -> sregs[dst] = readLine!() OR RAISE;,
+                        16 -> iregs[iBase + dst] = framePeakBytes();,
+                        17 -> iregs[iBase + dst] = codepointCount(sregs[argReg0]);,
+                        18 -> sregs[dst] = readFile(sregs[argReg0]) OR RAISE;,
+                        19 -> writeFile(sregs[argReg0], sregs[argReg1]) OR RAISE;,
+                        20 -> iregs[iBase + dst] = indexOf(sregs[argReg0], sregs[argReg1]) OR -1_i64;,
+                        21 -> iregs[iBase + dst] = 1_i64;,
+                        22 -> iregs[iBase + dst] = 0_i64;,
+                        DEFAULT -> print(formatVmError("unknown native " + nativeId.toString(), instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    END,
+            RegisterOp.IPrint ->
+                # IPRINT prefix_const int_reg suffix_const
+                    prefixIdx = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    suffixIdx = ops[ip]; ip += 1;
+                    print((getRegisterConstString(consts, prefixIdx) OR RAISE) + iregs[iBase + src].toString() + (getRegisterConstString(consts, suffixIdx) OR RAISE));,
+            RegisterOp.IPrint2 ->
+                # IPRINT2 prefix_const int_reg middle_const int_reg suffix_const
+                    prefixIdx = ops[ip]; ip += 1;
+                    leftSrc = ops[ip]; ip += 1;
+                    middleIdx = ops[ip]; ip += 1;
+                    rightSrc = ops[ip]; ip += 1;
+                    suffixIdx = ops[ip]; ip += 1;
+                    print((getRegisterConstString(consts, prefixIdx) OR RAISE) + iregs[iBase + leftSrc].toString() + (getRegisterConstString(consts, middleIdx) OR RAISE) + iregs[iBase + rightSrc].toString() + (getRegisterConstString(consts, suffixIdx) OR RAISE));,
+            RegisterOp.SConst ->
+                # SCONST dst const_idx
+                    dst = ops[ip]; ip += 1;
+                    constIdx = ops[ip]; ip += 1;
+                    sOldVal = COPY sregs[dst];
+                    sregs[dst] = getRegisterConstString(consts, constIdx) OR RAISE;
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.SRet ->
+                # SRET src
+                    src = ops[ip]; ip += 1;
+                    RETURN stringResult(sregs[src]) OR RAISE;,
+            RegisterOp.SMov ->
+                # SMOV dst src
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    sOldVal = COPY sregs[dst];
+                    sregs[dst] = COPY sregs[src];
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.SPrint ->
+                # SPRINT src -- print sregs[src] followed by newline.
+                # Dedicated string-print op so `print(strVar)` doesn't
+                # pretend to be IPRINT-with-zero (IPRINT was a benchmark
+                # int-print and trails a stray "0" for string args).
+                    src = ops[ip]; ip += 1;
+                    print(sregs[src]);,
+            RegisterOp.SConcat ->
+                # SCONCAT dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    sOldVal = COPY sregs[dst];
+                    sregs[dst] = sregs[left] + sregs[right];
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+            RegisterOp.LNew ->
+                # LNEW dst -- allocate Int64 list. Container kind tag = 1.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN list0 = List[];
+                    ELSE_IF dst == 1 THEN list1 = List[];
+                    ELSE_IF dst == 2 THEN list2 = List[];
+                    ELSE_IF dst == 3 THEN list3 = List[]; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 1_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.LAppendI ->
+                # LAPPENDI list src
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN list0.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 1 THEN list1.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 2 THEN list2.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 3 THEN list3.append(iregs[iBase + src]); END,
+            RegisterOp.LGetI ->
+                # LGETI dst list idx
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN iregs[iBase + dst] = list0[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = list1[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = list2[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = list3[iregs[iBase + idxReg]]; END,
+            RegisterOp.LLen ->
+                # LLEN dst list
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN iregs[iBase + dst] = list0.length();
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = list1.length();
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = list2.length();
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = list3.length(); END,
+            RegisterOp.MNew ->
+                # MNEW dst -- allocate string-keyed map. Container kind tag = 3.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN map0 = {};
+                    ELSE_IF dst == 1 THEN map1 = {};
+                    ELSE_IF dst == 2 THEN map2 = {};
+                    ELSE_IF dst == 3 THEN map3 = {}; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 3_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.MPutI ->
+                # MPUTI map key_const src
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN map0[mapKey] = iregs[iBase + src];
+                    ELSE_IF mapReg == 1 THEN map1[mapKey] = iregs[iBase + src];
+                    ELSE_IF mapReg == 2 THEN map2[mapKey] = iregs[iBase + src];
+                    ELSE_IF mapReg == 3 THEN map3[mapKey] = iregs[iBase + src]; END,
+            RegisterOp.MGetI ->
+                # MGETI dst map key_const fallback
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    fallback = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN iregs[iBase + dst] = map0[mapKey] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = map1[mapKey] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = map2[mapKey] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = map3[mapKey] OR iregs[iBase + fallback]; END,
+            RegisterOp.LFNew ->
+                # LFNEW dst -- allocate Float64 list. Container kind tag = 2.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN flist0 = List[];
+                    ELSE_IF dst == 1 THEN flist1 = List[];
+                    ELSE_IF dst == 2 THEN flist2 = List[];
+                    ELSE_IF dst == 3 THEN flist3 = List[]; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 2_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.LFAppend ->
+                # LFAPPEND list src
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN flist0.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 1 THEN flist1.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 2 THEN flist2.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 3 THEN flist3.append(fregs[fBase + src]); END,
+            RegisterOp.LFGet ->
+                # LFGET dst list idx
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN fregs[fBase + dst] = flist0[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 1 THEN fregs[fBase + dst] = flist1[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 2 THEN fregs[fBase + dst] = flist2[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 3 THEN fregs[fBase + dst] = flist3[iregs[iBase + idxReg]]; END,
+            RegisterOp.SEq ->
+                # SEQ dst left right
+                    dst = ops[ip]; ip += 1;
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    IF sregs[left] == sregs[right] THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END,
+            RegisterOp.LSSet ->
+                # LSSET list idx src
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN slist0[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 1 THEN slist1[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 2 THEN slist2[iregs[iBase + idxReg]] = COPY sregs[src];
+                    ELSE_IF listReg == 3 THEN slist3[iregs[iBase + idxReg]] = COPY sregs[src]; END,
+            RegisterOp.LSetI ->
+                # LSETI list idx src
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN list0[iregs[iBase + idxReg]] = iregs[iBase + src];
+                    ELSE_IF listReg == 1 THEN list1[iregs[iBase + idxReg]] = iregs[iBase + src];
+                    ELSE_IF listReg == 2 THEN list2[iregs[iBase + idxReg]] = iregs[iBase + src];
+                    ELSE_IF listReg == 3 THEN list3[iregs[iBase + idxReg]] = iregs[iBase + src]; END,
+            RegisterOp.LFSet ->
+                # LFSET list idx src
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN flist0[iregs[iBase + idxReg]] = fregs[fBase + src];
+                    ELSE_IF listReg == 1 THEN flist1[iregs[iBase + idxReg]] = fregs[fBase + src];
+                    ELSE_IF listReg == 2 THEN flist2[iregs[iBase + idxReg]] = fregs[fBase + src];
+                    ELSE_IF listReg == 3 THEN flist3[iregs[iBase + idxReg]] = fregs[fBase + src]; END,
+            RegisterOp.LFLen ->
+                # LFLEN dst list
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN iregs[iBase + dst] = flist0.length();
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = flist1.length();
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = flist2.length();
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = flist3.length(); END,
+            RegisterOp.MLen ->
+                # MLEN dst map
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN iregs[iBase + dst] = map0.length();
+                    ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = map1.length();
+                    ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = map2.length();
+                    ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = map3.length(); END,
+            RegisterOp.MContains ->
+                # MCONTAINS dst map key_const
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN IF map0.contains?(mapKey) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 1 THEN IF map1.contains?(mapKey) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 2 THEN IF map2.contains?(mapKey) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 3 THEN IF map3.contains?(mapKey) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END END,
+            RegisterOp.MDelete ->
+                # MDELETE map key_const
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN map0.delete(mapKey);
+                    ELSE_IF mapReg == 1 THEN map1.delete(mapKey);
+                    ELSE_IF mapReg == 2 THEN map2.delete(mapKey);
+                    ELSE_IF mapReg == 3 THEN map3.delete(mapKey); END,
+            RegisterOp.NMPutI ->
+                # NMPUTI map key_reg src
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN nmap0[iregs[iBase + keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 1 THEN nmap1[iregs[iBase + keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 2 THEN nmap2[iregs[iBase + keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 3 THEN nmap3[iregs[iBase + keyReg]] = iregs[iBase + src]; END,
+            RegisterOp.NMGetI ->
+                # NMGETI dst map key_reg fallback
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    fallback = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN iregs[iBase + dst] = nmap0[iregs[iBase + keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = nmap1[iregs[iBase + keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = nmap2[iregs[iBase + keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = nmap3[iregs[iBase + keyReg]] OR iregs[iBase + fallback]; END,
+            RegisterOp.NMContains ->
+                # NMCONTAINS dst map key_reg
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN IF nmap0.contains?(iregs[iBase + keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 1 THEN IF nmap1.contains?(iregs[iBase + keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 2 THEN IF nmap2.contains?(iregs[iBase + keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 3 THEN IF nmap3.contains?(iregs[iBase + keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END END,
+            RegisterOp.NMDelete ->
+                # NMDELETE map key_reg
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN nmap0.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 1 THEN nmap1.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 2 THEN nmap2.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 3 THEN nmap3.delete(iregs[iBase + keyReg]); END,
+            RegisterOp.NMNew ->
+                # NMNEW dst -- allocate Int64-keyed map. Container kind tag = 4.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN nmap0 = {};
+                    ELSE_IF dst == 1 THEN nmap1 = {};
+                    ELSE_IF dst == 2 THEN nmap2 = {};
+                    ELSE_IF dst == 3 THEN nmap3 = {}; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.NMLen ->
+                # NMLEN dst map
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN iregs[iBase + dst] = nmap0.length();
+                    ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = nmap1.length();
+                    ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = nmap2.length();
+                    ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = nmap3.length(); END,
+            RegisterOp.NMFNew ->
+                # NMFNEW dst -- allocate Int64-keyed Float64 map. Container kind tag = 4.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN nfmap0 = {};
+                    ELSE_IF dst == 1 THEN nfmap1 = {};
+                    ELSE_IF dst == 2 THEN nfmap2 = {};
+                    ELSE_IF dst == 3 THEN nfmap3 = {}; END
+                    IF recordingActive == 1_i64 THEN
+                        traceAllocId = traceAllocId + 1_i64;
+                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                    END,
+            RegisterOp.NMPutF ->
+                # NMPUTF map key_reg src
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN nfmap0[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 1 THEN nfmap1[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 2 THEN nfmap2[iregs[iBase + keyReg]] = fregs[fBase + src];
+                    ELSE_IF mapReg == 3 THEN nfmap3[iregs[iBase + keyReg]] = fregs[fBase + src]; END,
+            RegisterOp.NMGetF ->
+                # NMGETF dst map key_reg fallback
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    fallback = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN fregs[fBase + dst] = nfmap0[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 1 THEN fregs[fBase + dst] = nfmap1[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 2 THEN fregs[fBase + dst] = nfmap2[iregs[iBase + keyReg]] OR fregs[fBase + fallback];
+                    ELSE_IF mapReg == 3 THEN fregs[fBase + dst] = nfmap3[iregs[iBase + keyReg]] OR fregs[fBase + fallback]; END,
+            RegisterOp.JFLtF ->
+                # JFLTF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] >= fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.JFGtF ->
+                # JFGTF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] <= fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.JFEqF ->
+                # JFEQF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] != fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.JFNeqF ->
+                # JFNEQF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] == fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.JFLteF ->
+                # JFLTEF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] > fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.JFGteF ->
+                # JFGTEF left right target
+                    left = ops[ip]; ip += 1;
+                    right = ops[ip]; ip += 1;
+                    target = ops[ip]; ip += 1;
+                    IF fregs[fBase + left] < fregs[fBase + right] THEN ip = target; END,
+            RegisterOp.Reserved34 ->
+                    print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    RETURN RegisterValue.Nil;,
+            RegisterOp.Reserved35 ->
+                    print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    RETURN RegisterValue.Nil;,
+            RegisterOp.Reserved36 ->
+                    print(formatVmError("reserved opcode", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    RETURN RegisterValue.Nil;,
+            RegisterOp.Trap ->
+                    # Reserved for future inline-trap mechanism. The
+                    # current breakpoint implementation pauses via a
+                    # parallel `isBreakpoint[]` check before MATCH, so
+                    # this opcode is never produced today; the arm
+                    # exists only for exhaustive-match coverage.
+                    print(formatVmError("trap opcode (no producer wired)", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    RETURN RegisterValue.Nil;,
+            RegisterOp.LSNew ->
+                # LSNEW dst -- allocate String list slot.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN slist0 = List[];
+                    ELSE_IF dst == 1 THEN slist1 = List[];
+                    ELSE_IF dst == 2 THEN slist2 = List[];
+                    ELSE_IF dst == 3 THEN slist3 = List[]; END,
+            RegisterOp.LSAppend ->
+                # LSAPPEND list src
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN slist0.append(COPY sregs[src]);
+                    ELSE_IF listReg == 1 THEN slist1.append(COPY sregs[src]);
+                    ELSE_IF listReg == 2 THEN slist2.append(COPY sregs[src]);
+                    ELSE_IF listReg == 3 THEN slist3.append(COPY sregs[src]); END,
+            RegisterOp.LSGet ->
+                # LSGET dst list idx
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN sregs[dst] = COPY slist0[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 1 THEN sregs[dst] = COPY slist1[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 2 THEN sregs[dst] = COPY slist2[iregs[iBase + idxReg]];
+                    ELSE_IF listReg == 3 THEN sregs[dst] = COPY slist3[iregs[iBase + idxReg]]; END,
+            RegisterOp.LSLen ->
+                # LSLEN dst list
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN iregs[iBase + dst] = slist0.length();
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = slist1.length();
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = slist2.length();
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = slist3.length(); END,
+            RegisterOp.LSJoin ->
+                # LSJOIN dst list sep
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    sepReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN sregs[dst] = join(slist0, sregs[sepReg]);
+                    ELSE_IF listReg == 1 THEN sregs[dst] = join(slist1, sregs[sepReg]);
+                    ELSE_IF listReg == 2 THEN sregs[dst] = join(slist2, sregs[sepReg]);
+                    ELSE_IF listReg == 3 THEN sregs[dst] = join(slist3, sregs[sepReg]); END,
+            RegisterOp.VMNew ->
+                # VMNEW dst -- allocate HashMap<RegisterValue> slot.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN vmap0 = {};
+                    ELSE_IF dst == 1 THEN vmap1 = {};
+                    ELSE_IF dst == 2 THEN vmap2 = {};
+                    ELSE_IF dst == 3 THEN vmap3 = {}; END,
+            RegisterOp.VMPutNil ->
+                # VMPUTNIL map key_const
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN vmap0[mapKey] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 1 THEN vmap1[mapKey] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 2 THEN vmap2[mapKey] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 3 THEN vmap3[mapKey] = RegisterValue.Nil; END,
+            RegisterOp.VMPutI ->
+                # VMPUTI map key_const src
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN vmap0[mapKey] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[mapKey] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[mapKey] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[mapKey] = RegisterValue{ Int64Val: iregs[iBase + src] }; END,
+            RegisterOp.VMPutF ->
+                # VMPUTF map key_const src
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN vmap0[mapKey] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[mapKey] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[mapKey] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[mapKey] = RegisterValue{ Number: fregs[fBase + src] }; END,
+            RegisterOp.VMPutS ->
+                # VMPUTS map key_const src -- stores a COPY of the
+                # source string into the map. The map's @list-style
+                # cleanup deinits the variant on container teardown,
+                # matching what compiled CLEAR does for HashMap<UserUnion>.
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN vmap0[mapKey] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[mapKey] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[mapKey] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[mapKey] = RegisterValue{ Str: COPY sregs[src] }; END,
+            RegisterOp.VMGetTag ->
+                # VMGETTAG dst_tag map key_const miss_tag_reg -- writes
+                # 0/1/2/3 for Nil/Int64/Number/Str, or iregs[miss_tag_reg]
+                # if the key is absent. Tag id matches RegisterValue's
+                # variant-decl order.
+                    dstTag = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    missTagReg = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN
+                        IF vmap0.contains?(mapKey) THEN
+                            PARTIAL MATCH vmap0[mapKey] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 1 THEN
+                        IF vmap1.contains?(mapKey) THEN
+                            PARTIAL MATCH vmap1[mapKey] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 2 THEN
+                        IF vmap2.contains?(mapKey) THEN
+                            PARTIAL MATCH vmap2[mapKey] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 3 THEN
+                        IF vmap3.contains?(mapKey) THEN
+                            PARTIAL MATCH vmap3[mapKey] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    END,
+            RegisterOp.VMGetI ->
+                # VMGETI dst map key_const -- caller must have already
+                # checked the tag is Int64Val via VMGETTAG.
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[mapKey] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[mapKey] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[mapKey] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[mapKey] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.VMGetF ->
+                # VMGETF dst map key_const
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[mapKey] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[mapKey] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[mapKey] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[mapKey] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.VMGetS ->
+                # VMGETS dst map key_const
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyIdx = ops[ip]; ip += 1;
+                    mapKey = getRegisterConstString(consts, keyIdx) OR RAISE;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[mapKey] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[mapKey] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[mapKey] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[mapKey] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END END,
+            RegisterOp.MPutIR ->
+                # MPUTIR map key_reg src -- HashMap<Int64> put with
+                # dynamic key (sreg). HashMap COPYs the key string into
+                # its own storage on insert, matching CLEAR's compiled
+                # `map[k] = v` semantics for owned-key maps.
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN map0[sregs[keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 1 THEN map1[sregs[keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 2 THEN map2[sregs[keyReg]] = iregs[iBase + src];
+                    ELSE_IF mapReg == 3 THEN map3[sregs[keyReg]] = iregs[iBase + src]; END,
+            RegisterOp.MGetIR ->
+                # MGETIR dst map key_reg fallback
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    fallback = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN iregs[iBase + dst] = map0[sregs[keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 1 THEN iregs[iBase + dst] = map1[sregs[keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 2 THEN iregs[iBase + dst] = map2[sregs[keyReg]] OR iregs[iBase + fallback];
+                    ELSE_IF mapReg == 3 THEN iregs[iBase + dst] = map3[sregs[keyReg]] OR iregs[iBase + fallback]; END,
+            RegisterOp.MContainsR ->
+                # MCONTAINSR dst map key_reg
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN IF map0.contains?(sregs[keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 1 THEN IF map1.contains?(sregs[keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 2 THEN IF map2.contains?(sregs[keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END
+                    ELSE_IF mapReg == 3 THEN IF map3.contains?(sregs[keyReg]) THEN iregs[iBase + dst] = 1_i64; ELSE iregs[iBase + dst] = 0_i64; END END,
+            RegisterOp.VMPutNilR ->
+                # VMPUTNILR map key_reg
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN vmap0[sregs[keyReg]] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 1 THEN vmap1[sregs[keyReg]] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 2 THEN vmap2[sregs[keyReg]] = RegisterValue.Nil;
+                    ELSE_IF mapReg == 3 THEN vmap3[sregs[keyReg]] = RegisterValue.Nil; END,
+            RegisterOp.VMPutIR ->
+                # VMPUTIR map key_reg src
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN vmap0[sregs[keyReg]] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[sregs[keyReg]] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[sregs[keyReg]] = RegisterValue{ Int64Val: iregs[iBase + src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[sregs[keyReg]] = RegisterValue{ Int64Val: iregs[iBase + src] }; END,
+            RegisterOp.VMPutFR ->
+                # VMPUTFR map key_reg src
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN vmap0[sregs[keyReg]] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[sregs[keyReg]] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[sregs[keyReg]] = RegisterValue{ Number: fregs[fBase + src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[sregs[keyReg]] = RegisterValue{ Number: fregs[fBase + src] }; END,
+            RegisterOp.VMPutSR ->
+                # VMPUTSR map key_reg src -- copies both key and value
+                # strings into the map's own heap storage, matching
+                # what compiled CLEAR does for HashMap<UserUnion>.
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN vmap0[sregs[keyReg]] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 1 THEN vmap1[sregs[keyReg]] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 2 THEN vmap2[sregs[keyReg]] = RegisterValue{ Str: COPY sregs[src] };
+                    ELSE_IF mapReg == 3 THEN vmap3[sregs[keyReg]] = RegisterValue{ Str: COPY sregs[src] }; END,
+            RegisterOp.VMGetTagR ->
+                # VMGETTAGR dst_tag map key_reg miss_tag_reg
+                    dstTag = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    missTagReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN
+                        IF vmap0.contains?(sregs[keyReg]) THEN
+                            PARTIAL MATCH vmap0[sregs[keyReg]] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 1 THEN
+                        IF vmap1.contains?(sregs[keyReg]) THEN
+                            PARTIAL MATCH vmap1[sregs[keyReg]] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 2 THEN
+                        IF vmap2.contains?(sregs[keyReg]) THEN
+                            PARTIAL MATCH vmap2[sregs[keyReg]] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    ELSE_IF mapReg == 3 THEN
+                        IF vmap3.contains?(sregs[keyReg]) THEN
+                            PARTIAL MATCH vmap3[sregs[keyReg]] OR RegisterValue.Nil START
+                                RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                                RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                                RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                                RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                            END
+                        ELSE iregs[iBase + dstTag] = iregs[iBase + missTagReg];
+                        END
+                    END,
+            RegisterOp.VMGetIR ->
+                # VMGETIR dst map key_reg
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.VMGetFR ->
+                # VMGETFR dst map key_reg
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.VMGetSR ->
+                # VMGETSR dst map key_reg
+                    dst = ops[ip]; ip += 1;
+                    mapReg = ops[ip]; ip += 1;
+                    keyReg = ops[ip]; ip += 1;
+                    IF mapReg == 0 THEN PARTIAL MATCH vmap0[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 1 THEN PARTIAL MATCH vmap1[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 2 THEN PARTIAL MATCH vmap2[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF mapReg == 3 THEN PARTIAL MATCH vmap3[sregs[keyReg]] OR RegisterValue.Nil START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END END,
+            RegisterOp.LVNew ->
+                # LVNEW dst -- allocate RegisterValue list slot.
+                    dst = ops[ip]; ip += 1;
+                    IF dst == 0 THEN vlist0 = List[];
+                    ELSE_IF dst == 1 THEN vlist1 = List[];
+                    ELSE_IF dst == 2 THEN vlist2 = List[];
+                    ELSE_IF dst == 3 THEN vlist3 = List[]; END,
+            RegisterOp.LVAppNil ->
+                # LVAPPNIL list
+                    listReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN vlist0.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue.Nil); END,
+            RegisterOp.LVAppI ->
+                # LVAPPI list src
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Int64Val: iregs[iBase + src] }); END,
+            RegisterOp.LVAppF ->
+                # LVAPPF list src
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Number: fregs[fBase + src] }); END,
+            RegisterOp.LVAppS ->
+                # LVAPPS list src -- COPYs the source string into the
+                # list element's heap storage; @list cleanup runs the
+                # standard String cleanup on rewind, identical to what
+                # compiled CLEAR's UserUnion[]@list cleanup does.
+                    listReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Str: COPY sregs[src] }); END,
+            RegisterOp.LVLen ->
+                # LVLEN dst list
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN iregs[iBase + dst] = vlist0.length();
+                    ELSE_IF listReg == 1 THEN iregs[iBase + dst] = vlist1.length();
+                    ELSE_IF listReg == 2 THEN iregs[iBase + dst] = vlist2.length();
+                    ELSE_IF listReg == 3 THEN iregs[iBase + dst] = vlist3.length(); END,
+            RegisterOp.LVGetTag ->
+                # LVGETTAG dst_tag list idx -- writes 0/1/2/3 for
+                # Nil/Int64/Number/Str. Caller is expected to have
+                # bounds-checked the index.
+                    dstTag = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN
+                        PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START
+                            RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                            RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                            RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                            RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                        END
+                    ELSE_IF listReg == 1 THEN
+                        PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START
+                            RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                            RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                            RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                            RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                        END
+                    ELSE_IF listReg == 2 THEN
+                        PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START
+                            RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                            RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                            RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                            RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                        END
+                    ELSE_IF listReg == 3 THEN
+                        PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START
+                            RegisterValue.Nil       -> iregs[iBase + dstTag] = 0_i64;,
+                            RegisterValue.Int64Val  -> iregs[iBase + dstTag] = 1_i64;,
+                            RegisterValue.Number    -> iregs[iBase + dstTag] = 2_i64;,
+                            RegisterValue.Str       -> iregs[iBase + dstTag] = 3_i64;
+                        END
+                    END,
+            RegisterOp.LVGetI ->
+                # LVGETI dst list idx -- caller is expected to have
+                # already checked the tag is Int64Val via LVGETTAG.
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Int64Val AS n -> iregs[iBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.LVGetF ->
+                # LVGETF dst list idx
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Number AS n -> fregs[fBase + dst] = n;, DEFAULT -> PASS; END END,
+            RegisterOp.LVGetS ->
+                # LVGETS dst list idx
+                    dst = ops[ip]; ip += 1;
+                    listReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    IF listReg == 0 THEN PARTIAL MATCH vlist0[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 1 THEN PARTIAL MATCH vlist1[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 2 THEN PARTIAL MATCH vlist2[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END
+                    ELSE_IF listReg == 3 THEN PARTIAL MATCH vlist3[iregs[iBase + idxReg]] START RegisterValue.Str AS s -> sregs[dst] = COPY s;, DEFAULT -> PASS; END END,
+            RegisterOp.LSSplit ->
+                # LSSPLIT dst src sep -- fill slist[dst] with the
+                # parts of sregs[src] split on sregs[sep]. Mirrors the
+                # `<string>.split(<sep>)` builtin.
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    sep = ops[ip]; ip += 1;
+                    IF dst == 0 THEN slist0 = split(sregs[src], sregs[sep]);
+                    ELSE_IF dst == 1 THEN slist1 = split(sregs[src], sregs[sep]);
+                    ELSE_IF dst == 2 THEN slist2 = split(sregs[src], sregs[sep]);
+                    ELSE_IF dst == 3 THEN slist3 = split(sregs[src], sregs[sep]); END,
+            RegisterOp.MKeys ->
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF src == 0 THEN
+                      IF dst == 0 THEN slist0 = map0.keys();
+                      ELSE_IF dst == 1 THEN slist1 = map0.keys();
+                      ELSE_IF dst == 2 THEN slist2 = map0.keys();
+                      ELSE_IF dst == 3 THEN slist3 = map0.keys(); END
+                    ELSE_IF src == 1 THEN
+                      IF dst == 0 THEN slist0 = map1.keys();
+                      ELSE_IF dst == 1 THEN slist1 = map1.keys();
+                      ELSE_IF dst == 2 THEN slist2 = map1.keys();
+                      ELSE_IF dst == 3 THEN slist3 = map1.keys(); END
+                    ELSE_IF src == 2 THEN
+                      IF dst == 0 THEN slist0 = map2.keys();
+                      ELSE_IF dst == 1 THEN slist1 = map2.keys();
+                      ELSE_IF dst == 2 THEN slist2 = map2.keys();
+                      ELSE_IF dst == 3 THEN slist3 = map2.keys(); END
+                    ELSE_IF src == 3 THEN
+                      IF dst == 0 THEN slist0 = map3.keys();
+                      ELSE_IF dst == 1 THEN slist1 = map3.keys();
+                      ELSE_IF dst == 2 THEN slist2 = map3.keys();
+                      ELSE_IF dst == 3 THEN slist3 = map3.keys(); END
+                    END,
+            RegisterOp.MValues ->
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF src == 0 THEN
+                      IF dst == 0 THEN list0 = map0.values();
+                      ELSE_IF dst == 1 THEN list1 = map0.values();
+                      ELSE_IF dst == 2 THEN list2 = map0.values();
+                      ELSE_IF dst == 3 THEN list3 = map0.values(); END
+                    ELSE_IF src == 1 THEN
+                      IF dst == 0 THEN list0 = map1.values();
+                      ELSE_IF dst == 1 THEN list1 = map1.values();
+                      ELSE_IF dst == 2 THEN list2 = map1.values();
+                      ELSE_IF dst == 3 THEN list3 = map1.values(); END
+                    ELSE_IF src == 2 THEN
+                      IF dst == 0 THEN list0 = map2.values();
+                      ELSE_IF dst == 1 THEN list1 = map2.values();
+                      ELSE_IF dst == 2 THEN list2 = map2.values();
+                      ELSE_IF dst == 3 THEN list3 = map2.values(); END
+                    ELSE_IF src == 3 THEN
+                      IF dst == 0 THEN list0 = map3.values();
+                      ELSE_IF dst == 1 THEN list1 = map3.values();
+                      ELSE_IF dst == 2 THEN list2 = map3.values();
+                      ELSE_IF dst == 3 THEN list3 = map3.values(); END
+                    END,
+            RegisterOp.NMKeys ->
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF src == 0 THEN
+                      IF dst == 0 THEN list0 = nmap0.keys();
+                      ELSE_IF dst == 1 THEN list1 = nmap0.keys();
+                      ELSE_IF dst == 2 THEN list2 = nmap0.keys();
+                      ELSE_IF dst == 3 THEN list3 = nmap0.keys(); END
+                    ELSE_IF src == 1 THEN
+                      IF dst == 0 THEN list0 = nmap1.keys();
+                      ELSE_IF dst == 1 THEN list1 = nmap1.keys();
+                      ELSE_IF dst == 2 THEN list2 = nmap1.keys();
+                      ELSE_IF dst == 3 THEN list3 = nmap1.keys(); END
+                    ELSE_IF src == 2 THEN
+                      IF dst == 0 THEN list0 = nmap2.keys();
+                      ELSE_IF dst == 1 THEN list1 = nmap2.keys();
+                      ELSE_IF dst == 2 THEN list2 = nmap2.keys();
+                      ELSE_IF dst == 3 THEN list3 = nmap2.keys(); END
+                    ELSE_IF src == 3 THEN
+                      IF dst == 0 THEN list0 = nmap3.keys();
+                      ELSE_IF dst == 1 THEN list1 = nmap3.keys();
+                      ELSE_IF dst == 2 THEN list2 = nmap3.keys();
+                      ELSE_IF dst == 3 THEN list3 = nmap3.keys(); END
+                    END,
+            RegisterOp.NMValues ->
+                    dst = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    IF src == 0 THEN
+                      IF dst == 0 THEN list0 = nmap0.values();
+                      ELSE_IF dst == 1 THEN list1 = nmap0.values();
+                      ELSE_IF dst == 2 THEN list2 = nmap0.values();
+                      ELSE_IF dst == 3 THEN list3 = nmap0.values(); END
+                    ELSE_IF src == 1 THEN
+                      IF dst == 0 THEN list0 = nmap1.values();
+                      ELSE_IF dst == 1 THEN list1 = nmap1.values();
+                      ELSE_IF dst == 2 THEN list2 = nmap1.values();
+                      ELSE_IF dst == 3 THEN list3 = nmap1.values(); END
+                    ELSE_IF src == 2 THEN
+                      IF dst == 0 THEN list0 = nmap2.values();
+                      ELSE_IF dst == 1 THEN list1 = nmap2.values();
+                      ELSE_IF dst == 2 THEN list2 = nmap2.values();
+                      ELSE_IF dst == 3 THEN list3 = nmap2.values(); END
+                    ELSE_IF src == 3 THEN
+                      IF dst == 0 THEN list0 = nmap3.values();
+                      ELSE_IF dst == 1 THEN list1 = nmap3.values();
+                      ELSE_IF dst == 2 THEN list2 = nmap3.values();
+                      ELSE_IF dst == 3 THEN list3 = nmap3.values(); END
+                    END,
+            RegisterOp.IHNew ->
+                    dst = ops[ip]; ip += 1;
+                    newHandle = intListHandles.length();
+                    intListHandles.append(RegisterIntListHandle{ values: [] });
+                    iregs[iBase + dst] = newHandle;,
+            RegisterOp.IHAppend ->
+                    handleReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    intListHandles[iregs[iBase + handleReg]].values.append(iregs[iBase + src]);,
+            RegisterOp.IHGet ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+            RegisterOp.IHLen ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = intListHandles[iregs[iBase + handleReg]].values.length();,
+            RegisterOp.SHNew ->
+                    dst = ops[ip]; ip += 1;
+                    newHandle = stringListHandles.length();
+                    stringListHandles.append(RegisterStringListHandle{ values: [] });
+                    iregs[iBase + dst] = newHandle;,
+            RegisterOp.SHAppend ->
+                    handleReg = ops[ip]; ip += 1;
+                    src = ops[ip]; ip += 1;
+                    stringListHandles[iregs[iBase + handleReg]].values.append(COPY sregs[src]);,
+            RegisterOp.SHGet ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    idxReg = ops[ip]; ip += 1;
+                    sregs[dst] = COPY stringListHandles[iregs[iBase + handleReg]].values[iregs[iBase + idxReg]];,
+            RegisterOp.SHLen ->
+                    dst = ops[ip]; ip += 1;
+                    handleReg = ops[ip]; ip += 1;
+                    iregs[iBase + dst] = stringListHandles[iregs[iBase + handleReg]].values.length();,
+            RegisterOp.BgSpawn ->
+                    bgDst = ops[ip]; ip += 1;
+                    bgEntry = ops[ip]; ip += 1;
+                    ip += 1;
+                    MUTABLE bgCaps: RegisterValue[]@list = List[];
+                    FOR bci IN (0_i64 ..< pendingCaps.length()) DO bgCaps.append(COPY pendingCaps[bci]); END
+                    pendingCaps = List[];
+                    bgFut: ~RegisterValue = BG { @service ->
+                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR RAISE;
+                    };
+                    bgNewFid = futureTable.length();
+                    futureTable.append(bgFut);
+                    iregs[iBase + bgDst] = bgNewFid;,
+            RegisterOp.FNextI ->
+                    fniDst = ops[ip]; ip += 1;
+                    fniFid = ops[ip]; ip += 1;
+                    fniFidVal = iregs[iBase + fniFid];
+                    MUTABLE fniPv: RegisterValue = RegisterValue.Nil;
+                    fniKey = fniFidVal.toString();
+                    IF futureResolved[fniKey] AS fniCached THEN
+                        fniPv = COPY fniCached;
+                    ELSE
+                        fniPv = NEXT futureTable[fniFidVal];
+                        futureResolved[fniKey] = COPY fniPv;
+                    END
+                    PARTIAL MATCH fniPv START
+                        RegisterValue.Int64Val AS fniI -> iregs[iBase + fniDst] = fniI;,
+                        RegisterValue.Number AS fniN -> iregs[iBase + fniDst] = toInt(fniN);,
+                        DEFAULT -> iregs[iBase + fniDst] = 0_i64;
+                    END,
+            RegisterOp.FNextF ->
+                    fnfDst = ops[ip]; ip += 1;
+                    fnfFid = ops[ip]; ip += 1;
+                    fnfFidVal = iregs[iBase + fnfFid];
+                    MUTABLE fnfPv: RegisterValue = RegisterValue.Nil;
+                    fnfKey = fnfFidVal.toString();
+                    IF futureResolved[fnfKey] AS fnfCached THEN
+                        fnfPv = COPY fnfCached;
+                    ELSE
+                        fnfPv = NEXT futureTable[fnfFidVal];
+                        futureResolved[fnfKey] = COPY fnfPv;
+                    END
+                    PARTIAL MATCH fnfPv START
+                        RegisterValue.Number AS fnfN -> fregs[fBase + fnfDst] = fnfN;,
+                        RegisterValue.Int64Val AS fnfI -> fregs[fBase + fnfDst] = toFloat(fnfI);,
+                        DEFAULT -> fregs[fBase + fnfDst] = 0.0;
+                    END,
+            RegisterOp.FNextS ->
+                    fnsDst = ops[ip]; ip += 1;
+                    fnsFid = ops[ip]; ip += 1;
+                    fnsFidVal = iregs[iBase + fnsFid];
+                    MUTABLE fnsPv: RegisterValue = RegisterValue.Nil;
+                    fnsKey = fnsFidVal.toString();
+                    IF futureResolved[fnsKey] AS fnsCached THEN
+                        fnsPv = COPY fnsCached;
+                    ELSE
+                        fnsPv = NEXT futureTable[fnsFidVal];
+                        futureResolved[fnsKey] = COPY fnsPv;
+                    END
+                    PARTIAL MATCH fnsPv START
+                        RegisterValue.Str AS fnsS -> sregs[fnsDst] = COPY fnsS;,
+                        DEFAULT -> sregs[fnsDst] = "";
+                    END,
+            RegisterOp.CapGetI ->
+                    cgiDst = ops[ip]; ip += 1;
+                    cgiCidx = ops[ip]; ip += 1;
+                    cgiIdx = getRegisterConstInt(consts, cgiCidx);
+                    PARTIAL MATCH captureSlots[cgiIdx] START
+                        RegisterValue.Int64Val AS cgiV -> iregs[iBase + cgiDst] = cgiV;,
+                        RegisterValue.Number AS cgiN -> iregs[iBase + cgiDst] = toInt(cgiN);,
+                        DEFAULT -> iregs[iBase + cgiDst] = 0_i64;
+                    END,
+            RegisterOp.CapGetF ->
+                    cgfDst = ops[ip]; ip += 1;
+                    cgfCidx = ops[ip]; ip += 1;
+                    cgfIdx = getRegisterConstInt(consts, cgfCidx);
+                    PARTIAL MATCH captureSlots[cgfIdx] START
+                        RegisterValue.Number AS cgfV -> fregs[fBase + cgfDst] = cgfV;,
+                        RegisterValue.Int64Val AS cgfI -> fregs[fBase + cgfDst] = toFloat(cgfI);,
+                        DEFAULT -> fregs[fBase + cgfDst] = 0.0;
+                    END,
+            RegisterOp.CapGetS ->
+                    cgsDst = ops[ip]; ip += 1;
+                    cgsCidx = ops[ip]; ip += 1;
+                    cgsIdx = getRegisterConstInt(consts, cgsCidx);
+                    PARTIAL MATCH captureSlots[cgsIdx] START
+                        RegisterValue.Str AS cgsV -> sregs[cgsDst] = COPY cgsV;,
+                        DEFAULT -> sregs[cgsDst] = "";
+                    END,
+            RegisterOp.CapNew ->
+                    pendingCaps = List[];,
+            RegisterOp.CapPushI ->
+                    cpiR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Int64Val: iregs[iBase + cpiR] });,
+            RegisterOp.CapPushF ->
+                    cpfR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Number: fregs[fBase + cpfR] });,
+            RegisterOp.CapPushS ->
+                    cpsR = ops[ip]; ip += 1;
+                    pendingCaps.append(RegisterValue{ Str: COPY sregs[cpsR] });,
+            RegisterOp.SCellNew ->
+                    scnDst = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        iregs[iBase + scnDst] = sc.length();
+                        sc.append(RegisterValue{ Int64Val: 0_i64 });
+                        sc.append(RegisterValue{ Int64Val: 0_i64 });
+                    },
+            RegisterOp.SCellGetI ->
+                    scgDst = ops[ip]; ip += 1;
+                    scgCell = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        PARTIAL MATCH sc[iregs[iBase + scgCell]] START
+                            RegisterValue.Int64Val AS scgV -> iregs[iBase + scgDst] = scgV;,
+                            RegisterValue.Number AS scgN -> iregs[iBase + scgDst] = toInt(scgN);,
+                            DEFAULT -> iregs[iBase + scgDst] = 0_i64;
+                        END
+                    },
+            RegisterOp.SCellSetI ->
+                    scsCell = ops[ip]; ip += 1;
+                    scsSrc = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        sc[iregs[iBase + scsCell]] = RegisterValue{ Int64Val: iregs[iBase + scsSrc] };
+                    },
+            RegisterOp.LockAcq ->
+                    laDst = ops[ip]; ip += 1;
+                    laCell = ops[ip]; ip += 1;
+                    laTmo = ops[ip]; ip += 1;
+                    laCellIdx = iregs[iBase + laCell];
+                    laTimeout = iregs[iBase + laTmo];
+                    MUTABLE laAcquired = FALSE;
+                    MUTABLE laTimedOut = FALSE;
+                    MUTABLE laWaited: Int64 = 0_i64;
+                    WHILE !laAcquired DO
+                        WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                            MUTABLE laFree = FALSE;
+                            PARTIAL MATCH sc[laCellIdx + 1_i64] START
+                                RegisterValue.Int64Val AS laL -> IF laL == 0_i64 THEN laFree = TRUE; END,
+                                DEFAULT -> laFree = TRUE;
+                            END
+                            IF laFree THEN
+                                sc[laCellIdx + 1_i64] = RegisterValue{ Int64Val: 1_i64 };
+                                laAcquired = TRUE;
+                            END
+                        }
+                        IF !laAcquired THEN
+                            laSleep: Int64 = 1_i64;
+                            sleep(laSleep);
+                            laWaited = laWaited + 1_i64;
+                            IF laWaited >= laTimeout THEN
+                                laTimedOut = TRUE;
+                                laAcquired = TRUE;
+                            END
+                        END
+                    END
+                    IF laTimedOut THEN iregs[iBase + laDst] = 0_i64; ELSE iregs[iBase + laDst] = 1_i64; END,
+            RegisterOp.LockRel ->
+                    lrCell = ops[ip]; ip += 1;
+                    WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
+                        sc[iregs[iBase + lrCell] + 1_i64] = RegisterValue{ Int64Val: 0_i64 };
+                    },
+            RegisterOp.Operand ->
+                    print(formatVmError("attempted to execute operand slot", instructionIp, sourceLines, sourcePaths) OR "REGISTER VM ERROR (formatting failed)");
+                    RETURN RegisterValue.Nil;
+        END
+    END
+
+    RETURN RegisterValue.Nil;
+END
+
+FN registerFloatToString(n: Float64) RETURNS !String ->
+    wholeFloat = floor(n);
+    MUTABLE whole = toInt(wholeFloat);
+    frac = n - wholeFloat;
+    MUTABLE tenth = toInt(frac * 10.0 + 0.5);
+    IF tenth >= 10 THEN
+        whole += 1;
+        tenth = 0;
+    END
+    IF tenth == 0 THEN RETURN whole.toString(); END
+    RETURN whole.toString() + "." + tenth.toString();
+END
+
+FN registerFloatToInt(n: Float64) RETURNS Int64 ->
+    RETURN toInt(n);
+END
+
+FN printRegisterResult(v: RegisterValue) RETURNS !Void ->
+    PARTIAL MATCH v START
+        RegisterValue.Nil -> RETURN;,
+        RegisterValue.Int64Val AS i -> print(i.toString()); RETURN;,
+        RegisterValue.Number AS n -> print(registerFloatToString(n) OR RAISE); RETURN;,
+        RegisterValue.Str AS s -> print(COPY s); RETURN;,
+        DEFAULT -> print(""); RETURN;
+    END
+    RETURN;
+END
+
+FN main() RETURNS !Void ->
+    print("REGISTER VM ERROR: generated main was not installed");
+    RETURN;
+END

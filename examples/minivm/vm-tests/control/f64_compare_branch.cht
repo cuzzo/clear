@@ -1,0 +1,7 @@
+FN main() RETURNS Int64 ->
+    IF 1.5 < 2.5 THEN
+        RETURN 7_i64;
+    ELSE
+        RETURN 9_i64;
+    END
+END
