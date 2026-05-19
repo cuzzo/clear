@@ -13,6 +13,10 @@ module NilKillRuntimeTrace
   TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
     File.expand_path(path, ROOT)
   end
+  # This gem's own absolute path, computed ONCE. The per-event caller
+  # scan used File.expand_path(__FILE__, ROOT) for EVERY candidate
+  # frame to skip this gem's frames; that string-builds per frame.
+  SELF_ABS = File.expand_path(__FILE__, ROOT)
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
   TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
@@ -23,8 +27,62 @@ module NilKillRuntimeTrace
   @tuples = {}
   @collections = {}
   @objects = {}
+  # Mutation coalescing: a tight loop mutating ONE object at ONE site
+  # with ONE element-class fires record_collection_mutation N times,
+  # all producing the SAME observation. Defer them into a single
+  # pending batch + count; flush (one core call/owner, count: N) on
+  # any discriminator change or at dump. Byte-identical: every effect
+  # is an additive count or an idempotent merge, so N x count:1 ==
+  # 1 x count:N. NIL_KILL_COALESCE=0 restores the exact per-mutation
+  # path (the differential-proof baseline).
+  @coalesce = ENV["NIL_KILL_COALESCE"] != "0"
+  @pending_mut = nil
   @frames = Hash.new { |h, k| h[k] = [] }
   @shape_lookup = {}
+
+  # ---- non-hooked recorder-internal accumulators (Fix 2) ----
+  # install_collection_hook prepends Array/Hash/Set CLASS-wide, so the
+  # recorder's OWN per-observation Set#merge / Hash#[]= bookkeeping
+  # re-enters the hook (dispatch + super + marker read) ~dozens of
+  # times per traced call -- the recorder taxing itself. NKSet/NKTally
+  # are NOT Array/Hash/Set (nor subclasses), so the hook never fires on
+  # them. They are recorder-private (never returned to the workload,
+  # never marshaled, never serialized as objects -- every dump path
+  # first does .to_a.sort / transform_values / sort_by.to_h), so output
+  # is byte-identical for EVERY workload (unlike a per-object singleton
+  # hook), and any semantics bug surfaces as different recorded JSON ->
+  # caught by the byte-identical suite. Writes use Hash#[]= captured
+  # HERE, in the class body, BEFORE install_collection_hook (line
+  # ~1611) prepends -> the pristine C method, hook-free.
+  ORIG_HASH_STORE = ::Hash.instance_method(:[]=)
+
+  # Set semantics via Hash keys -- identical dedup to ::Set (also
+  # Hash-backed: same eql?/hash). Every dump sorts, so insertion order
+  # is irrelevant. Surface = exactly what the recorder calls.
+  class NKSet
+    include Enumerable
+    def initialize; @h = {}; end
+    def <<(item); ORIG_HASH_STORE.bind_call(@h, item, true); self; end
+    alias_method :add, :<<
+    def merge(enum); enum.each { |item| ORIG_HASH_STORE.bind_call(@h, item, true) }; self; end
+    def each(&blk); @h.each_key(&blk); end
+    def to_a; @h.keys; end
+    def empty?; @h.empty?; end
+    def freeze; @h.freeze; super; end
+  end
+
+  # ::Hash.new(0) semantics: a missing key reads as 0 and is NOT
+  # stored; only []= stores -> insertion order == first-increment
+  # order, exactly as Hash.new(0), so to_h / sort_by are byte-identical.
+  class NKTally
+    def initialize; @h = {}; end
+    def [](key); @h.fetch(key, 0); end
+    def []=(key, val); ORIG_HASH_STORE.bind_call(@h, key, val); end
+    def to_h; @h; end
+    def each(&blk); @h.each(&blk); end
+    def sort_by(&blk); @h.sort_by(&blk); end
+    def empty?; @h.empty?; end
+  end
   @path_cache = {}
   @target_cache = {}
   # Per-(path,line) memo of the constant-per-callsite context (abs,
@@ -244,6 +302,29 @@ module NilKillRuntimeTrace
   # not eligible (-> caller uses the original full path). Allocation-
   # free (index-bounded scan, no intermediate arrays).
   def self.homog_scalar_class(value)
+    # Memo-KEY derivation -- reruns every observation even though
+    # container_shape / collection_type_shape_key memoize the RESULT.
+    # The Array case (the hot one) uses an index loop: same elements,
+    # same class checks, same result, but no per-element block-yield.
+    if value.is_a?(Array)
+      len = value.length
+      return :empty if len.zero?
+
+      limit = len < ELEMENT_SAMPLE ? len : ELEMENT_SAMPLE
+      c0 = value[0].class
+      return nil if c0 == Array || c0 == Hash || c0 == Set
+
+      i = 1
+      while i < limit
+        cls = value[i].class
+        return nil if cls == Array || cls == Hash || cls == Set
+        return nil if cls != c0
+
+        i += 1
+      end
+      return c0
+    end
+
     n = 0
     c0 = nil
     value.each do |item|
@@ -438,6 +519,11 @@ module NilKillRuntimeTrace
   def self.register_collection_owner(value, owner)
     return unless value.is_a?(Array) || value.is_a?(Hash) || (defined?(Set) && value.is_a?(Set))
 
+    if value.frozen?
+      record_collection_snapshot(value, owner)
+      return
+    end
+
     oid = value.object_id
     unless @objects.key?(oid)
       # @objects is keyed by object_id and was NEVER evicted -> every
@@ -454,6 +540,16 @@ module NilKillRuntimeTrace
       # unchanged.
       @objects[oid] = {}
       ObjectSpace.define_finalizer(value, objects_finalizer(oid))
+      # Mutation-gate marker. The collection-mutation hooks fire on
+      # EVERY Array/Hash/Set mutation in the WHOLE process; the old
+      # gate paid Kernel#object_id + an @objects hash lookup on each
+      # one just to discover "not registered, ignore." Relevance is
+      # known HERE (registration). Stamp the object so the hook
+      # fast-path is one ivar read. Marker present <=> @objects entry
+      # present for every live non-frozen registered object (both set
+      # here, both die with the object; the finalizer only deletes
+      # @objects when the object -- and its ivar -- are already gone).
+      value.instance_variable_set(:@__nil_kill_traced, true)
     end
     owners = @objects[oid]
     owners[owner_identity_key(owner)] ||= owner
@@ -475,7 +571,11 @@ module NilKillRuntimeTrace
   end
 
   def self.collection_key(value, owner)
-    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line], collection_kind(value)]
+    collection_key_for(collection_kind(value), owner)
+  end
+
+  def self.collection_key_for(kind, owner)
+    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line], kind]
   end
 
   def self.record_collection_snapshot(value, owner)
@@ -489,27 +589,35 @@ module NilKillRuntimeTrace
   end
 
   def self.record_collection_observation(value, owner, elem_classes: [], key_classes: [], value_classes: [], elem_shapes: [], key_shapes: [], value_shapes: [], mutation_site: nil)
+    record_collection_observation_core(class_name(value), collection_kind(value), owner,
+      elem_classes: elem_classes, key_classes: key_classes, value_classes: value_classes,
+      elem_shapes: elem_shapes, key_shapes: key_shapes, value_shapes: value_shapes, mutation_site: mutation_site)
+  end
+
+  # cname/kind are the derived CLASS strings -- never the object. The
+  # coalescer stores THESE (never `value`/`elem`), so a pending batch
+  # cannot pin a workload object alive (no GC-leak hazard). `count`
+  # multiplies the additive effects (calls, mutation_sites); the set
+  # merges are idempotent so they run once regardless -> coalescing N
+  # identical mutations into one core call with count: N is exactly
+  # byte-identical to N separate count: 1 calls.
+  def self.record_collection_observation_core(cname, kind, owner, count: 1, elem_classes: [], key_classes: [], value_classes: [], elem_shapes: [], key_shapes: [], value_shapes: [], mutation_site: nil)
     with_collection_hooks_disabled do
       path = owner[:path]
       line = owner[:line]
       return unless path && line
-      kind = collection_kind(value)
-      key = collection_key(value, owner)
-      rec = (@collections[key] ||= { calls: 0, classes: Set.new, elem_classes: Set.new, key_classes: Set.new, value_classes: Set.new,
-                                      elem_shapes: Set.new, key_shapes: Set.new, value_shapes: Set.new, mutation_sites: Hash.new(0) })
-      rec[:calls] += 1
-      rec[:classes] << class_name(value)
-      # merge accepts any enumerable; the args are already Sets (from
-      # the memoized container_shape) or the [] kwarg default. The
-      # Array() wrapper allocated a fresh array EVERY collection call
-      # for nothing -- same elements merged, byte-identical output.
+      key = collection_key_for(kind, owner)
+      rec = (@collections[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new,
+                                      elem_shapes: NKSet.new, key_shapes: NKSet.new, value_shapes: NKSet.new, mutation_sites: NKTally.new })
+      rec[:calls] += count
+      rec[:classes] << cname
       rec[:elem_classes].merge(elem_classes)
       rec[:key_classes].merge(key_classes)
       rec[:value_classes].merge(value_classes)
       rec[:elem_shapes].merge(elem_shapes)
       rec[:key_shapes].merge(key_shapes)
       rec[:value_shapes].merge(value_shapes)
-      rec[:mutation_sites][mutation_site] += 1 if mutation_site
+      rec[:mutation_sites][mutation_site] += count if mutation_site
       bucket = owner[:bucket]
       if bucket
         case owner[:owner_kind].to_s
@@ -558,21 +666,88 @@ module NilKillRuntimeTrace
     key_shapes << key_shape if key_shape
     value_shapes << value_shape if value_shape
     mutation_site = collection_mutation_site
+    unless @coalesce
+      @lock.synchronize do
+        owners.each do |owner|
+          record_collection_observation(value, owner, elem_classes: elem_classes, key_classes: key_classes, value_classes: value_classes,
+            elem_shapes: elem_shapes, key_shapes: key_shapes, value_shapes: value_shapes, mutation_site: mutation_site)
+        end
+      end
+      return
+    end
+
+    # Derived CLASS strings only -- never `value`/`elem` (no GC pin).
+    cname = class_name(value)
+    kind = collection_kind(value)
     @lock.synchronize do
-      owners.each do |owner|
-        record_collection_observation(value, owner, elem_classes: elem_classes, key_classes: key_classes, value_classes: value_classes,
-          elem_shapes: elem_shapes, key_shapes: key_shapes, value_shapes: value_shapes, mutation_site: mutation_site)
+      p = @pending_mut
+      if p && p[:obk].equal?(owners_by_key) && p[:olen] == owners_by_key.size &&
+         p[:site] == mutation_site && p[:ec] == elem_classes && p[:kc] == key_classes &&
+         p[:vc] == value_classes && p[:es] == elem_shapes && p[:ks] == key_shapes && p[:vs] == value_shapes
+        # Same object-registration, owner-set, site and element-class
+        # signature as the pending batch -> identical observation; just
+        # bump the count.
+        p[:count] += 1
+      else
+        # Discriminator changed (incl. a different object -- the common
+        # interleave -- or owner-set growth): the old batch is complete.
+        flush_pending_locked!(p) if p
+        @pending_mut = { obk: owners_by_key, olen: owners_by_key.size, owners: owners,
+                         cname: cname, kind: kind, site: mutation_site,
+                         ec: elem_classes, kc: key_classes, vc: value_classes,
+                         es: elem_shapes, ks: key_shapes, vs: value_shapes, count: 1 }
       end
     end
   end
 
-  def self.collection_mutation_site
-    loc = caller_locations(2, 20).find do |candidate|
-      path = candidate.absolute_path || candidate.path
-      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+  # Flush ONE coalesced batch. @lock MUST already be held. Replays it
+  # as a single core call per owner with count == the coalesced total;
+  # byte-identical to `count` separate observations (additive counts,
+  # idempotent merges). Iterates the owner SNAPSHOT taken at batch
+  # start -- valid because owner-set growth ends the batch.
+  def self.flush_pending_locked!(pending)
+    pending[:owners].each do |owner|
+      record_collection_observation_core(pending[:cname], pending[:kind], owner, count: pending[:count],
+        elem_classes: pending[:ec], key_classes: pending[:kc], value_classes: pending[:vc],
+        elem_shapes: pending[:es], key_shapes: pending[:ks], value_shapes: pending[:vs], mutation_site: pending[:site])
     end
-    return nil unless loc
-    "#{abs_path(loc.absolute_path || loc.path)}:#{loc.lineno}"
+  end
+
+  # Flush the outstanding batch. MUST run before dump reads
+  # @collections (the counts/sites are otherwise still pending). Timing
+  # is otherwise irrelevant -- every effect is additive or idempotent.
+  def self.flush_pending_mutations!
+    @lock.synchronize do
+      pending = @pending_mut
+      @pending_mut = nil
+      flush_pending_locked!(pending) if pending
+    end
+  end
+
+  # Was caller_locations(2, 20) -- a 20-frame backtrace ALLOCATION on
+  # every collection mutation of a registered collection (microseconds
+  # x per-mutation = the hot-loop killer). Thread.each_caller_location
+  # is lazy + early-exits at the first match and allocates nothing.
+  # Byte-identical: same predicate, same skip-1 offset (the +1 frame is
+  # this gem's own, excluded by SELF_ABS anyway) and same 20-frame
+  # window cap (indices 2..21), so a match deeper than the original
+  # window still yields nil exactly as before.
+  def self.collection_mutation_site
+    seen = 0
+    Thread.each_caller_location do |c|
+      seen += 1
+      next if seen == 1
+      return nil if seen > 21
+
+      raw = c.absolute_path || c.path
+      next unless raw && target_path?(raw)
+
+      a = abs_path(raw)
+      next if a == SELF_ABS
+
+      return "#{a}:#{c.lineno}"
+    end
+    nil
   end
 
   def self.with_collection_hook_guard
@@ -585,11 +760,20 @@ module NilKillRuntimeTrace
   end
 
   def self.with_collection_hooks_disabled
-    previous = Thread.current[:__nil_kill_collection_hook]
-    Thread.current[:__nil_kill_collection_hook] = true
-    yield
-  ensure
-    Thread.current[:__nil_kill_collection_hook] = previous
+    # Already disabled (re-entrant -- the wrapped recorder paths nest):
+    # set-true + restore is a no-op, so skip both TLS writes and the
+    # ensure frame. The begin/ensure below runs ONLY on the slow path,
+    # which is reached ONLY when the flag was falsy -> restoring to nil
+    # is indistinguishable from the prior falsy for every truthiness
+    # read. Mirrors with_collection_hook_guard's early-return idiom.
+    return yield if Thread.current[:__nil_kill_collection_hook]
+
+    begin
+      Thread.current[:__nil_kill_collection_hook] = true
+      yield
+    ensure
+      Thread.current[:__nil_kill_collection_hook] = nil
+    end
   end
 
   def self.source_location_for_class(klass)
@@ -694,25 +878,25 @@ module NilKillRuntimeTrace
       calls: 0,
       ok_calls: 0,
       raised_calls: 0,
-      params_by_name: Hash.new { |h, k| h[k] = Set.new },
-      params_ok: Hash.new { |h, k| h[k] = Set.new },
-      params_raised: Hash.new { |h, k| h[k] = Set.new },
-      param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_sites_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_sites_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces_ok: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_traces_raised: Hash.new { |h, k| h[k] = Hash.new(0) },
-      param_elem: Hash.new { |h, k| h[k] = Set.new },
-      param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-      param_elem_shapes: Hash.new { |h, k| h[k] = Set.new },
-      param_kv_shapes: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-      returns: Set.new,
-      return_elem: Set.new,
-      return_kv: [Set.new, Set.new],
-      return_elem_shapes: Set.new,
-      return_kv_shapes: [Set.new, Set.new],
-      raised: Set.new,
+      params_by_name: Hash.new { |h, k| h[k] = NKSet.new },
+      params_ok: Hash.new { |h, k| h[k] = NKSet.new },
+      params_raised: Hash.new { |h, k| h[k] = NKSet.new },
+      param_sites: Hash.new { |h, k| h[k] = NKTally.new },
+      param_sites_ok: Hash.new { |h, k| h[k] = NKTally.new },
+      param_sites_raised: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces_ok: Hash.new { |h, k| h[k] = NKTally.new },
+      param_traces_raised: Hash.new { |h, k| h[k] = NKTally.new },
+      param_elem: Hash.new { |h, k| h[k] = NKSet.new },
+      param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+      param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
+      param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+      returns: NKSet.new,
+      return_elem: NKSet.new,
+      return_kv: [NKSet.new, NKSet.new],
+      return_elem_shapes: NKSet.new,
+      return_kv_shapes: [NKSet.new, NKSet.new],
+      raised: NKSet.new,
       plan: plan,
     }
   end
@@ -817,13 +1001,13 @@ module NilKillRuntimeTrace
         bucket: b,
         sample_method: sample_method,
         plan: method_plan,
-        params: Hash.new { |h, k| h[k] = Set.new },
-        param_sites: Hash.new { |h, k| h[k] = Hash.new(0) },
-        param_traces: Hash.new { |h, k| h[k] = Hash.new(0) },
-        param_elem: Hash.new { |h, k| h[k] = Set.new },
-        param_kv: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
-        param_elem_shapes: Hash.new { |h, k| h[k] = Set.new },
-        param_kv_shapes: Hash.new { |h, k| h[k] = [Set.new, Set.new] },
+        params: Hash.new { |h, k| h[k] = NKSet.new },
+        param_sites: Hash.new { |h, k| h[k] = NKTally.new },
+        param_traces: Hash.new { |h, k| h[k] = NKTally.new },
+        param_elem: Hash.new { |h, k| h[k] = NKSet.new },
+        param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+        param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
+        param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
         callsite: nil,
         trace: [],
         method_site: meta[:method_site],
@@ -1032,7 +1216,7 @@ module NilKillRuntimeTrace
         key = [path, src_ln]
         NilKillRuntimeTrace.with_collection_hooks_disabled do
           NilKillRuntimeTrace.lock.synchronize do
-            rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: Set.new })
+            rec = (NilKillRuntimeTrace.tlets[key] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
             rec[:classes] << NilKillRuntimeTrace.class_name(value)
           end
@@ -1125,7 +1309,7 @@ module NilKillRuntimeTrace
     Array.prepend(Module.new do
       define_method(:<<) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1133,7 +1317,7 @@ module NilKillRuntimeTrace
 
       define_method(:push) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1141,7 +1325,7 @@ module NilKillRuntimeTrace
 
       define_method(:append) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1149,7 +1333,7 @@ module NilKillRuntimeTrace
 
       define_method(:unshift) do |*values|
         result = super(*values)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1158,7 +1342,7 @@ module NilKillRuntimeTrace
       define_method(:[]=) do |*args|
         value = args.last
         result = super(*args)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1166,7 +1350,7 @@ module NilKillRuntimeTrace
 
       define_method(:concat) do |other|
         result = super(other)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { Array(other).first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
         end
         result
@@ -1180,7 +1364,7 @@ module NilKillRuntimeTrace
     Hash.prepend(Module.new do
       define_method(:[]=) do |key, value|
         result = super(key, value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
         end
         result
@@ -1188,7 +1372,7 @@ module NilKillRuntimeTrace
 
       define_method(:store) do |key, value|
         result = super(key, value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
         end
         result
@@ -1196,7 +1380,7 @@ module NilKillRuntimeTrace
 
       define_method(:merge!) do |*others, **kw, &blk|
         result = super(*others, **kw, &blk)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard do
             others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
             kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
@@ -1207,7 +1391,7 @@ module NilKillRuntimeTrace
 
       define_method(:update) do |*others, **kw, &blk|
         result = super(*others, **kw, &blk)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard do
             others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
             kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
@@ -1225,7 +1409,7 @@ module NilKillRuntimeTrace
     Set.prepend(Module.new do
       define_method(:add) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1233,7 +1417,7 @@ module NilKillRuntimeTrace
 
       define_method(:<<) do |value|
         result = super(value)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
         end
         result
@@ -1241,7 +1425,7 @@ module NilKillRuntimeTrace
 
       define_method(:merge) do |enum|
         result = super(enum)
-        if NilKillRuntimeTrace.objects.key?(object_id)
+        if @__nil_kill_traced
           NilKillRuntimeTrace.with_collection_hook_guard { enum.first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } if enum.respond_to?(:first) }
         end
         result
@@ -1310,9 +1494,19 @@ module NilKillRuntimeTrace
   end
 
   def self.record_open_struct_field(instance, field, value)
-    loc = caller_locations(2, 20).find do |candidate|
-      path = candidate.absolute_path || candidate.path
-      path && target_path?(path) && File.expand_path(path, ROOT) != File.expand_path(__FILE__, ROOT)
+    loc = nil
+    seen = 0
+    Thread.each_caller_location do |c|
+      seen += 1
+      next if seen == 1
+      break if seen > 21
+
+      raw = c.absolute_path || c.path
+      next unless raw && target_path?(raw)
+      next if abs_path(raw) == SELF_ABS
+
+      loc = c
+      break
     end
     return unless loc
     singleton_name = NilKillRuntimeTrace.safe_module_name(instance.class)
@@ -1335,7 +1529,7 @@ module NilKillRuntimeTrace
           # producer types feeding its is_a?(Type) guards.
           cls = safe_module_name(receiver.class)
           if cls
-            rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: Set.new })
+            rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
             rec[:classes] << class_name(value)
           end
@@ -1358,7 +1552,7 @@ module NilKillRuntimeTrace
     shape = container_shape(value)
     with_collection_hooks_disabled do
       @lock.synchronize do
-        rec = (@structs[key] ||= { calls: 0, classes: Set.new, elem_classes: Set.new, key_classes: Set.new, value_classes: Set.new, array_calls: 0, hash_calls: 0 })
+        rec = (@structs[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new, array_calls: 0, hash_calls: 0 })
         rec[:calls] += 1
         rec[:classes] << class_name(value)
         if shape&.first == :array
@@ -1395,6 +1589,7 @@ module NilKillRuntimeTrace
   end
 
   def self.dump
+    flush_pending_mutations!
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
     File.open(File.join(OUT_DIR, "methods-#{pid}.jsonl"), "w") do |file|

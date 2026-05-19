@@ -39,9 +39,9 @@ module NilKill
         "diagnostics" => @diagnostics, "actions" => @actions }
     end
 
-    def write
+    def write(evidence = to_h)
       FileUtils.mkdir_p(TMP_DIR)
-      File.write(EVIDENCE_PATH, JSON.pretty_generate(to_h))
+      File.write(EVIDENCE_PATH, JSON.pretty_generate(evidence))
     end
 
     def self.read

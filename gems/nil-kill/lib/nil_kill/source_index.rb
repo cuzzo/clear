@@ -3,21 +3,14 @@
 
 module NilKill
   class SourceIndex
-    @attribute_hash_shapes = {}
-    @attribute_array_element_shapes = {}
-    @struct_field_hash_shapes = {}
-    @struct_field_array_element_shapes = {}
-    @struct_field_static_types = {}
-    @struct_fields_by_name = {}
-    @struct_full_by_name = {}
-
-    class << self
+    # Cross-file shape/type symbol table; class-level readers delegate
+    # here so existing call sites are unchanged.
+    class ShapeSymbolTable
       attr_reader :attribute_hash_shapes, :attribute_array_element_shapes,
         :struct_field_hash_shapes, :struct_field_array_element_shapes,
-        :struct_field_static_types, :struct_fields_by_name, :struct_full_by_name,
-        :noreturn_methods
+        :struct_field_static_types, :struct_fields_by_name, :struct_full_by_name
 
-      def reset_global_shape_indexes
+      def initialize
         @attribute_hash_shapes = {}
         @attribute_array_element_shapes = {}
         @struct_field_hash_shapes = {}
@@ -25,8 +18,26 @@ module NilKill
         @struct_field_static_types = {}
         @struct_fields_by_name = {}
         @struct_full_by_name = {}
+      end
+    end
+
+    @shape_table = ShapeSymbolTable.new
+
+    class << self
+      attr_reader :noreturn_methods, :shape_table
+
+      %i[attribute_hash_shapes attribute_array_element_shapes
+         struct_field_hash_shapes struct_field_array_element_shapes
+         struct_field_static_types struct_fields_by_name struct_full_by_name].each do |idx|
+        define_method(idx) { @shape_table.public_send(idx) }
+      end
+
+      def reset_global_shape_indexes
+        @shape_table = ShapeSymbolTable.new
         @rbi_field_types = nil
         @noreturn_methods = Set.new
+        @source_lines = {}
+        @parsed_files = {}
       end
 
       def rbi_field_types
@@ -41,6 +52,16 @@ module NilKill
         return unless name && !name.to_s.empty?
         @noreturn_methods ||= Set.new
         @noreturn_methods << name.to_s
+      end
+
+      def source_lines(path)
+        @source_lines ||= {}
+        @source_lines[path] ||= File.readlines(path)
+      end
+
+      def parsed_file(path)
+        @parsed_files ||= {}
+        @parsed_files[path] ||= NilKill.cached_parse_file(path)
       end
 
       def load_rbi_field_types
@@ -71,10 +92,52 @@ module NilKill
       :type_normalizers, :dispatcher_inferences, :return_origins, :param_origins,
       :ivar_protocols, :ivar_param_origins
 
-    def initialize(path)
+    # Hash that bumps a shared epoch cell on every mutation so the
+    # expression_type memo can detect staleness. `wrap` keeps the cell
+    # bound across a non-mutating Hash#merge that returns an EpochHash.
+    class EpochHash < Hash
+      def self.wrap(src, cell)
+        if src.is_a?(EpochHash)
+          src.instance_variable_set(:@ec, cell)
+          return src
+        end
+        h = new
+        h.instance_variable_set(:@ec, cell)
+        src&.each { |k, v| h[k] = v }
+        h
+      end
+
+      def []=(k, v); @ec[0] += 1 if @ec; super; end
+      def store(k, v); @ec[0] += 1 if @ec; super; end
+      def delete(*a, &b); @ec[0] += 1 if @ec; super; end
+      def clear; @ec[0] += 1 if @ec; super; end
+      def merge!(*a, &b); @ec[0] += 1 if @ec; super; end
+      def update(*a, &b); @ec[0] += 1 if @ec; super; end
+      def replace(o); @ec[0] += 1 if @ec; super; end
+      def delete_if(&b); @ec[0] += 1 if @ec; super; end
+      def reject!(&b); @ec[0] += 1 if @ec; super; end
+      def select!(&b); @ec[0] += 1 if @ec; super; end
+      def keep_if(&b); @ec[0] += 1 if @ec; super; end
+    end
+
+    # The 5 @current_* maps expression_type reads. The writer re-wraps
+    # so a reassignment and later in-place writes both bump the epoch.
+    %i[current_param_types current_local_types current_collection_builders
+       current_hash_shapes current_array_element_shapes].each do |n|
+      define_method(n) { instance_variable_get("@#{n}") }
+      define_method("#{n}=") { |v| instance_variable_set("@#{n}", EpochHash.wrap(v, @ep)) }
+    end
+
+    def initialize(path, warm_only: false)
       @path = path
       @rel = NilKill.rel(path)
-      @lines = File.readlines(path)
+      @lines = self.class.source_lines(path)
+      @warm_only = warm_only
+      @ep = [0]
+      @expr_memo = {}
+      @expr_use_memo = ENV["NIL_KILL_EXPR_MEMO"] != "0"
+      @expr_shadow = ENV["NIL_KILL_EXPR_SHADOW"] == "1"
+      @expr_shadow_bad = 0
       @methods = []
       @tlet_sites = []
       @dead_nil_checks = []
@@ -103,12 +166,17 @@ module NilKill
       @inferred_param_hash_shapes = {}
       @inferred_param_array_element_shapes = {}
       @method_nodes = []
-      @current_param_types = {}
-      @current_local_types = {}
-      @current_collection_builders = {}
-      @current_hash_shapes = {}
+      # Pure function of the type string -> memoize by type.
+      @rcfs_memo = {}
+      # Symbol -> String memo: node.name.to_s on hot AST walks otherwise
+      # allocates a fresh String per visit for repeated method names.
+      @sym_str = {}
+      self.current_param_types = {}
+      self.current_local_types = {}
+      self.current_collection_builders = {}
+      self.current_hash_shapes = {}
       @current_hash_shape_sources = {}
-      @current_array_element_shapes = {}
+      self.current_array_element_shapes = {}
       @current_method_name = nil
       @local_container_origins = {}
       @ivar_container_origins = {}
@@ -116,18 +184,15 @@ module NilKill
       @ivar_tlet_types = {}
       @current_class_name = nil
       @class_like_constants = Set.new
-      parsed = Prism.parse_file(path)
+      parsed = self.class.parsed_file(path)
       if parsed.success?
-        collect_struct_declarations(parsed.value, [])
-        collect_class_like_constants(parsed.value, [])
-        collect_non_nil_method_returns(parsed.value)
-        collect_ivar_tlet_names(parsed.value)
+        collect_prescan(parsed.value, [], [])
         walk(parsed.value, [])
-        recompute_return_origins_with_inferred_shapes
-        recompute_collection_index_lookups_with_inferred_shapes
-        recompute_struct_field_static_with_inferred_locals
+        recompute_return_origins_with_inferred_shapes unless @warm_only
+        recompute_collection_index_lookups_with_inferred_shapes unless @warm_only
+        recompute_struct_field_static_with_inferred_locals unless @warm_only
       end
-      @method_nodes.each { |def_node, record| collect_type_normalizers!(def_node, record) }
+      @method_nodes.each { |def_node, record| collect_type_normalizers!(def_node, record) } unless @warm_only
     end
 
     def summary
@@ -140,13 +205,6 @@ module NilKill
         "param_origins" => @param_origins.size }
     end
 
-    # AST-based normalizer capture (replaces the old single-line
-    # `is_a?(Type)` + `Type.new(` scanner that undercounted by ~10x and
-    # mis-tracked methods). Walks the def body for every
-    # `recv.is_a?(Type)` / `recv.kind_of?(Type)` guard -- multi-line,
-    # `!`-wrapped, ternary, `T.must` forms all caught -- with exact
-    # class/method from the def record, and resolves the receiver's
-    # one-hop origin from the def's own assignment nodes (no points-to).
     def collect_type_normalizers!(def_node, record)
       body = def_node.respond_to?(:body) ? def_node.body : nil
       return unless body
@@ -172,14 +230,12 @@ module NilKill
     def each_ast(node, &blk)
       return unless node.is_a?(Prism::Node)
       yield node
-      node.child_nodes.compact.each { |c| each_ast(c, &blk) }
+      node.compact_child_nodes.each { |c| each_ast(c, &blk) }
     end
 
-    # One-hop, intra-method origin of a guard receiver, resolved on the
-    # AST: an accessor read (`node.type_info`), a hash-key read
-    # (`h[:type]`), an ivar, a call, or a param. A local receiver is
-    # resolved through its in-method assignment exactly once (depth 1)
-    # so `ti = node.type_info; ti.is_a?(Type)` keys to `.type_info`.
+    # A local receiver is resolved through its in-method assignment
+    # exactly once (depth 1) so `ti = node.type_info; ti.is_a?(Type)`
+    # keys to `.type_info`.
     def classify_origin(node, param_names, assigns, depth)
       case node
       when Prism::InstanceVariableReadNode
@@ -225,11 +281,11 @@ module NilKill
       when Prism::DefNode
         record = method_record(node, scope)
         record["return_origin"] = analyze_return_origin(node, record)
-        @methods << record
-        @return_origins << record["return_origin"] if record["return_origin"]
+        @methods << record unless @warm_only
+        @return_origins << record["return_origin"] if record["return_origin"] && !@warm_only
         if record["return_origin"] && record["return_origin"]["confidence"] == "strong"
           type = record["return_origin"]["candidate_type"]
-          @static_return_types[record["method"]] = type if NilKill.useful_type?(type)
+          (@static_return_types[record["method"]] = type; @ep[0] += 1) if NilKill.useful_type?(type)
         end
         if record["return_origin"] && record["return_origin"]["hash_shape"] && !record["return_origin"]["hash_shape"]["poisoned"]
           @static_hash_return_shapes[record["method"]] = record["return_origin"]["hash_shape"]
@@ -237,33 +293,33 @@ module NilKill
         if record["return_origin"] && record["return_origin"]["array_element_shape"] && !record["return_origin"]["array_element_shape"]["poisoned"]
           @static_array_element_return_shapes[record["method"]] = record["return_origin"]["array_element_shape"]
         end
-        @method_nodes << [node, record]
-        inspect_dispatcher(node, record)
+        @method_nodes << [node, record] unless @warm_only
+        inspect_dispatcher(node, record) unless @warm_only
         scoped_facts(record) { child_walk(node.body, scope) }
       when Prism::CallNode
-        inspect_param_origins(node, scope)
+        inspect_param_origins(node, scope) unless @warm_only
         update_collection_builder_call(node)
-        inspect_call(node)
-        inspect_index_lookup(node, scope)
-        inspect_hash_record_blocker(node, scope)
-        inspect_hash_record_member_call(node, scope)
+        inspect_call(node) unless @warm_only
+        inspect_index_lookup(node, scope) unless @warm_only
+        inspect_hash_record_blocker(node, scope) unless @warm_only
+        inspect_hash_record_member_call(node, scope) unless @warm_only
         inspect_struct_constructor(node)
         inspect_class_constructor_fields(node)
         inspect_attribute_shape_write(node)
         walk_call_children(node, scope)
       when Prism::ArrayNode
-        inspect_array_literal(node)
+        inspect_array_literal(node) unless @warm_only
         child_walk(node, scope)
       when Prism::HashNode
-        inspect_hash_literal(node)
+        inspect_hash_literal(node) unless @warm_only
         child_walk(node, scope)
       when Prism::LocalVariableWriteNode
         update_local_fact(node)
-        inspect_local_container_origin(node)
+        inspect_local_container_origin(node) unless @warm_only
         child_walk(node, scope)
       when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
-        inspect_variable_write(node)
-        inspect_ivar_container_origin(node)
+        inspect_variable_write(node) unless @warm_only
+        inspect_ivar_container_origin(node) unless @warm_only
         child_walk(node, scope)
       else
         child_walk(node, scope)
@@ -272,7 +328,7 @@ module NilKill
 
     def child_walk(node, scope)
       return unless node&.respond_to?(:child_nodes)
-      node.child_nodes.compact.each { |child| walk(child, scope) }
+      node.compact_child_nodes.each { |child| walk(child, scope) }
     end
 
     def walk_call_children(node, scope)
@@ -283,14 +339,14 @@ module NilKill
       end
 
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
       end
       child_walk(node, scope)
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def recompute_return_origins_with_inferred_shapes
@@ -304,7 +360,7 @@ module NilKill
           latest_origins << origin if origin
           if origin && origin["confidence"] == "strong"
             type = origin["candidate_type"]
-            @static_return_types[record["method"]] = type if NilKill.useful_type?(type)
+            (@static_return_types[record["method"]] = type; @ep[0] += 1) if NilKill.useful_type?(type)
           end
           if origin && origin["hash_shape"] && !origin["hash_shape"]["poisoned"]
             @static_hash_return_shapes[record["method"]] = origin["hash_shape"]
@@ -328,18 +384,10 @@ module NilKill
       end
     end
 
-    # During the main `walk`, a `Struct.new(x, ...)` argument that is a
-    # plain local/ivar reference resolves to no type, because
-    # `@current_local_types` is only populated by the return-origin
-    # pass, not the main walk. struct_field_candidates then marks the
-    # field's slot `has_unknown_static` and refuses to type it (the
-    # AST::ConcurrentOp soundness guard). Re-resolve those args here
-    # with local-type facts populated (the same machinery the
-    # return-origin pass uses) and fill the empty `type` in place.
-    # Existing soundness guards downstream are untouched: a still-
-    # unresolvable arg keeps its empty type (slot stays skipped), and
-    # struct-rbi's nilable / weak-collection / --validate srb tc gates
-    # still apply.
+    # The main walk leaves a `Struct.new(local, ...)` arg untyped
+    # (@current_local_types is only populated by the return-origin
+    # pass). Re-resolve with local-type facts so the field slot isn't
+    # needlessly skipped; a still-unresolvable arg keeps its empty type.
     def recompute_struct_field_static_with_inferred_locals
       return if @method_nodes.empty? || @struct_field_static.empty?
       index = Hash.new { |h, k| h[k] = [] }
@@ -376,7 +424,7 @@ module NilKill
           end
         end
       end
-      node.child_nodes.compact.each { |child| refill_struct_constructor_types(child, index) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| refill_struct_constructor_types(child, index) } if node.respond_to?(:child_nodes)
     end
 
     def collect_local_container_origins(node)
@@ -388,7 +436,7 @@ module NilKill
       when Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
         inspect_ivar_container_origin(node)
       end
-      node.child_nodes.compact.each { |child| collect_local_container_origins(child) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_local_container_origins(child) } if node.respond_to?(:child_nodes)
     end
 
     def collect_collection_index_facts(node, scope)
@@ -404,42 +452,57 @@ module NilKill
       when Prism::LocalVariableWriteNode
         update_local_fact(node)
         inspect_local_container_origin(node)
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
       else
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) } if node.respond_to?(:child_nodes)
       end
     end
 
     def collect_call_collection_index_facts(node, scope)
       block = node.block
       unless block && block.respond_to?(:body)
-        node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) }
+        node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) }
         return
       end
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
       end
-      node.child_nodes.compact.each { |child| collect_collection_index_facts(child, scope) }
+      node.compact_child_nodes.each { |child| collect_collection_index_facts(child, scope) }
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
-    def collect_struct_declarations(node, scope)
+    # Fused single-traversal replacement for the four pure pre-walk
+    # collectors (struct_declarations / class_like_constants /
+    # non_nil_method_returns / ivar_tlet_names). They each independently
+    # DFS'd the whole file; this performs the union of their per-node
+    # work in one DFS. cscope is the const_name-derived scope used by
+    # the struct + class-constant logic; iscope is the constant_path
+    # .slice-derived scope used by the ivar T.let logic (the two scope
+    # strings can differ, so both are threaded). non_nil ignores scope.
+    # Accumulators are disjoint and the single DFS order matches each
+    # original collector's DFS order, so output is byte-identical.
+    def collect_prescan(node, cscope, iscope)
       case node
       when Prism::ClassNode, Prism::ModuleNode
-        child_scope = scope + [const_name(node.constant_path)]
-        node.child_nodes.compact.each { |child| collect_struct_declarations(child, child_scope) } if node.respond_to?(:child_nodes)
+        name = const_name(node.constant_path)
+        full_name = (cscope + [name]).join("::")
+        @class_like_constants.add(full_name)
+        @class_like_constants.add(name)
+        child_c = cscope + [name]
+        child_i = iscope + [node.constant_path.slice]
+        node.compact_child_nodes.each { |child| collect_prescan(child, child_c, child_i) }
         return
       when Prism::ConstantWriteNode
         if struct_new_call?(node.value) || data_define_call?(node.value)
-          klass = (scope + [node.name.to_s]).join("::")
+          klass = (cscope + [node.name.to_s]).join("::")
           fields = struct_fields(node.value)
           if fields.any?
             rec = { "path" => @rel, "line" => node.location.start_line, "class" => klass, "fields" => fields }
-            @struct_declarations << rec
+            @struct_declarations << rec unless @warm_only
             @struct_fields_by_name[klass] = fields
             self.class.struct_fields_by_name[klass] = fields
             @struct_full_by_name[klass] = klass
@@ -454,30 +517,31 @@ module NilKill
               self.class.struct_full_by_name[short] = klass
             end
           end
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_struct_declarations(child, scope) } if node.respond_to?(:child_nodes)
-    end
-
-    def collect_class_like_constants(node, scope)
-      case node
-      when Prism::ClassNode, Prism::ModuleNode
-        name = const_name(node.constant_path)
-        full_name = (scope + [name]).join("::")
-        @class_like_constants.add(full_name)
-        @class_like_constants.add(name)
-        child_scope = scope + [name]
-        node.child_nodes.compact.each { |child| collect_class_like_constants(child, child_scope) } if node.respond_to?(:child_nodes)
-        return
-      when Prism::ConstantWriteNode
-        if struct_new_call?(node.value) || data_define_call?(node.value)
           name = node.name.to_s
-          full_name = (scope + [name]).join("::")
+          full_name = (cscope + [name]).join("::")
           @class_like_constants.add(full_name)
           @class_like_constants.add(name)
         end
+      when Prism::InstanceVariableWriteNode
+        val = node.value
+        if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
+          name = node.name.to_s
+          @ivar_tlet_names.add(name)
+          type_node = (val.arguments&.arguments || [])[1]
+          if type_node && !iscope.empty?
+            type_str = type_node.slice
+            (@ivar_tlet_types[[iscope.join("::"), name]] = type_str; @ep[0] += 1) if NilKill.useful_type?(type_str)
+          end
+        end
+      when Prism::DefNode
+        sig = sig_above(node.location.start_line)
+        if sig
+          ret = NilKill.extract_return_type(sig)
+          (@method_return_types[node.name.to_s] << ret; @ep[0] += 1) if ret
+          @non_nil_method_returns << node.name.to_s if non_nil_return_sig?(sig)
+        end
       end
-      node.child_nodes.compact.each { |child| collect_class_like_constants(child, scope) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_prescan(child, cscope, iscope) } if node.respond_to?(:compact_child_nodes)
     end
 
     def struct_new_call?(node)
@@ -516,8 +580,10 @@ module NilKill
       args = node.arguments&.arguments || []
       args.each_with_index do |arg, idx|
         next if idx >= fields.size || arg.is_a?(Prism::KeywordHashNode)
-        @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
-          "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
+        unless @warm_only
+          @struct_field_static << { "path" => @rel, "line" => node.location.start_line, "class" => full_class,
+            "field" => fields[idx], "type" => expression_type(arg), "expression" => arg.slice }
+        end
         merge_struct_field_static_type(full_class, fields[idx], expression_type(arg))
         merge_struct_field_hash_shape(full_class, fields[idx], hash_shape_for_value(arg))
         merge_struct_field_array_element_shape(full_class, fields[idx], array_element_shape_for_value(arg))
@@ -761,7 +827,7 @@ module NilKill
           arms << { "helper" => helper, "classes" => classes } unless classes.empty?
         end
       end
-      node.child_nodes.compact.each { |child| collect_dispatch_arms(child, param_name, arms) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_dispatch_arms(child, param_name, arms) } if node.respond_to?(:child_nodes)
     end
 
     def dispatch_helper_call(statements, param_name)
@@ -795,39 +861,6 @@ module NilKill
       types.uniq.size == types.size ? "high" : "review"
     end
 
-    def collect_ivar_tlet_names(node, scope = [])
-      case node
-      when Prism::ClassNode, Prism::ModuleNode
-        new_scope = scope + [node.constant_path.slice]
-        node.child_nodes.compact.each { |child| collect_ivar_tlet_names(child, new_scope) }
-        return
-      when Prism::InstanceVariableWriteNode
-        val = node.value
-        if val.is_a?(Prism::CallNode) && val.name == :let && val.receiver&.slice == "T"
-          name = node.name.to_s
-          @ivar_tlet_names.add(name)
-          type_node = (val.arguments&.arguments || [])[1]
-          if type_node && !scope.empty?
-            type_str = type_node.slice
-            @ivar_tlet_types[[scope.join("::"), name]] = type_str if NilKill.useful_type?(type_str)
-          end
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_ivar_tlet_names(child, scope) } if node.respond_to?(:child_nodes)
-    end
-
-    def collect_non_nil_method_returns(node)
-      if node.is_a?(Prism::DefNode)
-        sig = sig_above(node.location.start_line)
-        if sig
-          ret = NilKill.extract_return_type(sig)
-          @method_return_types[node.name.to_s] << ret if ret
-          @non_nil_method_returns << node.name.to_s if non_nil_return_sig?(sig)
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_non_nil_method_returns(child) } if node.respond_to?(:child_nodes)
-    end
-
     def non_nil_return_sig?(sig)
       match = sig.match(/\.returns\((.+?)\)/)
       return false unless match
@@ -847,13 +880,13 @@ module NilKill
       old_method_name = @current_method_name
       @non_nil_locals = Set.new(method_record["non_nil_params"])
       @maybe_nil_locals = Set.new
-      @current_param_types = method_record["params"].each_with_object({}) do |param, types|
+      self.current_param_types = method_record["params"].each_with_object({}) do |param, types|
         types[param["name"]] = param["type"] if NilKill.useful_type?(param["type"])
       end
-      @current_local_types = {}
-      @current_collection_builders = seed_param_collection_builders(method_record)
-      @current_hash_shapes = seed_param_hash_shapes(method_record)
-      @current_array_element_shapes = seed_param_array_element_shapes(method_record)
+      self.current_local_types = {}
+      self.current_collection_builders = seed_param_collection_builders(method_record)
+      self.current_hash_shapes = seed_param_hash_shapes(method_record)
+      self.current_array_element_shapes = seed_param_array_element_shapes(method_record)
       @current_method_name = method_record["method"]
       @local_container_origins = method_record["params"].each_with_object({}) do |param, origins|
         origins[param["name"]] = { "kind" => "method parameter", "name" => param["name"], "type" => param["type"],
@@ -863,11 +896,11 @@ module NilKill
     ensure
       @non_nil_locals = old
       @maybe_nil_locals = old_maybe_nil
-      @current_param_types = old_param_types
-      @current_local_types = old_local_types
-      @current_collection_builders = old_collection_builders
-      @current_hash_shapes = old_hash_shapes
-      @current_array_element_shapes = old_array_element_shapes
+      self.current_param_types = old_param_types
+      self.current_local_types = old_local_types
+      self.current_collection_builders = old_collection_builders
+      self.current_hash_shapes = old_hash_shapes
+      self.current_array_element_shapes = old_array_element_shapes
       @local_container_origins = old_local_origins
       @current_method_name = old_method_name
     end
@@ -876,27 +909,21 @@ module NilKill
       sig = sig_above(node.location.start_line)
       method_params = params(node, sig)
       noreturn_candidate = !contains_explicit_return?(node.body) && noreturn_body?(node.body)
-      # Cross-file propagation: register the method name globally so that
-      # callers in other files can recognise a transitive raise via
-      # `noreturn_call?`. Run between the first and second passes of
-      # `index_sources` in `infer.rb`, which gives one hop of propagation
-      # per pass. Multi-hop chains need additional passes (driven by
-      # `propagate_noreturn_until_stable!`).
       SourceIndex.register_noreturn_method(node.name) if noreturn_candidate
       SourceIndex.register_noreturn_method(node.name) if sig && /returns\(\s*T\.noreturn\s*\)/.match?(sig)
       { "path" => @rel, "line" => node.location.start_line, "end_line" => node.location.end_line, "class" => scope.join("::"),
         "method" => node.name.to_s, "kind" => node.receiver.is_a?(Prism::SelfNode) ? "class" : "instance",
         "has_sig" => !sig.nil?, "sig" => sig, "params" => method_params, "scope" => scope,
-        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => uses_yield?(node.body),
-        "untraceable_params" => untraceable_param_names(node),
-        "protocols" => param_protocols(node), "noreturn_candidate" => noreturn_candidate }
+        "non_nil_params" => non_nil_sig_params(sig), "uses_yield" => @warm_only ? false : uses_yield?(node.body),
+        "untraceable_params" => @warm_only ? [] : untraceable_param_names(node),
+        "protocols" => @warm_only ? {} : param_protocols(node), "noreturn_candidate" => noreturn_candidate }
     end
 
     def contains_explicit_return?(node)
       return false unless node
       return false if nested_scope_node?(node)
       return true if return_node?(node)
-      node.respond_to?(:child_nodes) && node.child_nodes.compact.any? { |child| contains_explicit_return?(child) }
+      node.respond_to?(:child_nodes) && node.compact_child_nodes.any? { |child| contains_explicit_return?(child) }
     end
 
     def noreturn_body?(node)
@@ -946,13 +973,13 @@ module NilKill
       old_array_element_shapes = @current_array_element_shapes
       old_method_name = @current_method_name
       old_class_name = @current_class_name
-      @current_param_types = record["params"].each_with_object({}) do |param, types|
+      self.current_param_types = record["params"].each_with_object({}) do |param, types|
         types[param["name"]] = param["type"] if NilKill.useful_type?(param["type"])
       end
-      @current_local_types = {}
-      @current_collection_builders = seed_param_collection_builders(record)
-      @current_hash_shapes = seed_param_hash_shapes(record)
-      @current_array_element_shapes = seed_param_array_element_shapes(record)
+      self.current_local_types = {}
+      self.current_collection_builders = seed_param_collection_builders(record)
+      self.current_hash_shapes = seed_param_hash_shapes(record)
+      self.current_array_element_shapes = seed_param_array_element_shapes(record)
       @current_method_name = record["method"]
       @current_class_name = record["class"] if record["class"] && !record["class"].empty?
       collect_local_type_facts(node.body)
@@ -991,11 +1018,11 @@ module NilKill
         "confidence" => confidence, "sources" => sources, "blockers" => blockers.uniq,
         "hash_shape" => hash_shape, "array_element_shape" => array_element_shape }
     ensure
-      @current_param_types = old_param_types
-      @current_local_types = old_local_types
-      @current_collection_builders = old_collection_builders
-      @current_hash_shapes = old_hash_shapes
-      @current_array_element_shapes = old_array_element_shapes
+      self.current_param_types = old_param_types
+      self.current_local_types = old_local_types
+      self.current_collection_builders = old_collection_builders
+      self.current_hash_shapes = old_hash_shapes
+      self.current_array_element_shapes = old_array_element_shapes
       @current_method_name = old_method_name
       @current_class_name = old_class_name
     end
@@ -1009,7 +1036,7 @@ module NilKill
       end
       update_local_fact(node) if node.is_a?(Prism::LocalVariableWriteNode)
       update_collection_builder_call(node) if node.is_a?(Prism::CallNode)
-      node.child_nodes.compact.each { |child| collect_local_type_facts(child) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_local_type_facts(child) } if node.respond_to?(:child_nodes)
     end
 
     def collect_branch_local_type_facts(node)
@@ -1018,30 +1045,30 @@ module NilKill
       before_shapes = dup_hash_shapes(@current_hash_shapes)
       before_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = before.dup
-      @current_collection_builders = dup_collection_builders(before_builders)
-      @current_hash_shapes = dup_hash_shapes(before_shapes)
-      @current_array_element_shapes = dup_hash_shapes(before_array_shapes)
+      self.current_local_types = before.dup
+      self.current_collection_builders = dup_collection_builders(before_builders)
+      self.current_hash_shapes = dup_hash_shapes(before_shapes)
+      self.current_array_element_shapes = dup_hash_shapes(before_array_shapes)
       collect_local_type_facts(node.statements)
       then_types = @current_local_types.dup
       then_builders = dup_collection_builders(@current_collection_builders)
       then_shapes = dup_hash_shapes(@current_hash_shapes)
       then_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = before.dup
-      @current_collection_builders = dup_collection_builders(before_builders)
-      @current_hash_shapes = dup_hash_shapes(before_shapes)
-      @current_array_element_shapes = dup_hash_shapes(before_array_shapes)
+      self.current_local_types = before.dup
+      self.current_collection_builders = dup_collection_builders(before_builders)
+      self.current_hash_shapes = dup_hash_shapes(before_shapes)
+      self.current_array_element_shapes = dup_hash_shapes(before_array_shapes)
       collect_local_type_facts(node.subsequent)
       else_types = @current_local_types.dup
       else_builders = dup_collection_builders(@current_collection_builders)
       else_shapes = dup_hash_shapes(@current_hash_shapes)
       else_array_shapes = dup_hash_shapes(@current_array_element_shapes)
 
-      @current_local_types = merge_branch_local_types(before, then_types, else_types)
-      @current_collection_builders = merge_branch_collection_builders(before_builders, then_builders, else_builders)
-      @current_hash_shapes = merge_branch_hash_shapes(before_shapes, then_shapes, else_shapes)
-      @current_array_element_shapes = merge_branch_hash_shapes(before_array_shapes, then_array_shapes, else_array_shapes)
+      self.current_local_types = merge_branch_local_types(before, then_types, else_types)
+      self.current_collection_builders = merge_branch_collection_builders(before_builders, then_builders, else_builders)
+      self.current_hash_shapes = merge_branch_hash_shapes(before_shapes, then_shapes, else_shapes)
+      self.current_array_element_shapes = merge_branch_hash_shapes(before_array_shapes, then_array_shapes, else_array_shapes)
     end
 
     def merge_branch_local_types(before, then_types, else_types)
@@ -1310,7 +1337,7 @@ module NilKill
         next unless arg.is_a?(Prism::LocalVariableReadNode)
         builder = @current_collection_builders[arg.name.to_s]
         next unless builder
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
         @current_local_types.delete(arg.name.to_s)
         @current_hash_shapes.delete(arg.name.to_s)
         @current_array_element_shapes.delete(arg.name.to_s)
@@ -1327,9 +1354,9 @@ module NilKill
       return unless builder && expr
       type = expression_type(expr)
       if NilKill.useful_type?(type) || type == "NilClass"
-        builder["types"] |= [type]
+        builder["types"] |= [type]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1342,9 +1369,9 @@ module NilKill
       type = expression_type(expr)
       info = collection_type_info(type)
       if info && info["kind"] == "array" && NilKill.useful_type?(info["element"])
-        builder["types"] |= [info["element"]]
+        builder["types"] |= [info["element"]]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1353,10 +1380,10 @@ module NilKill
       key_type = expression_type(key_expr)
       value_type = expression_type(value_expr)
       if (NilKill.useful_type?(key_type) || key_type == "NilClass") && (NilKill.useful_type?(value_type) || value_type == "NilClass")
-        builder["key_types"] |= [key_type]
-        builder["value_types"] |= [value_type]
+        builder["key_types"] |= [key_type]; @ep[0] += 1
+        builder["value_types"] |= [value_type]; @ep[0] += 1
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1368,7 +1395,7 @@ module NilKill
           add_hash_collection_types(builder, assoc.key, assoc.value)
         end
       else
-        builder["poisoned"] = true
+        builder["poisoned"] = true; @ep[0] += 1
       end
     end
 
@@ -1413,7 +1440,7 @@ module NilKill
         results << (values.first || :bare_return)
         return
       end
-      node.child_nodes.compact.each { |child| collect_explicit_returns(child, results) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_explicit_returns(child, results) } if node.respond_to?(:child_nodes)
     end
 
     def implicit_return_expression(node)
@@ -1453,7 +1480,7 @@ module NilKill
       when Prism::IfNode, Prism::CaseNode, Prism::RescueNode
         true
       else
-        node.respond_to?(:child_nodes) && node.child_nodes.compact.any? { |child| branching_return_expression?(child) }
+        node.respond_to?(:child_nodes) && node.compact_child_nodes.any? { |child| branching_return_expression?(child) }
       end
     end
 
@@ -1541,7 +1568,7 @@ module NilKill
           ret = known_return_type(callee, node: node, allow_rbi: rbi_return_candidate?(node))
           if ret && NilKill.useful_type?(ret)
             return [{ "kind" => "safe_call", "callee" => callee, "type" => nilable_type(ret), "line" => line, "code" => code,
-              "stdlib" => rbi_return_source?(node) }]
+              "stdlib" => statically_provable_call?(node) }]
           end
           blockers << "safe navigation return may be nil at #{@rel}:#{line}"
           return [{ "kind" => "nil", "type" => "NilClass", "line" => line, "code" => code },
@@ -1549,7 +1576,7 @@ module NilKill
         end
         ret = known_return_type(callee, node: node, allow_rbi: rbi_return_candidate?(node))
         return [{ "kind" => "typed_call", "callee" => callee, "type" => ret, "line" => line, "code" => code,
-          "stdlib" => rbi_return_source?(node) }] if ret && NilKill.useful_type?(ret)
+          "stdlib" => statically_provable_call?(node) }] if ret && NilKill.useful_type?(ret)
         expr_type = expression_type(node)
         return [{ "kind" => "static", "callee" => callee, "type" => expr_type, "line" => line, "code" => code }] if NilKill.useful_type?(expr_type)
         blockers << "untyped callee #{callee} at #{@rel}:#{line}"
@@ -1557,8 +1584,7 @@ module NilKill
       end
 
       # `@x = v` / `x = v` / `CONST = v` as the return expression: the
-      # returned value IS the RHS. Recurse so it types exactly like a
-      # direct return of the RHS (this was ~90% of "NotImplemented").
+      # returned value IS the RHS, so type it as the RHS.
       if node.is_a?(Prism::InstanceVariableWriteNode) || node.is_a?(Prism::LocalVariableWriteNode) ||
          node.is_a?(Prism::ClassVariableWriteNode) || node.is_a?(Prism::GlobalVariableWriteNode) ||
          node.is_a?(Prism::ConstantWriteNode)
@@ -1577,11 +1603,8 @@ module NilKill
     end
 
     def setter_call?(node)
-      # Trailing `=` identifies setters (`foo=`) and `[]=`. Exclude
-      # comparison operators (`==`, `!=`, `<=`, `>=`, `===`) which also
-      # end with `=` but are method calls returning T::Boolean, not
-      # assignments. Without this filter, `1 != 2` is misclassified as
-      # an assignment and returns the RHS type.
+      # Comparisons (`==`, `!=`, `<=`, `>=`, `===`) also end with `=`;
+      # without excluding them `1 != 2` is misread as an assignment.
       return false unless node.is_a?(Prism::CallNode)
       name = node.name.to_s
       return false unless name.end_with?("=")
@@ -1608,17 +1631,23 @@ module NilKill
 
     def rbi_return_candidate?(node)
       return false unless node.is_a?(Prism::CallNode)
-      # A call on a global variable receiver (e.g. `$stderr.puts`) is not safe
-      # to look up via the RBI index: the global is dynamically reassignable
-      # and the receiver's actual class at runtime can be anything. Treating
-      # the result as the stdlib's nominal return type leads the proposer to
-      # narrow signatures that runtime test paths violate.
+      # A global-variable receiver (`$stderr.puts`) is dynamically
+      # reassignable, so its RBI nominal return is unsound to narrow on.
       return false if node.receiver.is_a?(Prism::GlobalVariableReadNode)
       node.receiver || %w[! == puts print warn raise].include?(node.name.to_s)
     end
 
     def rbi_return_source?(node)
       node.is_a?(Prism::CallNode) && NilKill.rbi_return_type(node.name.to_s, receiver_type_for_call(node))
+    end
+
+    # rbi_return_source? needs the external sorbet RBI payload, which is
+    # absent under isolated test/CI tmp dirs. A call whose return is
+    # provable from core Ruby semantics on a known receiver type
+    # (propagated_core_return_type, e.g. Array[String]#join -> String)
+    # is statically provable without any payload -- grade it the same.
+    def statically_provable_call?(node)
+      rbi_return_source?(node) || NilKill.useful_type?(propagated_core_return_type(node))
     end
 
     def known_return_type(method_name, node: nil, allow_rbi: true)
@@ -1885,7 +1914,7 @@ module NilKill
           reasons << "operation #{node.class.name.split("::").last}"
         end
       end
-      node.child_nodes.compact.each { |child| collect_unknown_expression_reasons(child, reasons) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_unknown_expression_reasons(child, reasons) } if node.respond_to?(:child_nodes)
     end
 
     def param_protocols(node)
@@ -1904,9 +1933,7 @@ module NilKill
         if receiver.is_a?(Prism::LocalVariableReadNode) && protocols.key?(receiver.name.to_s)
           protocols[receiver.name.to_s]["methods"] << node.name.to_s
         end
-        # Methods called on an instance variable populate the class-scoped
-        # ivar protocol used by the recursive resolver. Capture covers
-        # `@x.token` directly as well as `T.must(@x).token` / safe-nav.
+        # Covers `@x.token`, `T.must(@x).token`, and safe-nav.
         if receiver.is_a?(Prism::InstanceVariableReadNode) && @current_class_name
           @ivar_protocols[[@current_class_name, receiver.name.to_s]] << node.name.to_s
         end
@@ -1924,13 +1951,10 @@ module NilKill
         source = unwrap_alias_source(node.value)
         if source && protocols.key?(source)
           protocols[source]["gaps"] << "captured in #{node.name} at #{@rel}:#{node.location.start_line}"
-          # Record that this ivar receives a value originating from a param
-          # of the enclosing method. The resolver uses this to decide
-          # whether to consult @ivar_protocols when expanding a capture gap.
           @ivar_param_origins[[@current_class_name, node.name.to_s]] << source if @current_class_name
         end
       end
-      node.child_nodes.compact.each { |child| collect_protocols(child, protocols, param_names) } if node.respond_to?(:child_nodes)
+      node.compact_child_nodes.each { |child| collect_protocols(child, protocols, param_names) } if node.respond_to?(:child_nodes)
     end
 
     def unwrap_alias_source(node)
@@ -1961,12 +1985,9 @@ module NilKill
       end
     end
 
-    # Splat (`*a`), double-splat (`**kw`), and block (`&b`) params: the
-    # runtime tracer types only positional/keyword named args, so these
-    # slots can never get runtime evidence. They appear in the Sorbet
-    # sig string (as `name: T...`) with no `*`/`**`/`&` marker, so the
-    # sig-text heuristic alone cannot recognise them -- the structural
-    # truth lives only in the def's Prism parameter list.
+    # Splat/double-splat/block params can never get runtime evidence
+    # and the sig text has no `*`/`**`/`&` marker, so they must be
+    # identified from the Prism parameter list, not the sig string.
     def untraceable_param_names(node)
       p = node.parameters
       return [] unless p
@@ -1995,7 +2016,7 @@ module NilKill
     def uses_yield?(node)
       return false unless node&.respond_to?(:child_nodes)
       return true if node.is_a?(Prism::YieldNode)
-      node.child_nodes.compact.any? { |child| uses_yield?(child) }
+      node.compact_child_nodes.any? { |child| uses_yield?(child) }
     end
 
     def inspect_call(node)
@@ -2172,7 +2193,7 @@ module NilKill
       block = call_node.block
       return nil unless block && block.respond_to?(:body)
       old_hash_shapes = @current_hash_shapes
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         shape = block_param_shapes_for_call(call_node)[idx]
         @current_hash_shapes[name] = dup_hash_shape(shape) if name && shape
@@ -2184,7 +2205,7 @@ module NilKill
       end
       shape
     ensure
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def hash_shape_for_literal_keys(value)
@@ -2218,14 +2239,20 @@ module NilKill
       struct_field_shape_for_call(node, self.class.struct_field_array_element_shapes)
     end
 
+    def sym_to_s(sym)
+      @sym_str[sym] ||= sym.to_s
+    end
+
     def struct_field_shape_for_call(node, index)
       receiver_type = expression_type(node.receiver)
-      receiver_classes_for_field_shape(receiver_type).each do |klass|
-        shape = index[[klass, node.name.to_s]]
+      name = sym_to_s(node.name)
+      classes = receiver_classes_for_field_shape(receiver_type)
+      classes.each do |klass|
+        shape = index[[klass, name]]
         return dup_hash_shape(shape) if shape
       end
-      if receiver_classes_for_field_shape(receiver_type).empty?
-        matching = index.select { |(_klass, field), _shape| field == node.name.to_s }.values
+      if classes.empty?
+        matching = index.select { |(_klass, field), _shape| field == name }.values
         return dup_hash_shape(matching.first) if matching.size == 1
       end
       nil
@@ -2234,13 +2261,20 @@ module NilKill
     def struct_field_static_type_for_call(node)
       return nil unless node.is_a?(Prism::CallNode) && node.receiver
       receiver_type = expression_type(node.receiver)
+      name = sym_to_s(node.name)
       types = receiver_classes_for_field_shape(receiver_type).flat_map do |klass|
-        Array(self.class.struct_field_static_types[[klass, node.name.to_s]])
+        Array(self.class.struct_field_static_types[[klass, name]])
       end
       NilKill.static_sorbet_type(types.uniq)
     end
 
+    # Pure function of `type` -> memoize. .dup so callers keep getting
+    # a fresh array.
     def receiver_classes_for_field_shape(type)
+      (@rcfs_memo[type] ||= receiver_classes_for_field_shape_uncached(type)).dup
+    end
+
+    def receiver_classes_for_field_shape_uncached(type)
       raw = NilKill.strip_nilable_type(type.to_s)
       return [] if raw.empty? || raw == "T.untyped"
       if raw.start_with?("T.any(")
@@ -2305,7 +2339,32 @@ module NilKill
       @tlet_sites << { "path" => @rel, "line" => node.location.start_line, "tlet" => false, "name" => node.name.to_s, "candidate_type" => type }
     end
 
+    # Sound because expression_type only READS state and every mutation
+    # of its read surface bumps @ep (the @current_* maps via EpochHash;
+    # the writes to @static_return_types/@ivar_tlet_types/
+    # @method_return_types); @current_class_name is in the key.
+    # NIL_KILL_EXPR_SHADOW asserts memo == fresh per call.
     def expression_type(node)
+      return expression_type_uncached(node) unless @expr_use_memo && node
+
+      key = node.object_id
+      ent = @expr_memo[key]
+      if ent && ent[0] == @ep[0] && ent[1] == @current_class_name
+        if @expr_shadow
+          fresh = expression_type_uncached(node)
+          if fresh != ent[2]
+            @expr_shadow_bad += 1
+            warn "EXPR_SHADOW MISMATCH #{node.class} cached=#{ent[2].inspect} fresh=#{fresh.inspect}" if @expr_shadow_bad <= 8
+          end
+        end
+        return ent[2]
+      end
+      r = expression_type_uncached(node)
+      @expr_memo[key] = [@ep[0], @current_class_name, r]
+      r
+    end
+
+    def expression_type_uncached(node)
       return nil unless node
       if return_node?(node)
         args = node.respond_to?(:arguments) ? node.arguments : nil
@@ -2492,8 +2551,8 @@ module NilKill
       return nil unless block && block.respond_to?(:body)
       old_local_types = @current_local_types
       old_hash_shapes = @current_hash_shapes
-      @current_local_types = @current_local_types.dup
-      @current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
+      self.current_local_types = @current_local_types.dup
+      self.current_hash_shapes = dup_hash_shapes(@current_hash_shapes)
       block_param_names(block).each_with_index do |name, idx|
         type = param_types[idx]
         @current_local_types[name] = type if name && NilKill.useful_type?(type)
@@ -2502,8 +2561,8 @@ module NilKill
       end
       expression_type(implicit_return_expression(block.body))
     ensure
-      @current_local_types = old_local_types if old_local_types
-      @current_hash_shapes = old_hash_shapes if old_hash_shapes
+      self.current_local_types = old_local_types if old_local_types
+      self.current_hash_shapes = old_hash_shapes if old_hash_shapes
     end
 
     def block_param_names(block)

@@ -3,8 +3,9 @@
 
 module NilKill
   class Report
-    def initialize(argv = [])
+    def initialize(argv = [], evidence: nil)
       @argv = argv.dup
+      @evidence_override = evidence
       @with_links = @argv.delete("--with-links")
       @full = @argv.delete("--full")
       @hygiene_only = @argv.delete("--hygiene")
@@ -12,7 +13,7 @@ module NilKill
     end
 
     def run
-      evidence = Store.read
+      evidence = @evidence_override || Store.read
       @evidence = evidence
       actions = evidence["actions"]
       lines = build_header(evidence)
@@ -43,8 +44,9 @@ module NilKill
       lines = lines.map { |line| format_report_line(line) }
       lines = prepare_linked_report(lines, full: @full) if @with_links
       FileUtils.mkdir_p(File.dirname(@report_path))
-      File.write(@report_path, lines.join("\n") + "\n")
-      puts File.read(@report_path)
+      report = lines.join("\n") + "\n"
+      File.write(@report_path, report)
+      puts report
     end
 
     def build_header(evidence)
@@ -808,7 +810,7 @@ module NilKill
       names = Array(evidence.dig("facts", "existing_sigs")).filter_map { |method| method["method"].to_s }.to_set
       usage = Hash.new { |hash, key| hash[key] = { "value" => 0, "return" => 0, "statement" => 0 } }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage(parsed.value, :statement, names, usage)
       rescue StandardError
@@ -981,7 +983,7 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
       rescue StandardError
@@ -2468,10 +2470,22 @@ module NilKill
       2
     end
 
+    # Was O(slots x param_origins): every method-slot rescanned ALL
+    # param_origins (thousands, whole-project) -> ~70% of the report
+    # tail. callee is the exact first filter, so index by it ONCE
+    # (memoized on the origins array, immutable during a report) and
+    # filter only the tiny per-callee group. group_by preserves order,
+    # so the per-callee group filtered by the slot predicate is exactly
+    # (and in the same order as) the original combined select ->
+    # byte-identical.
+    def param_origins_by_callee(origins)
+      (@param_origins_by_callee ||= {})[origins.object_id] ||=
+        origins.group_by { |origin| origin["callee"].to_s }
+    end
+
     def param_origins_for_slot(origins, method, name, idx)
-      origins.select do |origin|
-        origin["callee"].to_s == method["method"].to_s &&
-          (origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s)
+      Array(param_origins_by_callee(origins)[method["method"].to_s]).select do |origin|
+        origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s
       end
     end
 
@@ -2586,10 +2600,10 @@ module NilKill
         params = Array(method["params"])
         extract_param_entries(method["sig"].to_s).each_with_index do |(name, type), idx|
           next unless type == "T.untyped"
-          slot_origins = origins.select do |origin|
-            origin["callee"].to_s == method["method"].to_s &&
-              (origin["slot"].to_s == idx.to_s || origin["slot"].to_s == name.to_s)
-          end
+          # Identical predicate to param_origins_for_slot -- route
+          # through it so this shares the memoized by-callee index
+          # (was the same O(slots x origins) rescan).
+          slot_origins = param_origins_for_slot(origins, method, name, idx)
           bucket = untyped_param_source_category(slot_origins)
           buckets[bucket] += 1
           if examples[bucket].size < 8
@@ -2889,7 +2903,7 @@ module NilKill
       used = Set.new
       return_edges = Hash.new { |hash, key| hash[key] = Set.new }
       NilKill.target_files.each do |path|
-        parsed = Prism.parse_file(path)
+        parsed = NilKill.cached_parse_file(path)
         next unless parsed.success?
         mark_return_usage_graph(parsed.value, :statement, nil, candidate_names, method_return_types, used, return_edges)
       end
@@ -3234,6 +3248,15 @@ module NilKill
       member_calls = Array(evidence.dig("facts", "hash_record_member_calls"))
       param_origins = Array(evidence.dig("facts", "param_origins"))
       return_sources = Array(evidence.dig("facts", "return_origins")).flat_map { |origin| Array(origin["sources"]) }
+      # Was O(lookups x param_origins) + O(lookups x return_sources):
+      # every lookup rescanned ALL origins/sources with a per-element
+      # .to_s compare (~54s of build_actions on a whole-project index).
+      # Index by code ONCE -> O(1) per lookup. group_by preserves
+      # order, so the per-code group is exactly (and in the same order
+      # as) what `next unless code == lookup_code` yielded -> identical
+      # Set contents -> byte-identical.
+      param_origins_by_code = param_origins.group_by { |origin| origin["code"].to_s }
+      return_sources_by_code = return_sources.group_by { |source| source["code"].to_s }
 
       lookups.each do |lookup|
         cluster = cluster_for_hash_lookup(lookup, clusters_by_exact_key)
@@ -3247,12 +3270,11 @@ module NilKill
           "receiver" => lookup["receiver"], "index" => lookup["index"], "key" => key,
           "lookup_type" => lookup["lookup_type"], "status" => lookup["status"], "origin" => lookup["origin"] }
 
-        param_origins.each do |origin|
-          next unless origin["code"].to_s == lookup["code"].to_s
+        lookup_code = lookup["code"].to_s
+        Array(param_origins_by_code[lookup_code]).each do |origin|
           cluster["param_slot_ids"].add([origin["path"], origin["line"], origin["callee"], origin["slot"]])
         end
-        return_sources.each do |source|
-          next unless source["code"].to_s == lookup["code"].to_s
+        Array(return_sources_by_code[lookup_code]).each do |source|
           cluster["return_slot_ids"].add([source["path"], source["line"], source["code"]])
         end
       end
@@ -3480,10 +3502,15 @@ module NilKill
     end
 
     def hash_shape_site_key(path, line, code)
-      shape = Array(@evidence&.dig("facts", "hash_shapes")).find do |candidate|
-        candidate["path"] == path && candidate["line"].to_i == line.to_i && candidate["code"].to_s == code.to_s
-      end
+      shape = hash_shape_site_index[[path.to_s, line.to_i, code.to_s]]
       Array(shape&.fetch("keys", nil)).map(&:to_s).sort.join("\0") unless shape.nil?
+    end
+
+    def hash_shape_site_index
+      @hash_shape_site_index ||= Array(@evidence&.dig("facts", "hash_shapes")).each_with_object({}) do |shape, index|
+        key = [shape["path"].to_s, shape["line"].to_i, shape["code"].to_s]
+        index[key] ||= shape
+      end
     end
 
     def finalize_hash_record_struct_candidate(cluster)
@@ -3600,18 +3627,31 @@ module NilKill
     def hash_record_struct_path_for_scope(scope)
       parts = Array(scope).map(&:to_s).reject(&:empty?)
       return nil if parts.empty?
+      @hash_record_struct_path_cache ||= {}
       namespace = parts.join("::")
+      return @hash_record_struct_path_cache[namespace] if @hash_record_struct_path_cache.key?(namespace)
       preferred = [
         File.join("src", *parts.map { |part| underscore_const(part) }, "#{underscore_const(parts.last)}.rb"),
         File.join("src", "#{underscore_const(parts.last)}.rb"),
       ]
-      preferred.find { |path| File.file?(File.join(ROOT, path)) } || begin
-        pattern = /^\s*(?:module|class)\s+#{Regexp.escape(parts.last)}\b/
-        Dir.glob(File.join(ROOT, "src/**/*.rb")).find do |path|
-          File.readlines(path).any? { |line| line.match?(pattern) }
-        rescue StandardError
-          false
-        end&.then { |path| NilKill.rel(path) }
+      @hash_record_struct_path_cache[namespace] =
+        preferred.find { |path| File.file?(File.join(ROOT, path)) } ||
+        hash_record_struct_path_index[parts.last]
+    end
+
+    def hash_record_struct_path_index
+      self.class.hash_record_struct_path_index
+    end
+
+    def self.hash_record_struct_path_index
+      @hash_record_struct_path_index ||= Dir.glob(File.join(ROOT, "src/**/*.rb")).each_with_object({}) do |path, index|
+        rel = NilKill.rel(path)
+        File.foreach(path) do |line|
+          next unless line =~ /^\s*(?:module|class)\s+([A-Z]\w*)\b/
+          index[$1] ||= rel
+        end
+      rescue StandardError
+        nil
       end
     end
 
@@ -3644,10 +3684,19 @@ module NilKill
       if evidence.equal?(@evidence) && defined?(@hash_record_struct_pressure_cache) && @hash_record_struct_pressure_cache
         return @hash_record_struct_pressure_cache
       end
-      graph = flow_graph(evidence)
+      graph = FlowGraph.new
       lookups = Array(evidence.dig("facts", "collection_index_lookups")).select { |lookup| hash_record_lookup?(lookup) }
       param_origins = Array(evidence.dig("facts", "param_origins"))
       return_sources = Array(evidence.dig("facts", "return_origins")).flat_map { |origin| Array(origin["sources"]) }
+      # Was O(lookups x param_origins) + O(lookups x return_sources):
+      # every lookup rescanned ALL origins/sources with a per-element
+      # .to_s compare (~54s of build_actions on a whole-project index).
+      # Index by code ONCE -> O(1) per lookup. group_by preserves
+      # order, so the per-code group is exactly (and in the same order
+      # as) what `next unless code == lookup_code` yielded -> identical
+      # Set contents -> byte-identical.
+      param_origins_by_code = param_origins.group_by { |origin| origin["code"].to_s }
+      return_sources_by_code = return_sources.group_by { |source| source["code"].to_s }
       groups = Hash.new do |hash, key|
         hash[key] = { "label" => key, "keys" => Set.new, "examples" => [],
           "collection_slot_ids" => Set.new, "param_slot_ids" => Set.new, "return_slot_ids" => Set.new,
@@ -3663,12 +3712,11 @@ module NilKill
         row["ivar_slot_ids"].add([lookup["path"], lookup["line"], lookup["receiver"]]) if hash_record_ivar_lookup?(lookup)
         row["examples"] << "#{lookup["path"]}:#{lookup["line"]} #{lookup["code"]}; receiver type #{lookup["receiver_type"] || "unknown"}" if row["examples"].size < 5
 
-        param_origins.each do |origin|
-          next unless origin["code"].to_s == lookup["code"].to_s
+        lookup_code = lookup["code"].to_s
+        Array(param_origins_by_code[lookup_code]).each do |origin|
           row["param_slot_ids"].add([origin["path"], origin["line"], origin["callee"], origin["slot"]])
         end
-        return_sources.each do |source|
-          next unless source["code"].to_s == lookup["code"].to_s
+        Array(return_sources_by_code[lookup_code]).each do |source|
           row["return_slot_ids"].add([source["path"], source["line"], source["code"]])
         end
       end
@@ -3960,7 +4008,7 @@ module NilKill
         lines << "- #{status}: #{count}"
       end
       weak = lookups.select { |lookup| lookup["status"] != "typed collection receiver" }
-      graph = flow_graph
+      graph = FlowGraph.new
       grouped = weak.each_with_object(Hash.new { |h, k| h[k] = { "count" => 0, "examples" => [] } }) do |lookup, groups|
         label = hash_record_lookup_key(lookup) ? graph.hash_record_label_for_lookup(lookup) : collection_origin_label(lookup["origin"])
         groups[label]["count"] += 1

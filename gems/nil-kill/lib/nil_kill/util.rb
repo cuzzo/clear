@@ -21,6 +21,18 @@ module NilKill
     path.to_s
   end
 
+  def cached_parse_file(path)
+    stat = File.stat(path)
+    @cached_parse_files ||= {}
+    mtime = stat.mtime
+    stamp = [stat.size, mtime.to_i, mtime.nsec]
+    entry = @cached_parse_files[path]
+    return entry[1] if entry && entry[0] == stamp
+    parsed = Prism.parse_file(path)
+    @cached_parse_files[path] = [stamp, parsed]
+    parsed
+  end
+
   # ---- In-place instrumentation lifecycle -----------------------------
   # `collect` wraps the real src/ in place (one copy, at the real path,
   # always instrumented -> every load mechanism / subprocess / re-exec
