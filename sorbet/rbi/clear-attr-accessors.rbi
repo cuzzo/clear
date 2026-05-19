@@ -286,6 +286,10 @@ end
 
 class AST::FunctionDef
   sig { returns(T.untyped) }
+  def alloc_fault; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def alloc_fault=(value); end
+  sig { returns(T.untyped) }
   def arrow_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def arrow_token=(value); end
@@ -313,6 +317,10 @@ class AST::FunctionDef
   def effects_span; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def effects_span=(value); end
+  sig { returns(T.untyped) }
+  def error_fallible; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_fallible=(value); end
   sig { returns(T.untyped) }
   def explicit_return_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1150,6 +1158,10 @@ end
 
 class FunctionDef
   sig { returns(T.untyped) }
+  def alloc_fault; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def alloc_fault=(value); end
+  sig { returns(T.untyped) }
   def arrow_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def arrow_token=(value); end
@@ -1177,6 +1189,10 @@ class FunctionDef
   def effects_span; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def effects_span=(value); end
+  sig { returns(T.untyped) }
+  def error_fallible; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_fallible=(value); end
   sig { returns(T.untyped) }
   def explicit_return_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
