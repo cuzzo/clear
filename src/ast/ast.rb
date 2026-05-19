@@ -864,7 +864,7 @@ module AST
       t = @type_object
       return nil unless t
 
-      return :void if t.resolved == :Void
+      return :void if t.void?
       return :die if t.resolved == :NoReturn
       return :array if t.array?
       return :hashmap if t.map?
@@ -1600,6 +1600,8 @@ module AST
     def locked? = sync == :locked
     sig { returns(T::Boolean) }
     def local? = sync == :local
+    sig { returns(T::Boolean) }
+    def multiowned? = ownership == :multiowned
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants

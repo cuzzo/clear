@@ -183,6 +183,11 @@ class SymbolEntry
     @sync == :local
   end
 
+  sig { returns(T::Boolean) }
+  def write_locked?
+    @sync == :write_locked
+  end
+
   # Binding is Rc/Arc-stored. `storage == :shared || storage == :multiowned`
   # was reinvented inline across the annotator/MIR seam (decomplex
   # Missing-Abstraction). Storage axis -- distinct from Type#any_rc?

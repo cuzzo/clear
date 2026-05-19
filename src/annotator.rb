@@ -4184,7 +4184,7 @@ private
     if node.atomic_ptr?
       if node.ownership == :local
         error!(node, :LOCAL_INDIRECT_ATOMIC)
-      elsif node.ownership == :multiowned
+      elsif node.multiowned?
         error!(node, :MULTIOWNED_INDIRECT_ATOMIC)
       end
     end
@@ -5699,7 +5699,7 @@ private
     end
     ti = last.full_type
     return nil unless ti
-    return nil if ti.resolved == :Void || ti.resolved == :NoReturn
+    return nil if ti.void? || ti.resolved == :NoReturn
     # These are statement-level constructs, not value-producing expressions
     return nil if last.is_a?(AST::ReturnNode)   || last.is_a?(AST::VarDecl)   ||
                   last.is_a?(AST::BindExpr)      || last.is_a?(AST::Assignment) ||

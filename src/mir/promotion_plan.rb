@@ -50,7 +50,7 @@ module PromotionClassifier
     if ret_type.error_union? && ret_type.payload_type
       ret_type = ret_type.payload_type
     end
-    return {} if ret_type.resolved == :Void
+    return {} if ret_type.void?
     return {} if ret_type.string?
 
     return_nodes = collect_returns(fn_node.body)

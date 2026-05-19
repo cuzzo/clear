@@ -2239,7 +2239,7 @@ class MIRLowering
     ret_t = return_type
     can_fail = ret_t.error_union?
     payload_t = can_fail ? ret_t.payload_type : ret_t
-    returns_void = payload_t.resolved == :Void
+    returns_void = payload_t.void?
 
     fields = []
     fields << "self_val: @TypeOf(#{receiver_field})" if receiver_field

@@ -574,7 +574,7 @@ module GenericAnalysis
     end
     if coll_src
       node.full_type.collection  = coll_src.collection
-      node.full_type.provenance  = :heap if coll_src.collection == :pool || coll_src.collection == :set
+      node.full_type.provenance  = :heap if coll_src.pool? || coll_src.set_collection?
       node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count
       node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
       if node.full_type
