@@ -981,6 +981,7 @@ module AST
     attr_accessor :requires_clauses
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
+    attr_accessor :alloc_fault   # computed by compute_can_fail! post-pass: fn allocates (direct or via a non-OR-absorbed callee) -> can OOM. A FAULT (panics by default, catchable by OR/CATCH), NOT an ERROR (never forces RETURNS !T). #3/#12
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
     attr_accessor :uses_rt       # true when body references rt without allocating (e.g. Versioned.read for EBR pin)

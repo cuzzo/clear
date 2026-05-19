@@ -470,8 +470,50 @@ module EffectTracker
       end
     end
 
+    # ── FAULT axis: allocation (OOM) ─────────────────────────────────
+    # Computed parallel to can_fail, with the SAME single authority for
+    # channel termination (@fn_propagating_callees, #11): a callee
+    # reached only via `f() OR <fallback>` / `OR PASS` has its fault
+    # channel terminated locally and does not propagate the alloc fault
+    # into the caller. A FAULT rides the same Zig `!T`+try path as an
+    # ERROR (so codegen stays uniform -- step 3 folds this into
+    # can_fail); it differs only at surface enforcement (step 4: a
+    # FAULT never forces `RETURNS !T`). Direct seed = the alloc signals
+    # the #3 fix removed from the ERROR seed; they were never an error,
+    # they are this fault. (puck-clear-bugs.md #3/#12)
+    alloc_fault = {}
+    @fn_nodes.each do |name, fn_node|
+      alloc_fault[name] =
+        (fn_node.uses_frame == true) ||
+        (fn_node.uses_heap == true) ||
+        (fn_node.uses_alloc == true)
+    end
+    @call_graph.each do |_, callees|
+      callees.each do |c|
+        next if alloc_fault.key?(c)
+        scope = lookup_scope_for(c)
+        next unless scope
+        sig = scope.locals[c]&.type
+        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        alloc_fault[c] = true if sig&.alloc_fault
+      end
+    end
+    changed = T.let(true, T::Boolean)
+    while changed
+      changed = false
+      @call_graph.each do |fn_name, callees|
+        next if alloc_fault[fn_name]
+        prop = @fn_propagating_callees[fn_name] || callees
+        if prop.any? { |c| alloc_fault[c] }
+          alloc_fault[fn_name] = true
+          changed = T.let(true, T::Boolean)
+        end
+      end
+    end
+
     @fn_nodes.each do |name, fn_node|
       fn_node.can_fail = (can_fail[name] == true)
+      fn_node.alloc_fault = (alloc_fault[name] == true)
     end
   end
 
