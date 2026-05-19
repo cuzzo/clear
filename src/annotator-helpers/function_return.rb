@@ -53,6 +53,13 @@ class FunctionReturn < T::Struct
   sig { params(m: Symbol).returns(FunctionReturn) }
   def self.infer(m) = new(kind: Kind::Infer, infer: m)
 
+  # Single source for "is this the Fixed (concrete-Type) variant".
+  # Was reinvented inline as `kind == FunctionReturn::Kind::Fixed`
+  # (decomplex Reification-Miss: function_signature#fixed_return?,
+  # intrinsic_registry#to_return_type).
+  sig { returns(T::Boolean) }
+  def fixed? = kind == Kind::Fixed
+
   # A receiver-parametric variant (ElementOf / OptionalOfElement /
   # IdOfElement / OptionalOfValue / ValueList / KeyList) by Kind
   # constant name. No payload -- the Type is computed from the

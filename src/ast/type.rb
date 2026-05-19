@@ -286,7 +286,7 @@ class Type
     # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
     # provenance even without an active sync, mirroring the @indirect
     # CapabilityWrap branch in the annotator (annotator.rb:3517).
-    @provenance = :heap if @layout == :indirect
+    @provenance = :heap if indirect?
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
     @provenance = :rodata if @sync == :symbol
     # Pool collection always lives on the heap (owns internal slot array).
@@ -2167,7 +2167,7 @@ class Type
       # value receivers, and lifetime checks make the outer refcount redundant.
       #
       # `@indirect:atomic` uses the same bare-pointer binding layout.
-      if atomic? && (@ownership == :shared || @ownership == :multiowned || @layout == :indirect)
+      if atomic? && (@ownership == :shared || @ownership == :multiowned || indirect?)
         return "*#{inner_zig}"
       end
 

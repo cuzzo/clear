@@ -3429,7 +3429,7 @@ class MIRLowering
       # AtomicPtr commits surface AtomicConflict; Versioned commits surface
       # MvccConflict.
       sym = var_node.symbol
-      is_atomic_ptr = sym && sym.atomic? && sym.layout == :indirect
+      is_atomic_ptr = sym && sym.atomic? && sym.indirect?
       conflict_error = is_atomic_ptr ? :AtomicConflict : :MvccConflict
       conflict_action = emit_conflict_action_zig(
         node.lock_error_clause, with_label, node, conflict_error,
@@ -4859,7 +4859,7 @@ class MIRLowering
       return ident if node.atomic_borrow
       # AtomicPtr reads go through WITH SNAPSHOT; the bare identifier is the
       # cell pointer and AtomicPtr has no `.load()` method.
-      if node.symbol&.layout == :indirect
+      if node.symbol&.indirect?
         return ident
       end
       # Dereference bare atomic cells before loading; AtomicPtr reads use the
@@ -6005,7 +6005,7 @@ class MIRLowering
              when :multiowned then (node.atomic? ? nil : "rcCreate")
              end
 
-    strategy = if node.sync == :local || (node.layout == :indirect && !node.sync && !node.ownership)
+    strategy = if node.sync == :local || (node.indirect? && !node.sync && !node.ownership)
       :local
     elsif sync_fn && own_fn
       :both
@@ -6066,7 +6066,7 @@ class MIRLowering
       inner = "CheatLib.RefCell(#{inner})"  if payload.sync == :always_mutable
       inner = "CheatLib.Versioned(#{inner})" if payload.sync == :versioned
       if payload.atomic?
-        inner = payload.layout == :indirect ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
+        inner = payload.indirect? ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
       end
       return inner
     end

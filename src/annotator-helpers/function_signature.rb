@@ -142,7 +142,7 @@ class FunctionSignature
   # or host-inferred). Callers that only honor a statically-declared
   # owned return (e.g. the MIR HPT_LEAK check) gate on this.
   sig { returns(T::Boolean) }
-  def fixed_return? = @return_def.kind == FunctionReturn::Kind::Fixed
+  def fixed_return? = @return_def.fixed?
 
   sig { returns(FunctionSignature) }
   def dup

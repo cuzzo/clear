@@ -2278,7 +2278,7 @@ private
     # @indirect on a return type is a storage directive: the value is
     # heap-boxed into a `*T` cell at the RETURN site (escape analysis),
     # so the returned expression need not already carry :indirect.
-    layout_ok = expected_t.layout == actual_t.layout || expected_t.layout == :indirect
+    layout_ok = expected_t.layout == actual_t.layout || expected_t.indirect?
     expected_t.ownership == actual_t.ownership &&
       expected_t.sync == actual_t.sync &&
       layout_ok &&
@@ -3150,7 +3150,7 @@ private
       tsym = tscope&.locals&.[](tname)
       sync = tsym&.sync
       layout = tsym.respond_to?(:layout) ? tsym.layout : nil
-      if sync == :locked || sync == :write_locked || (sync == :atomic && layout == :indirect)
+      if sync == :locked || sync == :write_locked || tsym&.atomic_ptr?
         @in_auto_locked_assign = tname
       end
     end
@@ -3427,7 +3427,7 @@ private
           emit_cap_field_needs_with!(node,
             :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
             name: node.target.name, field: node.field, cap: "@writeLocked")
-        elsif sync == :atomic && layout == :indirect && !in_with_block && !in_auto_lock
+        elsif sym.atomic_ptr? && !in_with_block && !in_auto_lock
           emit_cap_field_needs_with!(node,
             :CAP_FIELD_NEEDS_WITH_SNAPSHOT, perm: "SNAPSHOT",
             name: node.target.name, field: node.field, cap: "@indirect:atomic")
@@ -4200,7 +4200,7 @@ private
       ti.ownership = :shared
     end
     # @indirect forces heap location (same as @local, but different intent).
-    ti.provenance = :heap           if node.layout == :indirect
+    ti.provenance = :heap           if node.indirect?
 
     # Lock ranks induce a total order only if every declaration of a type
     # uses the same rank.
@@ -4890,7 +4890,7 @@ private
     has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
       next false unless c[:capability] == :SNAPSHOT
       sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
-      sym && sym.atomic? && sym.respond_to?(:layout) && sym.layout == :indirect
+      sym && sym.atomic? && sym.respond_to?(:layout) && sym.indirect?
     }
 
     # Missing per-WITH conflict handlers fall back to SYNC POLICY. Stamp the
@@ -4965,7 +4965,7 @@ private
     sym = root.symbol
     return unless sym
     return unless sym.atomic?
-    return unless sym.respond_to?(:layout) && sym.layout == :indirect
+    return unless sym.respond_to?(:layout) && sym.indirect?
 
     error!(assignment_node, :INDIRECT_ATOMIC_FIELD_WRITE,
       name: root.name, field: field_name_for_msg(field_node))
@@ -5033,7 +5033,7 @@ private
 
   # Does this capability's binding potentially run as `:atomic` at runtime?
   #   - concrete sync `:atomic` (covers primitive @atomic and
-  #     indirect:atomic via sym.layout == :indirect, both flagged
+  #     indirect:atomic via sym.indirect?, both flagged
   #     by sym.atomic?);
   #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
   #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).

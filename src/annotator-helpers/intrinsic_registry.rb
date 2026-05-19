@@ -75,7 +75,7 @@ module IntrinsicRegistry
   # placeholder (the real resolution is consumer-side via
   # return_def.resolve, gated by fixed_return?).
   def to_return_type(rdef)
-    if rdef.kind == FunctionReturn::Kind::Fixed
+    if rdef.fixed?
       rdef.fixed || Type.new(:Void)
     else
       Type.new(:Any)

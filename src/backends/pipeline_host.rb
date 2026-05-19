@@ -478,7 +478,7 @@ class PipelineHost
   def build_pipe_items_mir(lhs_type)
     # In BC mode the VM has no SoA layout; treat @soa lists as regular lists
     # so the structural ItemsAccess path below applies uniformly.
-    bc_mode = @lowering.instance_variable_get(:@target) == :bc
+    bc_mode = bc_target?
     if lhs_type.pool? && lhs_type.sharded?
       [build_mat_sharded_pool(lhs_type), "pipe_items"]
     elsif lhs_type.pool? && lhs_type.soa? && !bc_mode
@@ -1993,7 +1993,7 @@ class PipelineHost
     # fusion pipeline (SELECT/WHERE/LIMIT/...) can be expressed; the BC
     # emitter handles the resulting next() loop by materializing the range.
     range_chain = unwrap_range_chain(list_node)
-    is_bc = (@lowering.instance_variable_get(:@target) == :bc)
+    is_bc = (bc_target?)
     if range_chain && !(is_bc && list_node.is_a?(AST::RangeLit) && range_chain[:stages].empty?)
       return lower_each_range(range_chain[:source], range_chain[:stages], each_op)
     end
@@ -3324,7 +3324,7 @@ class PipelineHost
     # op through the regular pipeline lowering. Result-order-deterministic
     # tests pass identically; tests asserting via order-invariant aggregates
     # (sum/count/min/max) don't care.
-    if @lowering.instance_variable_get(:@target) == :bc
+    if bc_target?
       lhs_ti = smooth_node.left.full_type
       stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? ||
                               lhs_ti.open_stream? || lhs_ti.inf_stream?)
