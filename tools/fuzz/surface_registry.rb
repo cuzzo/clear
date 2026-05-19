@@ -122,6 +122,16 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    # Truthful owner of takes_arg/give_arg across owning collection shapes.
+    # access_gate also claims takes_arg/give_arg but only for a struct
+    # (Counter); the taxonomy not crossing sink x shape is why the
+    # collection-shape gap was masked (#41).
+    takes_move_modality: {
+      collection_shapes: [:list, :set, :pool, :hash_map, :dynamic_array],
+      escape_sinks: [:takes_arg, :give_arg],
+      mir_ownership_contracts: [:move_suppresses_cleanup],
+    },
+
     loop_carry_collection: {
       cleanup_value_shapes: [:heap_list, :frame_string_concat],
       escape_sources: [:loop_local],

@@ -310,16 +310,6 @@ def ownership_surface_escape_sink_cell(sink)
           RETURN;
       END
     CHT
-  when :takes_arg, :give_arg
-    <<~CHT
-      FN consume!(TAKES xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
-      FN main() RETURNS Void ->
-          MUTABLE xs: Int64[] = [];
-          xs.append(4_i64);
-          ASSERT consume!(GIVE xs) == 1_i64, "takes/give sink";
-          RETURN;
-      END
-    CHT
   when :bg_handle_return
     <<~CHT
       FN work() RETURNS ~Int64 -> RETURN BG { 7_i64; }; END
