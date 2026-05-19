@@ -27,12 +27,16 @@ ruby gems/slopcop/exe/slopcop report --output=gems/slopcop/report.md
 
 | Slot category        | untyped | nilable | AFTER untyped | AFTER nilable |
 |----------------------|--------:|--------:|--------------:|--------------:|
-| params               |   1744  |   598   |               |               |
-| returns              |    735  |   542   |               |               |
-| collections          |    825  |     7   |               |               |
-| structs/ivars        |      8  |    47   |               |               |
-| structs/ivars `T.let`|    123 (slots) |  |          |               |
-| **TOTAL (src/ raw token)** | **2609** | **952** |       |               |
+| params               |   1744  |   598   |   1687 (-57)  |   598         |
+| returns              |    735  |   542   |    695 (-40)  |   549         |
+| collections          |    825  |     7   |    775 (-50)  |     8         |
+| structs/ivars        |      8  |    47   |      8        |    47         |
+| structs/ivars `T.let`|    123 (slots) |  |   123    |               |
+| **TOTAL (src/ raw token)** | **2609** | **952** | **2541 (-68)** | **960** |
+
+AFTER column = through Unit 1.5b (`056f3ab80`). `nilable` is flat/+8 by design:
+the drop comes in 1.5c when the nil sentinel + `binding_entry &&` guards collapse;
+the +8 is added typed-nilable accessor sigs. Sorbet `untyped.usages` 25431 -> 25322.
 
 (Categories overlap by construction: a `T.untyped` inside `T::Hash[..]` inside a
 `params(...)` is counted in params, collections, and TOTAL. TOTAL is the canonical
@@ -94,6 +98,9 @@ headline raw-token count.)
 | 0 metrics | `3710df248` | typing + gem baseline captured |
 | 1 | `6112cdd1a` | single-source `ft` in `lower_var_decl` (kill redundant recompute); byte-identical |
 | 1.5a | `40858bf2d` | typed `CleanupEntry < Hash` foundation; ~28 entry sigs flipped; byte-identical. src/ TOTAL.untyped 2609->2564 |
+| 1.5b(1) | `7f7b2a654` | lower_var_decl reader burn-down (decomplex #1 cluster); byte-identical |
+| 1.5b(2) | `57fdf1e2d` | emitter reader burn-down + single-source all entry construction (runtime sig surfaced + fixed latent untyped-construction gap); byte-identical |
+| 1.5b(3) | `056f3ab80` | mir_pass/control_flow/mir_lowering/mir_checker reader burn-down; byte-identical. src/ TOTAL.untyped -> 2541 (-68 cumulative); untyped.usages 25431->25322 |
 
 ## Unit 1.5 -- CleanupEntry (Hash -> typed) slices
 
