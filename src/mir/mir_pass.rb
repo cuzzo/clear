@@ -703,14 +703,15 @@ class MIRPass
           end
 
     if rhs
-      is_move = rhs.is_a?(AST::MoveNode)
-      ident = is_move ? rhs.value : rhs
-      add_if_consumed(ident, names, bindings, is_move) if ident.is_a?(AST::Identifier)
+      # Structural unwrap only; the move decision reads the annotator's
+      # was_moved stamp, not the MoveNode node type (INV-13).
+      ident = rhs.is_a?(AST::MoveNode) ? rhs.value : rhs
+      add_if_consumed(ident, names, bindings, ident.was_moved == true) if ident.is_a?(AST::Identifier)
     end
 
     # 2. Standalone GIVE: `GIVE x;` as a bare statement
     if stmt.is_a?(AST::MoveNode) && stmt.value.is_a?(AST::Identifier)
-      add_if_consumed(stmt.value, names, bindings, true)
+      add_if_consumed(stmt.value, names, bindings, stmt.value.was_moved == true)
     end
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
@@ -744,7 +745,7 @@ class MIRPass
       end
     when AST::MoveNode
       if node.value.is_a?(AST::Identifier)
-        add_if_consumed(node.value, names, bindings, true)
+        add_if_consumed(node.value, names, bindings, node.value.was_moved == true)
       else
         walk_consumed(node.value, names, bindings)
       end
