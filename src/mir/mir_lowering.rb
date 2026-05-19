@@ -13,6 +13,7 @@
 require "sorbet-runtime"
 
 require_relative "mir"
+require_relative "cleanup_entry"
 require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
@@ -58,7 +59,7 @@ class MIRLowering
     @debug_mode = debug_mode
     @pending_stmts = T.let([], T::Array[T.untyped])
     @tmp_counter = T.let(0, Integer)
-    @current_bindings = T.let({}, T::Hash[T.untyped, T.untyped])  # set per-function by lower_function_def from fn.cleanup_bindings
+    @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -891,7 +892,7 @@ class MIRLowering
   # Pre-compute zig_type, elem_zig_type, is_fixed into the cleanup entry hash.
   # Mutates entry in-place. Called by lower_var_decl and lower_function_def
   # (TAKES params) to avoid deferring type resolution to the emitter.
-  sig { params(entry: T::Hash[Symbol, T.untyped], ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
+  sig { params(entry: CleanupEntry, ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
   def build_drop_entry!(entry, ti, source_node)
 
     zig_type = case entry[:kind]
@@ -6314,7 +6315,7 @@ class MIRLowering
       drop_entry = if binding_entry
         binding_entry.dup
       elsif ft.string?
-        { kind: :heap_string, alloc: decl_alloc, has_moved_guard: true }
+        CleanupEntry.from({ kind: :heap_string, alloc: decl_alloc, has_moved_guard: true })
       else
         kind = case ft.sync
                when :locked then :locked
@@ -6323,7 +6324,7 @@ class MIRLowering
                when :always_mutable then :always_mutable
                else :heap_struct
                end
-        { kind: kind, alloc: decl_alloc, has_moved_guard: false }
+        CleanupEntry.from({ kind: kind, alloc: decl_alloc, has_moved_guard: false })
       end
       build_drop_entry!(drop_entry, node.full_type, node)
       # Escape-analysis heap stamp takes precedence.
@@ -6355,14 +6356,14 @@ class MIRLowering
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     elsif owned_return_transfer_binding?(binding_entry, init)
-      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc] || :heap
+      mir_alloc = resolve_decl_stdlib_alloc(node) || T.must(binding_entry)[:alloc] || :heap
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::TransferMark.new(safe_name, :moved)]
     else
       let_node
     end
   end
 
-  sig { params(binding_entry: T.nilable(T::Hash[T.untyped, T.untyped]), init: T.untyped).returns(T::Boolean) }
+  sig { params(binding_entry: T.nilable(CleanupEntry), init: T.untyped).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
     return false unless binding_entry && binding_entry[:needs_cleanup] == false
     return false unless binding_entry[:alloc] == :heap || binding_entry[:alloc] == :cleanup
