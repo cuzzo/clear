@@ -234,9 +234,12 @@ RSpec.describe SemanticAnnotator do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
-          # The fn explicitly declares `RETURNS !Float64[]`, so the
-          # return value's coerced_type is the declared error union.
-          expect(return_node.value.coerced_type).to eq(:"!Float64[]")
+          # `!` is the error CHANNEL, never part of a value's type: an
+          # infallible returned value coerces to the PAYLOAD, not the
+          # error union (the `!` is added by the return mechanism / fn
+          # signature). The old `!Float64[]` expectation encoded
+          # puck-clear-bugs.md #10.
+          expect(return_node.value.coerced_type).to eq(:"Float64[]")
         end
       end
     end

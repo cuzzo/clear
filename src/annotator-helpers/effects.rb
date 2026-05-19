@@ -496,10 +496,40 @@ module EffectTracker
     # they are this fault. (puck-clear-bugs.md #3/#12)
     alloc_fault = {}
     @fn_nodes.each do |name, fn_node|
-      alloc_fault[name] =
+      # Direct body allocation (counted at annotation: append/split/...).
+      direct_alloc =
         (fn_node.uses_frame == true) ||
         (fn_node.uses_heap == true) ||
         (fn_node.uses_alloc == true)
+      # Contract authority: a fn DECLARED to return an owned heap
+      # collection/map/string necessarily allocated that value. The
+      # body-count above misses `RETURN [1_i64]` (the makeList is
+      # hoisted at MIR-lowering, after annotation counts uses_*), so
+      # the Zig signature would lack `!` while the body emits
+      # `try makeList` (#10/#12 residue). Read collection-ness from
+      # the OUTER type when it's an error union (payload_type rebuilds
+      # from the bare raw symbol and drops @collection -- see #13).
+      # This feeds ONLY alloc_fault -> can_fail -> the Zig `!` prefix;
+      # it does NOT touch provenance/cleanup (which is what caused the
+      # 527 double-free in the earlier attempt), so it is safe.
+      decl_alloc =
+        begin
+          rt = fn_node.return_type
+          rt = Type.new(rt) if rt && !rt.is_a?(Type)
+          if rt.is_a?(Type)
+            if rt.error_union?
+              rt.collection? || rt.string?
+            else
+              (rt.respond_to?(:needs_escape_promotion?) && rt.needs_escape_promotion?) ||
+                rt.collection? || rt.string?
+            end
+          else
+            false
+          end
+        rescue StandardError
+          false
+        end
+      alloc_fault[name] = direct_alloc || decl_alloc
     end
     @call_graph.each do |_, callees|
       callees.each do |c|

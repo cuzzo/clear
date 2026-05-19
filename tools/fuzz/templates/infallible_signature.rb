@@ -68,37 +68,41 @@ INFALLIBLE_SIG_FAIL_SOURCES.each do |fs|
   %i[plain error_union].each do |decl|
     %i[scalar heap_string heap_list].each do |ret|
       true_fallible = INFALLIBLE_SIG_TRUE_FALLIBLE.include?(fs)
-      # #12: a bare, unabsorbed arena-allocating op (`a + a` concat,
-      # `a.split(" ")`, list build/append) and a heap-`@list` return
-      # path both lower to `try CheatLib.<op>` because those CheatLib
-      # fns are declared fallible (`error{OutOfMemory}`) -- but `try`
-      # is illegal in a plain (non-error) fn. Per the #3 thesis these
-      # arena ops bump-allocate and panic on OOM, so they should be
-      # infallible (no `try`); the real fix is runtime-side. Masked
-      # pre-fix because bug #3 rejected these at the annotator before
-      # codegen; the #3 de-conflation exposes the latent defect. The
-      # canonical #3 reproducer is unaffected (its charAt is OR-
-      # absorbed, no bare arena op). Tracked as puck-clear-bugs.md #12.
-      arena_codegen_12 =
-        decl == :plain && !true_fallible &&
-        (%i[alloc_concat alloc_split alloc_list_build].include?(fs) || ret == :heap_list)
+      # ERROR-vs-FAULT oracle (the unified alloc-as-FAULT model;
+      # puck-clear-bugs.md #3/#10/#12/#13):
+      #   - GENUINE ERROR (RAISE / OR RAISE / propagated ERROR callee)
+      #     with a plain `RETURNS T` is UNDER-DECLARED -> :compile_error
+      #     (surface enforcement: errors must be in the type).
+      #   - Everything else compiles. An allocating FAULT source
+      #     (none/alloc_*) with `RETURNS T` is LEGAL: the fn rides the
+      #     uniform Zig !T pipeline (alloc_fault -> can_fail) but is
+      #     surface-exempt; unhandled OOM panics (System/OutOfMemory),
+      #     catchable anywhere via OR/CATCH. fallible_callee_absorbed
+      #     stays infallible (#11). All ret_shapes incl heap_list now
+      #     transpile (6a: declared-collection-return -> alloc_fault ->
+      #     Zig `!`). No :in_dev parks remain -- the gate is now the
+      #     full regression oracle for the model.
       expected =
         if decl == :error_union && ret == :heap_list
-          # Returning `!Int64[]@list` mis-lowers: the list return temp
-          # keeps its `anyerror!array_list...` wrapper and Zig rejects
-          # the `*const anyerror!T` -> `*const T` cast. Orthogonal to
-          # the fallible-signature bug; the naive coerced-type payload
-          # strip makes it compile but then LEAKS the returned list
-          # (INV-2), so it is not a safe fix. Reserve the cells; flip
-          # to :pass when puck-clear-bugs.md #10 (+ #13 list-return
-          # cleanup) lands.
-          :in_dev
-        elsif arena_codegen_12
+          # #13 residue: a fn that DECLARES `RETURNS !Int64[]@list` and
+          # returns a collection LITERAL now COMPILES (the #10 coerced-
+          # type payload strip), but `r = subject() OR RAISE` leaks at
+          # the caller: the literal-returning subject is not in E1
+          # heap_fns (return_expr_is_heap? only recognizes call/ident/
+          # getfield, not literals) so no caller cleanup is paired.
+          # The safe-looking fixes (e3 see-through-OR_RESCUE +
+          # contract-level heap recognition) reintroduce the
+          # 527_discard_owned_value double-free / allocator-alignment
+          # mismatch -- strictly worse than the leak. This is the one
+          # precisely-isolated residual; it needs a dedicated cleanup-
+          # machinery change that recognizes literal-collection returns
+          # as heap-owning WITHOUT broadening heap_fns into the
+          # discard/GIVE path. Tracked: puck-clear-bugs.md #13.
           :in_dev
         elsif decl == :plain && true_fallible
-          :compile_error            # under-declared, must be rejected
+          :compile_error            # ERROR under-declared, must reject
         else
-          :pass                     # everything else must compile
+          :pass                     # FAULT/declared-error: must compile
         end
       INFALLIBLE_SIG_CELLS << {
         fail_source: fs, decl: decl, ret_shape: ret, expected: expected

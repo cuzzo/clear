@@ -2252,8 +2252,37 @@ private
     if !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
       error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
     elsif !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && actual != expected
-      node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
-      check_prefixed_int_range!(node.value, expected)
+      # A value's coercion target is the PAYLOAD, never the error union
+      # `!T`. `!` is the channel (added by the return mechanism / fn
+      # signature), orthogonal to the value's type. Stamping `!T` here
+      # makes lower() emit `@as(anyerror!T, value)`, whose address
+      # (`&__tmp`) is `*const anyerror!T` and fails the @list
+      # cleanup/return cast (puck-clear-bugs.md #10). A genuinely
+      # fallible value (auto-propagate-stripped call: `!T` stashed on
+      # error_union_type) keeps the channel target so return-lowering
+      # still emits the propagating `try`. Caller-side cleanup of the
+      # returned collection is handled by the uniform alloc-fault
+      # pipeline (steps 3-4), so unlike the earlier standalone attempt
+      # this no longer leaks (#13) and does not need E1 broadening
+      # (no 527 double-free). (`expected` is always a Type on master --
+      # the FunctionSignature seam coerces nil -> Void.)
+      value_is_fallible =
+        (node.value.respond_to?(:error_union_type) && node.value.error_union_type) ||
+        (begin
+           rt = node.value.respond_to?(:resolved_type) ? node.value.resolved_type : nil
+           rt ? Type.new(rt).error_union? : false
+         rescue StandardError
+           false
+         end)
+      coerce_target =
+        if !value_is_fallible && expected.respond_to?(:error_union?) && expected.error_union? &&
+           expected.respond_to?(:payload_type) && expected.payload_type
+          expected.payload_type
+        else
+          expected
+        end
+      node.value.coerced_type = coerce_target  # Don't coerce EXPLICIT returns
+      check_prefixed_int_range!(node.value, coerce_target)
     end
 
     node.full_type = actual
