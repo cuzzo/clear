@@ -4135,6 +4135,7 @@ private
         error!(node, :TYPE_MISMATCH_IN_OR, expected: payload_type.resolved, got: t_right_type.resolved)
       end
 
+      coerce_empty_collection_fallback!(node.right, payload_type)
       # Result is the payload type (error is handled)
       node.full_type = payload_type.resolved
       return
@@ -4146,6 +4147,7 @@ private
       unless wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
         error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
       end
+      coerce_empty_collection_fallback!(node.right, wrapped)
       node.full_type = wrapped.resolved
       return
     end
@@ -4156,6 +4158,21 @@ private
     else
       node.full_type = t_left_type.resolved
     end
+  end
+
+  # An empty collection fallback (`expr OR []` / `OR {}`) is visited
+  # with no expected-type context, so visit_ListLit types it `Any[]`
+  # and the transpiler defaults its element type (f64). Push the OR
+  # success type onto the empty literal -- the same expected-type
+  # propagation VarDecl does for `MUTABLE v: T[]@list = []`.
+  sig { params(rhs: T.untyped, expected: T.untyped).void }
+  def coerce_empty_collection_fallback!(rhs, expected)
+    return unless expected.is_a?(Type)
+    empty_list = rhs.is_a?(AST::ListLit) && rhs.items.empty? &&
+                 !rhs.instance_variable_get(:@constructor_collection)
+    empty_hash = rhs.is_a?(AST::HashLit) && rhs.pairs.empty?
+    return unless empty_list || empty_hash
+    rhs.full_type = expected
   end
 
   sig { params(node: AST::OrRaise).returns(Symbol) }
