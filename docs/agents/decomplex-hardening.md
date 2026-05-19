@@ -9,7 +9,7 @@ suppresses. Evidence and the precise fix per detector:
 
 ## 1. Reification-Misses (`predicate_alias.rb` + `miner.rb`) -- receiver-type FP
 
-**Evidence:** the irreducible floor of 18 (docs/reification-floor.md). decomplex
+**Evidence:** the irreducible floor of 18 (docs/agents/reification-floor.md). decomplex
 flags `<expr> == :sym` whenever `:sym` matches a known predicate's body,
 *regardless of what `<expr>` is*. All 18 residual `<expr>` are NOT the
 predicate's class: a passed Symbol param (promotion_plan ×9, escape_analysis),
@@ -30,7 +30,7 @@ This alone removes the entire current 18 floor.
 
 ## 2. Derived-State-Staleness (`derived_state.rb`) -- 3 named CF/identity FPs
 
-**Evidence:** docs/state-drift-audit.md S4 (sampled, patterns real; coverage
+**Evidence:** docs/agents/state-drift-audit.md S4 (sampled, patterns real; coverage
 unquantified). The `b = f(a); a reassigned; b not recomputed` heuristic
 misfires on:
 
