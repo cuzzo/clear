@@ -70,4 +70,38 @@ class DerivedStateTest < Minitest::Test
     assert_equal "bad", out.first[:defn]
     assert_equal "c", out.first[:derived]
   end
+
+  # Class-1 FP (the dominant one): a binding assigned from a
+  # conditional whose arm computes a local used to PRODUCE that
+  # binding. Pre-fix this flagged `init` "derived from is_move;
+  # is_move reassigned" -- a false positive. Must now be empty.
+  def test_branch_local_init_is_not_flagged
+    out = scan(<<~RB)
+      def f(node)
+        init = if node.list?
+                 is_move = node.move?
+                 is_move ? node.a : node.b
+               end
+        use(init)
+      end
+    RB
+    assert_empty out, "branch-local init is not a method-scope reassignment"
+  end
+
+  # Fail-safety regression: a GENUINE top-level reassignment is still
+  # caught even when its own RHS is a conditional (we only stop
+  # descending INTO a conditional RHS; the LASGN itself is still
+  # recorded). Proves the rule cannot mask the real desync.
+  def test_real_desync_with_conditional_rhs_still_flagged
+    out = scan(<<~RB)
+      def f(a)
+        b = transform(a)
+        a = if cond then x else y end
+        use(b)
+      end
+    RB
+    assert_equal 1, out.size
+    assert_equal "b", out.first[:derived]
+    assert_equal "a", out.first[:source]
+  end
 end

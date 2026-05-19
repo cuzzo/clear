@@ -39,7 +39,23 @@ module Decomplex
       node.children.each { |c| each_method(c, defstack, &blk) }
     end
 
+    # RHS constructs whose nested LASGNs are BRANCH-LOCAL initialization
+    # of the binding being assigned -- not later method-scope sequential
+    # reassignments. Recursing into them is the dominant DSS false
+    # positive (`x = if c; y = ...; use y; end` flattens `y` into the
+    # ordered list, so `analyze` mis-reads it as "y reassigned after x").
+    BRANCH_RHS = %i[IF CASE CASE2 CASE3 AND OR WHILE UNTIL
+                    RESCUE ENSURE].freeze
+
     # Flatten statements (incl. inside simple blocks) to ordered LASGNs.
+    #
+    # Fail-safe scoping: when an LASGN's VALUE child is a branch
+    # construct, record the LASGN itself but DO NOT descend into the
+    # conditional RHS. A genuine method-scope reassignment is always a
+    # top-level statement (an LASGN whose parent is the method body, not
+    # the value child of another LASGN), so it still enters the list ->
+    # the real `b = f(a); a = ...; use b` desync is still caught (no
+    # false negative). Non-branch values still recurse (`a = b = c`).
     def self.lasgns(stmts)
       acc = []
       walk = lambda do |n|
@@ -47,7 +63,12 @@ module Decomplex
 
         if n.type == :LASGN
           acc << n
-          n.children.each { |c| walk.call(c) }
+          val = n.children[1]
+          if Ast.node?(val) && BRANCH_RHS.include?(val.type)
+            # branch-local RHS: do not flatten its inner assignments
+          else
+            n.children.each { |c| walk.call(c) }
+          end
         else
           n.children.each { |c| walk.call(c) }
         end
