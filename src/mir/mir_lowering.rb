@@ -1812,7 +1812,10 @@ class MIRLowering
         end
       elsif callee_wants_mutable_value
         MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !callee_param_type&.collection?
+        # MoveNode exclusion dropped: with EscapeAnalysis condition 8 promoting
+        # the caller's frame ArrayList to heap when GIVEn to a TAKES T[] param,
+        # .items is heap-backed and matches the callee's heapAlloc-bound free (#39).
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
@@ -5923,7 +5926,11 @@ class MIRLowering
       elem_owns_heap = et.needs_cleanup?(sl) || et.string?
       needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
       strategy = needs_deep ? :list_deep : :list_shallow
-      src = ti&.list_collection? ? MIR::ItemsAccess.new(source, true) : source
+      # Plain `MUTABLE xs: Int64[]` is locally an ArrayList -- the deep-copy
+      # template reads __src.len, which fails on ArrayList. Wrap with the
+      # safe ItemsAccess (@hasField "items") for both list_collection and
+      # plain-array sources; comptime no-op on slice sources (#39).
+      src = MIR::ItemsAccess.new(source, true)
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)

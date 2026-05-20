@@ -62,12 +62,11 @@ TAKES_MOVE_SHAPE_SPECS = {
 
 TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
   %i[give bare copy].map do |modality|
-    # Remaining :in_dev cells -- dynarr (give/bare/copy) gated by #39
-    # (requires escape-analysis promotion of the caller's frame-allocated
-    # ArrayList; lowering-layer .items extraction matches types but
-    # mismatches allocators -> Invalid free at runtime).
-    { shape: shape, modality: modality,
-      expected: shape == :dynarr ? :in_dev : :pass }
+    # All cells now :pass. #39 (dynarr give/bare/copy) fixed by extending
+    # EscapeAnalysis condition 8 to plain T[], plus dropping the !MoveNode
+    # exclusion at 1797/1880, plus wrapping lower_copy's plain-array source
+    # in the safe ItemsAccess.
+    { shape: shape, modality: modality, expected: :pass }
   end
 end
 
