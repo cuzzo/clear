@@ -122,19 +122,34 @@ in favor of binding-level queries.
 1. **13a (this doc)** — done.
 2. **13b**: Add `Symbol#provenance` accessor returning `sym.storage`
    filtered to {:heap, :frame, :rodata, :borrow}.
-3. **13c Cat A**: Migrate the easy readers — ~30 sites of `ti.provenance`
-   / `ti.heap_provenance?` to `sym.provenance` / `sym.storage == :heap`.
-   Per-subsystem commits.
-4. **13e Cat 2**: Delete the escape-graph + control_flow Type.provenance
-   writes (Symbol already updated alongside).
-5. **13e Cat 6**: Delete generic_merge / method_return writes (template
+3. **13c Cat A — annotator context (SAFE)**: Migrate readers inside
+   `is_a?(AST::Identifier)` blocks in annotator subsystems and promotion
+   plan. Per-subsystem commits.
+4. **13c Cat A — MIR context (NOT SAFE, BUDGET FIRST)**: mir_lowering
+   readers cannot blindly swap `ft.heap_provenance?` for
+   `sym.heap_provenance?`. The MIR-time Type clone (`Type.new(node.full_type)`)
+   captures the snapshot at lower-time and may carry an OLDER provenance
+   than the post-EscapeGraph sym.storage. Concrete regression observed:
+   test 179_hashmap_structlit_no_double_dupe panics with "Invalid free"
+   if lower_var_decl uses sym.heap_provenance? where it previously used
+   the clone's. Fixing this needs either:
+   - EscapeGraph re-runs after lower-time clones are made, OR
+   - mir_lowering stops cloning Types (uses sym as the source of truth
+     for ALL reads, requires synchronizing all writers), OR
+   - the clone propagates from sym at clone-time
+   All three are non-trivial. Defer mir_lowering migrations.
+5. **13e Cat 2**: Delete the escape-graph + control_flow Type.provenance
+   writes (Symbol already updated alongside). REQUIRES mir_lowering
+   migration first because mir_lowering currently READS type.provenance
+   that escape-graph writes.
+6. **13e Cat 6**: Delete generic_merge / method_return writes (template
    Types).
-6. **13d Cat B + 13c Cat C**: The harder structural migration of Type-only
+7. **13d Cat B + 13c Cat C**: The harder structural migration of Type-only
    readers. May require new mechanisms or deletion of consumers.
-7. **13e Cat 1**: After all readers go through Symbol, the construction-
+8. **13e Cat 1**: After all readers go through Symbol, the construction-
    time writes become field-internal-only. Either keep as Type-internal
    bookkeeping or remove if no reader remains.
-8. **13f**: Once zero readers remain, delete `@provenance`, the predicates,
+9. **13f**: Once zero readers remain, delete `@provenance`, the predicates,
    the alias methods, the copy-ctor line. Type becomes immutable w.r.t.
    storage.
 
