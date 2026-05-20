@@ -935,15 +935,13 @@ class MIRPass
 
     filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
 
-    # Per-variable promotions.
     (filtered[:var_promotes] || []).each do |vp|
       strategy = classify_promote_strategy(vp[:zig_type])
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil, vp[:elem_zig_type])
     end
 
-    # Struct-level field promotion: annotate the ReturnNode directly so
-    # lower_return can apply promotion without global pending-flag state.
-    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
+    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node) &&
+       !return_value_is_already_heap_struct?(ret_node)
       ret_node.promote_ret_wrap = :var
       ret_node.ret_field_promote_data = {
         zig_type: filtered[:struct_promote],
@@ -952,6 +950,38 @@ class MIRPass
     elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
     end
+  end
+
+  # True when ret_node returns an Identifier whose binding's source is a
+  # StructLit/UnionVariantLit with ALL heap-bearing fields already at
+  # heap_provenance (typically via explicit COPY). promoteDeep at the
+  # boundary would duplicate already-heap pointers, orphaning the originals
+  # -- the spurious copy is both a leak and a perf regression vs Rust's
+  # move semantics.
+  sig { params(ret_node: AST::ReturnNode).returns(T::Boolean) }
+  def return_value_is_already_heap_struct?(ret_node)
+    val = ret_node.value
+    return false unless val.is_a?(AST::Identifier)
+    decl = find_binding_decl_in(@current_transform_fn&.body, val.name.to_s)
+    return false unless decl
+    init = decl.respond_to?(:value) ? decl.value : nil
+    return false unless init.is_a?(AST::StructLit) || init.is_a?(AST::UnionVariantLit)
+    init.fields.all? do |_, fval|
+      fti = fval&.full_type
+      fti = Type.new(fti) if fti && !fti.is_a?(Type)
+      next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
+      fti.heap_provenance?
+    end
+  end
+
+  sig { params(body: T.untyped, name: String).returns(T.untyped) }
+  def find_binding_decl_in(body, name)
+    return nil unless body.is_a?(Array)
+    body.each do |n|
+      return n if (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) &&
+                  n.respond_to?(:name) && n.name.to_s == name
+    end
+    nil
   end
 
   # Insert MIR::Return before a ReturnNode to mark which local variables'
