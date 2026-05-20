@@ -136,15 +136,24 @@ Each step below follows the same pattern (demonstrated by `SymbolEntry#init_cont
 
 The pattern collapses N read-sites + N decision implementations into 1 writer + N reads. Apply to every duplicate decision; the codebase moves toward "one writer, many readers" everywhere.
 
-## Session-progress shape (this is what landed)
+## Session-progress shape (what's landed)
 
-What's committed via PC1 + PC2 stamp work:
-- `SymbolEntry#init_contents_heap` — single-writer per-binding stamp set by annotator
-- `PromotionClassifier` reads stamp, deletes one re-derivation
-- `mir_pass#insert_promotion!` deletes a parallel decision layer (~25 LOC)
-- Closes the `return_value_modality:struct_owned_fields` leak via no spurious copy
+**Committed:**
+- `SymbolEntry#init_contents_heap` — single-writer per-binding stamp at bind-time. Annotator computes from init expression's per-field provenance (covers StructLit, UnionVariantLit, FuncCall returns).
+- `PromotionClassifier` reads stamp; one re-derivation deleted.
+- `mir_pass#insert_promotion!` parallel decision layer deleted (~25 LOC).
+- Closes the `return_value_modality:struct_owned_fields` leak via no spurious copy.
+- Ruby's `:union` DeepCopy strategy now calls `dupeValue` instead of `dupeUnionValue` directly (first step of PC-C; runtime behavior identical).
 
-What remains: applying the same pattern to the other 6 PCs in this document. Each is a session-sized commit. The pattern itself is now demonstrated and replicable.
+**Why each remaining PC needs more than one session:**
+- **PC-A (Type#layout deletion)**: Type#layout is read by `indirect?` which is called in 8+ files via `ti.indirect?`. Symbol#layout is also independently read in 4+ files. Deleting Type#layout while keeping AtomicPtr semantics requires replacing every `*T` emission with an explicit MIR wrapper at every construction site. Audit-heavy and risk-prone.
+- **PC-B (sync= side-effect)**: 15 callers of `Type#sync=`. Each that depends on the implicit `provenance=:heap` set must explicitly do so. Per-call-site audit.
+- **PC-C (dupe* consolidation)**: `dupeUnionValue` and `dupeStructSlices` have DIFFERENT semantics for struct pointee fields (shallow vs deep). Migrating callers would change behavior; needs corner-case audit.
+- **PC-D (zig_type is_pointer)**: 60+ readers of `heap_provenance?`. Many call `ti.zig_type` expecting implicit `*T` for heap structs. Each callsite needs explicit pointer-wrapping.
+- **PC-E (PromotionClassifier schema fallback)**: requires `init_contents_heap` stamp to cover ALL Identifier-source shapes (chained Identifier, IfStatement, MatchStatement, BinaryOp results, Cast).
+- **PC-F (CopyNode provenance stamp)**: depends on PC-D landing (zig_type must stop reading provenance for *T).
+
+Each is a focused multi-day effort with the gating discipline (568 transpile-tests + 4830 specs + fuzz monotonically improving). The pattern is established and can be applied incrementally without losing the demonstrated single-writer-stamp design.
 
 ## Acceptance for each step
 
