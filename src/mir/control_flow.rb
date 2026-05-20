@@ -595,7 +595,8 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
     ti = Type.from_node(node)
-    allocator = ti ? ((ti.provenance_alloc rescue nil) || (ti.heap_provenance? ? :heap : :frame)) : :frame
+    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : (ti&.heap_provenance? || false)
+    allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
     needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
   end
