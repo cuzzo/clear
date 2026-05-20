@@ -1577,17 +1577,15 @@ module LoopFrameAnalysis
     when AST::BinaryOp
       if node.string_concat
         node.storage = :heap
-        ti.provenance = :heap
       else
         promote_value_to_heap!(node.left)
         promote_value_to_heap!(node.right)
       end
     when AST::StringConcat
       node.storage = :heap
-      ti.provenance = :heap
     when AST::FuncCall, AST::MethodCall
       node.heap_dupe_result = true
-      ti.provenance = :heap
+      node.storage = :heap
     when AST::Identifier
       # Identifier referencing a frame string: mark for heap dupe at the assignment
       # site rather than promoting the declaration (which would cause double-free
@@ -1597,7 +1595,6 @@ module LoopFrameAnalysis
     else
       if node.respond_to?(:storage=)
         node.storage = :heap
-        ti.provenance = :heap
       end
     end
   end

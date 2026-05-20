@@ -295,8 +295,6 @@ module EscapeGraph
     when AST::BinaryOp
       if node.op == :ADD && node.string_concat
         node.storage = :heap
-        ti = node.full_type
-        ti.provenance = :heap if ti.is_a?(Type)
       end
       promote_frame_concats!(node.left)
       promote_frame_concats!(node.right)

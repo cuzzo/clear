@@ -4376,12 +4376,12 @@ private
       node.storage = :stack
     else
       # COPY always produces heap-owned data for non-value types.
-      # Set BOTH the Type's provenance (overrides any :rodata inherited from
-      # the source via the clone constructor at line 4359) and node.storage
-      # so readers consulting either source agree.
+      # Type's clone constructor inherits source provenance (e.g., :rodata from
+      # a string literal); override on the cloned Type so internal Type
+      # predicates (needs_cleanup?, finalize_storage) see :heap. The
+      # storage_override is the authoritative signal for Locatable readers.
       ti.provenance = :heap if ti.is_a?(Type)
       node.storage = :heap
-      # Mark as heap usage - COPY allocates via heapAlloc
       current_fn_ctx.heap_count += 1 if current_fn_ctx
     end
 
@@ -5534,8 +5534,7 @@ private
         (bg_value.is_a?(AST::BgBlock) && bg_value.return_provenance == :heap) ||
         (bg_value.is_a?(AST::BgStreamBlock) && bg_value.yields_frame_strings)
       if needs_heap
-        ti = node.full_type
-        ti.provenance = :heap if ti.is_a?(Type)
+        node.storage = :heap
       end
     end
   end
