@@ -45,6 +45,18 @@ module EscapeGraph
     # Seed from cross-module return_provenance for imported functions
     # whose body isn't re-analyzed here.
     fn_nodes.each { |n, fn| ret[n] = fn.return_provenance == :heap }
+    # Seed from local heuristics that were previously scattered across
+    # the annotator: String return type implies heap (callers must own
+    # the result); a return value that COPIES a non-implicitly-copyable
+    # value or wraps a COPY in a StructLit allocates heap.
+    fn_nodes.each do |name, fn|
+      next if ret[name] || !fn&.body
+      next if borrow_return?(fn)
+      if local_fn_returns_heap?(fn)
+        ret[name] = true
+        fn.return_provenance = :heap
+      end
+    end
     changed = T.let(true, T::Boolean)
     iters = 0
     while changed && iters < 200
@@ -63,6 +75,40 @@ module EscapeGraph
       end
     end
     ret
+  end
+
+  sig { params(fn: T.untyped).returns(T::Boolean) }
+  def local_fn_returns_heap?(fn)
+    if fn.respond_to?(:catch_clauses) && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+      ret_type = fn.respond_to?(:return_type) ? fn.return_type : nil
+      bare = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
+                ret_type.respond_to?(:payload_type)
+                ret_type.payload_type || ret_type
+             else
+                ret_type
+             end
+      if bare.respond_to?(:string?) && bare.string?
+        sym_sync = bare.respond_to?(:sync) ? bare.sync : nil
+        return true unless sym_sync == :symbol || sym_sync == :raw
+      end
+    end
+    return_values(fn.body).any? do |v|
+      next false unless v
+      next true if v.is_a?(AST::CopyNode) && !copy_implicitly_copyable?(v)
+      if (v.is_a?(AST::StructLit) || v.is_a?(AST::UnionVariantLit)) &&
+         v.respond_to?(:fields) && v.fields
+        next true if v.fields.any? { |_, fv| fv.is_a?(AST::CopyNode) }
+      end
+      false
+    end
+  end
+
+  sig { params(node: AST::CopyNode).returns(T::Boolean) }
+  def copy_implicitly_copyable?(node)
+    ti = node.full_type
+    return false unless ti.is_a?(Type)
+    resolver = ->(name) { nil }
+    ti.implicitly_copyable?(resolver)
   end
 
   sig { params(rv: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
@@ -611,6 +657,8 @@ module EscapeGraph
     when AST::Locatable
       blk.call(node)
       node.each_pair { |_, v| walk(v, &blk) } if node.is_a?(Struct)
+    when AST::MatchCase
+      node.each_pair { |_, v| walk(v, &blk) }
     end
   end
 end

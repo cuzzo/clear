@@ -12,6 +12,7 @@ require_relative "annotator-helpers/function_analysis"
 require_relative "annotator-helpers/pipe_analysis"
 require_relative "mir/ownership_graph"
 require_relative "mir/escape_analysis"
+require_relative "mir/escape_graph"
 require_relative "mir/bg_capture_classifier"
 require_relative "mir/effect_inference"
 require_relative "mir/concurrency_checks"
@@ -825,19 +826,13 @@ private
         end
       end
 
-      # CATCH wrappers heap-dupe all string returns (both success and catch paths).
-      # A fallible String return is an error union, so unwrap the payload
-      # before classifying string-return ownership.
-      ret_type = node.return_type || Type.new(:Void)
-      bare_ret = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
-                    ret_type.respond_to?(:payload_type)
-                   ret_type.payload_type || ret_type
-                 else
-                   ret_type
-                 end
-      if bare_ret.string?
-        node.return_provenance = :heap
-      end
+    end
+
+    # Inferred return_provenance: one predicate (EscapeGraph.local_fn_returns_heap?)
+    # owns the "does this fn return heap?" logic; both annotator (here, for
+    # caller-side resolve_call) and EscapeGraph's apply! consume it.
+    if node.body && EscapeGraph.local_fn_returns_heap?(node)
+      node.return_provenance = :heap
     end
 
     @function_context_stack.pop
@@ -2212,28 +2207,6 @@ private
 
     # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
     # so the caller receives heap-allocated data.
-    # But COPY of an implicitly-copyable value (e.g. Id<T>) is value-like and
-    # must not force heap return provenance.
-    if node.value.is_a?(AST::CopyNode)
-      fn_node = @fn_nodes[current_fn_ctx.name]
-      copy_ti = node.value.full_type
-      resolver = ->(name) { lookup_type_schema(name) rescue nil }
-      unless copy_ti&.implicitly_copyable?(resolver)
-        if fn_node
-          fn_node.return_provenance = :heap
-        end
-      end
-    elsif node.value.is_a?(AST::StructLit)
-      # ensure_owned_value! only wraps @list/rodata in CopyNode, never value types.
-      # No implicitly_copyable? gate needed here.
-      has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
-      if has_copy_field
-        fn_node = @fn_nodes[current_fn_ctx.name]
-        if fn_node
-          fn_node.return_provenance = :heap
-        end
-      end
-    end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     unless node.value.is_a?(AST::Identifier)

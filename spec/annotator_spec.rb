@@ -1697,7 +1697,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS Void -> v = makeList(); RETURN; END
         CLEAR
-        annotated = run(src)
+        annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
         expect(fn.return_provenance).to eq(:heap)
       end
