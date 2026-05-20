@@ -892,6 +892,10 @@ pub const CheatLib = struct {
             CheatLib.releaseOne(T, alloc, value);
         }
 
+        pub fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
+            return CheatLib.dupeValue(T, value, alloc);
+        }
+
         pub fn partitionedMapDelayCtxDestroy() bool {
             return partitioned_map_delay_ctx_destroy;
         }
@@ -3269,6 +3273,10 @@ pub const CheatLib = struct {
             var inner = try dupeValue(InnerT, current.*, alloc);
             errdefer if (comptime needsCleanup(InnerT)) cleanup(InnerT, alloc, &inner);
             return try T.init(alloc, inner);
+        }
+
+        if (info == .@"struct" and @hasDecl(T, "dupe")) {
+            return try value.dupe(alloc);
         }
 
         if (info == .@"struct" and !@hasDecl(T, "deinit")) {
