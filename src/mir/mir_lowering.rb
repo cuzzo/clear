@@ -7446,7 +7446,7 @@ class MIRLowering
         MIR::ScopeBlock.new([
           MIR::AllocMark.new("__ret_dupe", :heap, nil),
           MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
-          MIR::ErrCleanup.new("__ret_dupe", CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })),
+          MIR::ErrCleanup.new("__ret_dupe", CleanupEntry.from(heap_string_entry)),
           MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
         ])
       else
