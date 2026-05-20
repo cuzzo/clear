@@ -553,7 +553,7 @@ module EscapeGraph
   def stamp_node_heap!(n, return_nodes)
     n.storage = :heap
     ft = n.full_type
-    ft.provenance = :heap if ft.is_a?(Type) && !ft.heap_provenance?
+    ft.provenance = :heap if ft.is_a?(Type)
     # Annotator stamps symbol on every binding-decl node; MIRPass runs
     # strictly after. Raises if nil -- means an annotator hole.
     sym = n.symbol
