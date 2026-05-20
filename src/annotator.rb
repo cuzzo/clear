@@ -3975,6 +3975,7 @@ private
       node.string_concat = true
       current_fn_ctx.frame_count += 1 if current_fn_ctx
       # String concat result is frame-allocated.
+      node.storage = :frame
       ti = node.full_type
       ti.provenance = :frame if ti.is_a?(Type)
     end
@@ -4486,7 +4487,6 @@ private
     base = ti.resolved.to_s.sub(/^\?/, '')
     result_type = Type.new(base.to_sym)
     result_type.ownership  = :frozen
-    result_type.provenance = :heap
     node.full_type = result_type
     node.storage   = :frozen
   end
@@ -4553,7 +4553,6 @@ private
     end
 
     result = Type.new(source_type, ownership: :shared)
-    result.provenance = :heap
     node.full_type = result
     node.storage = :heap
 
