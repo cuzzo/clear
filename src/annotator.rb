@@ -3700,11 +3700,6 @@ private
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
       end
-      # Mirror the struct-field stamp at line 3804: without it, lower_struct_lit
-      # extracts .items and the ArrayList variant payload silently lowers to a
-      # slice mismatch (#43).
-      val_node.target_is_list_field = true if expected_type.is_a?(Type) && expected_type.list_collection?
-      # Move: union literal captures non-Copy values.
       move_if_not_copyable!(val_node)
       node.full_type = if node.type_args&.any?
         :"#{node.name}<#{node.type_args.join(',')}>"
@@ -3802,12 +3797,6 @@ private
         val_node.coerced_type = expected_type
       end
 
-      # Flag @list fields so the transpiler passes the ArrayList directly
-      # instead of converting to a slice via .items.
-      et = expected_type.is_a?(Type) ? expected_type : nil
-      val_node.target_is_list_field = true if et&.list_collection?
-
-      # Move: struct literal captures non-Copy values (skip for borrowed fields).
       move_if_not_copyable!(val_node) unless field_is_borrowed
     end
 

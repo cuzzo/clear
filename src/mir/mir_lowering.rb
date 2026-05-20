@@ -5549,29 +5549,48 @@ class MIRLowering
     end
   end
 
+  # Resolves field-name -> Type for both struct and union schemas. Returns {}
+  # when no schema is registered (e.g. tuple-style literals) so callers can
+  # safely lookup without nil checks.
+  sig { params(node: AST::StructLit).returns(T::Hash[String, T.untyped]) }
+  def struct_lit_field_types(node)
+    schema = @schema_lookup&.call(node.name.to_sym)
+    return {} unless schema
+    if schema.respond_to?(:variants) && schema.variants
+      schema.variants.each_with_object({}) { |(k, t), h| h[k.to_s] = t }
+    elsif schema.respond_to?(:fields) && schema.fields
+      schema.fields.each_with_object({}) do |(k, f), h|
+        h[k.to_s] = f.respond_to?(:type) ? f.type : f
+      end
+    else
+      {}
+    end
+  end
+
+  # True when the destination is a dynamic slice (`[]T`, no capacity), as
+  # opposed to a fixed-capacity array (`[N]T`) or an owning container
+  # (`@list` / `@set` / `@pool`). Comptime selector handles ArrayList -> .items
+  # vs slice passthrough at zero cost.
+  sig { params(ft: T.untyped, k: T.untyped, node: AST::StructLit).returns(T::Boolean) }
+  def struct_field_wants_slice?(ft, k, node)
+    return true if node.borrowed_field_names&.include?(k)
+    return false unless ft.is_a?(Type)
+    ft.array? && ft.dynamic? && !ft.list_collection? && !ft.string?
+  end
+
   sig { params(node: AST::StructLit).returns(T.untyped) }
   def lower_struct_lit(node)
-    # Collect hoisted statements for @indirect fields.
-    # Each @indirect field is allocated to a temp Let before the StructInit so
-    # the HeapCreate is in Let-init position (not an anonymous sub-expression).
     hoisted = []
+    field_types = struct_lit_field_types(node)
 
     fields = node.fields.map { |k, v|
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
       else
-        # err_cleanup: struct owns its fields on success; only clean up on error.
         hoist_alloc(lower(v), v, err_cleanup: true)
       end
-      vt = v.full_type
-      needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
-                    !(v.respond_to?(:target_is_list_field) && v.target_is_list_field)
-      # BORROWED fields: source may be ArrayList but field expects slice.
-      # node.borrowed_field_names is stamped by the annotator.
-      if node.borrowed_field_names&.include?(k) && vt&.array? && !needs_items
+      if struct_field_wants_slice?(field_types[k.to_s], k, node)
         val = MIR::ItemsAccess.new(val, true)
-      elsif needs_items
-        val = MIR::ItemsAccess.new(val, false)
       end
       # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).

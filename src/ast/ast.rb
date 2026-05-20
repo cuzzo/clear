@@ -564,11 +564,6 @@ module AST
     def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def target_is_list_field; @target_is_list_field = T.let(@target_is_list_field, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def target_is_list_field=(val); @target_is_list_field = T.let(val, T.untyped); end
-
-    sig { returns(T.untyped) }
     def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
