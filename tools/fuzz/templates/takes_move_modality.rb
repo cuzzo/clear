@@ -1,77 +1,166 @@
-# Template: ownership-transfer move modality x owning collection shape.
+# Template: ownership-transfer move modality x EVERY callee-param value shape.
 #
-# An owning collection/array passed to a `TAKES` parameter must transfer the
-# owning container. Implicit move into TAKES is valid CLEAR -- `consume(xs)`
-# needs NO explicit `GIVE`. This template exercises every {shape, modality}
-# combination as a regression gate against three proven lowering bugs
-# (now fixed; cells flipped to :pass):
+# Cells are ENUMERATED from the registry's :cleanup_value_shapes, not picked
+# from imagination. Every shape in CALLEE_PARAM_VALUE_SHAPES from
+# surface_registry.rb gets a cell per modality. Cells currently failing are
+# :in_dev with a tracker bug ref; cells passing are :pass. No silent omissions.
 #
-#   #37  @list/@set/@pool/@map via `bare`(implicit) or `COPY` -- mis-lowered
-#        as a slice; callsite collection? discriminator routes owning
-#        collection args by pointer; COPY of @list -> TAKES routes through
-#        CheatLib.dupeValue for an owning ArrayList. (ad7a29bf3 / cf150a29b)
-#   #39  dynamic `Int64[]` -> TAKES -- broken with GIVE because the slice
-#        path's CopyNode/MoveNode syntax exclusions prevented .items
-#        extraction. Exclusions dropped (cf150a29b).
-#   #40  nested `Int64[][]@list` -> TAKES -- :list_with_elem_cleanup
-#        emitted a mutable `xs.deinit(alloc)` failing on const-bound
-#        anytype params; outer deinit @constCast'd (6e9c6463d).
+# Bug history (the kind of blind spot this template now blocks):
+#   #37  @list/@set/@pool/@map via bare/COPY -- mis-lowered as slice
+#   #39  dynamic Int64[] -> TAKES -- allocator/.items mismatch
+#   #40  nested @list[][] -- mutable .deinit on const-anytype
+#   #42  COPY of @set/@pool/@map -- dupeValue missing arms
+#   #43  union_owned_payload -- variant store + missing rt (under investigation)
 #
-# Why the class went undetected: every TAKES-bearing template hardcoded
-# `GIVE` as a literal; the move modality was never a fuzz axis. Worse,
-# surface_registry.rb's access_gate baseline claims escape_sinks
-# :takes_arg/:give_arg coverage -- true only for a struct (Counter) -- so the
-# coverage reporter marked the whole takes/give surface covered, masking the
-# collection-shape gap (#41). This template is the truthful owner of
-# takes_arg/give_arg across collection shapes (registered in
-# surface_registry.rb TEMPLATE_COVERAGE).
-#
-# All cells now :pass. Historical gating (flipping :in_dev -> :pass was the
-# regression acceptance test):
-#
-#   shape\modality   give     bare         copy
-#   list/set/pool/map :pass    :in_dev #37  :in_dev #37
-#   dynarr            :in_dev  :in_dev      :in_dev   (all #39)
-#   nested            :in_dev  :in_dev      :in_dev   (all #40)
-#
-# CLONE is out of scope (CLONE of a non-RC collection is a distinct
-# front-end concern, not the implicit-move-into-TAKES class).
+# CLONE is out of scope (CLONE of a non-RC value is a distinct front-end
+# concern, not the implicit-move-into-TAKES class).
 
-# shape => [prelude, param_type, decl_block, mutate_stmt, consume_body]
+# Canonical per-shape construction. Keys match :cleanup_value_shapes naming
+# in the registry. The block ALWAYS ends with `xs` bound to the value to
+# consume so the consume(<mod> xs) call is uniform across shapes.
+#
+# [prelude, param_type, decl_block, body_returns_1?]
 TAKES_MOVE_SHAPE_SPECS = {
-  list: ["", "Int64[]@list",
-         "MUTABLE xs: Int64[]@list = [];", "xs.append(4_i64);",
-         "RETURN xs.length();"],
-  set: ["", "Int64[]@set",
-        "MUTABLE xs: Int64[]@set = [];", "xs.insert(4_i64);",
-        "RETURN xs.length();"],
-  pool: ["STRUCT It { v: Int64 }\n", "It[8]@pool",
-         "MUTABLE xs: It[8]@pool = [];", "_ = xs.insert(It{ v: 4_i64 });",
-         "RETURN xs.length();"],
-  map: ["", "HashMap<Int64>",
-        "MUTABLE xs: HashMap<Int64> = {};", "xs[\"k\"] = 4_i64;",
-        "RETURN xs.count();"],
-  dynarr: ["", "Int64[]",
-           "MUTABLE xs: Int64[] = [];", "xs.append(4_i64);",
-           "RETURN xs.length();"],
-  nested: ["", "Int64[][]@list",
-           "MUTABLE inner: Int64[]@list = [];\n    inner.append(5_i64);\n" \
-           "    MUTABLE xs: Int64[][]@list = [];", "xs.append(inner);",
-           "RETURN xs.length();"],
+  string: [
+    "",
+    "String",
+    "xs: String = COPY \"hi\";",
+    true,
+  ],
+  dynamic_array: [
+    "",
+    "Int64[]",
+    "MUTABLE xs: Int64[] = [];\n    xs.append(4_i64);",
+    false,
+  ],
+  heap_list: [
+    "",
+    "Int64[]@list",
+    "MUTABLE xs: Int64[]@list = [];\n    xs.append(4_i64);",
+    false,
+  ],
+  set: [
+    "",
+    "Int64[]@set",
+    "MUTABLE xs: Int64[]@set = [];\n    xs.insert(4_i64);",
+    false,
+  ],
+  pool: [
+    "STRUCT It { v: Int64 }\n",
+    "It[8]@pool",
+    "MUTABLE xs: It[8]@pool = [];\n    _ = xs.insert(It{ v: 4_i64 });",
+    false,
+  ],
+  hash_map: [
+    "",
+    "HashMap<Int64>",
+    "MUTABLE xs: HashMap<Int64> = {};\n    xs[\"k\"] = 4_i64;",
+    :map,
+  ],
+  sharded_list: [
+    "",
+    "Int64[]@list:sharded(2)",
+    "MUTABLE xs: Int64[]@list:sharded(2) = [];\n    xs.append(4_i64);",
+    false,
+  ],
+  sharded_pool: [
+    "STRUCT It { v: Int64 }\n",
+    "It[8]@pool:sharded(2)",
+    "MUTABLE xs: It[8]@pool:sharded(2) = [];\n    _ = xs.insert(It{ v: 4_i64 });",
+    false,
+  ],
+  sharded_set: [
+    "",
+    "Int64[]@set:sharded(2)",
+    "MUTABLE xs: Int64[]@set:sharded(2) = [];\n    xs.insert(4_i64);",
+    false,
+  ],
+  sharded_hash_map: [
+    "",
+    "HashMap<Int64>@sharded(2)",
+    "MUTABLE xs: HashMap<Int64>@sharded(2) = {};\n    xs[\"k\"] = 4_i64;",
+    :map,
+  ],
+  soa_list: [
+    "STRUCT It { v: Float64 }\n",
+    "It[]@list:soa",
+    "MUTABLE xs: It[]@list:soa = [];\n    xs.append(It{ v: 1.0 });",
+    false,
+  ],
+  soa_pool: [
+    "STRUCT It { v: Float64 }\n",
+    "It[8]@pool:soa",
+    "MUTABLE xs: It[8]@pool:soa = [];\n    _ = xs.insert(It{ v: 1.0 });",
+    false,
+  ],
+  struct_owned_fields: [
+    "STRUCT Holder { name: String }\n",
+    "Holder",
+    "xs: Holder = Holder{ name: COPY \"hello\" };",
+    true,
+  ],
+  union_owned_payload: [
+    "UNION V { Nil, Heap: Int64[]@list }\n",
+    "V",
+    "MUTABLE inner: Int64[]@list = [];\n    inner.append(7_i64);\n    xs: V = V{ Heap: inner };",
+    true,
+  ],
+  option_owned_payload: [
+    "",
+    "?String",
+    "xs: ?String = COPY \"opt\";",
+    true,
+  ],
+  nested_container: [
+    "",
+    "Int64[][]@list",
+    "MUTABLE inner: Int64[]@list = [];\n    inner.append(5_i64);\n    MUTABLE xs: Int64[][]@list = [];\n    xs.append(inner);",
+    false,
+  ],
+}.freeze
+
+# Empirically-classified expected outcomes per (shape, modality). Cells found
+# failing on this branch are :in_dev with the bug task ID. Default = :pass.
+# Every failure flipped via `ruby tools/fuzz/run.rb --matrix --templates
+# takes_move_modality` + standalone classification. NO speculation; NO silent
+# omissions.
+TAKES_MOVE_EXPECTED_OVERRIDES = {
+  # #43 -- union_owned_payload variant store emits `.items` slice; rt missing
+  [:union_owned_payload, :give] => [:in_dev, "#43"],
+  [:union_owned_payload, :bare] => [:in_dev, "#43"],
+  [:union_owned_payload, :copy] => [:in_dev, "#43"],
+  # #51 -- struct-with-owned-fields TAKES: callee body needs rt but signature
+  # lacks `rt: *Runtime` (same class as #43's part B)
+  [:struct_owned_fields, :give] => [:in_dev, "#51"],
+  [:struct_owned_fields, :bare] => [:in_dev, "#51"],
+  [:struct_owned_fields, :copy] => [:in_dev, "#51"],
+  # #52 -- ShardedList / SoaList: cleanup shim reads .len (no such field)
+  [:sharded_list, :give]        => [:in_dev, "#52"],
+  [:sharded_list, :bare]        => [:in_dev, "#52"],
+  [:sharded_list, :copy]        => [:in_dev, "#52"],
+  [:soa_list, :give]            => [:in_dev, "#52"],
+  [:soa_list, :bare]            => [:in_dev, "#52"],
+  [:soa_list, :copy]            => [:in_dev, "#52"],
+  # #53 -- sharded_hash_map COPY: dupeValue lacks ShardedStringMap arm; segfault
+  [:sharded_hash_map, :copy]    => [:in_dev, "#53"],
 }.freeze
 
 TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
   %i[give bare copy].map do |modality|
-    # All cells now :pass. #39 (dynarr give/bare/copy) fixed by extending
-    # EscapeAnalysis condition 8 to plain T[], plus dropping the !MoveNode
-    # exclusion at 1797/1880, plus wrapping lower_copy's plain-array source
-    # in the safe ItemsAccess.
-    { shape: shape, modality: modality, expected: :pass }
+    override = TAKES_MOVE_EXPECTED_OVERRIDES[[shape, modality]]
+    { shape: shape, modality: modality,
+      expected: override ? override[0] : :pass }
   end
 end
 
 FuzzGenerator.register(:takes_move_modality, cells: TAKES_MOVE_CELLS) do |p|
-  prelude, ptype, decl, mutate, body = TAKES_MOVE_SHAPE_SPECS.fetch(p[:shape])
+  prelude, ptype, decl, body_kind = TAKES_MOVE_SHAPE_SPECS.fetch(p[:shape])
+
+  body = case body_kind
+         when true then "RETURN 1_i64;"
+         when :map then "RETURN xs.count();"
+         else           "RETURN xs.length();"
+         end
 
   arg = case p[:modality]
         when :give then "GIVE xs"
@@ -84,7 +173,6 @@ FuzzGenerator.register(:takes_move_modality, cells: TAKES_MOVE_CELLS) do |p|
 
     FN main() RETURNS Void ->
         #{decl}
-        #{mutate}
         n: Int64 = consume(#{arg});
         ASSERT n == 1_i64, "takes #{p[:shape]} via #{p[:modality]}";
         RETURN;

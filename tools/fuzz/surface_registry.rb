@@ -122,13 +122,21 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
-    # Truthful owner of takes_arg/give_arg across owning collection shapes.
-    # access_gate also claims takes_arg/give_arg but only for a struct
-    # (Counter); the cross-cut check in coverage.rb (SINK_REQUIRES_SHAPES)
-    # surfaces the shape gap (#41).
+    # Truthful owner of takes_arg/give_arg across EVERY callee-param value
+    # shape. Cells enumerated from the registry, not hand-picked (#41 cross-
+    # cut is what gates this template now).
     takes_move_modality: {
-      cleanup_value_shapes: [:heap_list, :set, :pool, :hash_map, :dynamic_array],
-      collection_shapes: [:list, :set, :pool, :hash_map, :dynamic_array],
+      cleanup_value_shapes: [
+        :string, :dynamic_array, :heap_list, :pool, :set, :hash_map,
+        :sharded_list, :sharded_pool, :sharded_set, :sharded_hash_map,
+        :soa_list, :soa_pool,
+        :struct_owned_fields, :union_owned_payload, :option_owned_payload, :nested_container,
+      ],
+      collection_shapes: [
+        :dynamic_array, :list, :pool, :set, :hash_map,
+        :sharded_list, :sharded_pool, :sharded_set, :sharded_hash_map,
+        :soa_list, :soa_pool, :nested_collection,
+      ],
       escape_sinks: [:takes_arg, :give_arg],
       mir_ownership_contracts: [:move_suppresses_cleanup],
     },
@@ -298,16 +306,29 @@ module FuzzSurfaceRegistry
 
   # Cross-cut sinks where value-shape matters. A sink isn't truly covered
   # unless the templates claiming it collectively touch each of the listed
-  # shapes -- a struct-only claim masking collection-shape blind spots is
-  # exactly what hid #37/#39/#40/#42. Required shapes use cleanup_value_shapes
-  # naming; coverage.rb unions cleanup_value_shapes declarations across
-  # templates whose escape_sinks include the sink and reports any missing.
+  # shapes. Required shapes are the FULL :cleanup_value_shapes catalog --
+  # not a hand-picked subset (which was what hid #37/#39/#40/#42/#43).
+  # `:frame_*` shapes are caller-side temporaries, not callee param TYPES,
+  # so they are excluded from sinks that name a *type* (takes_arg/give_arg/
+  # return_value); they ARE valid for assign-into-heap sinks like
+  # struct_field_store / list_append. coverage.rb unions cleanup_value_shapes
+  # declarations across templates whose escape_sinks include the sink and
+  # reports any missing.
+  CALLEE_PARAM_VALUE_SHAPES = %i[
+    string dynamic_array heap_list pool set hash_map
+    sharded_list sharded_pool sharded_set sharded_hash_map
+    soa_list soa_pool
+    struct_owned_fields union_owned_payload option_owned_payload nested_container
+  ].freeze
+
+  ASSIGN_INTO_HEAP_VALUE_SHAPES = (CALLEE_PARAM_VALUE_SHAPES + %i[frame_string_concat frame_list]).freeze
+
   SINK_REQUIRES_SHAPES = {
-    takes_arg:          %i[heap_list pool set hash_map dynamic_array struct_owned_fields union_owned_payload],
-    give_arg:           %i[heap_list pool set hash_map dynamic_array struct_owned_fields union_owned_payload],
-    return_value:       %i[heap_list pool set hash_map string struct_owned_fields union_owned_payload],
-    struct_field_store: %i[heap_list string struct_owned_fields union_owned_payload],
-    list_append:        %i[heap_list string struct_owned_fields union_owned_payload],
+    takes_arg:          CALLEE_PARAM_VALUE_SHAPES,
+    give_arg:           CALLEE_PARAM_VALUE_SHAPES,
+    return_value:       CALLEE_PARAM_VALUE_SHAPES,
+    struct_field_store: ASSIGN_INTO_HEAP_VALUE_SHAPES,
+    list_append:        ASSIGN_INTO_HEAP_VALUE_SHAPES,
   }.freeze
 
   def self.surface(name)
