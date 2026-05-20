@@ -7468,7 +7468,7 @@ class MIRLowering
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
-    node.full_type.heap_provenance?
+    node.is_a?(AST::Locatable) ? node.value_heap_provenance? : node.full_type.heap_provenance?
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
