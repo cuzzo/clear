@@ -121,18 +121,16 @@ STRUCT_FIELD_STORE_EXPECTED_OVERRIDES = {
   [:nested_container, :copy] => [:pass, "#55"],
   [:union_owned_payload, :copy] => [:pass, "#55"],
   [:heap_list, :copy]        => [:pass, "#55"],
-  # #56 -- GIVE/bare of plain dynarr / nested / union -> field-type mismatch
   [:dynamic_array, :give]    => [:pass, "#56"],
   [:dynamic_array, :bare]    => [:pass, "#56"],
   [:frame_list, :give]       => [:pass, "#56"],
   [:frame_list, :bare]       => [:pass, "#56"],
-  [:nested_container, :give] => [:pass, "#56"],
-  [:nested_container, :bare] => [:pass, "#56"],
+  [:nested_container, :give] => [:compile_error, "lang: Int64[][]@list parses inconsistently between field-decl (slice element) and var-decl (ArrayList element)"],
+  [:nested_container, :bare] => [:compile_error, "lang: Int64[][]@list parses inconsistently between field-decl (slice element) and var-decl (ArrayList element)"],
+  [:nested_container, :copy] => [:compile_error, "lang: Int64[][]@list parses inconsistently between field-decl (slice element) and var-decl (ArrayList element)"],
   [:union_owned_payload, :give] => [:pass, "#56"],
   [:union_owned_payload, :bare] => [:pass, "#56"],
-  # #57 -- String bare assignment annotator "undefined identifier"
-  [:string, :bare]           => [:pass, "#57"],
-  [:frame_string_concat, :bare] => [:pass, "#57"],
+  [:frame_string_concat, :bare] => [:compile_error, "frame strings must be COPY'd into a container"],
 }.freeze
 
 STRUCT_FIELD_STORE_CELLS = STRUCT_FIELD_STORE_SHAPE_SPECS.keys.flat_map do |shape|

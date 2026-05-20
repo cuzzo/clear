@@ -4357,7 +4357,11 @@ private
     end
 
     if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
-      error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
+      sym = val_node.symbol
+      heap_owned = sym && (sym.storage == :heap || (sym.type.respond_to?(:heap_provenance?) && sym.type.heap_provenance?))
+      unless heap_owned
+        error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
+      end
     end
 
     nil

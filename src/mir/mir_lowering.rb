@@ -5584,12 +5584,15 @@ class MIRLowering
     field_types = struct_lit_field_types(node)
 
     fields = node.fields.map { |k, v|
+      ft = field_types[k.to_s]
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
+      elsif v.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
+        hoist_alloc(MIR::DeepCopy.new(lower(v.value), nil, nil, :full_value, :heap), v, err_cleanup: true)
       else
         hoist_alloc(lower(v), v, err_cleanup: true)
       end
-      if struct_field_wants_slice?(field_types[k.to_s], k, node)
+      if struct_field_wants_slice?(ft, k, node)
         val = MIR::ItemsAccess.new(val, true)
       end
       # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
