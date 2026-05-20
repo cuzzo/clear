@@ -1729,8 +1729,7 @@ class MIRLowering
   sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     return nil unless expr
-    ti = expr.full_type
-    return :heap if ti.heap_provenance?
+    return :heap if expr.is_a?(AST::Locatable) ? expr.value_heap_provenance? : expr.full_type.heap_provenance?
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return storage if storage == :heap || storage == :frame
     nil
@@ -7483,7 +7482,8 @@ class MIRLowering
     ti = Type.from_node(ast_node)
     return false unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    return false if ti.heap_provenance?  # already handled by mir_allocates?
+    is_heap = ast_node.is_a?(AST::Locatable) ? ast_node.value_heap_provenance? : ti.heap_provenance?
+    return false if is_heap  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end
 
