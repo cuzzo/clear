@@ -6214,9 +6214,10 @@ class MIRLowering
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
+    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ft.heap_provenance?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
-                          ft.heap_provenance? || ft.resource? || node.resource_close_zig
+                          is_heap || ft.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
     # Borrowed-by-reference bindings force Zig `var` even when local mutation
     # analysis only sees field mutation through the callee.
@@ -6232,7 +6233,7 @@ class MIRLowering
     zig_type = transpile_type(node.full_type)
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
-                       (ft.string? && ft.heap_provenance?)  # ""/literal infers *const [0:0]u8 without annotation
+                       (ft.string? && is_heap)  # ""/literal infers *const [0:0]u8 without annotation
     annotation = needs_annotation ? zig_type : nil
 
     # Resolve init value - special handling for collection types.
@@ -6314,7 +6315,7 @@ class MIRLowering
       rhs.storage = :heap if node.storage == :heap && rhs.is_a?(AST::StructLit)
       if !is_move && rc_retain_needed?(rhs)
         make_rc_retain(rhs)
-      elsif ft.string? && ft.heap_provenance? && !is_move &&
+      elsif ft.string? && is_heap && !is_move &&
             rhs.is_a?(AST::Literal) && rhs.type == :STRING
         # Heap carry var with string literal initial value: dupe to heap so the
         # defer free() on the var doesn't attempt to free a comptime literal.
