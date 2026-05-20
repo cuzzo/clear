@@ -727,17 +727,17 @@ module CleanupClassifier
     return nil if ti.any_rc?
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
-    return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.fixed_soa?
+    return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
     if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
-                   alloc: :frame, elem_needs_cleanup: has_heap_elems)
+                   alloc: :frame, elem_needs_cleanup: has_heap_elems, zig_type: ti.zig_type)
     end
-    return entry(:list, has_moved_guard: !ti.sharded?) if ti.list_collection?
-    return entry(:string_map) if ti.map? && !ti.numeric_map?
-    return entry(:numeric_map) if ti.numeric_map?
-    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: true) if ti.pool?
-    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: true) if ti.set_collection?
+    return entry(:list, has_moved_guard: !ti.sharded?, zig_type: ti.zig_type) if ti.list_collection?
+    return entry(:string_map, zig_type: ti.zig_type) if ti.map? && !ti.numeric_map?
+    return entry(:numeric_map, zig_type: ti.zig_type) if ti.numeric_map?
+    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: true, zig_type: ti.zig_type) if ti.pool?
+    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: true, zig_type: ti.zig_type) if ti.set_collection?
     nil
   end
 

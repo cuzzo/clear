@@ -1835,7 +1835,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("soa.deinit(rt.frameAlloc())")
+      # Post-collapse: @soa routes through CheatLib.cleanup ("struct with
+      # deinit" comptime arm dispatches to ptr.deinit(alloc) internally).
+      expect(zig).to include("CheatLib.cleanup(CheatLib.SoaList(Point), rt.frameAlloc(), &soa)")
     end
   end
 

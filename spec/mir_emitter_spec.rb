@@ -439,10 +439,13 @@ RSpec.describe MIREmitter do
     end
 
     it "emits pool cleanup" do
-      entry = CleanupEntry.from({ kind: :pool, alloc: :heap, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :pool, zig_type: "CheatLib.Pool(User, 100)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("pool", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer pool.deinit(rt.heapAlloc());")
+      # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
+      # calls ptr.deinit(alloc) internally). One emit form across all
+      # collection shapes.
+      expect(zig).to include("defer CheatLib.cleanup(CheatLib.Pool(User, 100), rt.heapAlloc(), &pool);")
     end
 
     it "emits rc cleanup with release fields" do

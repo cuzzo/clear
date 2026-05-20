@@ -760,6 +760,11 @@ RSpec.describe SemanticAnnotator do
       ZigTranspiler.new.transpile(src)
     end
 
+    # Post-collapse: per-element cleanup is comptime-dispatched inside the
+    # outer CheatLib.cleanup shim's ArrayList arm. The capability wrapper
+    # (Rc/Arc/WeakRc/Locked/RwLocked) is preserved in the outer list type
+    # parameter; the spec verifies the wrapper threads through and that no
+    # naked-T cleanup leaks past the wrapper.
     it "T@multiowned[]@list uses Rc(T) in element cleanup" do
       src = <<~CLEAR
         STRUCT Node { id: Int64 }
@@ -769,7 +774,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile(src)
-      expect(out).to include("CheatLib.cleanup(CheatLib.Rc(Node)")
+      expect(out).to include("std.ArrayListUnmanaged(CheatLib.Rc(Node))")
       expect(out).not_to match(/cleanup\(Node,/)
     end
 
@@ -782,7 +787,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile(src)
-      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(Node)")
+      expect(out).to include("std.ArrayListUnmanaged(CheatLib.Arc(Node))")
       expect(out).not_to match(/cleanup\(Node,/)
     end
 
@@ -796,7 +801,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile(src)
-      expect(out).to include("CheatLib.cleanup(CheatLib.WeakRc(Node)")
+      expect(out).to include("std.ArrayListUnmanaged(CheatLib.WeakRc(Node))")
       expect(out).not_to match(/for \(links\.items\).*cleanup\(Node,/)
     end
 
@@ -809,7 +814,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile(src)
-      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(CheatLib.Locked(Counter)")
+      expect(out).to include("std.ArrayListUnmanaged(CheatLib.Arc(CheatLib.Locked(Counter)))")
       expect(out).not_to match(/cleanup\(Counter,/)
     end
 
@@ -822,7 +827,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile(src)
-      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(CheatLib.RwLocked(Account)")
+      expect(out).to include("std.ArrayListUnmanaged(CheatLib.Arc(CheatLib.RwLocked(Account)))")
       expect(out).not_to match(/cleanup\(Account,/)
     end
   end

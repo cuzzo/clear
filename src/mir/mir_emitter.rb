@@ -1031,28 +1031,23 @@ class MIREmitter
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
 
-    when :list_with_elem_cleanup
-      # Dual-allocator cleanup: elements via cleanupAlloc (mixed-provenance:
-      # heap-string fields in frame structs), outer container via frameAlloc.
-      # The shim form (CheatLib.cleanup) uses one alloc for both -- wrong
-      # here. Inline form preserved; outer deinit @constCast'd so a const-
-      # bound anytype param (callee TAKES nested @list, #40) compiles.
-      body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } @constCast(&#{deref}).deinit(rt.frameAlloc()); }"
-      guarded_defer(name, body, g, errdefer:)
-
-    when :list, :string_map, :numeric_map
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
+    when :list_with_elem_cleanup, :list, :string_map, :numeric_map
+      # :list_with_elem_cleanup uses cleanupAlloc (the dual-allocator shim
+      # that runtime-dispatches heap-free vs frame-skip per pointer); the
+      # other three use entry.alloc. CheatLib.cleanup's ArrayList arm
+      # iterates elements with the same allocator before container deinit,
+      # so a single shim call is equivalent to the prior inline emit.
+      use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
+      guarded_cleanup(name, zig_type, use_alloc, g, errdefer:, via_pointer: vp)
 
     when :frozen
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
 
-    when :pool, :fixed_soa
-      guarded_defer(name, "#{deref}.deinit(#{alloc})", g, errdefer:)
-
-    when :set
-      arg = vp ? name : "&#{name}"
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", g, errdefer:)
+    when :pool, :fixed_soa, :set
+      # Pool/Set/SoaList: comptime shim's Pool / Set / "struct with deinit"
+      # arms call .deinit(alloc) internally. One emit for all three shapes.
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     when :rc
       rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
