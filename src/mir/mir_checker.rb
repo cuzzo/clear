@@ -945,23 +945,19 @@ class MIRChecker
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
+  # MIR nodes whose `allocates?` decision is just `alloc == :heap`.
+  ALLOC_HEAP_MIR_CLASSES = [
+    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::ConcatStr,
+    MIR::CapWrap, MIR::SharePromote, MIR::ContainerInit,
+  ].freeze
+
   def allocating_expr?(expr)
     # Only flag HEAP allocations. Frame allocations are managed by the frame
     # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.
-    case expr
-    when MIR::HeapCreate   then true              # always heap by definition
-    when MIR::DupeSlice    then expr.alloc == :heap
-    when MIR::AllocSlice   then expr.alloc == :heap
-    when MIR::MakeList     then expr.alloc == :heap
-    when MIR::ConcatStr    then expr.alloc == :heap
-    when MIR::CapWrap      then expr.alloc == :heap
-    when MIR::SharePromote then expr.alloc == :heap
-    when MIR::ContainerInit then expr.alloc == :heap
-    when MIR::DeepCopy
-      expr.strategy != :passthrough && expr.alloc == :heap
-    else
-      false
-    end
+    return true if MIR::HeapCreate === expr  # always heap by definition
+    return expr.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === expr }
+    return expr.strategy != :passthrough && expr.alloc == :heap if MIR::DeepCopy === expr
+    false
   end
 
   # Yield each immediate sub-expression of expr.
