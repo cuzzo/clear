@@ -940,8 +940,7 @@ class MIRPass
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil, vp[:elem_zig_type])
     end
 
-    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node) &&
-       !ret_value_init_contents_heap?(ret_node)
+    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
       ret_node.promote_ret_wrap = :var
       ret_node.ret_field_promote_data = {
         zig_type: filtered[:struct_promote],
@@ -950,14 +949,6 @@ class MIRPass
     elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
     end
-  end
-
-  # Reads the annotator's bind-time stamp. See SymbolEntry#init_contents_heap.
-  sig { params(ret_node: AST::ReturnNode).returns(T::Boolean) }
-  def ret_value_init_contents_heap?(ret_node)
-    val = ret_node.value
-    return false unless val.is_a?(AST::Identifier)
-    !!val.symbol&.init_contents_heap
   end
 
   # Insert MIR::Return before a ReturnNode to mark which local variables'

@@ -105,8 +105,8 @@ module PromotionClassifier
 
       elsif val.is_a?(AST::Identifier)
         ti = Type.from_node(val)
-        # TAKES params are already heap-owned by caller; no promotion needed.
         next if val.symbol&.takes
+        next if val.symbol&.init_contents_heap
         needs_escape = (ti&.needs_escape_promotion? || struct_has_promotable_fields?(ti, schema_lookup)) &&
                        !ti&.string? && !ti&.heap_provenance?
         if needs_escape
@@ -175,8 +175,8 @@ module PromotionClassifier
   private_class_method def self.fn_has_escapable_return?(fn_node, schema_lookup = nil)
     collect_returns(fn_node.body).any? do |ret|
       next false unless ret.value.is_a?(AST::Identifier)
-      # TAKES params are already heap-owned; returning them doesn't require promotion.
       next false if ret.value.symbol&.takes
+      next false if ret.value.symbol&.init_contents_heap
       ti = ret.value.full_type
       next true if ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?
       next true if schema_lookup && !ti.string? && !ti.heap_provenance? &&
