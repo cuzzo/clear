@@ -586,16 +586,6 @@ class Type
     @provenance == :rodata
   end
 
-  # Aliases: provenance predicates (same as heap?/frame?/rodata? now that provenance is authoritative)
-  alias heap_provenance?   heap?
-  alias frame_provenance?  frame?
-  alias rodata_provenance? rodata?
-
-  sig { returns(T::Boolean) }
-  def borrow_provenance?
-    @provenance == :borrow
-  end
-
   # Returns the allocator symbol for this provenance (:heap or :frame), or nil.
   sig { returns(T.nilable(Symbol)) }
   def provenance_alloc
@@ -869,7 +859,7 @@ class Type
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   sig { returns(T::Boolean) }
   def needs_heap_backing?
-    pool? || sharded? || heap_provenance? || map? || tense_observable?
+    pool? || sharded? || heap? || map? || tense_observable?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.
@@ -1514,7 +1504,7 @@ class Type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
     return true if any_rc? || link? || list_collection? || map? || pool? ||
-                   set_collection? || (string? && heap_provenance?) ||
+                   set_collection? || (string? && heap?) ||
                    (array? && !string?) || any_sync?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
@@ -1539,7 +1529,7 @@ class Type
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
     # Copy types never need cleanup regardless of allocator
-    return false if string? && !heap_provenance? && allocator == :frame
+    return false if string? && !heap? && allocator == :frame
 
     # Heap-allocated non-Copy: always needs cleanup
     return true if allocator == :heap
@@ -1603,7 +1593,7 @@ class Type
   # in-depth backstop rather than the load-bearing path.
   sig { params(schema_lookup: T.nilable(Proc)).returns(Symbol) }
   def cleanup_allocator(schema_lookup = nil)
-    return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
+    return :heap if heap? || map? || any_rc? || any_sync? ||
                      resource? || sharded? || striped? || link? ||
                      tense_observable?
     if schema_lookup

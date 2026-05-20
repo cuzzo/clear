@@ -92,7 +92,7 @@ RSpec.describe "Provenance annotation" do
       ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       # Provenance should be :heap for promoted return values
-      if ti.heap_provenance?
+      if ti.heap?
         expect(ti.provenance).to eq(:heap)
       end
     end
