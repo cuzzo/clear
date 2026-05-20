@@ -1031,23 +1031,48 @@ class MIREmitter
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
 
-    when :list_with_elem_cleanup, :list, :string_map, :numeric_map
-      # :list_with_elem_cleanup uses cleanupAlloc (the dual-allocator shim
-      # that runtime-dispatches heap-free vs frame-skip per pointer); the
-      # other three use entry.alloc. CheatLib.cleanup's ArrayList arm
-      # iterates elements with the same allocator before container deinit,
-      # so a single shim call is equivalent to the prior inline emit.
+    # ── Group A: all kinds whose cleanup is `CheatLib.cleanup(T, alloc, &name)`.
+    # The comptime shim in runtime-header.zig dispatches the per-shape body
+    # (ArrayList/Pool/Set/StringMap/struct-with-deinit/LockWrapper/RcInner/
+    # slice/optional/string/atomic-ptr) at compile time. Ruby-side per-kind
+    # branches collapsed -- one emit form serves all. Special overrides:
+    # :list_with_elem_cleanup forces cleanupAlloc (runtime arena dispatch
+    # for mixed-provenance container elements); :heap_string/:takes_string
+    # force the canonical []const u8 zig_type (entry may lack one) and the
+    # moved-guard (heap strings are always _moved-tracked).
+    when :list, :list_with_elem_cleanup, :string_map, :numeric_map,
+         :pool, :fixed_soa, :set,
+         :heap_slice, :heap_union, :heap_struct,
+         :optional_owned, :atomic_ptr,
+         :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
+         :takes_union, :match_as_inline_struct,
+         :heap_string, :takes_string
+      is_string = entry.kind == :heap_string || entry.kind == :takes_string
       use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
-      guarded_cleanup(name, zig_type, use_alloc, g, errdefer:, via_pointer: vp)
+      use_type = is_string ? "[]const u8" : zig_type
+      use_guard = is_string ? !errdefer : g
+      guarded_cleanup(name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
+
+    # ── Group B: custom destruction patterns (not expressible via shim).
+    when :resource
+      close = entry.resource_close_zig.gsub("{0}", name)
+      guarded_defer(name, close, g, errdefer:)
+
+    when :inf_stream
+      # Signal the generator fiber to stop and free Inner. No moved guard:
+      # InfStream is not linearly-affine (NEXT borrows, not moves).
+      kw = errdefer ? "errdefer" : "defer"
+      "#{kw} #{name}.deinit();\n"
+
+    when :observable
+      # ~T@observable: wait for the producer fiber to publish .finish()
+      # before destroying. Shape-independent across SUM/COUNT/MAX/...
+      kw = errdefer ? "errdefer" : "defer"
+      "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
 
     when :frozen
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
-
-    when :pool, :fixed_soa, :set
-      # Pool/Set/SoaList: comptime shim's Pool / Set / "struct with deinit"
-      # arms call .deinit(alloc) internally. One emit for all three shapes.
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     when :rc
       rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
@@ -1080,31 +1105,6 @@ class MIREmitter
       # ptr then destroy the outer struct.
       guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
 
-    when :heap_string, :takes_string
-      # Strings: CheatLib.cleanup's `T == []const u8` arm calls
-      # `alloc.free(ptr.*)` with an empty-string guard. Functionally
-      # equivalent to the bare alloc.free for non-empty strings; the
-      # guard prevents `[]const u8{}` rodata free errors.
-      guarded_cleanup(name, "[]const u8", alloc, true, errdefer:)
-
-    when :heap_slice, :heap_union, :heap_struct
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :optional_owned
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :atomic_ptr
-      # AtomicPtr M3 / review item J: same cleanup shape as :heap_struct
-      # (CheatLib.cleanup with the binding's *AtomicPtr(T) zig_type),
-      # but routed through a dedicated kind so the entry hash doesn't
-      # carry the unused rc_variant/rc_release_func fields. The
-      # runtime cleanup() shim dispatches via @hasDecl(child,
-      # "compareAndPublish") and recursively cleans the inner *T.
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
     when :heap_struct_plain
       guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
 
@@ -1115,15 +1115,9 @@ class MIREmitter
         guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
       end
 
-    when :takes_union
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
-
     when :takes_slice, :match_as_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
       guarded_defer(name, body, g, errdefer:)
-
-    when :match_as_inline_struct
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
