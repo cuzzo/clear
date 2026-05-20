@@ -427,8 +427,11 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: true })
       node = MIR::Cleanup.new("name", entry)
       zig = e.emit(node)
+      # Post-collapse: heap strings route through CheatLib.cleanup shim
+      # ([]const u8 arm calls alloc.free internally with an empty-string
+      # guard). One unified emit form across all cleanup kinds.
       expect(zig).to include("var name_moved = false;")
-      expect(zig).to include("defer if (!name_moved) rt.heapAlloc().free(name);")
+      expect(zig).to include("defer if (!name_moved) CheatLib.cleanup([]const u8, rt.heapAlloc(), &name);")
     end
 
     it "emits resource cleanup" do

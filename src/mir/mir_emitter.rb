@@ -1081,7 +1081,11 @@ class MIREmitter
       guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", true, errdefer:)
+      # Strings: CheatLib.cleanup's `T == []const u8` arm calls
+      # `alloc.free(ptr.*)` with an empty-string guard. Functionally
+      # equivalent to the bare alloc.free for non-empty strings; the
+      # guard prevents `[]const u8{}` rodata free errors.
+      guarded_cleanup(name, "[]const u8", alloc, true, errdefer:)
 
     when :heap_slice, :heap_union, :heap_struct
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)

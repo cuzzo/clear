@@ -770,8 +770,9 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("__new_resp")
       expect(zig).to include("CheatLib.cleanup([]const u8")
       # And the final defer must free resp (loop-carry reassignment makes resp
-      # move-tracked, so the free is guarded by the _moved flag).
-      expect(zig).to match(/defer if \(!resp_moved\) rt\.heapAlloc\(\)\.free\(resp\)/)
+      # move-tracked, so the free is guarded by the _moved flag). Post-collapse,
+      # the free routes through CheatLib.cleanup's []const u8 arm.
+      expect(zig).to match(/defer if \(!resp_moved\) CheatLib\.cleanup\(\[\]const u8, rt\.heapAlloc\(\), &resp\)/)
     end
 
   end
