@@ -164,3 +164,40 @@ in favor of binding-level queries.
 | 13c Cat C | MED | Type-internal predicates need restructuring |
 | 13d Cat B | HIGH | Design work — how do field types get provenance? |
 | 13f | LOW after rest | If 0 readers remain, deletion is mechanical |
+
+## Landed (as of SIMP-13e)
+
+- **SIMP-13a**: this audit doc
+- **SIMP-13b**: `Symbol#provenance`, `Symbol#heap_provenance?`, `#frame_provenance?`, `#rodata_provenance?`, `#borrow_provenance?` accessors (no behavior change)
+- **SIMP-13c**: 24+ Cat A reader sites migrated through helpers, then helpers
+  inlined as direct `sym&.X_provenance? || ti.X_provenance?` pattern at each
+  callsite. Three `Locatable#value_X_provenance?` helpers added then deleted
+  after inline.
+- **SIMP-13d**: 2 Cat B sites resolved (call_heap_provenance_from_type? +
+  borrow_return?), plus inlined helper-uses pattern across whole codebase.
+- **SIMP-13e**: 4 lockstep `type.provenance = :heap` writes deleted in
+  escape_graph.rb (stamp_node_heap! + stamp_return_symbol!). Required fix
+  in lower_bind_expr to propagate node.symbol → proxy.symbol. Three
+  control_flow.rb binding promotions (promote_to_heap!, promote_decl_to_heap!,
+  promote_value_to_heap! Identifier branch) migrated from
+  `ti.provenance = :heap` to `sym.storage = :heap`. Net: Symbol#storage
+  is the canonical source for escape-driven heap promotion.
+
+## Remaining for SIMP-13f
+
+13 reader sites still use the inline OR fallback `|| ti.X_provenance?` for
+non-binding expressions (literals, FuncCall returns, CopyNode results,
+BinaryOp string_concat, etc.). To delete Type#provenance entirely:
+
+1. Replace each ti-fallback with either:
+   - An expression-storage stamp set at annotation time on the AST node, OR
+   - AST-type dispatch (`is_a?(AST::Literal) ? ...`) for cases that are
+     derivable from node shape
+2. Migrate Cat 1 initial-classification writes (Type constructor sigils,
+   ast.rb finalize_storage!, scope.rb resolve_full_type) — Symbol#storage
+   needs an alternative initialization path that doesn't read Type#provenance
+3. Delete `@provenance`, `heap?`/`frame?`/`rodata?`/`borrow_provenance?`,
+   aliases, copy-ctor line, provenance_alloc dispatch in type.rb
+
+Each step is gated: spec + transpile + fuzz must remain green; net LOC
+delete preferred.
