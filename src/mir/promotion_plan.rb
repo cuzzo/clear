@@ -75,7 +75,7 @@ module PromotionClassifier
           end
 
           next unless fval.is_a?(AST::Identifier)
-          next unless fti&.needs_escape_promotion? && !fti&.string? && !fti&.heap_provenance?
+          next unless fti&.needs_escape_promotion? && !fti&.string? && !fval.symbol&.heap_provenance?
 
           var_promotes << {
             var: fval.name,
