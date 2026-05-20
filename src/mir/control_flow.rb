@@ -1571,7 +1571,7 @@ module LoopFrameAnalysis
     return unless node
     ti = node.full_type
     return unless ti.string?
-    return if ti.heap_provenance?  # already heap
+    return if node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?  # already heap
     case node
     when AST::BinaryOp
       if node.string_concat
