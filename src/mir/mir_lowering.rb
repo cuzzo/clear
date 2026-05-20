@@ -2229,7 +2229,8 @@ class MIRLowering
       alloc_kind: alloc_kind,
       return_type: node.full_type,
       call_zig: call_zig,
-      receiver_field: nil
+      receiver_field: nil,
+      ast_node: node
     )
   end
 
@@ -2253,7 +2254,8 @@ class MIRLowering
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
       return_type: node.full_type,
       call_zig: "f.self_val.#{node.name}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
-      receiver_field: receiver_code
+      receiver_field: receiver_code,
+      ast_node: node
     )
   end
 
@@ -2265,8 +2267,8 @@ class MIRLowering
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String)).returns(MIR::InlineZig) }
-  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
+  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::InlineZig) }
+  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
     ret_t = return_type
     can_fail = ret_t.error_union?
     payload_t = can_fail ? ret_t.payload_type : ret_t
@@ -2321,15 +2323,14 @@ class MIRLowering
     code << "}"
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
-    iz.stdlib_def =
-      call_heap_provenance_from_type?(payload_t) ? { allocates: true } : { allocates: false, borrows: :all }
+    is_heap = if ast_node.is_a?(AST::Locatable)
+                ast_node.value_heap_provenance?
+              else
+                t = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
+                t&.heap_provenance? || false
+              end
+    iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
     iz
-  end
-
-  sig { params(ti: Type).returns(T::Boolean) }
-  def call_heap_provenance_from_type?(ti)
-    t = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil)
-    t&.heap_provenance? || false
   end
 
 

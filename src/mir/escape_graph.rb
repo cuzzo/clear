@@ -613,9 +613,7 @@ module EscapeGraph
 
   sig { params(fn: T.untyped).returns(T::Boolean) }
   def borrow_return?(fn)
-    return true if fn.return_lifetime
-    rt = fn.return_type
-    !!(rt.is_a?(Type) && rt.borrow_provenance?)
+    !!fn.return_lifetime
   end
 
   sig { params(n: T.untyped).returns(T::Boolean) }
