@@ -3500,8 +3500,14 @@ private
         psch = (lookup_type_schema(field_type.resolved) rescue nil)
         struct_pointee = Schemas.struct?(psch)
         node.indirect_field = true if node.is_a?(AST::GetField) && !struct_pointee
-        field_type = field_type.dup
-        field_type.layout = nil
+        # For non-struct pointees, the read-deref produces a value of the
+        # inner type (layout no longer applies). For struct pointees, the
+        # binding holds the *T pointer directly -- keep layout=:indirect so
+        # ti.zig_type renders "*T".
+        if !struct_pointee
+          field_type = field_type.dup
+          field_type.layout = nil
+        end
       end
       node.full_type = field_type
     elsif struct_schema && node.token
