@@ -837,6 +837,39 @@ module AST
       @storage_override || (@type_object && (@type_object.provenance || :stack))
     end
 
+    # Canonical "is this expression's value heap-allocated?" — SIMP-13f.
+    # Routes through the symbol when available (post-EscapeGraph canonical),
+    # then the node's storage_override (set by annotator for non-binding
+    # expressions), and finally type.provenance as a transitional fallback.
+    # SIMP-13f.5 will delete the type fallback when all paths set
+    # storage_override or sym.storage.
+    sig { returns(T::Boolean) }
+    def heap_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.heap_provenance?
+      return true if @storage_override == :heap
+      ti = @type_object
+      ti.is_a?(Type) && ti.heap_provenance?
+    end
+
+    sig { returns(T::Boolean) }
+    def rodata_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.rodata_provenance?
+      return true if @storage_override == :rodata
+      ti = @type_object
+      ti.is_a?(Type) && ti.rodata_provenance?
+    end
+
+    sig { returns(T::Boolean) }
+    def borrow_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.borrow_provenance?
+      return true if @storage_override == :borrow
+      ti = @type_object
+      ti.is_a?(Type) && ti.borrow_provenance?
+    end
+
     sig { params(val: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
     def storage=(val)
       # Use a node-local override rather than mutating @type_object.provenance.

@@ -659,8 +659,7 @@ class MIRPass
   def or_rescue_needs_fallback_dupe?(or_node)
     return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
     left = or_node.left
-    left_sym = left.respond_to?(:symbol) ? left.symbol : nil
-    return true if left_sym&.heap_provenance? || left.full_type.heap_provenance?
+    return true if left.is_a?(AST::Locatable) && left.heap_provenance?
     if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(left)
     end
@@ -670,8 +669,7 @@ class MIRPass
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def or_rescue_needs_fallback_dupe_left?(expr)
     return false unless expr
-    expr_sym = expr.respond_to?(:symbol) ? expr.symbol : nil
-    return true if expr_sym&.heap_provenance? || expr.full_type.heap_provenance?
+    return true if expr.is_a?(AST::Locatable) && expr.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return or_rescue_needs_fallback_dupe_left?(expr.left)
     end

@@ -6181,13 +6181,10 @@ private
         fti = fval&.full_type
         fti = Type.new(fti) if fti && !fti.is_a?(Type)
         next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
-        fval_sym = fval.respond_to?(:symbol) ? fval.symbol : nil
-        fval_sym&.heap_provenance? || fti.heap_provenance?
+        fval.is_a?(AST::Locatable) && fval.heap_provenance?
       end
     when AST::FuncCall, AST::MethodCall
-      sig_t = init.respond_to?(:full_type) ? init.full_type : nil
-      init_sym = init.respond_to?(:symbol) ? init.symbol : nil
-      !!(init_sym&.heap_provenance? || (sig_t.is_a?(Type) && sig_t.heap_provenance?))
+      init.is_a?(AST::Locatable) && init.heap_provenance?
     when AST::Identifier
       !!init.symbol&.init_contents_heap
     when AST::CopyNode, AST::CloneNode

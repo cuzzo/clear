@@ -1729,8 +1729,7 @@ class MIRLowering
   sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     return nil unless expr
-    expr_sym = expr.respond_to?(:symbol) ? expr.symbol : nil
-    return :heap if expr_sym&.heap_provenance? || expr.full_type.heap_provenance?
+    return :heap if expr.is_a?(AST::Locatable) && expr.heap_provenance?
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return storage if storage == :heap || storage == :frame
     nil
@@ -2324,9 +2323,8 @@ class MIRLowering
     code << "}"
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
-    ast_sym = ast_node.respond_to?(:symbol) ? ast_node.symbol : nil
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
-    is_heap = !!(ast_sym&.heap_provenance? || pt&.heap_provenance?)
+    is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_provenance?) || !!pt&.heap_provenance?
     iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
     iz
   end
@@ -7469,8 +7467,7 @@ class MIRLowering
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
-    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    !!(node_sym&.heap_provenance? || node.full_type.heap_provenance?)
+    node.is_a?(AST::Locatable) && node.heap_provenance?
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
@@ -7484,8 +7481,7 @@ class MIRLowering
     ti = Type.from_node(ast_node)
     return false unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    ast_sym = ast_node.respond_to?(:symbol) ? ast_node.symbol : nil
-    is_heap = !!(ast_sym&.heap_provenance? || ti.heap_provenance?)
+    is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_provenance?) || ti.heap_provenance?
     return false if is_heap  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end
