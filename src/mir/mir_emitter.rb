@@ -1031,15 +1031,6 @@ class MIREmitter
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
 
-    # ── Group A: all kinds whose cleanup is `CheatLib.cleanup(T, alloc, &name)`.
-    # The comptime shim in runtime-header.zig dispatches the per-shape body
-    # (ArrayList/Pool/Set/StringMap/struct-with-deinit/LockWrapper/RcInner/
-    # slice/optional/string/atomic-ptr) at compile time. Ruby-side per-kind
-    # branches collapsed -- one emit form serves all. Special overrides:
-    # :list_with_elem_cleanup forces cleanupAlloc (runtime arena dispatch
-    # for mixed-provenance container elements); :heap_string/:takes_string
-    # force the canonical []const u8 zig_type (entry may lack one) and the
-    # moved-guard (heap strings are always _moved-tracked).
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map,
          :pool, :fixed_soa, :set,
          :heap_slice, :heap_union, :heap_struct,
@@ -1048,12 +1039,13 @@ class MIREmitter
          :takes_union, :match_as_inline_struct,
          :heap_string, :takes_string
       is_string = entry.kind == :heap_string || entry.kind == :takes_string
+      # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
+      # on mixed-provenance container elements.
       use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
       use_type = is_string ? "[]const u8" : zig_type
       use_guard = is_string ? !errdefer : g
       guarded_cleanup(name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
 
-    # ── Group B: custom destruction patterns (not expressible via shim).
     when :resource
       close = entry.resource_close_zig.gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)

@@ -365,16 +365,10 @@ module EffectTracker
       has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
         ti = Type.new(p.type || :Any)
-        # Any TAKES param that owns heap state emits a cleanup defer in the
-        # callee body, which uses `rt.heapAlloc()` (or similar). Previously
-        # this enumerated string/array/list/map and silently missed union,
-        # set, pool, struct-with-heap-fields, optional-with-heap-payload --
-        # closing #43 / #51 / #43B by widening to a single needs-cleanup
-        # predicate that respects the union/struct schema.
-        ti.string? || ti.array? || ti.collection? ||
-          ti.heap_provenance? || ti.any_sync? || ti.any_rc? || ti.link? ||
-          (ti.respond_to?(:optional?) && ti.optional?) ||
-          ti.needs_cleanup?(->(name) { lookup_type_schema(name) rescue nil })
+        is_pure_copy = ti.primitive? ||
+                       (ti.respond_to?(:generic_instance?) && ti.generic_instance? &&
+                        ti.generic_base == :Id)
+        !is_pure_copy
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
       has_raise = @fn_raises_directly[name]

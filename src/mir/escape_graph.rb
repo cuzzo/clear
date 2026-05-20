@@ -352,13 +352,9 @@ module EscapeGraph
         if collection_ti?(ti)
           out << src.name.to_s if param.takes || mut_list
         elsif param.takes && (ti.struct? || ti.optional?)
-          # TAKES of a non-Copy aggregate (union/struct/optional carrying
-          # heap-owning fields): callee cleanup frees internal heap
-          # pointers. Promote only the LEAVES (collection-typed decls
-          # nested in src's init), not the aggregate itself -- the
-          # aggregate stays a value (RVO/struct calling convention).
-          # aggregate_moved_list_decls is the same helper used by
-          # return-value escape (#43).
+          # The aggregate itself stays a value (RVO); only its collection
+          # leaves escape. Without this, frame-allocated leaves underflow
+          # the callee's heap-free in cleanup (#43).
           src_decl = decls[src.name.to_s]
           aggregate_moved_list_decls(src_decl&.value).each { |d| out << d } if src_decl
         end
