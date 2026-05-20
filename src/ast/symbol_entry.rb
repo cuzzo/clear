@@ -203,6 +203,42 @@ class SymbolEntry
     @storage == :shared || @storage == :multiowned
   end
 
+  # Canonical "where does this binding's data live?" accessor — SIMP-13b.
+  # Returns the storage axis filtered to provenance values
+  # (:heap, :frame, :rodata, :borrow) so callers replacing
+  # `type.provenance` get an equivalent answer. Storage modes that aren't
+  # provenance (:multiowned, :shared, :link, :local, :frozen) → nil
+  # because Type#provenance also returned nil for those.
+  PROVENANCE_STORAGE = T.let(
+    [:heap, :frame, :rodata, :borrow, :stack].freeze,
+    T::Array[Symbol]
+  )
+  sig { returns(T.nilable(Symbol)) }
+  def provenance
+    return nil unless PROVENANCE_STORAGE.include?(@storage)
+    @storage
+  end
+
+  sig { returns(T::Boolean) }
+  def heap_provenance?
+    @storage == :heap
+  end
+
+  sig { returns(T::Boolean) }
+  def frame_provenance?
+    @storage == :frame
+  end
+
+  sig { returns(T::Boolean) }
+  def rodata_provenance?
+    @storage == :rodata
+  end
+
+  sig { returns(T::Boolean) }
+  def borrow_provenance?
+    @storage == :borrow
+  end
+
   sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope
