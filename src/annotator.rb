@@ -2845,6 +2845,19 @@ private
       close_zig: resource_close
     )
     node.symbol = current_scope.locals[node.name]
+    # SIMP-13f: set_cleanup_alloc! may have written node.full_type.provenance
+    # AFTER `storage` was computed by finalize_decl_storage. Mirror late
+    # provenance writes onto sym.storage so it's the canonical "where is
+    # this binding's data?" source. Guard: only promote from provenance-axis
+    # defaults (:stack/:rodata/nil); don't overwrite storage-axis modes
+    # (:shared/:multiowned/:link/:local/:frozen) which are orthogonal.
+    nft_prov = node.full_type.respond_to?(:provenance) ? node.full_type.provenance : nil
+    if nft_prov && [:heap, :frame, :borrow, :rodata].include?(nft_prov)
+      sym_storage = node.symbol.storage
+      if sym_storage.nil? || sym_storage == :stack || sym_storage == :rodata
+        node.symbol.storage = nft_prov
+      end
+    end
     # Propagate @link_source from the value type to the scope entry.
     val_ti = node.value&.full_type
     if val_ti&.link?

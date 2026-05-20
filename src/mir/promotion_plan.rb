@@ -641,7 +641,7 @@ module CleanupClassifier
     return nil unless ti
     return nil if node.container_borrow
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    return nil if node_sym&.borrow_provenance? || ti.borrow_provenance?  # borrow return -- caller owns data
+    return nil if node_sym&.borrow_provenance?  # borrow return -- caller owns data
 
     sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
 
@@ -737,7 +737,7 @@ module CleanupClassifier
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
     return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_heap = !!(node_sym&.heap_provenance? || ti.heap_provenance?)
+    is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
@@ -822,8 +822,8 @@ module CleanupClassifier
     # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
     # skips frame, not rodata) is an invalid free. No cleanup needed.
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_rodata = !!(node_sym&.rodata_provenance? || ti.rodata_provenance?)
-    is_borrow = !!(node_sym&.borrow_provenance? || ti.borrow_provenance?)
+    is_rodata = !!node_sym&.rodata_provenance?
+    is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
     entry(:optional_owned, alloc: :cleanup)
   end
@@ -839,7 +839,7 @@ module CleanupClassifier
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_heap = !!(node_sym&.heap_provenance? || ti.heap_provenance?)
+    is_heap = !!node_sym&.heap_provenance?
     return nil unless is_heap
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     return nil if ti.collection?

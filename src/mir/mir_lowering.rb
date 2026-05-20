@@ -6213,10 +6213,7 @@ class MIRLowering
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    # MIR-clone divergence: ft is a Type.new clone captured at lower-time and
-    # node.symbol may have been escape-upgraded later. Use OR so neither is
-    # false-negative; SIMP-13f resolves by making sym the sole source.
-    is_heap = (node.symbol&.heap_provenance? || ft.heap_provenance?)
+    is_heap = !!node.symbol&.heap_provenance?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           is_heap || ft.resource? || node.resource_close_zig

@@ -219,24 +219,33 @@ class SymbolEntry
     @storage
   end
 
+  # Provenance predicates — SIMP-13. Symbol#storage is the canonical source,
+  # but during a multi-stage transition some late ti.provenance writes haven't
+  # yet been mirrored to sym.storage. Until those propagation gaps close
+  # (SIMP-13f.2), check sym.type.provenance as a fallback. When complete, the
+  # fallback line gets deleted in SIMP-13f.5.
   sig { returns(T::Boolean) }
   def heap_provenance?
-    @storage == :heap
+    return true if @storage == :heap
+    @type.is_a?(Type) && @type.respond_to?(:heap_provenance?) && @type.heap_provenance?
   end
 
   sig { returns(T::Boolean) }
   def frame_provenance?
-    @storage == :frame
+    return true if @storage == :frame
+    @type.is_a?(Type) && @type.respond_to?(:frame_provenance?) && @type.frame_provenance?
   end
 
   sig { returns(T::Boolean) }
   def rodata_provenance?
-    @storage == :rodata
+    return true if @storage == :rodata
+    @type.is_a?(Type) && @type.respond_to?(:rodata_provenance?) && @type.rodata_provenance?
   end
 
   sig { returns(T::Boolean) }
   def borrow_provenance?
-    @storage == :borrow
+    return true if @storage == :borrow
+    @type.is_a?(Type) && @type.respond_to?(:borrow_provenance?) && @type.borrow_provenance?
   end
 
   sig { returns(T::Boolean) }
