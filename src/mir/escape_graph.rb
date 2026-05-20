@@ -552,14 +552,11 @@ module EscapeGraph
   sig { params(n: T.untyped, return_nodes: T::Array[T.untyped]).void }
   def stamp_node_heap!(n, return_nodes)
     n.storage = :heap
-    ft = n.full_type
-    ft.provenance = :heap if ft.is_a?(Type)
     # Annotator stamps symbol on every binding-decl node; MIRPass runs
     # strictly after. Raises if nil -- means an annotator hole.
     sym = n.symbol
     Kernel.raise "EscapeGraph: stamp_node_heap! got nil symbol on #{n.class}" if sym.nil?
     sym.storage = :heap
-    sym.type.provenance = :heap
     stamp_return_symbol!(return_nodes, n.name.to_s)
     v = n.value
     v.storage = :heap if v.is_a?(AST::Locatable)
@@ -582,7 +579,6 @@ module EscapeGraph
       sym = ident&.symbol
       next unless sym
       sym.storage = :heap
-      sym.type.provenance = :heap
     end
   end
 

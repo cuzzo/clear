@@ -6445,6 +6445,7 @@ class MIRLowering
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig
       proxy.var_used = node.var_used
+      proxy.symbol = node.symbol if node.respond_to?(:symbol) && proxy.respond_to?(:symbol=)
       result = lower_var_decl(proxy)
       # Line-suffix disambiguation in lower_var_decl stores the renamed Zig
       # name under `proxy.object_id`. Annotator-resolved references point to
