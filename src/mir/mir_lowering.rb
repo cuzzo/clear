@@ -1764,7 +1764,8 @@ class MIRLowering
       takes = a.was_moved == true
       ti = a.full_type
       callee_param = callee_sig ? callee_sig.params[idx] : nil
-      callee_param_type = callee_param ? (callee_param.type || Type.new(:Any)) : nil
+      # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
+      callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
       # COPY of an owning collection into a TAKES collection param: the
       # default lower_copy produces a []T slice (right for struct/union
       # field stores), but a TAKES collection callee expects an owning
@@ -1774,7 +1775,7 @@ class MIRLowering
       # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
       # variants share isStringMap-shape via the inner-field heuristic.
       copy_to_owning = a.is_a?(AST::CopyNode) &&
-                       callee_param_type&.collection? &&
+                       callee_param_type.collection? &&
                        (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
                         (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
@@ -1802,7 +1803,7 @@ class MIRLowering
       callee_wants_mutable_value =
         callee_param && callee_param.mutable && a.is_a?(AST::Identifier) &&
         !callee_wants_mutable_list &&
-        !(callee_param_type&.respond_to?(:needs_pointer_passing?) && callee_param_type.needs_pointer_passing?)
+        !callee_param_type.needs_pointer_passing?
 
       if callee_wants_mutable_list && a.is_a?(AST::Identifier)
         if @current_fn_collection_params&.include?(a.name) || @current_bg_pointer_captures&.include?(a.name)
@@ -1812,7 +1813,7 @@ class MIRLowering
         end
       elsif callee_wants_mutable_value
         MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !callee_param_type&.collection?
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !callee_param_type.collection?
         # MoveNode exclusion dropped: with EscapeAnalysis condition 8 promoting
         # the caller's frame ArrayList to heap when GIVEn to a TAKES T[] param,
         # .items is heap-backed and matches the callee's heapAlloc-bound free (#39).
@@ -1899,24 +1900,19 @@ class MIRLowering
       ti = a.full_type
       # UFCS: the receiver is param[0], so args[i] -> params[i+1].
       callee_param = callee_sig&.params&.[](idx + 1)
-      callee_param_type = callee_param&.type
+      # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
+      callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
       # COPY of an owning collection into a TAKES collection param (#37 COPY):
       # produce owning ArrayList via dupeValue; see lower_func_call note.
-      # CheatLib.dupeValue has comptime arms for ArrayList (list_collection?),
-      # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
-      # variants share isStringMap-shape via the inner-field heuristic.
       copy_to_owning = a.is_a?(AST::CopyNode) &&
-                       callee_param_type&.collection? &&
+                       callee_param_type.collection? &&
                        (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
                         (ti&.array? && !ti&.string?))
       raw_arg = copy_to_owning ?
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
                   lower(a)
-      # copy_to_owning: hoist into a `var` temp so &__tmp resolves to *T (not
-      # *const T); the callee's anytype binding then allows mutable methods
-      # (xs.deinit, xs.count, ...) on the duplicated owning container.
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
-      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type&.collection?
+      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type.collection?
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
