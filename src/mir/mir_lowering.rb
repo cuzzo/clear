@@ -314,13 +314,18 @@ class MIRLowering
     { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
   end
 
+  sig { returns(T::Hash[Symbol, T.untyped]) }
+  def heap_string_entry
+    { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+  end
+
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def hoist_cleanup_entry(mir, ast_node)
     raw = case mir
     when MIR::DupeSlice, MIR::ConcatStr
-      { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      heap_string_entry
     when MIR::AllocSlice
       takes_slice_entry(mir.elem_type)
     when MIR::MakeList
@@ -378,9 +383,9 @@ class MIRLowering
     return nil unless ti
     ti = ti.payload_type || ti if ti.error_union?
     if ti.string?
-      { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      heap_string_entry
     elsif ti.list_collection?
-      { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: ti.zig_type }
+      list_cleanup_entry(ti.zig_type)
     else
       zig_t = (Type.new(ti.resolved).zig_type rescue nil)
       return nil unless zig_t
