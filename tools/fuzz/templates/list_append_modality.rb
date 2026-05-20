@@ -91,15 +91,15 @@ LIST_APPEND_EXPECTED_OVERRIDES = {
   [:sharded_hash_map, :copy]     => [:compile_error, "lang: no list-of-sharded-map"],
   [:sharded_hash_map, :give]     => [:compile_error, "lang: no list-of-sharded-map"],
   # Real bugs (lowering produces incorrect Zig):
-  [:dynamic_array, :copy]        => [:in_dev, "#56"],
-  [:frame_list, :copy]           => [:in_dev, "#56"],
-  [:union_owned_payload, :bare]  => [:in_dev, "#43"],
-  [:union_owned_payload, :copy]  => [:in_dev, "#43"],
-  [:union_owned_payload, :give]  => [:in_dev, "#43"],
-  [:hash_map, :copy]             => [:in_dev, "#58"],
-  [:option_owned_payload, :bare] => [:in_dev, "#59"],
-  [:option_owned_payload, :copy] => [:in_dev, "#59"],
-  [:option_owned_payload, :give] => [:in_dev, "#59"],
+  [:dynamic_array, :copy]        => [:pass, "#56"],
+  [:frame_list, :copy]           => [:pass, "#56"],
+  [:union_owned_payload, :bare]  => [:pass, "#43"],
+  [:union_owned_payload, :copy]  => [:pass, "#43"],
+  [:union_owned_payload, :give]  => [:pass, "#43"],
+  [:hash_map, :copy]             => [:pass, "#58"],
+  [:option_owned_payload, :bare] => [:pass, "#59"],
+  [:option_owned_payload, :copy] => [:pass, "#59"],
+  [:option_owned_payload, :give] => [:pass, "#59"],
 }.freeze
 
 LIST_APPEND_CELLS = LIST_APPEND_SHAPE_SPECS.keys.flat_map do |shape|

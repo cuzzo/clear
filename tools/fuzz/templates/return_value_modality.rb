@@ -119,17 +119,17 @@ RETURN_VALUE_SHAPE_SPECS = {
 # per-cell ./clear run.
 RETURN_VALUE_EXPECTED_OVERRIDES = {
   # #43 -- union variant return: variant store emits `.items` slice + rt
-  union_owned_payload: [:in_dev, "#43"],
+  union_owned_payload: [:pass, "#43"],
   # #52 -- cleanup shim reads .len on ShardedList/SoaList (no such field)
-  sharded_list: [:in_dev, "#52"],
-  soa_list: [:in_dev, "#52"],
+  sharded_list: [:pass, "#52"],
+  soa_list: [:pass, "#52"],
   # #54 -- returning owning @set/@pool/sharded/soa loses contents at runtime
   # (ASSERT length() == 1 fails -- contents silently lost on return)
-  set: [:in_dev, "#54"],
-  sharded_set: [:in_dev, "#54"],
-  pool: [:in_dev, "#54"],
-  sharded_pool: [:in_dev, "#54"],
-  soa_pool: [:in_dev, "#54"],
+  set: [:pass, "#54"],
+  sharded_set: [:pass, "#54"],
+  pool: [:pass, "#54"],
+  sharded_pool: [:pass, "#54"],
+  soa_pool: [:pass, "#54"],
 }.freeze
 
 RETURN_VALUE_CELLS = RETURN_VALUE_SHAPE_SPECS.keys.map do |shape|

@@ -126,23 +126,23 @@ TAKES_MOVE_SHAPE_SPECS = {
 # omissions.
 TAKES_MOVE_EXPECTED_OVERRIDES = {
   # #43 -- union_owned_payload variant store emits `.items` slice; rt missing
-  [:union_owned_payload, :give] => [:in_dev, "#43"],
-  [:union_owned_payload, :bare] => [:in_dev, "#43"],
-  [:union_owned_payload, :copy] => [:in_dev, "#43"],
+  [:union_owned_payload, :give] => [:pass, "#43"],
+  [:union_owned_payload, :bare] => [:pass, "#43"],
+  [:union_owned_payload, :copy] => [:pass, "#43"],
   # #51 -- struct-with-owned-fields TAKES: callee body needs rt but signature
   # lacks `rt: *Runtime` (same class as #43's part B)
-  [:struct_owned_fields, :give] => [:in_dev, "#51"],
-  [:struct_owned_fields, :bare] => [:in_dev, "#51"],
-  [:struct_owned_fields, :copy] => [:in_dev, "#51"],
+  [:struct_owned_fields, :give] => [:pass, "#51"],
+  [:struct_owned_fields, :bare] => [:pass, "#51"],
+  [:struct_owned_fields, :copy] => [:pass, "#51"],
   # #52 -- ShardedList / SoaList: cleanup shim reads .len (no such field)
-  [:sharded_list, :give]        => [:in_dev, "#52"],
-  [:sharded_list, :bare]        => [:in_dev, "#52"],
-  [:sharded_list, :copy]        => [:in_dev, "#52"],
-  [:soa_list, :give]            => [:in_dev, "#52"],
-  [:soa_list, :bare]            => [:in_dev, "#52"],
-  [:soa_list, :copy]            => [:in_dev, "#52"],
+  [:sharded_list, :give]        => [:pass, "#52"],
+  [:sharded_list, :bare]        => [:pass, "#52"],
+  [:sharded_list, :copy]        => [:pass, "#52"],
+  [:soa_list, :give]            => [:pass, "#52"],
+  [:soa_list, :bare]            => [:pass, "#52"],
+  [:soa_list, :copy]            => [:pass, "#52"],
   # #53 -- sharded_hash_map COPY: dupeValue lacks ShardedStringMap arm; segfault
-  [:sharded_hash_map, :copy]    => [:in_dev, "#53"],
+  [:sharded_hash_map, :copy]    => [:pass, "#53"],
 }.freeze
 
 TAKES_MOVE_CELLS = TAKES_MOVE_SHAPE_SPECS.keys.flat_map do |shape|
