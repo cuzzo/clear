@@ -309,6 +309,16 @@ class MIRLowering
       rc_variant: :standard, rc_alloc: :heap }
   end
 
+  sig { params(elem_zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
+  def takes_slice_entry(elem_zig_type)
+    { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: elem_zig_type }
+  end
+
+  sig { params(zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
+  def list_cleanup_entry(zig_type)
+    { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
+  end
+
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -317,18 +327,17 @@ class MIRLowering
     when MIR::DupeSlice, MIR::ConcatStr
       { kind: :heap_string, alloc: :heap, has_moved_guard: false }
     when MIR::AllocSlice
-      { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: mir.elem_type }
+      takes_slice_entry(mir.elem_type)
     when MIR::MakeList
-      zig_type = "std.ArrayListUnmanaged(#{mir.elem_type})"
-      { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
+      list_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
     when MIR::HeapCreate
       { kind: :heap_struct_plain, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
     when MIR::ContainerInit
-      { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
+      list_cleanup_entry(mir.zig_type)
     when MIR::DeepCopy
       case mir.strategy
       when :list_shallow, :list_deep
-        { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: mir.elem_type }
+        takes_slice_entry(mir.elem_type)
       when :full_value
         zig_t = mir.zig_type
         if zig_t.nil?
@@ -338,7 +347,7 @@ class MIRLowering
           bare.provenance = :stack if bare.respond_to?(:provenance=)
           zig_t = bare.zig_type
         end
-        { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
+        list_cleanup_entry(zig_t)
       else
         raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
               "mir_allocates? returned true but no cleanup entry defined. Add a case."
