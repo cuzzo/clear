@@ -1595,7 +1595,7 @@ module LoopFrameAnalysis
       # site rather than promoting the declaration (which would cause double-free
       # if the declaration's scope is shorter than the carry variable's scope).
       node.heap_dupe_result = true
-      ti.provenance = :heap
+      node.symbol.storage = :heap if node.symbol
     else
       if node.respond_to?(:storage=)
         node.storage = :heap
@@ -1611,7 +1611,7 @@ module LoopFrameAnalysis
     return unless decl_node
     decl_ti = decl_node.full_type
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
-    decl_ti.provenance = :heap
+    ident_node.symbol.storage = :heap if ident_node.symbol
     decl_node.storage = :heap
     if decl_node.value.respond_to?(:storage=)
       decl_node.value.storage = :heap
@@ -1625,7 +1625,7 @@ module LoopFrameAnalysis
     return unless decl_ti.is_a?(Type)
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
 
-    decl_ti.provenance = :heap
+    decl_node.symbol.storage = :heap if decl_node.respond_to?(:symbol) && decl_node.symbol
     decl_node.storage = :heap if decl_node.respond_to?(:storage=)
 
     value = decl_node.respond_to?(:value) ? decl_node.value : nil
