@@ -793,14 +793,12 @@ module AST
       when :frame
         t.provenance = :frame
       when :heap
-        if value_sync == :locked
-          t.sync = :locked          # sync= setter sets provenance = :heap
-        elsif value_sync == :write_locked
-          t.sync = :write_locked    # sync= setter sets provenance = :heap
-        else
-          t.provenance = :heap
-        end
         t.provenance = :heap
+        if value_sync == :locked
+          t.sync = :locked
+        elsif value_sync == :write_locked
+          t.sync = :write_locked
+        end
       # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
       end
 

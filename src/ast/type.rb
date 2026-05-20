@@ -1657,9 +1657,6 @@ class Type
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
-    # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
-    @provenance = :heap if value && value != :raw && value != :symbol && @ownership == :affine
-    @provenance = :rodata if value == :symbol
   end
 
   # Returns the Zig type string representation of this type.

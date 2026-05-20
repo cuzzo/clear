@@ -3901,7 +3901,7 @@ private
         end
       when :SYMBOL
         # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
-        Type.new(Type::STRING_TYPE, sync: :symbol)
+        Type.new(Type::STRING_TYPE, sync: :symbol, location: :rodata)
       when :BYTE         then Type.new(:Byte)
       when :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
       when :INT8    then Type.new(:Int8)
