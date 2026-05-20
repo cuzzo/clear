@@ -201,3 +201,46 @@ BinaryOp string_concat, etc.). To delete Type#provenance entirely:
 
 Each step is gated: spec + transpile + fuzz must remain green; net LOC
 delete preferred.
+
+### SIMP-13f investigation findings (this session)
+
+Attempted to eliminate the OR-fallback `|| ti.X_provenance?` at four classify_*
+helpers in promotion_plan.rb that operate on binding-decl nodes. Reverted —
+sym.storage is **not always canonical** for binding contexts. Concrete gaps
+observed via debug output:
+
+- `contents = fileReadAll(f)` — FuncCall returning heap String. After
+  annotation: `node.full_type.provenance=:heap` but `sym.storage=:stack`.
+  The :heap provenance is written by `set_cleanup_alloc!` AFTER the binding's
+  symbol was already created with storage=:stack from `finalize_storage`.
+
+- `f: ?String = names.first()` — Optional/borrow types. The :rodata/:borrow
+  provenance on the optional Type comes from method_analysis return-type
+  propagation, again after Symbol creation.
+
+The root architectural gap: **late provenance writes on a binding's Type don't
+propagate to Symbol**. Sites that write `node.full_type.provenance = :X` AFTER
+the symbol exists:
+- `annotator.rb:set_cleanup_alloc!` (FuncCall/MethodCall result classification)
+- `annotator.rb:visit_VarDecl` (indirect/COPY)
+- `function_analysis.rb` (call return propagation)
+- `generic_analysis.rb` / `method_analysis.rb` (type widening)
+
+Attempted `mirror_provenance_to_symbol!` helper to propagate from these
+late-write sites to sym.storage — surfaced 1749 spec failures because the
+helper over-wrote sym.storage in cases where the storage axis was something
+other than the provenance axis (e.g., :shared / :multiowned wrappers carry
+their own storage classification that doesn't follow the provenance set).
+
+The correct path forward for SIMP-13f:
+
+1. Find every site that writes `something.provenance = X` post-Symbol-creation
+2. For each, determine if it should also update sym.storage (and if so, with
+   what guard to avoid over-writing the storage axis)
+3. Once all late writes propagate to sym, the OR-fallback in readers becomes
+   purely defensive (no behavior change to remove)
+4. Then remove ti.provenance writes systematically
+5. Then delete the Type#provenance field
+
+Each step needs full gate runs (4830 specs + 567 transpile-tests + fuzz).
+Estimate 2-3 sessions of careful per-site work.
