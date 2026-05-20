@@ -332,33 +332,56 @@ module EscapeGraph
   sig { params(fn: T.untyped, fn_nodes: FnNodes).returns(T::Set[String]) }
   def callarg_escape_names(fn, fn_nodes)
     out = T.let(Set.new, T::Set[String])
-    # Pre-walk decls so we can look up an aggregate arg's init expression.
     decls = T.let({}, T::Hash[String, T.untyped])
     walk(fn.body) { |n| decls[n.name.to_s] = n if decl?(n) }
     walk(fn.body) do |call|
       next unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
-      callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
-      next unless callee.is_a?(AST::FunctionDef)
-      args = call.args || []
-      callee.params.each_with_index do |param, idx|
-        arg = args[idx]
-        next unless arg
+      each_call_arg_target(call, fn_nodes) do |arg, target_type, takes, mut_list|
         is_copy = arg.is_a?(AST::CopyNode)
         src = unwrap(arg)
         next unless src.is_a?(AST::Identifier)
         ti = src.full_type
         next unless ti.is_a?(Type)
-        pt = param.type
-        mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
         if collection_ti?(ti)
-          out << src.name.to_s if param.takes || mut_list
-        elsif (param.takes || is_copy) && (ti.struct? || ti.optional?)
+          out << src.name.to_s if takes || mut_list
+        elsif (takes || is_copy) && (ti.struct? || ti.optional?)
           src_decl = decls[src.name.to_s]
           aggregate_moved_list_decls(src_decl&.value).each { |d| out << d } if src_decl
         end
       end
     end
     out
+  end
+
+  # Yields (arg, target_param_type, takes, mut_list) for every consuming slot
+  # of `call`. Unifies user-FunctionDef calls (callee.params) with stdlib
+  # element-store method calls (append/insert/push/put) where the receiver's
+  # element_type is the target. Without this unification, stdlib intrinsic
+  # dispatch skipped the aggregate-leaf escape rule, leaving frame-allocated
+  # leaves inside COPY'd union/struct elements that the runtime's dupe path
+  # then tried to free with mismatched alignment.
+  ELEMENT_STORE_METHODS = T.let(%w[append insert push put].freeze, T::Array[String])
+
+  sig { params(call: T.untyped, fn_nodes: FnNodes, blk: T.untyped).void }
+  def each_call_arg_target(call, fn_nodes, &blk)
+    callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
+    if callee.is_a?(AST::FunctionDef)
+      args = call.args || []
+      callee.params.each_with_index do |param, idx|
+        a = args[idx]
+        next unless a
+        pt = param.type
+        mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
+        blk.call(a, pt, param.takes, mut_list)
+      end
+    elsif call.is_a?(AST::MethodCall) && ELEMENT_STORE_METHODS.include?(call.name.to_s)
+      obj = call.object
+      obj_ti = (obj.respond_to?(:full_type) ? obj.full_type : nil)
+      return unless obj_ti.is_a?(Type) && obj_ti.collection?
+      elem_t = obj_ti.element_type
+      return unless elem_t.is_a?(Type)
+      (call.args || []).each { |a| blk.call(a, elem_t, true, false) }
+    end
   end
 
   # capture_analysis.heap_promote_names deliberately excludes string
