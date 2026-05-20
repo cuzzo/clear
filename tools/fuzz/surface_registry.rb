@@ -124,9 +124,10 @@ module FuzzSurfaceRegistry
 
     # Truthful owner of takes_arg/give_arg across owning collection shapes.
     # access_gate also claims takes_arg/give_arg but only for a struct
-    # (Counter); the taxonomy not crossing sink x shape is why the
-    # collection-shape gap was masked (#41).
+    # (Counter); the cross-cut check in coverage.rb (SINK_REQUIRES_SHAPES)
+    # surfaces the shape gap (#41).
     takes_move_modality: {
+      cleanup_value_shapes: [:heap_list, :set, :pool, :hash_map, :dynamic_array],
       collection_shapes: [:list, :set, :pool, :hash_map, :dynamic_array],
       escape_sinks: [:takes_arg, :give_arg],
       mir_ownership_contracts: [:move_suppresses_cleanup],
@@ -240,6 +241,7 @@ module FuzzSurfaceRegistry
     },
 
     access_gate: {
+      cleanup_value_shapes: [:struct_owned_fields],
       sync_capabilities: [:locked, :write_locked, :versioned],
       escape_sources: [:with_alias],
       escape_sinks: [:return_value, :struct_field_store, :list_append, :takes_arg, :give_arg, :bg_capture, :do_capture, :bg_stream_capture],
@@ -294,11 +296,30 @@ module FuzzSurfaceRegistry
     collection_shape_smoke: [:collection_shapes],
   }.freeze
 
+  # Cross-cut sinks where value-shape matters. A sink isn't truly covered
+  # unless the templates claiming it collectively touch each of the listed
+  # shapes -- a struct-only claim masking collection-shape blind spots is
+  # exactly what hid #37/#39/#40/#42. Required shapes use cleanup_value_shapes
+  # naming; coverage.rb unions cleanup_value_shapes declarations across
+  # templates whose escape_sinks include the sink and reports any missing.
+  SINK_REQUIRES_SHAPES = {
+    takes_arg:          %i[heap_list pool set hash_map dynamic_array struct_owned_fields union_owned_payload],
+    give_arg:           %i[heap_list pool set hash_map dynamic_array struct_owned_fields union_owned_payload],
+    return_value:       %i[heap_list pool set hash_map string struct_owned_fields union_owned_payload],
+    struct_field_store: %i[heap_list string struct_owned_fields union_owned_payload],
+    list_append:        %i[heap_list string struct_owned_fields union_owned_payload],
+  }.freeze
+
   def self.surface(name)
     SURFACES.fetch(name)
   end
 
   def self.covered(template, surface)
     TEMPLATE_COVERAGE.fetch(template, {}).fetch(surface, [])
+  end
+
+  # Templates whose escape_sinks coverage includes the given sink.
+  def self.templates_covering_sink(sink)
+    TEMPLATE_COVERAGE.select { |_, cov| Array(cov[:escape_sinks]).include?(sink) }.keys
   end
 end
