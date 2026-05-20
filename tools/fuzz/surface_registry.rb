@@ -146,6 +146,22 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    # Truthful owner of :struct_field_store across EVERY value shape. Cells
+    # enumerated from the registry (ASSIGN_INTO_HEAP_VALUE_SHAPES -- adds the
+    # caller-side frame_* shapes that ownership_surface_smoke claims but
+    # doesn't actually emit per shape x modality).
+    struct_field_store_modality: {
+      cleanup_value_shapes: [
+        :string, :frame_string_concat, :dynamic_array, :frame_list, :heap_list,
+        :pool, :set, :hash_map,
+        :sharded_list, :sharded_pool, :sharded_set, :sharded_hash_map,
+        :soa_list, :soa_pool,
+        :struct_owned_fields, :union_owned_payload, :option_owned_payload, :nested_container,
+      ],
+      escape_sinks: [:struct_field_store],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths],
+    },
+
     # Truthful owner of takes_arg/give_arg across EVERY callee-param value
     # shape. Cells enumerated from the registry, not hand-picked (#41 cross-
     # cut is what gates this template now).
