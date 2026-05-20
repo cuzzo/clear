@@ -124,6 +124,28 @@ Steps 1, 2, 3 are independent in scope and can land in any order. Step 4 depends
 
 Recommended landing order: **1 → 2 → 6 → 3 → 4 → 5 → 7**.
 
+## Pattern: single-writer stamp + many-reader consumers
+
+Each step below follows the same pattern (demonstrated by `SymbolEntry#init_contents_heap` in the partial PC1+PC2 work):
+
+1. **Identify the duplicate-decision**: multiple sites computing the same answer.
+2. **Add a stamp on the binding**: a single-writer field that holds the decided answer.
+3. **Single writer at the natural decision point** (usually annotator at bind-time).
+4. **Convert all readers** to consume the stamp instead of re-deriving.
+5. **Delete the re-derivation logic** once readers all consume the stamp.
+
+The pattern collapses N read-sites + N decision implementations into 1 writer + N reads. Apply to every duplicate decision; the codebase moves toward "one writer, many readers" everywhere.
+
+## Session-progress shape (this is what landed)
+
+What's committed via PC1 + PC2 stamp work:
+- `SymbolEntry#init_contents_heap` — single-writer per-binding stamp set by annotator
+- `PromotionClassifier` reads stamp, deletes one re-derivation
+- `mir_pass#insert_promotion!` deletes a parallel decision layer (~25 LOC)
+- Closes the `return_value_modality:struct_owned_fields` leak via no spurious copy
+
+What remains: applying the same pattern to the other 6 PCs in this document. Each is a session-sized commit. The pattern itself is now demonstrated and replicable.
+
 ## Acceptance for each step
 
 | | spec | transpile | fuzz | LOC |
