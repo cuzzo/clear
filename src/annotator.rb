@@ -3906,14 +3906,18 @@ private
       when :NUMBER then Type.new(:Float64)
       when :INT64 then Type.new(:Int64)
       when :STRING
-        # provenance auto-inferred from location: :rodata in Type constructor
+        # SIMP-13f: stamp storage_override so Locatable#rodata_provenance? returns
+        # true without needing the type.provenance fallback.
         if node.storage == :stack
+          node.storage = :rodata
           Type.new(:"Byte[#{node.value.length}]", location: :rodata)
         else
+          node.storage = :rodata
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
       when :SYMBOL
         # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
+        node.storage = :rodata
         Type.new(Type::STRING_TYPE, sync: :symbol, location: :rodata)
       when :BYTE         then Type.new(:Byte)
       when :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
@@ -4324,6 +4328,7 @@ private
 
       copy = AST::CopyNode.new(val_node.token, val_node)
       copy.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any)
+      copy.storage = :heap
       elem = vti.element_type
       if elem
         es = lookup_type_schema(elem.resolved) rescue nil
@@ -4337,6 +4342,7 @@ private
       copy = AST::CopyNode.new(val_node.token, val_node)
       # provenance auto-inferred from location: :heap in Type constructor
       copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
+      copy.storage = :heap
       return copy
     end
 
@@ -6666,6 +6672,7 @@ private
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
         if matched_def.emit&.lifetime
           ti.provenance = :borrow
+          val.storage = :borrow if val.respond_to?(:storage=)
           return
         end
         ret_alloc = matched_def.emit&.return_alloc
@@ -6673,7 +6680,10 @@ private
         # alloc IS the return alloc (e.g. map.values() on sharded maps).
         ret_alloc ||= matched_def.emit&.alloc if matched_def.emit&.allocates
         if ret_alloc
-          ti.provenance ||= ret_alloc if [:heap, :frame].include?(ret_alloc)
+          if ti.provenance.nil? && [:heap, :frame].include?(ret_alloc)
+            ti.provenance = ret_alloc
+            val.storage = ret_alloc if val.respond_to?(:storage=)
+          end
           return
         end
       end

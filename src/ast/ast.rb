@@ -846,27 +846,21 @@ module AST
     def heap_provenance?
       sym = respond_to?(:symbol) ? symbol : nil
       return true if sym&.heap_provenance?
-      return true if @storage_override == :heap
-      ti = @type_object
-      ti.is_a?(Type) && ti.heap_provenance?
+      @storage_override == :heap
     end
 
     sig { returns(T::Boolean) }
     def rodata_provenance?
       sym = respond_to?(:symbol) ? symbol : nil
       return true if sym&.rodata_provenance?
-      return true if @storage_override == :rodata
-      ti = @type_object
-      ti.is_a?(Type) && ti.rodata_provenance?
+      @storage_override == :rodata
     end
 
     sig { returns(T::Boolean) }
     def borrow_provenance?
       sym = respond_to?(:symbol) ? symbol : nil
       return true if sym&.borrow_provenance?
-      return true if @storage_override == :borrow
-      ti = @type_object
-      ti.is_a?(Type) && ti.borrow_provenance?
+      @storage_override == :borrow
     end
 
     sig { params(val: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
