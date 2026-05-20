@@ -3700,6 +3700,11 @@ private
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
       end
+      # Flag @list-typed variant payloads so lower_struct_lit passes the ArrayList
+      # directly instead of extracting `.items` (slice). Mirrors the same stamp
+      # the struct-field path sets at line 3804 -- prior absence here caused
+      # union variant ArrayList payloads to silently lose to slice (#43).
+      val_node.target_is_list_field = true if expected_type.is_a?(Type) && expected_type.list_collection?
       # Move: union literal captures non-Copy values.
       move_if_not_copyable!(val_node)
       node.full_type = if node.type_args&.any?

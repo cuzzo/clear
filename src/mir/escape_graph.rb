@@ -332,6 +332,9 @@ module EscapeGraph
   sig { params(fn: T.untyped, fn_nodes: FnNodes).returns(T::Set[String]) }
   def callarg_escape_names(fn, fn_nodes)
     out = T.let(Set.new, T::Set[String])
+    # Pre-walk decls so we can look up an aggregate arg's init expression.
+    decls = T.let({}, T::Hash[String, T.untyped])
+    walk(fn.body) { |n| decls[n.name.to_s] = n if decl?(n) }
     walk(fn.body) do |call|
       next unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
       callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
@@ -343,10 +346,22 @@ module EscapeGraph
         src = unwrap(arg)
         next unless src.is_a?(AST::Identifier)
         ti = src.full_type
-        next unless ti.is_a?(Type) && collection_ti?(ti)
+        next unless ti.is_a?(Type)
         pt = param.type
         mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
-        out << src.name.to_s if param.takes || mut_list
+        if collection_ti?(ti)
+          out << src.name.to_s if param.takes || mut_list
+        elsif param.takes && (ti.struct? || ti.optional?)
+          # TAKES of a non-Copy aggregate (union/struct/optional carrying
+          # heap-owning fields): callee cleanup frees internal heap
+          # pointers. Promote only the LEAVES (collection-typed decls
+          # nested in src's init), not the aggregate itself -- the
+          # aggregate stays a value (RVO/struct calling convention).
+          # aggregate_moved_list_decls is the same helper used by
+          # return-value escape (#43).
+          src_decl = decls[src.name.to_s]
+          aggregate_moved_list_decls(src_decl&.value).each { |d| out << d } if src_decl
+        end
       end
     end
     out
