@@ -857,6 +857,14 @@ module AST
       ti.is_a?(Type) && ti.rodata_provenance?
     end
 
+    sig { returns(T::Boolean) }
+    def value_borrow_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.borrow_provenance?
+      ti = @type_object
+      ti.is_a?(Type) && ti.borrow_provenance?
+    end
+
     sig { returns(T.nilable(Symbol)) }
     def storage
       @storage_override || (@type_object && (@type_object.provenance || :stack))

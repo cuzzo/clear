@@ -638,7 +638,7 @@ module CleanupClassifier
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.container_borrow
-    return nil if ti.borrow_provenance?  # borrow return -- caller owns data
+    return nil if node.is_a?(AST::Locatable) ? node.value_borrow_provenance? : ti.borrow_provenance?  # borrow return -- caller owns data
 
     sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
 
@@ -646,12 +646,12 @@ module CleanupClassifier
       classify_frozen(ti) ||
       classify_inf_stream(ti) ||
       classify_resource(ti, node) ||
-      classify_collection(ti, schema_lookup) ||
+      classify_collection(ti, schema_lookup, node: node) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
       classify_atomic_ptr(ti) ||
       classify_rc_or_link(ti, schema_lookup) ||
       classify_sync(ti, sync) ||
-      classify_optional(ti, schema_lookup) ||
+      classify_optional(ti, schema_lookup, node: node) ||
       classify_owned_string(ti, node) ||
       classify_heap_provenance(ti, node, schema_lookup, sync) ||
       classify_heap_struct_plain(ti, node, schema_lookup, sync) ||
@@ -722,8 +722,8 @@ module CleanupClassifier
     entry(:inf_stream, has_moved_guard: false)
   end
 
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_collection(ti, schema_lookup)
+  sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_collection(ti, schema_lookup, node: nil)
     # Group 1 / Group 2 separation: when a collection is wrapped with
     # Arc/Rc ownership, the cleanup is `arcRelease` / `rcRelease` — which
     # cascades through the wrapper down to the inner data shape's deinit.
@@ -733,7 +733,8 @@ module CleanupClassifier
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
     return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
-    if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
+    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?
+    if ti.list_collection? && !ti.sharded? && !is_heap
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
                    alloc: :frame, elem_needs_cleanup: has_heap_elems, zig_type: ti.zig_type)
@@ -807,8 +808,8 @@ module CleanupClassifier
     nil
   end
 
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_optional(ti, schema_lookup)
+  sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_optional(ti, schema_lookup, node: nil)
     return nil unless ti.optional?
     inner = ti.wrapped_type
     return nil unless inner
@@ -816,7 +817,9 @@ module CleanupClassifier
     # rodata/borrow provenance: the payload is a string literal in the binary
     # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
     # skips frame, not rodata) is an invalid free. No cleanup needed.
-    return nil if ti.rodata_provenance? || ti.borrow_provenance?
+    is_rodata = node.is_a?(AST::Locatable) ? node.value_rodata_provenance? : ti.rodata_provenance?
+    is_borrow = node.is_a?(AST::Locatable) ? node.value_borrow_provenance? : ti.borrow_provenance?
+    return nil if is_rodata || is_borrow
     entry(:optional_owned, alloc: :cleanup)
   end
 
@@ -830,7 +833,8 @@ module CleanupClassifier
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
-    return nil unless ti.heap_provenance?
+    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?
+    return nil unless is_heap
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     return nil if ti.collection?
 
