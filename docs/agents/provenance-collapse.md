@@ -139,18 +139,22 @@ The pattern collapses N read-sites + N decision implementations into 1 writer + 
 ## Session-progress shape (what's landed)
 
 **Committed:**
-- `SymbolEntry#init_contents_heap` — single-writer per-binding stamp at bind-time. Annotator computes from init expression's per-field provenance (covers StructLit, UnionVariantLit, FuncCall returns).
+- `SymbolEntry#init_contents_heap` — single-writer per-binding stamp at bind-time. Annotator computes from init expression's per-field provenance.
+- Stamp coverage extended (SIMP-01): Identifier (chained), CopyNode/CloneNode, Cast, IfStatement, MatchStatement. StructLit/UnionVariantLit/FuncCall/MethodCall already covered.
 - `PromotionClassifier` reads stamp; one re-derivation deleted.
 - `mir_pass#insert_promotion!` parallel decision layer deleted (~25 LOC).
 - Closes the `return_value_modality:struct_owned_fields` leak via no spurious copy.
-- Ruby's `:union` DeepCopy strategy now calls `dupeValue` instead of `dupeUnionValue` directly (first step of PC-C; runtime behavior identical).
+- DeepCopy strategy collapse (SIMP-03): `:string` and `:union` → `:full_value`. lower_copy 6 → 4 strategies. emit_deep_copy: 6 → 4 case-arms. hoist_cleanup_entry: 4 → 2 DeepCopy branches. `node.zig_type` overrides `@TypeOf(src)` to preserve named union types and explicit `[]const u8` for strings.
+
+**Attempted and reverted:**
+- SIMP-02 (delete promoteDeep): blocked. `promote()` is frame-aware and skips already-heap data; `promoteDeep()` always dupes. The whole-struct return path needs promoteDeep semantics for HPT-independence: when the source binding is about to be freed, the return value must own its data regardless of allocator. Swap caused "Invalid free" in 77_error_snapshot.cht. Real fix needs a per-binding "source about to be cleaned up?" stamp at lowering time.
 
 **Why each remaining PC needs more than one session:**
 - **PC-A (Type#layout deletion)**: Type#layout is read by `indirect?` which is called in 8+ files via `ti.indirect?`. Symbol#layout is also independently read in 4+ files. Deleting Type#layout while keeping AtomicPtr semantics requires replacing every `*T` emission with an explicit MIR wrapper at every construction site. Audit-heavy and risk-prone.
-- **PC-B (sync= side-effect)**: 15 callers of `Type#sync=`. Each that depends on the implicit `provenance=:heap` set must explicitly do so. Per-call-site audit.
+- **PC-B (sync= side-effect)**: 17 callers of `Type#sync=` writes. Each that depends on the implicit `provenance=:heap` set must explicitly do so. Per-call-site audit.
 - **PC-C (dupe* consolidation)**: `dupeUnionValue` and `dupeStructSlices` have DIFFERENT semantics for struct pointee fields (shallow vs deep). Migrating callers would change behavior; needs corner-case audit.
 - **PC-D (zig_type is_pointer)**: 60+ readers of `heap_provenance?`. Many call `ti.zig_type` expecting implicit `*T` for heap structs. Each callsite needs explicit pointer-wrapping.
-- **PC-E (PromotionClassifier schema fallback)**: requires `init_contents_heap` stamp to cover ALL Identifier-source shapes (chained Identifier, IfStatement, MatchStatement, BinaryOp results, Cast).
+- **PC-E (PromotionClassifier schema fallback)**: NOT a duplicate-decision target. The schema fallback (`struct_has_promotable_fields?`) answers the *static type property* question "does this struct type contain heap-bearing fields?" — orthogonal to the stamp's *per-binding* question "are this binding's contents already heap?". Deletion requires moving the schema query onto Type as `has_promotable_struct_fields?(schema_lookup)`, then dual-condition logic stays but becomes single-source.
 - **PC-F (CopyNode provenance stamp)**: depends on PC-D landing (zig_type must stop reading provenance for *T).
 
 Each is a focused multi-day effort with the gating discipline (568 transpile-tests + 4830 specs + fuzz monotonically improving). The pattern is established and can be applied incrementally without losing the demonstrated single-writer-stamp design.
