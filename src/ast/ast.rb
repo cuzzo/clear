@@ -1109,7 +1109,6 @@ module AST
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
-    attr_accessor :storage        # :heap when carry-var concat is promoted to heap
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
     attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
@@ -1564,7 +1563,6 @@ module AST
   # Any backend emits a single allocation covering all parts.
   StringConcat   = Struct.new(:token, :parts) do
     include Locatable
-    attr_accessor :storage  # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
   end
 
   # CapabilityWrap: single AST node for all capability wrapping.
