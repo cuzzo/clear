@@ -343,6 +343,7 @@ module EscapeGraph
       callee.params.each_with_index do |param, idx|
         arg = args[idx]
         next unless arg
+        is_copy = arg.is_a?(AST::CopyNode)
         src = unwrap(arg)
         next unless src.is_a?(AST::Identifier)
         ti = src.full_type
@@ -351,10 +352,7 @@ module EscapeGraph
         mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
         if collection_ti?(ti)
           out << src.name.to_s if param.takes || mut_list
-        elsif param.takes && (ti.struct? || ti.optional?)
-          # The aggregate itself stays a value (RVO); only its collection
-          # leaves escape. Without this, frame-allocated leaves underflow
-          # the callee's heap-free in cleanup (#43).
+        elsif (param.takes || is_copy) && (ti.struct? || ti.optional?)
           src_decl = decls[src.name.to_s]
           aggregate_moved_list_decls(src_decl&.value).each { |d| out << d } if src_decl
         end
