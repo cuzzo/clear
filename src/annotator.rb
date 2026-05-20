@@ -4357,7 +4357,6 @@ private
     # Clone the Type so mutating provenance doesn't affect the inner node.
     inner_type = node.value.full_type
     node.full_type = inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type
-    node.storage = :stack
     ti = node.full_type
     resolver = ->(name) { lookup_type_schema(name) rescue nil }
 
@@ -4367,9 +4366,14 @@ private
     is_value_copy = ti.is_a?(Type) &&
       source_sync.nil? && !ti.multiowned? && !ti.shared? &&
       (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
-    unless is_value_copy
+    if is_value_copy
+      node.storage = :stack
+    else
       # COPY always produces heap-owned data for non-value types.
+      # Set both the Type provenance and the AST node storage so readers
+      # consulting either source agree.
       ti.provenance = :heap if ti.is_a?(Type)
+      node.storage = :heap
       # Mark as heap usage - COPY allocates via heapAlloc
       current_fn_ctx.heap_count += 1 if current_fn_ctx
     end
