@@ -522,7 +522,7 @@ RSpec.describe MIREmitter do
 
     it "emits union copy" do
       node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :union, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeUnionValue(Result, val, rt.heapAlloc())")
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue(Result, val, rt.heapAlloc())")
     end
 
     it "emits shallow list copy" do

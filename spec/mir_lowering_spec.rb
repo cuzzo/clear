@@ -1364,7 +1364,7 @@ RSpec.describe MIRLowering do
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
-      expect(emit(result)).to include("dupeUnionValue")
+      expect(emit(result)).to include("dupeValue(Value")
     end
 
     it "lowers COPY of borrowed union using bare union type" do
@@ -1379,7 +1379,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:union)
       expect(result.zig_type).to eq("Value")
-      expect(emit(result)).to eq("try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc())")
+      expect(emit(result)).to eq("try CheatLib.dupeValue(Value, val, rt.heapAlloc())")
     end
   end
 

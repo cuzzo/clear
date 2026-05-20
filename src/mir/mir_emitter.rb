@@ -1150,7 +1150,7 @@ class MIREmitter
       # string literals type-check (CLEAR strings are always []const u8).
       "@as([]const u8, try #{alloc}.dupe(u8, #{src}))"
     when :union
-      "try CheatLib.dupeUnionValue(#{node.zig_type}, #{src}, #{alloc})"
+      "try CheatLib.dupeValue(#{node.zig_type}, #{src}, #{alloc})"
     when :list_shallow
       elem = node.elem_type
       "blk_copy: {\n" \
