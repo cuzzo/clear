@@ -300,6 +300,15 @@ class MIRLowering
     hoist_alloc(copied, ast_node, err_cleanup: true)
   end
 
+  sig { params(ast_node: T.untyped, source: String).returns(T::Hash[Symbol, T.untyped]) }
+  def rc_cleanup_entry(ast_node, source:)
+    ti = Type.from_node(ast_node)
+    zig_t = ti&.zig_type
+    raise "hoist_cleanup_entry: #{source} has no zig_type -- ast_node type_info unavailable" unless zig_t
+    { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
+      rc_variant: :standard, rc_alloc: :heap }
+  end
+
   # Synthesize a cleanup plan entry for a hoisted temp.
   # Returns nil if the cleanup cannot be determined statically.
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -340,23 +349,13 @@ class MIRLowering
         kind = mir.sync_fn == "rwLockedCreate" ? :write_locked : :locked
         { kind: kind, alloc: :heap, has_moved_guard: false, zig_type: mir.sync_type }
       elsif mir.own_fn
-        ti = Type.from_node(ast_node)
-        zig_t = ti&.zig_type
-        raise "hoist_cleanup_entry: MIR::CapWrap (own_fn=#{mir.own_fn}) has no zig_type -- " \
-              "ast_node type_info unavailable" unless zig_t
-        { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
-          rc_variant: :standard, rc_alloc: :heap }
+        rc_cleanup_entry(ast_node, source: "MIR::CapWrap (own_fn=#{mir.own_fn})")
       else
         # :passthrough / :local -- inner value passes through; no additional cleanup.
         nil
       end
     when MIR::SharePromote
-      ti = Type.from_node(ast_node)
-      zig_t = ti&.zig_type
-      raise "hoist_cleanup_entry: MIR::SharePromote has no zig_type -- " \
-            "ast_node type_info unavailable" unless zig_t
-      { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
-        rc_variant: :standard, rc_alloc: :heap }
+      rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
     when MIR::Cast
       # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
       hoist_cleanup_entry(mir.expr, ast_node)
