@@ -108,7 +108,7 @@ module PromotionClassifier
         next if val.symbol&.takes
         next if val.symbol&.init_contents_heap
         needs_escape = (ti&.needs_escape_promotion? || struct_has_promotable_fields?(ti, schema_lookup)) &&
-                       !ti&.string? && !ti&.heap_provenance?
+                       !ti&.string? && !val.symbol&.heap_provenance?
         if needs_escape
           if ti.list_collection? || ti.map?
             var_promotes << {
@@ -178,8 +178,9 @@ module PromotionClassifier
       next false if ret.value.symbol&.takes
       next false if ret.value.symbol&.init_contents_heap
       ti = ret.value.full_type
-      next true if ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?
-      next true if schema_lookup && !ti.string? && !ti.heap_provenance? &&
+      sym_heap = ret.value.symbol&.heap_provenance?
+      next true if ti.needs_escape_promotion? && !ti.string? && !sym_heap
+      next true if schema_lookup && !ti.string? && !sym_heap &&
                    struct_has_promotable_fields?(ti, schema_lookup)
       false
     end

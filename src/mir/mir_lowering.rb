@@ -6565,7 +6565,7 @@ class MIRLowering
         root = T.let(node.name.target, T.untyped)
         root = root.target while root.is_a?(AST::GetField)
         if root.is_a?(AST::Identifier)
-          result.needs_field_cleanup = true if root.full_type.heap_provenance?
+          result.needs_field_cleanup = true if root.symbol&.heap_provenance?
         end
       end
     end
