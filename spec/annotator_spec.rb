@@ -2072,14 +2072,12 @@ RSpec.describe SemanticAnnotator do
 
       it "sets provenance to :borrow (no cleanup, caller owns data)" do
         decl = ast.statements.first
-        ti = decl.full_type
-        expect(ti.provenance).to eq(:borrow)
+        expect(decl.borrow_provenance?).to be true
       end
 
       it "sets provenance to :borrow" do
         decl = ast.statements.first
-        ti = decl.full_type
-        expect(ti.provenance).to eq(:borrow)
+        expect(decl.borrow_provenance?).to be true
       end
     end
 
