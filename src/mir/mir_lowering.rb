@@ -186,25 +186,20 @@ class MIRLowering
   # up by frame mark/rewind) and don't need cleanup tracking. Only heap
   # allocations require hoisting so the checker can verify their cleanup paths.
   sig { params(node: T.untyped).returns(T::Boolean) }
+  # Nodes whose "allocates?" decision is simply `node.alloc == :heap`.
+  ALLOC_HEAP_MIR_CLASSES = [
+    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
+    MIR::SharePromote, MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
+  ].freeze
+
   def mir_allocates?(node)
+    return true if MIR::HeapCreate === node  # always heap by definition
+    return node.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === node }
     case node
-    when MIR::DupeSlice    then node.alloc == :heap
-    when MIR::AllocSlice   then node.alloc == :heap
-    when MIR::MakeList     then node.alloc == :heap
-    when MIR::HeapCreate   then true  # always heap by definition
-    when MIR::CapWrap      then node.alloc == :heap
-    when MIR::SharePromote then node.alloc == :heap
-    when MIR::DeepCopy     then node.alloc == :heap
-    when MIR::ConcatStr    then node.alloc == :heap
-    when MIR::ContainerInit
-      node.alloc == :heap
-    when MIR::Call
-      node.heap_provenance ? true : false
-    when MIR::TryCatch
-      node.heap_provenance ? true : false
+    when MIR::Call, MIR::TryCatch
+      !!node.heap_provenance
     when MIR::Cast
       # Cast is a type coercion wrapper with no allocation of its own.
-      # Delegate to the wrapped expression.
       mir_allocates?(node.expr)
     when MIR::InlineZig
       # Only hoist if the node heap-allocates (stdlib_def allocates: true AND
