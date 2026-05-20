@@ -515,13 +515,13 @@ RSpec.describe MIREmitter do
   end
 
   describe "DeepCopy" do
-    it "emits string copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :string, :heap)
-      expect(e.emit(node)).to eq("@as([]const u8, try rt.heapAlloc().dupe(u8, src))")
+    it "emits string copy via dupeValue with explicit []const u8 type" do
+      node = MIR::DeepCopy.new(MIR::Ident.new("src"), "[]const u8", nil, :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]const u8, src, rt.heapAlloc())")
     end
 
-    it "emits union copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :union, :heap)
+    it "emits union copy via dupeValue with explicit union type" do
+      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :full_value, :heap)
       expect(e.emit(node)).to eq("try CheatLib.dupeValue(Result, val, rt.heapAlloc())")
     end
 

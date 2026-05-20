@@ -296,7 +296,7 @@ class MIRLowering
     return expr unless ti
     ti = ti.payload_type || ti if ti.error_union?
     return expr unless @union_schemas&.key?(ti.resolved)
-    copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :union, :heap)
+    copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :full_value, :heap)
     hoist_alloc(copied, ast_node, err_cleanup: true)
   end
 
@@ -318,18 +318,17 @@ class MIRLowering
       { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
     when MIR::DeepCopy
       case mir.strategy
-      when :string
-        { kind: :heap_string, alloc: :heap, has_moved_guard: false }
       when :list_shallow, :list_deep
         { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: mir.elem_type }
-      when :union
-        { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
       when :full_value
-        ti = Type.from_node(ast_node)
-        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
-        bare = Type.new(ti)
-        bare.provenance = :stack if bare.respond_to?(:provenance=)
-        zig_t = bare.zig_type
+        zig_t = mir.zig_type
+        if zig_t.nil?
+          ti = Type.from_node(ast_node)
+          raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
+          bare = Type.new(ti)
+          bare.provenance = :stack if bare.respond_to?(:provenance=)
+          zig_t = bare.zig_type
+        end
         { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
       else
         raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
@@ -5667,7 +5666,7 @@ class MIRLowering
         source_is_binding = v.is_a?(AST::GetField) || v.is_a?(AST::Identifier)
         needs_deep_cleanup = @union_schemas&.key?(field_sym) && source_is_binding
         if needs_deep_cleanup
-          val = MIR::DeepCopy.new(val, zig_t, nil, :union, :heap)
+          val = MIR::DeepCopy.new(val, zig_t, nil, :full_value, :heap)
         end
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
@@ -5927,11 +5926,11 @@ class MIRLowering
     alloc = :heap
 
     if ti && @union_schemas&.key?(ti.resolved)
-      MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :union, alloc)
+      MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
     elsif ti&.any_sync?
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     elsif ti&.string?
-      MIR::DeepCopy.new(source, nil, nil, :string, alloc)
+      MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
     elsif ti&.list_collection? || (ti&.array? && !ti&.string? && !ti&.collection?)
       elem_type = ti.element_type
       elem_zig = transpile_type(elem_type)

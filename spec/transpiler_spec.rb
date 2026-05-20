@@ -971,7 +971,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"world"/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, "world"/)
     end
 
     it "MATCH AS on non-Copy variant emits cleanup on binding (auto-TAKES)" do
@@ -1089,7 +1089,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, "hello"/)
     end
   end
 
@@ -1232,7 +1232,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"hello"/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, "hello"/)
     end
 
     it "dupes rodata string variable in union variant construction" do
@@ -1245,7 +1245,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*s\b/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, s\b/)
     end
 
     it "implicit-copies @list into union []T field" do
@@ -1288,7 +1288,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # COPY already dupes - should not double-dupe
-      lines = zig.scan(/heapAlloc\(\)\.dupe/).length
+      lines = zig.scan(/dupeValue\(/).length
       expect(lines).to eq(1)
     end
 
@@ -1635,7 +1635,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void -> result = caller!(); RETURN; END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, /)
+      expect(zig).to match(/dupeValue\(\[\]const u8, .+, rt\.heapAlloc\(\)\)/)
     end
   end
 

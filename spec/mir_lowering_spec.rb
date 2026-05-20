@@ -1207,8 +1207,8 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:string)
-      expect(emit(result)).to include("dupe(u8,")
+      expect(result.strategy).to eq(:full_value)
+      expect(emit(result)).to include("dupeValue([]const u8, s")
     end
 
     it "lowers COPY passthrough for value types" do
@@ -1363,7 +1363,7 @@ RSpec.describe MIRLowering do
       l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:union)
+      expect(result.strategy).to eq(:full_value)
       expect(emit(result)).to include("dupeValue(Value")
     end
 
@@ -1377,7 +1377,7 @@ RSpec.describe MIRLowering do
       l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:union)
+      expect(result.strategy).to eq(:full_value)
       expect(result.zig_type).to eq("Value")
       expect(emit(result)).to eq("try CheatLib.dupeValue(Value, val, rt.heapAlloc())")
     end
@@ -3332,10 +3332,10 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   it "classifies DeepCopy cleanup entries by copy strategy" do
     l = lowering
 
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap), nil)).to include(kind: :heap_string)
     expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "i64", :list_shallow, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
     expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "Value", :list_deep, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "Value")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :union, :heap), nil)).to include(kind: :non_copy_union, zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]const u8")
   end
 
   it "raises when a heap DeepCopy strategy lacks a cleanup mapping" do
@@ -3362,8 +3362,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
   it "delegates cleanup classification through Cast wrappers" do
     l = lowering
-    inner = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap)
+    inner = MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap)
 
-    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :heap_string)
+    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :list, zig_type: "[]const u8")
   end
 end

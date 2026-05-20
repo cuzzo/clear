@@ -1145,12 +1145,6 @@ class MIREmitter
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
     case node.strategy
-    when :string
-      # dupe returns []u8 (mutable); cast to []const u8 so comparisons with
-      # string literals type-check (CLEAR strings are always []const u8).
-      "@as([]const u8, try #{alloc}.dupe(u8, #{src}))"
-    when :union
-      "try CheatLib.dupeValue(#{node.zig_type}, #{src}, #{alloc})"
     when :list_shallow
       elem = node.elem_type
       "blk_copy: {\n" \
@@ -1179,7 +1173,8 @@ class MIREmitter
       "    break :blk_copy_value __src;\n" \
       "}"
     when :full_value
-      "try CheatLib.dupeValue(@TypeOf(#{src}), #{src}, #{alloc})"
+      type_arg = node.zig_type || "@TypeOf(#{src})"
+      "try CheatLib.dupeValue(#{type_arg}, #{src}, #{alloc})"
     else
       raise "MIREmitter#emit_deep_copy: unhandled strategy :#{node.strategy}"
     end
