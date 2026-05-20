@@ -2684,8 +2684,7 @@ private
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
-    # Walk the value so BG-handle lifetimes propagate through structural
-    # construction, not just direct BG initializers.
+    stamp_init_contents_heap!(node)
     stamp_bg_handle_lifetime!(node)
   end
 
@@ -2957,8 +2956,7 @@ private
         node.symbol.non_escaping   = true
         node.symbol.borrowed_alias = true
       end
-      # A BG handle inherits the lifetime of captured bindings that cannot
-      # outlive their declaring scope.
+      stamp_init_contents_heap!(node)
       stamp_bg_handle_lifetime!(node)
 
     elsif scope.is_immutable?(node.name)
@@ -6171,6 +6169,26 @@ private
     sym = decl_node.symbol
     return unless sym
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
+  end
+
+  # Single-writer stamp for "this binding's heap-bearing fields are all in
+  # heap_provenance already" (typically via COPY). PromotionClassifier and
+  # the return-time emitter READ this and skip emitting promoteDeep when
+  # true -- the COPY at the source already allocated the right heap data;
+  # a boundary promote would re-dupe and leak the original. See docs/agents/
+  # provenance-collapse.md.
+  sig { params(decl_node: T.untyped).void }
+  def stamp_init_contents_heap!(decl_node)
+    sym = decl_node.symbol
+    return unless sym
+    init = decl_node.respond_to?(:value) ? decl_node.value : nil
+    return unless init.is_a?(AST::StructLit) || init.is_a?(AST::UnionVariantLit)
+    sym.init_contents_heap = init.fields.all? do |_, fval|
+      fti = fval&.full_type
+      fti = Type.new(fti) if fti && !fti.is_a?(Type)
+      next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
+      fti.heap_provenance?
+    end
   end
 
   # AST node types that DON'T propagate a BG handle's tied lifetime

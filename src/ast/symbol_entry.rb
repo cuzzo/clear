@@ -114,8 +114,14 @@ class SymbolEntry
                 :layout,         # nil | :indirect — heap-pinned cell with stable address
                 :mutable_ref_target, # This binding is passed to a MUTABLE parameter by reference.
                                      # Forces Zig `var` storage so &binding yields *T, not *const T.
-                :poly_borrow_target  # address is taken at a universal-polymorphic call site;
+                :poly_borrow_target, # address is taken at a universal-polymorphic call site;
                                      # forces mutable Zig storage so the callee can write back.
+                :init_contents_heap  # true when the binding's init expression's heap-bearing
+                                     # fields are all in heap_provenance already (e.g. struct
+                                     # lit with COPY'd strings). PromotionClassifier reads
+                                     # this to skip redundant return-time promote. Single
+                                     # writer: annotator at bind-time. See docs/agents/
+                                     # provenance-collapse.md.
 
   # The binding's type. Single coercing seam: every input is laundered
   # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
