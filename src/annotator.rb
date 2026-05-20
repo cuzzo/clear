@@ -4370,8 +4370,9 @@ private
       node.storage = :stack
     else
       # COPY always produces heap-owned data for non-value types.
-      # Set both the Type provenance and the AST node storage so readers
-      # consulting either source agree.
+      # Set BOTH the Type's provenance (overrides any :rodata inherited from
+      # the source via the clone constructor at line 4359) and node.storage
+      # so readers consulting either source agree.
       ti.provenance = :heap if ti.is_a?(Type)
       node.storage = :heap
       # Mark as heap usage - COPY allocates via heapAlloc
