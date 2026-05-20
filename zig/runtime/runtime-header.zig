@@ -844,9 +844,19 @@ pub const CheatLib = struct {
     pub fn len(container: anytype) i64 {
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
         const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
-        // If it has .items (ArrayList), use that. Otherwise assume it's a Slice.
-        if (@hasField(@TypeOf(c), "items")) {
+        const T = @TypeOf(c);
+        const can_inspect = comptime blk: {
+            const ti = @typeInfo(T);
+            break :blk ti == .@"struct" or ti == .@"union" or ti == .@"enum" or ti == .@"opaque";
+        };
+        if (@hasField(T, "items")) {
             return @intCast(c.items.len);
+        } else if (comptime can_inspect and @hasDecl(T, "length")) {
+            return @intCast(c.length());
+        } else if (comptime can_inspect and @hasDecl(T, "count")) {
+            return @intCast(c.count());
+        } else if (comptime can_inspect and @hasDecl(T, "len")) {
+            return @intCast(c.len());
         } else {
             return @intCast(c.len);
         }

@@ -6241,14 +6241,21 @@ class MIRLowering
     bare_zig = transpile_type(bare_ft)
 
     init = if ft.pool?
-      cap = ft.capacity
-      inner = MIR::ContainerInit.new(bare_zig, :pool, decl_alloc, cap)
-      has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
+      rhs = node.value
+      rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
+      if AST.call?(rhs_unwrapped)
+        lower(node.value)
+      else
+        cap = ft.capacity
+        inner = MIR::ContainerInit.new(bare_zig, :pool, decl_alloc, cap)
+        has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
+      end
     elsif ft.set_collection?
       rhs = node.value
-      # DISTINCT pipeline: the init is a SMOOTH node (pipeline result) — lower it directly.
-      # For plain empty-set declarations, use ContainerInit.
+      rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
       if rhs.is_a?(AST::BinaryOp) && rhs.op == :SMOOTH
+        lower(node.value)
+      elsif AST.call?(rhs_unwrapped)
         lower(node.value)
       else
         inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
