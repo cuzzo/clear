@@ -6171,24 +6171,34 @@ private
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
   end
 
-  # Single-writer stamp for "this binding's heap-bearing fields are all in
-  # heap_provenance already" (typically via COPY). PromotionClassifier and
-  # the return-time emitter READ this and skip emitting promoteDeep when
-  # true -- the COPY at the source already allocated the right heap data;
-  # a boundary promote would re-dupe and leak the original. See docs/agents/
-  # provenance-collapse.md.
+  # Single-writer stamp: "this binding's heap-bearing contents are already
+  # in heap_provenance" -- so return-time promote is unnecessary (and would
+  # leak by re-allocating). PromotionClassifier reads this. ONE writer
+  # (bind-time), many readers (return-time). See docs/agents/provenance-collapse.md.
   sig { params(decl_node: T.untyped).void }
   def stamp_init_contents_heap!(decl_node)
     sym = decl_node.symbol
     return unless sym
     init = decl_node.respond_to?(:value) ? decl_node.value : nil
-    return unless init.is_a?(AST::StructLit) || init.is_a?(AST::UnionVariantLit)
-    sym.init_contents_heap = init.fields.all? do |_, fval|
-      fti = fval&.full_type
-      fti = Type.new(fti) if fti && !fti.is_a?(Type)
-      next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
-      fti.heap_provenance?
+    sym.init_contents_heap = init_value_contents_heap?(init)
+  end
+
+  sig { params(init: T.untyped).returns(T::Boolean) }
+  def init_value_contents_heap?(init)
+    return false unless init
+    if init.is_a?(AST::StructLit) || init.is_a?(AST::UnionVariantLit)
+      return init.fields.all? do |_, fval|
+        fti = fval&.full_type
+        fti = Type.new(fti) if fti && !fti.is_a?(Type)
+        next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
+        fti.heap_provenance?
+      end
     end
+    if init.is_a?(AST::FuncCall) || init.is_a?(AST::MethodCall)
+      sig = init.respond_to?(:full_type) && init.full_type
+      return true if sig.is_a?(Type) && sig.heap_provenance?
+    end
+    false
   end
 
   # AST node types that DON'T propagate a BG handle's tied lifetime
