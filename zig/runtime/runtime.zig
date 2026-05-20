@@ -450,23 +450,21 @@ pub const Runtime = struct {
         .remap = smartRemap,
     };
 
+    /// True when `ptr` is owned by the frame arena (rewind/restoreFrameMark
+    /// reclaims it). Single source of truth for "is this a frame pointer?";
+    /// callers are cleanupAlloc.free (skip frees) and promoteDeep (dupe
+    /// frame-strings to heap, leave heap-strings alone).
+    pub fn ptrIsFrameOwned(self: *Runtime, ptr: anytype) bool {
+        if (use_debug_arena) return self.overflow_arena.isLargeObject(ptr);
+        const frame_mem = self.overflow_arena.static_block;
+        const p = @intFromPtr(ptr);
+        const frame_base = @intFromPtr(frame_mem.ptr);
+        return p >= frame_base and p < frame_base + frame_mem.len;
+    }
+
     fn cleanupFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         const self: *Runtime = @ptrCast(@alignCast(ctx));
-        const p = @intFromPtr(buf.ptr);
-        // Determine if this pointer is frame-arena-owned (should be skipped —
-        // rewind/restoreFrameMark will reclaim it).
-        //
-        // Production: check if pointer falls within the static block (O(1)).
-        // Debug mode: every alloc is a large_object; scan the list (O(n), acceptable).
-        const is_frame = if (use_debug_arena)
-            self.overflow_arena.isLargeObject(buf.ptr)
-        else blk: {
-            const frame_mem = self.overflow_arena.static_block;
-            const frame_base = @intFromPtr(frame_mem.ptr);
-            break :blk (p >= frame_base and p < frame_base + frame_mem.len);
-        };
-        if (is_frame) return; // frame-arena owned — rewind reclaims it
-        // Everything else (heap, overflow blocks): delegate to real heap allocator.
+        if (self.ptrIsFrameOwned(buf.ptr)) return;
         self.heap_allocator.rawFree(buf, buf_align, ret_addr);
     }
 

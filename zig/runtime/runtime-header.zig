@@ -3627,10 +3627,7 @@ pub const CheatLib = struct {
         // duping them again leaks the original.
         if (T == []const u8 or T == []u8) {
             if (value.len == 0) return;
-            const frame_mem = rt.overflow_arena.static_block;
-            const p = @intFromPtr(value.*.ptr);
-            const frame_base = @intFromPtr(frame_mem.ptr);
-            if (p >= frame_base and p < frame_base + frame_mem.len) {
+            if (rt.ptrIsFrameOwned(value.*.ptr)) {
                 value.* = try rt.heapAlloc().dupe(u8, value.*);
             }
             return;
