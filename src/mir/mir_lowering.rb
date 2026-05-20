@@ -325,11 +325,11 @@ class MIRLowering
       when :union
         { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
       when :full_value
-        # CheatLib.dupeValue result -- same type as source (ArrayList for @list,
-        # struct for synced, etc.). Cleanup via the comptime shim through :list.
         ti = Type.from_node(ast_node)
-        zig_t = ti&.zig_type
-        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless zig_t
+        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
+        bare = Type.new(ti)
+        bare.provenance = :stack if bare.respond_to?(:provenance=)
+        zig_t = bare.zig_type
         { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
       else
         raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
@@ -5942,7 +5942,7 @@ class MIRLowering
       strategy = needs_deep ? :list_deep : :list_shallow
       src = MIR::ItemsAccess.new(source, true)
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
-    elsif ti&.collection?
+    elsif ti&.collection? || (ti && ti.struct? && ti.needs_promotion?(@schema_lookup))
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)

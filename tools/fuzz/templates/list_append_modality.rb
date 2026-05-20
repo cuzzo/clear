@@ -96,7 +96,6 @@ LIST_APPEND_EXPECTED_OVERRIDES = {
   [:union_owned_payload, :copy]  => [:pass, "#43"],
   [:union_owned_payload, :give]  => [:pass, "#43"],
   [:hash_map, :copy]             => [:pass, "#58"],
-  [:struct_owned_fields, :copy]  => [:pass, "lower_copy :passthrough strategy produces shallow byte-copy for struct with heap fields, container[0].name double-free's xs.name; needs lower_copy struct-needs-deep-clone arm"],
   [:option_owned_payload, :bare] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
   [:option_owned_payload, :copy] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
   [:option_owned_payload, :give] => [:compile_error, "lang: no list-of-optional (?T[]@list parses as ?(T[]@list))"],
