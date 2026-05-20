@@ -832,39 +832,6 @@ module AST
       @type_object&.base_type
     end
 
-    # Canonical "is this AST node's value on the heap?" predicate — SIMP-13c.
-    # Routes through the binding's SymbolEntry when available (the authoritative
-    # source — gets escape-upgraded by EscapeGraph), falling back to the
-    # node's storage_override / type.provenance for non-binding expressions
-    # (literals, COPY of non-symbol expressions, etc.). One read-site replaces
-    # the scattered `node.full_type.heap_provenance?` pattern.
-    sig { returns(T::Boolean) }
-    def value_heap_provenance?
-      sym = respond_to?(:symbol) ? symbol : nil
-      return true if sym&.heap_provenance?
-      ti = @type_object
-      ti.is_a?(Type) && ti.heap_provenance?
-    end
-
-    # Same pattern for rodata — prefer Symbol, fall back to Type. Used in
-    # promotion-plan field-skip checks where "field is already in rodata"
-    # is equivalent to "field is already heap" for the skip decision.
-    sig { returns(T::Boolean) }
-    def value_rodata_provenance?
-      sym = respond_to?(:symbol) ? symbol : nil
-      return true if sym&.rodata_provenance?
-      ti = @type_object
-      ti.is_a?(Type) && ti.rodata_provenance?
-    end
-
-    sig { returns(T::Boolean) }
-    def value_borrow_provenance?
-      sym = respond_to?(:symbol) ? symbol : nil
-      return true if sym&.borrow_provenance?
-      ti = @type_object
-      ti.is_a?(Type) && ti.borrow_provenance?
-    end
-
     sig { returns(T.nilable(Symbol)) }
     def storage
       @storage_override || (@type_object && (@type_object.provenance || :stack))

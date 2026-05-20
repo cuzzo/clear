@@ -1729,7 +1729,8 @@ class MIRLowering
   sig { params(expr: T.untyped).returns(T.nilable(Symbol)) }
   def infer_catch_value_allocator(expr)
     return nil unless expr
-    return :heap if expr.is_a?(AST::Locatable) ? expr.value_heap_provenance? : expr.full_type.heap_provenance?
+    expr_sym = expr.respond_to?(:symbol) ? expr.symbol : nil
+    return :heap if expr_sym&.heap_provenance? || expr.full_type.heap_provenance?
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return storage if storage == :heap || storage == :frame
     nil
@@ -2323,12 +2324,9 @@ class MIRLowering
     code << "}"
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
-    is_heap = if ast_node.is_a?(AST::Locatable)
-                ast_node.value_heap_provenance?
-              else
-                t = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
-                t&.heap_provenance? || false
-              end
+    ast_sym = ast_node.respond_to?(:symbol) ? ast_node.symbol : nil
+    pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
+    is_heap = !!(ast_sym&.heap_provenance? || pt&.heap_provenance?)
     iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
     iz
   end
@@ -6215,7 +6213,10 @@ class MIRLowering
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ft.heap_provenance?
+    # MIR-clone divergence: ft is a Type.new clone captured at lower-time and
+    # node.symbol may have been escape-upgraded later. Use OR so neither is
+    # false-negative; SIMP-13f resolves by making sym the sole source.
+    is_heap = (node.symbol&.heap_provenance? || ft.heap_provenance?)
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           is_heap || ft.resource? || node.resource_close_zig
@@ -7470,7 +7471,8 @@ class MIRLowering
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
-    node.is_a?(AST::Locatable) ? node.value_heap_provenance? : node.full_type.heap_provenance?
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    !!(node_sym&.heap_provenance? || node.full_type.heap_provenance?)
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
@@ -7484,7 +7486,8 @@ class MIRLowering
     ti = Type.from_node(ast_node)
     return false unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    is_heap = ast_node.is_a?(AST::Locatable) ? ast_node.value_heap_provenance? : ti.heap_provenance?
+    ast_sym = ast_node.respond_to?(:symbol) ? ast_node.symbol : nil
+    is_heap = !!(ast_sym&.heap_provenance? || ti.heap_provenance?)
     return false if is_heap  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end

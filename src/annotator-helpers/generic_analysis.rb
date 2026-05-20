@@ -681,7 +681,8 @@ module GenericAnalysis
   def has_heap_promoted_call?(expr)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless expr
-    return true if expr.is_a?(AST::Locatable) ? expr.value_heap_provenance? : expr.full_type.heap_provenance?
+    expr_sym = expr.respond_to?(:symbol) ? expr.symbol : nil
+    return true if expr_sym&.heap_provenance? || expr.full_type.heap_provenance?
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return has_heap_promoted_call?(expr.left)
     end

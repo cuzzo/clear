@@ -69,8 +69,9 @@ module PromotionClassifier
         val.fields.each do |fname, fval|
           fti = Type.from_node(fval)
 
-          fval_heap = fval.is_a?(AST::Locatable) ? fval.value_heap_provenance? : (fti&.heap_provenance? || false)
-          fval_rodata = fval.is_a?(AST::Locatable) ? fval.value_rodata_provenance? : (fti&.rodata_provenance? || false)
+          fval_sym = fval.respond_to?(:symbol) ? fval.symbol : nil
+          fval_heap = !!(fval_sym&.heap_provenance? || fti&.heap_provenance?)
+          fval_rodata = !!(fval_sym&.rodata_provenance? || fti&.rodata_provenance?)
           if fval_heap || fval_rodata
             handled_fields << fname.to_s
             next
@@ -90,8 +91,9 @@ module PromotionClassifier
         if var_promotes.empty?
           needs_promote = val.fields.any? do |_, fval|
             fti = Type.from_node(fval)
-            fval_heap = fval.is_a?(AST::Locatable) ? fval.value_heap_provenance? : (fti&.heap_provenance? || false)
-            fval_rodata = fval.is_a?(AST::Locatable) ? fval.value_rodata_provenance? : (fti&.rodata_provenance? || false)
+            fval_sym = fval.respond_to?(:symbol) ? fval.symbol : nil
+            fval_heap = !!(fval_sym&.heap_provenance? || fti&.heap_provenance?)
+            fval_rodata = !!(fval_sym&.rodata_provenance? || fti&.rodata_provenance?)
             next false if fval_heap || fval_rodata
             fti&.string? || fti&.array? || fti&.collection?
           end
@@ -638,7 +640,8 @@ module CleanupClassifier
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.container_borrow
-    return nil if node.is_a?(AST::Locatable) ? node.value_borrow_provenance? : ti.borrow_provenance?  # borrow return -- caller owns data
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    return nil if node_sym&.borrow_provenance? || ti.borrow_provenance?  # borrow return -- caller owns data
 
     sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
 
@@ -733,7 +736,8 @@ module CleanupClassifier
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
     return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
-    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    is_heap = !!(node_sym&.heap_provenance? || ti.heap_provenance?)
     if ti.list_collection? && !ti.sharded? && !is_heap
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
@@ -817,8 +821,9 @@ module CleanupClassifier
     # rodata/borrow provenance: the payload is a string literal in the binary
     # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
     # skips frame, not rodata) is an invalid free. No cleanup needed.
-    is_rodata = node.is_a?(AST::Locatable) ? node.value_rodata_provenance? : ti.rodata_provenance?
-    is_borrow = node.is_a?(AST::Locatable) ? node.value_borrow_provenance? : ti.borrow_provenance?
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    is_rodata = !!(node_sym&.rodata_provenance? || ti.rodata_provenance?)
+    is_borrow = !!(node_sym&.borrow_provenance? || ti.borrow_provenance?)
     return nil if is_rodata || is_borrow
     entry(:optional_owned, alloc: :cleanup)
   end
@@ -833,7 +838,8 @@ module CleanupClassifier
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
-    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    is_heap = !!(node_sym&.heap_provenance? || ti.heap_provenance?)
     return nil unless is_heap
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     return nil if ti.collection?

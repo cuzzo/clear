@@ -595,7 +595,8 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
     ti = Type.from_node(node)
-    is_heap = node.is_a?(AST::Locatable) ? node.value_heap_provenance? : (ti&.heap_provenance? || false)
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    is_heap = !!(node_sym&.heap_provenance? || ti&.heap_provenance?)
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
     needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
@@ -1572,7 +1573,8 @@ module LoopFrameAnalysis
     return unless node
     ti = node.full_type
     return unless ti.string?
-    return if node.is_a?(AST::Locatable) ? node.value_heap_provenance? : ti.heap_provenance?  # already heap
+    node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    return if node_sym&.heap_provenance? || ti.heap_provenance?  # already heap
     case node
     when AST::BinaryOp
       if node.string_concat
