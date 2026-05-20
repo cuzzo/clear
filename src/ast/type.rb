@@ -2181,10 +2181,6 @@ class Type
       end
     end
 
-    # :frame means "allocated in the frame arena". Strings/arrays are value-typed (slice), only
-    # frame-allocated structs are stored as *T pointers so large data stays off the fiber stack.
-    is_pointer = heap? || (frame? && struct?)
-
     # 3. Handle Special primitive mapping
     # String and Byte[N] (fixed-size string literals) both map to []const u8.
     # Byte[N] is the inferred type for string literals; their contents are always const.
@@ -2240,7 +2236,7 @@ class Type
       else
         zig = "[]#{base_zig}"
       end
-      return is_pointer && zig != "void" ? "*#{zig}" : zig
+      return zig
     end
 
     # 5. Handle HashMaps
@@ -2282,15 +2278,11 @@ class Type
     if generic_instance?
       return "u64" if @generic_base_raw == :Id
       args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
-      zig = "#{@generic_base_raw}(#{args_zig})"
-      return is_pointer && zig != "void" ? "*#{zig}" : zig
+      return "#{@generic_base_raw}(#{args_zig})"
     end
 
     # 6. Map primitives and builtins to Zig types; user types pass through.
-    zig = ZIG_TYPE_MAP[resolved] || resolved.to_s
-
-    # 7. Add pointer prefix if heap-allocated and not void
-    is_pointer && zig != "void" ? "*#{zig}" : zig
+    ZIG_TYPE_MAP[resolved] || resolved.to_s
   end
 end
 
