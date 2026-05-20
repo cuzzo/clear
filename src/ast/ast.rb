@@ -766,6 +766,7 @@ module AST
         new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
         new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
         new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
+        new_t.layout = final_type.layout if final_type.respond_to?(:layout) && final_type.layout
         # Propagate @link_source from value's type
         if val_ti&.link?
           link_src = val_ti.link_source
