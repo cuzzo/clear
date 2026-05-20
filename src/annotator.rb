@@ -6186,19 +6186,37 @@ private
   sig { params(init: T.untyped).returns(T::Boolean) }
   def init_value_contents_heap?(init)
     return false unless init
-    if init.is_a?(AST::StructLit) || init.is_a?(AST::UnionVariantLit)
-      return init.fields.all? do |_, fval|
+    case init
+    when AST::StructLit, AST::UnionVariantLit
+      init.fields.all? do |_, fval|
         fti = fval&.full_type
         fti = Type.new(fti) if fti && !fti.is_a?(Type)
         next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
         fti.heap_provenance?
       end
+    when AST::FuncCall, AST::MethodCall
+      sig_t = init.respond_to?(:full_type) && init.full_type
+      sig_t.is_a?(Type) && sig_t.heap_provenance?
+    when AST::Identifier
+      !!init.symbol&.init_contents_heap
+    when AST::CopyNode, AST::CloneNode
+      true
+    when AST::Cast
+      init_value_contents_heap?(init.value)
+    when AST::IfStatement
+      then_tail = (init.then_branch || []).last
+      else_tail = (init.else_branch || []).last
+      tails = [then_tail, else_tail].compact
+      tails.size == 2 && tails.all? { |t| init_value_contents_heap?(t) }
+    when AST::MatchStatement
+      cases = (init.cases || []).map { |c| c.is_a?(Hash) ? c[:body]&.last : (c.respond_to?(:body) ? c.body&.last : nil) }.compact
+      default = init.default_case
+      default_tail = default.is_a?(Array) ? default.last : (default.respond_to?(:body) ? default.body&.last : nil)
+      tails = cases + (default_tail ? [default_tail] : [])
+      tails.any? && tails.all? { |t| init_value_contents_heap?(t) }
+    else
+      false
     end
-    if init.is_a?(AST::FuncCall) || init.is_a?(AST::MethodCall)
-      sig = init.respond_to?(:full_type) && init.full_type
-      return true if sig.is_a?(Type) && sig.heap_provenance?
-    end
-    false
   end
 
   # AST node types that DON'T propagate a BG handle's tied lifetime
