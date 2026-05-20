@@ -838,10 +838,8 @@ module AST
     end
 
     # Canonical "is this expression's value heap-allocated?" — SIMP-13f.
-    # Routes through the symbol when available (post-EscapeGraph canonical),
-    # then the node's storage_override (set by annotator for non-binding
-    # expressions), and finally type.provenance as a transitional fallback
-    # for literal/expression nodes whose storage_override isn't yet stamped.
+    # Reads sym.storage when a symbol is attached (binding-level), else the
+    # node's @storage_override (expression-level, stamped by annotator).
     sig { returns(T::Boolean) }
     def heap_provenance?
       sym = respond_to?(:symbol) ? symbol : nil
