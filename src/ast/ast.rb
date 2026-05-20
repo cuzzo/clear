@@ -834,7 +834,7 @@ module AST
 
     sig { returns(T.nilable(Symbol)) }
     def storage
-      @storage_override || (@type_object && (@type_object.provenance || :stack))
+      @storage_override || :stack
     end
 
     # Canonical "is this expression's value heap-allocated?" — SIMP-13f.
