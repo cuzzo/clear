@@ -122,14 +122,14 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       "p", :stack, nil,
     ],
     struct_with_list: [
-      # Struct with heap-bearing field: storage stays :stack (the
-      # struct itself is SROA'd on the stack), cleanup allocator is
-      # :frame because the field's per-field cleanup is dispatched
-      # against the struct's STORAGE arena. Heap-promotion of the
-      # `items` field is the field's own concern, not the struct's.
+      # Struct with heap-bearing field: storage stays :stack (the struct
+      # is SROA'd on the stack). cleanup_alloc is :cleanup so cleanupAlloc
+      # runtime-dispatches per-pointer arena. The previous :frame default
+      # left heap-allocated field data unfreed when the struct's own
+      # storage was frame (#55).
       "STRUCT C { items: Int64[]@list }\n" \
       "FN make() RETURNS !C -> MUTABLE c = C{ items: [] }; c.items.append(1_i64); RETURN c; END",
-      "c", :stack, :frame,
+      "c", :stack, :cleanup,
     ],
     union_pure: [
       "UNION U { Empty, Some: Int64 }\n" \

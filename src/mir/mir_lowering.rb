@@ -5575,7 +5575,7 @@ class MIRLowering
   def struct_field_wants_slice?(ft, k, node)
     return true if node.borrowed_field_names&.include?(k)
     return false unless ft.is_a?(Type)
-    ft.array? && ft.dynamic? && !ft.list_collection? && !ft.string?
+    ft.array? && ft.dynamic? && !ft.collection? && !ft.string?
   end
 
   sig { params(node: AST::StructLit).returns(T.untyped) }
@@ -5929,24 +5929,18 @@ class MIRLowering
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     elsif ti&.string?
       MIR::DeepCopy.new(source, nil, nil, :string, alloc)
-    elsif ti&.list_collection? || (ti&.array? && !ti&.string?)
+    elsif ti&.list_collection? || (ti&.array? && !ti&.string? && !ti&.collection?)
       elem_type = ti.element_type
       elem_zig = transpile_type(elem_type)
-      # Default: slice copy (matches the []T storage of struct/union fields,
-      # where most COPYs land). Owning-collection TAKES consumers need an
-      # owning ArrayList instead -- that override is applied at the callsite
-      # (lower_func_call/method_call, #37 COPY).
       sl = @schema_lookup
       et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
       elem_owns_heap = et.needs_cleanup?(sl) || et.string?
       needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
       strategy = needs_deep ? :list_deep : :list_shallow
-      # Plain `MUTABLE xs: Int64[]` is locally an ArrayList -- the deep-copy
-      # template reads __src.len, which fails on ArrayList. Wrap with the
-      # safe ItemsAccess (@hasField "items") for both list_collection and
-      # plain-array sources; comptime no-op on slice sources (#39).
       src = MIR::ItemsAccess.new(source, true)
       MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
+    elsif ti&.collection?
+      MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
     end
@@ -6391,7 +6385,7 @@ class MIRLowering
       elsif node.respond_to?(:storage) && node.storage == :heap
         :heap
       elsif binding_entry.present? && binding_entry.alloc == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
-        alloc_for_node(node)
+        :cleanup
       else
         (binding_entry.present? && binding_entry.alloc) || decl_alloc
       end

@@ -909,7 +909,12 @@ module CleanupClassifier
       true
     end
     return nil unless has_cleanup
-    entry(:struct_with_cleanup_fields, alloc: ti.provenance_alloc || :heap)
+    alloc = case ti.provenance_alloc
+            when :heap then :heap
+            when :frame then :cleanup
+            else :heap
+            end
+    entry(:struct_with_cleanup_fields, alloc: alloc)
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
