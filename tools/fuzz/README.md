@@ -77,7 +77,12 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
-| `takes_move_modality`       | 4 (+14 in_dev)  | Owning collection (list/set/pool/map/dyn-array/nested) passed to a TAKES param via GIVE / bare(implicit) / COPY. Truthful owner of takes_arg/give_arg across collection shapes. in_dev cells gated by #37 (bare/COPY mis-lower) / #39 (dyn-array) / #40 (nested); flipping them to pass is those bugs' regression acceptance test. |
+| `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
+| `return_value_modality`     | 8 (+8 in_dev)   | EVERY :cleanup_value_shapes member returned from `FN producer() RETURNS T -> ... END`. Breadth axis complementing heap_ownership_transfer's depth on list/string. in_dev cells gated by #43 (union return), #52 (sharded/soa cleanup), #54 (set/pool return loses contents at runtime). |
+| `heap_ownership_transfer`   | 89              | ret_form (ident/literal/call/give/or_rescue) x bind_form (bare/or_raise/or_fallback/discard/discard_or_raise/onward) x decl (T/!T) -- the depth axis for :heap_list and :string returns (ported from origin/register-machine #13 manifest). |
+| `bg_capture_typing`         | small           | Type-inference cells for BG-block captures. |
+| `bg_copy_param_reentrant`   | 6               | COPY of @list param into BG calling reentrant function. |
+| `infallible_signature`      | small           | Cells exercising infallible (non-`!T`) function signature lowering. |
 | `binary_op_matrix`         | 30           | Binary operator lowering/admission combinations. |
 | `capability_wrap_matrix`   | 7            | Capability wrapper construction/admission cells. |
 | `catch_allocator_matrix`   | 10           | Error/catch paths that preserve allocator identity. |

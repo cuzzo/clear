@@ -122,6 +122,30 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    # 89-cell ret_form x bind_form x decl matrix for :heap_list / :string
+    # (the deep RET×BIND axis from origin/register-machine #13). The
+    # complementary breadth-across-all-shapes axis is return_value_modality.
+    heap_ownership_transfer: {
+      cleanup_value_shapes: [:heap_list, :string],
+      escape_sinks: [:return_value],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths,
+                                 :error_path_allocator_identity, :move_suppresses_cleanup],
+    },
+
+    # Truthful owner of :return_value across EVERY value shape -- the breadth
+    # axis complementing heap_ownership_transfer's depth on list/string. Cells
+    # enumerated from the registry, not hand-picked.
+    return_value_modality: {
+      cleanup_value_shapes: [
+        :string, :dynamic_array, :heap_list, :pool, :set, :hash_map,
+        :sharded_list, :sharded_pool, :sharded_set, :sharded_hash_map,
+        :soa_list, :soa_pool,
+        :struct_owned_fields, :union_owned_payload, :option_owned_payload, :nested_container,
+      ],
+      escape_sinks: [:return_value],
+      mir_ownership_contracts: [:promotion_on_escape],
+    },
+
     # Truthful owner of takes_arg/give_arg across EVERY callee-param value
     # shape. Cells enumerated from the registry, not hand-picked (#41 cross-
     # cut is what gates this template now).
