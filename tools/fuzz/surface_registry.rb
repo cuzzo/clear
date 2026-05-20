@@ -162,6 +162,22 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths],
     },
 
+    # Truthful owner of :list_append across EVERY element value shape (the
+    # ASSIGN_INTO_HEAP_VALUE_SHAPES superset). Many element-type x list-of
+    # combinations may be language-illegal -- such cells are :in_dev with a
+    # "language-not-supported" tag rather than silently omitted.
+    list_append_modality: {
+      cleanup_value_shapes: [
+        :string, :frame_string_concat, :dynamic_array, :frame_list, :heap_list,
+        :pool, :set, :hash_map,
+        :sharded_list, :sharded_pool, :sharded_set, :sharded_hash_map,
+        :soa_list, :soa_pool,
+        :struct_owned_fields, :union_owned_payload, :option_owned_payload, :nested_container,
+      ],
+      escape_sinks: [:list_append],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths],
+    },
+
     # Truthful owner of takes_arg/give_arg across EVERY callee-param value
     # shape. Cells enumerated from the registry, not hand-picked (#41 cross-
     # cut is what gates this template now).
