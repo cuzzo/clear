@@ -1046,22 +1046,6 @@ class MIREmitter
       use_guard = is_string ? !errdefer : g
       guarded_cleanup(name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
 
-    when :resource
-      close = entry.resource_close_zig.gsub("{0}", name)
-      guarded_defer(name, close, g, errdefer:)
-
-    when :inf_stream
-      # Signal the generator fiber to stop and free Inner. No moved guard:
-      # InfStream is not linearly-affine (NEXT borrows, not moves).
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}.deinit();\n"
-
-    when :observable
-      # ~T@observable: wait for the producer fiber to publish .finish()
-      # before destroying. Shape-independent across SUM/COUNT/MAX/...
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
-
     when :frozen
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
