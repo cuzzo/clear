@@ -846,6 +846,17 @@ module AST
       ti.is_a?(Type) && ti.heap_provenance?
     end
 
+    # Same pattern for rodata — prefer Symbol, fall back to Type. Used in
+    # promotion-plan field-skip checks where "field is already in rodata"
+    # is equivalent to "field is already heap" for the skip decision.
+    sig { returns(T::Boolean) }
+    def value_rodata_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.rodata_provenance?
+      ti = @type_object
+      ti.is_a?(Type) && ti.rodata_provenance?
+    end
+
     sig { returns(T.nilable(Symbol)) }
     def storage
       @storage_override || (@type_object && (@type_object.provenance || :stack))

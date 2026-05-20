@@ -69,7 +69,9 @@ module PromotionClassifier
         val.fields.each do |fname, fval|
           fti = Type.from_node(fval)
 
-          if fti&.heap_provenance? || fti&.rodata_provenance?
+          fval_heap = fval.is_a?(AST::Locatable) ? fval.value_heap_provenance? : (fti&.heap_provenance? || false)
+          fval_rodata = fval.is_a?(AST::Locatable) ? fval.value_rodata_provenance? : (fti&.rodata_provenance? || false)
+          if fval_heap || fval_rodata
             handled_fields << fname.to_s
             next
           end
@@ -88,7 +90,9 @@ module PromotionClassifier
         if var_promotes.empty?
           needs_promote = val.fields.any? do |_, fval|
             fti = Type.from_node(fval)
-            next false if fti&.heap_provenance? || fti&.rodata_provenance?
+            fval_heap = fval.is_a?(AST::Locatable) ? fval.value_heap_provenance? : (fti&.heap_provenance? || false)
+            fval_rodata = fval.is_a?(AST::Locatable) ? fval.value_rodata_provenance? : (fti&.rodata_provenance? || false)
+            next false if fval_heap || fval_rodata
             fti&.string? || fti&.array? || fti&.collection?
           end
           if needs_promote
