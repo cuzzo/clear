@@ -687,8 +687,11 @@ module CleanupClassifier
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
+      # NOTE: cannot eliminate :list_with_elem_cleanup uniformly yet.
+      # Cross-fiber cases (producer heap, consumer frame) need the
+      # cleanupAlloc dispatch until EscapeGraph promotes such consumers
+      # to heap (5 leaks across transpile-test suite when forced uniform).
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
-      log_mixed_provenance!(:list_with_elem_cleanup, node) if has_heap_elems
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
                    alloc: :frame, elem_needs_cleanup: has_heap_elems, zig_type: ti.zig_type)
     end
@@ -721,14 +724,28 @@ module CleanupClassifier
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
-    # MIXED-PROVENANCE AUDIT: this kind exists because the array's element
-    # structs may carry strings of different provenances. Per the "one
-    # collection = one allocator" principle, the runtime cleanupAlloc
-    # dispatch should not exist; the user should either COPY rodata strings
-    # explicitly or accept that the container's allocator constrains its
-    # elements.
-    log_mixed_provenance!(:array_with_struct_strings, node)
-    entry(:array_with_struct_strings, alloc: :cleanup)
+    # Per "one collection = one allocator": elements are uniformly in
+    # the container's allocator (CopyNode-stamper guarantees post-
+    # EscapeGraph). Read the binding's authoritative storage.
+    sym = node.respond_to?(:symbol) ? node.symbol : nil
+    container_alloc = container_alloc_from(sym, node)
+    entry(:array_with_struct_strings, alloc: container_alloc)
+  end
+
+  # Map binding storage to cleanup allocator. Heap-wrapper storage modes
+  # (sync/shared/multiowned/link/frozen) all imply heap; stack/frame
+  # imply frame. Reads decl symbol via sym.reg for the authoritative
+  # post-EscapeGraph storage.
+  sig { params(sym: T.untyped, node: T.untyped).returns(Symbol) }
+  private_class_method def self.container_alloc_from(sym, node)
+    decl = sym && sym.respond_to?(:reg) ? sym.reg : nil
+    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
+    storage = decl_sym&.storage || sym&.storage ||
+              (node.respond_to?(:storage) ? node.storage : nil)
+    case storage
+    when :frame, :stack then :frame
+    else :heap
+    end
   end
 
   # Audit instrument: log every time CleanupClassifier picks :cleanup because
@@ -801,6 +818,13 @@ module CleanupClassifier
     is_rodata = !!node_sym&.rodata_provenance?
     is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
+    # NOTE: classify_optional cannot uniformly use container_alloc yet
+    # without an EscapeGraph upgrade that promotes optionals receiving
+    # cross-fiber/heap data to heap. See test
+    # 326_observable_pipe_find_string for the cross-fiber case where
+    # the producer is heap but the consumer is frame -- :cleanup
+    # bridges. Per-policy long-term: EscapeGraph should promote final
+    # to heap (cross-fiber data crossing into a frame container).
     log_mixed_provenance!(:optional_owned, node)
     entry(:optional_owned, alloc: :cleanup)
   end
@@ -901,6 +925,15 @@ module CleanupClassifier
       true
     end
     return nil unless has_cleanup
+    # NOTE: cannot uniformly use container_alloc here yet -- doing so
+    # exposes a pre-existing FRAME_NO_REWIND gap for structs containing
+    # @list fields inside loop bodies (255_bind_cleanup_heap). The
+    # struct's :frame alloc causes the AllocMark to be :frame, but the
+    # surrounding loop's mark_per_iter detection (LoopFrameAnalysis)
+    # doesn't see this struct as a frame_decl. To enable, either
+    # LoopFrameAnalysis must include frame-cleanup-alloc bindings, OR
+    # we accept :cleanup as a fallback. Keeping :cleanup until that's
+    # addressed.
     alloc = case ti.provenance_alloc
             when :heap then :heap
             when :frame then :cleanup

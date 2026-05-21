@@ -46,8 +46,88 @@ module EscapeGraph
     # promotion side-effects here means a single pass marks every escape;
     # LoopFrameAnalysis.analyze! at MIRPass step 4 only sets mark_per_iter.
     LoopFrameAnalysis.analyze!(fn_nodes)
+    # Final escape-axis pass: every CopyNode in the AST gets its allocator
+    # set from its eventual container's FINALIZED storage (post-escape-
+    # promotion). Single source of truth for "one collection = one
+    # allocator": no annotator guessing pre-escape, no per-callsite
+    # ad-hoc decision.
+    fn_nodes.each_value { |fn| stamp_copy_node_alloc!(fn) if fn&.body }
     heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
     [heap_fns, heap_decls]
+  end
+
+  # Storage → allocator mapping. The CopyNode.alloc field only takes
+  # :heap or :frame: heap-wrapper storage modes (sync/shared/multiowned/
+  # link/frozen) all imply heap allocation for the contained data;
+  # frame/stack imply frame allocation.
+  sig { params(storage: T.nilable(Symbol)).returns(Symbol) }
+  def storage_to_alloc(storage)
+    case storage
+    when :frame, :stack then :frame
+    else :heap
+    end
+  end
+
+  # Resolve a SymbolEntry to its authoritative storage.
+  # The Identifier's `.symbol` field can lag behind the decl's symbol after
+  # escape analysis upgrades the decl (sym.reg points to the decl node,
+  # whose symbol is the authoritative entry). Single source of truth.
+  sig { params(sym: T.untyped).returns(T.nilable(Symbol)) }
+  def authoritative_storage(sym)
+    return nil unless sym
+    decl = sym.respond_to?(:reg) ? sym.reg : nil
+    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
+    decl_sym&.storage || sym.storage
+  end
+
+  # Walk every CopyNode reachable from fn.body and set CopyNode.alloc to
+  # the eventual container's finalized allocator. Replaces ad-hoc
+  # container_alloc threading at hundreds of annotator sites with one
+  # uniform pass that has all the data (post-EscapeGraph storage is
+  # final).
+  sig { params(fn: T.untyped).void }
+  def stamp_copy_node_alloc!(fn)
+    AST.walk_body(fn.body) do |node|
+      case node
+      when AST::VarDecl, AST::BindExpr
+        # The init expression's CopyNodes inherit the binding's
+        # finalized container allocator.
+        ca = storage_to_alloc(authoritative_storage(node.symbol))
+        stamp_copies_in_expr!(node.value, ca) if node.value
+      when AST::MethodCall, AST::FuncCall
+        # Method-call args (including TAKES) live in the receiver's
+        # container. Resolve to the authoritative storage on the decl,
+        # because Identifier.symbol may lag behind post-escape upgrades.
+        receiver = node.is_a?(AST::MethodCall) ? node.object : nil
+        rec_sym = receiver.respond_to?(:symbol) ? receiver.symbol : nil
+        rec_storage = authoritative_storage(rec_sym)
+        ca = rec_storage ? storage_to_alloc(rec_storage) : nil
+        next unless ca
+        node.args.each { |arg| stamp_copies_in_expr!(arg, ca) }
+      end
+    end
+  end
+
+  # Recursively walk expr and set every CopyNode's alloc. Stops at
+  # nested-binding boundaries (calls have their own container context,
+  # handled by the top-level walk_body MethodCall/FuncCall arm).
+  sig { params(expr: T.untyped, alloc: Symbol).void }
+  def stamp_copies_in_expr!(expr, alloc)
+    return unless expr
+    case expr
+    when AST::CopyNode
+      expr.alloc = alloc
+      stamp_copies_in_expr!(expr.value, alloc)
+    when AST::StructLit, AST::UnionVariantLit
+      expr.fields&.each_value { |fv| stamp_copies_in_expr!(fv, alloc) }
+    when AST::ListLit
+      expr.items&.each { |i| stamp_copies_in_expr!(i, alloc) }
+    when AST::MethodCall, AST::FuncCall
+      # Don't descend into calls: their args have their own container
+      # context (the receiver, or the callee's heap-TAKES contract).
+      # The top-level walk_body visit will reach this MethodCall/FuncCall
+      # via its own arm and handle args correctly.
+    end
   end
 
   sig { params(fn_nodes: FnNodes).returns(RetHeap) }
