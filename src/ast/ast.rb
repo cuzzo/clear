@@ -1004,6 +1004,14 @@ module AST
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
     attr_accessor :uses_rt       # true when body references rt without allocating (e.g. Versioned.read for EBR pin)
+    # uses_runtime? = true iff this fn's body touches any allocator (frame/heap/alloc) or
+    # references rt directly. Used by compute_needs_rt! and alloc_fault seed.
+    # ONE predicate replaces the per-source disjunction (the four counters track distinct
+    # signal sources but the consumer is "any of them?" -- there is one consumer-facing
+    # decision, hence one predicate).
+    def uses_runtime?
+      uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
+    end
     attr_accessor :return_provenance # :rodata, :frame, :heap — provenance of the return value
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)

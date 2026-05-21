@@ -381,7 +381,7 @@ module EffectTracker
       # `rt.checkYield()` injected at entry by mir_lowering, so they
       # need rt threaded.
       yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || fn_node.uses_rt || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = fn_node.uses_runtime? || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
@@ -500,6 +500,9 @@ module EffectTracker
     alloc_fault = {}
     @fn_nodes.each do |name, fn_node|
       # Direct body allocation (counted at annotation: append/split/...).
+      # uses_rt deliberately excluded -- alloc_fault is "fn could OOM" and
+      # uses_rt fns reference rt without necessarily allocating (e.g.
+      # Versioned.read EBR pin).
       direct_alloc =
         (fn_node.uses_frame == true) ||
         (fn_node.uses_heap == true) ||
