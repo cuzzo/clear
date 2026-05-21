@@ -219,6 +219,31 @@ class MIRLowering
   #   up on error). Use when the value is consumed by a TAKES arg, a struct/union
   #   field init, or any position where the receiver takes ownership on success.
   #   false (default) => emit Cleanup (defer; freed on all paths).
+  # Single-source allocator selection for a binding's AllocMark/Cleanup pair.
+  # Encodes the precedence cascade that decides what `defer cleanup(name)`
+  # frees through:
+  #   1. CleanupClassifier already chose :cleanup (mixed-provenance) -- honor it.
+  #   2. The init expression is a heap-allocating MIR op (HeapCreate, CapWrap,
+  #      MakeList etc.) -- the binding holds heap, cleanup uses heapAlloc.
+  #   3. EscapeGraph stamped node.storage = :heap -- the binding escapes.
+  #   4. Same-name collision: cleanup_bindings says :heap from a different-
+  #      scope sibling with the same name, but this declaration's storage is
+  #      :frame and the type doesn't structurally need heap backing -- use
+  #      :cleanup (runtime dispatch) so the wrong allocator isn't picked.
+  #   5. Otherwise inherit the classifier's pick (or decl_alloc fallback).
+  # Guarantees :cleanup is never silently downgraded (would mask leaks).
+  sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
+  def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
+    return :cleanup if binding_entry.present? && binding_entry.alloc == :cleanup
+    return :heap if mir_allocates?(init)
+    return :heap if node.respond_to?(:storage) && node.storage == :heap
+    if binding_entry.present? && binding_entry.alloc == :heap &&
+       alloc_for_node(node) != :heap && !ft.needs_heap_backing?
+      return :cleanup
+    end
+    (binding_entry.present? && binding_entry.alloc) || decl_alloc
+  end
+
   sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean), mutable: T::Boolean).returns(T.untyped) }
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false)
     return expr unless mir_allocates?(expr) || call_union_return_needs_hoist?(expr, ast_node)
@@ -6379,23 +6404,7 @@ class MIRLowering
       # inherited from the classifier, never synthesized here (INV-14).
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.full_type, node)
-      # Escape-analysis heap stamp takes precedence.
-      # Same-name collision fix: if cleanup_bindings says :heap but this declaration's
-      # storage is :frame and the type doesn't structurally require heap (sharded/pool/map),
-      # use per-declaration storage. This avoids using a stale alloc from a same-named
-      # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
-      # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
-      node_alloc = if binding_entry.present? && binding_entry.alloc == :cleanup
-        :cleanup
-      elsif mir_allocates?(init)
-        :heap
-      elsif node.respond_to?(:storage) && node.storage == :heap
-        :heap
-      elsif binding_entry.present? && binding_entry.alloc == :heap && alloc_for_node(node) != :heap && !ft.needs_heap_backing?
-        :cleanup
-      else
-        (binding_entry.present? && binding_entry.alloc) || decl_alloc
-      end
+      node_alloc = pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
       # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
       # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
       # because both AllocMark and Cleanup end up self-consistent at :frame.
