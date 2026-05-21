@@ -4470,16 +4470,6 @@ class MIRLowering
         # Kind without type -> clear any stale type from the prior context.
         stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type"), false)
       end
-    elsif node.error_name
-      # Type-only: annotator already backfilled node.kind via
-      # resolve_error_registration!'s type-lookup branch. If for some
-      # reason it wasn't backfilled (unknown type), the annotator
-      # already emitted the error; skip emission.
-      if AST.error_type?(node.error_name.to_sym)
-        registered_kind = AST.kind_of_type(node.error_name.to_sym)
-        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type"), false)
-        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type"), false)
-      end
     end
 
     if node.message

@@ -1494,49 +1494,6 @@ module LoopFrameAnalysis
     end
   end
 
-  # Does expr (or any sub-expression) contain a frame-allocating expression?
-  # "Frame-allocating" means: references a local frame variable (by name) OR
-  # calls a function (stdlib or user-defined) that returns a String (frame via
-  # preserveAndRewind protocol), OR calls a stdlib function with stdlib_allocates=true.
-  # Used to detect outer-string-reassignment patterns like
-  # `resp = resp + i.toString()` or `last = makePrefix(i)` where the RHS creates
-  # a frame string that would be freed by the loop's per-iteration rewind.
-  sig { params(expr: T.untyped, names: T.untyped).returns(T::Boolean) }
-  def self.rhs_references_any?(expr, names)
-    return false unless expr
-    # COPY/CLONE produce a detached value/handle -- carry var doesn't need promotion
-    return false if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode) || expr.is_a?(AST::FreezeNode)
-    # Any call (stdlib or user-defined) that returns a String may produce a
-    # carry value needing heap promotion. This covers both stdlib_allocates=true
-    # calls (toString, intToString, etc.) and user-defined string-returning functions.
-    if AST.call?(expr)
-      return true if expr.full_type.string?
-    end
-    case expr
-    when AST::Identifier
-      return names.include?(expr.name)
-    when AST::BinaryOp
-      return rhs_references_any?(expr.left, names) || rhs_references_any?(expr.right, names)
-    when AST::UnaryOp
-      return rhs_references_any?(expr.right, names)
-    when AST::FuncCall
-      return expr.args.any? { |a| rhs_references_any?(a, names) } || false
-    when AST::MethodCall
-      return rhs_references_any?(expr.object, names) ||
-             (expr.args.any? { |a| rhs_references_any?(a, names) } || false)
-    when AST::GetField
-      return rhs_references_any?(expr.target, names)
-    when AST::GetIndex
-      return rhs_references_any?(expr.target, names) || rhs_references_any?(expr.index, names)
-    when AST::StringConcat
-      # StringConcat ALWAYS allocates in the frame arena (std.mem.concat uses
-      # frameAlloc). Even if all parts are outer vars / literals, the result is
-      # frame-allocated and will be freed by the per-iteration rewind.
-      return true
-    end
-    false
-  end
-
   # Promote frame-allocating string expressions assigned to outer struct/map fields.
   # Pattern: outer_var.field = expr  or  outer_var[key] = expr
   # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
