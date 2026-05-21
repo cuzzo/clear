@@ -465,7 +465,7 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer CheatLib.lockedDestroy(CheatLib.Locked(Counter), rt.heapAlloc(), counter);")
+      expect(zig).to include("defer rt.heapAlloc().destroy(counter);")
     end
   end
 

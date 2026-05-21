@@ -1067,10 +1067,10 @@ class MIREmitter
       end
 
     when :locked, :write_locked, :always_mutable
-      fn = { locked: "lockedDestroy",
-             write_locked: "rwLockedDestroy",
-             always_mutable: "refCellDestroy" }[entry.kind]
-      guarded_defer(name, "CheatLib.#{fn}(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
+      # *Locked(T) / *RwLocked(T) / *RefCell(T): all three lockedDestroy/
+      # rwLockedDestroy/refCellDestroy helpers are alloc.destroy(ptr).
+      # Inner-data cleanup happens via per-field paths, not via wrapper teardown.
+      guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
     when :versioned
       # MVCC L6: tear down a *Versioned(T) cell. EBR-retire the live

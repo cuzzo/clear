@@ -2341,7 +2341,7 @@ RSpec.describe MIRLowering do
 
       zig = emit(low.lower(node))
       expect(zig).to include("var dst = try CheatLib.dupeValue")
-      expect(zig).to include("defer if (!dst_moved) CheatLib.lockedDestroy")
+      expect(zig).to include("defer if (!dst_moved) __rt.heapAlloc().destroy(dst)")
     end
 
     it "lowers DoBlock with stack tier" do
