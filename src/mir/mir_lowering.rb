@@ -331,7 +331,7 @@ class MIRLowering
 
   sig { params(elem_zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
   def takes_slice_entry(elem_zig_type)
-    { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: elem_zig_type }
+    { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: elem_zig_type, zig_type: "[]#{elem_zig_type}" }
   end
 
   sig { params(zig_type: String).returns(T::Hash[Symbol, T.untyped]) }

@@ -472,7 +472,10 @@ module CleanupClassifier
     return coll if coll
 
     # Plain slice (Int64[] without a collection modifier).
-    return entry(:takes_slice) if ti.array? && !ti.string?
+    if ti.array? && !ti.string?
+      elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
+      return entry(:takes_slice, elem_zig_type: elem_zig, zig_type: "[]#{elem_zig}")
+    end
 
     # Struct fallback (strings/collections/rc as fields).
     classify_struct_cleanup_fields(ti, nil, schema_lookup)
@@ -531,7 +534,7 @@ module CleanupClassifier
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
       # Slice variant uses the unified :takes_slice path. match_as: true
       # carries the MATCH AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig))
+      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig, zig_type: "[]#{elem_zig}"))
     elsif pt.collection? || pt.map?
       zig_type = pt.zig_type rescue pt.resolved.to_s
       return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list,

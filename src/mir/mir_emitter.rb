@@ -1088,8 +1088,9 @@ class MIREmitter
       end
 
     when :takes_slice
-      body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
-      guarded_defer(name, body, g, errdefer:)
+      # []ElemT: CheatLib.cleanup's slice arm iterates elements (when
+      # needsCleanup) and frees the buffer.
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
