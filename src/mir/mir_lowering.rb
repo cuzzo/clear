@@ -5952,7 +5952,11 @@ class MIRLowering
   def lower_copy(node)
     source = lower(node.value)
     ti = node.value.full_type
-    alloc = :heap
+    # CopyNode.alloc is set by ensure_owned_value! at auto-COPY sites to
+    # match the container's allocator. Defaults to :heap for explicit user
+    # COPY (no container context) -- the COPY produces a fresh heap-owned
+    # value the user binds independently.
+    alloc = node.alloc
 
     if ti && @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
