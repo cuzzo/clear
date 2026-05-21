@@ -171,7 +171,7 @@ RSpec.describe MIRLowering do
   describe "old MIR node translation" do
     it "translates MIR::Drop to MIR::Cleanup" do
       entry = { kind: :uniform, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
-      drop = MIR::Drop.new(tok, "items", :list, :frame, false, nil, nil, nil)
+      drop = MIR::Drop.new(tok, "items")
       drop.cleanup_entry = entry
 
       l = lowering
@@ -190,7 +190,7 @@ RSpec.describe MIRLowering do
     end
 
     it "translates MIR::Alloc to MIR::AllocMark" do
-      alloc = MIR::Alloc.new(tok, "x", :list, :heap)
+      alloc = MIR::Alloc.new(tok, "x", :heap)
       result = lowering.lower(alloc)
       expect(result).to be_a(MIR::AllocMark)
       expect(result.name).to eq("x")

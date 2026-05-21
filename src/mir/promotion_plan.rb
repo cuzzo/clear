@@ -701,20 +701,6 @@ module CleanupClassifier
     end
   end
 
-  # Audit instrument: log every time CleanupClassifier picks :cleanup because
-  # it expects mixed-provenance elements. Writes one line per occurrence to
-  # /tmp/clear-mixed-prov.log when CLEAR_AUDIT_MIXED_PROV=1. Single source of
-  # truth for "how often does cleanupAlloc actually fire" -- informs whether
-  # eliminating it (per Rust's same-provenance-per-container rule) is worth
-  # the user-visible breakage.
-  sig { params(kind: Symbol, node: T.untyped).void }
-  private_class_method def self.log_mixed_provenance!(kind, node)
-    return unless ENV["CLEAR_AUDIT_MIXED_PROV"] == "1"
-    line = (node.respond_to?(:token) && node.token && node.token.respond_to?(:line)) ? node.token.line : "?"
-    name = node.respond_to?(:name) ? node.name : "?"
-    File.open("/tmp/clear-mixed-prov.log", "a") { |f| f.puts "#{kind}\t#{name}\tL#{line}" }
-  end
-
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_rc_or_link(ti, schema_lookup)
     return nil unless ti.any_rc? || ti.link?

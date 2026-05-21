@@ -799,7 +799,7 @@ class MIRPass
 
     ti = stmt.full_type
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
-    stmt.reassign_cleanup = { kind: entry.kind, alloc: entry.alloc, zig_type: zig_type }
+    stmt.reassign_cleanup = { alloc: entry.alloc, zig_type: zig_type }
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
@@ -826,11 +826,8 @@ class MIRPass
       if src_entry && src_entry.needs_cleanup?
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
-      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.kind, as_entry.alloc)
-      drop = MIR::Drop.new(
-        stmt.token, c.binding.to_s, as_entry.kind, as_entry.alloc,
-        true, nil, nil, nil
-      )
+      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.alloc)
+      drop = MIR::Drop.new(stmt.token, c.binding.to_s)
       drop.cleanup_entry = as_entry
       mir_prefix << drop
       c.body = mir_prefix + c.body
@@ -846,9 +843,8 @@ class MIRPass
     return unless stmt.is_a?(AST::WhileBindLoop)
     entry = bindings[stmt.binding_name.to_s]
     return unless entry && entry.needs_cleanup?
-    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.kind, entry.alloc)
-    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s, entry.kind, entry.alloc,
-                         true, nil, nil, nil)
+    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.alloc)
+    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
     drop.cleanup_entry = entry
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
   end
@@ -860,9 +856,8 @@ class MIRPass
     stmt.bindings.each do |b|
       entry = bindings[b.name.to_s]
       next unless entry && entry.needs_cleanup?
-      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.kind, entry.alloc)
-      drop = MIR::Drop.new(stmt.token, b.name.to_s, entry.kind, entry.alloc,
-                           true, nil, nil, nil)
+      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.alloc)
+      drop = MIR::Drop.new(stmt.token, b.name.to_s)
       drop.cleanup_entry = entry
       mir_prefix << drop
     end

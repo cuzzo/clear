@@ -2051,20 +2051,16 @@ module MIR
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
   # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
-  Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
-                     :resource_close_zig, :source_node) do
+  # MIR::Drop carries a cleanup_entry that captures the full classifier
+  # output (zig_type / alloc / has_moved_guard / kind side-channels). The
+  # raw Struct fields (token, name) are the marker; everything cleanup-
+  # relevant lives on the cleanup_entry attribute.
+  Drop = Struct.new(:token, :name) do
     extend T::Sig
     include AST::Locatable
-    attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
+    attr_accessor :cleanup_entry
     sig { returns(TrueClass) }
     def needs_cleanup; true; end
-    # Carrier struct: the type lives in the :type_info member, NOT
-    # Locatable's @type_object. Override Locatable so the canonical
-    # full_type accessor reads/writes the member (member name kept).
-    sig { returns(T.untyped) }
-    def full_type; type_info; end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def full_type=(val); self.type_info = val; end
   end
 
   # Promote: escape promotion inserted before return statements.
@@ -2092,9 +2088,8 @@ module MIR
   # with cleanup. The StaticLeakChecker verifies every Alloc has exactly one
   # Drop or Move/Escape on every path through the function.
   #
-  # kind:  cleanup template symbol (same as Drop - :list, :string_map, etc.)
   # alloc: :heap or :frame - which allocator owns this value
-  Alloc = Struct.new(:token, :name, :kind, :alloc) do
+  Alloc = Struct.new(:token, :name, :alloc) do
     include AST::Locatable
   end
 
