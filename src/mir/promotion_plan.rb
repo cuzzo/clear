@@ -583,6 +583,12 @@ module CleanupClassifier
   # cleanup entry hash or nil. Order matters: earlier categories take
   # priority (e.g. resource before collection, RC before sync).
 
+  # Dispatch chain: each kind family is checked in priority order, the
+  # FIRST matching arm wins. Simple predicate-based kinds (observable,
+  # frozen, inf_stream, atomic_ptr, resource, sync, owned_string,
+  # non_copy_union) inline here; complex ones (collection, optional,
+  # heap_provenance, struct_cleanup_fields, rc_or_link, heap_struct_plain,
+  # array_struct_strings) stay as separate methods due to their size.
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
@@ -590,40 +596,40 @@ module CleanupClassifier
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil if node_sym&.borrow_provenance?  # borrow return -- caller owns data
 
-    sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
+    sync = node_sym&.sync
 
-    classify_observable(ti) ||
-      classify_frozen(ti) ||
-      classify_inf_stream(ti) ||
-      classify_resource(ti, node) ||
-      classify_collection(ti, schema_lookup, node: node) ||
-      classify_array_struct_strings(ti, node, schema_lookup) ||
-      classify_atomic_ptr(ti) ||
-      classify_rc_or_link(ti, schema_lookup) ||
-      classify_sync(ti, sync) ||
-      classify_optional(ti, schema_lookup, node: node) ||
-      classify_owned_string(ti, node) ||
-      classify_heap_provenance(ti, node, schema_lookup, sync) ||
-      classify_heap_struct_plain(ti, node, schema_lookup, sync) ||
-      classify_struct_cleanup_fields(ti, node, schema_lookup) ||
-      classify_non_copy_union(ti, schema_lookup)
-  end
-
-  # AtomicPtr M3 / review item J: dedicated cleanup kind for
-  # `@indirect:atomic` cells. Without this branch the binding
-  # falls into classify_rc_or_link (because M3.5 auto-promotes
-  # ownership=:shared, making any_rc? true) and gets a `:rc`
-  # entry whose rc_variant / rc_release_func fields are unused
-  # for atomic-ptr -- the actual cleanup is dispatched in the
-  # runtime cleanup() shim via @hasDecl(child, "compareAndPublish").
-  # Routing here avoids the misnomer and the unused entry fields.
-  # Fires BEFORE classify_rc_or_link so atomic-ptr beats the
-  # generic shared-Arc path.
-  sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_atomic_ptr(ti)
-    return nil unless ti.respond_to?(:atomic?) && ti.atomic?
-    return nil unless ti.respond_to?(:indirect?) && ti.indirect?
-    entry(:atomic_ptr)
+    # Inlined simple predicate -> kind mappings (no moved guard for
+    # streaming / observable -- those are not linearly affine).
+    return entry(:observable, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
+    return entry(:frozen, has_moved_guard: false) if ti.frozen?
+    return entry(:inf_stream, has_moved_guard: false) if ti.inf_stream?
+    if node.respond_to?(:resource_close_zig) && node.resource_close_zig
+      return entry(:resource, resource_close_zig: node.resource_close_zig)
+    end
+    coll = classify_collection(ti, schema_lookup, node: node)
+    return coll if coll
+    arr = classify_array_struct_strings(ti, node, schema_lookup)
+    return arr if arr
+    # AtomicPtr (`@indirect:atomic`): must fire BEFORE classify_rc_or_link
+    # since M3.5 auto-promotes ownership=:shared (any_rc? becomes true).
+    return entry(:atomic_ptr) if ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
+    rc = classify_rc_or_link(ti, schema_lookup)
+    return rc if rc
+    return entry(:locked) if sync == :locked
+    return entry(:write_locked) if sync == :write_locked
+    return entry(:always_mutable) if sync == :always_mutable
+    return entry(:versioned) if sync == :versioned
+    opt = classify_optional(ti, schema_lookup, node: node)
+    return opt if opt
+    own = classify_owned_string(ti, node)
+    return own if own
+    prov = classify_heap_provenance(ti, node, schema_lookup, sync)
+    return prov if prov
+    plain = classify_heap_struct_plain(ti, node, schema_lookup, sync)
+    return plain if plain
+    fields = classify_struct_cleanup_fields(ti, node, schema_lookup)
+    return fields if fields
+    classify_non_copy_union(ti, schema_lookup)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
@@ -631,45 +637,6 @@ module CleanupClassifier
   sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean, extra: T.untyped).returns(CleanupEntry) }
   private_class_method def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
     CleanupEntry.build(kind, alloc: alloc, has_moved_guard: has_moved_guard, **extra)
-  end
-
-  sig { params(_ti: Type, node: T.untyped).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_resource(_ti, node)
-    return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
-    entry(:resource, resource_close_zig: node.resource_close_zig)
-  end
-
-  # ~T@observable / ~T[]@set:observable: heap-allocated
-  # `*Observable<Terminal>(T)` produced by a streaming-aggregate fold
-  # over a tense source. The accumulator outlives the producer fiber
-  # and is destroyed at the binding's scope exit. Cleanup calls
-  # `wait()` (parks on the producer fiber's WaitGroup until `finish()`
-  # is published) before `destroy()` to avoid racing the fiber.
-  # `ObservableTerminal.destroy` itself comptime-detects whether the
-  # Inner has a `deinit()` (StreamSet does; the scalar atomics don't)
-  # and calls it before freeing self -- one cleanup recipe handles all
-  # terminal shapes. No moved guard: NEXT/COLLECT only read the inner
-  # value; the heap pointer always belongs to the binding.
-  sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_observable(ti)
-    return nil unless ti.tense_observable?
-    return nil if ti.promise_list?
-    entry(:observable, has_moved_guard: false)
-  end
-
-  # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
-  # deinit() sets closed=true and wakes the generator so it exits cleanly.
-  # No moved guard: streams are not linearly-affine (requires_move? = false).
-  sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_frozen(ti)
-    return nil unless ti.frozen?
-    entry(:frozen, has_moved_guard: false)
-  end
-
-  sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_inf_stream(ti)
-    return nil unless ti.inf_stream?
-    entry(:inf_stream, has_moved_guard: false)
   end
 
   sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -787,22 +754,6 @@ module CleanupClassifier
       end
       e
     end
-  end
-
-  sig { params(ti: Type, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_sync(ti, sync = nil)
-    return entry(:locked) if sync == :locked
-    return entry(:write_locked) if sync == :write_locked
-    return entry(:always_mutable) if sync == :always_mutable
-    if sync == :versioned
-      # *Versioned(T): CheatLib.cleanup's versioned-wrapper arm calls
-      # deinitSync (sync free of the inner ptr) + destroys the cell.
-      # Safe because the annotator marks Guards as non-escaping, so
-      # scope-end happens-after every WITH SNAPSHOT release. Type
-      # comptime-resolves at the call site via @TypeOf(name).
-      return entry(:versioned)
-    end
-    nil
   end
 
   sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
