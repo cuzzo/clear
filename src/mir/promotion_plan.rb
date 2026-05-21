@@ -659,8 +659,10 @@ module CleanupClassifier
       # ...) keeps its frame storage but cleanup must use the cleanupAlloc
       # vtable so per-element cleanup picks the right element-allocator
       # at runtime. The :list_with_elem_cleanup kind signals "frame
-      # storage, vtable cleanup" to the emitter -- the only remaining
-      # purpose of a distinct kind beyond the uniform routing.
+      # storage, vtable cleanup" to the emitter -- a workaround until
+      # element-store auto-COPY uniformly propagates container_alloc
+      # (then strings live in the same arena as the list and frameAlloc
+      # cleanup is correct).
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
                    alloc: :frame, elem_needs_cleanup: has_heap_elems)
