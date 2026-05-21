@@ -688,6 +688,7 @@ module CleanupClassifier
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
+      log_mixed_provenance!(:list_with_elem_cleanup, node) if has_heap_elems
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
                    alloc: :frame, elem_needs_cleanup: has_heap_elems, zig_type: ti.zig_type)
     end
@@ -720,10 +721,28 @@ module CleanupClassifier
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
-    # Use cleanupAlloc so element cleanup handles both heap-allocated strings
-    # (freed normally) and frame-allocated nested data (skipped safely, rewind
-    # reclaims it). heapAlloc would crash if any field points into frame memory.
+    # MIXED-PROVENANCE AUDIT: this kind exists because the array's element
+    # structs may carry strings of different provenances. Per the "one
+    # collection = one allocator" principle, the runtime cleanupAlloc
+    # dispatch should not exist; the user should either COPY rodata strings
+    # explicitly or accept that the container's allocator constrains its
+    # elements.
+    log_mixed_provenance!(:array_with_struct_strings, node)
     entry(:array_with_struct_strings, alloc: :cleanup)
+  end
+
+  # Audit instrument: log every time CleanupClassifier picks :cleanup because
+  # it expects mixed-provenance elements. Writes one line per occurrence to
+  # /tmp/clear-mixed-prov.log when CLEAR_AUDIT_MIXED_PROV=1. Single source of
+  # truth for "how often does cleanupAlloc actually fire" -- informs whether
+  # eliminating it (per Rust's same-provenance-per-container rule) is worth
+  # the user-visible breakage.
+  sig { params(kind: Symbol, node: T.untyped).void }
+  private_class_method def self.log_mixed_provenance!(kind, node)
+    return unless ENV["CLEAR_AUDIT_MIXED_PROV"] == "1"
+    line = (node.respond_to?(:token) && node.token && node.token.respond_to?(:line)) ? node.token.line : "?"
+    name = node.respond_to?(:name) ? node.name : "?"
+    File.open("/tmp/clear-mixed-prov.log", "a") { |f| f.puts "#{kind}\t#{name}\tL#{line}" }
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -782,6 +801,7 @@ module CleanupClassifier
     is_rodata = !!node_sym&.rodata_provenance?
     is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
+    log_mixed_provenance!(:optional_owned, node)
     entry(:optional_owned, alloc: :cleanup)
   end
 
