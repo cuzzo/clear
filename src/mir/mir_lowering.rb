@@ -6440,10 +6440,9 @@ class MIRLowering
       mapped = @do_capture_map && @do_capture_map[node.name]
       value = lower(node.value)
       value = copy_container_borrow_if_needed(value, node.value)
-      if node.reassign_cleanup
-        zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
-        alloc = alloc_from_sym(node.reassign_cleanup[:alloc])
-        MIR::ReassignWithCleanup.new(mapped || safe, value, zig_type, alloc)
+      rp = node.reassign_cleanup
+      if rp
+        MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
       else
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
       end
@@ -6793,8 +6792,7 @@ class MIRLowering
     target = lower(node.name.target)
     field = node.name.field.to_s
     value = lower(node.value)
-    fpc = node.field_pre_cleanup
-    alloc = MIR::Ident.new(alloc_zig_str(fpc[:alloc] || :heap))
+    alloc = MIR::Ident.new(alloc_zig_str(node.field_pre_cleanup || :heap))
     field_get = MIR::FieldGet.new(target, field)
     # Build a comptime @TypeOf(target.field) expression. The field name
     # is known statically; comptime resolves the type from the binding's
@@ -6827,9 +6825,8 @@ class MIRLowering
     if sync == :always_mutable
       value = hoist_alloc(lower(node.value), node.value)
       get_field = MIR::FieldGet.new(MIR::MethodCall.new(MIR::Ident.new(zig_var), "get", [], false), field)
-      fpc = node.field_pre_cleanup
-      if fpc
-        alloc_sym = fpc[:alloc] || :heap
+      alloc_sym = node.field_pre_cleanup
+      if alloc_sym
         stmts = T.let([
           MIR::Let.new("__old", get_field, false, nil, nil),
           MIR::Set.new(get_field, value),
@@ -6852,9 +6849,8 @@ class MIRLowering
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(guard_var), "release", [], false)),
       MIR::Let.new(alias_var, MIR::MethodCall.new(MIR::Ident.new(guard_var), "get", [], false), false, nil, nil),
     ], T::Array[T.untyped])
-    fpc = node.field_pre_cleanup
-    if fpc
-      alloc_sym = fpc[:alloc] || :heap
+    alloc_sym = node.field_pre_cleanup
+    if alloc_sym
       stmts << MIR::Let.new("__old", alias_field, false, nil, nil)
       stmts << MIR::Set.new(alias_field, value)
       stmts << len_guard.call("__old", alloc_sym)
@@ -7329,24 +7325,18 @@ class MIRLowering
 
     if node.promote_ret_wrap == :var && ret_field_promote && value
       rt = MIR::Ident.new(rt_name)
-      zig_type = ret_field_promote[:zig_type]
+      zig_type = ret_field_promote.zig_type!
       stmts = T.let([MIR::Let.new("__ret", value, true, nil, nil)], T::Array[T.untyped])
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
       # fields of __ret.
       stmts << MIR::AllocMark.new("__ret", :heap, nil)
       # ErrCleanup: if any promote call fails, free partially-promoted fields.
-      # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
       stmts << MIR::ErrCleanup.new("__ret",
         CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type }))
-      if ret_field_promote[:fields]
+      if ret_field_promote.fields
         # Per-field promotion: for each named heap field of __ret, emit
         # `try CheatLib.promote(@TypeOf(__ret.f), rt, &__ret.f);`.
-        # Previously emitted as a MIR::Call with a hand-assembled arg
-        # list — opaque to the MIR checker. EscapePromote with :generic
-        # strategy is a structural node (MIR::Stmt) the checker can
-        # reason about: the `name` carries the dotted path for
-        # visibility + INV-1 allocator consistency.
-        ret_field_promote[:fields].each do |fname|
+        ret_field_promote.fields.each do |fname|
           target = "__ret.#{fname}"
           stmts << MIR::EscapePromote.new(
             target,
@@ -7358,11 +7348,9 @@ class MIRLowering
         end
       else
         # Whole-struct deep promotion: `try CheatLib.promoteDeep(T, rt, &__ret);`.
-        # Previously opaque MIR::Call; now a structural EscapePromote
-        # with :generic_deep strategy.
         stmts << MIR::EscapePromote.new(
           "__ret",
-          ret_field_promote[:zig_type],
+          zig_type,
           :generic_deep,
           nil,
           rt_name,

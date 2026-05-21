@@ -1094,7 +1094,7 @@ module AST
     include Locatable
     include StatementVoidType
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
-    attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
+    attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
     attr_accessor :compound_op
@@ -1107,7 +1107,7 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :mode
-    attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
+    attr_accessor :reassign_cleanup  # MIR::ReassignPlan(alloc:, zig_type:) when the OLD value of this :assign target needs cleanup before overwrite. nil = no pre-cleanup.
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :compound_op
     attr_accessor :auto_atomic_op
@@ -1365,9 +1365,9 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping
+    attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping; pairs with ret_field_promote_data when :var.
     attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
-    attr_accessor :ret_field_promote_data # Hash { zig_type:, fields: } for struct field promotion on return
+    attr_accessor :ret_field_promote_data # MIR::FieldPromote for per-field promotion on return (paired with promote_ret_wrap == :var)
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
@@ -2114,5 +2114,79 @@ module MIR
   # cleanup-needing value that must be freed before overwrite.
   FieldCleanup = Struct.new(:token, :target_name, :field, :alloc) do
     include AST::Locatable
+  end
+
+  # ReassignPlan: stamped on AST::BindExpr (:assign mode) by MIRPass when
+  # the OLD value of the binding needs cleanup before the overwrite.
+  # Replaces a `{ alloc:, zig_type: }` hash; the struct is the single
+  # consumer-facing contract.
+  ReassignPlan = Struct.new(:alloc, :zig_type, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(Symbol) }
+    def alloc!
+      T.cast(alloc, Symbol)
+    end
+
+    sig { returns(String) }
+    def zig_type!
+      T.cast(zig_type, String)
+    end
+  end
+
+  # VarPromote: one variable that escapes a fn via RETURN and must be
+  # promoted from frame to heap before the return runs. Replaces a
+  # `{ var:, zig_type:, elem_zig_type: }` hash. elem_zig_type is the
+  # element type for list/slice promotion via promoteList; nil for
+  # struct/string shapes.
+  VarPromote = Struct.new(:var, :zig_type, :elem_zig_type, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(String) }
+    def var!
+      T.cast(var, String)
+    end
+
+    sig { returns(String) }
+    def zig_type!
+      T.cast(zig_type, String)
+    end
+  end
+
+  # FieldPromote: stamped on AST::ReturnNode when the returned value is a
+  # struct/union literal whose individual fields need promotion. The
+  # `fields` set names the unhandled (per-field-promote) field names; nil
+  # means "promote the whole struct deeply". Replaces a
+  # `{ zig_type:, fields: }` hash.
+  FieldPromote = Struct.new(:zig_type, :fields, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(String) }
+    def zig_type!
+      T.cast(zig_type, String)
+    end
+  end
+
+  # PromotionPlan: per-function plan produced by PromotionClassifier.classify.
+  # Replaces a 4-key hash. `empty?` is the "no promotion needed" signal
+  # callers used to detect via `{}` / `.empty?`.
+  PromotionPlan = Struct.new(:var_promotes, :struct_promote, :promote_return_ids, :unhandled_promote_fields, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(T::Boolean) }
+    def empty?
+      var_promotes_empty = var_promotes.nil? || var_promotes.empty?
+      var_promotes_empty && struct_promote.nil?
+    end
+
+    sig { params(new_var_promotes: T::Array[VarPromote]).returns(PromotionPlan) }
+    def with_var_promotes(new_var_promotes)
+      PromotionPlan.new(
+        var_promotes: new_var_promotes,
+        struct_promote: struct_promote,
+        promote_return_ids: promote_return_ids,
+        unhandled_promote_fields: unhandled_promote_fields
+      )
+    end
   end
 end

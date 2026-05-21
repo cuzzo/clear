@@ -754,7 +754,7 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       node.instance_variable_set(:@mode, :assign)
       def node.mode; @mode; end
-      node.instance_variable_set(:@reassign_cleanup, { zig_type: "[]const u8", alloc: :heap })
+      node.instance_variable_set(:@reassign_cleanup, MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap))
       def node.reassign_cleanup; @reassign_cleanup; end
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ReassignWithCleanup)

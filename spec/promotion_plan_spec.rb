@@ -111,11 +111,11 @@ RSpec.describe PromotionClassifier do
     end
 
     it "promotes the list variable" do
-      expect(plan[:var_promotes].map { |vp| vp[:var] }).to eq(["vals"])
+      expect(plan.var_promotes.map(&:var)).to eq(["vals"])
     end
 
     it "no struct-level promote needed" do
-      expect(plan[:struct_promote]).to be_nil
+      expect(plan.struct_promote).to be_nil
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression
@@ -203,7 +203,7 @@ RSpec.describe PromotionClassifier do
     it "does NOT need struct_promote (COPY already owns the string)" do
       # COPY name heap-dupes the string. No further promotion needed.
       # promoteFields would double-dupe.
-      expect(plan[:struct_promote]).to be_nil
+      expect(plan.struct_promote).to be_nil
     end
   end
 end

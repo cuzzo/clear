@@ -29,18 +29,17 @@ module PromotionClassifier
   # returned identifiers as :moved regardless of allocator. Without PromotionClassifier,
   # programs still work correctly -- they just do more runtime frame-to-heap promotions.
   #
-  # Classify escape promotions for a single function.
-  #
-  # @param fn_node [AST::FunctionDef] the annotated function
-  # @param schema_lookup [Proc] lambda(type_name_sym) -> schema hash or nil
-  # @return [Hash] { var_promotes:, struct_promote:, promote_return_ids:, unhandled_promote_fields: }
-  #                or empty hash
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Hash[Symbol, T.any(T::Array[T::Hash[Symbol, String]], T::Set[Integer])]) }
+  # Classify escape promotions for a single function. Returns a
+  # MIR::PromotionPlan; an empty plan (.empty? == true) signals "no
+  # promotion needed."
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(MIR::PromotionPlan) }
   def self.classify(fn_node, schema_lookup:)
-    return {} unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_has_escapable_return?(fn_node, schema_lookup)
+    empty_plan = MIR::PromotionPlan.new(var_promotes: [], struct_promote: nil,
+                                        promote_return_ids: nil, unhandled_promote_fields: nil)
+    return empty_plan unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_has_escapable_return?(fn_node, schema_lookup)
 
     ret_type_sym = fn_node.return_type
-    return {} unless ret_type_sym
+    return empty_plan unless ret_type_sym
     ret_type = ret_type_sym.is_a?(Type) ? ret_type_sym : Type.new(ret_type_sym)
     # Unwrap `!T` so the union/struct schema lookup below (and string?/Void
     # short-circuits) sees the underlying type. Post-#338, `RETURNS !Val`
@@ -50,15 +49,15 @@ module PromotionClassifier
     if ret_type.error_union? && ret_type.payload_type
       ret_type = ret_type.payload_type
     end
-    return {} if ret_type.void?
-    return {} if ret_type.string?
+    return empty_plan if ret_type.void?
+    return empty_plan if ret_type.string?
 
     return_nodes = collect_returns(fn_node.body)
-    return {} if return_nodes.empty?
+    return empty_plan if return_nodes.empty?
 
-    var_promotes = []
+    var_promotes = T.let([], T::Array[MIR::VarPromote])
     handled_fields = Set.new
-    struct_promote = T.let(nil, T.untyped)
+    struct_promote = T.let(nil, T.nilable(String))
     promote_return_ids = Set.new
 
     return_nodes.each do |ret_node|
@@ -79,11 +78,11 @@ module PromotionClassifier
           next unless fval.is_a?(AST::Identifier)
           next unless fti&.needs_escape_promotion? && !fti&.string? && !fval.symbol&.heap_provenance?
 
-          var_promotes << {
+          var_promotes << MIR::VarPromote.new(
             var: fval.name,
             zig_type: fti.zig_type,
             elem_zig_type: elem_zig_type_for(fti),
-          }
+          )
           handled_fields << fname.to_s
         end
 
@@ -115,11 +114,11 @@ module PromotionClassifier
                        !ti&.string? && !val.symbol&.heap_provenance?
         if needs_escape
           if ti.list_collection? || ti.map?
-            var_promotes << {
+            var_promotes << MIR::VarPromote.new(
               var: val.name,
               zig_type: ti.zig_type,
               elem_zig_type: elem_zig_type_for(ti),
-            }
+            )
           else
             struct_promote ||= zig_type_for(ret_type)
           end
@@ -129,7 +128,7 @@ module PromotionClassifier
 
     schema = schema_lookup.call(ret_type.resolved) rescue nil
     is_union = Schemas.union?(schema)
-    unhandled_fields = nil
+    unhandled_fields = T.let(nil, T.nilable(T::Array[String]))
     if struct_promote.nil?
       if var_promotes.any? || handled_fields.any?
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
@@ -139,33 +138,32 @@ module PromotionClassifier
     end
 
     if var_promotes.empty? && struct_promote.nil?
-      {}
+      empty_plan
     else
-      {
-        var_promotes: var_promotes.uniq { |vp| vp[:var] },
+      MIR::PromotionPlan.new(
+        var_promotes: var_promotes.uniq { |vp| vp.var },
         struct_promote: struct_promote,
         promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
         unhandled_promote_fields: unhandled_fields
-      }
+      )
     end
   end
 
   # Filter var_promotes to only those referenced in a return expression.
-  sig { params(plan: T::Hash[Symbol, T.untyped], return_value: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(plan: MIR::PromotionPlan, return_value: T.untyped).returns(MIR::PromotionPlan) }
   def self.filter_for_return(plan, return_value)
-    return plan if plan[:var_promotes]&.empty?
-
+    vps = plan.var_promotes
+    return plan if vps.nil? || vps.empty?
     referenced = referenced_vars(return_value)
-    relevant = plan[:var_promotes].select { |vp| referenced.include?(vp[:var]) }
-
-    plan.merge(var_promotes: relevant)
+    plan.with_var_promotes(vps.select { |vp| referenced.include?(vp.var) })
   end
 
   # Check if a specific return node needs struct_promote.
-  sig { params(plan: T::Hash[Symbol, T.untyped], ret_node: AST::ReturnNode).returns(T::Boolean) }
+  sig { params(plan: MIR::PromotionPlan, ret_node: AST::ReturnNode).returns(T::Boolean) }
   def self.needs_promote?(plan, ret_node)
-    return true if plan[:promote_return_ids].nil?
-    plan[:promote_return_ids].include?(ret_node.object_id)
+    ids = plan.promote_return_ids
+    return true if ids.nil?
+    ids.include?(ret_node.object_id)
   end
 
   # ── Private helpers ──────────────────────────────────────────────
@@ -216,13 +214,13 @@ module PromotionClassifier
     returns
   end
 
-  sig { params(ret_type: Type, schema_lookup: Proc, handled_fields: T::Set[String]).returns(T::Array[T.untyped]) }
+  sig { params(ret_type: Type, schema_lookup: Proc, handled_fields: T::Set[String]).returns([T.nilable(String), T.nilable(T::Array[String])]) }
   private_class_method def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
     resolved = ret_type.resolved
     schema = schema_lookup.call(resolved) rescue nil
     return [nil, nil] unless Schemas.field_bearing?(schema)
 
-    unhandled = []
+    unhandled = T.let([], T::Array[String])
     schema.fields.each do |fname, fdef|
       next if handled_fields.include?(fname.to_s)
       ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(AST::StructField) ? (fdef.type || :Any) : (fdef || :Any))
@@ -314,8 +312,8 @@ module CleanupClassifier
   end
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
-  # Stamps Assignment nodes directly with { zig_type:, alloc: }.
-  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry], schema_lookup: T.nilable(Proc)).returns(T.nilable(T::Array[T.untyped])) }
+  # Stamps Assignment.field_pre_cleanup with the allocator Symbol (:heap or :frame).
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry], schema_lookup: T.nilable(Proc)).void }
   def self.stamp_field_pre_cleanups!(body, bindings, schema_lookup: nil)
     AST.walk_body(body) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
@@ -327,7 +325,7 @@ module CleanupClassifier
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
       if !field_ti&.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti&.string?
-        stmt.field_pre_cleanup = { alloc: :heap }
+        stmt.field_pre_cleanup = :heap
         next
       end
 
@@ -336,20 +334,19 @@ module CleanupClassifier
       if field_ti&.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         if target_entry && target_entry[:alloc] == :heap
-          stmt.field_pre_cleanup = { alloc: :heap }
+          stmt.field_pre_cleanup = :heap
           next
         end
       end
 
       next unless field_ti&.needs_cleanup?(schema_lookup)
 
-      alloc = if target_node.is_a?(AST::Identifier)
+      stmt.field_pre_cleanup = if target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         (target_entry && target_entry[:alloc] == :heap) ? :heap : :frame
       else
         :frame
       end
-      stmt.field_pre_cleanup = { alloc: alloc }
     end
   end
 

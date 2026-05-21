@@ -20,7 +20,7 @@ class MIRPass
   WalkCtx = Struct.new(:bindings, :promo, keyword_init: true) do
     extend T::Sig
 
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.untyped).void }
+    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.nilable(MIR::PromotionPlan)).void }
     def initialize(bindings:, promo:)
       super
     end
@@ -30,12 +30,12 @@ class MIRPass
       self[:bindings]
     end
 
-    sig { returns(T.untyped) }
+    sig { returns(T.nilable(MIR::PromotionPlan)) }
     def promo
       self[:promo]
     end
 
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.untyped).returns(MIRPass::WalkCtx) }
+    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.nilable(MIR::PromotionPlan)).returns(MIRPass::WalkCtx) }
     def with(bindings: self.bindings, promo: self.promo)
       MIRPass::WalkCtx.new(bindings: bindings, promo: promo)
     end
@@ -126,7 +126,7 @@ class MIRPass
 
   private
 
-  sig { params(fn: AST::FunctionDef, promo: T::Hash[Symbol, T.any(T::Array[T::Hash[Symbol, String]], T::Set[Integer])]).returns(T.nilable(T::Hash[String, TrueClass])) }
+  sig { params(fn: AST::FunctionDef, promo: T.nilable(MIR::PromotionPlan)).returns(T.nilable(T::Hash[String, TrueClass])) }
   def transform_function!(fn, promo)
     bindings = @cleanup_bindings[fn.name] || {}
     has_bindings = bindings && !bindings.empty?
@@ -305,12 +305,12 @@ class MIRPass
 
       # Insert MIR verification nodes for reassignment and field pre-cleanup.
       if stmt.is_a?(AST::BindExpr) && stmt.reassign_cleanup
-        result << MIR::ReassignCleanup.new(stmt.token, stmt.name.to_s, stmt.reassign_cleanup[:alloc])
+        result << MIR::ReassignCleanup.new(stmt.token, stmt.name.to_s, stmt.reassign_cleanup.alloc!)
       end
       if stmt.is_a?(AST::Assignment) && stmt.field_pre_cleanup
         target = stmt.name
         target_name = target.is_a?(AST::GetField) && target.target.respond_to?(:name) ? target.target.name.to_s : nil
-        result << MIR::FieldCleanup.new(stmt.token, target_name, target.field, stmt.field_pre_cleanup[:alloc]) if target_name
+        result << MIR::FieldCleanup.new(stmt.token, target_name, target.field, stmt.field_pre_cleanup) if target_name
       end
 
       # Insert SuppressCleanup after statements that consume bindings.
@@ -799,7 +799,7 @@ class MIRPass
 
     ti = stmt.full_type
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
-    stmt.reassign_cleanup = { alloc: entry.alloc, zig_type: zig_type }
+    stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
@@ -981,24 +981,24 @@ class MIRPass
   # Defer suppression for escaped variables is handled by MIR::Return
   # (inserted by insert_return!) and consumed by the transpiler's
   # collect_escaping_identifiers in the ReturnNode handler.
-  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(T::Hash[Symbol, T.any(T::Array[T::Hash[Symbol, String]], T::Set[Integer])])).returns(T.nilable(T.any(T::Hash[T.untyped, T.untyped], Symbol, T::Hash[T.untyped, T.untyped]))) }
+  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(MIR::PromotionPlan)).void }
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
 
     filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
 
-    (filtered[:var_promotes] || []).each do |vp|
-      strategy = classify_promote_strategy(vp[:zig_type])
-      result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil, vp[:elem_zig_type])
+    (filtered.var_promotes || []).each do |vp|
+      strategy = classify_promote_strategy(vp.zig_type!)
+      result << MIR::Promote.new(ret_node.token, vp.var!, vp.zig_type!, strategy, nil, vp.elem_zig_type)
     end
 
-    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
+    if filtered.struct_promote && PromotionClassifier.needs_promote?(filtered, ret_node)
       ret_node.promote_ret_wrap = :var
-      ret_node.ret_field_promote_data = {
-        zig_type: filtered[:struct_promote],
-        fields:   filtered[:unhandled_promote_fields]
-      }
-    elsif filtered[:var_promotes]&.any?
+      ret_node.ret_field_promote_data = MIR::FieldPromote.new(
+        zig_type: filtered.struct_promote,
+        fields:   filtered.unhandled_promote_fields
+      )
+    elsif filtered.var_promotes && !filtered.var_promotes.empty?
       ret_node.promote_ret_wrap = :const
     end
   end
