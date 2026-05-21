@@ -464,7 +464,7 @@ module CleanupClassifier
       return has_heap ? entry(:takes_union) : nil
     end
 
-    return entry(:takes_string) if ti.string?
+    return entry(:heap_string) if ti.string?
 
     # Collection kinds: reuse the locals classifier (covers @list, @pool,
     # @set, @sharded list, HashMap, numeric map, fixed_soa, RC-wrapped maps).

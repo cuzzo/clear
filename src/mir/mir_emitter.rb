@@ -1037,8 +1037,8 @@ class MIREmitter
          :optional_owned, :atomic_ptr,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
          :takes_union, :match_as_inline_struct,
-         :heap_string, :takes_string
-      is_string = entry.kind == :heap_string || entry.kind == :takes_string
+         :heap_string
+      is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
       use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc

@@ -171,7 +171,10 @@ RSpec.describe CleanupClassifier do
       it "marks TAKES string param for cleanup" do
         entry = plan["s"]
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:takes_string)
+        # :takes_string was a vestigial alias of :heap_string (same emit).
+        # source_kind: :takes_param now carries the TAKES origin.
+        expect(entry[:kind]).to eq(:heap_string)
+        expect(entry[:source_kind]).to eq(:takes_param)
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
