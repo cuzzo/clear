@@ -310,6 +310,24 @@ module FunctionAnalysis
     )
   end
 
+  # Single point: what allocator does the receiver/container of this call use?
+  # For MethodCall on a list/struct/etc, the receiver's binding storage tells
+  # us the container allocator -- auto-COPY into this container must produce
+  # values in this allocator (per "one collection = one allocator").
+  # Returns nil when the call has no container context (plain function call,
+  # or receiver storage not yet determined).
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  def receiver_container_alloc(node)
+    return nil unless node.is_a?(AST::MethodCall)
+    obj = node.object
+    sym = obj.respond_to?(:symbol) ? obj.symbol : nil
+    storage = sym&.storage
+    return nil unless storage
+    return :frame if storage == :frame
+    return :heap if storage == :heap
+    nil
+  end
+
   sig { params(node: T.untyped, signature: FunctionSignature).returns(T.nilable(T::Array[String])) }
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -398,10 +416,18 @@ module FunctionAnalysis
         # auto-COPY for @list/heap mismatch; rodata-string auto-COPY for
         # literal-at-use-site DEFAULT; named string Identifier raises
         # STORE_STRING_NEEDS_COPY when its source isn't heap-owned).
-        # Calling for every arg shape -- not just AST::Identifier -- means
-        # `xs.append("literal")` triggers the auto-COPY of "literal" too.
-        owned = ensure_owned_value!(inner_node, param.type)
+        # Pass the receiver's allocator so the auto-COPY uses the
+        # container's allocator (frame list -> frame COPY, heap list ->
+        # heap COPY).
+        container_alloc = receiver_container_alloc(node) || :heap
+        owned = ensure_owned_value!(inner_node, param.type, nil, container_alloc: container_alloc)
         node.args[i] = owned if owned
+        # If the arg was an EXISTING CopyNode (user explicit COPY), inherit
+        # the container's allocator -- a COPY into a frame list copies to
+        # frame, not heap. Single source of truth: container decides.
+        if node.args[i].is_a?(AST::CopyNode) && container_alloc != :heap
+          node.args[i].alloc = container_alloc
+        end
 
         # `is_give` already had visit_GiveNode set the :give action;
         # for plain TAKES (no GIVE wrapper) record :takes so the
