@@ -1335,7 +1335,6 @@ class MIREmitter
     case node.kind
     when :heap    then "#{rt}.heapAlloc()"
     when :frame   then "#{rt}.frameAlloc()"
-    when :cleanup then "#{rt}.cleanupAlloc()"
     else               "#{rt}.heapAlloc()"
     end
   end
@@ -1443,7 +1442,6 @@ class MIREmitter
     case sym
     when :heap    then "#{rt}.heapAlloc()"
     when :frame   then "#{rt}.frameAlloc()"
-    when :cleanup then "#{rt}.cleanupAlloc()"
     else raise "alloc_zig: unknown allocator symbol :#{sym.inspect}"
     end
   end

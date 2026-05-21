@@ -219,27 +219,27 @@ class MIRLowering
   #   up on error). Use when the value is consumed by a TAKES arg, a struct/union
   #   field init, or any position where the receiver takes ownership on success.
   #   false (default) => emit Cleanup (defer; freed on all paths).
-  # Single-source allocator selection for a binding's AllocMark/Cleanup pair.
-  # Encodes the precedence cascade that decides what `defer cleanup(name)`
-  # frees through:
-  #   1. CleanupClassifier already chose :cleanup (mixed-provenance) -- honor it.
-  #   2. The init expression is a heap-allocating MIR op (HeapCreate, CapWrap,
-  #      MakeList etc.) -- the binding holds heap, cleanup uses heapAlloc.
-  #   3. EscapeGraph stamped node.storage = :heap -- the binding escapes.
-  #   4. Same-name collision: cleanup_bindings says :heap from a different-
-  #      scope sibling with the same name, but this declaration's storage is
-  #      :frame and the type doesn't structurally need heap backing -- use
-  #      :cleanup (runtime dispatch) so the wrong allocator isn't picked.
-  #   5. Otherwise inherit the classifier's pick (or decl_alloc fallback).
-  # Guarantees :cleanup is never silently downgraded (would mask leaks).
+  # Single-source allocator selection for a binding's AllocMark/Cleanup
+  # pair. Post-EscapeGraph promotion of frame containers receiving heap
+  # data + the :frozen-kind exemption, the :cleanup vtable workaround is
+  # unreachable. The cascade:
+  #   1. The init expression is a heap-allocating MIR op (HeapCreate,
+  #      CapWrap, MakeList etc.) -- the binding holds heap.
+  #   2. EscapeGraph stamped node.storage = :heap -- the binding escapes.
+  #   3. Same-name scope-collision (excluding :frozen, whose cleanup
+  #      target is a paired __buf): cleanup_bindings says :heap from a
+  #      different-scope sibling with the same name, but this declaration's
+  #      node is :frame and the type doesn't need heap backing. Trust
+  #      the node -- use :frame.
+  #   4. Otherwise inherit the classifier's pick (or decl_alloc fallback).
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
   def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
-    return :cleanup if binding_entry.present? && binding_entry.alloc == :cleanup
     return :heap if mir_allocates?(init)
     return :heap if node.respond_to?(:storage) && node.storage == :heap
     if binding_entry.present? && binding_entry.alloc == :heap &&
-       alloc_for_node(node) != :heap && !ft.needs_heap_backing?
-      return :cleanup
+       alloc_for_node(node) != :heap && !ft.needs_heap_backing? &&
+       binding_entry.kind != :frozen
+      return :frame
     end
     (binding_entry.present? && binding_entry.alloc) || decl_alloc
   end
@@ -865,7 +865,6 @@ class MIRLowering
     case kind
     when :heap    then "#{@rt_name}.heapAlloc()"
     when :frame   then "#{@rt_name}.frameAlloc()"
-    when :cleanup then "#{@rt_name}.cleanupAlloc()"
     else "#{@rt_name}.heapAlloc()"
     end
   end

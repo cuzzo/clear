@@ -432,40 +432,19 @@ pub const Runtime = struct {
         return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 
-    /// Allocator for cleanup of mixed-provenance data. free checks if the
-    /// pointer is in the frame arena (skip) or heap (delegate to heapAlloc).
-    /// Used by list_with_elem_cleanup where elements may contain frame strings,
-    /// heap-duped strings, or rodata — all in the same list.
-    pub fn cleanupAlloc(self: *Runtime) std.mem.Allocator {
-        return std.mem.Allocator{
-            .ptr = self,
-            .vtable = &CleanupAllocatorVTable,
-        };
-    }
 
-    const CleanupAllocatorVTable = std.mem.Allocator.VTable{
-        .alloc = smartAlloc, // reuse frame allocator for alloc (shouldn't be called)
-        .resize = smartResize,
-        .free = cleanupFree,
-        .remap = smartRemap,
-    };
-
-    /// True when `ptr` is owned by the frame arena (rewind/restoreFrameMark
-    /// reclaims it). Single source of truth for "is this a frame pointer?";
-    /// callers are cleanupAlloc.free (skip frees) and promoteDeep (dupe
-    /// frame-strings to heap, leave heap-strings alone).
+    /// True when `ptr` is owned by the frame arena. Only caller is
+    /// promote()'s string arm in runtime-header.zig: used to skip
+    /// re-duping a string that is already on the heap. promote() is
+    /// emitted at MIR::EscapePromote sites where the compiler can't
+    /// (yet) prove that the payload is already-heap; closing that gap
+    /// would let this helper be deleted too.
     pub fn ptrIsFrameOwned(self: *Runtime, ptr: anytype) bool {
         if (use_debug_arena) return self.overflow_arena.isLargeObject(ptr);
         const frame_mem = self.overflow_arena.static_block;
         const p = @intFromPtr(ptr);
         const frame_base = @intFromPtr(frame_mem.ptr);
         return p >= frame_base and p < frame_base + frame_mem.len;
-    }
-
-    fn cleanupFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-        const self: *Runtime = @ptrCast(@alignCast(ctx));
-        if (self.ptrIsFrameOwned(buf.ptr)) return;
-        self.heap_allocator.rawFree(buf, buf_align, ret_addr);
     }
 
     pub fn globalAlloc(self: *Runtime) std.mem.Allocator {

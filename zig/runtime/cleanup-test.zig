@@ -703,49 +703,11 @@ test "needsCleanup: recursive union with 17 variants compiles" {
     try std.testing.expect(CheatLib.needsCleanup(RecValue_Pair));
 }
 
-test "cleanupAlloc: mixed-provenance strings in union list" {
-    // Simulates an @list containing Val.Str elements where some strings
-    // are heap-allocated and some are frame-allocated. cleanup with heapAlloc
-    // would crash on frame strings. cleanup with frameAlloc would leak heap
-    // strings. cleanupAlloc handles both by checking pointer provenance.
-    const alloc = std.testing.allocator;
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(alloc);
-    // Heap-alloc the arena (not stack) so the 256 KB kcov-widened
-    // variant doesn't blow the test thread's stack. See makeRuntime
-    // above for the kcov+frame-arena rationale.
-    const arena_size: usize = if (@import("build_options").coverage) 256 * 1024 else 16384;
-    const arena_buf = try alloc.alloc(u8, arena_size);
-    defer alloc.free(arena_buf);
-    var rt = try Runtime.initFromSlice(arena_buf, &ebr, alloc, 0);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    const frame = rt.frameAlloc();
-    const safe = rt.cleanupAlloc();
-
-    // Build an ArrayList with mixed-provenance TestValue.Str elements.
-    var items = std.ArrayListUnmanaged(TestValue).empty;
-
-    // Element 1: heap-allocated string (from COPY)
-    const heap_str = try alloc.dupe(u8, "heap-owned");
-    try items.append(frame, TestValue{ .Str = heap_str });
-
-    // Element 2: frame-allocated string (from concat)
-    const frame_str = try std.mem.concat(frame, u8, &.{ "frame", "-owned" });
-    try items.append(frame, TestValue{ .Str = frame_str });
-
-    // Element 3: no string (Number — trivial cleanup)
-    try items.append(frame, TestValue{ .Num = 42.0 });
-
-    // Cleanup with cleanupAlloc: should free heap_str, skip frame_str, skip Num.
-    for (items.items) |*elem| {
-        CheatLib.cleanup(TestValue, safe, elem);
-    }
-    items.deinit(frame);
-    // testing.allocator detects leaks (heap_str must be freed)
-    // and panics on invalid frees (frame_str must NOT be freed with heap).
-}
+// cleanupAlloc + the mixed-provenance test were removed: EscapeGraph now
+// promotes any frame container that would receive heap-owned elements
+// to heap at the binding site, so the "mixed-provenance" scenario this
+// test simulated cannot arise in compiler output. tools/audit_provenance_mismatch
+// pins this invariant across the transpile-test corpus.
 
 test "cleanup: recursive union Str variant" {
     const alloc = std.testing.allocator;
