@@ -346,6 +346,20 @@ module EscapeGraph
       !!(e.op == :OR_RESCUE && decl_value_is_heap_call?(e.left, ret_heap))
     when AST::FuncCall
       ret_heap[e.name.to_s] == true
+    when AST::NextExpr
+      # NEXT on a tense_observable producer: the producer fiber heap-
+      # allocates the yielded payload (e.g. a String). The consumer
+      # binding's storage must match -- otherwise the binding's
+      # frame.free can't reach heap memory (the cleanupAlloc workaround
+      # before this lived in classify_optional). Restricting to
+      # observable producers avoids the regression on plain promise
+      # NEXTs whose payload is a stack value.
+      src = e.expr
+      src_ti = src.respond_to?(:full_type) ? src.full_type : nil
+      src_ti = Type.new(src_ti) if src_ti && !src_ti.is_a?(Type)
+      ret_ti = e.full_type
+      ret_ti = Type.new(ret_ti) if ret_ti && !ret_ti.is_a?(Type)
+      !!(src_ti && src_ti.tense_observable? && ret_ti && !cannot_own_heap?(ret_ti))
     else
       false
     end

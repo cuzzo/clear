@@ -772,15 +772,15 @@ module CleanupClassifier
     is_rodata = !!node_sym&.rodata_provenance?
     is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
-    # NOTE: classify_optional cannot uniformly use container_alloc yet
-    # without an EscapeGraph upgrade that promotes optionals receiving
-    # cross-fiber/heap data to heap. See test
-    # 326_observable_pipe_find_string for the cross-fiber case where
-    # the producer is heap but the consumer is frame -- :cleanup
-    # bridges. Per-policy long-term: EscapeGraph should promote final
-    # to heap (cross-fiber data crossing into a frame container).
-    log_mixed_provenance!(:optional_owned, node)
-    entry(:optional_owned, alloc: :cleanup)
+    # Optional binding alloc inherits from the binding's authoritative
+    # storage. EscapeGraph promotes optionals receiving cross-fiber/heap
+    # data to heap; the rest stay frame. The runtime cleanup arm uses
+    # the binding's allocator to free the payload -- frame.free is a
+    # no-op for frame strings (arena reclaim), heap.free for heap
+    # strings. No vtable / ptrIsFrameOwned needed.
+    storage = node_sym&.storage
+    alloc = storage == :heap ? :heap : :frame
+    entry(:optional_owned, alloc: alloc)
   end
 
   sig { params(ti: Type, node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -879,11 +879,14 @@ module CleanupClassifier
     # LoopFrameAnalysis must include frame-cleanup-alloc bindings, OR
     # we accept :cleanup as a fallback. Keeping :cleanup until that's
     # addressed.
-    alloc = case ti.provenance_alloc
-            when :heap then :heap
-            when :frame then :cleanup
-            else :heap
-            end
+    # Struct with cleanup-needing fields: alloc inherits provenance.
+    # Frame structs have frame-allocated nested collection/string fields
+    # (uniform via the same EscapeGraph promotion that handles direct
+    # @list bindings); the runtime's frame.free is a no-op for them,
+    # so the arena reclaim is correct. The previous :cleanup fallback
+    # was a workaround for the same mismatch class the list-elem case
+    # had; no longer needed.
+    alloc = ti.provenance_alloc == :frame ? :frame : :heap
     entry(:struct_with_cleanup_fields, alloc: alloc)
   end
 

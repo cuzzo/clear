@@ -123,13 +123,13 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     ],
     struct_with_list: [
       # Struct with heap-bearing field: storage stays :stack (the struct
-      # is SROA'd on the stack). cleanup_alloc is :cleanup so cleanupAlloc
-      # runtime-dispatches per-pointer arena. The previous :frame default
-      # left heap-allocated field data unfreed when the struct's own
-      # storage was frame (#55).
+      # is SROA'd on the stack). cleanup_alloc inherits the binding's
+      # provenance -- frame for non-escaping, heap for escapers. The
+      # previous :cleanup workaround dispatched at runtime via the
+      # cleanupAlloc vtable; uniform now via EscapeGraph promotion.
       "STRUCT C { items: Int64[]@list }\n" \
       "FN make() RETURNS !C -> MUTABLE c = C{ items: [] }; c.items.append(1_i64); RETURN c; END",
-      "c", :stack, :cleanup,
+      "c", :stack, :frame,
     ],
     union_pure: [
       "UNION U { Empty, Some: Int64 }\n" \
