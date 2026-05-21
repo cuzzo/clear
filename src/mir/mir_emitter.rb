@@ -1006,10 +1006,10 @@ class MIREmitter
       guarded_defer(name, close, g, errdefer:)
 
     when :inf_stream
-      # Signal the generator fiber to stop and free Inner. No moved guard:
-      # InfStream is not linearly-affine (NEXT borrows, not moves).
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}.deinit();\n"
+      # InfStream(T) has pub fn deinit(self: *Self). CheatLib.cleanup's
+      # struct-with-deinit arm dispatches by param count and calls
+      # ptr.deinit() for the 1-param case. No moved guard: NEXT borrows.
+      guarded_cleanup(name, zig_type, alloc, false, errdefer:, via_pointer: vp)
 
     when :observable
       # ~T@observable / ~T[]@set:observable: wait for the consumer fiber

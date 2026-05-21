@@ -673,7 +673,8 @@ module CleanupClassifier
   sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_inf_stream(ti)
     return nil unless ti.inf_stream?
-    entry(:inf_stream, has_moved_guard: false)
+    zig_type = ti.zig_type rescue "UNKNOWN"
+    entry(:inf_stream, has_moved_guard: false, zig_type: zig_type)
   end
 
   sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
