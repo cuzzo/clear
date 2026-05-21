@@ -985,18 +985,9 @@ class MIREmitter
     alloc = alloc_from_entry(entry)
     name = node.name
     g = !errdefer && entry.has_moved_guard?
-    zig_type = entry.zig_type || "UNKNOWN"
-    # Cleanup operates on the storage (success) type. After the
-    # `RETURNS !T` migration the annotator may stamp a binding with
-    # `!T`, but the Zig variable holds `T` post-`try`. Strip a leading
-    # `!` so the type argument matches the variable's actual type.
-    zig_type = zig_type[1..] if zig_type.start_with?("!")
-    elem_zig = entry.elem_zig_type || "UNKNOWN"
-    elem_zig = elem_zig[1..] if elem_zig.start_with?("!")
     # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
-    # TAKES params). Skip the & wrappers and use .* / direct access.
+    # TAKES params). Cleanup unwraps one pointer level via @TypeOf(name.*).
     vp = entry.via_pointer?
-    deref = vp ? "#{name}.*" : name
 
     case entry.kind
     when :resource

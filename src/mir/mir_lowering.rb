@@ -933,49 +933,12 @@ class MIRLowering
   # Cleanup entry helpers (moved from MIRPass/control_flow.rb)
   # ================================================================
 
-  # Pre-compute zig_type, elem_zig_type, is_fixed into the cleanup entry hash.
-  # Mutates entry in-place. Called by lower_var_decl and lower_function_def
-  # (TAKES params) to avoid deferring type resolution to the emitter.
+  # No-op: cleanup emit now uses @TypeOf(name) at the call site, so the
+  # entry needs no precomputed zig_type / elem_zig_type. Kept as a hook
+  # in case future per-kind metadata needs to be stamped at lowering time.
   sig { params(entry: CleanupEntry, ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
   def build_drop_entry!(entry, ti, source_node)
-
-    zig_type = case entry.kind
-    when :heap_slice
-      is_bare = T.must(source_node).value.is_a?(AST::CopyNode) && !ti&.list_collection?
-      if is_bare
-        elem = ti&.element_type ? Type.new(ti.element_type).zig_type : "UNKNOWN"
-        "[]#{elem}"
-      else
-        ti&.zig_type
-      end
-    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa, :optional_owned
-      ti&.zig_type
-    when :versioned
-      # Binding is *Versioned(T); cleanup expects the pointer type so the
-      # versioned-wrapper arm of CheatLib.cleanup fires.
-      inner = Type.new((ti&.resolved || :Any).to_s).zig_type
-      "*CheatLib.Versioned(#{inner})"
-    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable,
-         :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
-      Type.new((ti&.resolved || :Any).to_s).zig_type
-    when :rc, :atomic_ptr
-      ti&.zig_type
-    end
-
-    elem_zig = case entry.kind
-    when :list_with_elem_cleanup, :takes_slice
-      et = ti&.element_type
-      if et
-        t = et.is_a?(Type) ? et : Type.new(et)
-        t.zig_type
-      end
-    when :array_with_struct_strings
-      ti&.element_type ? Type.new(ti.element_type).zig_type : nil
-    end
-
-    entry[:zig_type] = zig_type || entry.zig_type || "UNKNOWN"
-    entry[:elem_zig_type] = elem_zig || entry.elem_zig_type
-    entry[:is_fixed] = ti&.fixed? if entry.kind == :array_with_struct_strings
+    nil
   end
 
   # Resolve the stdlib alloc: symbol for an AllocMark from the FuncCall node's
@@ -6858,11 +6821,15 @@ class MIRLowering
     value = lower(node.value)
     fpc = node.field_pre_cleanup
     alloc = MIR::Ident.new(alloc_zig_str(fpc[:alloc] || :heap))
+    field_get = MIR::FieldGet.new(target, field)
+    # Build a comptime @TypeOf(target.field) expression. The field name
+    # is known statically; comptime resolves the type from the binding's
+    # actual shape.
+    type_expr = MIR::Ident.new("@TypeOf(#{MIREmitter.new.emit(field_get)})")
     cleanup_call = MIR::Call.new("CheatLib.cleanup", [
-      MIR::Ident.new(fpc[:zig_type]), alloc,
-      MIR::AddressOf.new(MIR::FieldGet.new(target, field))
+      type_expr, alloc, MIR::AddressOf.new(field_get)
     ], false)
-    assign = MIR::Set.new(MIR::FieldGet.new(target, field), value)
+    assign = MIR::Set.new(field_get, value)
     MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), assign])
   end
 

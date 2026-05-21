@@ -327,7 +327,7 @@ module CleanupClassifier
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
       if !field_ti&.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti&.string?
-        stmt.field_pre_cleanup = { zig_type: "[]const u8", alloc: :heap }
+        stmt.field_pre_cleanup = { alloc: :heap }
         next
       end
 
@@ -336,7 +336,7 @@ module CleanupClassifier
       if field_ti&.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         if target_entry && target_entry[:alloc] == :heap
-          stmt.field_pre_cleanup = { zig_type: "[]const u8", alloc: :heap }
+          stmt.field_pre_cleanup = { alloc: :heap }
           next
         end
       end
@@ -349,7 +349,7 @@ module CleanupClassifier
       else
         :frame
       end
-      stmt.field_pre_cleanup = { zig_type: field_ti.zig_type, alloc: alloc }
+      stmt.field_pre_cleanup = { alloc: alloc }
     end
   end
 
@@ -474,7 +474,7 @@ module CleanupClassifier
     # Plain slice (Int64[] without a collection modifier).
     if ti.array? && !ti.string?
       elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
-      return entry(:takes_slice, elem_zig_type: elem_zig, zig_type: "[]#{elem_zig}")
+      return entry(:takes_slice, elem_zig_type: elem_zig)
     end
 
     # Struct fallback (strings/collections/rc as fields).
@@ -520,12 +520,10 @@ module CleanupClassifier
     common = { needs_cleanup: true, alloc: :heap, has_moved_guard: true, match_as: true }
     if Schemas.inline_struct?(variant_type)
       return nil unless Type.variant_has_heap?(variant_type)
-      union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
       # Inline-struct variant cleanup uses the unified :non_copy_union path
       # (same CheatLib.cleanup emit). match_as: true distinguishes the MATCH
       # AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :non_copy_union,
-                                            zig_type: "#{union_zig}_#{variant_name}"))
+      return CleanupEntry.from(common.merge(kind: :non_copy_union))
     end
     return nil if variant_type.is_a?(Type) && variant_type.indirect?
 
@@ -534,11 +532,9 @@ module CleanupClassifier
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
       # Slice variant uses the unified :takes_slice path. match_as: true
       # carries the MATCH AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig, zig_type: "[]#{elem_zig}"))
+      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig))
     elsif pt.collection? || pt.map?
-      zig_type = pt.zig_type rescue pt.resolved.to_s
-      return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list,
-                                            zig_type: zig_type))
+      return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list))
     end
     nil
   end
@@ -658,8 +654,7 @@ module CleanupClassifier
   private_class_method def self.classify_observable(ti)
     return nil unless ti.tense_observable?
     return nil if ti.promise_list?
-    zig_type = ti.zig_type rescue "UNKNOWN"
-    entry(:observable, has_moved_guard: false, zig_type: zig_type)
+    entry(:observable, has_moved_guard: false)
   end
 
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
@@ -674,8 +669,7 @@ module CleanupClassifier
   sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_inf_stream(ti)
     return nil unless ti.inf_stream?
-    zig_type = ti.zig_type rescue "UNKNOWN"
-    entry(:inf_stream, has_moved_guard: false, zig_type: zig_type)
+    entry(:inf_stream, has_moved_guard: false)
   end
 
   sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -688,7 +682,7 @@ module CleanupClassifier
     return nil if ti.any_rc?
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
-    return entry(:fixed_soa, alloc: wrapper_alloc(ti), has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
+    return entry(:fixed_soa, alloc: wrapper_alloc(ti), has_moved_guard: false) if ti.fixed_soa?
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
@@ -698,13 +692,13 @@ module CleanupClassifier
       # to heap (5 leaks across transpile-test suite when forced uniform).
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
-                   alloc: :frame, elem_needs_cleanup: has_heap_elems, zig_type: ti.zig_type)
+                   alloc: :frame, elem_needs_cleanup: has_heap_elems)
     end
-    return entry(:list, has_moved_guard: true, zig_type: ti.zig_type) if ti.list_collection?
-    return entry(:string_map, zig_type: ti.zig_type) if ti.map? && !ti.numeric_map?
-    return entry(:numeric_map, zig_type: ti.zig_type) if ti.numeric_map?
-    return entry(:pool, alloc: wrapper_alloc(ti), has_moved_guard: true, zig_type: ti.zig_type) if ti.pool?
-    return entry(:set, alloc: wrapper_alloc(ti), has_moved_guard: true, zig_type: ti.zig_type) if ti.set_collection?
+    return entry(:list, has_moved_guard: true) if ti.list_collection?
+    return entry(:string_map) if ti.map? && !ti.numeric_map?
+    return entry(:numeric_map) if ti.numeric_map?
+    return entry(:pool, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.pool?
+    return entry(:set, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.set_collection?
     nil
   end
 
@@ -732,8 +726,7 @@ module CleanupClassifier
     return nil unless elem_has_string_fields?(elem_schema)
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     container_alloc = container_alloc_from(sym, node)
-    elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
-    entry(:heap_slice, alloc: container_alloc, zig_type: "[]#{elem_zig}", has_moved_guard: false)
+    entry(:heap_slice, alloc: container_alloc, has_moved_guard: false)
   end
 
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes
@@ -809,12 +802,9 @@ module CleanupClassifier
       # *Versioned(T): CheatLib.cleanup's versioned-wrapper arm calls
       # deinitSync (sync free of the inner ptr) + destroys the cell.
       # Safe because the annotator marks Guards as non-escaping, so
-      # scope-end happens-after every WITH SNAPSHOT release.
-      bare = Type.new(ti.resolved)
-      bare.instance_variable_set(:@sync, nil)
-      bare.instance_variable_set(:@ownership, nil) if bare.respond_to?(:ownership)
-      inner_zig = bare.zig_type rescue ti.resolved.to_s
-      return entry(:versioned, zig_type: "*CheatLib.Versioned(#{inner_zig})")
+      # scope-end happens-after every WITH SNAPSHOT release. Type
+      # comptime-resolves at the call site via @TypeOf(name).
+      return entry(:versioned)
     end
     nil
   end
