@@ -1012,49 +1012,51 @@ class MIREmitter
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
          :takes_union, :heap_string,
          :inf_stream, :observable, :versioned, :takes_slice,
-         :heap_struct_plain, :frozen
+         :heap_struct_plain, :frozen, :rc
       is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
-      use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
+      use_alloc =
+        if entry.kind == :list_with_elem_cleanup
+          alloc_zig(:cleanup)
+        elsif entry.kind == :rc && entry.rc_alloc
+          alloc_from_sym(entry.rc_alloc)
+        else
+          alloc
+        end
       # :frozen lives in a paired `name__buf` binding; rebind locally.
       use_name = entry.kind == :frozen ? "#{name}__buf" : name
-      # :heap_struct_plain and :frozen have no fixed zig_type at classify
-      # time -- the binding shape (value-struct, *Struct, or Frozen(T))
-      # is known only at the call site, so we defer to comptime
-      # @TypeOf(...). cleanup() dispatches on the actual shape.
+      # Kinds whose binding shape is only known at the call site defer
+      # to comptime @TypeOf(...). cleanup() dispatches on the actual
+      # shape (struct-with-deinit, refInnerType -> releaseOne, optional
+      # unwrap, generic *T destroy, struct-recursive).
       use_type =
         if is_string
           "[]const u8"
-        elsif entry.kind == :heap_struct_plain || entry.kind == :frozen
+        elsif entry.kind == :heap_struct_plain || entry.kind == :frozen || entry.kind == :rc
           "@TypeOf(#{use_name})"
         else
           zig_type
         end
       use_guard = is_string ? !errdefer : g
-      guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
-
-    when :rc
-      rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
-      case entry.rc_variant
-      when :link
-        guarded_defer(name, "CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{name})", g, errdefer:)
-      when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{rc_alloc}, _strong_ref); }", g, errdefer:)
-      else
-        result = guarded_cleanup(name, zig_type, rc_alloc, g, errdefer:)
-        if entry.needs_release_fields?
-          guard = g ? "if (!#{name}_moved) " : ""
-          kw = errdefer ? "errdefer" : "defer"
-          result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
-        end
-        result
+      result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
+      # :rc optionally needs a releaseFields side-channel (struct with
+      # owned heap fields wrapped in Rc -- the inner struct's String/list
+      # fields must be released after Rc strong=0 but cleanup() only
+      # destroys the Rc cell). Future: move into the runtime arm too.
+      if entry.kind == :rc && entry.needs_release_fields?
+        guard = use_guard ? "if (!#{name}_moved) " : ""
+        kw = errdefer ? "errdefer" : "defer"
+        result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
       end
+      result
 
     when :locked, :write_locked, :always_mutable
-      # *Locked(T) / *RwLocked(T) / *RefCell(T): all three lockedDestroy/
-      # rwLockedDestroy/refCellDestroy helpers are alloc.destroy(ptr).
-      # Inner-data cleanup happens via per-field paths, not via wrapper teardown.
+      # *Locked(T) / *RwLocked(T) / *RefCell(T): pointer destroy only.
+      # Inner-data cleanup is owned by per-field reassignment paths
+      # (e.g. `cfg.get().field = newval` frees `__old` inline); routing
+      # through CheatLib.cleanup's wrapper arm would also recursively
+      # clean .data fields, double-freeing those.
       guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
     else

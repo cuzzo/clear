@@ -480,25 +480,30 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.weakArcUpgrade(N, w)")
       end
 
-      it "emits weakRcRelease cleanup for @multiowned link" do
+      # Rc/Arc/WeakRc/WeakArc/?Rc cleanup is uniform via CheatLib.cleanup:
+      # refInnerType detects the wrapper from struct shape; releaseOne
+      # dispatches weak/strong via isWeakRef + isAtomicRef; the Optional
+      # arm unwraps. The exact release call (weakRcRelease etc) is the
+      # runtime arm's job, not the emitter's.
+      it "routes @multiowned link cleanup through CheatLib.cleanup" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.weakRcRelease(N, w)")
+        expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*[^,]+,\s*&w\)/)
       end
 
-      it "emits weakArcRelease cleanup for @shared link" do
+      it "routes @shared link cleanup through CheatLib.cleanup" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS !Void -> x = N{ v: 1 } @shared; w = LINK x; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.weakArcRelease(N, w)")
+        expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*[^,]+,\s*&w\)/)
       end
 
-      it "emits optional-unwrap cleanup for RESOLVE result" do
+      it "routes optional RESOLVE result cleanup through CheatLib.cleanup" do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("if (r) |_strong_ref| CheatLib.rcRelease(N, rt.heapAlloc(), _strong_ref)")
+        expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&r\)/)
       end
 
       it "@link type annotation preserves link_source" do

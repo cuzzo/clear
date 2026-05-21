@@ -457,7 +457,7 @@ RSpec.describe MIREmitter do
                 base_zig: "User", needs_release_fields: true })
       node = MIR::Cleanup.new("user_rc", entry)
       zig = e.emit(node)
-      expect(zig).to include("CheatLib.cleanup(CheatLib.Rc(User), rt.heapAlloc(), &user_rc)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(user_rc), rt.heapAlloc(), &user_rc)")
       expect(zig).to include("CheatLib.releaseFields(User, rt.heapAlloc(), user_rc.ctrl.data.*)")
     end
 
