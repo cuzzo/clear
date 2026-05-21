@@ -889,11 +889,43 @@ class MIRPass
     val_ti = stmt.value.full_type
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
+    # Skip promote when the value's heap-owning payload is already heap.
+    # Without this, the runtime's promote() falls back to ptrIsFrameOwned
+    # to skip the re-dupe at runtime; with it, the emit-time analysis
+    # determines provenance and the runtime check becomes unnecessary.
+    return if value_payload_already_heap?(stmt.value)
+
     # Annotate directly on Assignment node (no MIR::Promote needed).
     # Use bare type (strip *) — promote(T, rt, &v) expects T = base, not pointer.
     zig_t = val_ti.zig_type
     zig_t = zig_t[1..] if zig_t.start_with?("*")
     stmt.container_promote_zig_type = zig_t
+  end
+
+  # True when every heap-owning field of `value` is already heap-OWNED
+  # by this expression (so promote()'s frame-to-heap dupe would be a
+  # leaky no-op). Restricted to OWNED sources (CopyNode :heap, recursive
+  # struct/union literals whose fields are all owned-heap). Borrowed
+  # sources (Identifier, GetIndex, GetField) are excluded: even when
+  # their symbol is heap_provenance, the binding still owns the cleanup
+  # of that data, so the assignment into a container MUST dupe.
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  def value_payload_already_heap?(value)
+    case value
+    when AST::CopyNode
+      value.alloc == :heap
+    when AST::StructLit, AST::UnionVariantLit
+      return false unless value.fields
+      value.fields.all? do |_, fv|
+        next true unless fv.respond_to?(:full_type)
+        fti = fv.full_type
+        fti = Type.new(fti) if fti && !fti.is_a?(Type)
+        next true unless fti.is_a?(Type) && fti.needs_promotion?(@schema_lookup)
+        value_payload_already_heap?(fv)
+      end
+    else
+      false
+    end
   end
 
   # Resolve the INDEX_OPS :set entry for a container type.

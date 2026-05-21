@@ -3666,9 +3666,11 @@ pub const CheatLib = struct {
 
         // 1. Strings: dupe only frame-arena strings to heap.
         // Heap strings (from COPY, toString, etc.) are already escaped —
-        // duping them again leaks the original. The compiler does NOT
-        // currently track "this value's payload is already heap" at
-        // the MIR::Promote emit site, so the runtime check stays.
+        // duping them again leaks the original. The compiler emits
+        // promote() at sites where the payload could be EITHER frame
+        // OR already-heap (e.g. dupeUnionValue is wrapped in promote()
+        // even when the dupe produces a heap value); narrowing that
+        // emit-side gap would let the check go away.
         if (T == []const u8 or T == []u8) {
             if (value.len == 0) return;
             if (rt.ptrIsFrameOwned(value.*.ptr)) {
