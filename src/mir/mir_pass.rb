@@ -76,6 +76,20 @@ class MIRPass
     # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
     # escape principle). Nothing to do here.
 
+    # Phase 0.5: Rust-aligned hoist. For every fn whose returns may carry
+    # heap-owning sub-expressions, propagate storage=:heap into the
+    # allocating field expressions of RETURN's struct/union literals.
+    # Lowering then picks heapAlloc directly; PromotionClassifier sees
+    # field.heap_provenance? = true and skips struct_promote. This is the
+    # architectural fix that lets the residual promoteDeep sites collapse:
+    # EscapeGraph decides storage per-declaration, this pass extends the
+    # decision INTO anonymous return-value sub-expressions that have no
+    # declaration of their own.
+    @fn_nodes.each do |_name, fn|
+      next unless fn_may_return_owning?(fn)
+      hoist_return_subexprs_to_heap!(fn.body)
+    end
+
     # Phase 1: classify promotions for all functions. Storage is already
     # decided at declaration time by EscapeGraph; this builds the
     # (now mostly degenerate) promotion plan downstream lowering reads.
@@ -125,6 +139,91 @@ class MIRPass
   end
 
   private
+
+  # Matches the same fn predicate PromotionClassifier.classify uses to gate
+  # its analysis: any of body-allocates / heap return / escapable-return.
+  # These are the fns whose RETURN literals might carry promotable
+  # sub-expressions.
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def fn_may_return_owning?(fn)
+    return false unless fn.body
+    # Match the trigger used by PromotionClassifier.classify so the same
+    # set of functions enter both passes (otherwise the hoist would
+    # skip fns whose returns the classifier processes, leaving residual
+    # promoteDeep sites).
+    body_allocates = fn.uses_frame == true || fn.uses_heap == true || fn.uses_alloc == true
+    body_allocates ||
+      fn.return_provenance == :heap ||
+      EscapeGraph.local_fn_returns_heap?(fn) ||
+      PromotionClassifier.send(:fn_has_escapable_return?, fn, @schema_lookup)
+  end
+
+  # Walk fn body, find every RETURN whose value is a struct/union literal,
+  # and stamp `storage = :heap` on each field expression that
+  #   (a) is not already heap/rodata/borrow,
+  #   (b) is not an Identifier (binding-level promotion handled by EscapeGraph),
+  #   (c) is not a COPY (already heap-dupes),
+  #   (d) has a type that needs_escape_promotion?
+  # Lowering reads node.storage via alloc_for_node and picks heapAlloc when
+  # the stamp is :heap; downstream PromotionClassifier sees
+  # field.heap_provenance? = true and skips struct_promote for the field.
+  # This is the Rust-aligned "decide at declaration / construction time"
+  # equivalent for nested allocating sub-expressions in return literals.
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).void }
+  def hoist_return_subexprs_to_heap!(stmts)
+    return unless stmts
+    AST.walk_body(stmts) do |node|
+      next unless node.is_a?(AST::ReturnNode)
+      val = node.value
+      next unless val
+      if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
+        hoist_lit_fields!(val)
+      elsif val.is_a?(AST::Identifier)
+        # Borrowed-param-as-return-value: `RETURN u` where u is a borrow of
+        # a non-Copy type with promotable fields. The caller takes
+        # ownership on return, so the value must be heap-cloned. Synthesize
+        # `COPY u` -- lowering routes through dupeValue (the unified clone
+        # primitive), same end result as promoteDeep but via the type-
+        # driven comptime path instead of the runtime promote subsystem.
+        wrap_identifier_with_copy_if_needed!(node, val)
+      end
+    end
+  end
+
+  sig { params(ret_node: AST::ReturnNode, id: AST::Identifier).void }
+  def wrap_identifier_with_copy_if_needed!(ret_node, id)
+    sym = id.symbol
+    return if sym&.takes
+    return if sym&.heap_provenance?
+    return if sym&.init_contents_heap
+    return if sym&.borrow_provenance?
+    ti = Type.from_node(id)
+    return unless ti.is_a?(Type)
+    return if ti.list_collection? || ti.map? || ti.string?
+    return unless ti.needs_escape_promotion? ||
+                  PromotionClassifier.send(:struct_has_promotable_fields?, ti, @schema_lookup)
+    copy = AST::CopyNode.new(id.token, id)
+    copy.full_type = ti
+    ret_node.value = copy
+  end
+
+  sig { params(lit: T.untyped).void }
+  def hoist_lit_fields!(lit)
+    return unless lit.respond_to?(:fields) && lit.fields
+    lit.fields.each do |_fname, fval|
+      next if fval.is_a?(AST::Identifier)
+      next unless fval.respond_to?(:storage=)
+      next if fval.is_a?(AST::CopyNode)
+      next if fval.is_a?(AST::Locatable) &&
+              (fval.heap_provenance? || fval.rodata_provenance? || fval.borrow_provenance?)
+
+      fti = Type.from_node(fval)
+      next unless fti.is_a?(Type) && fti.needs_escape_promotion?
+
+      fval.storage = :heap
+      hoist_lit_fields!(fval) if fval.is_a?(AST::StructLit) || fval.is_a?(AST::UnionVariantLit)
+    end
+  end
 
   sig { params(fn: AST::FunctionDef, promo: T.nilable(MIR::PromotionPlan)).returns(T.nilable(T::Hash[String, TrueClass])) }
   def transform_function!(fn, promo)
@@ -867,7 +966,7 @@ class MIRPass
   # Insert MIR::Promote before indexed Assignment nodes where the container's
   # INDEX_OPS :set has takes_value and the value type needs frame-to-heap
   # promotion. Driven by the INDEX_OPS registry in std_lib.rb.
-  sig { params(result: T::Array[T.untyped], stmt: T.untyped).returns(T.nilable(String)) }
+  sig { params(result: T::Array[T.untyped], stmt: T.untyped).void }
   def insert_container_promote!(result, stmt)
     return unless stmt.is_a?(AST::Assignment)
     return unless stmt.name.is_a?(AST::GetIndex)

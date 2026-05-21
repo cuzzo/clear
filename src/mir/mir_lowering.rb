@@ -372,7 +372,7 @@ class MIRLowering
       rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
     when MIR::Cast
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::TryCatch
+    when MIR::Call, MIR::TryCatch, MIR::InlineZig
       cleanup_entry_for_heap_result(ast_node)
     else
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
