@@ -22,6 +22,26 @@ class PipelineHost
   include PipelineGenerator
   include ZigTypeMapper
 
+  # Single-source loopMark save/restore pair for shard contexts that emit
+  # InlineZig (vs MIR::Let used by mir_lowering.prepend_loop_mark). Returns
+  # an array of two MIR::InlineZig nodes; caller concats into its inner
+  # body. Inline-string variant (for raw key_loop_mark / body_loop_mark
+  # interpolation) is shard_loop_mark_string below.
+  sig { params(var: String, rt: String, tag: String).returns(T::Array[T.untyped]) }
+  def shard_loop_mark_pair(var, rt, tag: "shard_loop")
+    [
+      MIR::InlineZig.new("const #{var} = #{rt}.saveLoopMark();", "#{tag}_save_mark"),
+      MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{var});", "#{tag}_restore_mark"),
+    ]
+  end
+
+  # String-template variant for sites that interpolate the marker into a
+  # larger Zig template literal (key_loop_mark / body_loop_mark).
+  sig { params(var: String, rt: String, indent: String).returns(String) }
+  def shard_loop_mark_string(var, rt, indent: "              ")
+    "const #{var} = #{rt}.saveLoopMark();\n#{indent}defer #{rt}.restoreLoopMark(#{var});"
+  end
+
   # Per-stage state for sequential pipeline lowering. `list` is the source
   # list AST, `options` is the smooth-node carrying alloc/error policy/etc.
   # Reek flagged the (list_node, smooth_node) clump across 13+ lower_*
@@ -3540,10 +3560,7 @@ class PipelineHost
       # The key expression allocates from the frame arena (e.g. a string
       # concat). Save/restore per iteration so successive iterations
       # don't accumulate frame memory.
-      lm_var = "__sh#{id}_loop_mark"
-      rt = @do_rt_name || "rt"
-      inner << MIR::InlineZig.new("const #{lm_var} = #{rt}.saveLoopMark();", "shard_loop_save_mark")
-      inner << MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{lm_var});", "shard_loop_restore_mark")
+      inner.concat(shard_loop_mark_pair("__sh#{id}_loop_mark", @do_rt_name || "rt", tag: "shard_loop"))
     end
     inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
     inner.concat(body_mir)
@@ -3619,16 +3636,10 @@ class PipelineHost
       @lowering.instance_variable_set(:@rt_name, saved_low_rt)
     end
 
-    key_loop_mark = if ctx[:key_allocates_frame]
-      "const __sh#{id}_key_mark = rt.saveLoopMark();\n              defer rt.restoreLoopMark(__sh#{id}_key_mark);"
-    else
-      ""
-    end
-    body_loop_mark = if ctx[:body_allocates_frame]
-      "const __sh#{id}_body_mark = __rt.saveLoopMark();\n                      defer __rt.restoreLoopMark(__sh#{id}_body_mark);"
-    else
-      ""
-    end
+    key_loop_mark = ctx[:key_allocates_frame] ?
+      shard_loop_mark_string("__sh#{id}_key_mark", "rt") : ""
+    body_loop_mark = ctx[:body_allocates_frame] ?
+      shard_loop_mark_string("__sh#{id}_body_mark", "__rt", indent: " " * 22) : ""
     key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
     key_free_work = if string_key
       "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n                  __rt.heapAlloc().free(__work.keys);"
