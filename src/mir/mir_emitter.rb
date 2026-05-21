@@ -1041,6 +1041,12 @@ class MIREmitter
 
   sig { params(node: MIR::EscapePromote).returns(T.nilable(String)) }
   def emit_escape_promote(node)
+    # promote() is IN-PLACE: it mutates the existing binding's payload
+    # without reallocating wrapper structures (e.g. an @indirect
+    # `*String` field is rewritten in place, keeping the heap pointer
+    # stable). dupeValue allocates a new wrapper, which orphans the
+    # old one. The two are NOT interchangeable; keep the per-strategy
+    # promote/promoteList/promoteDeep emit.
     rt = node.rt_expr || "rt"
     case node.strategy
     when :list
