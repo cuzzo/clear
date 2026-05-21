@@ -1005,25 +1005,13 @@ class MIREmitter
       close = entry.resource_close_zig.gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)
 
-    when :inf_stream
-      # InfStream(T) has pub fn deinit(self: *Self). CheatLib.cleanup's
-      # struct-with-deinit arm dispatches by param count and calls
-      # ptr.deinit() for the 1-param case. No moved guard: NEXT borrows.
-      guarded_cleanup(name, zig_type, alloc, false, errdefer:, via_pointer: vp)
-
-    when :observable
-      # *ObservableTerminal(Inner): CheatLib.cleanup's observable arm
-      # detects @hasDecl(wait/destroy/isFinished) and emits wait+destroy.
-      # Wait-then-destroy is critical: destroying while the producer
-      # fiber is still publishing is a UAF.
-      guarded_cleanup(name, zig_type, alloc, false, errdefer:, via_pointer: vp)
-
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map,
          :pool, :fixed_soa, :set,
          :heap_slice, :heap_union, :heap_struct,
          :optional_owned, :atomic_ptr,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
-         :takes_union, :heap_string
+         :takes_union, :heap_string,
+         :inf_stream, :observable, :versioned, :takes_slice
       is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
@@ -1059,19 +1047,12 @@ class MIREmitter
       # Inner-data cleanup happens via per-field paths, not via wrapper teardown.
       guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
-    when :versioned
-      # *Versioned(T): CheatLib.cleanup's versioned-wrapper arm handles
-      # the sync teardown (deinitSync + destroy). Safe because CLEAR
-      # guarantees no WITH SNAPSHOT guard outlives its scope.
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
-
     when :heap_struct_plain
+      # Polymorphic destroy: CheatLib.free handles both value-struct
+      # (no-op for self-managed types like SharedPromise) and pointer
+      # cases (.pointer.one destroy). Routing through CheatLib.cleanup
+      # would over-destroy self-managed inner fields; leave intentional.
       guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
-
-    when :takes_slice
-      # []ElemT: CheatLib.cleanup's slice arm iterates elements (when
-      # needsCleanup) and frees the buffer.
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
