@@ -393,11 +393,15 @@ module FunctionAnalysis
           end
         end
 
-        # Ensure @list args to TAKES params are heap-owned (implicit COPY).
-        if inner_node.is_a?(AST::Identifier)
-          owned = ensure_owned_value!(inner_node, param.type)
-          node.args[i] = owned if owned
-        end
+        # Ensure TAKES args are owned per the "one collection = one allocator"
+        # policy. ensure_owned_value! handles each shape (list_collection
+        # auto-COPY for @list/heap mismatch; rodata-string auto-COPY for
+        # literal-at-use-site DEFAULT; named string Identifier raises
+        # STORE_STRING_NEEDS_COPY when its source isn't heap-owned).
+        # Calling for every arg shape -- not just AST::Identifier -- means
+        # `xs.append("literal")` triggers the auto-COPY of "literal" too.
+        owned = ensure_owned_value!(inner_node, param.type)
+        node.args[i] = owned if owned
 
         # `is_give` already had visit_GiveNode set the :give action;
         # for plain TAKES (no GIVE wrapper) record :takes so the
