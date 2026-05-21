@@ -360,23 +360,19 @@ class MIRLowering
     when MIR::ContainerInit
       list_cleanup_entry(mir.zig_type)
     when MIR::DeepCopy
-      case mir.strategy
-      when :list_shallow, :list_deep
-        takes_slice_entry(mir.elem_type)
-      when :full_value
-        zig_t = mir.zig_type
-        if zig_t.nil?
-          ti = Type.from_node(ast_node)
-          raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
-          bare = Type.new(ti)
-          bare.provenance = :stack if bare.respond_to?(:provenance=)
-          zig_t = bare.zig_type
-        end
-        list_cleanup_entry(zig_t)
-      else
-        raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
-              "mir_allocates? returned true but no cleanup entry defined. Add a case."
+      # Only :full_value reaches hoist_cleanup (the :passthrough strategy
+      # is a no-op COPY and does not allocate). zig_type is set at lowering
+      # time; if not, derive it from the source AST node's type.
+      raise "hoist_cleanup_entry: unexpected DeepCopy strategy :#{mir.strategy}" unless mir.strategy == :full_value
+      zig_t = mir.zig_type
+      if zig_t.nil?
+        ti = Type.from_node(ast_node)
+        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
+        bare = Type.new(ti)
+        bare.provenance = :stack if bare.respond_to?(:provenance=)
+        zig_t = bare.zig_type
       end
+      list_cleanup_entry(zig_t)
     when MIR::CapWrap
       # CapWrap creates an Rc/Arc/Locked/RwLocked wrapper on the heap.
       if mir.sync_fn
@@ -5965,15 +5961,14 @@ class MIRLowering
     elsif ti&.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
     elsif ti&.list_collection? || (ti&.array? && !ti&.string? && !ti&.collection?)
-      elem_type = ti.element_type
-      elem_zig = transpile_type(elem_type)
-      sl = @schema_lookup
-      et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
-      elem_owns_heap = et.needs_cleanup?(sl) || et.string?
-      needs_deep = (node.respond_to?(:deep_copy) && node.deep_copy) || elem_owns_heap
-      strategy = needs_deep ? :list_deep : :list_shallow
+      # COPY of a list/slice: ItemsAccess produces a []T view; the slice arm of
+      # CheatLib.dupeValue allocates a fresh buffer and per-element dupes when
+      # elements need cleanup (or @memcpy when they don't). Subsumes the old
+      # :list_shallow + :list_deep dispatch. The element T (for the cleanup
+      # type) is stamped so cleanup hoist gets the right []T.
+      elem_zig = transpile_type(ti.element_type)
       src = MIR::ItemsAccess.new(source, true)
-      MIR::DeepCopy.new(src, nil, elem_zig, strategy, alloc)
+      MIR::DeepCopy.new(src, "[]#{elem_zig}", elem_zig, :full_value, alloc)
     elsif ti&.collection? || (ti && ti.struct? && ti.needs_promotion?(@schema_lookup))
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     else

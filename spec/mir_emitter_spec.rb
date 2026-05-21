@@ -525,18 +525,16 @@ RSpec.describe MIREmitter do
       expect(e.emit(node)).to eq("try CheatLib.dupeValue(Result, val, rt.heapAlloc())")
     end
 
-    it "emits shallow list copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "i64", :list_shallow, :heap)
-      zig = e.emit(node)
-      expect(zig).to include("@memcpy(__buf, __src)")
-      expect(zig).to include("rt.heapAlloc().alloc(i64, __src.len)")
-    end
+    it "emits slice copy via CheatLib.dupeValue (subsumes the old :list_shallow / :list_deep strategies)" do
+      # Lower_copy now stamps zig_type = "[]ElemT" and strategy :full_value
+      # for any list/slice COPY. CheatLib.dupeValue's slice arm handles
+      # both shallow (Copy elements -> @memcpy) and deep (heap-owning
+      # elements -> recursive dupeValue) internally.
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]i64", "i64", :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]i64, items, rt.heapAlloc())")
 
-    it "emits deep list copy via the canonical per-element dupeValue" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "Value", :list_deep, :heap)
-      zig = e.emit(node)
-      expect(zig).to include("dupeValue(Value, __src[__i], rt.heapAlloc())")
-      expect(zig).to include("errdefer rt.heapAlloc().free(__buf)")
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]Value", "Value", :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]Value, items, rt.heapAlloc())")
     end
 
     it "emits passthrough for value types" do

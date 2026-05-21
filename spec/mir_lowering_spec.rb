@@ -3332,19 +3332,22 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :list)
   end
 
-  it "classifies DeepCopy cleanup entries by copy strategy" do
+  it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do
+    # The old :list_shallow / :list_deep strategies were removed: any list/
+    # slice COPY now stamps zig_type = "[]ElemT" and strategy :full_value,
+    # routing the runtime through CheatLib.dupeValue's slice arm.
     l = lowering
 
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "i64", :list_shallow, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "Value", :list_deep, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]i64", "i64", :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]Value", "Value", :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]Value")
     expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "Value")
     expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]const u8")
   end
 
-  it "raises when a heap DeepCopy strategy lacks a cleanup mapping" do
+  it "raises when a heap DeepCopy uses a strategy other than :full_value" do
     expect {
       lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :unknown_strategy, :heap), nil)
-    }.to raise_error(/DeepCopy with unknown strategy :unknown_strategy/)
+    }.to raise_error(/unexpected DeepCopy strategy :unknown_strategy/)
   end
 
   it "raises when rc_cleanup_entry's ast_node carries no Type" do

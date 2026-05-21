@@ -1259,8 +1259,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # @list should be implicit-copied via CopyNode (emits slice copy)
-      expect(zig).to match(/heapAlloc|alloc.*__src/)
+      # @list COPY routes through CheatLib.dupeValue's slice arm (one path).
+      expect(zig).to match(/dupeValue\(\[\]Value/)
     end
 
     it "implicit-copies @list into struct []T field" do
@@ -1275,7 +1275,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc|alloc.*__src/)
+      expect(zig).to match(/dupeValue\(\[\]Value/)
     end
 
     it "does NOT dupe heap string (COPY) in union - already owned" do
@@ -1306,7 +1306,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("dupeValue")
     end
 
-    it "shallow-copies @list of Copy unions into union field (memcpy)" do
+    it "shallow-copies @list of Copy unions into union field via dupeValue (slice arm uses @memcpy internally for Copy elements)" do
       src = <<~CLEAR
         UNION Num { Int: Int64, Float: Float64 }
         UNION Wrapper { Nil, Items: Num[] }
@@ -1318,9 +1318,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Copy union elements - memcpy is safe, no dupeUnionValue needed
+      # Copy union elements - dupeValue's slice arm @memcpy's the buffer.
       expect(zig).not_to include("dupeUnionValue")
-      expect(zig).to include("@memcpy")
+      expect(zig).to match(/dupeValue\(\[\]Num/)
     end
   end
 

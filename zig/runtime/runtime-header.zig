@@ -3160,8 +3160,24 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Structs: recursively clean up all owned fields
+        // Generic *T (pointer to a single owning value) cleanup: recurse
+        // into the pointee if it carries owned heap, then destroy the
+        // pointer. This is the uniform path for any *Struct binding the
+        // earlier specific-shape arms (lock/versioned/observable wrappers,
+        // Atomic, Rc) didn't claim -- no "plain struct" special case.
         const info = @typeInfo(T);
+        if (info == .pointer and info.pointer.size == .one and
+            @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
+        {
+            const ChildT = info.pointer.child;
+            if (comptime needsCleanup(ChildT)) {
+                cleanup(ChildT, alloc, ptr.*);
+            }
+            alloc.destroy(ptr.*);
+            return;
+        }
+
+        // 9. Structs: recursively clean up all owned fields
         if (info == .@"struct") {
             inline for (info.@"struct".fields) |field| {
                 const FT = field.type;

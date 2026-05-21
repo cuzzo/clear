@@ -1109,28 +1109,11 @@ class MIREmitter
     @deep_copy_counter = (@deep_copy_counter || 0) + 1
     bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
-    when :list_shallow
-      elem = node.elem_type
-      "#{bc}: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (__src.len > 0) {\n" \
-      "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
-      "        @memcpy(__buf, __src);\n" \
-      "        break :#{bc} __buf;\n" \
-      "    } else break :#{bc} #{src};\n" \
-      "}"
-    when :list_deep
-      elem = node.elem_type
-      "#{bc}: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (__src.len > 0) {\n" \
-      "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
-      "        errdefer #{alloc}.free(__buf);\n" \
-      "        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeValue(#{elem}, __src[__i], #{alloc}); }\n" \
-      "        break :#{bc} __buf;\n" \
-      "    } else break :#{bc} #{src};\n" \
-      "}"
     when :passthrough
+      # Borrow-to-owned passthrough: auto-deref single pointers but
+      # keep value-shaped sources unchanged. Distinct from dupeValue
+      # because no allocation occurs -- this is the no-op COPY for
+      # Copy-type sources.
       "#{bc}_value: {\n" \
       "    const __src = #{src};\n" \
       "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :#{bc}_value __src.*;\n" \
