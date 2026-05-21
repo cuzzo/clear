@@ -474,7 +474,7 @@ module CleanupClassifier
     # Plain slice (Int64[] without a collection modifier).
     if ti.array? && !ti.string?
       elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
-      return entry(:takes_slice, elem_zig_type: elem_zig)
+      return entry(:uniform, elem_zig_type: elem_zig)
     end
 
     # Struct fallback (strings/collections/rc as fields).
@@ -523,20 +523,16 @@ module CleanupClassifier
       # Inline-struct variant cleanup uses the unified :non_copy_union path
       # (same CheatLib.cleanup emit). match_as: true distinguishes the MATCH
       # AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :non_copy_union))
+      return CleanupEntry.from(common.merge(kind: :uniform))
     end
     return nil if variant_type.is_a?(Type) && variant_type.indirect?
 
     pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
     if pt.array? && !pt.string?
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
-      # Slice variant uses the unified :takes_slice path. match_as: true
-      # carries the MATCH AS origin for downstream guards.
-      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig))
+      return CleanupEntry.from(common.merge(kind: :uniform, elem_zig_type: elem_zig))
     elsif pt.map?
-      # Non-array collection payload (HashMap). List-typed payloads are
-      # also array? and hit the :takes_slice arm above first.
-      return CleanupEntry.from(common.merge(kind: :string_map))
+      return CleanupEntry.from(common.merge(kind: :uniform))
     end
     nil
   end
@@ -602,9 +598,9 @@ module CleanupClassifier
 
     # Inlined simple predicate -> kind mappings (no moved guard for
     # streaming / observable -- those are not linearly affine).
-    return entry(:observable, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
+    return entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
     return entry(:frozen, has_moved_guard: false) if ti.frozen?
-    return entry(:inf_stream, has_moved_guard: false) if ti.inf_stream?
+    return entry(:uniform, has_moved_guard: false) if ti.inf_stream?
     if node.respond_to?(:resource_close_zig) && node.resource_close_zig
       return entry(:resource, resource_close_zig: node.resource_close_zig)
     end
@@ -614,13 +610,10 @@ module CleanupClassifier
     return arr if arr
     # AtomicPtr (`@indirect:atomic`): must fire BEFORE classify_rc_or_link
     # since M3.5 auto-promotes ownership=:shared (any_rc? becomes true).
-    return entry(:atomic_ptr) if ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
+    return entry(:uniform) if ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
     rc = classify_rc_or_link(ti, schema_lookup)
     return rc if rc
-    return entry(:locked) if sync == :locked
-    return entry(:write_locked) if sync == :write_locked
-    return entry(:always_mutable) if sync == :always_mutable
-    return entry(:versioned) if sync == :versioned
+    return entry(:uniform) if sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     opt = classify_optional(ti, schema_lookup, node: node)
     return opt if opt
     own = classify_owned_string(ti, node)
@@ -651,24 +644,17 @@ module CleanupClassifier
     return nil if ti.any_rc?
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
-    return entry(:fixed_soa, alloc: wrapper_alloc(ti), has_moved_guard: false) if ti.fixed_soa?
+    return entry(:uniform, alloc: wrapper_alloc(ti), has_moved_guard: false) if ti.fixed_soa?
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
-      # Uniform frame list: cleanup uses the binding's frame allocator.
-      # EscapeGraph.heap_arg_consumer_names promotes any frame list that
-      # would receive heap-owned elements to heap (so we never reach
-      # here with a mixed-provenance container). Elements are then
-      # uniformly frame-allocated (via the append-site dupeValue with
-      # frameAlloc); frame.free is the correct no-op cleanup.
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
-      return entry(:list, alloc: :frame, elem_needs_cleanup: has_heap_elems)
+      return entry(:uniform, alloc: :frame, elem_needs_cleanup: has_heap_elems)
     end
-    return entry(:list, has_moved_guard: true) if ti.list_collection?
-    return entry(:string_map) if ti.map? && !ti.numeric_map?
-    return entry(:numeric_map) if ti.numeric_map?
-    return entry(:pool, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.pool?
-    return entry(:set, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.set_collection?
+    return entry(:uniform, has_moved_guard: true) if ti.list_collection?
+    return entry(:uniform) if ti.map?
+    return entry(:uniform, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.pool?
+    return entry(:uniform, alloc: wrapper_alloc(ti), has_moved_guard: true) if ti.set_collection?
     nil
   end
 
@@ -696,7 +682,7 @@ module CleanupClassifier
     return nil unless elem_has_string_fields?(elem_schema)
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     container_alloc = container_alloc_from(sym, node)
-    entry(:heap_slice, alloc: container_alloc, has_moved_guard: false)
+    entry(:uniform, alloc: container_alloc, has_moved_guard: false)
   end
 
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes
@@ -780,7 +766,7 @@ module CleanupClassifier
     # strings. No vtable / ptrIsFrameOwned needed.
     storage = node_sym&.storage
     alloc = storage == :heap ? :heap : :frame
-    entry(:optional_owned, alloc: alloc)
+    entry(:uniform, alloc: alloc)
   end
 
   sig { params(ti: Type, node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -800,19 +786,19 @@ module CleanupClassifier
     return nil if ti.collection?
 
     return entry(:heap_string) if ti.string?
-    return entry(:heap_slice) if ti.array? && !ti.collection?
+    return entry(:uniform) if ti.array? && !ti.collection?
 
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)
       has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      return entry(:heap_union) if has_heap
+      return entry(:uniform) if has_heap
     end
     if Schemas.field_bearing?(schema)
       has_escapable = schema.fields.any? do |_, v|
         ft = v.is_a?(Type) ? v : Type.new(v.is_a?(AST::StructField) ? (v.type || :Any) : (v || :Any))
         ft.needs_escape_promotion?
       end
-      return entry(:heap_struct) if has_escapable
+      return entry(:uniform) if has_escapable
     end
     nil
   end
@@ -841,9 +827,9 @@ module CleanupClassifier
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)
       has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-      return entry(:heap_union) if has_heap
+      return entry(:uniform) if has_heap
     end
-    entry(:heap_struct)
+    entry(:uniform)
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -887,7 +873,7 @@ module CleanupClassifier
     # was a workaround for the same mismatch class the list-elem case
     # had; no longer needed.
     alloc = ti.provenance_alloc == :frame ? :frame : :heap
-    entry(:struct_with_cleanup_fields, alloc: alloc)
+    entry(:uniform, alloc: alloc)
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -898,7 +884,7 @@ module CleanupClassifier
     return nil if is_copy
     has_heap_variants = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
     alloc = has_heap_variants ? :heap : (ti.provenance_alloc || :frame)
-    entry(:non_copy_union, alloc: alloc)
+    entry(:uniform, alloc: alloc)
   end
 
   # ── Schema helpers ───────────────────────────────────────────────

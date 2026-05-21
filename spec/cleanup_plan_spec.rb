@@ -85,7 +85,7 @@ RSpec.describe CleanupClassifier do
         entry = plan["val"]
         expect(entry).not_to be_nil
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:alloc]).to eq(:heap)
       end
@@ -109,13 +109,13 @@ RSpec.describe CleanupClassifier do
       it "marks original for cleanup" do
         entry = plan["d"]
         expect(entry).not_to be_nil
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
       end
 
       it "marks COPY result for cleanup" do
         entry = plan["d2"]
         expect(entry).not_to be_nil
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -192,7 +192,7 @@ RSpec.describe CleanupClassifier do
       it "marks TAKES slice param for cleanup with heap alloc (callee owns buffer)" do
         entry = plan["items"]
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:takes_slice)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:source_kind]).to eq(:takes_param)
@@ -221,7 +221,7 @@ RSpec.describe CleanupClassifier do
       it "marks AS binding for cleanup (auto-TAKES)" do
         expect(plan["items"]).not_to be_nil
         # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
-        expect(plan["items"][:kind]).to eq(:takes_slice)
+        expect(plan["items"][:kind]).to eq(:uniform)
         expect(plan["items"][:match_as]).to eq(true)
       end
     end
@@ -235,7 +235,7 @@ RSpec.describe CleanupClassifier do
         map_ty = Type.new(:"HashMap<Int64>")
         entry = CleanupClassifier.send(:match_as_entry_for, map_ty, :U, "Items")
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:string_map)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:match_as]).to eq(true)
       end
     end
@@ -263,7 +263,7 @@ RSpec.describe CleanupClassifier do
         expect(entry[:has_moved_guard]).to eq(true)
         # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
         # match_as: true flag now carries the MATCH AS origin.
-        expect(entry[:kind]).to eq(:takes_slice)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:match_as]).to eq(true)
       end
 
@@ -329,7 +329,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup with _moved guard" do
         entry = plan["m"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:string_map)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -405,7 +405,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup (union returned from promoted function)" do
         entry = plan["v"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:heap_union)
+        expect(entry[:kind]).to eq(:uniform)
       end
     end
   end
@@ -430,7 +430,7 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         # Provenance-based: :heap_union (COPY produces :heap provenance)
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -512,7 +512,7 @@ RSpec.describe CleanupClassifier do
       it "pool has _moved guard through collection cleanup" do
         entry = plan["pool"]
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:kind]).to eq(:pool)
+        expect(entry[:kind]).to eq(:uniform)
       end
     end
   end
@@ -537,7 +537,7 @@ RSpec.describe CleanupClassifier do
       entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (CopyNode field gives :heap provenance)
-      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
+      expect([:uniform]).to include(entry[:kind])
     end
   end
 
@@ -557,7 +557,7 @@ RSpec.describe CleanupClassifier do
       entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (COPY field gives :heap provenance)
-      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
+      expect([:uniform]).to include(entry[:kind])
     end
   end
 
@@ -632,7 +632,7 @@ RSpec.describe CleanupClassifier do
       CLEAR
       entry = plan["items"]
       expect(entry).not_to be_nil, "struct array literal with string fields should have cleanup"
-      expect(entry[:kind]).to eq(:heap_slice)
+      expect(entry[:kind]).to eq(:uniform)
     end
   end
 

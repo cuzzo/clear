@@ -271,7 +271,7 @@ class MIRLowering
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node(ast_node)
     zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
-    entry = CleanupEntry.from({ kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t })
+    entry = CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_t })
 
     @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
@@ -329,14 +329,9 @@ class MIRLowering
       rc_variant: :standard, rc_alloc: :heap }
   end
 
-  sig { params(elem_zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
-  def takes_slice_entry(elem_zig_type)
-    { kind: :takes_slice, alloc: :heap, has_moved_guard: false, elem_zig_type: elem_zig_type, zig_type: "[]#{elem_zig_type}" }
-  end
-
   sig { params(zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
-  def list_cleanup_entry(zig_type)
-    { kind: :list, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
+  def uniform_cleanup_entry(zig_type)
+    { kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
   end
 
   sig { returns(T::Hash[Symbol, T.untyped]) }
@@ -356,17 +351,12 @@ class MIRLowering
     when MIR::DupeSlice, MIR::ConcatStr
       heap_string_entry
     when MIR::AllocSlice
-      takes_slice_entry(mir.elem_type)
+      uniform_cleanup_entry("[]#{mir.elem_type}").merge(elem_zig_type: mir.elem_type)
     when MIR::MakeList
-      list_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
-    when MIR::HeapCreate
-      { kind: :heap_struct, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
-    when MIR::ContainerInit
-      list_cleanup_entry(mir.zig_type)
+      uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
+    when MIR::HeapCreate, MIR::ContainerInit
+      uniform_cleanup_entry(mir.zig_type)
     when MIR::DeepCopy
-      # Only :full_value reaches hoist_cleanup (the :passthrough strategy
-      # is a no-op COPY and does not allocate). zig_type is set at lowering
-      # time; if not, derive it from the source AST node's type.
       raise "hoist_cleanup_entry: unexpected DeepCopy strategy :#{mir.strategy}" unless mir.strategy == :full_value
       zig_t = mir.zig_type
       if zig_t.nil?
@@ -376,22 +366,16 @@ class MIRLowering
         bare.provenance = :stack if bare.respond_to?(:provenance=)
         zig_t = bare.zig_type
       end
-      list_cleanup_entry(zig_t)
+      uniform_cleanup_entry(zig_t)
     when MIR::CapWrap
-      # CapWrap creates an Rc/Arc/Locked/RwLocked wrapper on the heap.
       if mir.sync_fn
-        kind = mir.sync_fn == "rwLockedCreate" ? :write_locked : :locked
-        { kind: kind, alloc: :heap, has_moved_guard: false, zig_type: mir.sync_type }
+        uniform_cleanup_entry(mir.sync_type)
       elsif mir.own_fn
         rc_cleanup_entry(ast_node, source: "MIR::CapWrap (own_fn=#{mir.own_fn})")
-      else
-        # :passthrough / :local -- inner value passes through; no additional cleanup.
-        nil
       end
     when MIR::SharePromote
       rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
     when MIR::Cast
-      # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call, MIR::TryCatch
       cleanup_entry_for_heap_result(ast_node)
@@ -410,11 +394,11 @@ class MIRLowering
     if ti.string?
       heap_string_entry
     elsif ti.list_collection?
-      list_cleanup_entry(ti.zig_type)
+      uniform_cleanup_entry(ti.zig_type)
     else
       zig_t = (Type.new(ti.resolved).zig_type rescue nil)
       return nil unless zig_t
-      { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
+      uniform_cleanup_entry(zig_t)
     end
   end
 
@@ -7353,7 +7337,7 @@ class MIRLowering
       # ErrCleanup: if any promote call fails, free partially-promoted fields.
       # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
       stmts << MIR::ErrCleanup.new("__ret",
-        CleanupEntry.from({ kind: :struct_with_cleanup_fields, alloc: :heap, has_moved_guard: false, zig_type: zig_type }))
+        CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type }))
       if ret_field_promote[:fields]
         # Per-field promotion: for each named heap field of __ret, emit
         # `try CheatLib.promote(@TypeOf(__ret.f), rt, &__ret.f);`.

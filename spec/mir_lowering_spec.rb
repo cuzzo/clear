@@ -170,7 +170,7 @@ RSpec.describe MIRLowering do
 
   describe "old MIR node translation" do
     it "translates MIR::Drop to MIR::Cleanup" do
-      entry = { kind: :list, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
+      entry = { kind: :uniform, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
       drop = MIR::Drop.new(tok, "items", :list, :frame, false, nil, nil, nil)
       drop.cleanup_entry = entry
 
@@ -1250,7 +1250,7 @@ RSpec.describe MIRLowering do
       expect(result[1].init).to be_a(MIR::DeepCopy)
       expect(result[1].init.strategy).to eq(:full_value)
       expect(result[2]).to be_a(MIR::Cleanup)
-      expect(result[2].cleanup_entry).to include(kind: :locked, alloc: :heap)
+      expect(result[2].cleanup_entry).to include(kind: :uniform, alloc: :heap)
     end
 
     it "lowers MOVE as identity" do
@@ -2692,7 +2692,7 @@ RSpec.describe MIRLowering do
       end
 
       expect(alloc&.alloc).to eq(:heap)
-      expect(cleanup&.cleanup_entry).to include(kind: :list, alloc: :heap)
+      expect(cleanup&.cleanup_entry).to include(kind: :uniform, alloc: :heap)
       expect(ret_stmt).not_to be_nil
     end
 
@@ -3311,22 +3311,19 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
     expect(l.send(:hoist_cleanup_entry, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), nil)).to include(kind: :heap_string)
     expect(l.send(:hoist_cleanup_entry, MIR::ConcatStr.new([MIR::Ident.new("a"), MIR::Ident.new("b")], :heap, "rt"), nil)).to include(kind: :heap_string)
-    expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
-    expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :list, zig_type: "std.ArrayListUnmanaged(i64)")
-    expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :heap_struct, zig_type: "Node")
-    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :list)
+    expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :uniform, elem_zig_type: "i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :uniform, zig_type: "std.ArrayListUnmanaged(i64)")
+    expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :uniform, zig_type: "Node")
+    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :uniform)
   end
 
   it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do
-    # The old :list_shallow / :list_deep strategies were removed: any list/
-    # slice COPY now stamps zig_type = "[]ElemT" and strategy :full_value,
-    # routing the runtime through CheatLib.dupeValue's slice arm.
     l = lowering
 
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]i64", "i64", :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]i64")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]Value", "Value", :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]Value")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "Value")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap), nil)).to include(kind: :list, zig_type: "[]const u8")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]i64", "i64", :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]Value", "Value", :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]const u8")
   end
 
   it "raises when a heap DeepCopy uses a strategy other than :full_value" do
@@ -3350,8 +3347,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     passthrough = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :passthrough, nil, nil, nil, :heap)
     shared_node = typed_node(Type.new(:Box, ownership: :shared))
 
-    expect(l.send(:hoist_cleanup_entry, locked, nil)).to include(kind: :locked, zig_type: "CheatLib.Locked(Box)")
-    expect(l.send(:hoist_cleanup_entry, rw_locked, nil)).to include(kind: :write_locked, zig_type: "CheatLib.RwLocked(Box)")
+    expect(l.send(:hoist_cleanup_entry, locked, nil)).to include(kind: :uniform, zig_type: "CheatLib.Locked(Box)")
+    expect(l.send(:hoist_cleanup_entry, rw_locked, nil)).to include(kind: :uniform, zig_type: "CheatLib.RwLocked(Box)")
     expect(l.send(:hoist_cleanup_entry, owned, shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
     expect(l.send(:hoist_cleanup_entry, passthrough, nil)).to be_nil
     expect(l.send(:hoist_cleanup_entry, MIR::SharePromote.new(MIR::Ident.new("box"), "Box", :heap), shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
@@ -3361,6 +3358,6 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     l = lowering
     inner = MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap)
 
-    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :list, zig_type: "[]const u8")
+    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :uniform, zig_type: "[]const u8")
   end
 end

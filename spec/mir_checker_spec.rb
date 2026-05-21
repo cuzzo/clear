@@ -60,7 +60,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
-        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :heap, has_moved_guard: false })),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("hpt_ok", body))
       expect(errors).to be_empty
@@ -101,7 +101,7 @@ RSpec.describe MIRChecker do
       body = [
         MIR::AllocMark.new("x", :frame),
         MIR::Let.new("x", call, false, nil, nil),
-        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :frame, has_moved_guard: false })),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :frame, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("hpt_bound_frame_alloc", body))
       expect(errors.any? { |e| e.include?("OWNED_RETURN_ALLOC_NOT_HEAP") && e.include?("x") }).to be true
@@ -213,7 +213,7 @@ RSpec.describe MIRChecker do
       iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
       iz.allocs = { key_alloc: :heap, val_alloc: :heap }
       iz.target_var = "map"
-      cleanup = MIR::Cleanup.new("map", CleanupEntry.from({ kind: :string_map, alloc: :heap, has_moved_guard: false,
+      cleanup = MIR::Cleanup.new("map", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false,
                                            zig_type: "CheatLib.StringMap(i64)" }))
       body = [
         MIR::AllocMark.new("map", :heap),
@@ -797,7 +797,7 @@ RSpec.describe MIRChecker do
       fn1 = fn_def("good", [
         MIR::AllocMark.new("x", :heap),
         MIR::Let.new("x", call1, false, nil, nil),
-        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :heap_slice, alloc: :heap, has_moved_guard: false })),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
       ])
 
       call2 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)

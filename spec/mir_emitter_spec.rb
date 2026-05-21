@@ -416,7 +416,7 @@ RSpec.describe MIREmitter do
 
   describe "Cleanup" do
     it "emits unguarded defer for list" do
-      entry = CleanupEntry.from({ kind: :list, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
       node = MIR::Cleanup.new("nums", entry)
       zig = e.emit(node)
       expect(zig).to include("defer CheatLib.cleanup(@TypeOf(nums), rt.frameAlloc(), &nums);")
@@ -442,7 +442,7 @@ RSpec.describe MIREmitter do
     end
 
     it "emits pool cleanup" do
-      entry = CleanupEntry.from({ kind: :pool, zig_type: "CheatLib.Pool(User, 100)", alloc: :heap, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.Pool(User, 100)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("pool", entry)
       zig = e.emit(node)
       # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
@@ -475,7 +475,7 @@ RSpec.describe MIREmitter do
     end
 
     it "emits locked cleanup" do
-      entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
       zig = e.emit(node)
       expect(zig).to include("defer CheatLib.cleanup(@TypeOf(counter), rt.heapAlloc(), &counter);")

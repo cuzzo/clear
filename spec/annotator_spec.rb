@@ -2241,7 +2241,7 @@ RSpec.describe SemanticAnnotator do
         # :heap_struct_plain merged into :heap_struct -- both routed
         # through CheatLib.cleanup's struct-recursive arm; the runtime
         # collapses the no-field case to a noop via inline-for.
-        expect(fn.cleanup_bindings["x"][:kind]).to eq(:heap_struct)
+        expect(fn.cleanup_bindings["x"][:kind]).to eq(:uniform)
       end
 
       it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
@@ -2253,7 +2253,7 @@ RSpec.describe SemanticAnnotator do
           END
         FLUX
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make" }
-        expect(fn.cleanup_bindings["p"][:kind]).to eq(:heap_struct)
+        expect(fn.cleanup_bindings["p"][:kind]).to eq(:uniform)
       end
 
       it "does NOT promote primitives (Float64)" do
