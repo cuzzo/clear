@@ -391,68 +391,27 @@ module CleanupClassifier
 
   sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[T.untyped]) }
   private_class_method def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
-    AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-      next if node.is_a?(AST::BindExpr) && node.mode == :assign
+    classify_in_body = ->(b) {
+      AST.walk_body(b) do |node|
+        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+        next if node.is_a?(AST::BindExpr) && node.mode == :assign
 
-      var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-      ti = node.full_type
-      cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
-      # Stamp on node for identity-based lookup in lower_var_decl (avoids
-      # same-name collisions when two vars share a name in different scopes).
-      node.mir_binding_entry = cleanup if cleanup
-      bindings[var_name] = cleanup if cleanup
-    end
-    # AST.walk_body doesn't recurse into MethodCall/FuncCall args, so BgBlock
-    # bodies used as call arguments are invisible to the visitor above.
-    # Walk expression-position BgBlock bodies explicitly so variables declared
-    # inside outer BG fibers (e.g. `~T[INF]` streams) are classified correctly.
-    T.must(walk_expression_bg_bodies(body, promoted_fns, schema_lookup, bindings))
-  end
-
-  # Walk BgBlock bodies found in expression positions within a statement list.
-  # Only handles BgBlock (outer consumer fiber), not BgStreamBlock (generator
-  # fiber bodies have special YIELD handling and no heap-cleanup variables).
-  sig { params(body: T.nilable(T::Array[T.untyped]), promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
-  private_class_method def self.walk_expression_bg_bodies(body, promoted_fns, schema_lookup, bindings)
-    return unless body.is_a?(Array)
-    body.each do |stmt|
-      bg_bodies_from_expr(stmt).each do |bg_body|
-        walk_bindings(bg_body, promoted_fns, schema_lookup, bindings)
+        var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+        cleanup = classify_binding(var_name, node.full_type, node, promoted_fns, schema_lookup)
+        # Stamp on node for identity-based lookup in lower_var_decl (avoids
+        # same-name collisions when two vars share a name in different scopes).
+        node.mir_binding_entry = cleanup if cleanup
+        bindings[var_name] = cleanup if cleanup
       end
-      # Recurse into control-flow containers.
-      case stmt
-      when AST::IfStatement
-        walk_expression_bg_bodies(stmt.then_branch, promoted_fns, schema_lookup, bindings)
-        walk_expression_bg_bodies(stmt.else_branch, promoted_fns, schema_lookup, bindings)
-      when AST::ForRange, AST::ForEach
-        walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
-      when AST::WhileLoop
-        walk_expression_bg_bodies(stmt.do_branch, promoted_fns, schema_lookup, bindings)
-      when AST::MatchStatement
-        stmt.cases.each { |c| walk_expression_bg_bodies(c.body, promoted_fns, schema_lookup, bindings) }
-        walk_expression_bg_bodies(stmt.default_case, promoted_fns, schema_lookup, bindings)
-      when AST::WithBlock
-        walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
-      end
-    end
-  end
-
-  # Extract BgBlock bodies from expression-position BG blocks in a statement.
-  # Returns [] if none; only BgBlock (not BgStreamBlock).
-  sig { params(stmt: T.untyped).returns(T::Array[T::Array[T.untyped]]) }
-  private_class_method def self.bg_bodies_from_expr(stmt)
-    result = []
-    case stmt
-    when AST::VarDecl, AST::BindExpr, AST::Assignment
-      val = stmt.value
-      result << val.body if val.is_a?(AST::BgBlock) && val.body
-    when AST::MethodCall
-      stmt.args.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
-    when AST::FuncCall
-      stmt.args.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
-    end
-    result
+    }
+    classify_in_body.call(body)
+    # AST.walk_body recurses into statement-position HasBodies but not into
+    # expression-position BG blocks (`x = BG STREAM { ... }`). AST.each_bg_block
+    # is the canonical "every BG fiber reachable from this body" walker; its
+    # body is exactly the set of additional cleanup-bearing scopes we must
+    # classify.
+    AST.each_bg_block(body) { |bg| classify_in_body.call(bg.body) if bg.body }
+    bindings.values
   end
 
   # ── Walk TAKES parameters ───────────────────────────────────────

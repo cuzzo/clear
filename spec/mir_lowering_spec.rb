@@ -3344,6 +3344,12 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     }.to raise_error(/DeepCopy with unknown strategy :unknown_strategy/)
   end
 
+  it "raises when rc_cleanup_entry's ast_node carries no Type" do
+    expect {
+      lowering.send(:rc_cleanup_entry, nil, source: "test")
+    }.to raise_error(/test has no zig_type/)
+  end
+
   it "classifies capability wrappers and share promotion cleanup entries" do
     l = lowering
 
