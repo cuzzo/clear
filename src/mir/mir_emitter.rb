@@ -1012,28 +1012,27 @@ class MIREmitter
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
          :takes_union, :heap_string,
          :inf_stream, :observable, :versioned, :takes_slice,
-         :heap_struct_plain
+         :heap_struct_plain, :frozen
       is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
       use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
-      # :heap_struct_plain has no fixed zig_type at classify time -- the
-      # binding can be a value-struct or *Struct, so we defer to comptime
-      # via @TypeOf(name). cleanup() dispatches on the actual shape.
+      # :frozen lives in a paired `name__buf` binding; rebind locally.
+      use_name = entry.kind == :frozen ? "#{name}__buf" : name
+      # :heap_struct_plain and :frozen have no fixed zig_type at classify
+      # time -- the binding shape (value-struct, *Struct, or Frozen(T))
+      # is known only at the call site, so we defer to comptime
+      # @TypeOf(...). cleanup() dispatches on the actual shape.
       use_type =
         if is_string
           "[]const u8"
-        elsif entry.kind == :heap_struct_plain
-          "@TypeOf(#{name})"
+        elsif entry.kind == :heap_struct_plain || entry.kind == :frozen
+          "@TypeOf(#{use_name})"
         else
           zig_type
         end
       use_guard = is_string ? !errdefer : g
-      guarded_cleanup(name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
-
-    when :frozen
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
+      guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
 
     when :rc
       rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
