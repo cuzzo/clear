@@ -542,11 +542,7 @@ module EscapeGraph
       # Already heap? No promotion needed.
       next if receiver.symbol&.heap_provenance?
       (call.args || []).each do |arg|
-        carries = arg_carries_heap?(arg, ret_heap, already_heap)
-        if ENV["AUDIT_PROMOTE_DEBUG"]
-          STDERR.puts "[promote-debug] line=#{call.token&.line} receiver=#{receiver.name} arg=#{arg.class.name.split('::').last} carries=#{carries}"
-        end
-        if carries
+        if arg_carries_heap?(arg, ret_heap, already_heap)
           out << receiver.name.to_s
           break
         end
