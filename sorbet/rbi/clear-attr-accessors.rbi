@@ -27,10 +27,6 @@ class AST::Assignment
   sig { params(value: T.untyped).returns(T.untyped) }
   def compound_op=(value); end
   sig { returns(T.untyped) }
-  def container_promote_zig_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def container_promote_zig_type=(value); end
-  sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_pre_cleanup=(value); end
@@ -135,10 +131,6 @@ class AST::BinaryOp
   def paren_bind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def paren_bind=(value); end
-  sig { returns(T.untyped) }
-  def storage; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def storage=(value); end
   sig { returns(T.untyped) }
   def string_concat; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -558,21 +550,6 @@ class AST::ReturnNode
   def catch_string_dupe_ret; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def catch_string_dupe_ret=(value); end
-  sig { returns(T.untyped) }
-  def promote_ret_wrap; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def promote_ret_wrap=(value); end
-  sig { returns(T.untyped) }
-  def ret_field_promote_data; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def ret_field_promote_data=(value); end
-end
-
-class AST::StringConcat
-  sig { returns(T.untyped) }
-  def storage; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def storage=(value); end
 end
 
 class AST::StructLit
@@ -739,10 +716,6 @@ class Assignment
   sig { params(value: T.untyped).returns(T.untyped) }
   def compound_op=(value); end
   sig { returns(T.untyped) }
-  def container_promote_zig_type; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def container_promote_zig_type=(value); end
-  sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_pre_cleanup=(value); end
@@ -866,10 +839,6 @@ class BinaryOp
   def paren_bind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def paren_bind=(value); end
-  sig { returns(T.untyped) }
-  def storage; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def storage=(value); end
   sig { returns(T.untyped) }
   def string_concat; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1652,14 +1621,6 @@ class ReturnNode
   def catch_string_dupe_ret; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def catch_string_dupe_ret=(value); end
-  sig { returns(T.untyped) }
-  def promote_ret_wrap; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def promote_ret_wrap=(value); end
-  sig { returns(T.untyped) }
-  def ret_field_promote_data; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def ret_field_promote_data=(value); end
 end
 
 class Schemas::EnumSchema
@@ -1778,13 +1739,6 @@ class StackVerifier
   def module_prefix; end
 end
 
-class StringConcat
-  sig { returns(T.untyped) }
-  def storage; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def storage=(value); end
-end
-
 class StructLit
   sig { returns(T.untyped) }
   def borrowed_field_names; end
@@ -1824,6 +1778,10 @@ class SymbolEntry
   def close_zig; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def close_zig=(value); end
+  sig { returns(T::Boolean) }
+  def init_contents_heap; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def init_contents_heap=(value); end
   sig { returns(T.untyped) }
   def invalid_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }

@@ -34,7 +34,8 @@ class CleanupEntry < Hash
   end
   def self.build(kind, alloc: :heap, has_moved_guard: true, **extra)
     if ENV["AUDIT_PROVENANCE_MISMATCH"] && (kind == :list_with_elem_cleanup || alloc == :cleanup)
-      warn "[mismatch] #{ENV["AUDIT_CURRENT_FILE"] || "?"}  kind=#{kind} alloc=#{alloc}  #{caller_locations(1, 3).map(&:to_s).join(" <- ")}"
+      cl = caller_locations(1, 3) || []
+      warn "[mismatch] #{ENV["AUDIT_CURRENT_FILE"] || "?"}  kind=#{kind} alloc=#{alloc}  #{cl.map(&:to_s).join(" <- ")}"
     end
     e = new
     e[:needs_cleanup] = true

@@ -6904,7 +6904,7 @@ class MIRLowering
   # iteration-variable decl).
   sig { params(body: T.untyped, mark_per_iter: T.untyped, tight: T.untyped, after_mark: T::Array[T.untyped]).returns(T.untyped) }
   def prepend_loop_mark(body, mark_per_iter:, tight:, after_mark: [])
-    suffix = after_mark + T.must(body)
+    suffix = after_mark + body
     return suffix unless !tight && mark_per_iter && @current_fn_has_rt
     rt = MIR::Ident.new(@rt_name)
     @loop_mark_counter = (@loop_mark_counter || 0) + 1
@@ -6924,8 +6924,8 @@ class MIRLowering
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
-    if !node.tight && @current_fn_has_rt && !loop_body_exits?(T.must(body))
-      T.must(body) << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
     MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight)
@@ -6951,8 +6951,8 @@ class MIRLowering
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
-    if !node.tight && @current_fn_has_rt && !loop_body_exits?(T.must(body))
-      T.must(body) << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
     MIR::WhileStmt.new(cond, body, node.binding_name, nil, node.mark_per_iter, false)
@@ -6982,7 +6982,7 @@ class MIRLowering
 
     # Yield check at end of body
     if @current_fn_has_rt
-      T.must(body) << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
     if ct.map?
@@ -7008,7 +7008,7 @@ class MIRLowering
         nil
       )
       value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
-      full_body = [skip_dead, value_bind] + T.must(body)
+      full_body = [skip_dead, value_bind] + body
       MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
@@ -7041,7 +7041,7 @@ class MIRLowering
       ptr_var   = "__kptr_#{@for_counter}"
       iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
       deref     = MIR::Let.new(var, MIR::FieldGet.new(MIR::Ident.new(ptr_var), "*"), false, nil, nil)
-      full_body = [deref, MIR::Suppress.new(var)] + T.must(body)
+      full_body = [deref, MIR::Suppress.new(var)] + body
       while_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
         full_body, ptr_var, nil, mark_per_iter, tight
@@ -7345,7 +7345,7 @@ class MIRLowering
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
-    node.is_a?(AST::Locatable) && node.heap_provenance?
+    !!(node.is_a?(AST::Locatable) && node.heap_provenance?)
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs

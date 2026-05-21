@@ -1043,7 +1043,7 @@ class MIREmitter
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
     # Uniquify the blk label across nested DeepCopy emits in the same scope.
-    @deep_copy_counter = (@deep_copy_counter || 0) + 1
+    @deep_copy_counter = T.let(T.let(@deep_copy_counter || 0, Integer) + 1, T.nilable(Integer))
     bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
     when :passthrough
@@ -1377,7 +1377,7 @@ class MIREmitter
       # Uniquify the blk label so multiple ItemsAccess emits in the same
       # Zig scope don't redefine each other. Zig rejects duplicate labels
       # even in nested expression positions.
-      @items_block_counter = (@items_block_counter || 0) + 1
+      @items_block_counter = T.let(T.let(@items_block_counter || 0, Integer) + 1, T.nilable(Integer))
       label = "blk_items_#{@items_block_counter}"
       "#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
     else

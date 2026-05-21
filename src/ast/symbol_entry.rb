@@ -314,5 +314,6 @@ class SymbolEntry
     @is_param = T.let(false, T::Boolean)
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
+    @init_contents_heap = T.let(false, T::Boolean)
   end
 end

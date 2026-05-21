@@ -561,7 +561,7 @@ module EscapeGraph
   #   - a CopyNode whose alloc is :heap (the existing stamper writes
   #     :frame for frame containers; :heap means the source is heap-bound)
   #   - a StructLit/UnionVariantLit whose fields recursively carry heap
-  sig { params(arg: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
+  sig { params(arg: T.untyped, ret_heap: RetHeap, already_heap: T::Set[T.untyped]).returns(T::Boolean) }
   def arg_carries_heap?(arg, ret_heap, already_heap = Set.new)
     arg = unwrap(arg)
     case arg

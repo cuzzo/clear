@@ -1643,9 +1643,10 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :deep_copy
-    attr_writer :alloc
+    sig { params(val: Symbol).returns(Symbol) }
+    def alloc=(val); T.must(@alloc = T.let(val, T.nilable(Symbol))); end
     sig { returns(Symbol) }
-    def alloc; @alloc ||= :heap; end
+    def alloc; @alloc = T.let(@alloc, T.nilable(Symbol)); @alloc || :heap; end
   end
   CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
   ShareNode         = Struct.new(:token, :value) { include Locatable }  # SHARE expr              -> promote/retain as T@shared (semantic lowering follows)
