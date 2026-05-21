@@ -619,7 +619,7 @@ module CleanupClassifier
   private_class_method def self.classify_atomic_ptr(ti)
     return nil unless ti.respond_to?(:atomic?) && ti.atomic?
     return nil unless ti.respond_to?(:indirect?) && ti.indirect?
-    entry(:atomic_ptr, alloc: :heap)
+    entry(:atomic_ptr)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
@@ -650,7 +650,7 @@ module CleanupClassifier
   private_class_method def self.classify_observable(ti)
     return nil unless ti.tense_observable?
     return nil if ti.promise_list?
-    entry(:observable, alloc: :heap, has_moved_guard: false)
+    entry(:observable, has_moved_guard: false)
   end
 
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
@@ -659,7 +659,7 @@ module CleanupClassifier
   sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_frozen(ti)
     return nil unless ti.frozen?
-    entry(:frozen, alloc: :heap, has_moved_guard: false)
+    entry(:frozen, has_moved_guard: false)
   end
 
   sig { params(ti: Type).returns(T.nilable(CleanupEntry)) }
@@ -678,7 +678,7 @@ module CleanupClassifier
     return nil if ti.any_rc?
 
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
-    return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
+    return entry(:fixed_soa, alloc: wrapper_alloc(ti), has_moved_guard: false, zig_type: ti.zig_type) if ti.fixed_soa?
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
@@ -689,9 +689,18 @@ module CleanupClassifier
     return entry(:list, has_moved_guard: true, zig_type: ti.zig_type) if ti.list_collection?
     return entry(:string_map, zig_type: ti.zig_type) if ti.map? && !ti.numeric_map?
     return entry(:numeric_map, zig_type: ti.zig_type) if ti.numeric_map?
-    return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: true, zig_type: ti.zig_type) if ti.pool?
-    return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: true, zig_type: ti.zig_type) if ti.set_collection?
+    return entry(:pool, alloc: wrapper_alloc(ti), has_moved_guard: true, zig_type: ti.zig_type) if ti.pool?
+    return entry(:set, alloc: wrapper_alloc(ti), has_moved_guard: true, zig_type: ti.zig_type) if ti.set_collection?
     nil
+  end
+
+  # Single-source allocator selection for type-intrinsic-heap wrappers
+  # (pool, set, fixed_soa, rc/arc). Reads Type-level provenance when explicit;
+  # otherwise defaults to :heap because all these shapes are always heap-
+  # allocated at the wrapper level.
+  sig { params(ti: Type).returns(Symbol) }
+  private_class_method def self.wrapper_alloc(ti)
+    ti.provenance_alloc || :heap
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -731,9 +740,9 @@ module CleanupClassifier
         rc_variant: :optional,
         rc_release_func: ti.shared? ? "arcRelease" : "rcRelease",
         base_zig: base_zig,
-        rc_alloc: ti.provenance_alloc || :heap)
+        rc_alloc: wrapper_alloc(ti))
     else
-      rc_alloc = ti.provenance_alloc || :heap
+      rc_alloc = wrapper_alloc(ti)
       e = entry(:rc, rc_variant: :standard, rc_alloc: rc_alloc)
       if ti.any_rc? && !ti.sync
         schema = schema_lookup.call(ti.resolved) rescue nil
@@ -776,7 +785,7 @@ module CleanupClassifier
     return nil unless ti.string?
     value = node.respond_to?(:value) ? node.value : nil
     return nil unless value.is_a?(AST::CopyNode)
-    entry(:heap_string, alloc: :heap, has_moved_guard: true)
+    entry(:heap_string, has_moved_guard: true)
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
