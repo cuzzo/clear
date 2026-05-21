@@ -6646,6 +6646,7 @@ class MIRLowering
         transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                      else op[:value_transforms] || []
                      end
+        already_heap_dupe = false
         transforms.each do |transform|
           case transform
           when :dupe_string_literal
@@ -6657,9 +6658,17 @@ class MIRLowering
               if should_dupe_borrowed_union?(val_node, val_ti)
                 zig_t = bare_zig_type(val_ti)
                 val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
+                already_heap_dupe = true
               end
             end
           when :container_promote
+            # Skip when :dupe_borrowed_union already wrapped this value
+            # in dupeUnionValue with heapAlloc -- the result is heap and
+            # a subsequent promote() would double-dupe (the runtime's
+            # ptrIsFrameOwned check is the workaround for this exact
+            # redundancy). Skipping here makes the runtime check dead
+            # for the dupeUnionValue case.
+            next if already_heap_dupe
             unless val_ti&.string?
               zig_type = node.container_promote_zig_type
               if zig_type
@@ -6726,6 +6735,7 @@ class MIRLowering
     transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                  else op[:value_transforms] || []
                  end
+    already_heap_dupe = false
     transforms.each do |transform|
       case transform
       when :dupe_string_literal
@@ -6737,9 +6747,15 @@ class MIRLowering
           if should_dupe_borrowed_union?(val_node, val_ti)
             zig_t = bare_zig_type(val_ti)
             val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
+            already_heap_dupe = true
           end
         end
       when :container_promote
+        # Skip when :dupe_borrowed_union already wrapped this value
+        # in dupeUnionValue with heapAlloc -- subsequent promote would
+        # double-dupe (the runtime's ptrIsFrameOwned check is the
+        # workaround for this exact redundancy).
+        next if already_heap_dupe
         unless val_ti&.string?
           zig_type = node.container_promote_zig_type
           if zig_type

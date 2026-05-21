@@ -3666,11 +3666,13 @@ pub const CheatLib = struct {
 
         // 1. Strings: dupe only frame-arena strings to heap.
         // Heap strings (from COPY, toString, etc.) are already escaped —
-        // duping them again leaks the original. The compiler emits
-        // promote() at sites where the payload could be EITHER frame
-        // OR already-heap (e.g. dupeUnionValue is wrapped in promote()
-        // even when the dupe produces a heap value); narrowing that
-        // emit-side gap would let the check go away.
+        // duping them again leaks the original. The remaining caller
+        // for this check is promote() recursing through StructLit
+        // fields where SOME fields are heap (auto-COPY) and others
+        // are frame (Identifier) -- the per-field provenance is
+        // compile-time known but not threaded through to the emit; a
+        // future refactor that promotes frame fields explicitly
+        // BEFORE the StructLit construction would let this check go.
         if (T == []const u8 or T == []u8) {
             if (value.len == 0) return;
             if (rt.ptrIsFrameOwned(value.*.ptr)) {
