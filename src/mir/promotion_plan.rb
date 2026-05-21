@@ -518,7 +518,10 @@ module CleanupClassifier
     if Schemas.inline_struct?(variant_type)
       return nil unless Type.variant_has_heap?(variant_type)
       union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
-      return CleanupEntry.from(common.merge(kind: :match_as_inline_struct,
+      # Inline-struct variant cleanup uses the unified :non_copy_union path
+      # (same CheatLib.cleanup emit). match_as: true distinguishes the MATCH
+      # AS origin for downstream guards.
+      return CleanupEntry.from(common.merge(kind: :non_copy_union,
                                             zig_type: "#{union_zig}_#{variant_name}"))
     end
     return nil if variant_type.is_a?(Type) && variant_type.indirect?
@@ -526,7 +529,9 @@ module CleanupClassifier
     pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
     if pt.array? && !pt.string?
       elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
-      return CleanupEntry.from(common.merge(kind: :match_as_slice, elem_zig_type: elem_zig))
+      # Slice variant uses the unified :takes_slice path. match_as: true
+      # carries the MATCH AS origin for downstream guards.
+      return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig))
     elsif pt.collection? || pt.map?
       zig_type = pt.zig_type rescue pt.resolved.to_s
       return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list,

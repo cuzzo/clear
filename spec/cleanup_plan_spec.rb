@@ -220,7 +220,9 @@ RSpec.describe CleanupClassifier do
 
       it "marks AS binding for cleanup (auto-TAKES)" do
         expect(plan["items"]).not_to be_nil
-        expect(plan["items"][:kind]).to eq(:match_as_slice)
+        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
+        expect(plan["items"][:kind]).to eq(:takes_slice)
+        expect(plan["items"][:match_as]).to eq(true)
       end
     end
   end
@@ -245,7 +247,10 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:kind]).to eq(:match_as_slice)
+        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
+        # match_as: true flag now carries the MATCH AS origin.
+        expect(entry[:kind]).to eq(:takes_slice)
+        expect(entry[:match_as]).to eq(true)
       end
 
       it "uses heap allocator (slice contents may be heap-allocated via COPY/promote)" do

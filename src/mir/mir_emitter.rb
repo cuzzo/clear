@@ -1036,8 +1036,7 @@ class MIREmitter
          :heap_slice, :heap_union, :heap_struct,
          :optional_owned, :atomic_ptr,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
-         :takes_union, :match_as_inline_struct,
-         :heap_string
+         :takes_union, :heap_string
       is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
@@ -1088,7 +1087,7 @@ class MIREmitter
         guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
       end
 
-    when :takes_slice, :match_as_slice
+    when :takes_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
       guarded_defer(name, body, g, errdefer:)
 
