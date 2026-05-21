@@ -4,192 +4,19 @@ require "sorbet-runtime"
 require_relative "cleanup_entry"
 require_relative "../ast/type"
 
-# Pass C: Escape Promotion Planning
-#
-# Computed after annotation (full type + ownership info available).
-# Produces a concrete plan per function that the transpiler executes
-# mechanically with zero decisions.
-#
-# Zig's CheatLib.promote(T, rt, &x) handles the type-specific logic:
-#   ArrayList  -> promoteList (dupes .items to heap)
-#   StringMap  -> .alloc = heapAlloc (O(1) pointer swap)
-#   String     -> heapAlloc.dupe (O(N) copy)
-#   Struct     -> recurse fields
-#   Union      -> promote active variant
-#
-# Ruby just decides WHICH variables/values to call it on.
-
+# Predicates consumed by MIRPass to gate the Phase 0.5 hoist
+# (hoist_return_subexprs_to_heap!). The old PromotionClassifier owned a
+# full per-function promote plan; after Path A, the hoist decides storage
+# at declaration / construction time and the runtime promote subsystem is
+# dead. Only these two predicates survive.
 module PromotionClassifier
-    extend T::Sig
+  extend T::Sig
 
-  # Performance optimization: identifies frame variables that always escape via return
-  # and upgrades them to heap at declaration (avoiding runtime CheatLib.promote calls).
-  #
-  # NOT a correctness requirement. Safety is enforced by OwnershipDataflow which marks
-  # returned identifiers as :moved regardless of allocator. Without PromotionClassifier,
-  # programs still work correctly -- they just do more runtime frame-to-heap promotions.
-  #
-  # Classify escape promotions for a single function. Returns a
-  # MIR::PromotionPlan; an empty plan (.empty? == true) signals "no
-  # promotion needed."
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(MIR::PromotionPlan) }
-  def self.classify(fn_node, schema_lookup:)
-    empty_plan = MIR::PromotionPlan.new(var_promotes: [], struct_promote: nil,
-                                        promote_return_ids: nil, unhandled_promote_fields: nil)
-    return empty_plan unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_has_escapable_return?(fn_node, schema_lookup)
-
-    ret_type_sym = fn_node.return_type
-    return empty_plan unless ret_type_sym
-    ret_type = ret_type_sym.is_a?(Type) ? ret_type_sym : Type.new(ret_type_sym)
-    # Unwrap `!T` so the union/struct schema lookup below (and string?/Void
-    # short-circuits) sees the underlying type. Post-#338, `RETURNS !Val`
-    # is common; without this unwrap, schema_lookup(:!Val) misses the
-    # registered :Val schema and the promote path never fires, leaving
-    # frame-allocated union variant fields dangling at the caller.
-    if ret_type.error_union? && ret_type.payload_type
-      ret_type = ret_type.payload_type
-    end
-    return empty_plan if ret_type.void?
-    return empty_plan if ret_type.string?
-
-    return_nodes = collect_returns(fn_node.body)
-    return empty_plan if return_nodes.empty?
-
-    var_promotes = T.let([], T::Array[MIR::VarPromote])
-    handled_fields = Set.new
-    struct_promote = T.let(nil, T.nilable(String))
-    promote_return_ids = Set.new
-
-    return_nodes.each do |ret_node|
-      val = ret_node.value
-      next unless val
-
-      if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
-        val.fields.each do |fname, fval|
-          fti = Type.from_node(fval)
-
-          fval_heap = fval.is_a?(AST::Locatable) && fval.heap_provenance?
-          fval_rodata = fval.is_a?(AST::Locatable) && fval.rodata_provenance?
-          if fval_heap || fval_rodata
-            handled_fields << fname.to_s
-            next
-          end
-
-          next unless fval.is_a?(AST::Identifier)
-          next unless fti&.needs_escape_promotion? && !fti&.string? && !fval.symbol&.heap_provenance?
-
-          var_promotes << MIR::VarPromote.new(
-            var: fval.name,
-            zig_type: fti.zig_type,
-            elem_zig_type: elem_zig_type_for(fti),
-          )
-          handled_fields << fname.to_s
-        end
-
-        if var_promotes.empty?
-          needs_promote = val.fields.any? do |_, fval|
-            fti = Type.from_node(fval)
-            fval_heap = fval.is_a?(AST::Locatable) && fval.heap_provenance?
-            fval_rodata = fval.is_a?(AST::Locatable) && fval.rodata_provenance?
-            next false if fval_heap || fval_rodata
-            fti&.string? || fti&.array? || fti&.collection?
-          end
-          if needs_promote
-            ret_schema = schema_lookup.call(ret_type.resolved) rescue nil
-            if Schemas.union?(ret_schema)
-              has_heap = (ret_schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-              if has_heap
-                struct_promote ||= zig_type_for(ret_type)
-                promote_return_ids << ret_node.object_id
-              end
-            end
-          end
-        end
-
-      elsif val.is_a?(AST::Identifier)
-        ti = Type.from_node(val)
-        next if val.symbol&.takes
-        next if val.symbol&.init_contents_heap
-        needs_escape = (ti&.needs_escape_promotion? || struct_has_promotable_fields?(ti, schema_lookup)) &&
-                       !ti&.string? && !val.symbol&.heap_provenance?
-        if needs_escape
-          if ti.list_collection? || ti.map?
-            var_promotes << MIR::VarPromote.new(
-              var: val.name,
-              zig_type: ti.zig_type,
-              elem_zig_type: elem_zig_type_for(ti),
-            )
-          else
-            struct_promote ||= zig_type_for(ret_type)
-          end
-        end
-      end
-    end
-
-    schema = schema_lookup.call(ret_type.resolved) rescue nil
-    is_union = Schemas.union?(schema)
-    unhandled_fields = T.let(nil, T.nilable(T::Array[String]))
-    if struct_promote.nil?
-      if var_promotes.any? || handled_fields.any?
-        struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
-      elsif (fn_node.return_provenance == :heap) && !is_union && ret_type.needs_promotion?(schema_lookup) &&
-            !all_returns_already_heap_constructed?(return_nodes)
-        # Pessimistic catch-all: heap-returning fn with promotable return type.
-        # Skip when every RETURN is `RETURN x` where x.symbol.init_contents_heap
-        # is true -- the binding was constructed with already-heap fields (e.g.
-        # via the Phase 0.5 hoist in MIRPass), so a return-time promoteDeep
-        # would double-clone.
-        struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
-      end
-    end
-
-    if var_promotes.empty? && struct_promote.nil?
-      empty_plan
-    else
-      MIR::PromotionPlan.new(
-        var_promotes: var_promotes.uniq { |vp| vp.var },
-        struct_promote: struct_promote,
-        promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
-        unhandled_promote_fields: unhandled_fields
-      )
-    end
-  end
-
-  sig { params(return_nodes: T::Array[AST::ReturnNode]).returns(T::Boolean) }
-  private_class_method def self.all_returns_already_heap_constructed?(return_nodes)
-    return false if return_nodes.empty?
-    return_nodes.all? do |ret|
-      v = ret.value
-      v.is_a?(AST::Identifier) && !!v.symbol&.init_contents_heap
-    end
-  end
-
-  # Filter var_promotes to only those referenced in a return expression.
-  sig { params(plan: MIR::PromotionPlan, return_value: T.untyped).returns(MIR::PromotionPlan) }
-  def self.filter_for_return(plan, return_value)
-    vps = plan.var_promotes
-    return plan if vps.nil? || vps.empty?
-    referenced = referenced_vars(return_value)
-    plan.with_var_promotes(vps.select { |vp| referenced.include?(vp.var) })
-  end
-
-  # Check if a specific return node needs struct_promote.
-  sig { params(plan: MIR::PromotionPlan, ret_node: AST::ReturnNode).returns(T::Boolean) }
-  def self.needs_promote?(plan, ret_node)
-    ids = plan.promote_return_ids
-    return true if ids.nil?
-    ids.include?(ret_node.object_id)
-  end
-
-  # ── Private helpers ──────────────────────────────────────────────
-
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Boolean)) }
-  private_class_method def self.fn_allocates?(fn_node)
-    fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc
-  end
-
+  # True iff the fn has at least one RETURN identifier that would need
+  # heap promotion (would have triggered the OLD struct_promote path).
+  # MIRPass uses this to gate which fns get the hoist treatment.
   sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.fn_has_escapable_return?(fn_node, schema_lookup = nil)
+  def self.fn_has_escapable_return?(fn_node, schema_lookup = nil)
     collect_returns(fn_node.body).any? do |ret|
       next false unless ret.value.is_a?(AST::Identifier)
       next false if ret.value.symbol&.takes
@@ -203,13 +30,12 @@ module PromotionClassifier
     end
   end
 
-  # Returns true iff `ti` is a STRUCT (not union, not primitive) with at least one
-  # field that needs escape promotion (string, list, or map).
-  # Used to detect when returning a borrowed struct identifier requires promoteDeep.
-  # Deliberately excludes union types -- unions are handled separately via
-  # struct/union literal returns and dupeUnionValue at call sites.
+  # True iff `ti` is a STRUCT (not union, not primitive) with at least one
+  # field that needs escape promotion (string, list, or map). MIRPass uses
+  # this to decide whether to synthesize a `COPY` wrapper around a
+  # borrowed Identifier returned from a heap-bearing fn.
   sig { params(ti: Type, schema_lookup: Proc).returns(T::Boolean) }
-  private_class_method def self.struct_has_promotable_fields?(ti, schema_lookup)
+  def self.struct_has_promotable_fields?(ti, schema_lookup)
     return false unless schema_lookup && ti
     resolved = ti.resolved
     schema = schema_lookup.call(resolved) rescue nil
@@ -222,55 +48,11 @@ module PromotionClassifier
     end
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[AST::ReturnNode]) }
   private_class_method def self.collect_returns(body)
-    returns = []
+    returns = T.let([], T::Array[AST::ReturnNode])
     AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
-  end
-
-  sig { params(ret_type: Type, schema_lookup: Proc, handled_fields: T::Set[String]).returns([T.nilable(String), T.nilable(T::Array[String])]) }
-  private_class_method def self.compute_struct_promote(ret_type, schema_lookup, handled_fields)
-    resolved = ret_type.resolved
-    schema = schema_lookup.call(resolved) rescue nil
-    return [nil, nil] unless Schemas.field_bearing?(schema)
-
-    unhandled = T.let([], T::Array[String])
-    schema.fields.each do |fname, fdef|
-      next if handled_fields.include?(fname.to_s)
-      ft = fdef.is_a?(Type) ? fdef : Type.new(fdef.is_a?(AST::StructField) ? (fdef.type || :Any) : (fdef || :Any))
-      unhandled << fname.to_s if ft.needs_escape_promotion?
-    end
-
-    unhandled.any? ? [zig_type_for(ret_type), unhandled] : [nil, nil]
-  end
-
-  sig { params(type: Type).returns(String) }
-  private_class_method def self.zig_type_for(type)
-    name = type.resolved.to_s.sub(/^[!?]+/, '')
-    Type.new(name).zig_type
-  end
-
-  sig { params(type: Type).returns(T.nilable(String)) }
-  private_class_method def self.elem_zig_type_for(type)
-    elem = type.element_type
-    return nil unless elem
-    Type.new(elem).zig_type
-  rescue
-    elem.to_s
-  end
-
-  sig { params(node: T.untyped).returns(T::Set[String]) }
-  private_class_method def self.referenced_vars(node)
-    vars = Set.new
-    return vars unless node
-    case node
-    when AST::Identifier
-      vars << node.name
-    when AST::StructLit
-      node.fields.each_value { |v| vars.merge(referenced_vars(v)) }
-    end
-    vars
   end
 end
 

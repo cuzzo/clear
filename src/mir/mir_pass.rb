@@ -16,12 +16,11 @@ class MIRPass
     extend T::Sig
 
   # Read-only context threaded through transform_body / recurse_branches!.
-  # Reek flagged the (bindings, promo) carry-down across many call sites.
-  WalkCtx = Struct.new(:bindings, :promo, keyword_init: true) do
+  WalkCtx = Struct.new(:bindings, keyword_init: true) do
     extend T::Sig
 
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.nilable(MIR::PromotionPlan)).void }
-    def initialize(bindings:, promo:)
+    sig { params(bindings: T::Hash[String, CleanupEntry]).void }
+    def initialize(bindings:)
       super
     end
 
@@ -30,14 +29,9 @@ class MIRPass
       self[:bindings]
     end
 
-    sig { returns(T.nilable(MIR::PromotionPlan)) }
-    def promo
-      self[:promo]
-    end
-
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.nilable(MIR::PromotionPlan)).returns(MIRPass::WalkCtx) }
-    def with(bindings: self.bindings, promo: self.promo)
-      MIRPass::WalkCtx.new(bindings: bindings, promo: promo)
+    sig { params(bindings: T::Hash[String, CleanupEntry]).returns(MIRPass::WalkCtx) }
+    def with(bindings: self.bindings)
+      MIRPass::WalkCtx.new(bindings: bindings)
     end
   end
 
@@ -90,13 +84,10 @@ class MIRPass
       hoist_return_subexprs_to_heap!(fn.body)
     end
 
-    # Phase 1: classify promotions for all functions. Storage is already
-    # decided at declaration time by EscapeGraph; this builds the
-    # (now mostly degenerate) promotion plan downstream lowering reads.
-    promotion_plans = {}
-    @fn_nodes.each do |name, fn|
-      promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
-    end
+    # (Phase 1 promotion plan was deleted: storage decisions live at
+    # declaration time via EscapeGraph + Phase 0.5 hoist; there is no
+    # plan to build, and insert_promotion! / MIR::Promote / MIR::EscapePromote
+    # / promote()/promoteList()/promoteDeep() are all gone.)
 
     # Phase 2: LoopFrameAnalysis ran inside EscapeGraph.apply! above so
     # every escape decision is marked in a single pass (per the
@@ -111,20 +102,17 @@ class MIRPass
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(stmt, promotion_plans[stmt.name])
+      transform_function!(stmt)
     end
 
     # Synthetic test-body wrappers live in @fn_nodes but never appear
     # under ast.statements, so the loop above skips them. Run the same
     # transform on each so MIR::Drop / MIR::Cleanup nodes land on the
-    # shared body array (which is also AST::TestThat.body). Keyed by
-    # the wrapper name prefix CompilerFrontend.synthesize_test_body_wrappers!
-    # generates -- intentionally narrow so we don't transform anything
-    # else that someone might add to fn_nodes later.
+    # shared body array (which is also AST::TestThat.body).
     @fn_nodes.each do |name, fn|
       next unless name.is_a?(String) && name.start_with?("__test_body_")
       next unless fn&.body
-      transform_function!(fn, promotion_plans[name])
+      transform_function!(fn)
     end
 
     # MIR escape analysis can discover heap-return provenance after the
@@ -286,22 +274,19 @@ class MIRPass
     copy
   end
 
-  sig { params(fn: AST::FunctionDef, promo: T.nilable(MIR::PromotionPlan)).returns(T.nilable(T::Hash[String, TrueClass])) }
-  def transform_function!(fn, promo)
+  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
+  def transform_function!(fn)
     bindings = @cleanup_bindings[fn.name] || {}
     has_bindings = bindings && !bindings.empty?
-    promo = nil if promo.empty?
-
-    fn.has_promotion = true if promo
 
     has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
     has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
 
     # BG scope-exit annotation runs unconditionally: the function may have no
-    # bindings/promotions but still contain BG blocks returning frame values.
+    # bindings but still contain BG blocks returning frame values.
     annotate_bg_exits_in_body!(fn.body)
 
-    return unless has_bindings || promo || has_bg_escapes || has_catch
+    return unless has_bindings || has_bg_escapes || has_catch
 
     # Borrow checking: verify no moves of borrowed variables inside WITH blocks.
     bc_errors = BorrowChecker.check(fn, schema_lookup: @schema_lookup)
@@ -346,12 +331,12 @@ class MIRPass
 
     @fn_has_catch = has_catch
     @current_transform_fn = T.let(fn, T.untyped)
-    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings, promo: promo))
+    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings))
     @current_transform_fn = T.let(nil, T.untyped)
 
     # Transform catch clause bodies so string returns are annotated for heap-dupe.
     if has_catch
-      empty_ctx = WalkCtx.new(bindings: {}, promo: nil)
+      empty_ctx = WalkCtx.new(bindings: {})
       fn.catch_clauses.each do |clause|
         tb = transform_body(clause.body, empty_ctx)
         clause.body = tb if tb
@@ -420,15 +405,13 @@ class MIRPass
     return stmts unless stmts.is_a?(Array)
     result = []
     bindings = ctx.bindings
-    promo = ctx.promo
     stmts.each do |stmt|
       # Recurse into nested control flow first.
       recurse_branches!(stmt, ctx)
 
-      # Insert Return (escape markers) + Promote before ReturnNode.
+      # Insert Return (escape markers) before ReturnNode.
       if stmt.is_a?(AST::ReturnNode)
         insert_return!(result, stmt, bindings, fn_node: @current_transform_fn)
-        insert_promotion!(result, stmt, promo)
         # Catch string dupe: heap-dupe string returns so both success and
         # error paths have consistent allocation for caller cleanup.
         insert_catch_string_dupe!(result, stmt) if @fn_has_catch
@@ -443,7 +426,9 @@ class MIRPass
       # Insert MIR::Promote before container stores that need frame-to-heap promotion.
       insert_container_promote!(result, stmt)
 
-      # BG escape promotions: frame-allocated captures must be promoted to heap.
+      # BG escape promotions: frame-allocated captures (heap upgrade already
+      # at declaration by EscapeGraph; this only annotates bg_string for
+      # string captures that need a dupe inside the fiber body).
       insert_bg_escape_promote!(result, stmt)
 
       # BG scope-exit promotion: annotate BgBlocks with what their exit value needs.
@@ -676,7 +661,7 @@ class MIRPass
     body.reverse_each do |stmt|
       next if stmt.is_a?(MIR::Alloc) || stmt.is_a?(MIR::Drop) ||
               stmt.is_a?(MIR::SuppressCleanup) || stmt.is_a?(MIR::Return) ||
-              stmt.is_a?(MIR::Promote) || stmt.is_a?(MIR::AllocMark) ||
+              stmt.is_a?(MIR::AllocMark) ||
               stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::MoveMark)
       last_expr = stmt.is_a?(AST::ThenChain) ? stmt.steps.last&.dig(:expr) : stmt
       break
@@ -733,14 +718,11 @@ class MIRPass
     end
   end
 
-  # Insert MIR::Promote for frame-allocated variables captured by BG/stream fibers.
-  # Lists get :list strategy (in-place promoteList). Strings get :bg_string
-  # strategy (transpiler emits dupe inside the BG block where the allocator is available).
-  sig { params(result: T::Array[T.untyped], stmt: T.untyped).returns(T.untyped) }
+  # Annotate BG-captured string locals for in-fiber dupe (bg_string strategy).
+  # Lists are heap-upgraded at declaration by EscapeGraph (Phase 1.5b); if a
+  # frame list reaches BG capture, that is an EscapeGraph gap, surfaced loudly.
+  sig { params(result: T::Array[T.untyped], stmt: T.untyped).void }
   def insert_bg_escape_promote!(result, stmt)
-    # Shallow walk: MIR::Promote is emitted in this scope. Nested BG
-    # captures from inner scope; their own Promote is emitted by the
-    # recursive transform_body call on the inner BG body.
     AST.each_bg_block_in_stmt(stmt) do |bg|
       captured = bg.capture_analysis&.captures
       next unless captured&.any?
@@ -748,18 +730,17 @@ class MIRPass
         t = type_obj ? Type.new(type_obj) : nil
         next unless t && t.needs_escape_promotion?
         next if t.needs_pointer_passing?
-        # A captured param is borrowed `*const T`: in-place
-        # promoteList(&param) discards const, and the COPY capture
-        # strategy already deep-copies it. Only locals are promotable.
         next if bg.capture_analysis&.capture_symbols&.dig(name)&.is_param
-        next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
+        next if @bg_heap_upgraded&.include?(name)
         if t.list_collection?
-          result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil, list_elem_zig_type(t))
-        else
-          # :bg_string: annotate directly on BgBlock (no MIR::Promote needed)
-          bg.capture_string_dupes ||= Set.new
-          bg.capture_string_dupes.add(name)
+          raise "BG-captured frame list '#{name}' reached insert_bg_escape_promote! " \
+                "without EscapeGraph heap-upgrading it. Storage must be decided " \
+                "at declaration, not via runtime promotion. Extend EscapeGraph " \
+                "Phase 1.5b to cover this case."
         end
+        # :bg_string: annotate the BgBlock; transpiler emits dupe in-fiber.
+        bg.capture_string_dupes ||= Set.new
+        bg.capture_string_dupes.add(name)
       end
     end
   end
@@ -1138,26 +1119,6 @@ class MIRPass
   # Insert MIR::Promote before a return statement and annotate the
   # ReturnNode for struct-level promotion wrapping.
   #
-  # Defer suppression for escaped variables is handled by MIR::Return
-  # (inserted by insert_return!) and consumed by the transpiler's
-  # collect_escaping_identifiers in the ReturnNode handler.
-  # POST-PATH-A this is dead: the Phase 0.5 hoist + init_contents_heap stamp
-  # leaves PromotionPlan empty for every test in the 4828-spec + 568-corpus
-  # suite. Kept as a tripwire: if a new code path ever produces a non-empty
-  # promotion plan, we want to know rather than silently promote.
-  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(MIR::PromotionPlan)).void }
-  def insert_promotion!(result, ret_node, promo)
-    return unless promo && !promo.empty?
-    filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
-    return if filtered.empty?
-    raise "PromotionPlan produced a non-empty plan after Path A hoist. " \
-          "var_promotes=#{(filtered.var_promotes || []).map(&:var).inspect} " \
-          "struct_promote=#{filtered.struct_promote.inspect} " \
-          "unhandled=#{filtered.unhandled_promote_fields.inspect}. " \
-          "Either extend hoist_return_subexprs_to_heap! or stamp init_contents_heap " \
-          "on the source binding."
-  end
-
   # Insert MIR::Return before a ReturnNode to mark which local variables'
   # ownership escapes to the caller. The checker uses this to know that
   # escaped vars don't need local cleanup.
@@ -1197,25 +1158,6 @@ class MIRPass
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []
     else []
     end
-  end
-
-  sig { params(zig_type: T.untyped).returns(Symbol) }
-  def classify_promote_strategy(zig_type)
-    return :generic unless zig_type
-    if zig_type.include?("ArrayListUnmanaged")
-      :list
-    elsif zig_type.include?("StringMap")
-      :string_map
-    else
-      :generic
-    end
-  end
-
-  sig { params(type_obj: T.nilable(Type)).returns(T.nilable(String)) }
-  def list_elem_zig_type(type_obj)
-    elem = type_obj&.element_type
-    return nil unless elem
-    Type.new(elem).zig_type
   end
 
 end

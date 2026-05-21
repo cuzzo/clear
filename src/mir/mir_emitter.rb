@@ -101,7 +101,6 @@ class MIREmitter
     when MIR::Cleanup          then emit_cleanup(node, errdefer: false)
     when MIR::ErrCleanup       then emit_cleanup(node, errdefer: true)
     when MIR::MoveMark         then emit_move_mark(node)
-    when MIR::EscapePromote    then emit_escape_promote(node)
     when MIR::DeepCopy         then emit_deep_copy(node)
     when MIR::ContainerInit    then emit_container_init(node)
     when MIR::CapWrap          then emit_cap_wrap(node)
@@ -1037,31 +1036,6 @@ class MIREmitter
   sig { params(node: MIR::MoveMark).returns(String) }
   def emit_move_mark(node)
     "#{node.name}_moved = true;"
-  end
-
-  sig { params(node: MIR::EscapePromote).returns(T.nilable(String)) }
-  def emit_escape_promote(node)
-    # promote() is IN-PLACE: it mutates the existing binding's payload
-    # without reallocating wrapper structures (e.g. an @indirect
-    # `*String` field is rewritten in place, keeping the heap pointer
-    # stable). dupeValue allocates a new wrapper, which orphans the
-    # old one. The two are NOT interchangeable; keep the per-strategy
-    # promote/promoteList/promoteDeep emit.
-    rt = node.rt_expr || "rt"
-    case node.strategy
-    when :list
-      elem = node.elem_type or
-        raise "MIREmitter#emit_escape_promote: :list promotion for '#{node.name}' missing elem_type"
-      "try CheatLib.promoteList(#{elem}, #{rt}, &#{node.name});"
-    when :string_map
-      "#{node.name}.alloc = #{rt}.heapAlloc();"
-    when :generic
-      "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
-    when :generic_deep
-      "try CheatLib.promoteDeep(#{node.zig_type}, #{rt}, &#{node.name});"
-    else
-      raise "MIREmitter#emit_escape_promote: unhandled strategy :#{node.strategy}"
-    end
   end
 
   sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }

@@ -213,17 +213,6 @@ RSpec.describe MIRLowering do
       expect(result.name).to eq("buf")
     end
 
-    it "translates MIR::Promote to MIR::EscapePromote" do
-      promote = MIR::Promote.new(tok, "items", "ArrayListUnmanaged(i64)", :list, nil, "i64")
-      result = lowering.lower(promote)
-      expect(result).to be_a(MIR::EscapePromote)
-      expect(result.name).to eq("items")
-      expect(result.strategy).to eq(:list)
-      expect(result.zig_type).to eq("ArrayListUnmanaged(i64)")
-      expect(result.elem_type).to eq("i64")
-      zig = emit(result)
-      expect(zig).to include("promoteList")
-    end
   end
 
   # apply_container_promote_zig has been removed. Container promote was

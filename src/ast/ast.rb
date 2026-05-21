@@ -1365,9 +1365,7 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping; pairs with ret_field_promote_data when :var.
     attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
-    attr_accessor :ret_field_promote_data # MIR::FieldPromote for per-field promotion on return (paired with promote_ret_wrap == :var)
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
@@ -2062,19 +2060,6 @@ module MIR
     attr_accessor :cleanup_entry
   end
 
-  # Promote: escape promotion inserted before return statements.
-  # Emits frame->heap copy/promotion code. Replaces PromotionClassifier lookups in transpiler.
-  #
-  # strategy:  :list     — promoteList (dupe backing buffer to heap; elem_type required)
-  #            :string_map — swap allocator to heapAlloc
-  #            :fields   — promoteFields (recursive field promotion)
-  #            :generic  — promote (single value deep copy)
-  Promote = Struct.new(:token, :name, :zig_type, :strategy, :fields, :elem_type) do
-    include AST::Locatable
-    # fields: Set of field names for :fields strategy (nil = all fields)
-    # elem_type: Zig element type for :list promotion.
-  end
-
   # SuppressCleanup: move suppression marker inserted at consumption points
   # (TAKES calls, GIVE, return escapes). Emits `x_moved = true;` to prevent
   # double-free via the defer guard emitted by Drop.
@@ -2134,59 +2119,4 @@ module MIR
     end
   end
 
-  # VarPromote: one variable that escapes a fn via RETURN and must be
-  # promoted from frame to heap before the return runs. Replaces a
-  # `{ var:, zig_type:, elem_zig_type: }` hash. elem_zig_type is the
-  # element type for list/slice promotion via promoteList; nil for
-  # struct/string shapes.
-  VarPromote = Struct.new(:var, :zig_type, :elem_zig_type, keyword_init: true) do
-    extend T::Sig
-
-    sig { returns(String) }
-    def var!
-      T.cast(var, String)
-    end
-
-    sig { returns(String) }
-    def zig_type!
-      T.cast(zig_type, String)
-    end
-  end
-
-  # FieldPromote: stamped on AST::ReturnNode when the returned value is a
-  # struct/union literal whose individual fields need promotion. The
-  # `fields` set names the unhandled (per-field-promote) field names; nil
-  # means "promote the whole struct deeply". Replaces a
-  # `{ zig_type:, fields: }` hash.
-  FieldPromote = Struct.new(:zig_type, :fields, keyword_init: true) do
-    extend T::Sig
-
-    sig { returns(String) }
-    def zig_type!
-      T.cast(zig_type, String)
-    end
-  end
-
-  # PromotionPlan: per-function plan produced by PromotionClassifier.classify.
-  # Replaces a 4-key hash. `empty?` is the "no promotion needed" signal
-  # callers used to detect via `{}` / `.empty?`.
-  PromotionPlan = Struct.new(:var_promotes, :struct_promote, :promote_return_ids, :unhandled_promote_fields, keyword_init: true) do
-    extend T::Sig
-
-    sig { returns(T::Boolean) }
-    def empty?
-      var_promotes_empty = var_promotes.nil? || var_promotes.empty?
-      var_promotes_empty && struct_promote.nil?
-    end
-
-    sig { params(new_var_promotes: T::Array[VarPromote]).returns(PromotionPlan) }
-    def with_var_promotes(new_var_promotes)
-      PromotionPlan.new(
-        var_promotes: new_var_promotes,
-        struct_promote: struct_promote,
-        promote_return_ids: promote_return_ids,
-        unhandled_promote_fields: unhandled_promote_fields
-      )
-    end
-  end
 end

@@ -629,7 +629,7 @@ class RegisterBcEmitter
     case stmt
     when MIR::Comment, MIR::Suppress, MIR::Noop
       nil
-    when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt, MIR::EscapePromote,
+    when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt,
          MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark
       nil
     when MIR::CatchWrapper

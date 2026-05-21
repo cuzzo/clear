@@ -277,7 +277,6 @@ pub fn build(b: *std.Build) void {
         .{ .path = "frame-test.zig" },
         .{ .path = "ownership-test.zig" },
         .{ .path = "partitioned-map-test.zig", .tsan = true },
-        .{ .path = "promote-list-test.zig" },
         .{ .path = "resource-test.zig" },
         .{ .path = "runtime-header-test.zig" },
         .{ .path = "sigaltstack-test.zig" },

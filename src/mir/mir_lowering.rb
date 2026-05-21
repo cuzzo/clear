@@ -412,7 +412,6 @@ class MIRLowering
 
     # --- Old MIR nodes (from MIRPass) -> new MIR nodes ---
     when MIR::Drop              then lower_drop(node)
-    when MIR::Promote           then lower_promote(node)
     when MIR::SuppressCleanup
       # SuppressCleanup is an AST-level marker that pre-dates line-suffix
       # rename; its .name is a raw identifier string with no link back to
@@ -950,18 +949,6 @@ class MIRLowering
   sig { params(node: MIR::Drop).returns(MIR::Cleanup) }
   def lower_drop(node)
     MIR::Cleanup.new(zig_safe_name(node.name), node.cleanup_entry)
-  end
-
-  sig { params(node: MIR::Promote).returns(MIR::EscapePromote) }
-  def lower_promote(node)
-    MIR::EscapePromote.new(
-      node.name ? zig_safe_name(node.name) : node.name,
-      node.zig_type,
-      node.strategy,
-      node.fields,
-      @rt_name,
-      node.elem_type,
-    )
   end
 
   # ================================================================
@@ -7319,52 +7306,11 @@ class MIRLowering
       return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args))
     end
 
-    # Read scope-exit promotion from node annotations (no global flags).
+    # Catch-clause string dupe: ensures both success and error paths return
+    # heap-backed strings for consistent caller cleanup.
     needs_string_dupe = node.catch_string_dupe_ret
-    ret_field_promote = node.ret_field_promote_data
 
-    if node.promote_ret_wrap == :var && ret_field_promote && value
-      rt = MIR::Ident.new(rt_name)
-      zig_type = ret_field_promote.zig_type!
-      stmts = T.let([MIR::Let.new("__ret", value, true, nil, nil)], T::Array[T.untyped])
-      # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
-      # fields of __ret.
-      stmts << MIR::AllocMark.new("__ret", :heap, nil)
-      # ErrCleanup: if any promote call fails, free partially-promoted fields.
-      stmts << MIR::ErrCleanup.new("__ret",
-        CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type }))
-      if ret_field_promote.fields
-        # Per-field promotion: for each named heap field of __ret, emit
-        # `try CheatLib.promote(@TypeOf(__ret.f), rt, &__ret.f);`.
-        ret_field_promote.fields.each do |fname|
-          target = "__ret.#{fname}"
-          stmts << MIR::EscapePromote.new(
-            target,
-            "@TypeOf(#{target})",
-            :generic,
-            nil,
-            rt_name,
-          )
-        end
-      else
-        # Whole-struct deep promotion: `try CheatLib.promoteDeep(T, rt, &__ret);`.
-        stmts << MIR::EscapePromote.new(
-          "__ret",
-          zig_type,
-          :generic_deep,
-          nil,
-          rt_name,
-        )
-      end
-      stmts << MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
-      MIR::ScopeBlock.new(stmts)
-    elsif node.promote_ret_wrap == :const && value
-      stmts = T.let([
-        MIR::Let.new("__ret", value, false, nil, nil),
-        MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
-      ], T::Array[T.untyped])
-      MIR::ScopeBlock.new(stmts)
-    elsif needs_string_dupe && value
+    if needs_string_dupe && value
       ret_type = Type.new(node.value.full_type)
       if ret_type&.string?
         MIR::ScopeBlock.new([

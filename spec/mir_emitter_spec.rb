@@ -488,45 +488,6 @@ RSpec.describe MIREmitter do
     end
   end
 
-  describe "EscapePromote" do
-    it "emits list promotion" do
-      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt", "i64")
-      expect(e.emit(node)).to eq("try CheatLib.promoteList(i64, rt, &items);")
-    end
-
-    it "emits nested list promotion from explicit elem_type" do
-      node = MIR::EscapePromote.new(
-        "items",
-        "CheatLib.ArrayListUnmanaged(CheatLib.Promise(i64))",
-        :list,
-        nil,
-        "rt",
-        "CheatLib.Promise(i64)"
-      )
-      expect(e.emit(node)).to eq("try CheatLib.promoteList(CheatLib.Promise(i64), rt, &items);")
-    end
-
-    it "requires explicit elem_type for list promotion" do
-      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt")
-      expect { e.emit(node) }.to raise_error(RuntimeError, /missing elem_type/)
-    end
-
-    it "emits string_map promotion" do
-      node = MIR::EscapePromote.new("cache", nil, :string_map, nil, "rt")
-      expect(e.emit(node)).to eq("cache.alloc = rt.heapAlloc();")
-    end
-
-    it "emits generic promotion" do
-      node = MIR::EscapePromote.new("val", "User", :generic, nil, "rt")
-      expect(e.emit(node)).to eq("try CheatLib.promote(User, rt, &val);")
-    end
-
-    it "raises on unknown strategy" do
-      node = MIR::EscapePromote.new("x", nil, :unknown_strategy, nil, "rt")
-      expect { e.emit(node) }.to raise_error(RuntimeError, /unhandled strategy/)
-    end
-  end
-
   describe "DeepCopy" do
     it "emits string copy via dupeValue with explicit []const u8 type" do
       node = MIR::DeepCopy.new(MIR::Ident.new("src"), "[]const u8", nil, :full_value, :heap)
