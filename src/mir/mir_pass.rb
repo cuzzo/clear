@@ -893,21 +893,16 @@ class MIRPass
     # being stored in a heap container, wrap every frame-storage heap-
     # owning field in an AST::CopyNode(:heap). The existing CopyNode
     # lowering deep-copies each wrapped field to heap at construction
-    # time, so the StructLit is built with all-heap fields. No
-    # post-construct promote() is needed.
+    # time, so the StructLit is built with all-heap fields.
     if stmt.value.is_a?(AST::StructLit) || stmt.value.is_a?(AST::UnionVariantLit)
       rewrite_frame_fields_to_copy_heap!(stmt.value)
-      return  # No container_promote annotation needed.
     end
-
-    # Skip promote when the value's heap-owning payload is already heap.
-    return if value_payload_already_heap?(stmt.value)
-
-    # Annotate directly on Assignment node (no MIR::Promote needed).
-    # Use bare type (strip *) — promote(T, rt, &v) expects T = base, not pointer.
-    zig_t = val_ti.zig_type
-    zig_t = zig_t[1..] if zig_t.start_with?("*")
-    stmt.container_promote_zig_type = zig_t
+    # Non-literal values (Identifier, GetIndex etc.) flowing into a
+    # heap container are handled by :dupe_borrowed_union (for unions)
+    # or by the source binding's storage being already heap. The old
+    # :container_promote annotation that emitted a post-construct
+    # promote() blk is no longer needed: zero generated blk_prm sites
+    # remain after the AST-level rewrite.
   end
 
   # Walk a StructLit/UnionVariantLit and wrap every frame-storage heap-
@@ -954,32 +949,6 @@ class MIRPass
     when AST::StructLit, AST::UnionVariantLit
       return false unless fv.fields
       fv.fields.all? { |_, sub| field_value_already_heap?(sub) }
-    else
-      false
-    end
-  end
-
-  # True when every heap-owning field of `value` is already heap-OWNED
-  # by this expression (so promote()'s frame-to-heap dupe would be a
-  # leaky no-op). Restricted to OWNED sources (CopyNode :heap, recursive
-  # struct/union literals whose fields are all owned-heap). Borrowed
-  # sources (Identifier, GetIndex, GetField) are excluded: even when
-  # their symbol is heap_provenance, the binding still owns the cleanup
-  # of that data, so the assignment into a container MUST dupe.
-  sig { params(value: T.untyped).returns(T::Boolean) }
-  def value_payload_already_heap?(value)
-    case value
-    when AST::CopyNode
-      value.alloc == :heap
-    when AST::StructLit, AST::UnionVariantLit
-      return false unless value.fields
-      value.fields.all? do |_, fv|
-        next true unless fv.respond_to?(:full_type)
-        fti = fv.full_type
-        fti = Type.new(fti) if fti && !fti.is_a?(Type)
-        next true unless fti.is_a?(Type) && fti.needs_promotion?(@schema_lookup)
-        value_payload_already_heap?(fv)
-      end
     else
       false
     end

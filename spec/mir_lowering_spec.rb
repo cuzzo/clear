@@ -226,13 +226,12 @@ RSpec.describe MIRLowering do
     end
   end
 
-  describe "#apply_container_promote_zig" do
-    it "uses the bare pointee type for promoted values" do
-      zig = lowering.send(:apply_container_promote_zig, "val", "rt", "*Value")
-      expect(zig).to include("CheatLib.promote(Value, rt, &__prm)")
-      expect(zig).not_to include("CheatLib.promote(*Value")
-    end
-  end
+  # apply_container_promote_zig has been removed. Container promote was
+  # replaced by an AST-level per-field CopyNode(:heap) rewrite in
+  # mir_pass.insert_container_promote!. The deep-copy at field
+  # construction time is exercised by the StructLit/UnionVariantLit
+  # container-store transpile-tests; no separate unit test pins the
+  # removed runtime-promote wrapper.
 
   describe "#emit_builtin" do
     it "passes a bare type name through to dupeUnionValue unchanged" do
@@ -911,21 +910,10 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("CheatLib.setAt(bag, 0, 42);")
     end
 
-    it "promotes container values before indexed storage when requested" do
-      target = make_id("items", full_type: :"Value[]@list")
-      index = make_lit(:INT64, 0, full_type: :Int64)
-      value = make_id("value", full_type: :Value)
-      get_index = AST::GetIndex.new(tok, target, index)
-      node = AST::Assignment.new(tok, get_index, value)
-      node.container_promote_zig_type = "Value"
-
-      result = lowering.lower(node)
-
-      expect(result).to be_a(MIR::ExprStmt)
-      expect(result.expr).to be_a(MIR::InlineZig)
-      expect(result.expr.stdlib_def.emit.value_transforms).not_to be_nil
-      expect(emit(result)).to include("CheatLib.setAt(items, 0,")
-    end
+    # container_promote_zig_type annotation was removed. The container-
+    # promote path is now AST-level per-field CopyNode(:heap) rewrite
+    # in mir_pass; lowering no longer needs to read a promote-zig hint
+    # off the Assignment node.
 
     it "cleans up overwritten list elements that own heap fields before indexed storage" do
       target = make_id("items", full_type: Type.new(:"Point[]", collection: :list))

@@ -1086,7 +1086,6 @@ module AST
     include StatementVoidType
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
-    attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
     attr_accessor :compound_op

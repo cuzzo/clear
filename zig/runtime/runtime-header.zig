@@ -3584,10 +3584,6 @@ pub const CheatLib = struct {
         return result;
     }
 
-    pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
-        try promote(T, rt, value);
-    }
-
     /// Deep promote: unconditionally dupe ALL strings (including heap).
     /// Used for HPT independence -- the source is about to be freed,
     /// so the returned copy must own its own data regardless of allocator.

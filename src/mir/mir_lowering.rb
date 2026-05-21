@@ -6646,7 +6646,6 @@ class MIRLowering
         transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                      else op[:value_transforms] || []
                      end
-        already_heap_dupe = false
         transforms.each do |transform|
           case transform
           when :dupe_string_literal
@@ -6658,26 +6657,13 @@ class MIRLowering
               if should_dupe_borrowed_union?(val_node, val_ti)
                 zig_t = bare_zig_type(val_ti)
                 val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
-                already_heap_dupe = true
               end
             end
           when :container_promote
-            # Skip when :dupe_borrowed_union already wrapped this value
-            # in dupeUnionValue with heapAlloc -- the result is heap and
-            # a subsequent promote() would double-dupe (the runtime's
-            # ptrIsFrameOwned check is the workaround for this exact
-            # redundancy). Skipping here makes the runtime check dead
-            # for the dupeUnionValue case.
-            next if already_heap_dupe
-            unless val_ti&.string?
-              zig_type = node.container_promote_zig_type
-              if zig_type
-                val_zig = emit_expr(val)
-                new_zig = apply_container_promote_zig(T.must(val_zig), rt_name, zig_type)
-                val = MIR::InlineZig.new(new_zig, "index_promote")
-                val.stdlib_def = { allocates: true }
-              end
-            end
+            # Dead: insert_container_promote! now does an AST-level
+            # per-field CopyNode(:heap) rewrite for StructLit values
+            # being stored in heap containers. Non-literal values flow
+            # through :dupe_borrowed_union or are already heap.
           end
         end
 
@@ -6735,7 +6721,6 @@ class MIRLowering
     transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
                  else op[:value_transforms] || []
                  end
-    already_heap_dupe = false
     transforms.each do |transform|
       case transform
       when :dupe_string_literal
@@ -6747,24 +6732,10 @@ class MIRLowering
           if should_dupe_borrowed_union?(val_node, val_ti)
             zig_t = bare_zig_type(val_ti)
             val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
-            already_heap_dupe = true
           end
         end
       when :container_promote
-        # Skip when :dupe_borrowed_union already wrapped this value
-        # in dupeUnionValue with heapAlloc -- subsequent promote would
-        # double-dupe (the runtime's ptrIsFrameOwned check is the
-        # workaround for this exact redundancy).
-        next if already_heap_dupe
-        unless val_ti&.string?
-          zig_type = node.container_promote_zig_type
-          if zig_type
-            promote_val_zig = emit_expr(val)
-            new_zig = apply_container_promote_zig(T.must(promote_val_zig), rt_name, zig_type)
-            val = MIR::InlineZig.new(new_zig, "index_promote")
-            val.stdlib_def = { allocates: true }
-          end
-        end
+        # Dead: see insert_container_promote! comment.
       end
     end
 
@@ -7793,13 +7764,6 @@ class MIRLowering
     schema_lookup = @schema_lookup
     return false if val_ti.respond_to?(:implicitly_copyable?) && val_ti.implicitly_copyable?(schema_lookup)
     true
-  end
-
-  # Apply container_promote: zig_type comes from Assignment.container_promote_zig_type annotation
-  sig { params(val_ref: String, rt_name: String, zig_type: String).returns(String) }
-  def apply_container_promote_zig(val_ref, rt_name, zig_type)
-    promote_type = zig_type.sub(/\A\*/, '')
-    "blk_prm: {\n    var __prm = #{val_ref};\n    try CheatLib.promote(#{promote_type}, #{rt_name}, &__prm);\n    break :blk_prm __prm;\n}"
   end
 
   # Check if a value node is an Rc/Arc identifier that needs retain (not moved, not unwrapped)
