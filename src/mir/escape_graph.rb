@@ -17,7 +17,11 @@ module EscapeGraph
   extend T::Sig
   module_function
 
-  FnNodes = T.type_alias { T::Hash[T.untyped, T.untyped] }
+  # Values are always AST::FunctionDef (compiler_frontend.rb populates it
+  # via `fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef)` + synthesized
+  # test-body wrappers, also FunctionDefs). The value type being concrete
+  # lets `fn.body` drop the defensive `fn&.body` nil-guard.
+  FnNodes = T.type_alias { T::Hash[T.untyped, AST::FunctionDef] }
   RetHeap = T.type_alias { T::Hash[T.untyped, T::Boolean] }
 
   sig { params(fn_nodes: FnNodes).returns([T::Set[String], T::Set[String]]) }
@@ -26,14 +30,14 @@ module EscapeGraph
     # fixpoint so a `RETURN resp` of a loop-promoted heap string is
     # seen as heap-return.
     fn_nodes.each do |_n, fn|
-      next unless fn&.body
+      next unless fn.body
       loop_carry_names(fn)           # side-effect: promote carry values
       promote_heapmut_concats!(fn)
     end
     ret_heap = compute_ret_heap_fixpoint(fn_nodes)
     heap_decls = T.let(Set.new, T::Set[String])
     fn_nodes.each do |name, fn|
-      next unless fn&.body
+      next unless fn.body
       stamp_fn!(fn, decide_fn(fn, ret_heap, fn_nodes), name, heap_decls, ret_heap)
     end
     # Cross-module SYNC propagation: caller's arg sync flows into callee's
@@ -51,7 +55,7 @@ module EscapeGraph
     # promotion). Single source of truth for "one collection = one
     # allocator": no annotator guessing pre-escape, no per-callsite
     # ad-hoc decision.
-    fn_nodes.each_value { |fn| stamp_copy_node_alloc!(fn) if fn&.body }
+    fn_nodes.each_value { |fn| stamp_copy_node_alloc!(fn) if fn.body }
     heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
     [heap_fns, heap_decls]
   end
@@ -119,9 +123,9 @@ module EscapeGraph
       expr.alloc = alloc
       stamp_copies_in_expr!(expr.value, alloc)
     when AST::StructLit, AST::UnionVariantLit
-      expr.fields&.each_value { |fv| stamp_copies_in_expr!(fv, alloc) }
+      expr.fields.each_value { |fv| stamp_copies_in_expr!(fv, alloc) }
     when AST::ListLit
-      expr.items&.each { |i| stamp_copies_in_expr!(i, alloc) }
+      expr.items.each { |i| stamp_copies_in_expr!(i, alloc) }
     when AST::MethodCall, AST::FuncCall
       # Don't descend into calls: their args have their own container
       # context (the receiver, or the callee's heap-TAKES contract).
@@ -141,7 +145,7 @@ module EscapeGraph
     # the result); a return value that COPIES a non-implicitly-copyable
     # value or wraps a COPY in a StructLit allocates heap.
     fn_nodes.each do |name, fn|
-      next if ret[name] || !fn&.body
+      next if ret[name] || !fn.body
       next if borrow_return?(fn)
       if local_fn_returns_heap?(fn)
         ret[name] = true
@@ -154,7 +158,7 @@ module EscapeGraph
       changed = false
       iters += 1
       fn_nodes.each do |name, fn|
-        next if ret[name] || !fn&.body
+        next if ret[name] || !fn.body
         next if borrow_return?(fn)            # borrow carve-out: caller doesn't own
         rvals = return_values(fn.body)
         next if rvals.empty?
@@ -411,7 +415,7 @@ module EscapeGraph
       promote_frame_concats!(node.right)
     when AST::StringConcat
       node.storage = :heap
-      node.parts&.each { |p| promote_frame_concats!(p) }
+      node.parts.each { |p| promote_frame_concats!(p) }
     else
       AST.wrapped_children(node).each { |c| promote_frame_concats!(c) }
     end
@@ -510,7 +514,7 @@ module EscapeGraph
           out << src.name.to_s if takes || mut_list
         elsif (takes || is_copy) && (ti.struct? || ti.optional?)
           src_decl = decls[src.name.to_s]
-          aggregate_moved_list_decls(src_decl&.value).each { |d| out << d } if src_decl
+          aggregate_moved_list_decls(src_decl.value).each { |d| out << d } if src_decl
         end
       end
     end
@@ -566,9 +570,9 @@ module EscapeGraph
     when AST::CopyNode
       arg.alloc == :heap
     when AST::StructLit, AST::UnionVariantLit
-      arg.fields&.any? { |_, fv| arg_carries_heap?(fv, ret_heap, already_heap) }
+      arg.fields.any? { |_, fv| arg_carries_heap?(fv, ret_heap, already_heap) }
     when AST::ListLit
-      arg.items&.any? { |it| arg_carries_heap?(it, ret_heap, already_heap) }
+      arg.items.any? { |it| arg_carries_heap?(it, ret_heap, already_heap) }
     when AST::Identifier
       # Already-marked heap_provenance OR will-be-promoted by another
       # escape rule already collected this pass (callarg_escape etc.).
