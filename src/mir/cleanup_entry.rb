@@ -17,9 +17,8 @@ require "sorbet-runtime"
 # Field universe (all optional except kind/alloc/needs_cleanup/
 # has_moved_guard, which `build` always sets):
 #   needs_cleanup alloc kind has_moved_guard match_as
-#   resource_close_zig rc_variant rc_release_func rc_alloc base_zig
-#   needs_release_fields elem_needs_cleanup sync inner via_pointer
-#   source_kind zig_type elem_zig_type is_fixed
+#   resource_close_zig rc_alloc base_zig needs_release_fields
+#   elem_needs_cleanup sync inner via_pointer source_kind
 class CleanupEntry < Hash
   extend T::Sig
   extend T::Generic
@@ -76,29 +75,14 @@ class CleanupEntry < Hash
   sig { returns(T::Boolean) }
   def match_as? = self[:match_as] == true
 
-  sig { returns(T.nilable(String)) }
-  def zig_type = self[:zig_type]
-
-  sig { returns(T.nilable(String)) }
-  def elem_zig_type = self[:elem_zig_type]
-
   sig { returns(T::Boolean) }
   def via_pointer? = self[:via_pointer] == true
-
-  sig { returns(T::Boolean) }
-  def is_fixed? = self[:is_fixed] == true
 
   sig { returns(T::Boolean) }
   def needs_release_fields? = self[:needs_release_fields] == true
 
   sig { returns(T.nilable(Symbol)) }
-  def rc_variant = self[:rc_variant]
-
-  sig { returns(T.nilable(Symbol)) }
   def rc_alloc = self[:rc_alloc]
-
-  sig { returns(T.nilable(String)) }
-  def rc_release_func = self[:rc_release_func]
 
   sig { returns(T.nilable(String)) }
   def base_zig = self[:base_zig]

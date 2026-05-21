@@ -763,30 +763,26 @@ module CleanupClassifier
   private_class_method def self.classify_rc_or_link(ti, schema_lookup)
     return nil unless ti.any_rc? || ti.link?
 
-    base_type = ti.resolved.to_s
-    base_type = base_type.sub(/^\?/, '') if ti.optional?
-    base_zig = Type.new(base_type).zig_type rescue base_type
-
+    # Strong / weak / optional Rc/Arc all flow through CheatLib.cleanup's
+    # refInnerType + releaseOne arms (which detect weak/atomic via
+    # comptime). The Ruby just needs the binding's allocator and -- for
+    # struct-wrapping-Rc bindings -- a side-channel to release inner
+    # heap fields after Rc strong=0 (no field cleanup is done by the
+    # uniform releaseOne path).
     if ti.link?
-      source = ti.link_source || :multiowned
-      entry(:rc,
-        rc_variant: :link,
-        rc_release_func: source == :shared ? "weakArcRelease" : "weakRcRelease",
-        base_zig: base_zig)
+      entry(:rc)
     elsif ti.optional?
-      entry(:rc,
-        rc_variant: :optional,
-        rc_release_func: ti.shared? ? "arcRelease" : "rcRelease",
-        base_zig: base_zig,
-        rc_alloc: wrapper_alloc(ti))
+      entry(:rc, rc_alloc: wrapper_alloc(ti))
     else
       rc_alloc = wrapper_alloc(ti)
-      e = entry(:rc, rc_variant: :standard, rc_alloc: rc_alloc)
+      e = entry(:rc, rc_alloc: rc_alloc)
       if ti.any_rc? && !ti.sync
         schema = schema_lookup.call(ti.resolved) rescue nil
         if Schemas.field_bearing?(schema)
+          base_type = ti.resolved.to_s
+          base_type = base_type.sub(/^\?/, '') if ti.optional?
           e[:needs_release_fields] = true
-          e[:base_zig] = base_zig
+          e[:base_zig] = Type.new(base_type).zig_type rescue base_type
         end
       end
       e
