@@ -1011,12 +1011,23 @@ class MIREmitter
          :optional_owned, :atomic_ptr,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
          :takes_union, :heap_string,
-         :inf_stream, :observable, :versioned, :takes_slice
+         :inf_stream, :observable, :versioned, :takes_slice,
+         :heap_struct_plain
       is_string = entry.kind == :heap_string
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
       # on mixed-provenance container elements.
       use_alloc = entry.kind == :list_with_elem_cleanup ? alloc_zig(:cleanup) : alloc
-      use_type = is_string ? "[]const u8" : zig_type
+      # :heap_struct_plain has no fixed zig_type at classify time -- the
+      # binding can be a value-struct or *Struct, so we defer to comptime
+      # via @TypeOf(name). cleanup() dispatches on the actual shape.
+      use_type =
+        if is_string
+          "[]const u8"
+        elsif entry.kind == :heap_struct_plain
+          "@TypeOf(#{name})"
+        else
+          zig_type
+        end
       use_guard = is_string ? !errdefer : g
       guarded_cleanup(name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
 
@@ -1046,17 +1057,6 @@ class MIREmitter
       # rwLockedDestroy/refCellDestroy helpers are alloc.destroy(ptr).
       # Inner-data cleanup happens via per-field paths, not via wrapper teardown.
       guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
-
-    when :heap_struct_plain
-      # @TypeOf(name) lets CheatLib.cleanup comptime-dispatch uniformly:
-      # *Struct -> generic *T arm (destroy); value-struct -> struct arm
-      # (iterate fields, no-op for all-primitive); struct-with-deinit ->
-      # invoke own deinit. Self-managed runtime types (SharedPromise,
-      # BoundedStream, ...) declare deinit so the right arm fires.
-      kw = errdefer ? "errdefer" : "defer"
-      guard = g ? "if (!#{name}_moved) " : ""
-      decl = g ? "var #{name}_moved = false; _ = &#{name}_moved;\n" : ""
-      "#{decl}#{kw} #{guard}CheatLib.cleanup(@TypeOf(#{name}), #{alloc}, &#{name});\n"
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
