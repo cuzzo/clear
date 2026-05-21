@@ -4317,8 +4317,8 @@ private
   # +val_node+:      the AST value node being stored
   # +expected_type+: the target field/param type (Type or Symbol)
   # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
-  sig { params(val_node: T.untyped, expected_type: T.untyped, container_desc: T.nilable(String)).returns(T.nilable(AST::CopyNode)) }
-  def ensure_owned_value!(val_node, expected_type, container_desc = nil)
+  sig { params(val_node: T.untyped, expected_type: T.untyped, container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::CopyNode)) }
+  def ensure_owned_value!(val_node, expected_type, container_desc = nil, container_alloc: :heap)
     # Non-escaping values (WITH block aliases) cannot be stored in containers
     if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
       error!(val_node, :STORE_WITH_SCOPED_INTO_CONTAINER, name: val_node.name, container: container_desc || 'a container')
@@ -4337,7 +4337,8 @@ private
 
       copy = AST::CopyNode.new(val_node.token, val_node)
       copy.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any)
-      copy.storage = :heap
+      copy.storage = container_alloc
+      copy.alloc = container_alloc
       elem = vti.element_type
       if elem
         es = lookup_type_schema(elem.resolved) rescue nil
@@ -4349,9 +4350,12 @@ private
 
     if vti.string? && vti.rodata?
       copy = AST::CopyNode.new(val_node.token, val_node)
-      # provenance auto-inferred from location: :heap in Type constructor
-      copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
-      copy.storage = :heap
+      # Auto-COPY of rodata literal into a non-rodata container -- new
+      # string lives in the container's allocator so the container has
+      # uniform-provenance elements (no cleanupAlloc needed).
+      copy.full_type = Type.new(Type::STRING_TYPE, location: container_alloc)
+      copy.storage = container_alloc
+      copy.alloc = container_alloc
       return copy
     end
 
