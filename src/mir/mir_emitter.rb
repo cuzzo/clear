@@ -1004,17 +1004,13 @@ class MIREmitter
       # Locked, RwLocked, Versioned, Rc/Arc/WeakRc/WeakArc, Observable,
       # struct-with-deinit, struct-recursive, generic *T) comptime-
       # dispatch on the binding's actual type. The kind axis signals
-      # four side-channel behaviors:
-      #   :list_with_elem_cleanup -> frame-storage binding with vtable
-      #                              (cleanupAlloc) for element cleanup
+      # three side-channel behaviors:
       #   :rc + rc_alloc          -> binding-specific allocator
       #   :rc + needs_release_fields -> post-cleanup releaseFields call
       #   :frozen                 -> cleanup operates on the paired
       #                              `name__buf` binding
       use_alloc =
-        if entry.kind == :list_with_elem_cleanup
-          alloc_zig(:cleanup)
-        elsif entry.kind == :rc && entry.rc_alloc
+        if entry.kind == :rc && entry.rc_alloc
           alloc_from_sym(entry.rc_alloc)
         else
           alloc
