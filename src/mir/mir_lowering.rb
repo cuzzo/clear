@@ -1723,6 +1723,44 @@ class MIRLowering
   # Function / method calls
   # ================================================================
 
+  # Apply the calling-convention rule to one argument.
+  #
+  # ONE place decides how an arg crosses a fn boundary:
+  #  - Slice-typed callee receiving an ArrayList: extract .items
+  #  - Callee expects *T (mutable param, needs_pointer_passing,
+  #    universal-poly auto-borrow): AddressOf, unless the arg is an
+  #    identifier already pointer-shaped (collection param or BG capture)
+  #  - Otherwise: pass through unchanged
+  sig { params(arg: T.untyped, a: T.untyped, callee_param: T.untyped, callee_param_type: Type, callee_sig: T.untyped, idx: Integer).returns(T.untyped) }
+  def cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
+    ti = a.full_type
+
+    if ti&.array? && !ti&.string? && !ti&.pool? &&
+       !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) &&
+       !callee_param_type.collection?
+      return MIR::ItemsAccess.new(arg, true)
+    end
+
+    wants_ptr_mut_list  = callee_param && callee_param.mutable &&
+                          callee_param.type.respond_to?(:list_collection?) &&
+                          callee_param.type.list_collection?
+    wants_ptr_mut_value = callee_param && callee_param.mutable &&
+                          a.is_a?(AST::Identifier) &&
+                          !wants_ptr_mut_list &&
+                          !callee_param_type.needs_pointer_passing?
+    wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
+    wants_ptr_poly      = universal_poly_arg_needs_addr?(a, callee_sig, idx)
+
+    return arg unless wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly
+
+    if a.is_a?(AST::Identifier) &&
+       (@current_fn_collection_params&.include?(a.name) ||
+        @current_bg_pointer_captures&.include?(a.name))
+      return arg
+    end
+    MIR::AddressOf.new(arg)
+  end
+
   sig { params(node: AST::FuncCall).returns(T.untyped) }
   def lower_func_call(node)
     if (intercept = stub_intercept_for(node.name, nil, node.args))
@@ -1768,54 +1806,7 @@ class MIRLowering
       # (xs.deinit, xs.count, ...) on the duplicated owning container.
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
       arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
-      # Array/List args: convert to slice via .items (skip strings - already []const u8).
-      #
-      # Exception: when the callee declares `MUTABLE xs: T[]@list`, pass
-      # the caller's ArrayList by pointer (`&xs`) instead of `xs.items`.
-      # `.items` is a slice view -- it cannot grow the buffer or update
-      # the caller's `len`, so any `.append`/`.pop` inside the callee
-      # would silently fail to propagate back. Pointer-pass mirrors the
-      # treatment of `@map`/`@pool` mutable params and lets Zig's
-      # auto-deref handle the in-callee `xs.append(...)` / `xs.items`
-      # access uniformly.
-      callee_wants_mutable_list =
-        callee_param && callee_param.mutable &&
-        callee_param.type.respond_to?(:list_collection?) &&
-        callee_param.type.list_collection?
-      callee_wants_mutable_value =
-        callee_param && callee_param.mutable && a.is_a?(AST::Identifier) &&
-        !callee_wants_mutable_list &&
-        !callee_param_type.needs_pointer_passing?
-
-      if callee_wants_mutable_list && a.is_a?(AST::Identifier)
-        if @current_fn_collection_params&.include?(a.name) || @current_bg_pointer_captures&.include?(a.name)
-          arg
-        else
-          MIR::AddressOf.new(arg)
-        end
-      elsif callee_wants_mutable_value
-        MIR::AddressOf.new(arg)
-      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !callee_param_type.collection?
-        # MoveNode exclusion dropped: with EscapeAnalysis condition 8 promoting
-        # the caller's frame ArrayList to heap when GIVEn to a TAKES T[] param,
-        # .items is heap-backed and matches the callee's heapAlloc-bound free (#39).
-        MIR::ItemsAccess.new(arg, true)
-      elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-        # Skip & for params already received as pointers (prevents double-& in recursive calls)
-        # Also skip & for BG pointer captures (already stored as *T in fiber context)
-        if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
-                                         @current_bg_pointer_captures&.include?(a.name))
-          arg
-        else
-          MIR::AddressOf.new(arg)
-        end
-      elsif universal_poly_arg_needs_addr?(a, callee_sig, idx)
-        # Plain T into a universally polymorphic param is auto-borrowed so
-        # mutations in the polymorphic body flow back to the caller.
-        MIR::AddressOf.new(arg)
-      else
-        arg
-      end
+      cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     }
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
@@ -1894,18 +1885,7 @@ class MIRLowering
                   MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
                   lower(a)
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
-      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) && !callee_param_type.collection?
-        MIR::ItemsAccess.new(arg, true)
-      elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
-        if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||
-                                         @current_bg_pointer_captures&.include?(a.name))
-          arg
-        else
-          MIR::AddressOf.new(arg)
-        end
-      else
-        arg
-      end
+      cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx + 1)
     }
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
