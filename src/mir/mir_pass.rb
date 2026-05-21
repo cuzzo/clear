@@ -73,10 +73,8 @@ class MIRPass
     heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
 
-    # Propagate caller arg sync into callee param SymbolEntry#sync.
-    # Runs after annotation has stamped local bindings; before classification
-    # passes that read sync (CleanupClassifier, mir_lowering).
-    EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
+    # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
+    # escape principle). Nothing to do here.
 
     # Phase 1: classify promotions for all functions. Storage is already
     # decided at declaration time by EscapeGraph; this builds the

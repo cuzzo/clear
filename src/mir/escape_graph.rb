@@ -11,6 +11,7 @@
 # silent miscompile.
 require "set"
 require "sorbet-runtime"
+require_relative "escape_analysis"
 
 module EscapeGraph
   extend T::Sig
@@ -35,6 +36,11 @@ module EscapeGraph
       next unless fn&.body
       stamp_fn!(fn, decide_fn(fn, ret_heap, fn_nodes), name, heap_decls, ret_heap)
     end
+    # Cross-module SYNC propagation: caller's arg sync flows into callee's
+    # param SymbolEntry. Part of escape (the sync axis is whether the value
+    # crosses threads / scheduler boundaries). Folded here so a single pass
+    # marks every escape decision.
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
     # Loop-frame escape promotions (frame decls that escape via outer mutation
     # / outer field assignment) belong to escape analysis. Folding the
     # promotion side-effects here means a single pass marks every escape;
