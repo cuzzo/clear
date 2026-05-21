@@ -1012,24 +1012,11 @@ class MIREmitter
       guarded_cleanup(name, zig_type, alloc, false, errdefer:, via_pointer: vp)
 
     when :observable
-      # ~T@observable / ~T[]@set:observable: wait for the consumer fiber
-      # to publish .finish() (spins on isFinished), then free the heap
-      # allocation. Wait-then-destroy is critical: destroying while the
-      # fiber still publishes is a UAF.
-      #
-      # Use `wait()` not `next()` so collection inners (StreamSet) don't
-      # acquire a snapshot the cleanup would discard -- that would leak
-      # the snapshot's buffer refcount. Shape-independent: same body
-      # for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND/REDUCE/DISTINCT.
-      # M7 (now landable, after A1): derive the destroy allocator from
-      # the entry. classify_observable stamps `:heap`; A1 added
-      # tense_observable? to Type#needs_heap_backing? so lower_var_decl
-      # no longer downgrades the entry to :frame. alloc_from_entry now
-      # returns "rt.heapAlloc()" reliably for every observable binding,
-      # matching the allocator that built the *ObservableTerminal
-      # wrapper in lower_range_fold_observable.
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
+      # *ObservableTerminal(Inner): CheatLib.cleanup's observable arm
+      # detects @hasDecl(wait/destroy/isFinished) and emits wait+destroy.
+      # Wait-then-destroy is critical: destroying while the producer
+      # fiber is still publishing is a UAF.
+      guarded_cleanup(name, zig_type, alloc, false, errdefer:, via_pointer: vp)
 
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map,
          :pool, :fixed_soa, :set,

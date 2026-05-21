@@ -3031,6 +3031,23 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Pointer-to-ObservableTerminal(Inner): the producer fiber may
+        // still be publishing when cleanup fires, so wait() for finish
+        // before destroying. wait+destroy mirrors the bespoke Ruby
+        // :observable teardown the classifier used to emit inline.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            if (ti != .pointer or ti.pointer.size != .one) break :blk false;
+            const child = ti.pointer.child;
+            if (@typeInfo(child) != .@"struct") break :blk false;
+            break :blk @hasDecl(child, "wait") and @hasDecl(child, "destroy") and
+                @hasDecl(child, "isFinished") and @hasField(child, "inner");
+        }) {
+            ptr.*.wait();
+            ptr.*.destroy(alloc);
+            return;
+        }
+
         // 2. ArrayList (list collections)
         if (comptime isArrayList(T)) {
             const ElemT = comptime arrayListElemType(T).?;

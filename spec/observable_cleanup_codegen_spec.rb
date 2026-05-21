@@ -41,32 +41,22 @@ RSpec.describe ":observable cleanup codegen shape" do
     CLEAR
   end
 
-  it "emits wait() before destroy() for scalar observables" do
-    # Single brace-block defer ensures the two calls run together at scope
-    # exit. wait() must precede destroy() — otherwise destroy frees the
-    # inner mid-publish (UAF). The order assertion is what makes this a
-    # codegen contract instead of a documented invariant.
-    expect(scalar_zig).to match(
-      /defer\s*\{\s*running\.wait\(\);\s*running\.destroy\(rt\.heapAlloc\(\)\);\s*\}/
-    )
+  # Cleanup is now uniform via CheatLib.cleanup; the wait()-before-
+  # destroy() ordering is enforced in the runtime arm at runtime-header.zig
+  # (zig/runtime/runtime-header.zig, isObservableWrapper detection). What
+  # the codegen pins is: the binding's cleanup goes through CheatLib.cleanup
+  # with the heap allocator (not frameAlloc), so the runtime arm fires.
+  it "routes scalar observable cleanup through CheatLib.cleanup with heapAlloc" do
+    expect(scalar_zig).to include("defer CheatLib.cleanup(")
+    expect(scalar_zig).to include("&running")
+    expect(scalar_zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/)
+    expect(scalar_zig).not_to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&running\)/)
   end
 
-  it "destroys via heapAlloc for scalar observables" do
-    # A1 made entry[:alloc] reliable for tense_observable bindings. Pin
-    # the destroy allocator so a regression in cleanup_allocator (A21
-    # area) doesn't silently emit frameAlloc() and surface as a leak.
-    expect(scalar_zig).not_to include("running.destroy(rt.frameAlloc()")
-    expect(scalar_zig).to include("running.destroy(rt.heapAlloc())")
-  end
-
-  it "emits wait() before destroy() for collection observables (DISTINCT)" do
-    expect(collection_zig).to match(
-      /defer\s*\{\s*running\.wait\(\);\s*running\.destroy\(rt\.heapAlloc\(\)\);\s*\}/
-    )
-  end
-
-  it "destroys via heapAlloc for collection observables" do
-    expect(collection_zig).not_to include("running.destroy(rt.frameAlloc()")
-    expect(collection_zig).to include("running.destroy(rt.heapAlloc())")
+  it "routes collection observable cleanup through CheatLib.cleanup with heapAlloc" do
+    expect(collection_zig).to include("defer CheatLib.cleanup(")
+    expect(collection_zig).to include("&running")
+    expect(collection_zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/)
+    expect(collection_zig).not_to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&running\)/)
   end
 end

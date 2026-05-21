@@ -2936,7 +2936,10 @@ RSpec.describe MIRLowering do
       },
       "transpile-tests/305_observable_collect.cht" => {
         description: "observable COLLECT wait/destroy cleanup",
-        required_patterns: [/running\.wait\(\)/, /running\.destroy\(rt\.heapAlloc\(\)\)/, /try running\.next\(\)/]
+        # wait+destroy lives in CheatLib.cleanup's observable arm now; the
+        # codegen contract is "binding cleanup routes through CheatLib.cleanup
+        # with heapAlloc, calling running.next() in the body."
+        required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
       },
       "transpile-tests/329_versioned_snapshot_mutable.cht" => {
         description: "versioned mutable snapshot update conflict handling",

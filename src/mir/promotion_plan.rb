@@ -658,7 +658,8 @@ module CleanupClassifier
   private_class_method def self.classify_observable(ti)
     return nil unless ti.tense_observable?
     return nil if ti.promise_list?
-    entry(:observable, has_moved_guard: false)
+    zig_type = ti.zig_type rescue "UNKNOWN"
+    entry(:observable, has_moved_guard: false, zig_type: zig_type)
   end
 
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
