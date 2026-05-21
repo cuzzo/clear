@@ -249,6 +249,12 @@ module EscapeGraph
     loop_carry_names(fn).each   { |d| esc_strong << d }
     bg_capture_names(fn).each   { |d| esc_strong << d }
     callarg_escape_names(fn, fn_nodes).each { |d| esc_strong << d }
+    # Container receives heap-owned element: promote the container to
+    # heap so storage allocators match. Eliminates the frame-list /
+    # heap-element mismatch (the :cleanup allocator workaround). Pass
+    # the already-collected esc_strong so an arg whose source binding
+    # will be promoted to heap (e.g. callarg_escape) is recognized.
+    heap_arg_consumer_names(fn, ret_heap, esc_strong).each { |d| esc_strong << d }
     if !borrow_return?(fn)
       if heap_ptr_return?(fn)
         return_values(fn.body).each { |rv| referenced_decls(rv).each { |d| esc_strong << d } }
@@ -474,6 +480,15 @@ module EscapeGraph
       each_call_arg_target(call, fn_nodes) do |arg, target_type, takes, mut_list|
         is_copy = arg.is_a?(AST::CopyNode)
         src = unwrap(arg)
+        if src.is_a?(AST::StructLit) || src.is_a?(AST::UnionVariantLit)
+          # Struct/union literal arg with collection-typed fields:
+          # appending {data: data_list} into items[] makes data_list
+          # escape via items's storage. Without this branch, the
+          # nested data list stays frame-allocated while items lives
+          # past the loop iteration, causing UAF after rewind.
+          aggregate_moved_list_decls(src).each { |d| out << d } if takes
+          next
+        end
         next unless src.is_a?(AST::Identifier)
         ti = src.full_type
         next unless ti.is_a?(Type)
@@ -496,6 +511,70 @@ module EscapeGraph
   # leaves inside COPY'd union/struct elements that the runtime's dupe path
   # then tried to free with mismatched alignment.
   ELEMENT_STORE_METHODS = T.let(%w[append insert push put].freeze, T::Array[String])
+
+  # Containers whose append/insert/push/put receives a heap-owned arg
+  # must be promoted to heap so element + container share an allocator.
+  # Without this, a frame @list ends up holding heap-pointer-bearing
+  # elements (the :list_with_elem_cleanup workaround).
+  sig { params(fn: T.untyped, ret_heap: RetHeap, already_heap: T::Set[String]).returns(T::Set[String]) }
+  def heap_arg_consumer_names(fn, ret_heap, already_heap)
+    out = T.let(Set.new, T::Set[String])
+    walk(fn.body) do |call|
+      next unless call.is_a?(AST::MethodCall) && ELEMENT_STORE_METHODS.include?(call.name.to_s)
+      receiver = call.object
+      next unless receiver.is_a?(AST::Identifier)
+      rec_ti = receiver.full_type
+      next unless rec_ti.is_a?(Type) && rec_ti.collection?
+      # Already heap? No promotion needed.
+      next if receiver.symbol&.heap_provenance?
+      (call.args || []).each do |arg|
+        carries = arg_carries_heap?(arg, ret_heap, already_heap)
+        if ENV["AUDIT_PROMOTE_DEBUG"]
+          STDERR.puts "[promote-debug] line=#{call.token&.line} receiver=#{receiver.name} arg=#{arg.class.name.split('::').last} carries=#{carries}"
+        end
+        if carries
+          out << receiver.name.to_s
+          break
+        end
+      end
+    end
+    out
+  end
+
+  # True when this arg expression carries heap-owned data into a container.
+  # Sources of heap:
+  #   - a function call whose return is heap-allocated (per ret_heap)
+  #   - a CopyNode whose alloc is :heap (the existing stamper writes
+  #     :frame for frame containers; :heap means the source is heap-bound)
+  #   - a StructLit/UnionVariantLit whose fields recursively carry heap
+  sig { params(arg: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
+  def arg_carries_heap?(arg, ret_heap, already_heap = Set.new)
+    arg = unwrap(arg)
+    case arg
+    when AST::FuncCall, AST::MethodCall
+      !!(ret_heap[arg.name.to_s] == true)
+    when AST::CopyNode
+      arg.alloc == :heap
+    when AST::StructLit, AST::UnionVariantLit
+      arg.fields&.any? { |_, fv| arg_carries_heap?(fv, ret_heap, already_heap) }
+    when AST::ListLit
+      arg.items&.any? { |it| arg_carries_heap?(it, ret_heap, already_heap) }
+    when AST::Identifier
+      # Already-marked heap_provenance OR will-be-promoted by another
+      # escape rule already collected this pass (callarg_escape etc.).
+      return true if arg.symbol&.heap_provenance?
+      already_heap.include?(arg.name.to_s)
+    when AST::BinaryOp
+      return true if arg.respond_to?(:storage) && arg.storage == :heap
+      return true if arg.respond_to?(:string_concat) && arg.string_concat
+      arg_carries_heap?(arg.left, ret_heap, already_heap) || arg_carries_heap?(arg.right, ret_heap, already_heap)
+    when AST::StringConcat
+      return true if arg.respond_to?(:storage) && arg.storage == :heap
+      true
+    else
+      false
+    end
+  end
 
   sig { params(call: T.untyped, fn_nodes: FnNodes, blk: T.untyped).void }
   def each_call_arg_target(call, fn_nodes, &blk)

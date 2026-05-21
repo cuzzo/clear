@@ -655,17 +655,14 @@ module CleanupClassifier
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
-      # Frame list whose elements own heap (Strings, struct-with-strings,
-      # ...) keeps its frame storage but cleanup must use the cleanupAlloc
-      # vtable so per-element cleanup picks the right element-allocator
-      # at runtime. The :list_with_elem_cleanup kind signals "frame
-      # storage, vtable cleanup" to the emitter -- a workaround until
-      # element-store auto-COPY uniformly propagates container_alloc
-      # (then strings live in the same arena as the list and frameAlloc
-      # cleanup is correct).
+      # Uniform frame list: cleanup uses the binding's frame allocator.
+      # EscapeGraph.heap_arg_consumer_names promotes any frame list that
+      # would receive heap-owned elements to heap (so we never reach
+      # here with a mixed-provenance container). Elements are then
+      # uniformly frame-allocated (via the append-site dupeValue with
+      # frameAlloc); frame.free is the correct no-op cleanup.
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
-      return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
-                   alloc: :frame, elem_needs_cleanup: has_heap_elems)
+      return entry(:list, alloc: :frame, elem_needs_cleanup: has_heap_elems)
     end
     return entry(:list, has_moved_guard: true) if ti.list_collection?
     return entry(:string_map) if ti.map? && !ti.numeric_map?
