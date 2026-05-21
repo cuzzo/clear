@@ -542,9 +542,10 @@ RSpec.describe MIREmitter do
     it "emits passthrough for value types" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
       zig = e.emit(node)
-      expect(zig).to include("blk_copy_value")
+      # blk labels are now uniquified (counter suffix); match the prefix.
+      expect(zig).to match(/blk_copy_\d+_value/)
       expect(zig).to include("const __src = n")
-      expect(zig).to include("break :blk_copy_value __src")
+      expect(zig).to match(/break :blk_copy_\d+_value __src/)
     end
   end
 

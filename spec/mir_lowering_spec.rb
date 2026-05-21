@@ -1219,9 +1219,9 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
       zig = emit(result)
-      expect(zig).to include("blk_copy_value")
+      expect(zig).to match(/blk_copy_\d+_value/)
       expect(zig).to include("const __src = x")
-      expect(zig).to include("break :blk_copy_value __src")
+      expect(zig).to match(/break :blk_copy_\d+_value __src/)
     end
 
     it "lowers COPY of sync values as full-value dupes" do

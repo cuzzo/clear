@@ -1124,33 +1124,36 @@ class MIREmitter
   def emit_deep_copy(node)
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
+    # Uniquify the blk label across nested DeepCopy emits in the same scope.
+    @deep_copy_counter = (@deep_copy_counter || 0) + 1
+    bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
     when :list_shallow
       elem = node.elem_type
-      "blk_copy: {\n" \
+      "#{bc}: {\n" \
       "    const __src = #{src};\n" \
       "    if (__src.len > 0) {\n" \
       "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
       "        @memcpy(__buf, __src);\n" \
-      "        break :blk_copy __buf;\n" \
-      "    } else break :blk_copy #{src};\n" \
+      "        break :#{bc} __buf;\n" \
+      "    } else break :#{bc} #{src};\n" \
       "}"
     when :list_deep
       elem = node.elem_type
-      "blk_copy: {\n" \
+      "#{bc}: {\n" \
       "    const __src = #{src};\n" \
       "    if (__src.len > 0) {\n" \
       "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
       "        errdefer #{alloc}.free(__buf);\n" \
       "        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeValue(#{elem}, __src[__i], #{alloc}); }\n" \
-      "        break :blk_copy __buf;\n" \
-      "    } else break :blk_copy #{src};\n" \
+      "        break :#{bc} __buf;\n" \
+      "    } else break :#{bc} #{src};\n" \
       "}"
     when :passthrough
-      "blk_copy_value: {\n" \
+      "#{bc}_value: {\n" \
       "    const __src = #{src};\n" \
-      "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :blk_copy_value __src.*;\n" \
-      "    break :blk_copy_value __src;\n" \
+      "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :#{bc}_value __src.*;\n" \
+      "    break :#{bc}_value __src;\n" \
       "}"
     when :full_value
       type_arg = node.zig_type || "@TypeOf(#{src})"
@@ -1476,7 +1479,12 @@ class MIREmitter
       # The `*ArrayList` arm fires for callees whose caller passed a
       # `MUTABLE @list` param straight through (e.g. forwarding a
       # pointer-passed list to a borrow-shape callee).
-      "blk_items: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :blk_items if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
+      # Uniquify the blk label so multiple ItemsAccess emits in the same
+      # Zig scope don't redefine each other. Zig rejects duplicate labels
+      # even in nested expression positions.
+      @items_block_counter = (@items_block_counter || 0) + 1
+      label = "blk_items_#{@items_block_counter}"
+      "#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
     else
       "#{inner}.items"
     end
