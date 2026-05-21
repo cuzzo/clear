@@ -1009,6 +1009,7 @@ module AST
     # ONE predicate replaces the per-source disjunction (the four counters track distinct
     # signal sources but the consumer is "any of them?" -- there is one consumer-facing
     # decision, hence one predicate).
+    sig { returns(T::Boolean) }
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
     end
@@ -2059,8 +2060,6 @@ module MIR
     extend T::Sig
     include AST::Locatable
     attr_accessor :cleanup_entry
-    sig { returns(TrueClass) }
-    def needs_cleanup; true; end
   end
 
   # Promote: escape promotion inserted before return statements.

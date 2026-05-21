@@ -790,7 +790,7 @@ class MIRPass
   end
 
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_reassign_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
@@ -805,7 +805,7 @@ class MIRPass
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
   # Previously stamp-only; now inserts MIR::Alloc + MIR::Drop + MIR::SuppressCleanup
   # so the checker verifies match_as cleanup like any other binding.
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Boolean)) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_match_as_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
@@ -838,7 +838,7 @@ class MIRPass
     src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry.needs_cleanup?
   end
 
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_while_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::WhileBindLoop)
     entry = bindings[stmt.binding_name.to_s]
@@ -849,7 +849,7 @@ class MIRPass
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
   end
 
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_if_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []

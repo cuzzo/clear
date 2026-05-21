@@ -350,7 +350,10 @@ module EffectTracker
   # Post-pass: compute needs_rt for every function.
   # A function needs rt if it uses the frame arena, calls a fn pointer, or any
   # transitive callee needs rt. main always needs rt (entry point).
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  #
+  # Stamps fn_node.needs_rt as a side effect; the caller-visible result is
+  # the boolean stamp, not a returned hash, so the method is void.
+  sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.untyped)

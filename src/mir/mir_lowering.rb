@@ -320,53 +320,48 @@ class MIRLowering
     hoist_alloc(copied, ast_node, err_cleanup: true)
   end
 
-  sig { params(ast_node: T.untyped, source: String).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(ast_node: T.untyped, source: String).returns(CleanupEntry) }
   def rc_cleanup_entry(ast_node, source:)
     ti = Type.from_node(ast_node)
     zig_t = ti&.zig_type
     raise "hoist_cleanup_entry: #{source} has no zig_type -- ast_node type_info unavailable" unless zig_t
-    { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
-      rc_variant: :standard, rc_alloc: :heap }
+    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false,
+                       zig_type: zig_t, rc_variant: :standard, rc_alloc: :heap)
   end
 
-  sig { params(zig_type: String).returns(T::Hash[Symbol, T.untyped]) }
+  sig { params(zig_type: String).returns(CleanupEntry) }
   def uniform_cleanup_entry(zig_type)
-    { kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type }
+    CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type)
   end
 
-  sig { returns(T::Hash[Symbol, T.untyped]) }
+  # Heap strings are linearly-affine: a defer must guard against move
+  # (RETURN, GIVE, TAKES consumption). has_moved_guard drives use_guard
+  # via the standard `g = !errdefer && entry.has_moved_guard?` rule.
+  sig { returns(CleanupEntry) }
   def heap_string_entry
-    # Heap strings are linearly-affine: a defer must guard against move
-    # (RETURN, GIVE, TAKES consumption). The kind no longer needs a
-    # special-case in emit_cleanup -- has_moved_guard drives use_guard
-    # via the standard `g = !errdefer && entry.has_moved_guard?` rule.
-    { kind: :heap_string, alloc: :heap, has_moved_guard: true }
+    CleanupEntry.build(:heap_string, alloc: :heap, has_moved_guard: true)
   end
 
   # Synthesize a cleanup plan entry for a hoisted temp.
-  # Returns nil if the cleanup cannot be determined statically.
+  # Returns nil when the MIR node is not an allocating expression that
+  # produces an owned heap binding (CapWrap :passthrough / :local,
+  # Call/TryCatch with non-cleanup-needing return).
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def hoist_cleanup_entry(mir, ast_node)
-    raw = case mir
+    case mir
     when MIR::DupeSlice, MIR::ConcatStr
       heap_string_entry
     when MIR::AllocSlice
-      uniform_cleanup_entry("[]#{mir.elem_type}").merge(elem_zig_type: mir.elem_type)
+      e = uniform_cleanup_entry("[]#{mir.elem_type}")
+      e[:elem_zig_type] = mir.elem_type
+      e
     when MIR::MakeList
       uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
     when MIR::HeapCreate, MIR::ContainerInit
       uniform_cleanup_entry(mir.zig_type)
     when MIR::DeepCopy
       raise "hoist_cleanup_entry: unexpected DeepCopy strategy :#{mir.strategy}" unless mir.strategy == :full_value
-      zig_t = mir.zig_type
-      if zig_t.nil?
-        ti = Type.from_node(ast_node)
-        raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
-        bare = Type.new(ti)
-        bare.provenance = :stack if bare.respond_to?(:provenance=)
-        zig_t = bare.zig_type
-      end
-      uniform_cleanup_entry(zig_t)
+      uniform_cleanup_entry(deep_copy_zig_type(mir, ast_node))
     when MIR::CapWrap
       if mir.sync_fn
         uniform_cleanup_entry(mir.sync_type)
@@ -383,23 +378,28 @@ class MIRLowering
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
     end
-    raw && CleanupEntry.from(raw)
   end
 
-  sig { params(ast_node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(String) }
+  private def deep_copy_zig_type(mir, ast_node)
+    return mir.zig_type if mir.zig_type
+    ti = Type.from_node(ast_node)
+    raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
+    bare = Type.new(ti)
+    bare.provenance = :stack if bare.respond_to?(:provenance=)
+    bare.zig_type
+  end
+
+  sig { params(ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_heap_result(ast_node)
     ti = Type.from_node(ast_node)
     return nil unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    if ti.string?
-      heap_string_entry
-    elsif ti.list_collection?
-      uniform_cleanup_entry(ti.zig_type)
-    else
-      zig_t = (Type.new(ti.resolved).zig_type rescue nil)
-      return nil unless zig_t
-      uniform_cleanup_entry(zig_t)
-    end
+    return heap_string_entry if ti.string?
+    return uniform_cleanup_entry(ti.zig_type) if ti.list_collection?
+    zig_t = (Type.new(ti.resolved).zig_type rescue nil)
+    return nil unless zig_t
+    uniform_cleanup_entry(zig_t)
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -1731,34 +1731,54 @@ class MIRLowering
   #    universal-poly auto-borrow): AddressOf, unless the arg is an
   #    identifier already pointer-shaped (collection param or BG capture)
   #  - Otherwise: pass through unchanged
-  sig { params(arg: T.untyped, a: T.untyped, callee_param: T.untyped, callee_param_type: Type, callee_sig: T.untyped, idx: Integer).returns(T.untyped) }
+  #
+  # callee_param is nilable only because intrinsic/extern call paths can
+  # arrive without a signature; the helper degrades to "pass as-is".
+  sig do
+    params(arg: T.untyped, a: T.untyped,
+           callee_param: T.nilable(AST::Param),
+           callee_param_type: Type,
+           callee_sig: T.untyped, idx: Integer).returns(T.untyped)
+  end
   def cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     ti = a.full_type
 
-    if ti&.array? && !ti&.string? && !ti&.pool? &&
+    if ti.is_a?(Type) && ti.array? && !ti.string? && !ti.pool? &&
        !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) &&
        !callee_param_type.collection?
       return MIR::ItemsAccess.new(arg, true)
     end
 
-    wants_ptr_mut_list  = callee_param && callee_param.mutable &&
+    return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
+    return arg if arg_already_pointer_shaped?(a)
+    MIR::AddressOf.new(arg)
+  end
+
+  sig do
+    params(a: T.untyped, ti: T.untyped,
+           callee_param: T.nilable(AST::Param),
+           callee_param_type: Type,
+           callee_sig: T.untyped, idx: Integer).returns(T::Boolean)
+  end
+  private def wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
+    mutable_callee     = !callee_param.nil? && !!callee_param.mutable
+    wants_ptr_mut_list  = mutable_callee &&
                           callee_param.type.respond_to?(:list_collection?) &&
                           callee_param.type.list_collection?
-    wants_ptr_mut_value = callee_param && callee_param.mutable &&
+    wants_ptr_mut_value = mutable_callee &&
                           a.is_a?(AST::Identifier) &&
                           !wants_ptr_mut_list &&
                           !callee_param_type.needs_pointer_passing?
     wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
     wants_ptr_poly      = universal_poly_arg_needs_addr?(a, callee_sig, idx)
+    !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly)
+  end
 
-    return arg unless wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly
-
-    if a.is_a?(AST::Identifier) &&
-       (@current_fn_collection_params&.include?(a.name) ||
-        @current_bg_pointer_captures&.include?(a.name))
-      return arg
-    end
-    MIR::AddressOf.new(arg)
+  sig { params(a: T.untyped).returns(T::Boolean) }
+  private def arg_already_pointer_shaped?(a)
+    return false unless a.is_a?(AST::Identifier)
+    !!(@current_fn_collection_params&.include?(a.name) ||
+       @current_bg_pointer_captures&.include?(a.name))
   end
 
   sig { params(node: AST::FuncCall).returns(T.untyped) }
