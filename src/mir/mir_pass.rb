@@ -173,19 +173,18 @@ class MIRPass
   def hoist_return_subexprs_to_heap!(stmts)
     return unless stmts
     AST.walk_body(stmts) do |node|
-      next unless node.is_a?(AST::ReturnNode)
-      val = node.value
-      next unless val
-      if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
-        hoist_lit_fields!(val)
-      elsif val.is_a?(AST::Identifier)
-        # Borrowed-param-as-return-value: `RETURN u` where u is a borrow of
-        # a non-Copy type with promotable fields. The caller takes
-        # ownership on return, so the value must be heap-cloned. Synthesize
-        # `COPY u` -- lowering routes through dupeValue (the unified clone
-        # primitive), same end result as promoteDeep but via the type-
-        # driven comptime path instead of the runtime promote subsystem.
-        wrap_identifier_with_copy_if_needed!(node, val)
+      # RETURN with a struct/union literal: propagate :heap into the
+      # field sub-expressions so lowering picks heapAlloc for them.
+      # RETURN with a bare Identifier borrowed param: synthesize COPY so
+      # the value lowers to dupeValue (type-driven deep clone).
+      if node.is_a?(AST::ReturnNode)
+        val = node.value
+        next unless val
+        if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
+          hoist_lit_fields!(val)
+        elsif val.is_a?(AST::Identifier)
+          wrap_identifier_with_copy_if_needed!(node, val)
+        end
       end
     end
   end
@@ -1080,6 +1079,15 @@ class MIRPass
   # Defer suppression for escaped variables is handled by MIR::Return
   # (inserted by insert_return!) and consumed by the transpiler's
   # collect_escaping_identifiers in the ReturnNode handler.
+  # Insert MIR::Promote before a return statement and annotate the
+  # ReturnNode for struct-level promotion wrapping.
+  #
+  # POST-PATH-A this is the residual path. The Phase 0.5 hoist covers the
+  # generated-test corpus (0 promote sites). This code remains as a
+  # back-stop for synthetic patterns (e.g. heap-promoted struct with
+  # rodata-literal string fields, surfaced by annotator specs) that need
+  # the per-field promote runtime call until a deeper rewrite handles
+  # them at construction time.
   sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(MIR::PromotionPlan)).void }
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
