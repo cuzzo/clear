@@ -889,10 +889,18 @@ class MIRPass
     val_ti = stmt.value.full_type
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
+    # AST-level per-field rewrite: for a StructLit/UnionVariantLit value
+    # being stored in a heap container, wrap every frame-storage heap-
+    # owning field in an AST::CopyNode(:heap). The existing CopyNode
+    # lowering deep-copies each wrapped field to heap at construction
+    # time, so the StructLit is built with all-heap fields. No
+    # post-construct promote() is needed.
+    if stmt.value.is_a?(AST::StructLit) || stmt.value.is_a?(AST::UnionVariantLit)
+      rewrite_frame_fields_to_copy_heap!(stmt.value)
+      return  # No container_promote annotation needed.
+    end
+
     # Skip promote when the value's heap-owning payload is already heap.
-    # Without this, the runtime's promote() falls back to ptrIsFrameOwned
-    # to skip the re-dupe at runtime; with it, the emit-time analysis
-    # determines provenance and the runtime check becomes unnecessary.
     return if value_payload_already_heap?(stmt.value)
 
     # Annotate directly on Assignment node (no MIR::Promote needed).
@@ -900,6 +908,55 @@ class MIRPass
     zig_t = val_ti.zig_type
     zig_t = zig_t[1..] if zig_t.start_with?("*")
     stmt.container_promote_zig_type = zig_t
+  end
+
+  # Walk a StructLit/UnionVariantLit and wrap every frame-storage heap-
+  # owning field value in AST::CopyNode(:heap). After this rewrite, the
+  # existing field-level CopyNode lowering deep-copies each wrapped
+  # field to heap; the StructLit is constructed with all-heap fields,
+  # making a post-construct promote() unnecessary.
+  sig { params(lit: T.untyped).void }
+  def rewrite_frame_fields_to_copy_heap!(lit)
+    return unless lit.fields
+    lit.fields.each do |fname, fv|
+      next if fv.is_a?(AST::CopyNode)              # already an explicit COPY
+      next if fv.is_a?(AST::MoveNode)              # explicit move; trust caller
+      next if fv.is_a?(AST::CloneNode)             # Rc clone
+      next unless fv.respond_to?(:full_type)
+      fti = fv.full_type
+      fti = Type.new(fti) if fti && !fti.is_a?(Type)
+      next unless fti.is_a?(Type)
+      next unless fti.needs_promotion?(@schema_lookup) && !fti.string?
+      # Skip if the field source is already heap (Identifier with
+      # heap_provenance symbol, heap-returning call, or all-heap
+      # nested StructLit). Those don't need re-dupe.
+      next if field_value_already_heap?(fv)
+      # Wrap in CopyNode(:heap). Lowering's CopyNode-of-collection /
+      # CopyNode-of-struct path will deep-copy with heapAlloc.
+      copy = AST::CopyNode.new(fv.token, fv)
+      copy.full_type = fti
+      copy.storage = :heap
+      copy.alloc = :heap
+      lit.fields[fname] = copy
+    end
+  end
+
+  # True when this field's source already owns heap (no re-dupe needed).
+  sig { params(fv: T.untyped).returns(T::Boolean) }
+  def field_value_already_heap?(fv)
+    case fv
+    when AST::CopyNode
+      fv.alloc == :heap
+    when AST::Identifier
+      !!fv.symbol&.heap_provenance?
+    when AST::FuncCall, AST::MethodCall
+      !!fv.heap_provenance? if fv.respond_to?(:heap_provenance?)
+    when AST::StructLit, AST::UnionVariantLit
+      return false unless fv.fields
+      fv.fields.all? { |_, sub| field_value_already_heap?(sub) }
+    else
+      false
+    end
   end
 
   # True when every heap-owning field of `value` is already heap-OWNED

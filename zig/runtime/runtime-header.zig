@@ -3664,20 +3664,14 @@ pub const CheatLib = struct {
     pub fn promote(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
         const info = @typeInfo(T);
 
-        // 1. Strings: dupe only frame-arena strings to heap.
-        // Heap strings (from COPY, toString, etc.) are already escaped —
-        // duping them again leaks the original. The remaining caller
-        // for this check is promote() recursing through StructLit
-        // fields where SOME fields are heap (auto-COPY) and others
-        // are frame (Identifier) -- the per-field provenance is
-        // compile-time known but not threaded through to the emit; a
-        // future refactor that promotes frame fields explicitly
-        // BEFORE the StructLit construction would let this check go.
+        // 1. Strings: dupe to heap. promote() is only emitted at sites
+        // where the source is known frame at compile time (see
+        // mir_pass.insert_container_promote!'s AST-level per-field
+        // CopyNode(:heap) rewrite for StructLit/UnionVariantLit;
+        // heap-already fields are excluded by field_value_already_heap?).
         if (T == []const u8 or T == []u8) {
             if (value.len == 0) return;
-            if (rt.ptrIsFrameOwned(value.*.ptr)) {
-                value.* = try rt.heapAlloc().dupe(u8, value.*);
-            }
+            value.* = try rt.heapAlloc().dupe(u8, value.*);
             return;
         }
 

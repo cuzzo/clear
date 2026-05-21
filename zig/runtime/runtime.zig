@@ -432,21 +432,6 @@ pub const Runtime = struct {
         return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 
-
-    /// True when `ptr` is owned by the frame arena. Only caller is
-    /// promote()'s string arm in runtime-header.zig: used to skip
-    /// re-duping a string that is already on the heap. promote() is
-    /// emitted at MIR::EscapePromote sites where the compiler can't
-    /// (yet) prove that the payload is already-heap; closing that gap
-    /// would let this helper be deleted too.
-    pub fn ptrIsFrameOwned(self: *Runtime, ptr: anytype) bool {
-        if (use_debug_arena) return self.overflow_arena.isLargeObject(ptr);
-        const frame_mem = self.overflow_arena.static_block;
-        const p = @intFromPtr(ptr);
-        const frame_base = @intFromPtr(frame_mem.ptr);
-        return p >= frame_base and p < frame_base + frame_mem.len;
-    }
-
     pub fn globalAlloc(self: *Runtime) std.mem.Allocator {
         return self.heap_allocator;
     }
