@@ -457,10 +457,16 @@ class MIRChecker
 
       container_alloc = T.must(allocs[target]).first.alloc
 
-      # Check primary allocator
+      # Check primary allocator. :cleanup is a mixed-provenance
+      # container -- it tolerates any op allocator (the runtime
+      # cleanupAlloc.free dispatches per-pointer). Per the
+      # "one collection = one allocator" policy this kind is being
+      # phased out, but while it exists it's correct for ops to use
+      # the actual element's allocator (often :frame) inside a
+      # :cleanup container.
       if iz.allocs.key?(:alloc)
         op_alloc = iz.allocs[:alloc]
-        if op_alloc != container_alloc
+        if op_alloc != container_alloc && container_alloc != :cleanup
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
         end
