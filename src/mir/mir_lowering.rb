@@ -6957,6 +6957,26 @@ class MIRLowering
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
   end
 
+  # Single-source frame-arena marker injection for every loop shape
+  # (lower_while / lower_while_bind / lower_for_each / lower_for_range).
+  # When mark_per_iter is set by EscapeGraph (frame allocs that survive
+  # past the iteration end would otherwise grow the arena unbounded),
+  # prepend a saveLoopMark/restoreLoopMark pair so each iteration rewinds
+  # to the pre-body high-water mark. `after_mark` is interposed between
+  # the marker pair and the body (lower_for_range uses it for the
+  # iteration-variable decl).
+  sig { params(body: T.untyped, mark_per_iter: T.untyped, tight: T.untyped, after_mark: T::Array[T.untyped]).returns(T.untyped) }
+  def prepend_loop_mark(body, mark_per_iter:, tight:, after_mark: [])
+    suffix = after_mark + T.must(body)
+    return suffix unless !tight && mark_per_iter && @current_fn_has_rt
+    rt = MIR::Ident.new(@rt_name)
+    @loop_mark_counter = (@loop_mark_counter || 0) + 1
+    mark_var = "__loop_mark_#{@loop_mark_counter}"
+    save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
+    restore = MIR::DeferStmt.new(MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false))
+    [save, restore] + suffix
+  end
+
   sig { params(node: AST::WhileLoop).returns(MIR::WhileStmt) }
   def lower_while(node)
     rt = MIR::Ident.new(@rt_name)
@@ -6964,16 +6984,7 @@ class MIRLowering
     b = node.do_branch
     body = b.is_a?(Array) ? lower_body(b) : []
 
-    if !node.tight && node.mark_per_iter && @current_fn_has_rt
-      @loop_mark_counter = (@loop_mark_counter || 0) + 1
-      mark_var = "__loop_mark_#{@loop_mark_counter}"
-      # Prologue: save loop mark
-      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      restore = MIR::DeferStmt.new(
-        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-      )
-      body = [save, restore] + T.must(body)
-    end
+    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
     if !node.tight && @current_fn_has_rt && !loop_body_exits?(T.must(body))
@@ -7001,15 +7012,7 @@ class MIRLowering
       body = [MIR::DeferStmt.new(release_call)] + T.must(body)
     end
 
-    if !node.tight && node.mark_per_iter && @current_fn_has_rt
-      @loop_mark_counter = (@loop_mark_counter || 0) + 1
-      mark_var = "__loop_mark_#{@loop_mark_counter}"
-      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      restore = MIR::DeferStmt.new(
-        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-      )
-      body = [save, restore] + T.must(body)
-    end
+    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
     if !node.tight && @current_fn_has_rt && !loop_body_exits?(T.must(body))
       T.must(body) << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
@@ -7038,17 +7041,7 @@ class MIRLowering
     mark_per_iter = node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil
     tight = node.respond_to?(:tight) && node.tight
 
-    # Inject saveLoopMark/restoreLoopMark when the body has loop-local frame allocs.
-    # Mirrors the same injection done in lower_while and lower_for_range.
-    if !tight && mark_per_iter && @current_fn_has_rt
-      @loop_mark_counter = (@loop_mark_counter || 0) + 1
-      mark_var = "__loop_mark_#{@loop_mark_counter}"
-      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      restore = MIR::DeferStmt.new(
-        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-      )
-      body = [save, restore] + T.must(body)
-    end
+    body = prepend_loop_mark(body, mark_per_iter: mark_per_iter, tight: tight)
 
     # Yield check at end of body
     if @current_fn_has_rt
@@ -7167,18 +7160,7 @@ class MIRLowering
     # Prologue: const var: i64 = iter; _ = &var;
     var_decl = MIR::Let.new(var, MIR::Ident.new(iter_var), false, "i64", "_ = &#{var};")
 
-    # Frame mark if needed
-    if !node.tight && node.mark_per_iter && @current_fn_has_rt
-      @loop_mark_counter = (@loop_mark_counter || 0) + 1
-      mark_var = "__loop_mark_#{@loop_mark_counter}"
-      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      restore = MIR::DeferStmt.new(
-        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-      )
-      body = [save, restore, var_decl] + T.must(body)
-    else
-      body = [var_decl] + T.must(body)
-    end
+    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight, after_mark: [var_decl])
 
     # Yield check
     if !node.tight && @current_fn_has_rt
