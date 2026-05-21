@@ -504,7 +504,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         # Post-collapse: sharded pool routes through CheatLib.cleanup shim.
-        expect(out).to include("defer CheatLib.cleanup(CheatLib.ShardedPool(Score, 4), rt.heapAlloc(), &sp)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(sp), rt.heapAlloc(), &sp)")
         expect(out).not_to include("sp_moved")
       end
 
@@ -956,7 +956,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       # Post-collapse: SOA pool routes through CheatLib.cleanup shim.
-      expect(zig).to include("CheatLib.cleanup(CheatLib.SoaPool(Entity), rt.heapAlloc(), &pool)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
     end
 
     it "uses field-slice iteration for scalar folds without materializing structs" do

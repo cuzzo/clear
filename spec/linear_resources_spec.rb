@@ -533,7 +533,7 @@ RSpec.describe SemanticAnnotator do
               STRUCT Edge { target: N@link }
               FN f() RETURNS !Void -> n = N{ v: 1 } @multiowned; e = Edge{ target: LINK n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.cleanup(Edge, rt.heapAlloc(), &e)")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(e), rt.heapAlloc(), &e)")
       end
 
       it "struct with @multiowned field emits cleanup" do
@@ -541,7 +541,7 @@ RSpec.describe SemanticAnnotator do
               STRUCT W { inner: N@multiowned }
               FN f() RETURNS !Void -> n = N{ v: 1 } @multiowned; w = W{ inner: n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.cleanup(W, rt.heapAlloc(), &w)")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(w), rt.heapAlloc(), &w)")
       end
 
       it "raises error when passing @link to function expecting plain type" do

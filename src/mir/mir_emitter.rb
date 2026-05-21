@@ -619,9 +619,7 @@ class MIREmitter
     tmp = "__new_#{node.name}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
-    zt = node.zig_type
-    zt = zt[1..] if zt.start_with?("!")
-    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{zt}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
   end
 
   sig { params(node: MIR::IfStmt).returns(String) }
@@ -1012,10 +1010,11 @@ class MIREmitter
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
          :takes_union, :heap_string,
          :inf_stream, :observable, :versioned, :takes_slice,
-         :heap_struct_plain, :frozen, :rc
-      is_string = entry.kind == :heap_string
+         :heap_struct_plain, :frozen, :rc,
+         :locked, :write_locked, :always_mutable
       # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
-      # on mixed-provenance container elements.
+      # on mixed-provenance container elements; :rc may carry a binding-
+      # specific allocator (rc_alloc, e.g. from CapWrap upgrades).
       use_alloc =
         if entry.kind == :list_with_elem_cleanup
           alloc_zig(:cleanup)
@@ -1026,19 +1025,17 @@ class MIREmitter
         end
       # :frozen lives in a paired `name__buf` binding; rebind locally.
       use_name = entry.kind == :frozen ? "#{name}__buf" : name
-      # Kinds whose binding shape is only known at the call site defer
-      # to comptime @TypeOf(...). cleanup() dispatches on the actual
-      # shape (struct-with-deinit, refInnerType -> releaseOne, optional
-      # unwrap, generic *T destroy, struct-recursive).
-      use_type =
-        if is_string
-          "[]const u8"
-        elsif entry.kind == :heap_struct_plain || entry.kind == :frozen || entry.kind == :rc
-          "@TypeOf(#{use_name})"
-        else
-          zig_type
-        end
-      use_guard = is_string ? !errdefer : g
+      # ONE shape: @TypeOf(name) lets CheatLib.cleanup comptime-dispatch
+      # on the binding's actual type. ArrayList, slice, String, Pool, Set,
+      # StringMap, Locked, RwLocked, Versioned, Rc/Arc/WeakRc/WeakArc,
+      # Observable, struct-with-deinit, struct-recursive, generic *T --
+      # all handled by the runtime arms. via_pointer bindings already
+      # hold *T; strip one pointer level so cleanup's T matches the
+      # pointee shape (the call passes the *T directly, not &name).
+      use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
+      # Heap strings get unguarded defers (no move tracking); other kinds
+      # use the entry's guard flag.
+      use_guard = entry.kind == :heap_string ? !errdefer : g
       result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
       # :rc optionally needs a releaseFields side-channel (struct with
       # owned heap fields wrapped in Rc -- the inner struct's String/list
@@ -1050,14 +1047,6 @@ class MIREmitter
         result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
       end
       result
-
-    when :locked, :write_locked, :always_mutable
-      # *Locked(T) / *RwLocked(T) / *RefCell(T): pointer destroy only.
-      # Inner-data cleanup is owned by per-field reassignment paths
-      # (e.g. `cfg.get().field = newval` frees `__old` inline); routing
-      # through CheatLib.cleanup's wrapper arm would also recursively
-      # clean .data fields, double-freeing those.
-      guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"

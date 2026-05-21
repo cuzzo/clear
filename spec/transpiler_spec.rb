@@ -113,7 +113,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("CheatLib.cleanup(std.ArrayListUnmanaged(f64), rt.frameAlloc(), &vals)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(vals), rt.frameAlloc(), &vals)")
     end
 
     it "sharded list still uses heapAlloc" do
@@ -875,7 +875,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # val is deep-copied by the runtime before map storage; original needs cleanup
       expect(zig).not_to include("val_moved")
-      expect(zig).to include("defer CheatLib.cleanup(Value")
+      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
       expect(zig).to include("&val")
     end
 
@@ -892,7 +892,7 @@ RSpec.describe ZigTranspiler do
       # The runtime deep-copies val via dupeUnionValue before storing in map.
       # val itself must be cleaned up -- its cleanup defer must NOT be suppressed.
       expect(zig).not_to include("val_moved")
-      expect(zig).to include("defer CheatLib.cleanup(Value")
+      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
       expect(zig).to include("&val")
     end
 
@@ -1021,7 +1021,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/cleanup\(Value.*&result\).*\n.*result = /)
+      expect(zig).to match(/cleanup\([^,]+, [^,]+, &result\).*\n.*result = /)
     end
   end
 
@@ -1548,7 +1548,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include(".append(")
       expect(zig).to include("__p.next()")
       expect(zig).to include("frameAlloc()")
-      expect(zig).to include("CheatLib.cleanup(std.ArrayListUnmanaged(i64), rt.frameAlloc(), &results)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(results), rt.frameAlloc(), &results)")
     end
   end
 
@@ -1606,7 +1606,7 @@ RSpec.describe ZigTranspiler do
       # makeVal!() returns a heap-owning Value. useVal borrows it (non-TAKES).
       # The temporary must be hoisted to a named let with a cleanup defer,
       # otherwise the Lambda's @indirect body pointer leaks.
-      expect(zig).to include("defer CheatLib.cleanup(Value")
+      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__tmp_\d+\)/)
     end
 
     it "does not hoist Copy types (Int64) used as non-TAKES args" do
@@ -1617,7 +1617,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # Int64 is a Copy type -- no cleanup needed, no __tmp hoisting
-      expect(zig).not_to include("defer CheatLib.cleanup(Int64")
+      expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &num\)/)
     end
   end
 
@@ -1837,7 +1837,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # Post-collapse: @soa routes through CheatLib.cleanup ("struct with
       # deinit" comptime arm dispatches to ptr.deinit(alloc) internally).
-      expect(zig).to include("CheatLib.cleanup(CheatLib.SoaList(Point), rt.frameAlloc(), &soa)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(soa), rt.frameAlloc(), &soa)")
     end
   end
 

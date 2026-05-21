@@ -573,9 +573,13 @@ pub const CheatLib = struct {
     pub const File = struct {
         fd: std.posix.fd_t,
 
-        pub fn close(self: File) void {
+        /// Idempotent cleanup: close the fd. `deinit` is the canonical
+        /// name CheatLib.cleanup's struct-with-deinit arm looks for; the
+        /// `close` alias preserves user-facing CLEAR code.
+        pub fn deinit(self: File) void {
             compat.closeFd(self.fd);
         }
+        pub const close = deinit;
 
         pub fn read(self: File, buffer: []u8) !usize {
             return try std.posix.read(self.fd, buffer);
@@ -2959,22 +2963,27 @@ pub const CheatLib = struct {
             return;
         }
 
-        // Heap-allocated sync wrappers created by COPY need top-level
-        // pointer cleanup. The generic struct-field pointer cleanup below
-        // only fires when the pointer is stored inside another value.
+        // Heap-allocated sync wrappers (Locked / RwLocked / Versioned) +
+        // RefCell-like single-field cells: destroy the wrapper. CLEAR's
+        // lowering owns inner-field cleanup via per-reassignment paths
+        // (no recursion into .data here; would over-free static
+        // assignments). Versioned needs deinitSync to release its
+        // current EBR-retired ptr before destroy.
         if (comptime blk: {
             const ti = @typeInfo(T);
             if (ti != .pointer or ti.pointer.size != .one) break :blk false;
             const child = ti.pointer.child;
             if (@typeInfo(child) != .@"struct") break :blk false;
-            break :blk isLockWrapper(child) or isVersionedWrapper(child);
+            // Lock wrappers (mutex/rw field), Versioned, RefCell (only
+            // `data` field). RefCell shape: struct with one field named
+            // `data` and no `init` decl that needs args.
+            if (isLockWrapper(child) or isVersionedWrapper(child)) break :blk true;
+            const cfields = @typeInfo(child).@"struct".fields;
+            break :blk cfields.len == 1 and std.mem.eql(u8, cfields[0].name, "data");
         }) {
             const ChildT = @typeInfo(T).pointer.child;
             if (comptime isVersionedWrapper(ChildT)) {
                 ptr.*.deinitSync(alloc);
-            } else {
-                const DataT = @TypeOf(ptr.*.data);
-                if (comptime needsCleanup(DataT)) cleanup(DataT, alloc, &ptr.*.data);
             }
             alloc.destroy(ptr.*);
             return;

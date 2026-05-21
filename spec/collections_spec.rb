@@ -133,7 +133,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
         # calls .deinit(alloc) internally). Functionally identical.
-        expect(out).to include("defer CheatLib.cleanup(CheatLib.Pool(User), rt.heapAlloc(), &pool)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
         expect(out).not_to include("pool_moved")
       end
     end
@@ -361,7 +361,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("CheatLib.Pool(User).initCapacity(rt.heapAlloc(), 100)")
-        expect(out).to include("defer CheatLib.cleanup(CheatLib.Pool(User), rt.heapAlloc(), &pool)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
         expect(out).not_to include("pool_moved")
         expect(out).to include("try pool.insert(rt.heapAlloc(),")
         expect(out).to include("pool.get(id)")

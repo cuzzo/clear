@@ -65,7 +65,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
 
     it "emits cleanup for non-Copy union with string variant" do
       main_body = fn_body(zig, "clearMain")
-      expect(main_body).to include("cleanup(Value")
+      expect(main_body).to match(/cleanup\(@TypeOf/)
     end
   end
 
@@ -124,7 +124,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
     end
 
     it "emits cleanup for struct with promoted string field" do
-      expect(zig).to include("cleanup(User")
+      expect(zig).to match(/cleanup\(@TypeOf/)
     end
   end
 end

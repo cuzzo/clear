@@ -68,7 +68,7 @@ RSpec.describe MIREmitter do
     node = MIR::ReassignWithCleanup.new("buf", MIR::Lit.new("new_val"), "[]const u8", :heap)
     zig = e.emit(node)
     expect(zig).to include("const __new_buf = new_val;")
-    expect(zig).to include("CheatLib.cleanup([]const u8, rt.heapAlloc(), &buf);")
+    expect(zig).to include("CheatLib.cleanup(@TypeOf(buf), rt.heapAlloc(), &buf);")
     expect(zig).to include("buf = __new_buf;")
   end
 
@@ -419,7 +419,7 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :list, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
       node = MIR::Cleanup.new("nums", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer CheatLib.cleanup(CheatLib.ArrayListUnmanaged(i64), rt.frameAlloc(), &nums);")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(nums), rt.frameAlloc(), &nums);")
       expect(zig).not_to include("_moved")
     end
 
@@ -431,7 +431,7 @@ RSpec.describe MIREmitter do
       # ([]const u8 arm calls alloc.free internally with an empty-string
       # guard). One unified emit form across all cleanup kinds.
       expect(zig).to include("var name_moved = false;")
-      expect(zig).to include("defer if (!name_moved) CheatLib.cleanup([]const u8, rt.heapAlloc(), &name);")
+      expect(zig).to include("defer if (!name_moved) CheatLib.cleanup(@TypeOf(name), rt.heapAlloc(), &name);")
     end
 
     it "emits resource cleanup" do
@@ -448,7 +448,7 @@ RSpec.describe MIREmitter do
       # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
       # calls ptr.deinit(alloc) internally). One emit form across all
       # collection shapes.
-      expect(zig).to include("defer CheatLib.cleanup(CheatLib.Pool(User, 100), rt.heapAlloc(), &pool);")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool);")
     end
 
     it "emits rc cleanup with release fields" do
@@ -465,7 +465,7 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer rt.heapAlloc().destroy(counter);")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(counter), rt.heapAlloc(), &counter);")
     end
   end
 

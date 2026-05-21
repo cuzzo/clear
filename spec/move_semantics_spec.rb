@@ -210,7 +210,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         END
       CLEAR
       body = fn_body(zig, "clearMain")
-      has_element_cleanup = body.include?("cleanup(Value") ||
+      has_element_cleanup = body.include?("cleanup(@TypeOf") ||
                             body.include?("for (results.items)")
       expect(has_element_cleanup).to be(true)
     end
