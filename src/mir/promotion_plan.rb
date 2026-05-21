@@ -132,7 +132,13 @@ module PromotionClassifier
     if struct_promote.nil?
       if var_promotes.any? || handled_fields.any?
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
-      elsif (fn_node.return_provenance == :heap) && !is_union && ret_type.needs_promotion?(schema_lookup)
+      elsif (fn_node.return_provenance == :heap) && !is_union && ret_type.needs_promotion?(schema_lookup) &&
+            !all_returns_already_heap_constructed?(return_nodes)
+        # Pessimistic catch-all: heap-returning fn with promotable return type.
+        # Skip when every RETURN is `RETURN x` where x.symbol.init_contents_heap
+        # is true -- the binding was constructed with already-heap fields (e.g.
+        # via the Phase 0.5 hoist in MIRPass), so a return-time promoteDeep
+        # would double-clone.
         struct_promote, unhandled_fields = compute_struct_promote(ret_type, schema_lookup, handled_fields)
       end
     end
@@ -146,6 +152,15 @@ module PromotionClassifier
         promote_return_ids: promote_return_ids.empty? ? nil : promote_return_ids,
         unhandled_promote_fields: unhandled_fields
       )
+    end
+  end
+
+  sig { params(return_nodes: T::Array[AST::ReturnNode]).returns(T::Boolean) }
+  private_class_method def self.all_returns_already_heap_constructed?(return_nodes)
+    return false if return_nodes.empty?
+    return_nodes.all? do |ret|
+      v = ret.value
+      v.is_a?(AST::Identifier) && !!v.symbol&.init_contents_heap
     end
   end
 

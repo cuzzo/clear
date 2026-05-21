@@ -173,10 +173,9 @@ class MIRPass
   def hoist_return_subexprs_to_heap!(stmts)
     return unless stmts
     AST.walk_body(stmts) do |node|
-      # RETURN with a struct/union literal: propagate :heap into the
-      # field sub-expressions so lowering picks heapAlloc for them.
-      # RETURN with a bare Identifier borrowed param: synthesize COPY so
-      # the value lowers to dupeValue (type-driven deep clone).
+      # RETURN with a struct/union literal: propagate :heap into field
+      # sub-expressions. RETURN with a bare Identifier borrowed param:
+      # synthesize COPY so the value lowers to dupeValue.
       if node.is_a?(AST::ReturnNode)
         val = node.value
         next unless val
@@ -186,7 +185,37 @@ class MIRPass
           wrap_identifier_with_copy_if_needed!(node, val)
         end
       end
+      # Heap-storage VarDecl/BindExpr with struct/union literal value:
+      # propagate at construction time. Rodata-literal string fields in a
+      # heap struct need heap-cloning so the caller's recursive cleanup
+      # doesn't try to free rodata. Same hoist logic, applied at the
+      # declaration rather than the RETURN.
+      if heap_construction_decl?(node)
+        val = node.respond_to?(:value) ? node.value : nil
+        if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
+          hoist_lit_fields!(val)
+          # After hoist, the literal's fields are all heap-owned (either
+          # already-heap, CopyNode-wrapped, or storage=:heap-stamped). Tell
+          # PromotionClassifier so it skips this binding -- otherwise its
+          # post-loop "fn returns heap struct" arm pessimistically asks
+          # compute_struct_promote to deep-promote at return time, double-
+          # promoting fields the hoist already handled.
+          sym = node.respond_to?(:symbol) ? node.symbol : nil
+          sym.init_contents_heap = true if sym
+        end
+      end
     end
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def heap_construction_decl?(node)
+    is_decl =
+      node.is_a?(AST::VarDecl) ||
+      (node.is_a?(AST::BindExpr) && node.respond_to?(:mode) && node.mode == :decl)
+    return false unless is_decl
+    target_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    !!(target_sym&.heap_provenance? ||
+       (node.respond_to?(:storage) && node.storage == :heap))
   end
 
   sig { params(ret_node: AST::ReturnNode, id: AST::Identifier).void }
@@ -198,7 +227,7 @@ class MIRPass
     return if sym&.borrow_provenance?
     ti = Type.from_node(id)
     return unless ti.is_a?(Type)
-    return if ti.list_collection? || ti.map? || ti.string?
+    return if ti.string?  # Strings get caller-side dupe via catch_string_dupe / DupeSlice
     return unless ti.needs_escape_promotion? ||
                   PromotionClassifier.send(:struct_has_promotable_fields?, ti, @schema_lookup)
     copy = AST::CopyNode.new(id.token, id)
@@ -209,19 +238,52 @@ class MIRPass
   sig { params(lit: T.untyped).void }
   def hoist_lit_fields!(lit)
     return unless lit.respond_to?(:fields) && lit.fields
-    lit.fields.each do |_fname, fval|
-      next if fval.is_a?(AST::Identifier)
-      next unless fval.respond_to?(:storage=)
-      next if fval.is_a?(AST::CopyNode)
-      next if fval.is_a?(AST::Locatable) &&
-              (fval.heap_provenance? || fval.rodata_provenance? || fval.borrow_provenance?)
+    lit.fields.each do |fname, fval|
+      next if fval.is_a?(AST::CopyNode) || fval.is_a?(AST::MoveNode) || fval.is_a?(AST::CloneNode)
+      next if fval.is_a?(AST::Locatable) && fval.heap_provenance?
 
       fti = Type.from_node(fval)
       next unless fti.is_a?(Type) && fti.needs_escape_promotion?
 
-      fval.storage = :heap
-      hoist_lit_fields!(fval) if fval.is_a?(AST::StructLit) || fval.is_a?(AST::UnionVariantLit)
+      replacement = field_heap_replacement(fval, fti)
+      lit.fields[fname] = replacement if replacement && !replacement.equal?(fval)
+      if replacement.is_a?(AST::StructLit) || replacement.is_a?(AST::UnionVariantLit)
+        hoist_lit_fields!(replacement)
+      end
     end
+  end
+
+  # Two strategies:
+  #  - ALLOCATING expression (StringConcat, MethodCall, etc.) -> stamp
+  #    storage=:heap so lowering picks heapAlloc directly. ONE alloc.
+  #  - NON-ALLOCATING expression (Literal, Identifier) -> wrap with
+  #    AST::CopyNode so lowering routes through dupeValue (the unified
+  #    type-driven deep clone). Heap-clones rodata literals and frame/
+  #    borrowed identifiers into the heap struct's fields.
+  sig { params(fval: T.untyped, fti: Type).returns(T.untyped) }
+  def field_heap_replacement(fval, fti)
+    if fval.is_a?(AST::Identifier)
+      sym = fval.symbol
+      return fval if sym&.takes
+      return fval if sym&.init_contents_heap
+      return fval if sym&.borrow_provenance?
+      return wrap_with_copy(fval, fti)
+    end
+    if fval.is_a?(AST::Literal)
+      return wrap_with_copy(fval, fti)
+    end
+    if fval.respond_to?(:storage=)
+      fval.storage = :heap
+      return fval
+    end
+    fval
+  end
+
+  sig { params(node: T.untyped, ti: Type).returns(AST::CopyNode) }
+  def wrap_with_copy(node, ti)
+    copy = AST::CopyNode.new(node.token, node)
+    copy.full_type = ti
+    copy
   end
 
   sig { params(fn: AST::FunctionDef, promo: T.nilable(MIR::PromotionPlan)).returns(T.nilable(T::Hash[String, TrueClass])) }
@@ -1079,35 +1141,21 @@ class MIRPass
   # Defer suppression for escaped variables is handled by MIR::Return
   # (inserted by insert_return!) and consumed by the transpiler's
   # collect_escaping_identifiers in the ReturnNode handler.
-  # Insert MIR::Promote before a return statement and annotate the
-  # ReturnNode for struct-level promotion wrapping.
-  #
-  # POST-PATH-A this is the residual path. The Phase 0.5 hoist covers the
-  # generated-test corpus (0 promote sites). This code remains as a
-  # back-stop for synthetic patterns (e.g. heap-promoted struct with
-  # rodata-literal string fields, surfaced by annotator specs) that need
-  # the per-field promote runtime call until a deeper rewrite handles
-  # them at construction time.
+  # POST-PATH-A this is dead: the Phase 0.5 hoist + init_contents_heap stamp
+  # leaves PromotionPlan empty for every test in the 4828-spec + 568-corpus
+  # suite. Kept as a tripwire: if a new code path ever produces a non-empty
+  # promotion plan, we want to know rather than silently promote.
   sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(MIR::PromotionPlan)).void }
   def insert_promotion!(result, ret_node, promo)
     return unless promo && !promo.empty?
-
     filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
-
-    (filtered.var_promotes || []).each do |vp|
-      strategy = classify_promote_strategy(vp.zig_type!)
-      result << MIR::Promote.new(ret_node.token, vp.var!, vp.zig_type!, strategy, nil, vp.elem_zig_type)
-    end
-
-    if filtered.struct_promote && PromotionClassifier.needs_promote?(filtered, ret_node)
-      ret_node.promote_ret_wrap = :var
-      ret_node.ret_field_promote_data = MIR::FieldPromote.new(
-        zig_type: filtered.struct_promote,
-        fields:   filtered.unhandled_promote_fields
-      )
-    elsif filtered.var_promotes && !filtered.var_promotes.empty?
-      ret_node.promote_ret_wrap = :const
-    end
+    return if filtered.empty?
+    raise "PromotionPlan produced a non-empty plan after Path A hoist. " \
+          "var_promotes=#{(filtered.var_promotes || []).map(&:var).inspect} " \
+          "struct_promote=#{filtered.struct_promote.inspect} " \
+          "unhandled=#{filtered.unhandled_promote_fields.inspect}. " \
+          "Either extend hoist_return_subexprs_to_heap! or stamp init_contents_heap " \
+          "on the source binding."
   end
 
   # Insert MIR::Return before a ReturnNode to mark which local variables'
