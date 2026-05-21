@@ -321,6 +321,7 @@ if __FILE__ == $0
   if script_file
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
+    ENV["AUDIT_CURRENT_FILE"] = script_file
     transpiler = ZigTranspiler.new
 
     case options[:mode]
