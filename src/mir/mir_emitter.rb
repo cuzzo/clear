@@ -1110,15 +1110,10 @@ class MIREmitter
     bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
     when :passthrough
-      # Borrow-to-owned passthrough: auto-deref single pointers but
-      # keep value-shaped sources unchanged. Distinct from dupeValue
-      # because no allocation occurs -- this is the no-op COPY for
-      # Copy-type sources.
-      "#{bc}_value: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :#{bc}_value __src.*;\n" \
-      "    break :#{bc}_value __src;\n" \
-      "}"
+      # Borrow-to-owned passthrough: auto-deref single pointers but keep
+      # value-shaped sources unchanged. No allocation -- this is the
+      # no-op COPY for Copy-type sources. comptime-evaluated branch.
+      "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
       type_arg = node.zig_type || "@TypeOf(#{src})"
       "try CheatLib.dupeValue(#{type_arg}, #{src}, #{alloc})"

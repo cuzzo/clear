@@ -1211,17 +1211,14 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to include("dupeValue([]const u8, s")
     end
 
-    it "lowers COPY passthrough for value types" do
+    it "lowers COPY passthrough for value types as an inline auto-deref expression" do
       inner = make_id("x", full_type: :Int64)
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Int64
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
-      zig = emit(result)
-      expect(zig).to match(/blk_copy_\d+_value/)
-      expect(zig).to include("const __src = x")
-      expect(zig).to match(/break :blk_copy_\d+_value __src/)
+      expect(emit(result)).to eq("(if (@typeInfo(@TypeOf(x)) == .pointer) x.* else x)")
     end
 
     it "lowers COPY of sync values as full-value dupes" do

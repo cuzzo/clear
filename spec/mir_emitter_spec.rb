@@ -537,13 +537,9 @@ RSpec.describe MIREmitter do
       expect(e.emit(node)).to eq("try CheatLib.dupeValue([]Value, items, rt.heapAlloc())")
     end
 
-    it "emits passthrough for value types" do
+    it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
-      zig = e.emit(node)
-      # blk labels are now uniquified (counter suffix); match the prefix.
-      expect(zig).to match(/blk_copy_\d+_value/)
-      expect(zig).to include("const __src = n")
-      expect(zig).to match(/break :blk_copy_\d+_value __src/)
+      expect(e.emit(node)).to eq("(if (@typeInfo(@TypeOf(n)) == .pointer) n.* else n)")
     end
   end
 
