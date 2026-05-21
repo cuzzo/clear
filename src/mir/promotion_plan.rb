@@ -503,40 +503,36 @@ module CleanupClassifier
         variant_type = (schema.variants || {})[variant_name]
         next unless variant_type
 
-        if Schemas.inline_struct?(variant_type)
-          has_heap = Type.variant_has_heap?(variant_type)
-          if has_heap
-            union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
-            bindings[c.binding] = CleanupEntry.from({
-              needs_cleanup: true, alloc: :heap, kind: :match_as_inline_struct,
-              has_moved_guard: true, match_as: true,
-              zig_type: "#{union_zig}_#{variant_name}"
-            })
-          end
-        elsif variant_type.is_a?(Type) && variant_type.indirect?
-          # @indirect payload: the extracted value is a simple type (behind a
-          # pointer in the union). No AS binding cleanup needed.
-          next
-        else
-          pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
-          if pt.array? && !pt.string?
-            elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
-            bindings[c.binding] = CleanupEntry.from({
-              needs_cleanup: true, alloc: :heap, kind: :match_as_slice,
-              has_moved_guard: true, match_as: true,
-              elem_zig_type: elem_zig
-            })
-          elsif pt.collection? || pt.map?
-            zig_type = pt.zig_type rescue pt.resolved.to_s
-            bindings[c.binding] = CleanupEntry.from({
-              needs_cleanup: true, alloc: :heap, kind: pt.map? ? :string_map : :list,
-              has_moved_guard: true, match_as: true,
-              zig_type: zig_type
-            })
-          end
-        end
+        e = match_as_entry_for(variant_type, union_lookup, variant_name)
+        bindings[c.binding] = e if e
       end
     end
+  end
+
+  # Single dispatch point for MATCH AS variant cleanup. Returns nil when the
+  # variant doesn't need an AS-binding cleanup (unit variants, @indirect
+  # pointees, plain non-heap-bearing inline structs).
+  sig { params(variant_type: T.untyped, union_lookup: T.untyped, variant_name: T.untyped).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.match_as_entry_for(variant_type, union_lookup, variant_name)
+    common = { needs_cleanup: true, alloc: :heap, has_moved_guard: true, match_as: true }
+    if Schemas.inline_struct?(variant_type)
+      return nil unless Type.variant_has_heap?(variant_type)
+      union_zig = Type.new(union_lookup).zig_type rescue union_lookup.to_s
+      return CleanupEntry.from(common.merge(kind: :match_as_inline_struct,
+                                            zig_type: "#{union_zig}_#{variant_name}"))
+    end
+    return nil if variant_type.is_a?(Type) && variant_type.indirect?
+
+    pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
+    if pt.array? && !pt.string?
+      elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
+      return CleanupEntry.from(common.merge(kind: :match_as_slice, elem_zig_type: elem_zig))
+    elsif pt.collection? || pt.map?
+      zig_type = pt.zig_type rescue pt.resolved.to_s
+      return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list,
+                                            zig_type: zig_type))
+    end
+    nil
   end
 
   # Classify ownership-transferring captures from WHILE-bind / IF-bind nodes.
