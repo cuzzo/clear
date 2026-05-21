@@ -86,9 +86,10 @@ class MIRPass
       promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
 
-    # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
-    # provenance before classification.
-    LoopFrameAnalysis.analyze!(@fn_nodes)
+    # Phase 2: LoopFrameAnalysis ran inside EscapeGraph.apply! above so
+    # every escape decision is marked in a single pass (per the
+    # "all escapes marked in one pass" architectural principle). Nothing to
+    # do here -- mark_per_iter and storage upgrades are already set.
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
     @fn_nodes.each do |name, fn|

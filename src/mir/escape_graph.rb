@@ -35,6 +35,11 @@ module EscapeGraph
       next unless fn&.body
       stamp_fn!(fn, decide_fn(fn, ret_heap, fn_nodes), name, heap_decls, ret_heap)
     end
+    # Loop-frame escape promotions (frame decls that escape via outer mutation
+    # / outer field assignment) belong to escape analysis. Folding the
+    # promotion side-effects here means a single pass marks every escape;
+    # LoopFrameAnalysis.analyze! at MIRPass step 4 only sets mark_per_iter.
+    LoopFrameAnalysis.analyze!(fn_nodes)
     heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
     [heap_fns, heap_decls]
   end
