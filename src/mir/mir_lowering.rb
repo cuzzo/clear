@@ -360,7 +360,7 @@ class MIRLowering
     when MIR::MakeList
       list_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
     when MIR::HeapCreate
-      { kind: :heap_struct_plain, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
+      { kind: :heap_struct, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
     when MIR::ContainerInit
       list_cleanup_entry(mir.zig_type)
     when MIR::DeepCopy

@@ -625,8 +625,8 @@ module CleanupClassifier
     return own if own
     prov = classify_heap_provenance(ti, node, schema_lookup, sync)
     return prov if prov
-    plain = classify_heap_struct_plain(ti, node, schema_lookup, sync)
-    return plain if plain
+    composite = classify_heap_composite(ti, node, schema_lookup, sync)
+    return composite if composite
     fields = classify_struct_cleanup_fields(ti, node, schema_lookup)
     return fields if fields
     classify_non_copy_union(ti, schema_lookup)
@@ -817,19 +817,19 @@ module CleanupClassifier
   end
 
   # Catch-all for heap pointers not handled by classify_heap_provenance.
-  # Covers @alwaysMutable / @indirect annotations AND structs promoted to heap
-  # by MIRPass upgrade phases (upgrade_heap_ptr_returns_to_heap! et al.) where
-  # type_info.provenance is not set (only node.@storage_override is set).
+  # Heap-stored composite (struct or union) whose cleanup the uniform
+  # CheatLib.cleanup path handles via @TypeOf comptime dispatch.
+  # Covers @alwaysMutable / @indirect annotations AND structs promoted
+  # to heap by MIRPass upgrade phases where type_info.provenance is not
+  # set (only node.@storage_override is set).
   #
-  # Consults the schema to choose the right cleanup kind:
-  #   - struct with heap-containing fields  -> :heap_struct  (recursive deinit)
-  #   - union with heap variants            -> :heap_union   (tagged deinit)
-  #   - plain struct (all-primitive fields) -> :heap_struct_plain (free only)
-  #
-  # This makes the choice based solely on node.storage, so MIRPass upgrades do
-  # NOT need to mutate type_info.provenance for struct variables.
+  # The runtime arms differentiate based on actual Zig type shape; the
+  # Ruby kind label is now informational only:
+  #   - :heap_union for tagged-union schemas with heap variants
+  #   - :heap_struct for everything else (struct-recursive cleanup;
+  #     all-primitive struct collapses to a no-op via inline-for)
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup, sync = nil)
+  private_class_method def self.classify_heap_composite(ti, node, schema_lookup, sync = nil)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
@@ -837,21 +837,12 @@ module CleanupClassifier
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?
 
-    # Consult schema to pick the correct cleanup kind.
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)
       has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       return entry(:heap_union) if has_heap
     end
-    if Schemas.field_bearing?(schema)
-      has_escapable = schema.fields.any? do |_, v|
-        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(AST::StructField) ? (v.type || :Any) : (v || :Any))
-        ft.needs_escape_promotion?
-      end
-      return entry(:heap_struct) if has_escapable
-    end
-
-    entry(:heap_struct_plain)
+    entry(:heap_struct)
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }

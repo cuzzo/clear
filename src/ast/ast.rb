@@ -2038,8 +2038,8 @@ module MIR
   # kind:              cleanup template symbol (matches emit_cleanup_from_entry cases):
   #                    :resource, :list, :list_with_elem_cleanup, :string_map, :numeric_map,
   #                    :pool, :set, :rc, :locked, :write_locked, :heap_string, :heap_slice,
-  #                    :heap_union, :heap_struct, :heap_struct_plain, :struct_with_cleanup_fields,
-  #                    :struct_rc, :array_with_struct_strings, :non_copy_union, :takes_union,
+  #                    :heap_union, :heap_struct, :struct_with_cleanup_fields,
+  #                    :struct_rc, :non_copy_union, :takes_union,
   #                    :takes_string, :takes_slice
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
