@@ -1624,7 +1624,23 @@ module AST
     def write_locked? = sync == :write_locked
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
-  CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
+  # CopyNode -- explicit COPY expr (deep copy of value).
+  #   deep_copy: true for unions with heap variants.
+  #   alloc:     :heap (default) | :frame -- the allocator the duped buffer
+  #              lives in. Inherited from the CONTAINER at auto-COPY sites
+  #              so a `String[]@list` (frame list) auto-COPY allocates the
+  #              new string in frame, not heap. Without this, frame
+  #              containers ended up with heap elements -- the "mixed
+  #              provenance" bug that forced cleanupAlloc. lower_copy reads
+  #              this; hard-coded :heap pre-policy.
+  CopyNode          = Struct.new(:token, :value) do
+    extend T::Sig
+    include Locatable
+    attr_accessor :deep_copy
+    attr_writer :alloc
+    sig { returns(Symbol) }
+    def alloc; @alloc ||= :heap; end
+  end
   CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
   ShareNode         = Struct.new(:token, :value) { include Locatable }  # SHARE expr              -> promote/retain as T@shared (semantic lowering follows)
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
