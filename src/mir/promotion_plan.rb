@@ -805,7 +805,17 @@ module CleanupClassifier
     return entry(:locked) if sync == :locked
     return entry(:write_locked) if sync == :write_locked
     return entry(:always_mutable) if sync == :always_mutable
-    return entry(:versioned) if sync == :versioned
+    if sync == :versioned
+      # *Versioned(T): CheatLib.cleanup's versioned-wrapper arm calls
+      # deinitSync (sync free of the inner ptr) + destroys the cell.
+      # Safe because the annotator marks Guards as non-escaping, so
+      # scope-end happens-after every WITH SNAPSHOT release.
+      bare = Type.new(ti.resolved)
+      bare.instance_variable_set(:@sync, nil)
+      bare.instance_variable_set(:@ownership, nil) if bare.respond_to?(:ownership)
+      inner_zig = bare.zig_type rescue ti.resolved.to_s
+      return entry(:versioned, zig_type: "*CheatLib.Versioned(#{inner_zig})")
+    end
     nil
   end
 

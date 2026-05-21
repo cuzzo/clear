@@ -950,7 +950,12 @@ class MIRLowering
       end
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa, :optional_owned
       ti&.zig_type
-    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable, :versioned,
+    when :versioned
+      # Binding is *Versioned(T); cleanup expects the pointer type so the
+      # versioned-wrapper arm of CheatLib.cleanup fires.
+      inner = Type.new((ti&.resolved || :Any).to_s).zig_type
+      "*CheatLib.Versioned(#{inner})"
+    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
       Type.new((ti&.resolved || :Any).to_s).zig_type
     when :rc, :atomic_ptr

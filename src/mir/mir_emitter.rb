@@ -1060,9 +1060,10 @@ class MIREmitter
       guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
     when :versioned
-      # MVCC L6: tear down a *Versioned(T) cell. EBR-retire the live
-      # ptr then destroy the outer struct.
-      guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
+      # *Versioned(T): CheatLib.cleanup's versioned-wrapper arm handles
+      # the sync teardown (deinitSync + destroy). Safe because CLEAR
+      # guarantees no WITH SNAPSHOT guard outlives its scope.
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     when :heap_struct_plain
       guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
