@@ -604,7 +604,11 @@ RSpec.describe CleanupClassifier do
 
   # ── Array literal of structs with string fields ────────────────────
   describe "array literal of structs with string fields" do
-    it "gets :array_with_struct_strings cleanup" do
+    it "gets :heap_slice cleanup (uniform slice arm of CheatLib.cleanup)" do
+      # No "array of struct with strings" special case: a plain T[] slice
+      # with owning element fields routes through the slice arm. Element
+      # cleanup recurses into String fields; buffer free is alloc-driven
+      # (no-op for frame, real free for heap).
       plan = cleanup_for(<<~CLEAR, "main")
         STRUCT Item { name: String, value: Int64 }
         FN main() RETURNS Void ->
@@ -614,7 +618,7 @@ RSpec.describe CleanupClassifier do
       CLEAR
       entry = plan["items"]
       expect(entry).not_to be_nil, "struct array literal with string fields should have cleanup"
-      expect(entry[:kind]).to eq(:array_with_struct_strings)
+      expect(entry[:kind]).to eq(:heap_slice)
     end
   end
 

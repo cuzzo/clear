@@ -717,24 +717,23 @@ module CleanupClassifier
     ti.provenance_alloc || :heap
   end
 
+  # Plain `T[]` slice (no @list modifier) where elements own heap. Route
+  # uniformly through the slice arm of CheatLib.cleanup: it iterates
+  # elements (calling cleanup recursively, which descends into String
+  # fields) and frees the buffer with the binding's allocator. For
+  # frame-allocated bindings the free is a no-op (frame arena rewinds);
+  # for heap-allocated bindings the buffer is freed. ONE shape, ONE
+  # cleanup path -- no "array of struct with strings" special case.
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
-    # `node` is the originating AST node for the binding being classified.
-    # For VarDecl/BindExpr this is the declaration (which has a `.value`
-    # RHS); for IF-bind / WHILE-bind captures it's the binding statement
-    # itself (no `.value` accessor — the captured expression lives inside
-    # `bindings[:expr]` / `condition`). Guard with respond_to? so non-decl
-    # callers don't crash.
     val = node.respond_to?(:value) ? node.value : nil
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
-    # Per "one collection = one allocator": elements are uniformly in
-    # the container's allocator (CopyNode-stamper guarantees post-
-    # EscapeGraph). Read the binding's authoritative storage.
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     container_alloc = container_alloc_from(sym, node)
-    entry(:array_with_struct_strings, alloc: container_alloc)
+    elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
+    entry(:heap_slice, alloc: container_alloc, zig_type: "[]#{elem_zig}", has_moved_guard: false)
   end
 
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes

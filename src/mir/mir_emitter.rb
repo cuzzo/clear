@@ -1067,13 +1067,6 @@ class MIREmitter
     when :heap_struct_plain
       guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
 
-    when :array_with_struct_strings
-      if entry.is_fixed?
-        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
-      else
-        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
-      end
-
     when :takes_slice
       # []ElemT: CheatLib.cleanup's slice arm iterates elements (when
       # needsCleanup) and frees the buffer.
