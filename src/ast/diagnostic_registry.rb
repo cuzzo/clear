@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 # Single source of truth for compiler-emitted diagnostics.
 #
 # Before this file existed, `MESSAGES` (in source_error.rb) held just
