@@ -1048,11 +1048,15 @@ class MIREmitter
       guarded_defer(name, "#{alloc}.destroy(#{name})", g, errdefer:)
 
     when :heap_struct_plain
-      # Polymorphic destroy: CheatLib.free handles both value-struct
-      # (no-op for self-managed types like SharedPromise) and pointer
-      # cases (.pointer.one destroy). Routing through CheatLib.cleanup
-      # would over-destroy self-managed inner fields; leave intentional.
-      guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
+      # @TypeOf(name) lets CheatLib.cleanup comptime-dispatch uniformly:
+      # *Struct -> generic *T arm (destroy); value-struct -> struct arm
+      # (iterate fields, no-op for all-primitive); struct-with-deinit ->
+      # invoke own deinit. Self-managed runtime types (SharedPromise,
+      # BoundedStream, ...) declare deinit so the right arm fires.
+      kw = errdefer ? "errdefer" : "defer"
+      guard = g ? "if (!#{name}_moved) " : ""
+      decl = g ? "var #{name}_moved = false; _ = &#{name}_moved;\n" : ""
+      "#{decl}#{kw} #{guard}CheatLib.cleanup(@TypeOf(#{name}), #{alloc}, &#{name});\n"
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"

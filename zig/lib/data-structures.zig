@@ -649,6 +649,19 @@ pub fn bind(comptime deps: type) type {
                 _ = self.inner.ref_count.fetchAdd(1, .acquire);
                 return Self{ .inner = self.inner, .alloc = self.alloc, .resolved = null };
             }
+
+            /// Drop an unconsumed handle: decrement ref_count and free Inner
+            /// if last. Idempotent for consumed handles (next() already
+            /// decremented). Required so CheatLib.cleanup can teardown a
+            /// SharedPromise binding uniformly via struct-with-deinit.
+            pub fn deinit(self: *Self) void {
+                if (self.resolved != null) return; // already consumed
+                const prev = self.inner.ref_count.fetchSub(1, .release);
+                if (prev == 1) {
+                    _ = self.inner.ref_count.load(.acquire);
+                    self.alloc.destroy(self.inner);
+                }
+            }
         };
     }
 
