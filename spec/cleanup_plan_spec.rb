@@ -225,6 +225,20 @@ RSpec.describe CleanupClassifier do
         expect(plan["items"][:match_as]).to eq(true)
       end
     end
+
+    context "MATCH AS variant payload is a map" do
+      # match_as_entry_for has a code path for non-array collection
+      # payloads (the only reachable case is map?, since list-typed
+      # payloads are also array? and hit the :takes_slice arm first).
+      # Exercise it on a HashMap-typed variant.
+      it "produces :string_map for a HashMap variant payload" do
+        map_ty = Type.new(:"HashMap<Int64>")
+        entry = CleanupClassifier.send(:match_as_entry_for, map_ty, :U, "Items")
+        expect(entry).not_to be_nil
+        expect(entry[:kind]).to eq(:string_map)
+        expect(entry[:match_as]).to eq(true)
+      end
+    end
   end
 
   describe "MATCH TAKES binding (move)" do

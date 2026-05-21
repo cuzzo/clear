@@ -533,8 +533,10 @@ module CleanupClassifier
       # Slice variant uses the unified :takes_slice path. match_as: true
       # carries the MATCH AS origin for downstream guards.
       return CleanupEntry.from(common.merge(kind: :takes_slice, elem_zig_type: elem_zig))
-    elsif pt.collection? || pt.map?
-      return CleanupEntry.from(common.merge(kind: pt.map? ? :string_map : :list))
+    elsif pt.map?
+      # Non-array collection payload (HashMap). List-typed payloads are
+      # also array? and hit the :takes_slice arm above first.
+      return CleanupEntry.from(common.merge(kind: :string_map))
     end
     nil
   end

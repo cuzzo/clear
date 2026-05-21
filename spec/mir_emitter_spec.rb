@@ -461,6 +461,19 @@ RSpec.describe MIREmitter do
       expect(zig).to include("CheatLib.releaseFields(User, rt.heapAlloc(), user_rc.ctrl.data.*)")
     end
 
+    it "emits rc cleanup with release fields AND moved guard" do
+      # Pins the guarded branch of the :rc releaseFields side-channel:
+      # has_moved_guard=true makes the post-cleanup releaseFields wrap in
+      # `if (!name_moved)`. Without this spec the guarded arm was dead.
+      entry = CleanupEntry.from({ kind: :rc, zig_type: "CheatLib.Rc(User)", alloc: :heap,
+                has_moved_guard: true, rc_variant: nil, rc_alloc: :heap,
+                base_zig: "User", needs_release_fields: true })
+      node = MIR::Cleanup.new("user_rc", entry)
+      zig = e.emit(node)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(user_rc), rt.heapAlloc(), &user_rc)")
+      expect(zig).to include("defer if (!user_rc_moved) CheatLib.releaseFields(User, rt.heapAlloc(), user_rc.ctrl.data.*)")
+    end
+
     it "emits locked cleanup" do
       entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
