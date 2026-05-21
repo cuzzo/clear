@@ -341,7 +341,11 @@ class MIRLowering
 
   sig { returns(T::Hash[Symbol, T.untyped]) }
   def heap_string_entry
-    { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+    # Heap strings are linearly-affine: a defer must guard against move
+    # (RETURN, GIVE, TAKES consumption). The kind no longer needs a
+    # special-case in emit_cleanup -- has_moved_guard drives use_guard
+    # via the standard `g = !errdefer && entry.has_moved_guard?` rule.
+    { kind: :heap_string, alloc: :heap, has_moved_guard: true }
   end
 
   # Synthesize a cleanup plan entry for a hoisted temp.

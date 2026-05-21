@@ -653,10 +653,12 @@ module CleanupClassifier
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     is_heap = !!node_sym&.heap_provenance?
     if ti.list_collection? && !ti.sharded? && !is_heap
-      # NOTE: cannot eliminate :list_with_elem_cleanup uniformly yet.
-      # Cross-fiber cases (producer heap, consumer frame) need the
-      # cleanupAlloc dispatch until EscapeGraph promotes such consumers
-      # to heap (5 leaks across transpile-test suite when forced uniform).
+      # Frame list whose elements own heap (Strings, struct-with-strings,
+      # ...) keeps its frame storage but cleanup must use the cleanupAlloc
+      # vtable so per-element cleanup picks the right element-allocator
+      # at runtime. The :list_with_elem_cleanup kind signals "frame
+      # storage, vtable cleanup" to the emitter -- the only remaining
+      # purpose of a distinct kind beyond the uniform routing.
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(has_heap_elems ? :list_with_elem_cleanup : :list,
                    alloc: :frame, elem_needs_cleanup: has_heap_elems)

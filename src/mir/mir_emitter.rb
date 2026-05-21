@@ -991,21 +991,26 @@ class MIREmitter
 
     case entry.kind
     when :resource
+      # Schema-driven close hook: user-provided Zig snippet with `{0}` =
+      # the binding name. Future: lift into a deinit method on the type
+      # itself (requires wrapping raw-fd sockets as Zig structs).
       close = entry.resource_close_zig.gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)
 
-    when :list, :list_with_elem_cleanup, :string_map, :numeric_map,
-         :pool, :fixed_soa, :set,
-         :heap_slice, :heap_union, :heap_struct,
-         :optional_owned, :atomic_ptr,
-         :struct_with_cleanup_fields, :struct_rc, :non_copy_union,
-         :takes_union, :heap_string,
-         :inf_stream, :observable, :versioned, :takes_slice,
-         :heap_struct_plain, :frozen, :rc,
-         :locked, :write_locked, :always_mutable
-      # :list_with_elem_cleanup forces cleanupAlloc for runtime arena dispatch
-      # on mixed-provenance container elements; :rc may carry a binding-
-      # specific allocator (rc_alloc, e.g. from CapWrap upgrades).
+    else
+      # The uniform cleanup path. Every other kind dispatches identically
+      # through CheatLib.cleanup(@TypeOf(name), alloc, &name) -- the
+      # runtime arms (ArrayList, slice, String, Pool, Set, StringMap,
+      # Locked, RwLocked, Versioned, Rc/Arc/WeakRc/WeakArc, Observable,
+      # struct-with-deinit, struct-recursive, generic *T) comptime-
+      # dispatch on the binding's actual type. The kind axis signals
+      # four side-channel behaviors:
+      #   :list_with_elem_cleanup -> frame-storage binding with vtable
+      #                              (cleanupAlloc) for element cleanup
+      #   :rc + rc_alloc          -> binding-specific allocator
+      #   :rc + needs_release_fields -> post-cleanup releaseFields call
+      #   :frozen                 -> cleanup operates on the paired
+      #                              `name__buf` binding
       use_alloc =
         if entry.kind == :list_with_elem_cleanup
           alloc_zig(:cleanup)
@@ -1014,33 +1019,22 @@ class MIREmitter
         else
           alloc
         end
-      # :frozen lives in a paired `name__buf` binding; rebind locally.
       use_name = entry.kind == :frozen ? "#{name}__buf" : name
-      # ONE shape: @TypeOf(name) lets CheatLib.cleanup comptime-dispatch
-      # on the binding's actual type. ArrayList, slice, String, Pool, Set,
-      # StringMap, Locked, RwLocked, Versioned, Rc/Arc/WeakRc/WeakArc,
-      # Observable, struct-with-deinit, struct-recursive, generic *T --
-      # all handled by the runtime arms. via_pointer bindings already
-      # hold *T; strip one pointer level so cleanup's T matches the
-      # pointee shape (the call passes the *T directly, not &name).
+      # via_pointer bindings hold *T directly; strip one pointer level
+      # so cleanup's T matches the pointee shape.
       use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
-      # Heap strings get unguarded defers (no move tracking); other kinds
-      # use the entry's guard flag.
+      # Heap strings force a moved guard in defer context. Some classifier
+      # paths (heap_carry promotion) build the entry with has_moved_guard
+      # false; the string IS move-tracked at scope end though, so the
+      # guard is unconditional for the kind.
       use_guard = entry.kind == :heap_string ? !errdefer : g
       result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
-      # :rc optionally needs a releaseFields side-channel (struct with
-      # owned heap fields wrapped in Rc -- the inner struct's String/list
-      # fields must be released after Rc strong=0 but cleanup() only
-      # destroys the Rc cell). Future: move into the runtime arm too.
       if entry.kind == :rc && entry.needs_release_fields?
-        guard = use_guard ? "if (!#{name}_moved) " : ""
+        guard = g ? "if (!#{name}_moved) " : ""
         kw = errdefer ? "errdefer" : "defer"
         result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
       end
       result
-
-    else
-      raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
     end
   end
 
