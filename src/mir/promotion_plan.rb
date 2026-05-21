@@ -307,9 +307,8 @@ module CleanupClassifier
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
     walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
-    # 4. WHILE bind and IF bind captures from call results (ownership-transferring).
-    walk_while_bind_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
-    walk_if_bind_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
+    # 4. WHILE-bind / IF-bind captures from ownership-transferring call results.
+    walk_capture_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
 
     bindings
   end
@@ -540,49 +539,40 @@ module CleanupClassifier
     end
   end
 
-  # Classify WHILE bind captures that come from ownership-transferring calls.
-  # Only MethodCall/FuncCall results are considered: variable/field access is a
-  # borrow and the original binding retains cleanup responsibility.
-  # RESOLVE is handled separately (rcRelease in lower_while_bind).
+  # Classify ownership-transferring captures from WHILE-bind / IF-bind nodes.
+  # Both shapes carry the same contract: a binding name + an expression whose
+  # ownership transfers when the call returns Some(T). Only MethodCall/FuncCall
+  # results are considered -- variable/field access is a borrow and the
+  # original binding retains cleanup responsibility. RESOLVE is handled
+  # separately (rcRelease in lower_*_bind).
   sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
-  private_class_method def self.walk_while_bind_bindings(body, promoted_fns, schema_lookup, bindings)
-    AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::WhileBindLoop)
-      cond = node.condition
-      next unless AST.call?(cond)
-      next if cond.is_a?(AST::ResolveNode)
-      ti = cond.full_type
-      inner_ti = ti.wrapped_type
+  private_class_method def self.walk_capture_bindings(body, promoted_fns, schema_lookup, bindings)
+    each_capture_binding(body) do |name, expr, anchor_node|
+      next unless AST.call?(expr)
+      next if expr.is_a?(AST::ResolveNode)
+      inner_ti = expr.full_type&.wrapped_type
       next unless inner_ti
-      e = classify_binding(node.binding_name.to_s, inner_ti, node, promoted_fns, schema_lookup)
+      e = classify_binding(name, inner_ti, anchor_node, promoted_fns, schema_lookup)
       next unless e
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
         e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
       end
-      bindings[node.binding_name.to_s] = e
+      bindings[name] = e
     end
   end
 
-  # Classify IF bind captures that come from ownership-transferring calls.
-  sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
-  private_class_method def self.walk_if_bind_bindings(body, promoted_fns, schema_lookup, bindings)
+  # Yield (binding_name, expression, anchor_node) for every IF-bind / WHILE-bind
+  # capture in body. The anchor is the IfBind / WhileBindLoop node that owns
+  # the capture's lifetime.
+  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.untyped) }
+  private_class_method def self.each_capture_binding(body, &block)
     AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::IfBind)
-      node.bindings.each do |b|
-        expr = b.expr
-        next unless AST.call?(expr)
-        next if expr.is_a?(AST::ResolveNode)
-        ti = expr.full_type
-        inner_ti = ti.wrapped_type
-        next unless inner_ti
-        e = classify_binding(b.name.to_s, inner_ti, node, promoted_fns, schema_lookup)
-        next unless e
-        e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
-        if inner_ti.element_type
-          e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
-        end
-        bindings[b.name.to_s] = e
+      case node
+      when AST::WhileBindLoop
+        yield node.binding_name.to_s, node.condition, node
+      when AST::IfBind
+        node.bindings.each { |b| yield b.name.to_s, b.expr, node }
       end
     end
   end
