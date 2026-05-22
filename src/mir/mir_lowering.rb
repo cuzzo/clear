@@ -832,10 +832,13 @@ class MIRLowering
       needs_heap ||= node_is_heap?(node)
       needs_heap ? :heap : :frame
     when :node_storage
-      # A container-mutation method call allocates with the receiver's
-      # allocator (one allocator per binding); a plain call's result
-      # allocator is the call node's own placement.
-      if node.is_a?(AST::MethodCall) && node.object
+      # A container-MUTATION method (append/...) allocates with the
+      # receiver's allocator -- the effect lives in the receiver. A
+      # VALUE-PRODUCING method (toList/toString/...) produces a fresh
+      # result placed by its own binding (@decl_alloc), independent of
+      # the receiver -- consulting the receiver wrongly forces heap when
+      # the receiver happens to be heap (e.g. a range).
+      if node.is_a?(AST::MethodCall) && node.object && node.mutates_receiver
         (receiver_root_heap?(node.object) || node_is_heap?(node.object) ||
          node_is_heap?(node) || @decl_alloc == :heap) ? :heap : :frame
       else
