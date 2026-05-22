@@ -4412,8 +4412,11 @@ class MIRLowering
     # (alloc_sym) -- one allocator per binding, like every other value.
     if promise_type.observable? && promise_type.tense_type&.array?
       inner = lower(node.expr)
+      # The materialized list inherits the receiving binding's placement
+      # (@decl_alloc, set during lower_var_decl); alloc_sym is the
+      # fallback when NEXT is lowered outside a binding.
       return MIR::MethodCall.new(inner, "materializeNext",
-        [MIR::AllocatorRef.new(alloc_sym)], true)
+        [MIR::AllocatorRef.new(@decl_alloc || alloc_sym)], true)
     end
 
     if promise_type.observable?
@@ -6279,7 +6282,12 @@ class MIRLowering
     bare_ft = has_caps ? ft.bare_data_type : ft
     bare_zig = transpile_type(bare_ft)
 
-    init = if ft.pool?
+    # Every allocating sub-expression of the value -- collection init,
+    # pipeline, COLLECT, toList, concat -- inherits this binding's
+    # finalized placement. ONE allocator per binding, read off the
+    # decl's symbol; no per-branch threading.
+    init = with_decl_alloc(is_heap ? :heap : :frame) do
+    if ft.pool?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
       if AST.call?(rhs_unwrapped)
@@ -6345,11 +6353,9 @@ class MIRLowering
         # defer free() on the var doesn't attempt to free a comptime literal.
         MIR::DupeSlice.new(lower(rhs), :heap)
       else
-        # The value's allocating expression inherits this binding's
-        # finalized placement -- read straight off the decl's symbol
-        # (escape analysis is the single writer). No node.storage stamp.
-        with_decl_alloc(is_heap ? :heap : :frame) { lower(node.value) }
+        lower(node.value)
       end
+    end
     end
 
     # `_` is not a valid Zig binding identifier; a discarded value that
