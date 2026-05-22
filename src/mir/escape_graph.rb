@@ -407,18 +407,29 @@ module EscapeGraph
   def promote_frame_concats!(node)
     return unless node # :nocov: defensive (callers internal-recurse + Array.compact upstream)
     case node
+    when AST::Identifier
+      # The Hoist pass lifted the frame string-concat into a __hoist_N
+      # temp; promote that binding -- a sanctioned symbol.storage write.
+      sym = node.symbol
+      decl = sym.respond_to?(:reg) ? sym.reg : nil if sym
+      sym.storage = :heap if sym && decl && concat_valued_decl?(decl)
     when AST::BinaryOp
-      if node.op == :ADD && node.string_concat
-        node.storage = :heap
-      end
       promote_frame_concats!(node.left)
       promote_frame_concats!(node.right)
     when AST::StringConcat
-      node.storage = :heap
       node.parts.each { |p| promote_frame_concats!(p) }
     else
       AST.wrapped_children(node).each { |c| promote_frame_concats!(c) }
     end
+  end
+
+  # True when `decl`'s value is a string-concat expression (the shape the
+  # Hoist pass moves into a temp).
+  sig { params(decl: T.untyped).returns(T::Boolean) }
+  def concat_valued_decl?(decl)
+    v = decl.respond_to?(:value) ? decl.value : nil
+    v.is_a?(AST::StringConcat) ||
+      (v.is_a?(AST::BinaryOp) && v.op == :ADD && !!v.string_concat)
   end
 
   sig { params(expr: T.untyped, acc: T::Array[String]).returns(T::Array[String]) }

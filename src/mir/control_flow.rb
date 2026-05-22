@@ -893,16 +893,11 @@ class OwnershipDataflow
     # Heap-allocated strings own their backing buffer; RETURN/move
     # transfers ownership to the receiver (just like a heap-allocated
     # collection or struct). Rodata / frame / param strings are still
-    # treated as Copy — those don't own heap memory. The SymbolEntry's
-    # `storage` reflects the LITERAL's provenance (e.g. :rodata for
-    # `""`); EscapeAnalysis upgrades the *VarDecl*'s storage when the
-    # binding escapes. Read through `sym.reg.storage` so post-E2
-    # heap promotions are visible.
-    if ti.string? && ident.is_a?(AST::Identifier) && ident.symbol
-      decl = ident.symbol.reg
-      if decl && decl.respond_to?(:storage) && decl.storage == :heap
-        return false
-      end
+    # treated as Copy — those don't own heap memory. Symbol#storage is
+    # the canonical provenance (SIMP-13f) that EscapeAnalysis makes
+    # definitive; read it, not the VarDecl node's annotation-time value.
+    if ti.string? && ident.symbol&.heap_provenance?
+      return false
     end
     is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
