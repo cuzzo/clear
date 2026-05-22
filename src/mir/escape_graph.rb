@@ -557,6 +557,13 @@ module EscapeGraph
     when AST::FuncCall
       heap_valued?(e, ret_heap, fn_nodes)
     when AST::Identifier
+      # A TAKES parameter of a heap-backed type (collection, dynamic
+      # array, string) is owned heap data -- the caller transferred
+      # ownership, so a struct/return carrying it owns heap.
+      if e.symbol&.takes
+        pt = type_of(e)
+        return true if pt.is_a?(Type) && (collection_ti?(pt) || pt.array? || pt.string?)
+      end
       # The escape decision is authoritative: a binding in the heap set
       # (or already heap-provenance-stamped) owns heap data, regardless
       # of whether its TYPE is nominally Copy (a heap-owned string
