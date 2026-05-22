@@ -41,7 +41,8 @@ end
 
 # Axis 2: return-expression shape (the under-tested namesake axis).
 [:list_literal, :hash_literal, :str_literal, :concat,
- :call_result, :if_branches].each do |shape|
+ :call_result, :if_branches,
+ :indirect_struct, :indirect_struct_string].each do |shape|
   ESCAPE_VIA_RETURN_CELLS << { return_shape: shape }
 end
 # Language-limited shapes: COPY of a collection field/index returns a
@@ -170,6 +171,36 @@ def escape_via_return_shape_cell(shape)
       FN main() RETURNS Void ->
           result = make();
           ASSERT result.length() == 1_i64, "return index copy";
+          RETURN;
+      END
+    CHT
+  when :indirect_struct
+    <<~CHT
+      STRUCT Cfg { setting: Int64 }
+
+      FN make() RETURNS !Cfg @indirect ->
+          cfg = Cfg{ setting: 7_i64 };
+          RETURN cfg;
+      END
+
+      FN main() RETURNS Void ->
+          c = make();
+          ASSERT c.setting == 7_i64, "return @indirect struct";
+          RETURN;
+      END
+    CHT
+  when :indirect_struct_string
+    <<~CHT
+      STRUCT Person { name: String }
+
+      FN make() RETURNS !Person @indirect ->
+          p = Person{ name: COPY "alice" };
+          RETURN p;
+      END
+
+      FN main() RETURNS Void ->
+          r = make();
+          ASSERT r.name == "alice", "return @indirect struct w/ String field";
           RETURN;
       END
     CHT

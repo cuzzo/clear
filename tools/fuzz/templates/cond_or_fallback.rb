@@ -28,7 +28,7 @@
 # the forensic), all cells turn green.
 
 COND_OR_FALLBACK_CELLS = []
-[:if, :while].each do |ctr|
+[:if, :while, :return].each do |ctr|
   [:empty, :default].each do |fb|
     # value_type is :heap_string only. The :heap_list variant
     # (`COPY xs` of a `Int64[]@list` parameter) hits an unrelated CLEAR
@@ -43,6 +43,9 @@ COND_OR_FALLBACK_CELLS = []
     # can't sit before the loop). Keep them visible but :in_dev until
     # the WHILE-cond lowering is restructured. See
     # docs/agents/clear-bug123-forensic.md #1.
+    # :return cells exercise OR-fallback in RETURN position
+    # (`RETURN maybe(x) OR fallback`) -- the escape_graph
+    # return_value_is_heap? BinaryOp/OR_RESCUE arm.
     cell[:expected] = (ctr == :while) ? :in_dev : :pass
     COND_OR_FALLBACK_CELLS << cell
   end
@@ -117,6 +120,10 @@ def cof_container_block(p, cond, body)
   case p[:container]
   when :if
     "IF #{cond} THEN\n        #{body}\n    END"
+  when :return
+    # OR-fallback in RETURN position is handled by a separate renderer
+    # path; this block is unused for :return.
+    ""
   when :while
     # Bound by an unrelated counter so the loop terminates. The cond's
     # OR-fallback expression is the second clause; both halves must
@@ -135,6 +142,27 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
   inner_fn = cof_inner_fn(p[:value_type])
   arg      = cof_call_arg(p[:value_type])
   fb_lit   = cof_fallback_literal(p[:fallback], p[:value_type])
+
+  if p[:container] == :return
+    # OR-fallback in RETURN position: a wrapper fn returns
+    # `maybe(arg) OR fallback`. Exercises return_value_is_heap?'s
+    # BinaryOp/OR_RESCUE arm in escape_graph.
+    rt = cof_value_type(p[:value_type])
+    next <<~CHT
+      #{inner_fn}
+
+      FN wrap(s: String) RETURNS #{rt} ->
+          RETURN maybe(s) OR #{fb_lit};
+      END
+
+      FN main() RETURNS Void ->
+          ok = wrap(#{arg});
+          ASSERT ok == #{cof_call_arg(p[:value_type])}, "or-fallback in return";
+          RETURN;
+      END
+    CHT
+  end
+
   baseline = cof_baseline(p[:value_type])
   expr     = "maybe(#{arg}) OR #{fb_lit}"
   cond     = cof_compare(p[:value_type], expr, baseline)
