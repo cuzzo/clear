@@ -4404,14 +4404,13 @@ class MIRLowering
     # Collection observable (`~T[]@set:observable`): NEXT yields an owned
     # ArrayListUnmanaged(T) via `materializeNext(alloc)` rather than a
     # snapshot handle, so user code (`final = NEXT running`) gets
-    # something it can iterate without explicit `.release()`. Use
-    # `heapAlloc()` unconditionally -- the StreamSet's internal buffers
-    # live on the heap, and the receiving CLEAR binding's cleanup runs
-    # via the standard list-cleanup path with the same allocator.
+    # something it can iterate without explicit `.release()`. The
+    # materialized list is placed by the receiving binding's allocator
+    # (alloc_sym) -- one allocator per binding, like every other value.
     if promise_type.observable? && promise_type.tense_type&.array?
       inner = lower(node.expr)
       return MIR::MethodCall.new(inner, "materializeNext",
-        [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")], true)
+        [MIR::AllocatorRef.new(alloc_sym)], true)
     end
 
     if promise_type.observable?
@@ -5138,8 +5137,10 @@ class MIRLowering
       # so `final = stream |> DISTINCT _ |> COLLECT` and `final = NEXT
       # (stream |> DISTINCT _)` produce the same shape.
       collect_method = (ft && ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
+      # The materialized list is placed by the receiving binding's
+      # allocator (@decl_alloc) -- one allocator per binding.
       collect_args = collect_method == "materializeNext" ?
-        [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")] : []
+        [MIR::AllocatorRef.new(@decl_alloc == :heap ? :heap : :frame)] : []
       named_source = node.left.is_a?(AST::Identifier)
       if named_source
         return MIR::MethodCall.new(left, collect_method, collect_args, true)

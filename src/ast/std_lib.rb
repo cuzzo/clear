@@ -212,10 +212,10 @@ STD_LIB = T.let({
     {
       args: [:"Any[]"],
       return: :infer_to_list,
-      zig: "try ({0}).toList({rt}.heapAlloc())",
+      zig: "try ({0}).toList({alloc})",
       bc: true, bc_op: :to_list,
       allocates: true,
-      alloc: :heap,
+      alloc: :node_storage,
       is_method: true,
     }
   ],
