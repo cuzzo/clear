@@ -6843,7 +6843,13 @@ class MIRLowering
     target = lower(node.name.target)
     field = node.name.field.to_s
     value = lower(node.value)
-    alloc = MIR::Ident.new(alloc_zig_str(node.field_pre_cleanup || :heap))
+    # The old field value is freed with the CONTAINER's allocator -- a
+    # field of a heap struct is heap, of a frame struct is frame (one
+    # allocator per binding). field_pre_cleanup can lag the container's
+    # finalized placement, so resolve from the receiver root.
+    alloc_sym = (receiver_root_heap?(node.name) || node_is_heap?(root_receiver_node(node.name))) ?
+      :heap : (node.field_pre_cleanup || :frame)
+    alloc = MIR::Ident.new(alloc_zig_str(alloc_sym))
     field_get = MIR::FieldGet.new(target, field)
     # Build a comptime @TypeOf(target.field) expression. The field name
     # is known statically; comptime resolves the type from the binding's

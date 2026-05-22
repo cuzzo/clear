@@ -400,6 +400,10 @@ module EscapeGraph
           if outer.include?(root)
             moved.call(n.value).each(&mark)                          # M2
             carried_root!(root, decls, heap)                         # M2: loop-carry
+            # Reassigned with a value carrying heap-owned data (a
+            # struct literal with a heap field): the binding must be
+            # heap so it owns and frees that data with one allocator.
+            heap << root if escaping_value_is_heap?(n.value, decls, heap, ret_heap, fn_nodes)
           else
             moved.call(n.value).each { |d| link.call(d, root) }
           end
