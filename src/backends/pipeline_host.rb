@@ -560,11 +560,11 @@ class PipelineHost
     # Value.List to grow via list-push.
     var_decl = MIR::Let.new("pipe_mat",
       MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
-        :list_empty, :heap, nil),
+        :list_empty, pipeline_result_alloc, nil),
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
-        [MIR::AllocatorRef.new(:heap)], false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc)], false)
     )
     [var_decl, defer]
   end
@@ -580,7 +580,7 @@ class PipelineHost
   def mat_append(value_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
-        [MIR::AllocatorRef.new(:heap), value_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), value_expr], true), false)
   end
 
   # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
@@ -588,7 +588,7 @@ class PipelineHost
   def mat_append_slice(slice_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
-        [MIR::AllocatorRef.new(:heap), slice_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), slice_expr], true), false)
   end
 
   # Sharded pool: for each shard, for each slot, append alive values.
