@@ -1142,7 +1142,6 @@ module AST
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
-    attr_accessor :storage        # :heap when a heap-returning fn returns this concat
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
     attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
@@ -1336,7 +1335,6 @@ module AST
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
-    attr_accessor :storage           # :heap when a heap-returning fn returns this call's result directly
     sig { returns(FalseClass) }
     def wildcard?; false end
     def name; self[:name].to_s end
@@ -1596,7 +1594,6 @@ module AST
   # Any backend emits a single allocation covering all parts.
   StringConcat   = Struct.new(:token, :parts) do
     include Locatable
-    attr_accessor :storage  # :heap when a heap-returning fn returns this concat
   end
 
   # CapabilityWrap: single AST node for all capability wrapping.

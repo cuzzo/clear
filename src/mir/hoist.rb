@@ -60,6 +60,7 @@ module Hoist
     when AST::MatchStatement                  then stmt.cases.map(&:body) + [stmt.default_case].compact
     when AST::WithBlock                       then [stmt.body]
     when AST::DoBlock                         then stmt.branches.map { |b| b[:body] }.compact
+    when AST::BgBlock, AST::BgStreamBlock      then [stmt.body]
     else []
     end
   end
@@ -81,6 +82,32 @@ module Hoist
         end
       end
     end
+    # A RETURN / YIELD value that is an anonymous allocating expression
+    # has no SymbolEntry, so escape analysis cannot decide its placement.
+    # Lift it to a temp binding so it becomes a normal escaping decl.
+    # A YIELD value pushed onto a stream is consumed outside the
+    # producing fiber. An anonymous allocating expression there has no
+    # SymbolEntry, so escape analysis cannot place it -- lift it.
+    # (RETURN values need no AST hoist: lower_return already hoists the
+    # return expression to a named MIR temp, and reads the function's
+    # return placement for its allocator.)
+    if stmt.is_a?(AST::YieldExpr) && stmt.expr
+      v = stmt.expr
+      if allocating?(v)
+        stmt.expr = make_temp!(v, hoists, ctr)
+      elsif v.is_a?(AST::StructLit) || v.is_a?(AST::UnionVariantLit) || v.is_a?(AST::ListLit)
+        hoist_concats_within!(v, hoists, ctr)
+      end
+    end
+  end
+
+  # An anonymous expression that allocates a fresh heap-able value and so
+  # needs its own binding for escape analysis to place it.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def allocating?(node)
+    return false unless node
+    concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit) ||
+      node.is_a?(AST::MethodCall)
   end
 
   # Yield every MethodCall reachable inside one statement's OWN
@@ -180,6 +207,10 @@ module Hoist
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
     decl.full_type = ti
+    # The temp is always consumed by the statement it was lifted from
+    # (return / yield / element store), so it is used by construction --
+    # var-use analysis ran before this pass and cannot know that.
+    decl.var_used = true
     # decl.storage (a node field) is left as annotation's default; escape
     # analysis records the definitive placement on sym.storage below.
     sym = SymbolEntry.new(reg: decl, type: ti, mutable: false, storage: storage)
@@ -194,6 +225,11 @@ module Hoist
     # move so ownership dataflow transfers the temp into the container
     # instead of cleaning it up at scope exit.
     ident.was_moved = true if ident.respond_to?(:was_moved=)
+    # An @indirect field value carries needs_heap_create; the stamp must
+    # follow the value to its new position.
+    if concat.respond_to?(:needs_heap_create) && concat.needs_heap_create
+      ident.needs_heap_create = true
+    end
     ident
   end
 end

@@ -67,6 +67,9 @@ class MIRLowering
     @debug_mode = debug_mode
     @pending_stmts = T.let([], T::Array[T.untyped])
     @tmp_counter = T.let(0, Integer)
+    # Allocator of the binding whose value is currently being lowered;
+    # an anonymous allocating sub-expression inherits it (with_decl_alloc).
+    @decl_alloc = T.let(nil, T.nilable(Symbol))
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -78,6 +81,7 @@ class MIRLowering
     @used_sharded_map = T.let(false, T::Boolean)
     @current_fn_has_rt = T.let(false, T::Boolean)
     @current_fn_tail_call = T.let(false, T::Boolean)
+    @current_fn_return_alloc = T.let(nil, T.nilable(Symbol))
     @current_fn_zig_name = T.let(nil, T.nilable(String))
     @current_fn_return_payload_zig = T.let(nil, T.nilable(String))
     @current_fn_has_catch = T.let(false, T::Boolean)
@@ -716,7 +720,25 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(Symbol) }
   def alloc_for_node(node)
-    node_is_heap?(node) ? :heap : :frame
+    return :heap if node_is_heap?(node)
+    # Binding-value position: an anonymous allocating expression has no
+    # symbol of its own, so it inherits the enclosing binding's
+    # allocator (set by with_decl_alloc). One allocator per binding.
+    @decl_alloc == :heap ? :heap : :frame
+  end
+
+  # Run `blk` with @decl_alloc set to the allocator of the binding whose
+  # value is being lowered. alloc_for_node / :node_storage read it so an
+  # anonymous allocating sub-expression uses its binding's allocator.
+  sig { params(alloc: T.nilable(Symbol), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_decl_alloc(alloc, &blk)
+    prev = @decl_alloc
+    @decl_alloc = alloc
+    begin
+      blk.call
+    ensure
+      @decl_alloc = prev
+    end
   end
 
   # True when `node` is heap-placed. Symbol#storage is escape analysis's
@@ -815,9 +837,9 @@ class MIRLowering
       # allocator is the call node's own placement.
       if node.is_a?(AST::MethodCall) && node.object
         (receiver_root_heap?(node.object) || node_is_heap?(node.object) ||
-         node_is_heap?(node)) ? :heap : :frame
+         node_is_heap?(node) || @decl_alloc == :heap) ? :heap : :frame
       else
-        node_is_heap?(node) ? :heap : :frame
+        (node_is_heap?(node) || @decl_alloc == :heap) ? :heap : :frame
       end
     else :heap
     end
@@ -1172,6 +1194,9 @@ class MIRLowering
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
+    # Return-expression allocator: a RETURN value inherits the function's
+    # finalized return placement (escape analysis sets return_provenance).
+    @current_fn_return_alloc = node.return_provenance == :heap ? :heap : nil
     @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
     @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
 
@@ -4332,15 +4357,10 @@ class MIRLowering
     if @target == :bc && @current_stream_is_inf
       return MIR::StreamYield.new(lowered)
     end
-    if node.yield_dupe
-      # Frame string: dupe to stream allocator before push so the value outlives
-      # the fiber's frame rewind (or loop mark rewind between yields).
-      dupe_call = emit_builtin(:streamDupeBytes, [
-        MIR::Ident.new("#{stream_local}.alloc"),
-        lowered,
-      ])
-      return MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [dupe_call], true)
-    end
+    # The yielded value is a hoisted, escape-placed binding (Hoist lifts
+    # anonymous YIELD operands; escape analysis marks it heap because it
+    # escapes the fiber). The stream owns it; the consumer frees it. No
+    # dupe -- one allocation, placed by escape analysis.
     MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
   end
 
@@ -5555,6 +5575,7 @@ class MIRLowering
 
     fields = node.fields.map { |k, v|
       ft = field_types[k.to_s]
+      move_mark_field!(v)
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
       elsif v.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
@@ -5621,6 +5642,7 @@ class MIRLowering
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
       # err_cleanup: union owns its payload on success; only clean up on error.
+      move_mark_field!(v)
       val = hoist_alloc(lower(v), v, err_cleanup: true)
       # @indirect is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
@@ -5954,6 +5976,20 @@ class MIRLowering
     mark_explicit_moves_for_cleanup(node.right) if node.respond_to?(:right)
     mark_explicit_moves_for_cleanup(node.condition) if node.respond_to?(:condition) && !node.is_a?(AST::IfStatement)
     node.args&.each { |a| mark_explicit_moves_for_cleanup(a) } if node.respond_to?(:args)
+  end
+
+  # A struct/union literal field store is a consuming site: a moved
+  # binding placed in a field transfers ownership, so its guarded
+  # cleanup must be suppressed via MoveMark -- the same mechanism
+  # element stores and TAKES args use (INV-13/14).
+  sig { params(v: T.untyped).void }
+  def move_mark_field!(v)
+    return unless v.is_a?(AST::Identifier) && v.was_moved == true
+    nm = zig_safe_name(v.name)
+    nm = @fn_name_rename_map[nm] if @fn_name_rename_map&.key?(nm)
+    entry = @current_bindings[v.name.to_s] || CleanupEntry::NONE
+    guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](nm) || !!v.full_type&.string?
+    @pending_stmts << MIR::MoveMark.new(nm) if guarded
   end
 
   sig { params(node: AST::MoveNode).returns(MIR::Ident) }
@@ -6296,7 +6332,10 @@ class MIRLowering
         # defer free() on the var doesn't attempt to free a comptime literal.
         MIR::DupeSlice.new(lower(rhs), :heap)
       else
-        lower(node.value)
+        # The value's allocating expression inherits this binding's
+        # finalized placement -- read straight off the decl's symbol
+        # (escape analysis is the single writer). No node.storage stamp.
+        with_decl_alloc(is_heap ? :heap : :frame) { lower(node.value) }
       end
     end
 
@@ -6425,9 +6464,11 @@ class MIRLowering
       # promoted local rewrites the LHS to the appropriate ctx-field
       # reference.
       mapped = @do_capture_map && @do_capture_map[node.name]
-      value = lower(node.value)
-      value = copy_container_borrow_if_needed(value, node.value)
       rp = node.reassign_cleanup
+      # The new value's allocating expression inherits the reassigned
+      # binding's allocator (one allocator per binding).
+      value = with_decl_alloc(rp ? alloc_from_sym(rp.alloc!) : nil) { lower(node.value) }
+      value = copy_container_borrow_if_needed(value, node.value)
       if rp
         MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
       else
@@ -7284,7 +7325,9 @@ class MIRLowering
 
   sig { params(node: AST::ReturnNode).returns(T.untyped) }
   def lower_return(node)
-    value = node.value ? lower(node.value) : nil
+    # The return expression's allocating sub-nodes inherit the function's
+    # finalized return placement -- the return slot is their "binding".
+    value = node.value ? with_decl_alloc(@current_fn_return_alloc) { lower(node.value) } : nil
     rt_name = @rt_name
 
     # If the return value is a hoisted temp, convert its Cleanup to ErrCleanup:

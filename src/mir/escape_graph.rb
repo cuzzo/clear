@@ -76,10 +76,6 @@ module EscapeGraph
     # allocator": no annotator guessing pre-escape, no per-callsite
     # ad-hoc decision.
     fn_nodes.each_value { |fn| stamp_copy_node_alloc!(fn) if fn.body }
-    # Storage axis: propagate finalized binding/return placement onto the
-    # anonymous allocating expressions lowering reads. ONE pass, after
-    # every decision -- never scattered across lowering.
-    fn_nodes.each_value { |fn| stamp_storage!(fn) if fn.body }
     heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
     [heap_fns, heap_decls]
   end
@@ -155,67 +151,6 @@ module EscapeGraph
       # context (the receiver, or the callee's heap-TAKES contract).
       # The top-level walk_body visit will reach this MethodCall/FuncCall
       # via its own arm and handle args correctly.
-    end
-  end
-
-  # Single uniform pass: propagate each binding's FINALIZED storage onto
-  # the allocating expression that produces its value, and each heap-
-  # returning fn's provenance onto its return expressions. An allocating
-  # expression node (string concat, value-producing method call) carries
-  # no binding of its own -- lowering reads node.storage to pick the
-  # allocator. The storage analogue of stamp_copy_node_alloc!: ONE place,
-  # after escape analysis has finalized every binding. Lowering NEVER
-  # writes node.storage; it only reads what this pass decided.
-  sig { params(fn: T.untyped).void }
-  def stamp_storage!(fn)
-    heap_ret = !borrow_return?(fn) && fn.return_provenance == :heap
-    # Resolve a binding's FINALIZED storage through its declaration: a
-    # reassignment node's own `.symbol` can lag the decl, so a name ->
-    # decl map (the same one decide_fn builds) is the reliable source.
-    decls = T.let({}, T::Hash[String, T.untyped])
-    walk(fn.body) { |n| decls[n.name.to_s] = n if decl?(n) }
-    heap_binding = ->(name) do
-      d = name && decls[name]
-      st = d && authoritative_storage(d.symbol)
-      !!(st && storage_to_alloc(st) == :heap)
-    end
-    AST.walk_body(fn.body) do |node|
-      case node
-      when AST::VarDecl
-        st = authoritative_storage(node.symbol)
-        stamp_alloc_storage!(node.value) if node.value && st && storage_to_alloc(st) == :heap
-      when AST::BindExpr
-        nm = node.name.is_a?(String) ? node.name : node.name.to_s
-        is_heap = node.mode == :decl ?
-          (st = authoritative_storage(node.symbol)) && storage_to_alloc(st) == :heap :
-          heap_binding.call(nm)
-        stamp_alloc_storage!(node.value) if node.value && is_heap
-      when AST::Assignment
-        stamp_alloc_storage!(node.value) if node.value && heap_binding.call(root_ident_name(node.name))
-      when AST::ReturnNode
-        stamp_alloc_storage!(node.value) if heap_ret && node.value
-      end
-    end
-  end
-
-  # Stamp storage = :heap on the allocating expression that directly
-  # produces a value (after MOVE-unwrap). Shallow: call / struct-literal
-  # arguments have their own container context and are reached via their
-  # own binding's visit, never recursed into here.
-  sig { params(expr: T.untyped).void }
-  def stamp_alloc_storage!(expr)
-    return unless expr
-    e = T.let(expr, T.untyped)
-    e = e.value while e.is_a?(AST::MoveNode)
-    case e
-    when AST::StringConcat, AST::MethodCall
-      e.storage = :heap if e.respond_to?(:storage=)
-    when AST::BinaryOp
-      if e.op == :OR_RESCUE
-        stamp_alloc_storage!(e.left)
-      elsif e.op == :ADD && e.string_concat && e.respond_to?(:storage=)
-        e.storage = :heap
-      end
     end
   end
 
@@ -481,6 +416,11 @@ module EscapeGraph
         else
           moved.call(n.value).each { |d| link.call(d, root) }
         end
+      when AST::YieldExpr
+        # YIELD: the value is pushed onto the stream and consumed
+        # outside the producing fiber -- it escapes the fiber frame,
+        # exactly like a function return escapes the function.
+        referenced_decls(n.expr).each(&mark) if n.expr
       when AST::FuncCall, AST::MethodCall
         if n.is_a?(AST::MethodCall) && ELEMENT_STORE_METHODS.include?(n.name.to_s)
           # Element store (append/insert/push/put): the element JOINS the
