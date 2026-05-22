@@ -1010,7 +1010,10 @@ module EscapeGraph
     elsif call.is_a?(AST::MethodCall) && ELEMENT_STORE_METHODS.include?(call.name.to_s)
       obj = call.object
       obj_ti = (obj.respond_to?(:full_type) ? obj.full_type : nil)
-      return unless obj_ti.is_a?(Type) && obj_ti.collection?
+      # @list/@set/@pool collections AND plain dynamic arrays (T[]) are
+      # all appendable element-store targets.
+      return unless obj_ti.is_a?(Type) &&
+                    (collection_ti?(obj_ti) || (obj_ti.array? && obj_ti.dynamic?))
       elem_t = obj_ti.element_type
       return unless elem_t.is_a?(Type)
       (call.args || []).each { |a| blk.call(a, elem_t, true, false) }
