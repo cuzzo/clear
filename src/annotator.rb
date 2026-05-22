@@ -2816,6 +2816,23 @@ private
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
     set_cleanup_alloc!(node)
+    # set_cleanup_alloc! may write node.full_type.provenance AFTER
+    # finalize_decl_storage! computed `storage`. The symbol must be BORN
+    # with that late value -- the annotator must not patch symbol.storage
+    # post-declare (that field belongs to escape analysis). Fold it into
+    # `declare_storage`, the value passed to declare() ONLY. `storage`
+    # itself stays un-folded for the byte/capability bookkeeping below
+    # (a stack slot initialized from a rodata literal is still a stack
+    # slot -- folding `storage` would mis-count it). Only promotes from
+    # provenance-axis defaults (:stack/:rodata/nil); never a real mode.
+    nft_prov = node.full_type.respond_to?(:provenance) ? node.full_type.provenance : nil
+    val_storage = node.value.is_a?(AST::Locatable) ? node.value.instance_variable_get(:@storage_override) : nil
+    late_prov = nft_prov || val_storage
+    declare_storage = storage
+    if late_prov && %i[heap frame borrow rodata].include?(late_prov) &&
+       (storage.nil? || storage == :stack || storage == :rodata)
+      declare_storage = late_prov
+    end
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.full_type.is_resource = true if is_resource && node.full_type.respond_to?(:is_resource=)
@@ -2837,7 +2854,7 @@ private
       final_type
     end
     current_scope.declare(
-      node.name, node, scope_type, mutable_flag, false, node.slot_size, storage,
+      node.name, node, scope_type, mutable_flag, false, node.slot_size, declare_storage,
       Set.new, [],
       sync: node_sync,
       layout: node_layout,
@@ -2845,21 +2862,8 @@ private
       close_zig: resource_close
     )
     node.symbol = current_scope.locals[node.name]
-    # SIMP-13f: set_cleanup_alloc! may have written node.full_type.provenance
-    # AFTER `storage` was computed by finalize_decl_storage. Mirror late
-    # provenance writes onto sym.storage so it's the canonical "where is
-    # this binding's data?" source. Guard: only promote from provenance-axis
-    # defaults (:stack/:rodata/nil); don't overwrite storage-axis modes
-    # (:shared/:multiowned/:link/:local/:frozen) which are orthogonal.
-    nft_prov = node.full_type.respond_to?(:provenance) ? node.full_type.provenance : nil
-    val_storage = node.value.is_a?(AST::Locatable) ? node.value.instance_variable_get(:@storage_override) : nil
-    late_prov = nft_prov || val_storage
-    if late_prov && [:heap, :frame, :borrow, :rodata].include?(late_prov)
-      sym_storage = node.symbol.storage
-      if sym_storage.nil? || sym_storage == :stack || sym_storage == :rodata
-        node.symbol.storage = late_prov
-      end
-    end
+    # (The late-provenance fold now happens BEFORE declare, above, so the
+    # symbol is born with the correct storage -- no post-declare write.)
     # Propagate @link_source from the value type to the scope entry.
     val_ti = node.value&.full_type
     if val_ti&.link?
