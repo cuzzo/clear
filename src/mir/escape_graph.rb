@@ -24,8 +24,11 @@ module EscapeGraph
   FnNodes = T.type_alias { T::Hash[T.untyped, AST::FunctionDef] }
   RetHeap = T.type_alias { T::Hash[T.untyped, T::Boolean] }
 
-  sig { params(fn_nodes: FnNodes).returns([T::Set[String], T::Set[String]]) }
-  def apply!(fn_nodes)
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.untyped).returns([T::Set[String], T::Set[String]]) }
+  def apply!(fn_nodes, schema_lookup = nil)
+    # Schema lookup for struct/union field inspection -- threaded so the
+    # escape graph can ask "does this struct own heap fields".
+    @schema_lookup = T.let(schema_lookup, T.untyped)
     # The escape graph, fixpointed across functions. ret_heap[f] -- does
     # f return heap-owned data -- is itself an escape result (f's return
     # value escapes f), so it is derived from decide_fn and iterated to
@@ -568,7 +571,13 @@ module EscapeGraph
       # (or already heap-provenance-stamped) owns heap data, regardless
       # of whether its TYPE is nominally Copy (a heap-owned string
       # binding -- its value a fresh concat -- IS a heap transfer).
-      !!(heap.include?(e.name.to_s) || e.symbol&.heap_provenance?)
+      return true if heap.include?(e.name.to_s) || e.symbol&.heap_provenance?
+      # A struct/union value with heap-owning fields, used in an owning
+      # position (return / store), transfers heap to the new owner --
+      # the value's own heap fields go with it.
+      ti = type_of(e)
+      !!(ti.is_a?(Type) && ti.struct? && @schema_lookup &&
+         ti.needs_cleanup?(@schema_lookup))
     when AST::StringConcat, AST::ListLit, AST::HashLit
       true   # fresh allocation
     when AST::StructLit, AST::UnionVariantLit

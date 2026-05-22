@@ -64,7 +64,7 @@ class MIRPass
     # Produces heap_fns and stamps storage/provenance on heap decls.
     # MIRChecker's 7 invariants are unchanged and PROVE the result
     # (fail-closed: any escape gap surfaces as a located error).
-    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes)
+    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes, @schema_lookup)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
 
     # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
