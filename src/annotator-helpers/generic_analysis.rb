@@ -607,16 +607,10 @@ module GenericAnalysis
     end
   end
 
-  # Propagate heap_promoted flag from function call return values.
-  # Looks through OR expressions (BinaryOp :OR) to find the underlying
-  # call — `x = failableFunc() OR default` should still propagate
-  # heap_promoted from failableFunc's returns_promoted flag.
   sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
   def propagate_call_flags!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    if has_heap_promoted_call?(node.value)
-      node.full_type.provenance = :heap
-    end
+    _ = node
+    nil
   end
 
 
@@ -673,37 +667,4 @@ module GenericAnalysis
     nil
   end
 
-  # Check if an expression carries heap_promoted_call, looking through
-  # OR/OR_RESCUE wrappers. Used by propagate_call_flags! and visit_BgBlock.
-  # Both OR (orelse) and OR_RESCUE (catch) propagate because the transpiler
-  # ensures fallback struct values also have their string fields duped to heap.
-  sig { params(expr: T.untyped).returns(T::Boolean) }
-  def has_heap_promoted_call?(expr)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return false unless expr
-    return true if expr.is_a?(AST::Locatable) && expr.heap_provenance?
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
-      return has_heap_promoted_call?(expr.left)
-    end
-    false
-  end
-
-  # Returns true when a BG block's last expression is a string that will be
-  # frame-allocated and thus needs heap-duping before the fiber exits.
-  # Mirrors bg_exit_needs_string_dupe? in MIRPass but runs at annotation time.
-  sig { params(expr: T.untyped).returns(T::Boolean) }
-  def bg_exit_frame_string?(expr)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return false unless expr
-    t = expr.full_type
-    return false unless t.string?
-    return false if t.heap? || t.rodata?
-    return true  if t.frame?
-    # Check stdlib def for explicit frame allocation (provenance not yet set on expr).
-    if expr.respond_to?(:matched_stdlib_def)
-      msd = expr.matched_stdlib_def
-      return true if msd && msd.emit&.return_alloc == :frame
-    end
-    false
-  end
 end

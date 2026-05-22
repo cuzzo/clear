@@ -1298,7 +1298,6 @@ MAP_METHODS = T.let({
 # Value transforms (ordered, applied to {value} before substitution):
 #   :dupe_string_literal   heap-dupe string literals (rodata can't be freed)
 #   :dupe_borrowed_union   deep-copy borrowed non-Copy union values
-#   :container_promote     promote frame-allocated sub-collections to heap
 
 INDEX_OPS = T.let({
   string_map: {
@@ -1315,7 +1314,7 @@ INDEX_OPS = T.let({
       allocates: true,
       key_alloc: :heap,
       val_alloc: :receiver_storage,
-      value_transforms: [:dupe_string_literal, :dupe_borrowed_union, :container_promote],
+      value_transforms: [:dupe_string_literal, :dupe_borrowed_union],
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
       shard_direct_value_transforms: [],  # putDirect dupes key+value internally; no caller-side transforms
       shard_alloc: :heap,
@@ -1379,7 +1378,6 @@ INDEX_OPS = T.let({
       takes_value: true,
       allocates: true,
       alloc: :heap,
-      value_transforms: [:container_promote],
     },
   },
   set_collection: {

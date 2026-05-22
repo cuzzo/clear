@@ -690,8 +690,7 @@ private
     signature.requires = node.requires
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
-    # Register function node BEFORE body analysis so visit_ReturnNode can
-    # set returns_promoted on it and callers in the same pass can read it.
+    # Register function node before body analysis so recursive references can resolve it.
     @fn_nodes[node.name] = node
 
     # 4. Routine Analysis
@@ -828,12 +827,6 @@ private
 
     end
 
-    # Inferred return_provenance: one predicate (EscapeGraph.local_fn_returns_heap?)
-    # owns the "does this fn return heap?" logic; both annotator (here, for
-    # caller-side resolve_call) and EscapeGraph's apply! consume it.
-    if node.body && EscapeGraph.local_fn_returns_heap?(node)
-      node.return_provenance = :heap
-    end
 
     @function_context_stack.pop
   end
@@ -5269,10 +5262,6 @@ private
 
     node.full_type = Type.new(:"~?#{elem_syms.first}[]")
 
-    # Detect YIELD of frame strings: when any YIELD expression is frame-allocated,
-    # the MIR pass will heap-dupe it before push. NEXT callers own the duped copy.
-    node.yields_frame_strings = true if stream_body_yields_frame_string?(node.body)
-
     # Compute captures for transpiler (same as BG blocks).
     stream_analysis = analyze_fiber_captures(node.body)
     node.capture_analysis = stream_analysis
@@ -5280,30 +5269,6 @@ private
     if stream_analysis.has_non_escaping_capture
       error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
              "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
-    end
-  end
-
-  # Returns true if any YieldExpr in the stream body yields a frame-allocated string.
-  # Stops recursion at nested BgStreamBlock boundaries.
-  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
-  def stream_body_yields_frame_string?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |stmt|
-      case stmt
-      when AST::YieldExpr
-        bg_exit_frame_string?(stmt.expr)
-      when AST::WhileLoop
-        stream_body_yields_frame_string?(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        stream_body_yields_frame_string?(stmt.body)
-      when AST::IfStatement
-        stream_body_yields_frame_string?(stmt.then_branch) ||
-          stream_body_yields_frame_string?(stmt.else_branch)
-      when AST::BgStreamBlock
-        false  # nested stream boundary — don't descend
-      else
-        false
-      end
     end
   end
 
@@ -5349,19 +5314,6 @@ private
       last_type = T.must(last_type_str[1..]).to_sym
     end
     node.full_type = Type.new(:"~#{last_type}")
-
-    # Propagate returns_promoted through BG blocks: if the last expression
-    # calls a function with returns_promoted, the BG block's promise carries
-    # heap-promoted data that the NEXT caller must clean up.
-    last_expr = node.body.last
-    if has_heap_promoted_call?(last_expr)
-      node.return_provenance = :heap
-    elsif bg_exit_frame_string?(last_expr)
-      # Last expression is a frame-allocated string. The MIR pass will heap-dup it
-      # so the fiber's result outlives the frame rewind. The NEXT caller owns that
-      # heap string and must free it.
-      node.return_provenance = :heap
-    end
 
     # @arena implies @pinned — thread-local arena memory can't be stolen.
     if node.arena_mode
@@ -5527,20 +5479,7 @@ private
       node.full_type = promise_type.tense_type.to_sym
     end
 
-    # Propagate heap provenance through NEXT: if the fiber's exit/yield value was
-    # frame-allocated and heap-duped, the NEXT caller owns that heap allocation
-    # and must free it.
-    if node.expr.is_a?(AST::Identifier)
-      sym = node.expr.symbol
-      decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
-      bg_value = decl_node&.value
-      needs_heap =
-        (bg_value.is_a?(AST::BgBlock) && bg_value.return_provenance == :heap) ||
-        (bg_value.is_a?(AST::BgStreamBlock) && bg_value.yields_frame_strings)
-      if needs_heap
-        node.storage = :heap
-      end
-    end
+    nil
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
@@ -6172,7 +6111,7 @@ private
 
   # Single-writer stamp: "this binding's heap-bearing contents are already
   # in heap_provenance" -- so return-time promote is unnecessary (and would
-  # leak by re-allocating). PromotionClassifier reads this. ONE writer
+  # leak by re-allocating). Legacy compatibility field. ONE writer
   # (bind-time), many readers (return-time). See docs/agents/provenance-collapse.md.
   sig { params(decl_node: T.untyped).void }
   def stamp_init_contents_heap!(decl_node)

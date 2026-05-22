@@ -10,10 +10,9 @@
 # a real declaration with a SymbolEntry attached, so every allocating
 # thing escape analysis sees is a symbol-bearing binding.
 #
-# v1 scope: string-concat expressions sitting inside element-store call
-# arguments (append / insert / push / put) -- the exact surface
-# escape_graph's promote_frame_concats! used to stamp via node.storage.
-# The pass grows to cover the remaining anonymous allocating shapes.
+# Scope: anonymous allocating expressions in escape positions (return, yield,
+# enclosing/container stores) are lifted to real declarations. Escape analysis
+# then marks only bindings; it never promotes expression nodes.
 require "sorbet-runtime"
 
 module Hoist
@@ -65,10 +64,9 @@ module Hoist
     end
   end
 
-  # Find element-store method calls in this statement's expression tree
-  # and hoist the string concats inside their arguments. Restricted to
-  # composite-element stores -- the exact surface escape_graph's
-  # promote_heapmut_concats! / promote_frame_concats! used to stamp.
+  # Find element-store method calls in this statement's expression tree.
+  # Composite element stores are escaping positions; hoist allocating
+  # argument fragments so the escape pass sees bindings.
   sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).void }
   def collect_stmt_hoists!(stmt, hoists, ctr)
     each_method_call(stmt) do |call|
@@ -82,23 +80,27 @@ module Hoist
         end
       end
     end
-    # A RETURN / YIELD value that is an anonymous allocating expression
-    # has no SymbolEntry, so escape analysis cannot decide its placement.
-    # Lift it to a temp binding so it becomes a normal escaping decl.
-    # A YIELD value pushed onto a stream is consumed outside the
-    # producing fiber. An anonymous allocating expression there has no
-    # SymbolEntry, so escape analysis cannot place it -- lift it.
-    # (RETURN values need no AST hoist: lower_return already hoists the
-    # return expression to a named MIR temp, and reads the function's
-    # return placement for its allocator.)
-    if stmt.is_a?(AST::YieldExpr) && stmt.expr
-      v = stmt.expr
-      if allocating?(v)
-        stmt.expr = make_temp!(v, hoists, ctr)
-      elsif v.is_a?(AST::StructLit) || v.is_a?(AST::UnionVariantLit) || v.is_a?(AST::ListLit)
-        hoist_concats_within!(v, hoists, ctr)
+    # RETURN / YIELD / field-store values escape their current frame. If the
+    # escaping value is anonymous and allocating, give it a binding first.
+    case stmt
+    when AST::ReturnNode
+      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr) if stmt.value
+    when AST::YieldExpr
+      stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr) if stmt.expr
+    when AST::Assignment
+      if stmt.name.is_a?(AST::GetField) || stmt.name.is_a?(AST::GetIndex)
+        stmt.value = hoist_escape_value!(stmt.value, hoists, ctr) if stmt.value
       end
     end
+  end
+
+  sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).returns(T.untyped) }
+  def hoist_escape_value!(value, hoists, ctr)
+    return make_temp!(value, hoists, ctr) if allocating?(value)
+    if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
+      hoist_concats_within!(value, hoists, ctr)
+    end
+    value
   end
 
   # An anonymous expression that allocates a fresh heap-able value and so
@@ -175,9 +177,8 @@ module Hoist
     end
   end
 
-  # Mirrors escape_graph's promote_heapmut_concats! gate: the receiver is
-  # a collection whose element type is composite (non-primitive,
-  # non-string). Only those stores went through promote_frame_concats!.
+  # Composite element stores can own nested heap-bearing fields, so
+  # anonymous allocating fragments inside their arguments need bindings.
   sig { params(call: T.untyped).returns(T::Boolean) }
   def composite_element_store?(call)
     obj = call.object

@@ -84,7 +84,7 @@ module FunctionAnalysis
   # Resolve a function call: look up the function, dispatch based on type
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
-  # heap_promoted_call flags.
+  # call result placement is decided later by escape analysis.
   sig { params(node: T.untyped, args: T::Array[T.untyped]).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -241,38 +241,7 @@ module FunctionAnalysis
       error!(node, :NOT_A_FUNCTION, name: func_name)
     end
 
-    # Tag calls that return collections (direct or via struct fields) so the
-    # caller knows to use heapAlloc for cleanup of promoted data.
-    # String returns only get heap_promoted_call from callee.returns_promoted
-    # (not from type alone) because stdlib string functions like readFile use
-    # frameAlloc internally — the caller shouldn't try to free those.
-    if node.full_type
-      callee_node = @fn_nodes[func_name]
-      sig_return_heap = fsig && fsig.return_provenance == :heap
-      if callee_node&.return_provenance == :heap || sig_return_heap
-        node.full_type.provenance = :heap
-        node.storage = :heap if node.respond_to?(:storage=)
-      elsif node.full_type.needs_escape_promotion? && !node.full_type.string?
-        node.full_type.provenance = :heap
-        node.storage = :heap if node.respond_to?(:storage=)
-      else
-        # Union return types with heap variants need heap_promoted_call
-        # when the callee allocates at all (frame, heap, or alloc).
-        ret_type = node.full_type
-        if ret_type
-          ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
-          schema = lookup_type_schema(ret_sym)
-          if Schemas.union?(schema)
-            has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
-            if has_heap && callee_allocates
-              node.full_type.provenance = :heap
-              node.storage = :heap if node.respond_to?(:storage=)
-            end
-          end
-        end
-      end
-    end
+    nil
   end
 
   sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }

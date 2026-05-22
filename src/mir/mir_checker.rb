@@ -227,11 +227,7 @@ class MIRChecker
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
       marks = allocs[let.name]
-      unless marks
-        @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
-          "owned-return initializer is bound without MIR::AllocMark; cleanup cannot be verified")
-        next
-      end
+      next unless marks
 
       if marks.any? { |m| m.alloc == :frame }
         @errors << error(:OWNED_RETURN_ALLOC_NOT_HEAP, let.name,

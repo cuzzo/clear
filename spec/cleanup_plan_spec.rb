@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/mir/promotion_plan"
+require_relative "../src/mir/cleanup_classifier"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
 

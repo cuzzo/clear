@@ -983,7 +983,7 @@ class MIREmitter
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
     name = node.name
-    g = !errdefer && entry.has_moved_guard?
+    g = entry.has_moved_guard?
     # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
     # TAKES params). Cleanup unwraps one pointer level via @TypeOf(name.*).
     vp = entry.via_pointer?
@@ -1022,7 +1022,7 @@ class MIREmitter
       # paths (heap_carry promotion) build the entry with has_moved_guard
       # false; the string IS move-tracked at scope end though, so the
       # guard is unconditional for the kind.
-      use_guard = entry.kind == :heap_string ? !errdefer : g
+      use_guard = entry.kind == :heap_string ? (!errdefer || entry.has_moved_guard?) : g
       result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
       if entry.kind == :rc && entry.needs_release_fields?
         guard = g ? "if (!#{name}_moved) " : ""

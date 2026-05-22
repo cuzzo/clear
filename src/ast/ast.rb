@@ -1018,7 +1018,6 @@ module AST
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
     attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
-    attr_accessor :has_promotion      # set by MIRPass when function has escape promotions
     attr_accessor :moved_guard_info   # stamped by MIRPass: { var_name => bool } for has_moved_guard lookups
     attr_accessor :cleanup_bindings   # stamped by MIRPass: { var_name => entry_hash } for MIRLowering
     attr_accessor :heap_carry_return      # true when a heap carry var is the return value (caller must free)
@@ -1365,8 +1364,7 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
-  end
+    end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
   # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)
@@ -1758,12 +1756,10 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
-    attr_accessor :return_provenance # :heap when BG body calls a returns_promoted function
+    attr_accessor :return_provenance # :heap when the value escapes as heap-owned
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
-    attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
-    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the BG run fn
     # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
     # on the BG body's transitive call set. Phase A only records this; Phase B
     # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.
@@ -1795,9 +1791,7 @@ module AST
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
-    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
-    attr_accessor :yields_frame_strings  # true when any YIELD expr is a frame string (NEXT caller owns the duped copy)
-    # FSM Phase A: set by FsmClassifier (see effects.rb).
+      # FSM Phase A: set by FsmClassifier (see effects.rb).
     attr_accessor :spawn_form
     attr_accessor :fsm_ineligible_reason
     attr_accessor :fsm_suspend_points
@@ -1807,8 +1801,7 @@ module AST
   # Only valid inside a BgStreamBlock body. expr: the value to yield.
   YieldExpr         = Struct.new(:token, :expr) do
     include Locatable
-    attr_accessor :yield_dupe  # true when the yielded value must be heap-duped before push (frame string)
-  end
+    end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.

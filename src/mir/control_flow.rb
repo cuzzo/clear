@@ -11,7 +11,7 @@
 #      boundary. Determines whether cleanup is needed and whether a moved guard
 #      is required. Runs after annotation, uses was_moved flags on AST nodes.
 #
-#   3. MIRPass: runs CleanupClassifier/PromotionClassifier, inserts MIR nodes
+#   3. MIRPass: runs CleanupClassifier, inserts MIR nodes
 #      (Drop, Promote, SuppressCleanup) into AST statement lists. The transpiler
 #      consumes MIR::Drop for variable cleanup. Promote/SuppressCleanup are
 #      inserted but not yet consumed.
@@ -745,6 +745,14 @@ class OwnershipDataflow
     when AST::ListLit
       node.items.each { |i| collect_ownership_transfers(i, step) }
 
+    when AST::GetField
+      if owning_field_move?(node)
+        root = AST.root_identifier(node)
+        step.consumed << root.name.to_s if root && step.state[root.name.to_s]
+      else
+        collect_explicit_in(node, step)
+      end
+
     when AST::MoveNode
       inner = node.value
       if inner.is_a?(AST::Identifier)
@@ -901,6 +909,15 @@ class OwnershipDataflow
     end
     is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def owning_field_move?(node)
+    return false unless node.is_a?(AST::GetField)
+    ti = Type.from_node(node)
+    !!(ti.respond_to?(:indirect?) && ti.indirect?)
+  rescue
+    false
   end
 
   sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
@@ -1273,91 +1290,71 @@ module LoopFrameAnalysis
 
 
   # Entry point.  Call once per pass, after CleanupClassifier.
-  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
-  def self.analyze!(fn_nodes)
+  sig { params(fn_nodes: T::Hash[String, T.untyped], schema_lookup: T.nilable(Proc)).returns(T::Hash[String, T.untyped]) }
+  def self.analyze!(fn_nodes, schema_lookup = nil)
     fn_nodes.each_value do |fn|
       next unless fn.body
-      walk_stmts!(fn.body)
+      walk_stmts!(fn.body, schema_lookup)
       update_shard_contexts!(fn.body, fn_nodes)
     end
   end
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
-  def self.walk_stmts!(stmts)
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), schema_lookup: T.nilable(Proc)).void }
+  def self.walk_stmts!(stmts, schema_lookup = nil)
     return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_stmt!(s) }
+    stmts.each { |s| walk_stmt!(s, schema_lookup) }
+    nil
   end
 
-  sig { params(stmt: T.untyped).returns(T.nilable(T::Array[T::Hash[Symbol, T.untyped]])) }
-  def self.walk_stmt!(stmt)
+  sig { params(stmt: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  def self.walk_stmt!(stmt, schema_lookup = nil)
     case stmt
     when AST::WhileLoop, AST::WhileBindLoop
-      walk_stmts!(stmt.do_branch)          # inner loops first
-      process_loop!(stmt, stmt.do_branch)
+      walk_stmts!(stmt.do_branch, schema_lookup)          # inner loops first
+      process_loop!(stmt, stmt.do_branch, schema_lookup)
     when AST::ForRange
-      walk_stmts!(stmt.body)
-      process_loop!(stmt, stmt.body)
+      walk_stmts!(stmt.body, schema_lookup)
+      process_loop!(stmt, stmt.body, schema_lookup)
     when AST::ForEach
-      walk_stmts!(stmt.body)
-      process_loop!(stmt, stmt.body)
+      walk_stmts!(stmt.body, schema_lookup)
+      process_loop!(stmt, stmt.body, schema_lookup)
     when AST::IfStatement
-      walk_stmts!(stmt.then_branch)
-      walk_stmts!(stmt.else_branch)
+      walk_stmts!(stmt.then_branch, schema_lookup)
+      walk_stmts!(stmt.else_branch, schema_lookup)
     when AST::MatchStatement
-      stmt.cases.each { |c| walk_stmts!(c.body) }
-      walk_stmts!(stmt.default_case)
+      stmt.cases.each { |c| walk_stmts!(c.body, schema_lookup) }
+      walk_stmts!(stmt.default_case, schema_lookup)
     when AST::WithBlock
-      walk_stmts!(stmt.body)
+      walk_stmts!(stmt.body, schema_lookup)
     when AST::DoBlock
-      stmt.branches.each { |b| walk_stmts!(b[:body]) }
+      stmt.branches.each { |b| walk_stmts!(b[:body], schema_lookup) }
     end
+    nil
   end
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
-  sig { params(loop_node: T.untyped, body: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
-  def self.process_loop!(loop_node, body)
-    return if loop_node.tight  # tight loops suppress all frame marks
-
+  sig { params(loop_node: T.untyped, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
+  def self.process_loop!(loop_node, body, schema_lookup = nil)
+    return if loop_node.tight
     local_names = collect_local_names(body)
-
-    # Find frame-allocated local VarDecls. Values that escape into an outer
-    # container cannot be protected by a per-iteration rewind, since that would
-    # invalidate the stored pointer. Promote those declarations to heap instead.
-    frame_decls = local_frame_decls(body, local_names)
-    escaping, non_escaping = frame_decls.partition do |decl|
-      escapes_to_outer?(decl.name.to_s, body, local_names)
-    end
-    escaping.each { |decl| promote_decl_to_heap!(decl) }
-
-    loop_node.mark_per_iter = non_escaping.any?
-
-    if loop_node.mark_per_iter
-      # When the loop rewinds, backing-store extensions of OUTER frame containers
-      # are corrupted — for ANY mutation in this loop's iteration, including
-      # ones buried inside nested loops or other nested control-flow. The frame
-      # arena is fiber-wide; nested loops share it with the enclosing loop.
-      #
-      # Authoritative locality data is already on each Identifier: the
-      # annotator set `ident.symbol.reg` to the variable's declaration AST
-      # node. So "is this receiver outer to the loop?" reduces to "is the
-      # declaration node OUTSIDE this loop's body subtree?" — no string-name
-      # matching, no ad-hoc scope tracking.
-      promote_outer_mutations!(body)
-    end
-
-    # Always: promote string-typed RHS expressions to heap when assigned to outer
-    # struct/map fields (outer_var.field = expr or outer_var[key] = expr).
-    # This prevents allocator mismatches: the cleanup-before-reassign MIR node
-    # uses the field's declared allocator (heap), so the new value must also be heap.
-    promote_outer_field_assigns!(body, local_names)
+    loop_node.mark_per_iter = local_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    nil
   end
 
-  # ── helpers: local name / frame-decl collection ──────────────────────────
+  sig { params(loop_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.loop_capture_frame_alloc?(loop_node, schema_lookup = nil)
+    return false unless loop_node.is_a?(AST::WhileBindLoop)
+    cond_t = Type.from_node(loop_node.condition)
+    inner = cond_t&.wrapped_type
+    return false unless inner.is_a?(Type)
+    inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
+  rescue
+    false
+  end
 
-  # Collect names declared directly in body (stop at nested loop / fn boundaries).
   sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
   def self.collect_local_names(body)
     names = Set.new
@@ -1372,24 +1369,6 @@ module LoopFrameAnalysis
     names
   end
 
-  # Frame-allocated VarDecl/BindExpr declared directly in body.
-  # Use type_info.frame_provenance? (provenance-based) rather than storage == :frame
-  # (location-based) because lists/strings annotated with @list have provenance=:frame
-  # but location=nil (their storage field stays :stack after finalize_storage!).
-  # Only includes types that actually make frame-arena allocations (collections,
-  # arrays, strings) -- primitives like Int64 are excluded even when
-  # frame_provenance? is set.
-  # A collection/string/array/map binding lives in the frame arena unless
-  # EscapeAnalysis promoted it to the heap, or it's a rodata symbol. That
-  # is the actual definition of "needs per-iteration mark/rewind".
-  #
-  # The old code keyed on `frame_provenance?` (== `@provenance == :frame`),
-  # but `:frame` is the implicit default and is left unstamped (nil) — so
-  # the check only ever fired for the rare explicitly-located case and
-  # missed every ordinary frame collection (`split` result, `@list`
-  # literal, ...). This is the correct general predicate: it READS the
-  # EscapeAnalysis heap stamp (invariant #16, no use-site re-derivation)
-  # and the static Type shape — no per-allocator heuristics.
   sig { params(ti: T.untyped).returns(T::Boolean) }
   def self.frame_local_collection?(ti)
     return false unless ti
@@ -1411,173 +1390,6 @@ module LoopFrameAnalysis
       end
     end
     decls
-  end
-
-  # Does var_name appear as a value arg to a mutates_receiver call on an outer
-  # container anywhere in the loop body (including nested loops)?
-  #
-  # The match walks transitively through struct/union/list initialisers so
-  # `outer.append(Wrap{ field: var_name })` and `outer.append([var_name])`
-  # are recognised — the variable still escapes into the outer container,
-  # the wrapping layer is just where the move ends up. See
-  # docs/agents/bug9-forensic.md for the bug class.
-  sig { params(var_name: String, body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
-  def self.escapes_to_outer?(var_name, body, local_names)
-    found = T.let(false, T::Boolean)
-    AST.walk_body(body) do |node|
-      next unless node.mutates_receiver
-      case node
-      when AST::MethodCall
-        receiver = node.object
-        next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args.any? { |a| expr_references_var?(a, var_name) }
-      when AST::FuncCall
-        receiver = node.args.first
-        next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        found = true if node.args.drop(1).any? { |a| expr_references_var?(a, var_name) }
-      end
-    end
-    found
-  end
-
-  # Does `expr` reference an Identifier named `var_name`, directly or
-  # through any transparent value wrapper (struct/union/list literal,
-  # GIVE/COPY/CLONE/SHARE/FREEZE)? Descends via the single canonical
-  # AST.wrapped_children definition so escape detection can never drift
-  # out of sync with the other consumers (docs/agents/bug9-forensic.md).
-  sig { params(expr: T.untyped, var_name: String).returns(T::Boolean) }
-  def self.expr_references_var?(expr, var_name)
-    return false if expr.nil?
-    return true if expr.is_a?(AST::Identifier) && expr.name == var_name
-    AST.wrapped_children(expr).any? { |c| expr_references_var?(c, var_name) }
-  end
-
-  # Walk the loop body subtree once. For each mutates_receiver call, ask the
-  # symbol table where the receiver was declared and promote it to heap if
-  # the declaration is outside this loop's body.
-  #
-  # Identity check via `ident.symbol.reg` (set by the annotator) is the
-  # authoritative locality answer — no need to re-derive it from string-name
-  # matching against a recomputed local_names set.
-  sig { params(body: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
-  def self.promote_outer_mutations!(body)
-    # Pre-collect the declaration AST nodes that live anywhere within this
-    # loop's subtree. AST.walk_body is the existing deep walker; we only
-    # need to skip FunctionDef nodes, which are a different frame arena.
-    local_decls = Set.new
-    AST.walk_body(body) do |n|
-      next if n.is_a?(AST::FunctionDef)
-      case n
-      when AST::VarDecl
-        local_decls << n.object_id
-      when AST::BindExpr
-        local_decls << n.object_id if n.mode == :decl
-      end
-    end
-
-    AST.walk_body(body) do |n|
-      next if n.is_a?(AST::FunctionDef)
-      next unless n.mutates_receiver
-      receiver = case n
-                 when AST::MethodCall then n.object
-                 when AST::FuncCall   then n.args.first
-                 end
-      next unless receiver.is_a?(AST::Identifier)
-      decl = receiver.symbol&.reg
-      next if decl.nil? || local_decls.include?(decl.object_id)
-      promote_to_heap!(receiver)
-    end
-  end
-
-  # Promote frame-allocating string expressions assigned to outer struct/map fields.
-  # Pattern: outer_var.field = expr  or  outer_var[key] = expr
-  # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
-  # toString, etc.). The MIR cleanup-before-reassign uses the field's declared
-  # allocator (heap), so the new value must also be heap to avoid a mismatch.
-  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T.nilable(T::Array[T.untyped])) }
-  def self.promote_outer_field_assigns!(body, local_names)
-    AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::Assignment)
-      target = node.name
-      next unless target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
-      receiver = case target
-                 when AST::GetField  then target.target
-                 when AST::GetIndex  then target.target
-                 end
-      next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-      val = node.value
-      next unless val
-      # Identifiers are already handled by :dupe_string_literal in lower_indexed_assignment
-      # (for map puts) and are a no-op for struct fields -- skip them to avoid double-dupe.
-      next if val.is_a?(AST::Identifier)
-      next unless val.full_type.string?
-      # Promote the value expression so the concat/dupe uses heapAlloc.
-      promote_value_to_heap!(val)
-    end
-  end
-
-  # Set storage=:heap on an expression node so it uses heapAlloc.
-  # Handles BinaryOp, StringConcat, FuncCall/MethodCall (via heap_dupe_result),
-  # and nodes with a direct storage= accessor.
-  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
-  def self.promote_value_to_heap!(node)
-    return unless node
-    ti = node.full_type
-    return unless ti.string?
-    return if node.is_a?(AST::Locatable) && node.heap_provenance?  # already heap
-    case node
-    when AST::BinaryOp
-      if node.string_concat
-        node.storage = :heap
-      else
-        promote_value_to_heap!(node.left)
-        promote_value_to_heap!(node.right)
-      end
-    when AST::StringConcat
-      node.storage = :heap
-    when AST::FuncCall, AST::MethodCall
-      node.heap_dupe_result = true
-      node.storage = :heap
-    when AST::Identifier
-      # Identifier referencing a frame string: mark for heap dupe at the assignment
-      # site rather than promoting the declaration (which would cause double-free
-      # if the declaration's scope is shorter than the carry variable's scope).
-      node.heap_dupe_result = true
-      node.symbol.storage = :heap if node.symbol
-    else
-      if node.respond_to?(:storage=)
-        node.storage = :heap
-      end
-    end
-  end
-
-  # Promote a container Identifier's declaration to heap.
-  sig { params(ident_node: AST::Identifier).returns(T.nilable(Symbol)) }
-  def self.promote_to_heap!(ident_node)
-    decl_node = ident_node.symbol&.reg
-    return unless decl_node
-    decl_ti = decl_node.full_type
-    return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
-    ident_node.symbol.storage = :heap if ident_node.symbol
-    decl_node.storage = :heap
-    if decl_node.value.respond_to?(:storage=)
-      decl_node.value.storage = :heap
-    end
-  end
-
-  # Promote a frame-allocated declaration whose value escapes this loop.
-  sig { params(decl_node: T.untyped).returns(T.nilable(Symbol)) }
-  def self.promote_decl_to_heap!(decl_node)
-    decl_ti = Type.from_node(decl_node)
-    return unless decl_ti.is_a?(Type)
-    return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
-
-    decl_node.symbol.storage = :heap if decl_node.respond_to?(:symbol) && decl_node.symbol
-    decl_node.storage = :heap if decl_node.respond_to?(:storage=)
-
-    value = decl_node.respond_to?(:value) ? decl_node.value : nil
-    promote_value_to_heap!(value) if value
-    value.storage = :heap if value && value.respond_to?(:storage=)
   end
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
@@ -1662,7 +1474,7 @@ module LoopFrameAnalysis
   end
 
   # Returns true when expr is a call to a frame-allocating function
-  # (uses_frame=true and NOT heap-promoted on return).
+  #.
   sig { params(expr: T.untyped, fn_nodes: T::Hash[String, T.untyped]).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     case expr
@@ -1897,6 +1709,13 @@ class BorrowChecker
       _collect_was_moved(node, names)
     when AST::ListLit
       node.items.each { |i| _collect_moves(i, names) }
+    when AST::GetField
+      if owning_field_move?(node)
+        root = AST.root_identifier(node)
+        names << root.name.to_s if root
+      else
+        _collect_was_moved(node, names)
+      end
     when AST::MoveNode
       inner = node.value
       names << inner.name.to_s if inner.is_a?(AST::Identifier)
@@ -1969,6 +1788,15 @@ class BorrowChecker
     when AST::CapabilityWrap
       walk_for_was_moved(node.value, &block)
     end
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def owning_field_move?(node)
+    return false unless node.is_a?(AST::GetField)
+    ti = Type.from_node(node)
+    !!(ti.respond_to?(:indirect?) && ti.indirect?)
+  rescue
+    false
   end
 
   sig { params(ident: AST::Identifier).returns(T::Boolean) }

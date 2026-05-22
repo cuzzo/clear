@@ -4,58 +4,6 @@ require "sorbet-runtime"
 require_relative "cleanup_entry"
 require_relative "../ast/type"
 
-# Predicates consumed by MIRPass to gate the Phase 0.5 hoist
-# (hoist_return_subexprs_to_heap!). The old PromotionClassifier owned a
-# full per-function promote plan; after Path A, the hoist decides storage
-# at declaration / construction time and the runtime promote subsystem is
-# dead. Only these two predicates survive.
-module PromotionClassifier
-  extend T::Sig
-
-  # True iff the fn has at least one RETURN identifier that would need
-  # heap promotion (would have triggered the OLD struct_promote path).
-  # MIRPass uses this to gate which fns get the hoist treatment.
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  def self.fn_has_escapable_return?(fn_node, schema_lookup = nil)
-    collect_returns(fn_node.body).any? do |ret|
-      next false unless ret.value.is_a?(AST::Identifier)
-      next false if ret.value.symbol&.takes
-      next false if ret.value.symbol&.init_contents_heap
-      ti = ret.value.full_type
-      sym_heap = ret.value.symbol&.heap_provenance?
-      next true if ti.needs_escape_promotion? && !ti.string? && !sym_heap
-      next true if schema_lookup && !ti.string? && !sym_heap &&
-                   struct_has_promotable_fields?(ti, schema_lookup)
-      false
-    end
-  end
-
-  # True iff `ti` is a STRUCT (not union, not primitive) with at least one
-  # field that needs escape promotion (string, list, or map). MIRPass uses
-  # this to decide whether to synthesize a `COPY` wrapper around a
-  # borrowed Identifier returned from a heap-bearing fn.
-  sig { params(ti: Type, schema_lookup: Proc).returns(T::Boolean) }
-  def self.struct_has_promotable_fields?(ti, schema_lookup)
-    return false unless schema_lookup && ti
-    resolved = ti.resolved
-    schema = schema_lookup.call(resolved) rescue nil
-    return false unless Schemas.field_bearing?(schema)
-    schema.fields.any? do |_, v|
-      ft = v.is_a?(AST::StructField) ? v.type : v
-      t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-      next false unless t
-      t.string? || t.list_collection? || t.map?
-    end
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Array[AST::ReturnNode]) }
-  private_class_method def self.collect_returns(body)
-    returns = T.let([], T::Array[AST::ReturnNode])
-    AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
-    returns
-  end
-end
-
 # =========================================================================
 # Pass C (caller side): Cleanup Classification
 #
@@ -191,14 +139,6 @@ module CleanupClassifier
 
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
         cleanup = classify_binding(var_name, node.full_type, node, promoted_fns, schema_lookup)
-        if cleanup
-          # One allocator per binding: cleanup frees with the SAME
-          # allocator escape analysis placed the binding in. The
-          # binding's definitive Symbol#storage is the single source of
-          # truth -- no per-shape allocator guess.
-          st = node.symbol&.storage
-          cleanup[:alloc] = (st.nil? || st == :frame || st == :stack || st == :rodata) ? :frame : :heap
-        end
         # Stamp on node for identity-based lookup in lower_var_decl (avoids
         # same-name collisions when two vars share a name in different scopes).
         node.mir_binding_entry = cleanup if cleanup
@@ -354,11 +294,27 @@ module CleanupClassifier
       next unless inner_ti
       e = classify_binding(name, inner_ti, anchor_node, promoted_fns, schema_lookup)
       next unless e
+      e[:alloc] = :heap if capture_expr_heap?(expr, promoted_fns)
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
         e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
       end
       bindings[name] = e
+    end
+  end
+
+  sig { params(expr: T.untyped, promoted_fns: T::Set[String]).returns(T::Boolean) }
+  private_class_method def self.capture_expr_heap?(expr, promoted_fns)
+    case expr
+    when AST::FuncCall
+      promoted_fns.include?(expr.name.to_s) ||
+        (expr.respond_to?(:heap_provenance?) && expr.heap_provenance?)
+    when AST::MethodCall
+      return true if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
+      receiver = expr.object
+      receiver.respond_to?(:symbol) && receiver.symbol&.heap_provenance?
+    else
+      false
     end
   end
 
@@ -392,41 +348,46 @@ module CleanupClassifier
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
-    return nil if node.container_borrow
+    return nil if node.respond_to?(:container_borrow) && node.container_borrow
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil if node_sym&.borrow_provenance?  # borrow return -- caller owns data
 
     sync = node_sym&.sync
+    entry = nil
 
-    # Inlined simple predicate -> kind mappings (no moved guard for
-    # streaming / observable -- those are not linearly affine).
-    return entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
-    return entry(:frozen, has_moved_guard: false) if ti.frozen?
-    return entry(:uniform, has_moved_guard: false) if ti.inf_stream?
-    if node.respond_to?(:resource_close_zig) && node.resource_close_zig
-      return entry(:resource, resource_close_zig: node.resource_close_zig)
+    entry ||= entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
+    entry ||= entry(:frozen, has_moved_guard: false) if ti.frozen?
+    entry ||= entry(:uniform, has_moved_guard: false) if ti.inf_stream?
+    if !entry && node.respond_to?(:resource_close_zig) && node.resource_close_zig
+      entry = entry(:resource, resource_close_zig: node.resource_close_zig)
     end
-    coll = classify_collection(ti, schema_lookup, node: node)
-    return coll if coll
-    arr = classify_array_struct_strings(ti, node, schema_lookup)
-    return arr if arr
-    # AtomicPtr (`@indirect:atomic`): must fire BEFORE classify_rc_or_link
-    # since M3.5 auto-promotes ownership=:shared (any_rc? becomes true).
-    return entry(:uniform) if ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
-    rc = classify_rc_or_link(ti, schema_lookup)
-    return rc if rc
-    return entry(:uniform) if sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
-    opt = classify_optional(ti, schema_lookup, node: node)
-    return opt if opt
-    own = classify_owned_string(ti, node)
-    return own if own
-    prov = classify_heap_provenance(ti, node, schema_lookup, sync)
-    return prov if prov
-    composite = classify_heap_composite(ti, node, schema_lookup, sync)
-    return composite if composite
-    fields = classify_struct_cleanup_fields(ti, node, schema_lookup)
-    return fields if fields
-    classify_non_copy_union(ti, schema_lookup)
+    entry ||= classify_collection(ti, schema_lookup, node: node)
+    entry ||= classify_array_struct_strings(ti, node, schema_lookup)
+    if !entry && ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
+      entry = entry(:uniform)
+    end
+    entry ||= classify_rc_or_link(ti, schema_lookup)
+    entry ||= entry(:uniform) if sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
+    entry ||= classify_optional(ti, schema_lookup, node: node)
+    entry ||= classify_owned_string(ti, node)
+    entry ||= classify_heap_provenance(ti, node, schema_lookup, sync)
+    entry ||= classify_heap_composite(ti, node, schema_lookup, sync)
+    entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
+    entry ||= classify_non_copy_union(ti, schema_lookup)
+    finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+  end
+
+  sig { params(entry: T.nilable(CleanupEntry), node: T.untyped, ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+    return nil unless entry
+    return entry unless node.respond_to?(:symbol)
+    sym = node.symbol
+    decl = sym&.respond_to?(:reg) ? sym.reg : nil
+    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
+    storage = decl_sym&.storage || sym&.storage
+    type_alloc = ti.cleanup_allocator(schema_lookup)
+    entry[:alloc] = (type_alloc == :heap || storage == :heap) ? :heap : :frame
+    entry
   end
 
   # ── Individual classifiers ───────────────────────────────────────

@@ -118,9 +118,8 @@ class SymbolEntry
                                      # forces mutable Zig storage so the callee can write back.
                 :init_contents_heap  # true when the binding's init expression's heap-bearing
                                      # fields are all in heap_provenance already (e.g. struct
-                                     # lit with COPY'd strings). PromotionClassifier reads
-                                     # this to skip redundant return-time promote. Single
-                                     # writer: annotator at bind-time. See docs/agents/
+                                     # lit with COPY'd strings). Legacy field; not an escape decision.
+                                     # Escape placement is symbol.storage. See docs/agents/
                                      # provenance-collapse.md.
 
   # The binding's type. Single coercing seam: every input is laundered

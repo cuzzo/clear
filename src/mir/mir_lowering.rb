@@ -11,6 +11,7 @@
 # introspection and allocator resolution happens HERE, not in the emitter.
 
 require "sorbet-runtime"
+require "set"
 
 require_relative "mir"
 require_relative "cleanup_entry"
@@ -84,6 +85,7 @@ class MIRLowering
     @current_fn_return_alloc = T.let(nil, T.nilable(Symbol))
     @current_fn_zig_name = T.let(nil, T.nilable(String))
     @current_fn_return_payload_zig = T.let(nil, T.nilable(String))
+    @current_fn_returned_names = T.let(Set.new, T::Set[String])
     @current_fn_has_catch = T.let(false, T::Boolean)
     @current_fn_collection_params = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_fn_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
@@ -275,9 +277,10 @@ class MIRLowering
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node(ast_node)
     zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
-    entry = CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_t })
+    alloc = @decl_alloc == :heap ? :heap : :frame
+    entry = CleanupEntry.from({ kind: :uniform, alloc: alloc, has_moved_guard: false, zig_type: zig_t })
 
-    @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
+    @pending_stmts << MIR::AllocMark.new(name, alloc, ti)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     @pending_stmts << (err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry))
     MIR::Ident.new(name)
@@ -311,6 +314,37 @@ class MIRLowering
     false
   rescue
     false
+  end
+
+  sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(T.untyped) }
+  def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
+    return mir unless dest_alloc == :heap
+
+    ti = dest_type || Type.from_node(ast_node)
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    return mir unless ti.is_a?(Type) && ti.string?
+    return mir if heap_owned_value?(mir, ast_node)
+
+    MIR::DupeSlice.new(mir, :heap)
+  end
+
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
+  def heap_owned_value?(mir, ast_node)
+    return heap_owned_value?(mir.expr, ast_node) if mir.is_a?(MIR::Cast)
+    return true if mir.is_a?(MIR::DupeSlice) && mir.alloc == :heap
+    return true if mir.is_a?(MIR::ConcatStr) && mir.alloc == :heap
+    return true if mir.is_a?(MIR::DeepCopy) && mir.strategy == :full_value && mir.alloc == :heap
+    return true if mir.is_a?(MIR::Call) && mir.heap_provenance
+    return true if mir.is_a?(MIR::TryCatch) && mir.heap_provenance
+    return true if ast_node.is_a?(AST::NextExpr)
+    if mir.is_a?(MIR::InlineZig)
+      return true if mir.stdlib_def&.emit&.return_alloc == :heap
+      return true if mir.allocs.is_a?(Hash) && mir.allocs.values.any? { |a| a == :heap }
+    end
+
+    node = ast_node
+    node = node.value if node.is_a?(AST::MoveNode)
+    node.is_a?(AST::Identifier) && node.symbol&.heap_provenance?
   end
 
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
@@ -1202,6 +1236,7 @@ class MIRLowering
     @current_fn_return_alloc = node.return_provenance == :heap ? :heap : nil
     @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
     @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
+    @current_fn_returned_names = collect_fn_returned_names(node.body)
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
@@ -1332,10 +1367,9 @@ class MIRLowering
     prologue = []
 
     # Frame mark save/restore.
-    # uses_frame from annotation is stale for vars upgraded frame->heap by MIRPass
-    # (upgrade_always_escaped_to_heap!, upgrade_bg_captures_to_heap!, etc.).
+    # uses_frame from annotation is stale after escape analysis marks locals heap.
     # When cleanup_bindings is set (post-MIRPass), derive from it: it reflects the
-    # post-upgrade allocators. Fall back to uses_frame when cleanup_bindings is absent
+    # final allocators. Fall back to uses_frame when cleanup_bindings is absent
     # (synthetic functions, specs). uses_alloc tracks stdlib frame calls (append,
     # concat) which are not in cleanup_bindings and are always accurate.
     has_frame_bindings = if node.cleanup_bindings
@@ -1357,8 +1391,6 @@ class MIRLowering
                          @enum_schemas&.key?(bare_ret.resolved) ||
                          @union_schemas&.key?(bare_ret.resolved)
     returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
-    has_promotion = node.has_promotion
-
     heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
     if fn_needs_rt
       prologue << MIR::ExprStmt.new(MIR::Call.new("@setEvalBranchQuota", [MIR::Lit.new("100000")], false), false)
@@ -1367,7 +1399,7 @@ class MIRLowering
       #   - heap carry return strings: result is on heap, frame rewind is safe
       # For frame-string returns (no heap_carry_return), we skip the mark/restore
       # entirely: the returned string lives in the caller's frame region.
-      if uses_frame_or_alloc && (returns_value_type || (returns_string && heap_carry_return)) && !has_promotion
+      if uses_frame_or_alloc && (returns_value_type || (returns_string && heap_carry_return))
         prologue << MIR::FrameSave.new(@rt_name)
         prologue << MIR::FrameRestore.new(@rt_name)
       else
@@ -1847,9 +1879,12 @@ class MIRLowering
                        callee_param_type.collection? &&
                        (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
                         (ti&.array? && !ti&.string?))
-      raw_arg = copy_to_owning ?
-                  MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
-                  lower(a)
+      arg_alloc = takes ? :heap : @decl_alloc
+      raw_arg = with_decl_alloc(arg_alloc) do
+        copy_to_owning ?
+          MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
+          lower(a)
+      end
       # copy_to_owning: hoist into a `var` temp so &__tmp resolves to *T (not
       # *const T); the callee's anytype binding then allows mutable methods
       # (xs.deinit, xs.count, ...) on the duplicated owning container.
@@ -1930,9 +1965,12 @@ class MIRLowering
                        callee_param_type.collection? &&
                        (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
                         (ti&.array? && !ti&.string?))
-      raw_arg = copy_to_owning ?
-                  MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
-                  lower(a)
+      arg_alloc = takes ? :heap : @decl_alloc
+      raw_arg = with_decl_alloc(arg_alloc) do
+        copy_to_owning ?
+          MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
+          lower(a)
+      end
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
       cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx + 1)
     }
@@ -1997,6 +2035,23 @@ class MIRLowering
       end
     end
 
+    # Template-based intrinsics: resolve destination allocator before lowering
+    # TAKES args. COPY inside append/put/etc. must be constructed in the
+    # receiver/container allocator so cleanup remains one-allocator-per-owner.
+    pattern = node.zig_pattern.dup
+    pre_resolved_alloc = nil
+    if pattern.include?("{alloc}")
+      alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
+      receiver_type = if node.is_a?(AST::MethodCall)
+        Type.new(node.object.full_type)
+      else
+        ti = node.args&.first&.full_type
+        ti ? Type.new(ti) : nil
+      end
+      pre_resolved_alloc = resolve_alloc_sym(alloc_sym, receiver_type, nil, node)
+    end
+    stdlib_args_for_lower = node.matched_stdlib_def&.arg_spec
+
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
       obj_mir = lower(node.object)
@@ -2011,9 +2066,18 @@ class MIRLowering
       elsif obj_ti&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
-      [obj_mir] + node.args.map { |a| lower(a) }
+      lowered_args = node.args.each_with_index.map do |a, ai|
+        spec = stdlib_args_for_lower.is_a?(Array) ? stdlib_args_for_lower[ai + 1] : nil
+        takes = spec.is_a?(Hash) && spec[:takes]
+        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+      end
+      [obj_mir] + lowered_args
     else
-      node.args.map { |a| lower(a) }
+      node.args.each_with_index.map do |a, ai|
+        spec = stdlib_args_for_lower.is_a?(Array) ? stdlib_args_for_lower[ai] : nil
+        takes = spec.is_a?(Hash) && spec[:takes]
+        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+      end
     end
 
     # Hot-path collection lengths should lower to direct `.len` / `.items.len`
@@ -2035,21 +2099,11 @@ class MIRLowering
       return MIR::InlineBc.new(op_name, mir_args, node.matched_stdlib_def)
     end
 
-    pattern = node.zig_pattern.dup
-
     # Resolve {alloc} to a symbol and wrap TAKES string args in MIR::DupeSlice.
     # The {alloc} PLACEHOLDER stays in the pattern -- the emitter substitutes it.
     resolved_allocs = {}
     if pattern.include?("{alloc}")
-      alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
-      # Resolve receiver type: MethodCall -> receiver object; UFCS FuncCall -> first arg
-      receiver_type = if node.is_a?(AST::MethodCall)
-        Type.new(node.object.full_type)
-      else
-        ti = node.args&.first&.full_type
-        ti ? Type.new(ti) : nil
-      end
-      resolved = resolve_alloc_sym(alloc_sym, receiver_type, nil, node)
+      resolved = pre_resolved_alloc || :heap
       resolved_allocs[:alloc] = resolved
 
       # Wrap non-heap strings at TAKES positions in DupeSlice (visible to MIR checker)
@@ -2444,7 +2498,10 @@ class MIRLowering
       return iz
     end
 
-    items_mir = node.items.map { |i| hoist_alloc(lower(i), i) }
+    list_alloc = alloc_for_node(node)
+    items_mir = node.items.map do |i|
+      with_decl_alloc(list_alloc) { hoist_alloc(lower(i), i, err_cleanup: true) }
+    end
 
     if ti.respond_to?(:fixed?) && ti.fixed? &&
        (node.storage == :stack || node.storage == :frame)
@@ -2465,19 +2522,16 @@ class MIRLowering
       # Empty list: MIR expression depends on collection type
       if ti.respond_to?(:list_collection?) && ti.list_collection?
         zig_t = transpile_type(ti)
-        alloc = alloc_for_node(node)
-        return MIR::ContainerInit.new(zig_t, :list_empty, alloc, nil)
+        return MIR::ContainerInit.new(zig_t, :list_empty, list_alloc, nil)
       end
       # Dynamic empty list: use makeList with empty items
       elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
-      alloc = alloc_for_node(node)
-      return MIR::MakeList.new(elem_zig, [], alloc)
+      return MIR::MakeList.new(elem_zig, [], list_alloc)
     end
 
     # Non-empty list literal -> makeList
     elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
-    alloc = alloc_for_node(node)
-    MIR::MakeList.new(elem_zig, items_mir, alloc)
+    MIR::MakeList.new(elem_zig, items_mir, list_alloc)
   end
 
   sig { params(node: AST::HashLit).returns(T.untyped) }
@@ -3800,9 +3854,8 @@ class MIRLowering
       end
 
       # Capture handling delegated to FiberCtxBuilder -- same builder
-      # BG/BG STREAM/CONCURRENT use. DO branches need no string promotes
-      # (no fiber_string_promotes call) and use "ctx" as the body access
-      # prefix (no per-id suffix).
+      # BG/BG STREAM/CONCURRENT use. DO branches use "ctx" as the body
+      # access prefix (no per-id suffix).
       caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
 
       capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n    ")
@@ -3918,7 +3971,7 @@ class MIRLowering
     # DO branches and pipeline_host CONCURRENT callbacks call. Only the
     # site-specific control fields (Promise.inner / alloc) and the
     # body access prefix (__ctx_<id> for BG) are added here.
-    bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
+    promoted_names = T.let({}, T::Hash[String, String])
     outer_capture_map = @do_capture_map || {}
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "__ctx_#{id}",
@@ -3933,8 +3986,8 @@ class MIRLowering
     # the bare-name init AND the @TypeOf(...) field type below must
     # use that rewritten reference too — the outer name is no longer
     # in scope at the spawn site, only the rewritten one is.
-    # Promoted strings and FreshHeapCopy dupes already point to a
-    # local generated above the spawn, so they don't need rewriting.
+    # FreshHeapCopy dupes already point to a local generated above the
+    # spawn, so they don't need rewriting.
     capture_fields = caps.specs.map { |s|
       ftype = if s.dupe_decl_zig || promoted_names[s.name] || outer_capture_map[s.name].nil?
                 s.field_type_zig
@@ -4031,22 +4084,17 @@ class MIRLowering
           ""
         end
       else
-        last_mir = lower(last_step[:expr])
+        result_alloc = inner_t.string? ? :heap : nil
+        last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
+        last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, inner_t)
+        last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
         body_mir.concat(last_pending)
         body_mir << last_mir
         result_code = emit_expr(last_mir)
         pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-        # Apply scope-exit promotion: frame strings must be heap-duped so they
-        # outlive the fiber's frame, which is rewound when the fiber exits.
-        assignment = if node.exit_promote&.dig(:strategy) == :string_dupe
-          # Use __ctx_N.alloc — __bg_alloc is the same allocator but declared
-          # in the outer block, not accessible inside the run fn.
-          "__ctx_#{id}.inner.result = try __ctx_#{id}.alloc.dupe(u8, #{result_code});"
-        else
-          result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
-          "__ctx_#{id}.inner.result = #{result_code};"
-        end
+        result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
+        assignment = "__ctx_#{id}.inner.result = #{result_code};"
         pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
       end
       run_body = body_mir
@@ -4058,16 +4106,13 @@ class MIRLowering
     arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
 
     capture_frees = captured.filter_map { |name, _|
-      if bg_string_promotes.include?(name)
-        "defer __ctx_#{id}.alloc.free(__ctx_#{id}.#{name});"
-      elsif capture_close_zig[name]
+      if capture_close_zig[name]
         "defer #{capture_close_zig[name].gsub('{0}', "__ctx_#{id}.#{name}")};"
       end
     }.join("\n                    ")
     capture_frees = [capture_frees, fresh_heap_cleanups].reject(&:empty?).join("\n                    ")
 
-    promoted_decls = fiber_promoted_decls_zig(promoted_names, alloc_var)
-    promoted_decls = [promoted_decls, fresh_heap_decls].reject(&:empty?).join("\n        ")
+    promoted_decls = fresh_heap_decls
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
@@ -4102,7 +4147,7 @@ class MIRLowering
         blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,
         id: id, bg_rt: bg_rt, capture_fields: capture_fields,
         captured: captured, capture_close_zig: capture_close_zig,
-        pointer_captures: pointer_captures, bg_string_promotes: bg_string_promotes,
+        pointer_captures: pointer_captures,
         stmt_code: stmt_code, result_line: result_line,
         capture_frees: capture_frees, arena_init: arena_init,
         # FreshHeapCopy body cleanups (master's `defer CheatLib.cleanup
@@ -4280,7 +4325,7 @@ class MIRLowering
     # Capture handling delegated to FiberCtxBuilder -- same builder
     # BG/DO/CONCURRENT use. BG STREAM's site-specific extras are the
     # control fields (stream_inner / alloc) and "ctx" body prefix.
-    bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "sg")
+    promoted_names = T.let({}, T::Hash[String, String])
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "ctx",
                                  promoted_names: promoted_names)
@@ -4316,8 +4361,8 @@ class MIRLowering
     @current_stream_local = prev_stream_local
     @current_stream_is_inf = prev_stream_is_inf
 
-    promoted_decls = fiber_promoted_decls_zig(promoted_names, alloc_var)
-    string_frees = bg_string_promotes.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")
+    promoted_decls = ""
+    string_frees = ""
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, :local)
@@ -4780,21 +4825,6 @@ class MIRLowering
   sig { params(site_id: Integer, line: Integer, col: Integer, dispatch: T.untyped, form: Symbol).returns(String) }
   def bg_profile_site_comment(site_id, line, col, dispatch, form)
     "// CLEAR_PROFILE_TASK_SITE id=#{site_id} kind=BG line=#{line} column=#{col} dispatch=#{dispatch} form=#{form}"
-  end
-
-  sig { params(node: T.untyped, id: Integer, prefix: String).returns(T::Array[T.untyped]) }
-  def fiber_string_promotes(node, id, prefix)
-    promotes = node.capture_string_dupes || Set.new
-    names = {}
-    promotes.each { |name| names[name] = "__#{prefix}p_#{id}_#{name}" }
-    [promotes, names]
-  end
-
-  sig { params(promoted_names: T::Hash[String, String], alloc_var: String).returns(String) }
-  def fiber_promoted_decls_zig(promoted_names, alloc_var)
-    promoted_names.map { |name, promoted|
-      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
-    }.join("\n            ")
   end
 
   # ================================================================
@@ -5592,16 +5622,19 @@ class MIRLowering
   def lower_struct_lit(node)
     hoisted = []
     field_types = struct_lit_field_types(node)
+    struct_alloc = alloc_for_node(node)
 
     fields = node.fields.map { |k, v|
       ft = field_types[k.to_s]
       move_mark_field!(v)
-      val = if rc_retain_needed?(v)
-        make_rc_retain(v)
-      elsif v.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
-        hoist_alloc(MIR::DeepCopy.new(lower(v.value), nil, nil, :full_value, :heap), v, err_cleanup: true)
-      else
-        hoist_alloc(lower(v), v, err_cleanup: true)
+      val = with_decl_alloc(struct_alloc) do
+        if rc_retain_needed?(v)
+          make_rc_retain(v)
+        elsif v.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
+          hoist_alloc(MIR::DeepCopy.new(lower(v.value), nil, nil, :full_value, struct_alloc), v, err_cleanup: true)
+        else
+          hoist_alloc(lower(v), v, err_cleanup: true)
+        end
       end
       if struct_field_wants_slice?(ft, k, node)
         val = MIR::ItemsAccess.new(val, true)
@@ -5636,8 +5669,7 @@ class MIRLowering
 
     # Heap/frame allocated struct → pointer
     result = if node.storage == :heap || node.storage == :frame
-      alloc = alloc_for_node(node)
-      MIR::HeapCreate.new(type_name, init, alloc, "blk")
+      MIR::HeapCreate.new(type_name, init, struct_alloc, "blk")
     else
       init
     end
@@ -5658,12 +5690,13 @@ class MIRLowering
   def lower_union_variant_lit(node)
     # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
     hoisted = []
+    variant_alloc = alloc_for_node(node)
 
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
       # err_cleanup: union owns its payload on success; only clean up on error.
       move_mark_field!(v)
-      val = hoist_alloc(lower(v), v, err_cleanup: true)
+      val = with_decl_alloc(variant_alloc) { hoist_alloc(lower(v), v, err_cleanup: true) }
       # @indirect is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
       if v.needs_heap_create
@@ -5837,8 +5870,8 @@ class MIRLowering
 
     left  = cond.left
     right = cond.right
-    left_zig  = emit_expr(lower(left))
-    right_zig = emit_expr(lower(right))
+    left_zig  = emit_expr(hoist_alloc(lower(left), left))
+    right_zig = emit_expr(hoist_alloc(lower(right), right))
 
     helper, extra_args = pick_equality_helper(left, right)
     return nil unless helper
@@ -5940,7 +5973,7 @@ class MIRLowering
     # match the container's allocator. Defaults to :heap for explicit user
     # COPY (no container context) -- the COPY produces a fresh heap-owned
     # value the user binds independently.
-    alloc = node.alloc
+    alloc = @decl_alloc || node.alloc || :heap
 
     if ti && @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
@@ -5987,7 +6020,7 @@ class MIRLowering
       ident_name = zig_safe_name(node.value.name)
       ident_name = @fn_name_rename_map[ident_name] if @fn_name_rename_map&.key?(ident_name)
       entry = @current_bindings[node.value.name.to_s] || CleanupEntry::NONE
-      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](ident_name) || node.value.full_type&.string?
+      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](ident_name)
       @pending_stmts << MIR::MoveMark.new(ident_name) if guarded
       return
     end
@@ -6008,7 +6041,7 @@ class MIRLowering
     nm = zig_safe_name(v.name)
     nm = @fn_name_rename_map[nm] if @fn_name_rename_map&.key?(nm)
     entry = @current_bindings[v.name.to_s] || CleanupEntry::NONE
-    guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](nm) || !!v.full_type&.string?
+    guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](nm)
     @pending_stmts << MIR::MoveMark.new(nm) if guarded
   end
 
@@ -6275,7 +6308,7 @@ class MIRLowering
     decl_alloc = if node.symbol&.heap_provenance?
       :heap
     else
-      (binding_entry.present? && binding_entry.alloc) || :heap
+      (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
     end
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
@@ -6290,7 +6323,7 @@ class MIRLowering
     # pipeline, COLLECT, toList, concat -- inherits this binding's
     # finalized placement. ONE allocator per binding, read off the
     # decl's symbol; no per-branch threading.
-    init = with_decl_alloc(is_heap ? :heap : :frame) do
+    init = with_decl_alloc(decl_alloc) do
     if ft.pool?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
@@ -6347,17 +6380,12 @@ class MIRLowering
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
       is_move = node.value.was_moved == true
       # Propagate VarDecl heap storage to StructLit so lower_struct_lit emits HeapCreate.
-      # upgrade_heap_ptr_returns_to_heap! sets decl.storage = :heap but not decl.value.storage.
       rhs.storage = :heap if node.storage == :heap && rhs.is_a?(AST::StructLit)
       if !is_move && rc_retain_needed?(rhs)
         make_rc_retain(rhs)
-      elsif ft.string? && is_heap && !is_move &&
-            rhs.is_a?(AST::Literal) && rhs.type == :STRING
-        # Heap carry var with string literal initial value: dupe to heap so the
-        # defer free() on the var doesn't attempt to free a comptime literal.
-        MIR::DupeSlice.new(lower(rhs), :heap)
       else
-        lower(node.value)
+        placed = lower(node.value)
+        place_value_for_destination(placed, node.value, decl_alloc, ft)
       end
     end
     end
@@ -6418,7 +6446,12 @@ class MIRLowering
       drop_entry[:alloc] = node_alloc
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
-      [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
+      cleanup = if @current_fn_returned_names.include?(safe_name)
+        MIR::ErrCleanup.new(safe_name, drop_entry)
+      else
+        MIR::Cleanup.new(safe_name, drop_entry)
+      end
+      [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, cleanup]
     elsif owned_return_transfer_binding?(binding_entry, init)
       mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || :heap
       [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::TransferMark.new(safe_name, :moved)]
@@ -6490,8 +6523,13 @@ class MIRLowering
       rp = node.reassign_cleanup
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
-      value = with_decl_alloc(rp ? alloc_from_sym(rp.alloc!) : nil) { lower(node.value) }
+      assign_alloc = rp ? alloc_from_sym(rp.alloc!) : nil
+      value = with_decl_alloc(assign_alloc) do
+        lowered = lower(node.value)
+        place_value_for_destination(lowered, node.value, assign_alloc, node.full_type)
+      end
       value = copy_container_borrow_if_needed(value, node.value)
+      value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value)
       if rp
         MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
       else
@@ -6643,10 +6681,10 @@ class MIRLowering
 
     target = lower(target_node)
     idx = lower(node.name.index)
-    val = lower(node.value)
 
     # Fallback for unknown container types or missing registry entries
     unless op
+      val = lower(node.value)
       return MIR::ExprStmt.new(emit_builtin(:setAt, [target, idx, val]), false)
     end
 
@@ -6656,6 +6694,7 @@ class MIRLowering
     # transforms / shard-direct vs routed dispatch from the node fields.
     if kind == :string_map || kind == :numeric_map
       target_var = target_node.is_a?(AST::Identifier) ? target_node.name : nil
+      val = with_decl_alloc(:heap) { lower(node.value) }
 
       # Map keys are duped internally by put -- always frame-allocate the
       # key expression so it's cleaned by arena rewind (no orphaned heap
@@ -6692,13 +6731,7 @@ class MIRLowering
                 zig_t = bare_zig_type(val_ti)
                 val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
               end
-            end
-          when :container_promote
-            # Dead: insert_container_promote! now does an AST-level
-            # per-field CopyNode(:heap) rewrite for StructLit values
-            # being stored in heap containers. Non-literal values flow
-            # through :dupe_borrowed_union or are already heap.
-          end
+            end          end
         end
 
         # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
@@ -6733,6 +6766,7 @@ class MIRLowering
 
     # Non-HashMap kinds (array, list, pool, set_collection) keep their
     # InlineZig template path below.
+    val = lower(node.value)
     target_var_for_bc = target_node.is_a?(AST::Identifier) ? target_node.name : nil
     if @target == :bc && op[:bc_op] &&
        !(@shard_context && target_var_for_bc == @shard_context[:map])
@@ -6767,10 +6801,7 @@ class MIRLowering
             zig_t = bare_zig_type(val_ti)
             val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
           end
-        end
-      when :container_promote
-        # Dead: see insert_container_promote! comment.
-      end
+        end      end
     end
 
     # Substitute non-allocator placeholders into the pattern
@@ -7278,6 +7309,7 @@ class MIRLowering
       }
       branches = node.cases.flat_map { |c|
         body = lower_branch.call(c.body)
+        body = hoist_unhoisted_return_allocs(body, c.body)
         # WHEN-arms are subject-independent guard expressions, even on
         # union subjects. Dispatch them BEFORE the union/string/eq
         # paths or the union path will treat c.value (a Bool expr)
@@ -7346,31 +7378,73 @@ class MIRLowering
         end
       }
       default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
+      default = hoist_unhoisted_return_allocs(default, node.default_case) if default
       result = MIR::IfChain.new(branches, default)
     end
 
     expr_label ? MIR::BlockExpr.new(expr_label, [result]) : result
   end
 
+  sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  def hoist_unhoisted_return_allocs(body, ast_stmts)
+    return body unless body
+    returns = T.let([], T::Array[T.untyped])
+    Array(ast_stmts).each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
+    ret_i = T.let(0, Integer)
+
+    body.flat_map do |stmt|
+      unless stmt.is_a?(MIR::ReturnStmt) && stmt.value && mir_allocates?(stmt.value)
+        ret_i += 1 if stmt.is_a?(MIR::ReturnStmt)
+        next [stmt]
+      end
+
+      ast_value = returns[ret_i]
+      ret_i += 1
+      @tmp_counter += 1
+      name = "__tmp_#{@tmp_counter}"
+      entry = hoist_cleanup_entry(stmt.value, ast_value)
+      out = [
+        MIR::AllocMark.new(name, :heap, nil),
+        MIR::Let.new(name, stmt.value, false, nil, nil)
+      ]
+      out << MIR::ErrCleanup.new(name, entry) if entry
+      out << MIR::ReturnStmt.new(MIR::Ident.new(name))
+      out
+    end
+  end
+
   sig { params(node: AST::ReturnNode).returns(T.untyped) }
   def lower_return(node)
     # The return expression's allocating sub-nodes inherit the function's
     # finalized return placement -- the return slot is their "binding".
-    value = node.value ? with_decl_alloc(@current_fn_return_alloc) { lower(node.value) } : nil
+    value = node.value ? with_decl_alloc(@current_fn_return_alloc) do
+      lowered = lower(node.value)
+      place_value_for_destination(lowered, node.value, @current_fn_return_alloc, node.value.full_type)
+    end : nil
     rt_name = @rt_name
 
     # If the return value is a hoisted temp, convert its Cleanup to ErrCleanup:
     # the caller takes ownership on success, so we only clean up on error.
     # Borrow-position temps (intermediates, not the return value) keep regular
     # Cleanup (defer) -- they are freed normally when the function exits.
+    returned_names = returned_binding_names(node.value)
     if value.is_a?(MIR::Ident)
+      returned_names << value.name
+    end
+    unless returned_names.empty?
       @pending_stmts.each_with_index do |s, i|
-        if s.is_a?(MIR::Cleanup) && s.name == value.name
+        if s.is_a?(MIR::Cleanup) && returned_names.include?(s.name)
           @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry)
         end
       end
     end
 
+    if @current_fn_return_payload_zig&.start_with?("*") &&
+       value && !value.is_a?(MIR::HeapCreate) && !value.is_a?(MIR::Call) &&
+       !return_value_already_payload_pointer?(node.value)
+      bare_ret = @current_fn_return_payload_zig.sub(/\A\*/, "")
+      value = MIR::HeapCreate.new(bare_ret, value, :heap, "ret")
+    end
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
@@ -7378,41 +7452,72 @@ class MIRLowering
       return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args))
     end
 
-    # Catch-clause string dupe: ensures both success and error paths return
-    # heap-backed strings for consistent caller cleanup.
-    needs_string_dupe = node.catch_string_dupe_ret
-
-    if needs_string_dupe && value
-      ret_type = Type.new(node.value.full_type)
-      if ret_type&.string?
-        MIR::ScopeBlock.new([
-          MIR::AllocMark.new("__ret_dupe", :heap, nil),
-          MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
-          MIR::ErrCleanup.new("__ret_dupe", CleanupEntry.from(heap_string_entry)),
-          MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
-        ])
-      else
-        MIR::ReturnStmt.new(value)
-      end
+    # Rc/Arc return: retain before returning (increment refcount)
+    if node.value && rc_retain_needed?(node.value)
+      MIR::ReturnStmt.new(make_rc_retain(node.value))
     else
-      # Rc/Arc return: retain before returning (increment refcount)
-      if node.value && rc_retain_needed?(node.value)
-        MIR::ReturnStmt.new(make_rc_retain(node.value))
-      else
-        # Hoist allocating expressions (DeepCopy, ConcatStr, Cast wrapping these,
-        # etc.) to a named Let so the checker sees it in Let-init position.
-        # ErrCleanup: the caller takes ownership on success.
-        # Skip Call nodes: they are not flagged by UNHOISTED_ALLOC and the test
-        # contract requires heap-returning calls to remain inline (no __tmp wrap).
-        value = hoist_alloc(value, node.value, err_cleanup: true) if value && !value.is_a?(MIR::Call)
-        MIR::ReturnStmt.new(value)
-      end
+      # Hoist allocating expressions (DeepCopy, ConcatStr, Cast wrapping these,
+      # etc.) to a named Let so the checker sees it in Let-init position.
+      # ErrCleanup: the caller takes ownership on success.
+      # Skip Call nodes: they are not flagged by UNHOISTED_ALLOC and the test
+      # contract requires heap-returning calls to remain inline (no __tmp wrap).
+      value = hoist_alloc(value, node.value, err_cleanup: true) if value && !value.is_a?(MIR::Call)
+      MIR::ReturnStmt.new(value)
     end
   end
 
   # ================================================================
   # Helpers
   # ================================================================
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def return_value_already_payload_pointer?(ast_node)
+    return false unless ast_node && @current_fn_return_payload_zig
+    ti = ast_node.respond_to?(:full_type) ? ast_node.full_type : nil
+    return false unless ti.respond_to?(:zig_type)
+    ti.zig_type == @current_fn_return_payload_zig
+  rescue StandardError
+    false
+  end
+
+  sig { params(expr: T.untyped).returns(T::Set[String]) }
+  def returned_binding_names(expr)
+    names = T.let(Set.new, T::Set[String])
+    collect_returned_binding_names(expr, names)
+    names
+  end
+
+  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T::Set[String]) }
+  def collect_fn_returned_names(body)
+    names = T.let(Set.new, T::Set[String])
+    return names unless body
+    AST.walk_body(body) do |node|
+      collect_returned_binding_names(node.value, names) if node.is_a?(AST::ReturnNode)
+    end
+    names
+  end
+
+  sig { params(expr: T.untyped, names: T::Set[String]).void }
+  def collect_returned_binding_names(expr, names)
+    return unless expr
+    case expr
+    when AST::Identifier
+      names << zig_safe_name(expr.name)
+    when AST::MoveNode, AST::ShareNode
+      collect_returned_binding_names(expr.value, names)
+    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+      return
+    when AST::StructLit, AST::UnionVariantLit
+      expr.fields.each_value { |v| collect_returned_binding_names(v, names) }
+    when AST::ListLit
+      expr.items.each { |v| collect_returned_binding_names(v, names) }
+    when AST::BinaryOp
+      collect_returned_binding_names(expr.left, names) if expr.op == :OR_RESCUE
+    when AST::GetField, AST::GetIndex
+      collect_returned_binding_names(expr.target, names)
+    end
+    nil
+  end
 
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
