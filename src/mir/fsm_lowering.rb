@@ -140,19 +140,11 @@ module FsmLowering
             MIR::FieldGet.new(ctx_ident, "inner"),
             "result",
           )
-          value =
-            if exit_promote&.dig(:strategy) == :string_dupe
-              # try ctx.alloc.dupe(u8, last_mir)
-              MIR::MethodCall.new(
-                MIR::FieldGet.new(ctx_ident, "alloc"),
-                "dupe",
-                [MIR::Ident.new("u8"), last_mir],
-                true,
-              )
-            else
-              strip_try(last_mir)
-            end
-          result_mir << MIR::Set.new(target, value, false)
+          # The fiber's tail value is escape-placed on the heap like any
+          # other escaping binding; the promise stores it directly and
+          # the consumer (NEXT) owns and frees it. No per-promise
+          # allocator, no dupe.
+          result_mir << MIR::Set.new(target, strip_try(last_mir), false)
         end
       end
 

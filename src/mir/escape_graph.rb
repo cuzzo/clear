@@ -443,12 +443,15 @@ module EscapeGraph
               next unless decls.key?(d)
               (croot && decls.key?(croot)) ? link.call(d, croot) : mark.call(d)
             end
-            # An anonymous element that is itself heap-owned (a heap-
-            # returning call, list/hash literal) forces the container
-            # heap: the container must own and free heap elements with
-            # the same allocator. COPY/CLONE adapt to the container, so
-            # they do not force it.
-            next if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
+            # An anonymous element that is COMMITTED heap -- a heap-
+            # returning user call, or a list/hash literal -- forces the
+            # container heap (it owns and frees that element with one
+            # allocator). COPY/CLONE and intrinsic results (toString,
+            # ...) ADAPT to the container's allocator, so they do not
+            # force it.
+            u = unwrap(arg)
+            next if u.is_a?(AST::CopyNode) || u.is_a?(AST::CloneNode) ||
+                    u.is_a?(AST::MethodCall) || u.is_a?(AST::Literal)
             if croot && decls.key?(croot) &&
                escaping_value_is_heap?(arg, decls, heap, ret_heap, fn_nodes)
               heap << croot
@@ -552,10 +555,9 @@ module EscapeGraph
       return escaping_value_is_heap?(e.left, decls, heap, ret_heap, fn_nodes) if e.op == :OR_RESCUE
       !!(e.respond_to?(:string_concat) && e.string_concat)
     when AST::MethodCall
-      # A value-producing method call (toString, substr, ...) allocates
-      # a fresh result. heap_provenance? marks the genuine allocating
-      # intrinsics; a borrow-producing method (no alloc) is not stamped.
-      !!e.heap_provenance?
+      # A value-producing method call (toString, substr, ...) that
+      # allocates yields a fresh owned result -- heap when it escapes.
+      e.heap_provenance? || method_allocates?(e)
     else
       # @indirect payloads carry needs_heap_create from annotation.
       !!(e.respond_to?(:needs_heap_create) && e.needs_heap_create)
@@ -584,6 +586,15 @@ module EscapeGraph
       !!(e.op == :OR_RESCUE && heap_valued?(e.left, ret_heap, fn_nodes))
     else false
     end
+  end
+
+  # True when an intrinsic method call allocates a fresh value (its
+  # stdlib registry entry is marked `allocates`) -- the same signal the
+  # FSM exit / cleanup classifier read.
+  sig { params(call: T.untyped).returns(T::Boolean) }
+  def method_allocates?(call)
+    md = call.respond_to?(:matched_stdlib_def) ? call.matched_stdlib_def : nil
+    !!(md && md.emit&.allocates)
   end
 
   # The expression a BG/stream fiber yields -- the last body statement.
