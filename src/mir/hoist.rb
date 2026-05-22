@@ -82,11 +82,15 @@ module Hoist
         end
       end
     end
-    # A RETURN / YIELD value with no SymbolEntry: escape analysis works
-    # on bindings, so it cannot decide the placement of a bare
-    # expression. Lift it to a temp binding -- then the return/yield
-    # value is a normal escaping binding and "does this fn return heap"
-    # is just "is the return binding's storage heap".
+    # A RETURN / YIELD value that is an anonymous allocating expression
+    # has no SymbolEntry, so escape analysis cannot decide its placement.
+    # Lift it to a temp binding so it becomes a normal escaping decl.
+    # A YIELD value pushed onto a stream is consumed outside the
+    # producing fiber. An anonymous allocating expression there has no
+    # SymbolEntry, so escape analysis cannot place it -- lift it.
+    # (RETURN values need no AST hoist: lower_return already hoists the
+    # return expression to a named MIR temp, and reads the function's
+    # return placement for its allocator.)
     if stmt.is_a?(AST::YieldExpr) && stmt.expr
       v = stmt.expr
       if allocating?(v)
@@ -94,11 +98,6 @@ module Hoist
       elsif v.is_a?(AST::StructLit) || v.is_a?(AST::UnionVariantLit) || v.is_a?(AST::ListLit)
         hoist_concats_within!(v, hoists, ctr)
       end
-    end
-    # The return value becomes a binding (unless already a bare
-    # Identifier -- that IS the return binding).
-    if stmt.is_a?(AST::ReturnNode) && stmt.value && !stmt.value.is_a?(AST::Identifier)
-      stmt.value = make_temp!(stmt.value, hoists, ctr)
     end
   end
 

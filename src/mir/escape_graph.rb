@@ -307,19 +307,26 @@ module EscapeGraph
     result
   end
 
-  # Does `fn` return heap-owned data the caller must free? The return
-  # value is a binding (Hoist lifts it); escape analysis placed that
-  # binding like every other one. So this is just: is the return
-  # binding's storage heap. No return-specific re-analysis.
+  # Does `fn` return heap-owned data the caller must free? This is just
+  # the escape graph applied to the return: the returned value escapes
+  # `fn`, and is heap iff it carries heap-owned data. A borrow-return
+  # transfers no ownership.
   sig do
     params(fn: T.untyped, decisions: T::Hash[String, Symbol], fn_nodes: FnNodes,
            ret_heap: RetHeap, annotated_heap_ret: T::Set[T.untyped]).returns(T::Boolean)
   end
   def fn_returns_heap?(fn, decisions, fn_nodes, ret_heap, annotated_heap_ret)
     return false if borrow_return?(fn)
+    # Annotation already classified this as a heap return (big-struct /
+    # @indirect / heap-typed result), or the return type is a heap
+    # pointer -- a heap-owned result by construction.
     return true if annotated_heap_ret.include?(fn.name) || heap_ptr_return?(fn)
+    decls = T.let({}, T::Hash[String, T.untyped])
+    walk(fn.body) { |n| decls[n.name.to_s] = n if decl?(n) }
+    heap_set = T.let(Set.new, T::Set[String])
+    decisions.each { |k, v| heap_set << k if v == :heap }
     return_values(fn.body).any? do |rv|
-      rv.is_a?(AST::Identifier) && decisions[rv.name.to_s] == :heap
+      rv && escaping_value_is_heap?(rv, decls, heap_set, ret_heap, fn_nodes)
     end
   end
 
