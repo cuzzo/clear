@@ -525,6 +525,15 @@ class PipelineHost
 
   HEAP_ALLOC = "rt.heapAlloc()"
 
+  # A pipeline result is built with the allocator of the binding it
+  # flows into -- escape analysis already decided that placement (frame
+  # when the result does not escape, heap when it does). One allocator
+  # per binding; the pipeline is placed like every other value.
+  sig { returns(Symbol) }
+  def pipeline_result_alloc
+    @lowering.instance_variable_get(:@decl_alloc) == :heap ? :heap : :frame
+  end
+
   # Convert allocator symbol to Zig string (for InlineZig content only).
   sig { params(sym: T.anything).returns(String) }
   def alloc_zig_str(sym)
@@ -4051,7 +4060,7 @@ class PipelineHost
       MIR::Ident.new(result_t.zig_type),
       MIR::Lit.new(lhs.full_type.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4080,7 +4089,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4186,7 +4195,7 @@ class PipelineHost
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4222,7 +4231,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4258,7 +4267,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4333,7 +4342,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4361,7 +4370,7 @@ class PipelineHost
     call = @lowering.send(:emit_builtin, :concurrentListWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
