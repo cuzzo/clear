@@ -1017,7 +1017,12 @@ class MIRPass
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
     entry = bindings[stmt.name.to_s]
-    return unless entry && entry.needs_cleanup? && entry.kind != :resource
+    return unless entry && entry.kind != :resource
+    # A heap-owned binding reassigned in a loop must free the OLD value
+    # before storing the new one -- even if the binding is ultimately
+    # moved out (only the final value is moved; the intermediates would
+    # otherwise leak). needs_cleanup? alone misses the moved-out case.
+    return unless entry.needs_cleanup? || entry.alloc == :heap
 
     ti = stmt.full_type
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
