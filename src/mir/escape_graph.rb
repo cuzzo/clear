@@ -321,15 +321,6 @@ module EscapeGraph
     # @indirect / heap-typed result), or the return type is a heap
     # pointer -- a heap-owned result by construction.
     return true if annotated_heap_ret.include?(fn.name) || heap_ptr_return?(fn)
-    # The declared return type owns heap fields (a struct/union with a
-    # String / collection / @indirect field): the caller owns the
-    # returned value including that heap data. Works even when the body
-    # is generic (anytype params) -- the return type is concrete.
-    rt = fn.return_type
-    rt = rt.payload_type if rt.respond_to?(:error_union?) && rt.error_union? &&
-                            rt.respond_to?(:payload_type) && rt.payload_type
-    return true if rt.is_a?(Type) && rt.struct? && @schema_lookup &&
-                   rt.needs_cleanup?(@schema_lookup)
     decls = T.let({}, T::Hash[String, T.untyped])
     walk(fn.body) { |n| decls[n.name.to_s] = n if decl?(n) }
     heap_set = T.let(Set.new, T::Set[String])
