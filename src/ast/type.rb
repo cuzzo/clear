@@ -1505,7 +1505,8 @@ class Type
     end
     return true if any_rc? || link? || list_collection? || map? || pool? ||
                    set_collection? || (string? && heap?) ||
-                   (array? && !string?) || any_sync?
+                   (array? && !string?) || any_sync? ||
+                   (respond_to?(:indirect?) && indirect?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(schema))

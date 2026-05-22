@@ -176,7 +176,7 @@ module Hoist
     name = "__hoist_#{n}"
     tok = concat.respond_to?(:token) ? concat.token : nil
     ti = concat.full_type
-    storage = concat.respond_to?(:storage) ? concat.storage : :frame
+    storage = (concat.respond_to?(:storage) && concat.storage) || :frame
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
     decl.full_type = ti

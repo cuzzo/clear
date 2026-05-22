@@ -191,6 +191,14 @@ module CleanupClassifier
 
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
         cleanup = classify_binding(var_name, node.full_type, node, promoted_fns, schema_lookup)
+        if cleanup
+          # One allocator per binding: cleanup frees with the SAME
+          # allocator escape analysis placed the binding in. The
+          # binding's definitive Symbol#storage is the single source of
+          # truth -- no per-shape allocator guess.
+          st = node.symbol&.storage
+          cleanup[:alloc] = (st.nil? || st == :frame || st == :stack || st == :rodata) ? :frame : :heap
+        end
         # Stamp on node for identity-based lookup in lower_var_decl (avoids
         # same-name collisions when two vars share a name in different scopes).
         node.mir_binding_entry = cleanup if cleanup
@@ -576,7 +584,7 @@ module CleanupClassifier
     if Schemas.field_bearing?(schema)
       has_escapable = schema.fields.any? do |_, v|
         ft = v.is_a?(Type) ? v : Type.new(v.is_a?(AST::StructField) ? (v.type || :Any) : (v || :Any))
-        ft.needs_escape_promotion?
+        ft.needs_cleanup?(schema_lookup)
       end
       return entry(:uniform) if has_escapable
     end

@@ -2816,23 +2816,12 @@ private
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
     set_cleanup_alloc!(node)
-    # set_cleanup_alloc! may write node.full_type.provenance AFTER
-    # finalize_decl_storage! computed `storage`. The symbol must be BORN
-    # with that late value -- the annotator must not patch symbol.storage
-    # post-declare (that field belongs to escape analysis). Fold it into
-    # `declare_storage`, the value passed to declare() ONLY. `storage`
-    # itself stays un-folded for the byte/capability bookkeeping below
-    # (a stack slot initialized from a rodata literal is still a stack
-    # slot -- folding `storage` would mis-count it). Only promotes from
-    # provenance-axis defaults (:stack/:rodata/nil); never a real mode.
-    nft_prov = node.full_type.respond_to?(:provenance) ? node.full_type.provenance : nil
-    val_storage = node.value.is_a?(AST::Locatable) ? node.value.instance_variable_get(:@storage_override) : nil
-    late_prov = nft_prov || val_storage
-    declare_storage = storage
-    if late_prov && %i[heap frame borrow rodata].include?(late_prov) &&
-       (storage.nil? || storage == :stack || storage == :rodata)
-      declare_storage = late_prov
-    end
+    # The symbol is born with the annotation-derived placement only.
+    # Escape analysis is the single writer that makes Symbol#storage
+    # definitive (promotes to :heap when the binding escapes); the
+    # annotator must not pre-fold a type's heap-capable provenance onto
+    # the symbol -- that over-promotes (e.g. a union typed heap-capable
+    # but never actually escaping).
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.full_type.is_resource = true if is_resource && node.full_type.respond_to?(:is_resource=)
@@ -2854,7 +2843,7 @@ private
       final_type
     end
     current_scope.declare(
-      node.name, node, scope_type, mutable_flag, false, node.slot_size, declare_storage,
+      node.name, node, scope_type, mutable_flag, false, node.slot_size, storage,
       Set.new, [],
       sync: node_sync,
       layout: node_layout,

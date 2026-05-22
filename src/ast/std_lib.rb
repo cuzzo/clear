@@ -1020,7 +1020,7 @@ POOL_METHODS = T.let({
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
@@ -1088,7 +1088,7 @@ SET_METHODS = T.let({
     arity: 1, tag: :set_method, allocates: true,
     zig: "try {0}.insert({alloc}, {1})",
     bc: true,
-    alloc: :heap,
+    alloc: :receiver_storage,
     mutates_receiver: true,
     borrows: :all,  # set dupes strings internally; caller retains ownership
     args: [:"Any[]", :Any],
@@ -1153,7 +1153,7 @@ MAP_METHODS = T.let({
     bc: true,
     takes_args: [1],  # value (arg 1) is TAKES
     zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     args: [:"String{}", :String, { type: :Any, takes: true }],
     numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
     validate: ->(node, args, obj_type, error_fn) {
@@ -1171,7 +1171,7 @@ MAP_METHODS = T.let({
     arity: 1, tag: :map_method,
     bc: true,
     zig: "{0}.remove({alloc}, {1})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     mutates_receiver: true,
     numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {

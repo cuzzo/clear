@@ -716,7 +716,26 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(Symbol) }
   def alloc_for_node(node)
-    (node.respond_to?(:storage) && node.storage == :heap) ? :heap : :frame
+    node_is_heap?(node) ? :heap : :frame
+  end
+
+  # True when `node` is heap-placed. Symbol#storage is escape analysis's
+  # definitive answer for any symbol-bearing node; anonymous expression
+  # nodes (no binding) fall back to annotation-time node.storage.
+  #
+  # An Identifier's `.symbol` can lag behind the decl's symbol after
+  # escape promotion -- resolve through `sym.reg.symbol` to the
+  # authoritative decl-level entry.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def node_is_heap?(node)
+    return false unless node
+    sym = node.respond_to?(:symbol) ? node.symbol : nil
+    if sym
+      decl = sym.respond_to?(:reg) ? sym.reg : nil
+      auth = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
+      return !!auth.heap_provenance?
+    end
+    !!(node.respond_to?(:storage) && node.storage == :heap)
   end
 
 
@@ -769,43 +788,37 @@ class MIRLowering
     when :heap  then :heap
     when :frame then :frame
     when :receiver_storage
-      needs_heap = receiver_type&.needs_heap_backing?
-      needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
-      # For method calls, check the receiver object's storage (e.g., parts.append -> parts.storage).
-      # Also check the declaration node in case a later pass heap-promoted
-      # the container.
-      # after the Identifier was annotated (Identifier.storage may be stale).
+      # The operation's allocator is the receiver binding's definitive
+      # placement (Symbol#storage) -- one allocator per binding. No
+      # type-shape override.
+      needs_heap = node_is_heap?(target_node)
+      # Resolve from the receiver's binding: Symbol#storage is escape
+      # analysis's definitive placement. A nested mutation
+      # (`root[i].field.append(x)`) inherits the ROOT container's
+      # allocator -- the same root the MIR checker attributes the op to.
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
-        # A nested-collection-field mutation (`root[i].field.append(x)`)
-        # must inherit the ROOT container's allocator -- the same root
-        # the MIR checker attributes the op to via extract_root_var_name.
-        # The leaf receiver (GetField/GetIndex) carries no storage stamp,
-        # so resolving from it alone yields :frame while the checker sees
-        # the heap-promoted root -> INLINE_ALLOC_MISMATCH.
-        receiver_root_heap?(obj) ||
-        obj.storage == :heap || obj.symbol&.reg&.storage == :heap ||
-          # Pointer-passed `@list` parameter: the receiver crosses a frame
-          # boundary into this function. The caller's frame allocator is
-          # not reachable here -- using *this* function's frameAlloc for
-          # buffer growth would tie the buffer's lifetime to the callee's
-          # frame mark, which gets rewound on return. The caller's
-          # `items.items.ptr` would then be dangling, and a subsequent
-          # `.append` writes through it. Force heap here so the buffer
-          # outlives any frame; the matching escape-promote on the
-          # caller's binding (escape_analysis.rb Condition 9) ensures
-          # the cleanup uses heapAlloc too.
+        receiver_root_heap?(obj) || node_is_heap?(obj) ||
+          # Pointer-passed `@list` parameter crosses a frame boundary;
+          # force heap so the grown buffer outlives any frame mark.
           (obj.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(obj.name))
       elsif node.mutates_receiver
         first = node.args&.first
-        receiver_root_heap?(first) ||
-        first&.storage == :heap || first&.symbol&.reg&.storage == :heap ||
+        receiver_root_heap?(first) || node_is_heap?(first) ||
           (first.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(first.name))
       end
-      needs_heap ||= (node.storage == :heap)
+      needs_heap ||= node_is_heap?(node)
       needs_heap ? :heap : :frame
     when :node_storage
-      node.storage == :heap ? :heap : :frame
+      # A container-mutation method call allocates with the receiver's
+      # allocator (one allocator per binding); a plain call's result
+      # allocator is the call node's own placement.
+      if node.is_a?(AST::MethodCall) && node.object
+        (receiver_root_heap?(node.object) || node_is_heap?(node.object) ||
+         node_is_heap?(node)) ? :heap : :frame
+      else
+        node_is_heap?(node) ? :heap : :frame
+      end
     else :heap
     end
   end
@@ -829,8 +842,9 @@ class MIRLowering
   def receiver_root_heap?(node)
     root = root_receiver_node(node)
     return false unless root.is_a?(AST::Identifier)
-    root.storage == :heap || !!(root.symbol&.reg&.respond_to?(:storage) &&
-                                root.symbol.reg.storage == :heap)
+    # Symbol#storage is escape analysis's definitive placement; resolve
+    # through the authoritative decl-level symbol.
+    node_is_heap?(root)
   end
 
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
@@ -6202,7 +6216,7 @@ class MIRLowering
     # name-keyed cleanup plan (which may be stale for same-name vars in different scopes).
     # Escape analysis stamping (:heap) takes precedence. For :frame, trust the
     # cleanup_bindings alloc (which correctly handles sharded/pool/always-heap types).
-    decl_alloc = if node.respond_to?(:storage) && node.storage == :heap
+    decl_alloc = if node.symbol&.heap_provenance?
       :heap
     else
       (binding_entry.present? && binding_entry.alloc) || :heap
@@ -6335,14 +6349,10 @@ class MIRLowering
       # inherited from the classifier, never synthesized here (INV-14).
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.full_type, node)
-      node_alloc = pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
-      # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
-      # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
-      # because both AllocMark and Cleanup end up self-consistent at :frame.
-      if binding_entry.present? && binding_entry.alloc == :cleanup && node_alloc != :cleanup
-        raise "BUG in lower_var_decl: lowering downgraded :cleanup to " \
-              ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
-      end
+      # One allocator per binding: AllocMark, Cleanup, and the init
+      # expression all use decl_alloc -- the binding's definitive
+      # placement. No separate per-node allocator re-decision.
+      node_alloc = decl_alloc
       drop_entry[:alloc] = node_alloc
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc

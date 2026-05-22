@@ -70,6 +70,13 @@ class MIRPass
     # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
     # escape principle). Nothing to do here.
 
+    # needs_rt finalization: the annotator computed needs_rt before
+    # escape analysis, so it could not see a function that owns a
+    # heap-placed local (escape analysis decides that). Any function
+    # with a heap binding allocates via `rt`; propagate to its callers
+    # (they must thread rt to pass it).
+    finalize_needs_rt!
+
     # Phase 0.5: Rust-aligned hoist. For every fn whose returns may carry
     # heap-owning sub-expressions, propagate storage=:heap into the
     # allocating field expressions of RETURN's struct/union literals.
@@ -81,7 +88,7 @@ class MIRPass
     # declaration of their own.
     @fn_nodes.each do |_name, fn|
       next unless fn_may_return_owning?(fn)
-      hoist_return_subexprs_to_heap!(fn.body)
+      hoist_return_subexprs_to_heap!(fn.body, fn.return_provenance == :heap)
     end
 
     # (Phase 1 promotion plan was deleted: storage decisions live at
@@ -128,6 +135,54 @@ class MIRPass
 
   private
 
+  # Finalize needs_rt after escape analysis. The annotator's
+  # compute_needs_rt! ran before placement was decided, so it could not
+  # see a function that owns a heap-placed LOCAL (escape analysis
+  # decides that). Any function with a heap binding allocates via `rt`;
+  # propagate to callers, which must thread rt to pass it.
+  sig { void }
+  def finalize_needs_rt!
+    @fn_nodes.each do |_name, fn|
+      next unless fn.body
+      next if fn.needs_rt
+      AST.walk_body(fn.body) do |n|
+        if (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.heap_provenance?
+          fn.needs_rt = true
+        end
+      end
+    end
+    callees = T.let({}, T::Hash[String, T::Set[String]])
+    @fn_nodes.each do |name, fn|
+      next unless fn.body
+      cs = T.let(Set.new, T::Set[String])
+      collect_callees(fn.body, cs)
+      callees[name] = cs
+    end
+    changed = T.let(true, T::Boolean)
+    while changed
+      changed = false
+      @fn_nodes.each do |name, fn|
+        next unless fn.body && !fn.needs_rt
+        if callees[name]&.any? { |c| @fn_nodes[c]&.needs_rt }
+          fn.needs_rt = true
+          changed = true
+        end
+      end
+    end
+  end
+
+  sig { params(node: T.untyped, acc: T::Set[String]).void }
+  def collect_callees(node, acc)
+    return if node.nil?
+    if node.is_a?(Array)
+      node.each { |c| collect_callees(c, acc) }
+      return
+    end
+    return unless node.is_a?(Struct)
+    acc << node.name.to_s if (node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)) && node.name
+    node.to_a.each { |c| collect_callees(c, acc) }
+  end
+
   # Matches the same fn predicate PromotionClassifier.classify uses to gate
   # its analysis: any of body-allocates / heap return / escapable-return.
   # These are the fns whose RETURN literals might carry promotable
@@ -157,8 +212,8 @@ class MIRPass
   # field.heap_provenance? = true and skips struct_promote for the field.
   # This is the Rust-aligned "decide at declaration / construction time"
   # equivalent for nested allocating sub-expressions in return literals.
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).void }
-  def hoist_return_subexprs_to_heap!(stmts)
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), heap_return: T::Boolean).void }
+  def hoist_return_subexprs_to_heap!(stmts, heap_return = false)
     return unless stmts
     AST.walk_body(stmts) do |node|
       # RETURN with a struct/union literal: propagate :heap into field
@@ -171,6 +226,13 @@ class MIRPass
           hoist_lit_fields!(val)
         elsif val.is_a?(AST::Identifier)
           wrap_identifier_with_copy_if_needed!(node, val)
+          # A heap-returning fn returning a borrowed string binding must
+          # heap-dupe it: the caller frees with the heap allocator.
+          node.catch_string_dupe_ret = true if heap_return && return_string_borrow?(val)
+        elsif heap_return && return_string_borrow?(val)
+          # rodata literal / field-or-element string borrow returned from
+          # a heap-returning fn: dupe to heap for caller-side free.
+          node.catch_string_dupe_ret = true
         end
       end
       # Heap-storage VarDecl/BindExpr with struct/union literal value:
@@ -192,6 +254,20 @@ class MIRPass
           sym.init_contents_heap = true if sym
         end
       end
+    end
+  end
+
+  # A returned string value that is a borrow or rodata (not a fresh
+  # owned allocation): an owning (heap-returning) fn must heap-dupe it
+  # so the caller can free it with the heap allocator.
+  sig { params(v: T.untyped).returns(T::Boolean) }
+  def return_string_borrow?(v)
+    ti = Type.from_node(v)
+    return false unless ti.is_a?(Type) && ti.string?
+    case v
+    when AST::Literal, AST::GetField, AST::GetIndex then true
+    when AST::Identifier then !v.symbol&.heap_provenance?
+    else false
     end
   end
 
