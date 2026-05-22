@@ -51,7 +51,12 @@ OWNERSHIP_SURFACE_CELLS = []
   :non_copy_requires_explicit_move_or_copy,
 ].each do |contract|
   cell = { axis: :mir_ownership_contracts, contract: contract }
-  if [:alias_non_escape, :bg_lifetime_enforcement, :non_copy_requires_explicit_move_or_copy].include?(contract)
+  # non_copy_requires_explicit_move_or_copy expects :pass, not
+  # :compile_error: a TAKES parameter is itself the ownership-transfer
+  # signal (INV-13: was_moved set by `param[:takes] || GIVE`). Passing
+  # to a TAKES slot does NOT require an explicit `GIVE` at the call
+  # site -- the prior :compile_error expectation was a stale premise.
+  if [:alias_non_escape, :bg_lifetime_enforcement].include?(contract)
     cell[:expected] = :compile_error
   end
   OWNERSHIP_SURFACE_CELLS << cell

@@ -19,6 +19,22 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
+    # CI gate: full matrix MINUS quarantine (must pass)
+    ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/fuzz --clean
+
+    # Just the quarantined (known-broken) templates
+    ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/fuzz --clean
+
+## Quarantine
+
+`tools/fuzz/quarantine.txt` lists templates with a known compiler bug or
+generator defect. They are excluded from the required CI gate
+(`--skip-quarantined`) and run in a separate non-blocking job
+(`--only-quarantined`). Each line carries the reason; delete a line the
+moment its bug is fixed and the template rejoins the gate. This is what
+stops templates bit-rotting unnoticed — every template either passes the
+gate or is explicitly, visibly quarantined.
+
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
 
