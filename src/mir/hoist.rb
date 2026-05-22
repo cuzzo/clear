@@ -180,7 +180,8 @@ module Hoist
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
     decl.full_type = ti
-    decl.storage = storage if decl.respond_to?(:storage=)
+    # decl.storage (a node field) is left as annotation's default; escape
+    # analysis records the definitive placement on sym.storage below.
     sym = SymbolEntry.new(reg: decl, type: ti, mutable: false, storage: storage)
     decl.symbol = sym
     hoists << decl
