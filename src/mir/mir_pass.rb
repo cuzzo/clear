@@ -829,6 +829,11 @@ class MIRPass
   def insert_catch_string_dupe!(result, ret_node)
     return unless ret_node.value
     return unless ret_node.value.full_type.string?
+    # An owned-heap string binding is returned by MOVE, not duped:
+    # duping it would leak the original (move-marked but copied).
+    # Only rodata / borrow returns need the heap dupe.
+    v = ret_node.value
+    return if v.is_a?(AST::Identifier) && v.symbol&.heap_provenance?
     ret_node.catch_string_dupe_ret = true
   end
 

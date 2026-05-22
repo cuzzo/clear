@@ -5360,6 +5360,15 @@ class MIRLowering
     # block, only when actually entered.
     right = descend(node, :right)
 
+    # One allocator per binding (INV-9, error-path identity): when the
+    # binding is heap-placed, the OR-RESCUE fallback must also yield
+    # heap-owned data. An allocating fallback (concat) already inherits
+    # @decl_alloc; a rodata string literal must be duped to the heap.
+    if @decl_alloc == :heap && node.right.is_a?(AST::Literal) &&
+       Type.new(node.right.full_type).string?
+      right = MIR::DupeSlice.new(right, :heap)
+    end
+
     if is_error
       return try_catch_with_provenance(left, right, nil, fallback: right)
     end
