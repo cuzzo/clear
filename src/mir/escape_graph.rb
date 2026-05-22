@@ -526,6 +526,13 @@ module EscapeGraph
         copy_typed_decl?(decls[d]) ? nil : link.call(d, b)
       end
       heap << b if heap_valued?(value, ret_heap, fn_nodes)
+      # A struct/union literal that constructs heap-owned data (an
+      # @indirect field, a heap collection field) makes the binding own
+      # heap memory -- it must be heap so its cleanup uses one allocator.
+      if (v.is_a?(AST::StructLit) || v.is_a?(AST::UnionVariantLit)) &&
+         escaping_value_is_heap?(value, decls, heap, ret_heap, fn_nodes)
+        heap << b
+      end
     end
   end
 
