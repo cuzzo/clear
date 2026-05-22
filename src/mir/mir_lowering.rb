@@ -2064,6 +2064,10 @@ class MIRLowering
           storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
           next if storage == :heap
           next if arg_node.is_a?(AST::CopyNode)
+          # A freshly heap-allocated arg (a heap-returning call, a
+          # concat) is already owned -- it moves into the container.
+          # Duping it would orphan the original allocation.
+          next if mir_allocates?(mir_args[mir_idx])
           dupe_alloc = resolved == :heap ? :heap : alloc_for_node(arg_node)
           mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], dupe_alloc)
         end

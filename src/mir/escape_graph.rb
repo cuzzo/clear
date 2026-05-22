@@ -413,6 +413,10 @@ module EscapeGraph
         if outer.include?(root)
           moved.call(n.value).each(&mark)                            # M2
           carried_root!(root, decls, heap)                           # M2: loop-carry
+          # A heap value stored into a field/element of an enclosing
+          # container forces that container heap: it must own and free
+          # the heap data with one allocator (INV-1).
+          heap << root if escaping_value_is_heap?(n.value, decls, heap, ret_heap, fn_nodes)
         else
           moved.call(n.value).each { |d| link.call(d, root) }
         end
