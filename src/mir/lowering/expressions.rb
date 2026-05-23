@@ -330,7 +330,6 @@ module MIRLoweringExpressions
     # mir-lowering strict ivars
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     @current_fn_has_catch = T.let(@current_fn_has_catch, T.untyped)
-    @decl_alloc = T.let(@decl_alloc, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rhs = node.right
 
@@ -373,9 +372,9 @@ module MIRLoweringExpressions
       # (stream |> DISTINCT _)` produce the same shape.
       collect_method = (ft && ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
       # The materialized list is placed by the receiving binding's
-      # allocator (@decl_alloc) -- one allocator per binding.
+      # allocator -- one allocator per binding.
       collect_args = collect_method == "materializeNext" ?
-        [MIR::AllocatorRef.new(@decl_alloc == :heap ? :heap : :frame)] : []
+        [MIR::AllocatorRef.new(:frame)] : []
       named_source = node.left.is_a?(AST::Identifier)
       if named_source
         return MIR::MethodCall.new(left, collect_method, collect_args, true)
@@ -477,7 +476,6 @@ module MIRLoweringExpressions
   def lower_or_rescue(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @decl_alloc = T.let(@decl_alloc, T.untyped)
     @pending_stmts = T.let(@pending_stmts, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     @target = T.let(@target, T.untyped)
@@ -601,17 +599,6 @@ module MIRLoweringExpressions
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
     right = descend(node, :right)
-
-    # One allocator per binding (INV-9, error-path identity): when the
-    # binding is heap-placed, the OR-RESCUE fallback must also yield
-    # heap-owned data. An allocating fallback (concat) already inherits
-    # @decl_alloc; a rodata string literal must be duped to the heap.
-    if @decl_alloc == :heap && node.right.is_a?(AST::Literal) &&
-       Type.new(node.right.full_type).string?
-      right = lower_scoped do
-        hoist_alloc(MIR::DupeSlice.new(lower(node.right), :heap), node.right, err_cleanup: true)
-      end
-    end
 
     if is_error
       return try_catch_with_provenance(left, right, nil, fallback: right)
@@ -860,7 +847,12 @@ module MIRLoweringExpressions
         elsif v.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
           hoist_alloc(MIR::DeepCopy.new(lower(v.value), nil, nil, :full_value, struct_alloc), v, err_cleanup: true)
         else
-          hoist_alloc(lower(v), v, err_cleanup: true)
+          lowered = hoist_alloc(lower(v), v, err_cleanup: true)
+          if ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) && !ast_expr_produces_heap?(v)
+            hoist_alloc(MIR::DeepCopy.new(lowered, ft.zig_type, nil, :full_value, struct_alloc), v, err_cleanup: true)
+          else
+            lowered
+          end
         end
       end
       if struct_field_wants_slice?(ft, k, node)
@@ -873,7 +865,9 @@ module MIRLoweringExpressions
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :heap, nil)
+        mark = MIR::AllocMark.new(temp, :heap, nil)
+        mark.scope = :heap
+        hoisted << mark
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         # errdefer cleans this field if a later allocation (another field or
         # the outer struct pointer) fails.
@@ -946,7 +940,9 @@ module MIRLoweringExpressions
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :heap, nil)
+        mark = MIR::AllocMark.new(temp, :heap, nil)
+        mark.scope = :heap
+        hoisted << mark
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         if needs_deep_cleanup
           # Deep copy owns heap data inside __p.*; errdefer must clean it up
@@ -1214,7 +1210,6 @@ module MIRLoweringExpressions
   def lower_copy(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @decl_alloc = T.let(@decl_alloc, T.untyped)
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     @union_schemas = T.let(@union_schemas, T.untyped)
     source = lower(node.value)
@@ -1224,7 +1219,7 @@ module MIRLoweringExpressions
     # match the container's allocator. Defaults to :heap for explicit user
     # COPY (no container context) -- the COPY produces a fresh heap-owned
     # value the user binds independently.
-    alloc = @decl_alloc || node.alloc || :heap
+    alloc = node.alloc || :heap
 
     if @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)

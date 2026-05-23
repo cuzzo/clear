@@ -538,6 +538,11 @@ module AST
       @matched_stdlib_def = T.let(IntrinsicRegistry.fs(val), T.untyped)
     end
 
+    sig { returns(T.untyped) }
+    def matched_signature; @matched_signature = T.let(@matched_signature, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def matched_signature=(val); @matched_signature = T.let(val, T.untyped); end
+
     sig { void }
     def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
@@ -842,9 +847,9 @@ module AST
     # Reads sym.storage when a symbol is attached (binding-level), else the
     # node's @storage_override (expression-level, stamped by annotator).
     sig { returns(T::Boolean) }
-    def heap_provenance?
+    def heap_storage?
       sym = respond_to?(:symbol) ? symbol : nil
-      return true if sym&.heap_provenance?
+      return true if sym&.heap_storage?
       @storage_override == :heap
     end
 
@@ -1013,7 +1018,6 @@ module AST
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
     end
-    attr_accessor :return_provenance # :rodata, :frame, :heap — provenance of the return value
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
@@ -1305,7 +1309,7 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
-    attr_accessor :matched_signature # resolved FunctionSignature for named calls; escape/lowering read it directly
+    # matched_signature is provided by Locatable for both function and method calls.
     attr_accessor :arg_families      # per-arg Set<Family> for ?-form effect resolution
     attr_accessor :collapsed_errors  # Set<Symbol> of errors this
                                      # specific call site can surface, projected per actual-family of
@@ -1757,7 +1761,6 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
-    attr_accessor :return_provenance # :heap when the value escapes as heap-owned
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags

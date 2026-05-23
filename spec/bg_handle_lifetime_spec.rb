@@ -48,8 +48,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime).to be_a(Hash)
-      expect(sym.lifetime[:sources].size).to eq(1)
+      expect(sym.lifetime.size).to eq(1)
       # Source is the SymbolEntry of the captured atomic. Identity
       # check via name on the SymbolEntry's reg / scope.
       atomic_sym = find_binding_symbol(main_fn(ast), "c")
@@ -67,7 +66,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime[:sources].size).to eq(2)
+      expect(sym.lifetime.size).to eq(2)
       expect(sym.lifetime_sources.map { |s| s.equal?(find_binding_symbol(main_fn(ast), "x")) || s.equal?(find_binding_symbol(main_fn(ast), "y")) }.all?).to be(true)
     end
 
@@ -102,8 +101,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime).to be_a(Hash)
-      expect(sym.lifetime[:sources].first).to equal(find_binding_symbol(main_fn(ast), "c"))
+      expect(sym.lifetime.first).to equal(find_binding_symbol(main_fn(ast), "c"))
     end
 
     it "BG capturing @writeLocked also gets a tied lifetime" do
@@ -117,7 +115,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime[:sources].size).to eq(1)
+      expect(sym.lifetime.size).to eq(1)
     end
   end
 
@@ -135,7 +133,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
       sym = find_binding_symbol(main_fn(ast), "bg")
       # Arc is refcounted; lifetime extension comes from the refcount,
       # not from the originating binding's scope.
-      expect(sym.lifetime).to be_nil
+      expect(sym.lifetime).to eq([])
     end
   end
 
@@ -152,10 +150,9 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime).to be_a(Hash)
-      expect(sym.lifetime[:sources].size).to eq(1)
+      expect(sym.lifetime.size).to eq(1)
       counter_sym = find_binding_symbol(main_fn(ast), "counter")
-      expect(sym.lifetime[:sources]).to include(counter_sym)
+      expect(sym.lifetime).to include(counter_sym)
     end
 
     it "atomic + locked = both contribute (intersection of two scopes)" do
@@ -173,7 +170,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "bg")
-      expect(sym.lifetime[:sources].size).to eq(2)
+      expect(sym.lifetime.size).to eq(2)
     end
   end
 
@@ -197,8 +194,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "h")
-      expect(sym.lifetime).to be_a(Hash)
-      expect(sym.lifetime[:sources].size).to eq(1)
+      expect(sym.lifetime.size).to eq(1)
       counter_sym = find_binding_symbol(main_fn(ast), "c")
       expect(sym.lifetime_sources).to include(counter_sym)
     end
@@ -220,7 +216,6 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         END
       CLEAR
       sym = find_binding_symbol(main_fn(ast), "w")
-      expect(sym.lifetime).to be_a(Hash)
       counter_sym = find_binding_symbol(main_fn(ast), "c")
       expect(sym.lifetime_sources).to include(counter_sym)
     end
@@ -239,7 +234,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
       # No captures = no lifetime to inherit from. The handle can
       # flow freely (subject to existing single-receiver / spawn
       # constraints).
-      expect(sym.lifetime).to be_nil
+      expect(sym.lifetime).to eq([])
     end
   end
 end

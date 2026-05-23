@@ -628,7 +628,6 @@ module MIRLoweringConcurrency
   def lower_next_expr(node, alloc_sym = :frame)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @decl_alloc = T.let(@decl_alloc, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     @target = T.let(@target, T.untyped)
     @tmp_counter = T.let(@tmp_counter, T.untyped)
@@ -676,10 +675,10 @@ module MIRLoweringConcurrency
     if promise_type.observable? && promise_type.tense_type&.array?
       inner = lower(node.expr)
       # The materialized list inherits the receiving binding's placement
-      # (@decl_alloc, set during lower_var_decl); alloc_sym is the
+      # alloc_sym is the
       # fallback when NEXT is lowered outside a binding.
       return MIR::MethodCall.new(inner, "materializeNext",
-        [MIR::AllocatorRef.new(@decl_alloc || alloc_sym)], true)
+        [MIR::AllocatorRef.new(alloc_sym)], true)
     end
 
     if promise_type.observable?

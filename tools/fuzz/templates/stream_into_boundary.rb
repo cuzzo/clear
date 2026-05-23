@@ -78,12 +78,12 @@ end
 CONSUMERS.each do |c|
   VALUES_PHASE_A.each do |v|
     LEND_MOVES.each do |m|
-      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :local, sync: :none, move: m, value: v, expected: :in_dev }
+      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :local, sync: :none, move: m, value: v }
     end
   end
   PHASE_B_VALUE_FOR_SYNC.each do |sync, value|
     LEND_MOVES.each do |m|
-      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :shared, sync: sync, move: m, value: value, expected: :in_dev }
+      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :shared, sync: sync, move: m, value: value }
     end
   end
 end

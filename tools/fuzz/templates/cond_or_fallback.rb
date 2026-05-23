@@ -36,17 +36,12 @@ COND_OR_FALLBACK_CELLS = []
     # mask the bug-1 signal — tracked separately, not part of this
     # template's job.
     cell = { container: ctr, fallback: fb, value_type: :heap_string }
-    # :if cells isolate bug #1 (lower_if cond-pending leak) and pass
-    # once lower_if drains+wraps the cond's @pending_stmts. :while cells
-    # are the same bug class in a loop, but the fix is structurally
-    # different (the cond is re-evaluated per iteration, so the hoist
-    # can't sit before the loop). Keep them visible but :in_dev until
-    # the WHILE-cond lowering is restructured. See
-    # docs/agents/clear-bug123-forensic.md #1.
+    # Every cell is active. A condition-position OR fallback must either
+    # compile correctly or expose a real regression.
     # :return cells exercise OR-fallback in RETURN position
     # (`RETURN maybe(x) OR fallback`) -- the escape_graph
     # return_value_is_heap? BinaryOp/OR_RESCUE arm.
-    cell[:expected] = (ctr == :while) ? :in_dev : :pass
+    cell[:expected] = :pass
     COND_OR_FALLBACK_CELLS << cell
   end
 end

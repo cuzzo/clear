@@ -1018,6 +1018,7 @@ STD_LIB = T.let({
 POOL_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
+    mutates_receiver: true,
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",

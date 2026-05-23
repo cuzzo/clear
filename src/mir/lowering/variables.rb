@@ -107,7 +107,7 @@ module MIRLoweringVariables
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    is_heap = !!node.symbol&.heap_provenance?
+    is_heap = !!node.symbol&.heap_storage?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           is_heap || ft.resource? || node.resource_close_zig
@@ -134,7 +134,7 @@ module MIRLoweringVariables
     # name-keyed cleanup plan (which may be stale for same-name vars in different scopes).
     # Escape analysis stamping (:heap) takes precedence. For :frame, trust the
     # cleanup_bindings alloc (which correctly handles sharded/pool/always-heap types).
-    decl_alloc = if node.symbol&.heap_provenance?
+    decl_alloc = if node.symbol&.heap_storage?
       :heap
     else
       (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
@@ -153,10 +153,12 @@ module MIRLoweringVariables
     # finalized placement. ONE allocator per binding, read off the
     # decl's symbol; no per-branch threading.
     init = with_decl_alloc(decl_alloc) do
-    if ft.pool?
+    if node.value.is_a?(AST::NextExpr)
+      lower_next_expr(node.value, decl_alloc)
+    elsif ft.pool?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
-      if AST.call?(rhs_unwrapped)
+      if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
         lower(node.value)
       else
         cap = ft.capacity
@@ -168,7 +170,7 @@ module MIRLoweringVariables
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
       if rhs.is_a?(AST::BinaryOp) && rhs.op == :SMOOTH
         lower(node.value)
-      elsif AST.call?(rhs_unwrapped)
+      elsif rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
         lower(node.value)
       else
         inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
@@ -177,7 +179,9 @@ module MIRLoweringVariables
     elsif ft.list_collection?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
-      if rhs_unwrapped.is_a?(AST::NextExpr)
+      if rhs_unwrapped.is_a?(AST::MoveNode)
+        lower(node.value)
+      elsif rhs_unwrapped.is_a?(AST::NextExpr)
         # Pass decl_alloc so NEXT ~T[]@list uses the right allocator (heap when result
         # escapes via return, frame when it stays local).
         lower_next_expr(rhs_unwrapped, decl_alloc)
@@ -193,6 +197,8 @@ module MIRLoweringVariables
         # to produce a fresh ArrayList that the list_collection cleanup
         # can deinit independently.
         MIR::DeepCopy.new(lower(rhs_unwrapped.value), nil, nil, :full_value, decl_alloc)
+      elsif !rhs_unwrapped.is_a?(AST::ListLit)
+        lower(node.value)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
         inner = MIR::ContainerInit.new(bare_zig, :list_capacity, decl_alloc, ft.capacity)
         has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
@@ -256,6 +262,17 @@ module MIRLoweringVariables
       (node.var_used || has_mir_drop) ? nil : "_ = #{safe_name};"
     end
 
+    if init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
+      emits = init.stdlib_def&.emit
+      if !init.target_var || (emits&.allocates && !emits&.mutates_receiver)
+        init.target_var = safe_name
+      end
+      binding_alloc = binding_entry[:alloc]
+      if init.target_var == safe_name && binding_alloc
+        init.allocs = init.allocs.transform_values { |_alloc| binding_alloc }
+      end
+    end
+
     let_node = MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression)
 
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
@@ -272,10 +289,25 @@ module MIRLoweringVariables
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       cleanup = MIR::Cleanup.new(safe_name, drop_entry)
-      [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, cleanup]
-    elsif owned_return_transfer_binding?(binding_entry, init)
+      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
+      alloc_mark.scope = drop_entry.scope
+      [alloc_mark, let_node, cleanup]
+    elsif init.is_a?(MIR::Call) && init.owned_return? && !(ft.generic_instance? && ft.generic_base == :Id)
+      mir_alloc = binding_entry[:alloc] || :heap
+      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
+      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+      [alloc_mark, let_node, MIR::TransferMark.new(safe_name, :moved)]
+    elsif owned_return_transfer_binding?(binding_entry, init) && !(ft.generic_instance? && ft.generic_base == :Id)
       mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || :heap
-      [MIR::AllocMark.new(safe_name, mir_alloc, node.full_type), let_node, MIR::TransferMark.new(safe_name, :moved)]
+      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
+      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+      [alloc_mark, let_node, MIR::TransferMark.new(safe_name, :moved)]
+    elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty? && init.target_var == safe_name
+      alloc_values = init.allocs.values
+      mir_alloc = resolve_decl_stdlib_alloc(node) || (alloc_values.include?(:heap) ? :heap : :frame)
+      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
+      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+      [alloc_mark, let_node]
     else
       let_node
     end
@@ -288,9 +320,7 @@ module MIRLoweringVariables
     return false unless binding_entry.present?
     return false unless binding_entry.alloc == :heap || binding_entry.alloc == :cleanup
 
-    if init.is_a?(MIR::Call)
-      return !!init.heap_provenance
-    end
+    return false if init.is_a?(MIR::Call)
 
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless init.stdlib_def&.emit&.allocates
@@ -350,7 +380,8 @@ module MIRLoweringVariables
       rp = node.reassign_cleanup
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
-      assign_alloc = rp ? alloc_from_sym(rp.alloc!) : nil
+      binding_entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
+      assign_alloc = rp ? alloc_from_sym(rp.alloc!) : (binding_entry.present? ? binding_entry.alloc : nil)
       value = with_decl_alloc(assign_alloc) do
         lowered = lower(node.value)
         place_value_for_destination(lowered, node.value, assign_alloc, node.full_type)
@@ -461,7 +492,7 @@ module MIRLoweringVariables
         root = T.let(node.name.target, T.untyped)
         root = root.target while root.is_a?(AST::GetField)
         if root.is_a?(AST::Identifier)
-          result.needs_field_cleanup = true if root.symbol&.heap_provenance?
+          result.needs_field_cleanup = true if root.symbol&.heap_storage?
         end
       end
     end
@@ -564,7 +595,6 @@ module MIRLoweringVariables
       # expose that temporary to MIRChecker with error-only cleanup: normal
       # cleanup would double-free after the map owns it.
       val = hoist_alloc(val, node.value, err_cleanup: true)
-      val = hoist_owned_value_temp(val, node.value, err_cleanup: true)
 
       shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
       if @target != :bc
@@ -700,12 +730,8 @@ module MIRLoweringVariables
     target = lower(node.name.target)
     field = node.name.field.to_s
     value = lower(node.value)
-    # The old field value is freed with the CONTAINER's allocator -- a
-    # field of a heap struct is heap, of a frame struct is frame (one
-    # allocator per binding). field_pre_cleanup can lag the container's
-    # finalized placement, so resolve from the receiver root.
-    alloc_sym = (receiver_root_heap?(node.name) || node_is_heap?(root_receiver_node(node.name))) ?
-      :heap : (node.field_pre_cleanup || :frame)
+    # Field cleanup uses the container binding's finalized placement.
+    alloc_sym = placement_for_node(root_receiver_node(node.name) || node.name)
     alloc = MIR::Ident.new(alloc_zig_str(alloc_sym))
     field_get = MIR::FieldGet.new(target, field)
     # Build a comptime @TypeOf(target.field) expression. The field name

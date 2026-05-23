@@ -93,6 +93,7 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
+| `escape_mechanism_matrix`   | 7 (+11 in_dev) | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM capture, enclosing assignment, field/index stores, collection stores, call args, and call-return receiver stores. in_dev cells currently surface leaks in list/set/map/pool stores, collection-literal returns, owned function args, TAKES/GIVE, call-return receiver stores, and indexed outer stores. |
 | `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
 | `return_value_modality`     | 8 (+8 in_dev)   | EVERY :cleanup_value_shapes member returned from `FN producer() RETURNS T -> ... END`. Breadth axis complementing heap_ownership_transfer's depth on list/string. in_dev cells gated by #43 (union return), #52 (sharded/soa cleanup), #54 (set/pool return loses contents at runtime). |
 | `struct_field_store_modality` | ~30 (+24 in_dev) | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare. Registry-driven (18 shapes including frame_*). in_dev cells gated by #55 (COPY broken across most shapes), #56 (GIVE/bare type mismatches), #57 (String bare annotator quirk). |
@@ -120,6 +121,11 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
 | `cond_or_fallback`          | 8               | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
 | `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
+| `bind_capture_cleanup`      | 2               | Bind-expression capture cleanup for optional/list payloads. |
+| `cleanup_classifier_shapes` | 12              | Cleanup-classifier shape coverage for struct/union/option payloads. |
+| `cross_fiber_consumer`      | 6               | BG STREAM / observable producer values consumed across fiber boundaries. |
+| `loop_local_cleanup_alloc`  | 4               | Loop-local allocation forms that must be cleaned or promoted consistently. |
+| `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
 
 ### `stream_into_boundary` matrix
 

@@ -66,7 +66,7 @@ class MIRLowering
     # @union_schemas&.dig(name) }` lambda at 5 sites (decomplex
     # Missing-Abstraction / Reification-Miss).
     @schema_lookup = T.let(
-      ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) },
+      ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) || @enum_schemas&.dig(name) },
       T.proc.params(name: T.untyped).returns(T.untyped),
     )
     @fn_sigs = T.let(fn_sigs || {}, T::Hash[T.untyped, T.untyped])
@@ -82,9 +82,9 @@ class MIRLowering
     @debug_mode = debug_mode
     @pending_stmts = T.let([], T::Array[T.untyped])
     @tmp_counter = T.let(0, Integer)
+    @current_decl_alloc = T.let(nil, T.nilable(Symbol))
     # Allocator of the binding whose value is currently being lowered;
     # an anonymous allocating sub-expression inherits it (with_decl_alloc).
-    @decl_alloc = T.let(nil, T.nilable(Symbol))
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -96,13 +96,14 @@ class MIRLowering
     @used_sharded_map = T.let(false, T::Boolean)
     @current_fn_has_rt = T.let(false, T::Boolean)
     @current_fn_tail_call = T.let(false, T::Boolean)
-    @current_fn_return_alloc = T.let(nil, T.nilable(Symbol))
     @current_fn_zig_name = T.let(nil, T.nilable(String))
     @current_fn_return_payload_zig = T.let(nil, T.nilable(String))
     @current_fn_returned_names = T.let(Set.new, T::Set[String])
+    @current_fn_heap_carry_return = T.let(false, T::Boolean)
     @current_fn_has_catch = T.let(false, T::Boolean)
     @current_fn_collection_params = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_fn_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_fn_takes_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_fn_mutable_scalar_params = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_bg_pointer_captures = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_fiber_capture_symbols = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -137,20 +138,62 @@ class MIRLowering
     end
 
     return mir unless ti.is_a?(Type) && ti.string?
-    return mir if heap_owned_value?(mir, ast_node)
+    if ast_node.is_a?(AST::BinaryOp) && ast_node.op == :OR_RESCUE
+      if mir.is_a?(MIR::TryCatch)
+        left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
+        right = place_or_branch_value_for_destination(mir.catch_body, ast_node.right)
+        return MIR::TryCatch.new(left, right, mir.capture)
+      elsif mir.is_a?(MIR::Orelse)
+        left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
+        right = place_or_branch_value_for_destination(mir.fallback, ast_node.right)
+        return MIR::Orelse.new(left, right)
+      end
+    end
+
+    place_string_value_for_heap_destination(mir, ast_node)
+  end
+
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  def place_or_branch_value_for_destination(mir, ast_node)
+    placed = place_string_value_for_heap_destination(mir, ast_node)
+    return placed unless mir_allocates?(placed)
+
+    scoped_owning_branch_value(placed, ast_node)
+  end
+
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  def place_string_value_for_heap_destination(mir, ast_node)
+    return mir if heap_owned_result?(mir, ast_node)
 
     MIR::DupeSlice.new(mir, :heap)
   end
 
+  sig { params(mir: T.untyped, ast_node: T.untyped).returns(MIR::BlockExpr) }
+  def scoped_owning_branch_value(mir, ast_node)
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
+    @block_expr_counter += 1
+    @tmp_counter += 1
+    label = "__own_branch_#{@block_expr_counter}"
+    name = "__tmp_#{@tmp_counter}"
+    type_info = Type.from_node!(ast_node, context: "branch ownership placement")
+    mark = MIR::AllocMark.new(name, :heap, type_info)
+    mark.scope = :heap
+    body = T.let([mark, MIR::Let.new(name, mir, false, nil, nil)], T::Array[MIR::Stmt])
+    entry = hoist_cleanup_entry(mir, ast_node)
+    body << MIR::ErrCleanup.new(name, entry) if entry
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
+    MIR::BlockExpr.new(label, body)
+  end
+
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
-  def heap_owned_value?(mir, ast_node)
-    return heap_owned_value?(mir.expr, ast_node) if mir.is_a?(MIR::Cast)
-    return heap_owned_value?(mir.expr, ast_node) if mir.is_a?(MIR::TryExpr)
+  def heap_owned_result?(mir, ast_node)
+    return heap_owned_result?(mir.expr, ast_node) if mir.is_a?(MIR::Cast)
+    return heap_owned_result?(mir.expr, ast_node) if mir.is_a?(MIR::TryExpr)
     return true if mir.is_a?(MIR::DupeSlice) && mir.alloc == :heap
     return true if mir.is_a?(MIR::ConcatStr) && mir.alloc == :heap
     return true if mir.is_a?(MIR::DeepCopy) && mir.strategy == :full_value && mir.alloc == :heap
-    return true if mir.is_a?(MIR::Call) && mir.heap_provenance
-    return true if mir.is_a?(MIR::TryCatch) && mir.heap_provenance
+    return true if mir.is_a?(MIR::Call) && mir.owned_return?
     return true if ast_node.is_a?(AST::NextExpr)
     if mir.is_a?(MIR::InlineZig)
       return true if mir.stdlib_def&.emit&.return_alloc == :heap
@@ -159,7 +202,7 @@ class MIRLowering
 
     node = ast_node
     node = node.value if node.is_a?(AST::MoveNode)
-    node.is_a?(AST::Identifier) && node.symbol&.heap_provenance?
+    node.is_a?(AST::Identifier) && node.symbol&.storage == :heap
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -180,7 +223,10 @@ class MIRLowering
       safe = zig_safe_name(node.name)
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
       MIR::MoveMark.new(safe)
-    when MIR::Alloc             then MIR::AllocMark.new(node.name, node.alloc, nil)
+    when MIR::Alloc
+      mark = MIR::AllocMark.new(node.name, node.alloc, nil)
+      mark.scope = node.alloc == :heap ? :heap : :iteration
+      mark
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)
     when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
     when MIR::FieldCleanup      then MIR::FieldCleanupMark.new(node.target_name, node.field, node.alloc)
@@ -496,65 +542,45 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(Symbol) }
   def alloc_for_node(node)
-    return :heap if node_is_heap?(node)
-    # Binding-value position: an anonymous allocating expression has no
-    # symbol of its own, so it inherits the enclosing binding's
-    # allocator (set by with_decl_alloc). One allocator per binding.
-    @decl_alloc == :heap ? :heap : :frame
+    placement_for_node(node)
   end
 
-  # Run `blk` with @decl_alloc set to the allocator of the binding whose
-  # value is being lowered. alloc_for_node / :node_storage read it so an
-  # anonymous allocating sub-expression uses its binding's allocator.
   sig { params(alloc: T.nilable(Symbol), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
   def with_decl_alloc(alloc, &blk)
-    prev = @decl_alloc
-    @decl_alloc = alloc
-    begin
-      blk.call
-    ensure
-      @decl_alloc = prev
-    end
+    prev = @current_decl_alloc
+    @current_decl_alloc = alloc
+    blk.call
+  ensure
+    @current_decl_alloc = prev
   end
 
-  sig { params(callee_param: T.untyped).returns(T.nilable(Symbol)) }
-  def takes_arg_alloc(callee_param)
-    return @decl_alloc unless callee_param
+  sig { params(callee_param: T.untyped).returns(Symbol) }
+  def allocator_for_takes_param!(callee_param)
+    Kernel.raise "TAKES argument allocator requested without a callee parameter" unless callee_param
     sym = callee_param.respond_to?(:symbol) ? callee_param.symbol : nil
-    return :heap if sym&.heap_provenance? || sym&.storage == :heap
-    raw_ti = callee_param.respond_to?(:type) ? callee_param.type : nil
-    ti = Type.from_node!(raw_ti, context: "TAKES parameter allocator")
-    return :heap if takes_param_needs_heap_cleanup?(ti)
-    @decl_alloc || :heap
+    return :heap if sym&.storage == :heap
+    :frame
   end
 
-  sig { params(ti: Type).returns(T::Boolean) }
-  def takes_param_needs_heap_cleanup?(ti)
-    ti.recursive_cleanup_shape?(@schema_lookup)
-  end
-
-  sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
-  def type_shape_needs_recursive_cleanup?(ti, seen = nil)
-    ti.recursive_cleanup_shape?(@schema_lookup, seen)
-  end
-
-  # True when `node` is heap-placed. Symbol#storage is escape analysis's
-  # definitive answer for any symbol-bearing node; anonymous expression
-  # nodes (no binding) fall back to annotation-time node.storage.
-  #
-  # An Identifier's `.symbol` can lag behind the decl's symbol after
-  # escape promotion -- resolve through `sym.reg.symbol` to the
-  # authoritative decl-level entry.
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def node_is_heap?(node)
-    return false unless node
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  def symbol_storage_for_node(node)
+    return nil unless node
     sym = node.respond_to?(:symbol) ? node.symbol : nil
-    if sym
-      decl = sym.respond_to?(:reg) ? sym.reg : nil
-      auth = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
-      return !!auth.heap_provenance?
+    return nil unless sym
+    decl = sym.respond_to?(:reg) ? sym.reg : nil
+    auth = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
+    storage = auth.storage
+    storage == :heap ? :heap : :frame
+  end
+
+  sig { params(node: T.untyped).returns(Symbol) }
+  def placement_for_node(node)
+    root = root_receiver_node(node) || node
+    if root.is_a?(AST::Identifier)
+      entry = @current_bindings[root.name.to_s] if @current_bindings
+      return entry.alloc if entry&.alloc
     end
-    !!(node.respond_to?(:storage) && node.storage == :heap)
+    symbol_storage_for_node(root) || @current_decl_alloc || :frame
   end
 
 
@@ -607,63 +633,23 @@ class MIRLowering
     when :heap  then :heap
     when :frame then :frame
     when :receiver_storage
-      # The operation's allocator is the receiver binding's definitive
-      # placement (Symbol#storage) -- one allocator per binding. No
-      # type-shape override.
-      needs_heap = node_is_heap?(target_node)
-      # Resolve from the receiver's binding: Symbol#storage is escape
-      # analysis's definitive placement. A nested mutation
-      # (`root[i].field.append(x)`) inherits the ROOT container's
-      # allocator -- the same root the MIR checker attributes the op to.
-      needs_heap ||= if node.is_a?(AST::MethodCall)
-        obj = node.object
-        receiver_root_heap?(obj) || node_is_heap?(obj) ||
-          # Pointer-passed `@list` parameter crosses a frame boundary;
-          # force heap so the grown buffer outlives any frame mark.
-          (obj.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(obj.name))
-      elsif node.mutates_receiver
-        first = node.args&.first
-        receiver_root_heap?(first) || node_is_heap?(first) ||
-          (first.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(first.name))
-      end
-      needs_heap ||= node_is_heap?(node)
-      needs_heap ? :heap : :frame
+      receiver = target_node
+      receiver ||= node.object if node.is_a?(AST::MethodCall)
+      receiver ||= node.args&.first if node.respond_to?(:mutates_receiver) && node.mutates_receiver
+      root = root_receiver_node(receiver)
+      placement_for_node(root || receiver || node)
     when :node_storage
-      # A container-MUTATION method (append/...) allocates with the
-      # receiver's allocator -- the effect lives in the receiver. A
-      # VALUE-PRODUCING method (toList/toString/...) produces a fresh
-      # result placed by its own binding (@decl_alloc), independent of
-      # the receiver -- consulting the receiver wrongly forces heap when
-      # the receiver happens to be heap (e.g. a range).
-      if node.is_a?(AST::MethodCall) && node.object && node.mutates_receiver
-        (receiver_root_heap?(node.object) || node_is_heap?(node.object) ||
-         node_is_heap?(node) || @decl_alloc == :heap) ? :heap : :frame
-      else
-        (node_is_heap?(node) || @decl_alloc == :heap) ? :heap : :frame
-      end
+      placement_for_node(target_node || node)
     else :heap
     end
   end
 
-  # Shared by extract_root_var_name (checker attribution) and
-  # receiver_root_heap? (allocator resolution); they must agree on the
-  # root or an op's allocator diverges from its AllocMark.
+  # Shared root resolution for checker attribution and receiver allocator lookup.
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_receiver_node(node)
     root = AST.root_identifier(node)
     return root if root
     node.respond_to?(:target) ? root_receiver_node(node.target) : nil
-  end
-
-  # A nested @list inside a heap container element is itself heap-
-  # backed, so `root[i].field.append(x)` must use the root's allocator.
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def receiver_root_heap?(node)
-    root = root_receiver_node(node)
-    return false unless root.is_a?(AST::Identifier)
-    # Symbol#storage is escape analysis's definitive placement; resolve
-    # through the authoritative decl-level symbol.
-    node_is_heap?(root)
   end
 
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
@@ -975,8 +961,24 @@ class MIRLowering
     end
 
     list_alloc = alloc_for_node(node)
+    elem_type = ti.element_type if ti.respond_to?(:element_type)
+    elem_zig = elem_type ? transpile_type(elem_type) : "u8"
+    elem_needs_owned_storage =
+      if elem_type
+        et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
+        et.recursive_cleanup_shape?(@schema_lookup)
+      else
+        false
+      end
     items_mir = node.items.map do |i|
-      with_decl_alloc(list_alloc) { hoist_alloc(lower(i), i, err_cleanup: true) }
+      with_decl_alloc(list_alloc) do
+        item = hoist_alloc(lower(i), i, err_cleanup: true)
+        if elem_needs_owned_storage && !ast_expr_produces_heap?(i)
+          hoist_alloc(MIR::DeepCopy.new(item, elem_zig, nil, :full_value, list_alloc), i, err_cleanup: true)
+        else
+          item
+        end
+      end
     end
 
     if ti.respond_to?(:fixed?) && ti.fixed? &&
@@ -990,7 +992,6 @@ class MIRLowering
       # KB fixed arrays fine. Falling through to MakeList here would
       # produce an ArrayList whose Zig type doesn't match the variable's
       # declared `[N]T`, so the assignment fails to compile.
-      elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
       return MIR::ArrayInit.new(elem_zig, node.items.length.to_s, items_mir)
     end
 
@@ -1001,12 +1002,10 @@ class MIRLowering
         return MIR::ContainerInit.new(zig_t, :list_empty, list_alloc, nil)
       end
       # Dynamic empty list: use makeList with empty items
-      elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
       return MIR::MakeList.new(elem_zig, [], list_alloc)
     end
 
     # Non-empty list literal -> makeList
-    elem_zig = ti.element_type ? transpile_type(ti.element_type) : "u8"
     MIR::MakeList.new(elem_zig, items_mir, list_alloc)
   end
 
@@ -1628,16 +1627,14 @@ class MIRLowering
   # Returns a new node without try, or the original node if not try-wrapped.
   sig { params(left: T.untyped, catch_body: T.untyped, capture: T.nilable(String), fallback: T.untyped).returns(MIR::TryCatch) }
   def try_catch_with_provenance(left, catch_body, capture, fallback: nil)
-    tc = MIR::TryCatch.new(strip_try(left), catch_body, capture)
-    tc.heap_provenance = mir_allocates?(left) || (!!fallback && mir_allocates?(fallback))
-    tc
+    MIR::TryCatch.new(strip_try(left), catch_body, capture)
   end
 
   sig { params(mir_node: T.untyped).returns(T.untyped) }
   def strip_try(mir_node)
     case mir_node
     when MIR::Call
-      MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.heap_provenance)
+      MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.owned_return)
     when MIR::MethodCall
       MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false)
     when MIR::TryExpr
@@ -1750,9 +1747,9 @@ class MIRLowering
   sig { params(value: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
   def owned_sink_value?(value, ast_node)
     return true if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
-    return true if ast_node.respond_to?(:heap_provenance?) && ast_node.heap_provenance?
-    return true if node_is_heap?(ast_node)
+    return true if placement_for_node(ast_node) == :heap
     return true if mir_allocates?(value)
+    return true if value.is_a?(MIR::Call) && value.owned_return?
     false
   end
 

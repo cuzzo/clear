@@ -472,8 +472,9 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "has no entries" do
-        expect(plan["s"]).to be_nil
+      it "has a no-cleanup frame lifetime entry" do
+        expect(plan["s"]&.dig(:needs_cleanup)).to be false
+        expect(plan["s"]&.dig(:alloc)).to eq(:frame)
       end
     end
 

@@ -2,45 +2,42 @@ require "rspec"
 require_relative "../src/ast/symbol_entry"
 
 # Atomics M2.1: SymbolEntry.lifetime is the single mechanism for
-# "where can this binding escape to". Three shapes:
+# "where can this binding escape to". One shape:
 #
-#   nil               — no constraint
-#   :current_scope    — locked to declaring scope (replaces
+#   []                — no constraint
+#   [self]            — locked to declaring scope (replaces
 #                        non_escaping = true)
-#   { sources: [...] } — intersection of source lifetimes (used for
-#                        `RETURNS foo:T` returns AND BG handles whose
-#                        lifetime is the intersection of all captured
-#                        atomic / borrow bindings)
+#   [source, ...]     — intersection of source lifetimes
 #
 # `non_escaping` is preserved as a back-compat alias on top of
-# `lifetime == :current_scope`.
+# `lifetime == [self]`.
 RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
   def fresh
     SymbolEntry.new(reg: nil, type: :Int64, mutable: false, storage: :stack)
   end
 
   describe "default state" do
-    it "lifetime is nil and non_escaping is false" do
+    it "lifetime is empty and non_escaping is false" do
       sym = fresh
-      expect(sym.lifetime).to be_nil
+      expect(sym.lifetime).to eq([])
       expect(sym.non_escaping).to be(false)
       expect(sym.lifetime_sources).to eq([])
     end
   end
 
-  describe ":current_scope (replaces non_escaping = true)" do
-    it "non_escaping = true sets lifetime to :current_scope" do
+  describe "[self] current-scope lifetime (replaces non_escaping = true)" do
+    it "non_escaping = true sets lifetime to [self]" do
       sym = fresh
       sym.non_escaping = true
-      expect(sym.lifetime).to eq(:current_scope)
+      expect(sym.lifetime).to eq([sym])
       expect(sym.non_escaping).to be(true)
     end
 
-    it "non_escaping = false clears the :current_scope lifetime" do
+    it "non_escaping = false clears the current-scope lifetime" do
       sym = fresh
       sym.non_escaping = true
       sym.non_escaping = false
-      expect(sym.lifetime).to be_nil
+      expect(sym.lifetime).to eq([])
       expect(sym.non_escaping).to be(false)
     end
 
@@ -50,14 +47,14 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       expect(sym.non_escaping).to be(true)
     end
 
-    it "lifetime_sources returns [self] for :current_scope" do
+    it "lifetime_sources returns [self] for current-scope lifetime" do
       sym = fresh
       sym.lifetime = :current_scope
       expect(sym.lifetime_sources).to eq([sym])
     end
   end
 
-  describe "tied lifetime ({ sources: [...] })" do
+  describe "tied lifetime sources" do
     it "single-source form (RETURNS foo:T)" do
       # FN identity(foo: T) RETURNS foo:T -> RETURN foo; END
       # The returned value's lifetime points at `foo`. Whatever foo's
@@ -65,7 +62,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       foo = fresh
       retval = fresh
       retval.lifetime = SymbolEntry.tied_lifetime([foo])
-      expect(retval.lifetime).to eq(sources: [foo])
+      expect(retval.lifetime).to eq([foo])
       expect(retval.lifetime_sources).to eq([foo])
       # NOT non_escaping in the v0.1 sense — the binding CAN leave its
       # declaring scope, just not past foo's scope.
@@ -78,7 +75,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       x, y, z = fresh, fresh, fresh
       bg = fresh
       bg.lifetime = SymbolEntry.tied_lifetime([x, y, z])
-      expect(bg.lifetime).to eq(sources: [x, y, z])
+      expect(bg.lifetime).to eq([x, y, z])
       expect(bg.lifetime_sources).to eq([x, y, z])
       expect(bg.non_escaping).to be(false)
     end
@@ -87,12 +84,12 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       a = fresh
       b = fresh
       result = SymbolEntry.tied_lifetime([a, b, a])
-      expect(result).to eq(sources: [a, b])
+      expect(result).to eq([a, b])
     end
 
-    it "tied_lifetime returns nil for empty / nil input (unconstrained)" do
-      expect(SymbolEntry.tied_lifetime(nil)).to be_nil
-      expect(SymbolEntry.tied_lifetime([])).to be_nil
+    it "tied_lifetime returns an empty array for empty / nil input (unconstrained)" do
+      expect(SymbolEntry.tied_lifetime(nil)).to eq([])
+      expect(SymbolEntry.tied_lifetime([])).to eq([])
     end
 
     it "non_escaping = false does NOT clobber a tied lifetime" do
@@ -104,7 +101,7 @@ RSpec.describe SymbolEntry, "lifetime unification (M2.1)" do
       other = fresh
       sym.lifetime = SymbolEntry.tied_lifetime([other])
       sym.non_escaping = false
-      expect(sym.lifetime).to eq(sources: [other])
+      expect(sym.lifetime).to eq([other])
     end
 
     it "non_escaping reads false for a tied lifetime" do

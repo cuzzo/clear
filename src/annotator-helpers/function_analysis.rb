@@ -4,6 +4,9 @@ require_relative "../ast/ast"
 
 module FunctionAnalysis
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
@@ -92,9 +95,10 @@ module FunctionAnalysis
 
     scope = lookup_scope_for(func_name)
     unless scope
-      @fn_nodes = T.let(@fn_nodes, T.untyped)
+      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+      fn_nodes = T.must(@fn_nodes)
       emit_typo_suggestion!(
-        node.token, func_name, @fn_nodes.keys,
+        node.token, func_name, fn_nodes.keys,
         "Undefined function '#{func_name}'",
         "closest declared function"
       )
@@ -217,6 +221,11 @@ module FunctionAnalysis
                inner.respond_to?(:layout) && inner.layout.nil? &&
                inner.respond_to?(:layout=)
               inner.layout = outer.layout
+            end
+            if outer.respond_to?(:collection) && outer.collection &&
+               inner.respond_to?(:collection) && inner.collection.nil? &&
+               inner.respond_to?(:collection=)
+              inner.collection = outer.collection
             end
           end
           node.full_type = inner
@@ -608,9 +617,7 @@ module FunctionAnalysis
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
-    # Empty return_lifetime means the signature has no lifetime annotation.
-    lifetime_paths = signature.return_lifetime || []
-    lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
+    lifetime_paths = signature.return_lifetime
     return true if lifetime_paths.empty?
 
     borrow_type = param.mutable ? :mutable : :immutable
@@ -922,7 +929,7 @@ module FunctionAnalysis
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
-    lifetime_paths = current_fn_ctx&.lifetime || []
+    lifetime_paths = current_fn_ctx.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]

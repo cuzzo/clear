@@ -606,7 +606,7 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
     ti = Type.from_node(node)
-    is_heap = node.is_a?(AST::Locatable) && node.heap_provenance?
+    is_heap = node.is_a?(AST::Locatable) && node.heap_storage?
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
     needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
@@ -909,7 +909,7 @@ class OwnershipDataflow
     # treated as Copy — those don't own heap memory. Symbol#storage is
     # the canonical provenance (SIMP-13f) that EscapeAnalysis makes
     # definitive; read it, not the VarDecl node's annotation-time value.
-    if ti.string? && ident.symbol&.heap_provenance?
+    if ti.string? && ident.symbol&.heap_storage?
       return false
     end
     is_atomic_ptr = ti.atomic_ptr?
@@ -1270,36 +1270,22 @@ end
 # ==========================================
 #
 # Sets mark_per_iter on every loop AST node and updates SHARD shard_context
-# frame-alloc flags.  Runs after CleanupClassifier has finalised every
-# binding's allocator, before MIR node insertion (Phase 3).
+# frame-alloc flags. Runs after CleanupClassifier has finalized every binding's
+# allocator, before MIR node insertion.
 #
-# Invariant: mark_per_iter = true  iff  the loop body contains at least one
-# local, non-escaping, frame-allocated VarDecl.
-#
-#   "local"      -- declared inside THIS loop (not a nested loop or outer scope)
-#   "frame"      -- node.storage == :frame  (set by annotator / upgrade phases)
-#   "non-escaping" -- not passed as a value argument to a mutates_receiver
-#                    call on an outer-scope container (where the stored pointer
-#                    must survive the per-iteration rewind)
-#
-# If mark_per_iter becomes true and the direct body also contains
-# mutates_receiver calls on OUTER containers, those containers are promoted to
-# heap so the per-iteration rewind cannot corrupt their backing store.
-#
-# Scope of rewind:
-#   - FOR / WHILE / FOREACH loops -- regular AST loops
-#   - IF / MATCH / WITH  -- NOT a rewind boundary; always recurse into branches
-#   - Nested loops       -- analysed first (inner→outer); their outer-mutation
-#                          promotions are applied before the enclosing loop runs
-#   - Functions/lambdas  -- their own frame; the callee rewinds on return
+# A loop is only a repeated scope boundary. It may request a per-iteration frame
+# rewind when finalized cleanup facts prove every direct frame allocation in the
+# loop is iteration-local. It must not infer escaping from method names or
+# collection shapes.
 #
 module LoopFrameAnalysis
 
   extend T::Sig
 
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   # Entry point.  Call once per pass, after CleanupClassifier.
-  sig { params(fn_nodes: T::Hash[String, T.untyped], schema_lookup: T.nilable(Proc)).returns(T::Hash[String, T.untyped]) }
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(FnNodes) }
   def self.analyze!(fn_nodes, schema_lookup = nil)
     fn_nodes.each_value do |fn|
       next unless fn.body
@@ -1349,7 +1335,8 @@ module LoopFrameAnalysis
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
     local_names = collect_local_names(body)
-    loop_node.mark_per_iter = local_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    has_frame_locals = local_iteration_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    loop_node.mark_per_iter = has_frame_locals
     nil
   end
 
@@ -1378,26 +1365,40 @@ module LoopFrameAnalysis
     names
   end
 
-  sig { params(ti: Type).returns(T::Boolean) }
-  def self.frame_local_collection?(ti)
-    collection_shaped = ti.collection_value? || ti.string?
-    collection_shaped && !ti.heap? && !ti.rodata?
-  end
-
   sig { params(body: T::Array[T.untyped], _local_names: T::Set[String]).returns(T::Array[T.untyped]) }
   def self.local_frame_decls(body, _local_names)
     decls = []
     scan_direct(body) do |s|
       case s
       when AST::VarDecl
-        next unless frame_local_collection?(Type.from_node!(s, context: "loop frame decl")) && s.name.is_a?(String)
-        decls << s
+        next unless s.name.is_a?(String)
+        entry = s.respond_to?(:mir_binding_entry) ? s.mir_binding_entry : nil
+        decls << s if binding_frame_allocates?(s, entry)
       when AST::BindExpr
         next unless s.mode == :decl && s.name.is_a?(String)
-        decls << s if frame_local_collection?(Type.from_node!(s, context: "loop frame bind"))
+        entry = s.respond_to?(:mir_binding_entry) ? s.mir_binding_entry : nil
+        decls << s if binding_frame_allocates?(s, entry)
       end
     end
     decls
+  end
+
+  sig { params(node: T.untyped, entry: T.nilable(CleanupEntry)).returns(T::Boolean) }
+  def self.binding_frame_allocates?(node, entry)
+    return false unless entry&.present? && entry.alloc == :frame
+    return true if entry.needs_cleanup?
+    value = node.respond_to?(:value) ? node.value : nil
+    return false if value.nil?
+    return false if value.is_a?(AST::Literal) || value.is_a?(AST::Identifier)
+    true
+  end
+
+  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Array[T.untyped]) }
+  def self.local_iteration_frame_decls(body, local_names)
+    local_frame_decls(body, local_names).select do |decl|
+      entry = decl.respond_to?(:mir_binding_entry) ? decl.mir_binding_entry : nil
+      entry&.present? && entry.alloc == :frame && entry.scope == :iteration
+    end
   end
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
@@ -1462,7 +1463,7 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T::Array[T.untyped], fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).returns(T.nilable(T::Array[T.untyped])) }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1483,14 +1484,13 @@ module LoopFrameAnalysis
 
   # Returns true when expr is a call to a frame-allocating function
   #.
-  sig { params(expr: T.untyped, fn_nodes: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     case expr
     when AST::FuncCall
       fn = fn_nodes[expr.name]
       # uses_frame=true means the function frame-allocates internally (e.g. intToString
-      # intermediates). Even when return_provenance=:heap (string heap-dup on return),
-      # those intermediate frame allocations accumulate in the caller's frame arena.
+      # intermediates). Those intermediate frame allocations accumulate in the caller's frame arena.
       # The SHARD loop must saveLoopMark/restoreLoopMark to rewind them each iteration.
       fn&.uses_frame ? true : false
     when AST::MethodCall

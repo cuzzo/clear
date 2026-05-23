@@ -186,19 +186,35 @@ pub fn bind(comptime deps: type) type {
     // unconditionally dispatches via std.ArrayListUnmanaged([]const u8).
     pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged([]const u8) {
         var list: std.ArrayListUnmanaged([]const u8) = .empty;
-        errdefer list.deinit(allocator);
+        errdefer {
+            for (list.items) |key| {
+                if (key.len > 0) allocator.free(key);
+            }
+            list.deinit(allocator);
+        }
         try list.ensureTotalCapacity(allocator, map.count());
         var it = map.keyIterator();
-        while (it.next()) |k| list.appendAssumeCapacity(k.*);
+        while (it.next()) |k| {
+            const key_copy = if (k.*.len > 0) try allocator.dupe(u8, k.*) else k.*;
+            list.appendAssumeCapacity(key_copy);
+        }
         return list;
     }
 
     pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged(V) {
         var list: std.ArrayListUnmanaged(V) = .empty;
-        errdefer list.deinit(allocator);
+        errdefer {
+            if (comptime needsCleanup(V)) {
+                for (list.items) |*item| cleanup(V, allocator, item);
+            }
+            list.deinit(allocator);
+        }
         try list.ensureTotalCapacity(allocator, map.count());
         var it = map.valueIterator();
-        while (it.next()) |v| list.appendAssumeCapacity(v.*);
+        while (it.next()) |v| {
+            const value_copy = if (comptime needsCleanup(V)) try dupeValue(V, v.*, allocator) else v.*;
+            list.appendAssumeCapacity(value_copy);
+        }
         return list;
     }
 
@@ -309,10 +325,18 @@ pub fn bind(comptime deps: type) type {
 
     pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(V) {
         var list: std.ArrayListUnmanaged(V) = .empty;
-        errdefer list.deinit(allocator);
+        errdefer {
+            if (comptime needsCleanup(V)) {
+                for (list.items) |*item| cleanup(V, allocator, item);
+            }
+            list.deinit(allocator);
+        }
         try list.ensureTotalCapacity(allocator, map.count());
         var it = map.valueIterator();
-        while (it.next()) |v| list.appendAssumeCapacity(v.*);
+        while (it.next()) |v| {
+            const value_copy = if (comptime needsCleanup(V)) try dupeValue(V, v.*, allocator) else v.*;
+            list.appendAssumeCapacity(value_copy);
+        }
         return list;
     }
 

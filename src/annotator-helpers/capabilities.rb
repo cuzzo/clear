@@ -80,6 +80,9 @@ end
 # acquire_capability! used by visit_WithBlock.
 module CapabilityHelper
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # WITH can be applied to an Identifier or a GetField (`obj.field`).
   # For an Identifier, sync/ownership lives on the SymbolEntry. For a
@@ -397,7 +400,6 @@ module CapabilityHelper
   sig { params(call: T.untyped, callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
     return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
@@ -410,7 +412,9 @@ module CapabilityHelper
       return nil
     end
 
-    fn = @fn_nodes[callee] if callee.is_a?(String)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn = fn_nodes[callee] if callee.is_a?(String)
     return nil unless fn
     return "can fail" if fn.can_fail
     effects = fn.effects || Set.new
@@ -1335,7 +1339,6 @@ module CapabilityAudit
   sig { params(var_name: String, node: T.untyped, final_type: T.untyped, storage: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @capability_audit = T.let(@capability_audit, T.untyped)
     return unless var_name.is_a?(String) && current_fn_ctx&.name
 
@@ -1345,8 +1348,11 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_node = @fn_nodes[current_fn_ctx&.name]
-    return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
+    fn_name = current_fn_ctx&.name
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn_node = fn_name ? fn_nodes[fn_name] : nil
+    return if fn_node&.visibility == :pub
 
     key = "#{current_fn_ctx&.name}:#{var_name}"
     line   = node.token&.line

@@ -1908,10 +1908,10 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      # Resource captured by BG inside while loop: maybe-moved (loop back
-      # edge means client could be re-declared). Guarded defer + suppress.
-      expect(out).to include("client_moved = true")
-      expect(out).to include("defer if (!client_moved)")
+      # Capture owns the per-iteration resource; the outer binding has no
+      # cleanup path because ownership transfers into the BG context.
+      expect(out).not_to include("client_moved")
+      expect(out).to include("defer CheatLib.socketClose(__ctx_0.client)")
     end
   end
 

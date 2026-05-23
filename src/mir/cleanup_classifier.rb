@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "cleanup_entry"
 require_relative "../ast/type"
+require_relative "../annotator-helpers/function_signature"
 
 # =========================================================================
 # Pass C (caller side): Cleanup Classification
@@ -28,13 +29,15 @@ require_relative "../ast/type"
 module CleanupClassifier
     extend T::Sig
 
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+
   # Classify all bindings in a function that need cleanup.
   #
   # @param fn_node [AST::FunctionDef]
   # @param fn_nodes [Hash] name => FunctionDef for all functions
   # @param schema_lookup [Proc] lambda(type_sym) => schema hash
   # @return [Hash] { var_name => entry_hash } or empty hash
-  sig { params(fn_node: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).returns(T::Hash[String, CleanupEntry]) }
+  sig { params(fn_node: AST::FunctionDef, fn_nodes: FnNodes, schema_lookup: Proc).returns(T::Hash[String, CleanupEntry]) }
   def self.classify(fn_node, fn_nodes:, schema_lookup:)
     return {} unless fn_node.body
 
@@ -53,7 +56,213 @@ module CleanupClassifier
     # 4. WHILE-bind / IF-bind captures from ownership-transferring call results.
     walk_capture_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
 
+    stamp_cleanup_scopes!(fn_node.body, bindings)
+
     bindings
+  end
+
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.stamp_cleanup_scopes!(body, bindings)
+    stamp_default_scopes!(body, loop_depth: 0)
+    stamp_extended_loop_lifetimes!(body, bindings)
+  end
+
+  sig { params(body: T::Array[T.untyped], loop_depth: Integer).void }
+  private_class_method def self.stamp_default_scopes!(body, loop_depth:)
+    body.each do |node|
+      case node
+      when AST::VarDecl, AST::BindExpr
+        next if node.is_a?(AST::BindExpr) && node.mode == :assign
+        entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
+        next unless entry&.present?
+        entry[:scope] = if entry.alloc == :heap
+                          :heap
+                        elsif loop_depth.positive?
+                          :iteration
+                        else
+                          :function
+                        end
+      when AST::WhileLoop, AST::WhileBindLoop
+        stamp_default_scopes!(node.do_branch, loop_depth: loop_depth + 1)
+      when AST::ForRange, AST::ForEach
+        stamp_default_scopes!(node.body, loop_depth: loop_depth + 1)
+      when AST::IfStatement
+        stamp_default_scopes!(node.then_branch, loop_depth: loop_depth)
+        stamp_default_scopes!(node.else_branch, loop_depth: loop_depth)
+      when AST::MatchStatement
+        node.cases.each { |c| stamp_default_scopes!(c.body, loop_depth: loop_depth) }
+        stamp_default_scopes!(node.default_case, loop_depth: loop_depth) if node.default_case
+      when AST::WithBlock
+        stamp_default_scopes!(node.body, loop_depth: loop_depth)
+      when AST::DoBlock
+        node.branches.each { |b| stamp_default_scopes!(T.cast(b.fetch(:body), T::Array[T.untyped]), loop_depth: loop_depth) }
+      end
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.stamp_extended_loop_lifetimes!(body, bindings)
+    body.each do |node|
+      case node
+      when AST::WhileLoop, AST::WhileBindLoop
+        stamp_loop_extensions!(node.do_branch, bindings)
+        stamp_extended_loop_lifetimes!(node.do_branch, bindings)
+      when AST::ForRange, AST::ForEach
+        stamp_loop_extensions!(node.body, bindings)
+        stamp_extended_loop_lifetimes!(node.body, bindings)
+      when AST::IfStatement
+        stamp_extended_loop_lifetimes!(node.then_branch, bindings)
+        stamp_extended_loop_lifetimes!(node.else_branch, bindings)
+      when AST::MatchStatement
+        node.cases.each { |c| stamp_extended_loop_lifetimes!(c.body, bindings) }
+        stamp_extended_loop_lifetimes!(node.default_case, bindings) if node.default_case
+      when AST::WithBlock
+        stamp_extended_loop_lifetimes!(node.body, bindings)
+      when AST::DoBlock
+        node.branches.each { |b| stamp_extended_loop_lifetimes!(T.cast(b.fetch(:body), T::Array[T.untyped]), bindings) }
+      end
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.stamp_loop_extensions!(body, bindings)
+    local_names = cleanup_local_names(body)
+    local_entries = cleanup_local_entries(body)
+    scan_loop_scope(body) do |node|
+      case node
+      when AST::BindExpr
+        next unless node.mode == :assign
+        next if local_names.include?(node.name.to_s)
+        entry = bindings[node.name.to_s]
+        promote_entry_to_heap_cleanup!(entry, node.value) if entry&.present? && value_extends_loop?(node.value)
+      when AST::Assignment
+        target = AST.root_identifier(node.name)
+        next if target&.name && local_names.include?(target.name.to_s)
+        mark_iteration_values_function!(node.value, local_entries)
+      when AST::FuncCall
+        mark_call_lifetime_extensions!(node.args, params_for_call(node), local_entries, nil)
+      when AST::MethodCall
+        receiver = AST.root_identifier(node.object)
+        receiver_nonlocal = !!(receiver&.name && !local_names.include?(receiver.name.to_s))
+        mark_call_lifetime_extensions!(node.args, params_for_method_call(node).drop(1), local_entries, receiver_nonlocal)
+      end
+    end
+  end
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  private_class_method def self.value_extends_loop?(value)
+    Type.from_node!(value, context: "cleanup lifetime extension").heap_ptr?
+  end
+
+  sig { params(entry_obj: CleanupEntry, value: T.untyped).void }
+  private_class_method def self.promote_entry_to_heap_cleanup!(entry_obj, value)
+    ti = Type.from_node!(value, context: "cleanup lifetime promotion")
+    entry_obj[:needs_cleanup] = true
+    entry_obj[:alloc] = :heap
+    entry_obj[:scope] = :heap
+    entry_obj[:kind] = ti.string? ? :heap_string : :uniform
+    entry_obj[:has_moved_guard] = true
+  end
+
+  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], local_entries: T::Hash[String, CleanupEntry], receiver_nonlocal: T.nilable(T::Boolean)).void }
+  private_class_method def self.mark_call_lifetime_extensions!(args, params, local_entries, receiver_nonlocal)
+    return unless receiver_nonlocal
+    params.each_with_index do |param, idx|
+      next unless param.takes || param.mutable
+      arg = args[idx]
+      mark_iteration_values_function!(arg, local_entries) if arg
+    end
+  end
+
+  sig { params(expr: T.untyped, local_entries: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.mark_iteration_values_function!(expr, local_entries)
+    collect_expr_identifiers(expr).each do |ident|
+      entry = local_entries[ident.name.to_s]
+      next unless entry&.present?
+      entry[:scope] = :function if entry.alloc == :frame && entry.scope == :iteration
+    end
+  end
+
+  sig { params(expr: T.untyped).returns(T::Array[AST::Identifier]) }
+  private_class_method def self.collect_expr_identifiers(expr)
+    found = T.let([], T::Array[AST::Identifier])
+    stack = T.let([expr], T::Array[T.untyped])
+    until stack.empty?
+      node = stack.pop
+      next unless node.is_a?(AST::Locatable)
+      found << node if node.is_a?(AST::Identifier)
+      node.class.members.each do |member|
+        value = node[member]
+        if value.is_a?(Array)
+          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
+        elsif value.is_a?(Hash)
+          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
+        elsif value.is_a?(AST::Locatable)
+          stack << value
+        end
+      end
+    end
+    found
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  private_class_method def self.cleanup_local_names(body)
+    names = T.let(Set.new, T::Set[String])
+    scan_loop_scope(body) do |node|
+      case node
+      when AST::VarDecl
+        names << node.name.to_s if node.name.is_a?(String)
+      when AST::BindExpr
+        names << node.name.to_s if node.name.is_a?(String) && node.mode == :decl
+      end
+    end
+    names
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Hash[String, CleanupEntry]) }
+  private_class_method def self.cleanup_local_entries(body)
+    entries = T.let({}, T::Hash[String, CleanupEntry])
+    scan_loop_scope(body) do |node|
+      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      next if node.is_a?(AST::BindExpr) && node.mode != :decl
+      name = node.name.to_s
+      entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
+      entries[name] = entry if entry&.present?
+    end
+    entries
+  end
+
+  sig { params(body: T::Array[T.untyped], block: T.untyped).void }
+  private_class_method def self.scan_loop_scope(body, &block)
+    body.each do |node|
+      yield node
+      case node
+      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef, AST::LambdaLit
+        next
+      when AST::IfStatement
+        scan_loop_scope(node.then_branch, &block)
+        scan_loop_scope(node.else_branch, &block)
+      when AST::MatchStatement
+        node.cases.each { |c| scan_loop_scope(c.body, &block) }
+        scan_loop_scope(node.default_case, &block) if node.default_case
+      when AST::WithBlock
+        scan_loop_scope(node.body, &block)
+      when AST::DoBlock
+        node.branches.each { |b| scan_loop_scope(T.cast(b.fetch(:body), T::Array[T.untyped]), &block) }
+      end
+    end
+  end
+
+  sig { params(call: AST::FuncCall).returns(T::Array[AST::Param]) }
+  private_class_method def self.params_for_call(call)
+    sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil
+    sig ? sig.params : []
+  end
+
+  sig { params(call: AST::MethodCall).returns(T::Array[AST::Param]) }
+  private_class_method def self.params_for_method_call(call)
+    sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil
+    sig ? sig.params : []
   end
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
@@ -97,10 +306,9 @@ module CleanupClassifier
 
   # ── Promoted function detection ──────────────────────────────────
 
-  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T::Set[String]) }
+  sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
   private_class_method def self.compute_promoted_fns(fn_nodes)
     promoted = Set.new
-    fn_nodes.each { |name, fn| promoted << name if fn.return_provenance == :heap }
 
     changed = T.let(true, T::Boolean)
     while changed
@@ -142,6 +350,8 @@ module CleanupClassifier
         if cleanup
           alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
           cleanup[:alloc] = alloc if alloc
+        else
+          cleanup = no_cleanup_alloc_entry(node.full_type, schema_lookup)
         end
         # Stamp on node for identity-based lookup in lower_var_decl (avoids
         # same-name collisions when two vars share a name in different scopes).
@@ -157,6 +367,16 @@ module CleanupClassifier
     # classify.
     AST.each_bg_block(body) { |bg| classify_in_body.call(bg.body) if bg.body }
     bindings.values
+  end
+
+  sig { params(full_type: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.no_cleanup_alloc_entry(full_type, schema_lookup)
+    ti = full_type.is_a?(Type) ? full_type : Type.new(full_type)
+    return nil unless ti.heap_ptr? || ti.collection_value?
+    alloc = ti.cleanup_allocator(schema_lookup)
+    CleanupEntry.no_cleanup(alloc: alloc, scope: alloc == :heap ? :heap : :function)
+  rescue
+    nil
   end
 
   sig { params(node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
@@ -336,15 +556,23 @@ module CleanupClassifier
   private_class_method def self.capture_expr_heap?(expr, promoted_fns)
     case expr
     when AST::FuncCall
+      return false if call_has_return_lifetime?(expr)
       promoted_fns.include?(expr.name.to_s) ||
-        (expr.respond_to?(:heap_provenance?) && expr.heap_provenance?)
+        (expr.respond_to?(:heap_storage?) && expr.heap_storage?)
     when AST::MethodCall
-      return true if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
+      return false if call_has_return_lifetime?(expr)
+      return true if expr.respond_to?(:heap_storage?) && expr.heap_storage?
       receiver = expr.object
-      !!(receiver.respond_to?(:symbol) && receiver.symbol&.heap_provenance?)
+      !!(receiver.respond_to?(:symbol) && receiver.symbol&.heap_storage?)
     else
       false
     end
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  private_class_method def self.call_has_return_lifetime?(expr)
+    sig = expr.respond_to?(:matched_signature) ? FunctionSignature.unwrap(expr.matched_signature) : nil
+    !!sig && !sig.return_lifetime.empty?
   end
 
   # Yield (binding_name, expression, anchor_node) for every IF-bind / WHILE-bind
@@ -372,13 +600,14 @@ module CleanupClassifier
   # FIRST matching arm wins. Simple predicate-based kinds (observable,
   # frozen, inf_stream, atomic_ptr, resource, sync, owned_string,
   # non_copy_union) inline here; complex ones (collection, optional,
-  # heap_provenance, struct_cleanup_fields, rc_or_link, heap_struct_plain,
+  # heap_storage, struct_cleanup_fields, rc_or_link, heap_struct_plain,
   # array_struct_strings) stay as separate methods due to their size.
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    return nil if node_sym&.borrow_provenance?  # borrow return -- caller owns data
+    return nil if node_sym&.borrow_provenance? ||
+                  (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?)
 
     sync = node_sym&.sync
     entry = nil
@@ -392,7 +621,9 @@ module CleanupClassifier
     if !entry && node.respond_to?(:resource_close_zig) && node.resource_close_zig
       entry = entry(:resource, resource_close_zig: node.resource_close_zig)
     end
+    entry ||= classify_owned_return_call(ti, node, schema_lookup)
     entry ||= classify_collection(ti, schema_lookup, node: node)
+    entry ||= entry(:uniform, has_moved_guard: true) if ti.direct_indexable_collection?
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
     if !entry && ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
       entry = entry(:uniform)
@@ -401,7 +632,7 @@ module CleanupClassifier
     entry ||= entry(:uniform) if sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     entry ||= classify_optional(ti, schema_lookup, node: node)
     entry ||= classify_owned_string(ti, node, promoted_fns)
-    entry ||= classify_heap_provenance(ti, node, schema_lookup, sync)
+    entry ||= classify_heap_storage(ti, node, schema_lookup, sync)
     entry ||= classify_heap_composite(ti, node, schema_lookup, sync)
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
@@ -429,6 +660,50 @@ module CleanupClassifier
     CleanupEntry.build(kind, alloc: alloc, has_moved_guard: has_moved_guard, **extra)
   end
 
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_owned_return_call(ti, node, schema_lookup)
+    return nil unless node.respond_to?(:value) && contains_call?(node.value)
+    sym = node.respond_to?(:symbol) ? node.symbol : nil
+    return nil unless sym&.storage == :heap
+    ret = ti.error_union? ? ti.payload_type : ti
+    return nil unless ret && (
+      ret.needs_explicit_cleanup?(:heap, schema_lookup) ||
+        ret.heap_ptr? ||
+        ret.recursive_cleanup_shape?(schema_lookup)
+    )
+
+    schema = schema_lookup.call(ret.resolved) rescue nil
+    kind = ret.string? ? :heap_string : :uniform
+    e = entry(kind, alloc: :heap, has_moved_guard: true)
+    e[:fixed_alloc] = true
+    e
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  private_class_method def self.contains_call?(node)
+    found = T.let(false, T::Boolean)
+    stack = T.let([node], T::Array[T.untyped])
+    until stack.empty?
+      cur = stack.pop
+      next unless cur.is_a?(AST::Locatable)
+      if AST.call?(cur)
+        found = true
+        break
+      end
+      cur.class.members.each do |member|
+        value = cur[member]
+        if value.is_a?(Array)
+          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
+        elsif value.is_a?(Hash)
+          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
+        elsif value.is_a?(AST::Locatable)
+          stack << value
+        end
+      end
+    end
+    found
+  end
+
   sig { params(ti: Type, schema_lookup: Proc, node: T.untyped).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_collection(ti, schema_lookup, node: nil)
     # Group 1 / Group 2 separation: when a collection is wrapped with
@@ -441,7 +716,7 @@ module CleanupClassifier
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
     return entry(:uniform, alloc: wrapper_alloc(ti), has_moved_guard: false) if ti.fixed_soa?
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_heap = !!node_sym&.heap_provenance?
+    is_heap = !!node_sym&.heap_storage?
     if ti.list_collection? && !ti.sharded? && !is_heap
       has_heap_elems = elem_needs_cleanup?(ti, schema_lookup)
       return entry(:uniform, alloc: :frame, elem_needs_cleanup: has_heap_elems)
@@ -581,9 +856,9 @@ module CleanupClassifier
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
+  private_class_method def self.classify_heap_storage(ti, node, schema_lookup, sync = nil)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_heap = !!node_sym&.heap_provenance?
+    is_heap = node_sym&.storage == :heap
     return nil unless is_heap
     return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     return nil if ti.collection?
@@ -605,7 +880,7 @@ module CleanupClassifier
     nil
   end
 
-  # Catch-all for heap pointers not handled by classify_heap_provenance.
+  # Catch-all for heap pointers not handled by classify_heap_storage.
   # Heap-stored composite (struct or union) whose cleanup the uniform
   # CheatLib.cleanup path handles via @TypeOf comptime dispatch.
   # Covers @alwaysMutable / @indirect annotations AND structs promoted

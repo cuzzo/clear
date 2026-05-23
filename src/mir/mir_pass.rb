@@ -8,13 +8,16 @@
 
 require "sorbet-runtime"
 
+require_relative "../ast/ast"
+require_relative "../annotator-helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "escape_analysis"
-require_relative "escape_graph"
 require_relative "control_flow"
 
 class MIRPass
     extend T::Sig
+
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   # Read-only context threaded through transform_body / recurse_branches!.
   WalkCtx = Struct.new(:bindings, keyword_init: true) do
@@ -40,9 +43,9 @@ class MIRPass
   # Exposed for specs that test classification directly.
   attr_reader :cleanup_bindings
 
-  sig { params(fn_nodes: T::Hash[String, T.untyped], schema_lookup: Proc).void }
+  sig { params(fn_nodes: FnNodes, schema_lookup: Proc).void }
   def initialize(fn_nodes:, schema_lookup:)
-    @fn_nodes = fn_nodes
+    @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
   end
@@ -60,18 +63,11 @@ class MIRPass
   def transform!(ast)
     # Dead-simple escape analysis: mark SymbolEntry#storage = :heap for the
     # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
-    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes, @schema_lookup)
+    heap_fns, @bg_heap_upgraded = EscapeAnalysis.apply!(@fn_nodes, @schema_lookup)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
 
-    # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
+    # SYNC propagation ran inside EscapeAnalysis.apply! above (single-pass
     # escape principle). Nothing to do here.
-
-    # needs_rt finalization: the annotator computed needs_rt before
-    # escape analysis, so it could not see a function that owns a
-    # heap-placed local (escape analysis decides that). Any function
-    # with a heap binding allocates via `rt`; propagate to its callers
-    # (they must thread rt to pass it).
-    finalize_needs_rt!
 
     # Promotion planning is gone: escape analysis writes symbol.storage;
     # lowering and cleanup only read that fact.
@@ -82,6 +78,12 @@ class MIRPass
     end
 
     LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup)
+
+    # needs_rt finalization must run after placement and cleanup
+    # classification. That is the point where the compiler knows whether a
+    # function actually needs an allocator for a heap/frame binding or cleanup.
+    # Propagate to callers so runtime threading is decided once from final data.
+    finalize_needs_rt!
 
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
@@ -112,22 +114,27 @@ class MIRPass
 
   private
 
-  # Finalize needs_rt after escape analysis. The annotator's
-  # compute_needs_rt! ran before placement was decided, so it could not
-  # see a function that owns a heap-placed LOCAL (escape analysis
-  # decides that). Any function with a heap binding allocates via `rt`;
+  # Finalize needs_rt after escape analysis and cleanup classification. The
+  # annotator's compute_needs_rt! ran before placement was decided, so it could
+  # not see a function that owns an allocator-backed binding. Any function with
+  # a heap/frame cleanup binding or heap-placed local allocates via `rt`;
   # propagate to callers, which must thread rt to pass it.
   sig { void }
   def finalize_needs_rt!
     @fn_nodes.each do |_name, fn|
       next unless fn.body
       next if fn.needs_rt
-      if fn.return_provenance == :heap
+      if fn.respond_to?(:heap_carry_return) && fn.heap_carry_return
         fn.needs_rt = true
         next
       end
-      AST.walk_body(fn.body) do |n|
-        if (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.heap_provenance?
+      bindings = @cleanup_bindings[fn.name.to_s] || {}
+      if bindings.any? { |_binding_name, entry| entry.present? && [:heap, :frame].include?(entry.alloc) }
+        fn.needs_rt = true
+        next
+      end
+      walk_ast_nodes(fn.body) do |n|
+        if (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.storage == :heap
           fn.needs_rt = true
         end
       end
@@ -164,6 +171,25 @@ class MIRPass
     node.to_a.each { |c| collect_callees(c, acc) }
   end
 
+  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.proc.params(arg0: T.untyped).void).void }
+  def walk_ast_nodes(nodes, visited = Set.new, &block)
+    return unless nodes
+    nodes = [nodes] unless nodes.is_a?(Array)
+    nodes.each do |node|
+      case node
+      when AST::Locatable
+        next unless visited.add?(node.object_id)
+        block.call(node)
+        next unless node.is_a?(Struct)
+        node.class.members.each { |member| walk_ast_nodes(node[member], visited, &block) }
+      when Array
+        walk_ast_nodes(node, visited, &block)
+      when Hash
+        node.each_value { |value| walk_ast_nodes(value, visited, &block) }
+      end
+    end
+  end
+
   sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
   def transform_function!(fn)
     bindings = @cleanup_bindings[fn.name] || {}
@@ -192,18 +218,7 @@ class MIRPass
       @last_dataflow.cleanup_decisions!(fn, bindings)
     end
 
-    # Patch heap carry return vars: refine_moved_guards! (called inside cleanup_decisions!)
-    # sets has_moved_guard=false for string vars because strings are Copy types and
-    # are never GIVE'd in OwnershipDataflow.  But carry return vars ARE transferred to the
-    # caller implicitly via RETURN.  Override the flag so MIR::Drop emits a guarded defer
-    # and collect_return_escapes emits SuppressCleanup before the return.
-    if fn.respond_to?(:heap_carry_return_vars) && fn.heap_carry_return_vars&.any? && bindings
-      fn.heap_carry_return_vars.each do |var_name|
-        entry = live_cleanup_entry(bindings, var_name)
-        next unless entry
-        entry[:has_moved_guard] = true
-      end
-    end
+    mark_returned_cleanup_bindings!(fn, bindings)
 
     # Stamp cleanup_bindings on the FunctionDef so MIRLowering can read
     # allocator + cleanup info without relying on OLD MIR::Alloc/Drop siblings.
@@ -521,13 +536,7 @@ class MIRPass
         walk_consumed(node.value, names, bindings)
       end
     when AST::FuncCall, AST::MethodCall
-      node.args.each do |a|
-        if a.is_a?(AST::Identifier) && a.was_moved
-          add_if_consumed(a, names, bindings, true)
-        else
-          walk_consumed(a, names, bindings)
-        end
-      end
+      consume_call_args(node, names, bindings)
       walk_consumed(node.object, names, bindings) if node.is_a?(AST::MethodCall)
     when AST::BinaryOp
       walk_consumed(node.left, names, bindings)
@@ -539,13 +548,35 @@ class MIRPass
     end
   end
 
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall), names: T::Set[String], bindings: T::Hash[String, CleanupEntry]).void }
+  def consume_call_args(node, names, bindings)
+    sig_obj = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+    params = sig_obj&.params || []
+    param_offset = node.is_a?(AST::MethodCall) ? 1 : 0
+
+    node.args.each_with_index do |arg, idx|
+      param = params[idx + param_offset]
+      consumes = param&.takes == true
+      if arg.is_a?(AST::Identifier) && (arg.was_moved || consumes)
+        add_if_consumed(arg, names, bindings, arg.was_moved == true || consumes)
+      else
+        walk_consumed(arg, names, bindings)
+      end
+    end
+  end
+
   # Add identifier to consumed set if it has a moved guard and passes
   # Copy-type filters. RC types only consume on explicit GIVE (MoveNode).
   sig { params(ident: AST::Identifier, names: T::Set[String], bindings: T::Hash[String, CleanupEntry], is_move: T::Boolean).returns(T.nilable(T::Set[String])) }
   def add_if_consumed(ident, names, bindings, is_move)
     name = ident.name.to_s
     entry = bindings[name]
-    return unless entry && entry.has_moved_guard? && entry.needs_cleanup?
+    return unless entry && entry.needs_cleanup?
+    if is_move
+      entry[:has_moved_guard] = true
+    elsif !entry.has_moved_guard?
+      return
+    end
 
     ti = ident.full_type
 
@@ -659,6 +690,27 @@ class MIRPass
       info[name] = true if entry.has_moved_guard? && entry.needs_cleanup?
     end
     fn.moved_guard_info = info unless info.empty?
+  end
+
+  sig { params(fn: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).void }
+  def mark_returned_cleanup_bindings!(fn, bindings)
+    return unless fn.body
+
+    returned = T.let(Set.new, T::Set[String])
+    walk_ast_nodes(fn.body) do |node|
+      next unless node.is_a?(AST::ReturnNode) && node.value
+      collect_escaping_ids(node.value).each { |id| returned << id.name.to_s }
+    end
+
+    if fn.respond_to?(:heap_carry_return_vars) && fn.heap_carry_return_vars
+      fn.heap_carry_return_vars.each { |name| returned << name.to_s }
+    end
+
+    returned.each do |name|
+      entry = live_cleanup_entry(bindings, name)
+      next unless entry&.needs_cleanup?
+      entry[:has_moved_guard] = true
+    end
   end
 
   # Insert MIR::Return before a ReturnNode to mark which local variables'

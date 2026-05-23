@@ -19,13 +19,13 @@
 ESCAPE_VIA_RETURN_CELLS = []
 
 # Axis 1: value type x body x size (return shape pinned to :ident).
-# set_int / set_string / pool / map_int_numeric returns are :in_dev:
+# set_int / set_string / pool / map_int_numeric returns are active:
 # `RETURNS !T@set` / `!T@pool` mis-lowers -- the Zig return type is
 # ArrayList but the value is a Set/Pool (bug #54, also documented in
 # return_value_modality's override table, which owns the type-breadth
 # axis properly). escape_via_return keeps the WORKING element types for
 # body-context coverage and owns the return-SHAPE axis below.
-EVR_DEV_ELEMS = %i[set_int set_string pool map_int_numeric].freeze
+EVR_DEV_ELEMS = [].freeze
 [:int, :string,
  :set_int, :set_string,
  :pool, :map_str, :map_int_numeric,
@@ -33,7 +33,7 @@ EVR_DEV_ELEMS = %i[set_int set_string pool map_int_numeric].freeze
   [:none, :loop, :early_if].each do |body|
     [3, 7].each do |size|
       cell = { elem: elem, body: body, size: size, return_shape: :ident }
-      cell[:expected] = :in_dev if EVR_DEV_ELEMS.include?(elem)
+      cell[:expected] = :pass if EVR_DEV_ELEMS.include?(elem)
       ESCAPE_VIA_RETURN_CELLS << cell
     end
   end

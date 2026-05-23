@@ -149,13 +149,29 @@ module MIRLoweringControlFlow
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
     @for_counter = T.let(@for_counter, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
     @struct_schemas = T.let(@struct_schemas, T.untyped)
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
     var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     rt = MIR::Ident.new(@rt_name)
     coll = lower(node.collection)
     coll_type = node.collection.full_type
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
+    collection_setup = T.let([], T::Array[T.untyped])
+    if for_each_owned_collection_source?(coll)
+      @tmp_counter = T.let(@tmp_counter, T.untyped)
+      @tmp_counter += 1
+      source_name = "__for_src_#{@tmp_counter}"
+      source_alloc = for_each_owned_collection_source_alloc(coll, ct)
+      entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
+      mark = MIR::AllocMark.new(source_name, source_alloc, ct)
+      mark.scope = source_alloc == :heap ? :heap : :iteration
+      collection_setup << mark
+      collection_setup << MIR::Let.new(source_name, coll, false, nil, nil)
+      collection_setup << MIR::Cleanup.new(source_name, entry)
+      coll = MIR::Ident.new(source_name)
+    end
     is_mutable = node.is_mutable == true
     mark_per_iter = node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil
     tight = node.respond_to?(:tight) && node.tight
@@ -167,6 +183,7 @@ module MIRLoweringControlFlow
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
+    loop_stmt = T.let(nil, T.untyped)
     if ct.map?
       @for_counter = (@for_counter || 0) + 1
       iter_var = "__kit_#{@for_counter}"
@@ -176,7 +193,7 @@ module MIRLoweringControlFlow
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
         body, var, nil, mark_per_iter, tight
       )
-      MIR::ScopeBlock.new([iter_init, while_stmt])
+      loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
     elsif ct.pool?
       # Pool: iterate over slots, skip dead entries.
       # Emits: for (pool.slots) |*__pslot_N| { if (!__pslot_N.alive) continue; const var = __pslot_N.value; body }
@@ -191,10 +208,10 @@ module MIRLoweringControlFlow
       )
       value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
       full_body = [skip_dead, value_bind] + body
-      MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
+      loop_stmt = MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
-      MIR::WhileStmt.new(
+      loop_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "next", [], true),
         body, var, nil, mark_per_iter, tight)
     elsif ct.bounded_stream?
@@ -202,7 +219,7 @@ module MIRLoweringControlFlow
       # Use nextOrNull() so the while-loop optional-capture pattern works.
       # defer deinit drains any unconsumed promises on early exit.
       defer_deinit = MIR::DeferStmt.new(MIR::MethodCall.new(coll, "deinit", [], false))
-      MIR::ScopeBlock.new([
+      loop_stmt = MIR::ScopeBlock.new([
         defer_deinit,
         MIR::WhileStmt.new(
           MIR::MethodCall.new(coll, "nextOrNull", [], true),
@@ -213,7 +230,7 @@ module MIRLoweringControlFlow
       # closed.  A LIMIT stage in the body breaks the loop after N items.
       # No extra defer needed: the variable-scope `defer name.deinit()` (emitted by
       # the variable's cleanup entry) signals the generator to stop at function exit.
-      MIR::WhileStmt.new(
+      loop_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "nextOrNull", [], true),
         body, var, nil, mark_per_iter, tight)
     elsif ct.set_collection?
@@ -228,7 +245,7 @@ module MIRLoweringControlFlow
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
         full_body, ptr_var, nil, mark_per_iter, tight
       )
-      MIR::ScopeBlock.new([iter_init, while_stmt])
+      loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&
@@ -261,8 +278,25 @@ module MIRLoweringControlFlow
       else
         var
       end
-      MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
+      loop_stmt = MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
     end
+    collection_setup.empty? ? loop_stmt : MIR::ScopeBlock.new(collection_setup + [loop_stmt])
+  end
+
+  sig { params(mir: T.untyped).returns(T::Boolean) }
+  def for_each_owned_collection_source?(mir)
+    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return true if mir.is_a?(MIR::Call) && mir.owned_return?
+    T.unsafe(self).mir_allocates?(mir)
+  end
+
+  sig { params(mir: T.untyped, type_info: Type).returns(Symbol) }
+  def for_each_owned_collection_source_alloc(mir, type_info)
+    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
+    return :heap if T.unsafe(self).mir_allocates?(mir)
+
+    type_info.cleanup_allocator(@schema_lookup)
   end
 
   sig { params(node: AST::ForRange).returns(MIR::ScopeBlock) }
@@ -495,8 +529,10 @@ module MIRLoweringControlFlow
       @tmp_counter += 1
       name = "__tmp_#{@tmp_counter}"
       entry = hoist_cleanup_entry(stmt.value, ast_value)
+      mark = MIR::AllocMark.new(name, :heap, nil)
+      mark.scope = :heap
       out = T.let([
-        MIR::AllocMark.new(name, :heap, nil),
+        mark,
         MIR::Let.new(name, stmt.value, false, nil, nil)
       ], T::Array[T.untyped])
       out << MIR::ErrCleanup.new(name, entry) if entry
@@ -509,18 +545,21 @@ module MIRLoweringControlFlow
   def lower_return(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @current_fn_return_alloc = T.let(@current_fn_return_alloc, T.untyped)
     @current_fn_tail_call = T.let(@current_fn_tail_call, T.untyped)
     @current_fn_zig_name = T.let(@current_fn_zig_name, T.untyped)
     @debug_mode = T.let(@debug_mode, T.untyped)
     @pending_stmts = T.let(@pending_stmts, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
+    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
+    @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
+    @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
     # The return expression's allocating sub-nodes inherit the function's
     # finalized return placement -- the return slot is their "binding".
     pending_start = @pending_stmts.length
-    value = node.value ? with_decl_alloc(@current_fn_return_alloc) do
+    value = node.value ? with_decl_alloc(nil) do
       lowered = lower(node.value)
-      place_value_for_destination(lowered, node.value, @current_fn_return_alloc, node.value.full_type)
+      place_value_for_destination(lowered, node.value, nil, node.value.full_type)
     end : nil
     rt_name = @rt_name
 
@@ -557,6 +596,25 @@ module MIRLoweringControlFlow
       value = MIR::HeapCreate.new(bare_ret, value, :heap, "ret")
     end
 
+    if @current_fn_heap_carry_return && node.value && value &&
+       !value.is_a?(MIR::Ident) &&
+       !return_transfers_heap_binding?(node.value) &&
+       !mir_allocates?(value) && !(value.is_a?(MIR::Call) && value.owned_return?)
+      ret_type = Type.from_node(node.value)
+      ret_type = ret_type.payload_type if ret_type&.error_union?
+      value = MIR::DupeSlice.new(value, :heap) if ret_type&.string?
+    end
+
+    if @current_fn_heap_carry_return && node.value && value.is_a?(MIR::Ident) &&
+       @current_fn_param_names&.include?(value.name) &&
+       !@current_fn_takes_param_names&.include?(value.name)
+      ret_type = Type.from_node(node.value)
+      ret_type = ret_type.payload_type if ret_type&.error_union?
+      if ret_type&.recursive_cleanup_shape?(@schema_lookup)
+        value = MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap)
+      end
+    end
+
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
     if @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
@@ -586,6 +644,12 @@ module MIRLoweringControlFlow
   # ================================================================
   # Helpers
   # ================================================================
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def return_transfers_heap_binding?(ast_node)
+    root = AST.root_identifier(ast_node) rescue nil
+    root&.symbol&.storage == :heap
+  end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def return_value_already_payload_pointer?(ast_node)
@@ -644,17 +708,16 @@ module MIRLoweringControlFlow
 
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
-  def call_heap_provenance?(node)
+  def call_heap_storage?(node)
     T.bind(self, MIRLowering) rescue nil
-    !!(node.is_a?(AST::Locatable) && node.heap_provenance?)
+    !!(node.is_a?(AST::Locatable) && node.heap_storage?)
   end
 
   sig { params(sig_obj: T.untyped).returns(T::Boolean) }
   def callee_returns_heap_string?(sig_obj)
     T.bind(self, MIRLowering) rescue nil
     return false unless sig_obj && sig_obj.respond_to?(:return_type)
-    lifetime = sig_obj.respond_to?(:return_lifetime) ? sig_obj.return_lifetime : nil
-    return false if lifetime && !(lifetime.respond_to?(:empty?) && lifetime.empty?)
+    return false if sig_obj.respond_to?(:return_lifetime) && !sig_obj.return_lifetime.empty?
     ti = Type.new(sig_obj.return_type)
     ti = ti.payload_type || ti if ti.error_union?
     ti.string? && !ti.symbol? && !ti.raw?
@@ -664,7 +727,7 @@ module MIRLoweringControlFlow
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
   # a cleanup defer when used as a temporary in a non-TAKES argument position.
-  # heap_provenance? misses these: unions like Value are stack-sized but own heap
+  # heap_storage? misses these: unions like Value are stack-sized but own heap
   # memory (via @indirect fields). When returned inline as a non-TAKES argument,
   # they must be hoisted to a named let with a defer.
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
@@ -676,7 +739,7 @@ module MIRLoweringControlFlow
     ti = Type.from_node(ast_node)
     return false unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_provenance?) || ti.heap?
+    is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_storage?) || ti.heap?
     return false if is_heap  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end

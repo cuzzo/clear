@@ -1672,7 +1672,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Escape marking for returned collections" do
-      it "sets return_provenance on function returning @list (via MIRPass)" do
+      it "marks returned @list binding heap (via MIRPass)" do
         src = <<~CLEAR
           FN buildList() RETURNS !Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
@@ -1682,12 +1682,13 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         ast = run_mir(src)
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
-        expect(fn.return_provenance).to eq(:heap)
+        decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "vals" }
+        expect(decl.symbol.storage).to eq(:heap)
       end
     end
 
-    context "return_provenance for struct/union with implicit COPY fields" do
-      it "sets return_provenance when returning union with implicit-copied @list field" do
+    context "returned struct/union with implicit COPY fields" do
+      it "marks implicit-copied @list field binding heap" do
         src = <<~CLEAR
           UNION Value { Nil, List: Value[] }
           FN makeList() RETURNS !Value ->
@@ -1699,7 +1700,8 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
-        expect(fn.return_provenance).to eq(:heap)
+        decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "items" }
+        expect(decl.symbol.storage).to eq(:heap)
       end
     end
 
@@ -3968,8 +3970,9 @@ RSpec.describe SemanticAnnotator do
       expect(zig).not_to include("CheatLib.makeList")
     end
 
-    it "does NOT emit frameAlloc for a stack-fixed array" do
-      expect(zig).not_to include("frameAlloc")
+    it "does NOT emit collection allocation for a stack-fixed array" do
+      expect(zig).not_to include("CheatLib.makeList")
+      expect(zig).not_to include("try rt.frameAlloc().alloc")
     end
 
     it "works for a two-element Float64 array" do

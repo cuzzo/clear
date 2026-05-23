@@ -2631,52 +2631,6 @@ RSpec.describe MIRLowering do
       expect(zig).to include("rt.__error.error_name = 0")
     end
 
-    it "lowers fallible OR PASS to TryCatch while preserving heap provenance" do
-      call = AST::FuncCall.new(tok, "make", [])
-      call.full_type = Type.new(:"Int64[]", collection: :list)
-      call.error_union_type = Type.new(:"!Int64[]")
-      call.can_fail = true
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:"!Int64[]"))
-      sig.return_provenance = :heap
-      node = AST::BinaryOp.new(tok, call, :OR_RESCUE, AST::OrPass.new(tok))
-      node.full_type = Type.new(:"Int64[]", collection: :list)
-
-      result = lowering(fn_sigs: { "make" => sig }).lower(node)
-
-      expect(result).to be_a(MIR::TryCatch)
-      expect(result.heap_provenance).to be true
-      expect(emit(result)).to include("make(rt) catch @as(std.ArrayListUnmanaged(i64), .empty)")
-    end
-
-    it "hoists heap-provenance TryCatch returns with err cleanup" do
-      call = AST::FuncCall.new(tok, "make", [])
-      call.full_type = Type.new(:"Int64[]", collection: :list)
-      call.error_union_type = Type.new(:"!Int64[]")
-      call.can_fail = true
-      sig = FunctionSignature.new(params: [], return_type: Type.new(:"!Int64[]"))
-      sig.return_provenance = :heap
-      value = AST::BinaryOp.new(tok, call, :OR_RESCUE, AST::OrPass.new(tok))
-      value.full_type = Type.new(:"Int64[]", collection: :list)
-      ret = AST::ReturnNode.new(tok, value)
-      ret.full_type = value.full_type
-
-      body = lowering(fn_sigs: { "make" => sig }).lower_body([ret])
-
-      temp_let = body.grep(MIR::Let).find { |stmt| stmt.init.is_a?(MIR::TryCatch) }
-      expect(temp_let).not_to be_nil
-
-      temp_name = temp_let.name
-      alloc = body.grep(MIR::AllocMark).find { |stmt| stmt.name == temp_name }
-      cleanup = body.grep(MIR::ErrCleanup).find { |stmt| stmt.name == temp_name }
-      ret_stmt = body.grep(MIR::ReturnStmt).find do |stmt|
-        stmt.value.is_a?(MIR::Ident) && stmt.value.name == temp_name
-      end
-
-      expect(alloc&.alloc).to eq(:heap)
-      expect(cleanup&.cleanup_entry).to include(kind: :uniform, alloc: :heap)
-      expect(ret_stmt).not_to be_nil
-    end
-
     it "lowers OR EXIT on fallible expressions to a catch block that rewrites error context" do
       call = AST::FuncCall.new(tok, "parse", [])
       call.full_type = :Int64
@@ -3235,7 +3189,9 @@ RSpec.describe MIRLowering do
         result = l.lower(node)
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)
-      expect(result.fallback).to be_a(MIR::StructInit)
+        expect(result.fallback).to be_a(MIR::BlockExpr)
+        expect(result.fallback.body.last).to be_a(MIR::BreakStmt)
+        expect(result.fallback.body.last.value).to be_a(MIR::StructInit)
       end
 
       it "leaves a non-allocating fallback unwrapped" do

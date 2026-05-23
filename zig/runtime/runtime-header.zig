@@ -2047,6 +2047,7 @@ pub const CheatLib = struct {
     pub fn stringReplace(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement: []const u8) ![]const u8 {
         Runtime.profileAlloc(0);
         var result: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer result.deinit(allocator);
         var i: usize = 0;
         while (i < haystack.len) {
             if (i + needle.len <= haystack.len and std.mem.eql(u8, haystack[i..][0..needle.len], needle)) {
@@ -2057,7 +2058,7 @@ pub const CheatLib = struct {
                 i += 1;
             }
         }
-        return result.items;
+        return try result.toOwnedSlice(allocator);
     }
 
     // lowercase(str) -> new string with all ASCII bytes lowered

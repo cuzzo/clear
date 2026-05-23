@@ -784,6 +784,13 @@ class Type
     collection? || non_string_array?
   end
 
+  # True when values of this type carry pointer-backed data that must not
+  # outlive its allocator region.
+  sig { returns(T::Boolean) }
+  def heap_ptr?
+    string? || indirect? || collection? || (array? && !fixed? && !string?)
+  end
+
   sig { returns(T::Boolean) }
   def associative_collection?
     map?
@@ -1523,6 +1530,7 @@ class Type
     return true if string? || any_rc? || link? || collection?
 
     if array?
+      return true unless fixed?
       et = element_type
       return false unless et
       return Type.from_node(et)&.recursive_cleanup_shape?(schema_lookup, seen) || false
@@ -1697,12 +1705,12 @@ class Type
       fields = vt.fields
       return fields.any? { |_, ft|
         t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && (t.indirect? || t.string? || t.collection? || (t.array? && !t.fixed?))
+        t && t.heap_ptr?
       }
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.indirect? || t.collection? || t.string? || (t.array? && !t.fixed?)) rescue false
+    t.heap_ptr? rescue false
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.

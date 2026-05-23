@@ -1,5 +1,7 @@
 require "rspec"
 
+ARCH_ROOT = File.expand_path("..", __dir__)
+
 # Static-analysis guard for the placement-field architecture.
 #
 # Storage / allocator decisions flow through a staged pipeline, and EACH
@@ -11,11 +13,12 @@ require "rspec"
 #   node.storage        <- annotation ONLY
 #   symbol.storage      <- escape analysis ONLY
 #   CleanupEntry#alloc  <- cleanup classification ONLY
+#   CleanupEntry#scope  <- cleanup classification ONLY
 #
 # These invariants are non-negotiable: fixing the compiler means making
 # every placement decision in its one sanctioned pass, never beside it.
 RSpec.describe "architecture invariants: placement-field writers" do
-  SRC = File.expand_path("../src", __dir__)
+  SRC = File.join(ARCH_ROOT, "src")
 
   # ── the ONE sanctioned writer of each field ─────────────────────────
 
@@ -37,7 +40,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
   # symbol.storage is made DEFINITIVE by escape analysis.
   SYMBOL_STORAGE_OK = lambda do |rel|
-    rel == "mir/escape_graph.rb" || rel == "mir/escape_analysis.rb"
+    rel == "mir/escape_analysis.rb"
   end
 
   # CleanupEntry#alloc is set once, by cleanup classification.
@@ -51,6 +54,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
     node_w = []
     sym_w = []
     cleanup_w = []
+    cleanup_scope_w = []
     Dir[File.join(SRC, "**", "*.rb")].sort.each do |path|
       rel = path.sub(SRC + "/", "")
       File.readlines(path).each_with_index do |line, idx|
@@ -71,9 +75,13 @@ RSpec.describe "architecture invariants: placement-field writers" do
         if line.match(/\b\w*(?:entry|cleanup)\w*\[:alloc\]\s*=(?![=~])/i)
           cleanup_w << [loc, code]
         end
+
+        if line.match(/\b\w*(?:entry|cleanup)\w*\[:scope\]\s*=(?![=~])/i)
+          cleanup_scope_w << [loc, code]
+        end
       end
     end
-    { node: node_w, symbol: sym_w, cleanup: cleanup_w }
+    { node: node_w, symbol: sym_w, cleanup: cleanup_w, cleanup_scope: cleanup_scope_w }
   end
 
   WRITES = scan
@@ -100,5 +108,170 @@ RSpec.describe "architecture invariants: placement-field writers" do
   it "CleanupEntry#alloc is written ONLY by cleanup classification" do
     bad = renegades(WRITES[:cleanup], CLEANUP_ALLOC_OK)
     expect(bad).to be_empty, report("CleanupEntry#alloc", bad)
+  end
+
+  it "CleanupEntry#scope is written ONLY by cleanup classification" do
+    bad = renegades(WRITES[:cleanup_scope], CLEANUP_ALLOC_OK)
+    expect(bad).to be_empty, report("CleanupEntry#scope", bad)
+  end
+end
+
+RSpec.describe "architecture invariants: MIR pass order" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  def expect_order(rel, *patterns)
+    text = source(rel)
+    positions = patterns.map do |pattern|
+      idx = text.index(pattern)
+      expect(idx).not_to be_nil, "#{rel} is missing #{pattern.inspect}"
+      idx
+    end
+    expect(positions).to eq(positions.sort),
+      "#{rel} has wrong pass order:\n  #{patterns.join("\n  ")}"
+  end
+
+  it "runs top-level rewrites before hoist, type check, and MIRPass" do
+    expect_order(
+      "src/backends/compiler_frontend.rb",
+      "annotator.annotate!",
+      "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "StringConcatRewriter.new.rewrite!(T.must(ast))",
+      "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
+      "Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)",
+      "PreMirTypeCheck.verify!(T.must(ast))",
+      "mir_pass = MIRPass.new",
+      "mir_pass.transform!",
+    )
+  end
+
+  it "runs imported modules through the same rewrite/hoist/typecheck/MIRPass boundary" do
+    expect_order(
+      "src/backends/importer.rb",
+      "annotator.annotate!",
+      "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "StringConcatRewriter.new.rewrite!(ast)",
+      "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
+      "Hoist.apply!(ast, schema_lookup: schema_lookup)",
+      "PreMirTypeCheck.verify!(ast)",
+      "mir_pass = MIRPass.new",
+      "mir_pass.transform!",
+    )
+  end
+
+  it "runs MIR placement before cleanup classification, loop analysis, and lowering stamps" do
+    expect_order(
+      "src/mir/mir_pass.rb",
+      "EscapeAnalysis.apply!",
+      "CleanupClassifier.classify",
+      "LoopFrameAnalysis.analyze!",
+      "transform_function!",
+    )
+  end
+
+  it "aborts compilation on MIRChecker errors in emitted program paths" do
+    expect(source("src/backends/transpiler.rb")).to include("MIR ownership verification failed")
+    expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
+  end
+end
+
+RSpec.describe "architecture invariants: closed placement pipeline" do
+  ForbiddenPattern = Struct.new(:name, :glob, :pattern, :allowed, keyword_init: true)
+
+  FORBIDDEN = [
+    ForbiddenPattern.new(
+      name: "return/heap provenance as placement data",
+      glob: "src/**/*.rb",
+      pattern: /\b(?:return_provenance|heap_provenance)\b/,
+      allowed: [
+        %r{\Asrc/mir/mir_checker\.rb\z},
+        %r{\Asrc/mir/mir\.rb\z},
+        %r{\Asrc/ast/diagnostic_registry\.rb\z},
+      ],
+    ),
+    ForbiddenPattern.new(
+      name: "lowering-side heap/frame inference helpers",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb,cleanup_classifier.rb}",
+      pattern: /\b(?:node_is_heap\?|heap_owned_value\?|takes_arg_alloc|receiver_root_heap\?|storage_to_alloc|authoritative_storage|call_return_provenance|return_expr_provenance)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "recursive cleanup shape used as allocator input downstream",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb}",
+      pattern: /\b(?:recursive_cleanup_shape\?|type_shape_needs_recursive_cleanup\?)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "lowering/hoist context allocator state",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb}",
+      pattern: /@(?:decl_alloc|current_fn_return_alloc)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "node storage used as downstream allocator authority",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb,cleanup_classifier.rb}",
+      pattern: /\bnode\.storage\s*(?:==|=~|!=|=)\s*:heap\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "inactive escape fuzz cells",
+      glob: "tools/fuzz/templates/**/*.rb",
+      pattern: /(?:expected\s*[:=]|\?\s*)\s*:in_dev\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "source-specific call metadata in escape analysis",
+      glob: "src/mir/escape_analysis.rb",
+      pattern: /\bmatched_stdlib_def\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop-analysis special escape flags",
+      glob: "src/**/*.rb",
+      pattern: /\b(?:frame_alloc_escapes|stores_into_nonlocal_collection)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop rewind decisions from collection mutator names",
+      glob: "src/mir/{control_flow.rb,mir_checker.rb}",
+      pattern: /\b(?:append|insert|push|put|ELEMENT_STORE)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop rewind decisions from collection shape",
+      glob: "src/mir/{control_flow.rb,mir_checker.rb}",
+      pattern: /\b(?:collection\?|collection_value\?|list_collection\?|set_collection\?|pool\?|map\?|array\?)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "defensive nil-array fallbacks in placement helpers",
+      glob: "src/mir/{cleanup_classifier.rb,hoist.rb}",
+      pattern: /\|\|\s*\[\]|\b&&\s*\w+\.any\?|\w+&\.any\?/,
+      allowed: [],
+    ),
+  ].freeze
+
+  def scan_for(pattern)
+    files = Dir[File.join(ARCH_ROOT, pattern.glob)].uniq.sort
+    files.each_with_object([]) do |path, hits|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next if pattern.allowed.any? { |allowed| allowed.match?(rel) }
+
+      File.readlines(path).each_with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(pattern.pattern)
+
+        hits << "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+  end
+
+  FORBIDDEN.each do |pattern|
+    it "forbids #{pattern.name}" do
+      hits = scan_for(pattern)
+      expect(hits).to be_empty,
+        "#{hits.size} forbidden #{pattern.name} hit(s):\n#{hits.join("\n")}"
+    end
   end
 end

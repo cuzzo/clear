@@ -45,15 +45,16 @@ class CompilerFrontend
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
 
-    # Hoist anonymous allocating expressions into temp bindings so escape
-    # analysis only ever sees symbol-bearing declarations.
-    Hoist.apply!(T.must(ast))
-
     PipelineRewriter.new(annotator).rewrite!(ast)
     StringConcatRewriter.new.rewrite!(T.must(ast))
-
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
+
+    # Hoist after all annotation-preserving rewrites so escape analysis
+    # only ever sees symbol-bearing declarations, including synthetic
+    # allocation expressions introduced by those rewrites.
+    Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)
+
+    fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     T.must(ast).statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
 
     # Synthesize a FunctionDef wrapper for every TEST THAT body so the
@@ -116,8 +117,9 @@ class CompilerFrontend
   # wrapper never reaches code generation -- it only carries enough
   # shape for the analysis passes to walk the body as if it were a
   # real `FN __test_X() RETURNS Void -> ... END`.
-  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Array[AST::FunctionDef]) }
   def self.synthesize_test_body_wrappers!(ast, fn_nodes)
+    wrappers = T.let([], T::Array[AST::FunctionDef])
     counter = 0
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::TestBlock)
@@ -140,6 +142,7 @@ class CompilerFrontend
             false          # uses_frame
           )
           fn_nodes[synth_name] = synth_fn
+          wrappers << synth_fn
           # Stamp the wrapper onto the AST::TestThat so mir_lowering can
           # reach the cleanup_bindings / promotion when it walks the
           # body. Without this, lower_test_block's @current_bindings
@@ -148,5 +151,6 @@ class CompilerFrontend
         end
       end
     end
+    wrappers
   end
 end

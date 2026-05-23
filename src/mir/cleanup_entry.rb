@@ -14,9 +14,9 @@ require "sorbet-runtime"
 # typed accessors, typed sigs). Reader burn-down (`[:k]` -> `.k`) and
 # the non-nil contract land in later EPIC-66 slices.
 #
-# Field universe (all optional except kind/alloc/needs_cleanup/
+# Field universe (all optional except kind/alloc/scope/needs_cleanup/
 # has_moved_guard, which `build` always sets):
-#   needs_cleanup alloc kind has_moved_guard match_as
+#   needs_cleanup alloc scope kind has_moved_guard match_as
 #   resource_close_zig rc_alloc base_zig needs_release_fields
 #   elem_needs_cleanup sync inner via_pointer source_kind
 class CleanupEntry < Hash
@@ -36,9 +36,21 @@ class CleanupEntry < Hash
     e = new
     e[:needs_cleanup] = true
     e[:alloc] = alloc
+    e[:scope] = alloc == :heap ? :heap : :function
     e[:kind] = kind
     e[:has_moved_guard] = has_moved_guard
     extra.each { |k, v| e[k] = v }
+    e
+  end
+
+  sig { params(alloc: Symbol, scope: Symbol).returns(CleanupEntry) }
+  def self.no_cleanup(alloc:, scope:)
+    e = new
+    e[:needs_cleanup] = false
+    e[:alloc] = alloc
+    e[:scope] = scope
+    e[:kind] = :none
+    e[:has_moved_guard] = false
     e
   end
 
@@ -56,6 +68,9 @@ class CleanupEntry < Hash
 
   sig { returns(Symbol) }
   def alloc = T.cast(self[:alloc], Symbol)
+
+  sig { returns(Symbol) }
+  def scope = T.cast(self[:scope], Symbol)
 
   # Total presence predicates -- safe on the NONE sentinel.
   # `present?` is true only for a real classifier-produced entry;

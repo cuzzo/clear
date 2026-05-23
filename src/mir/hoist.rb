@@ -25,31 +25,42 @@ module Hoist
 
   ELEMENT_STORE = T.let(%w[append insert push put].freeze, T::Array[String])
 
-  sig { params(ast: T.untyped).void }
-  def apply!(ast)
+  sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
+  def apply!(ast, schema_lookup: nil)
     ctr = T.let([0], T::Array[Integer])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      hoist_body!(stmt.body, ctr)
+      next if synthesized_body?(stmt)
+      hoist_body!(stmt.body, ctr, schema_lookup)
     end
+  end
+
+  # THUNK bodies are not lowered as normal statement lists. They are consumed
+  # by ThunkTransform from the recurrence plan and emitted as a synthesized
+  # frame machine, so normal-body hoists would create bindings that the
+  # synthesized body cannot see.
+  sig { params(fn: T.untyped).returns(T::Boolean) }
+  def synthesized_body?(fn)
+    (fn.respond_to?(:thunk_plan) && fn.thunk_plan) ||
+      (fn.respond_to?(:mutual_thunk_plan) && fn.mutual_thunk_plan)
   end
 
   # Walk a statement list. For each statement, lift the hoistable
   # sub-expressions into temp decls inserted immediately before it.
-  sig { params(body: T.untyped, ctr: T::Array[Integer]).void }
-  def hoist_body!(body, ctr)
+  sig { params(body: T.untyped, ctr: T::Array[Integer], schema_lookup: T.nilable(Proc)).void }
+  def hoist_body!(body, ctr, schema_lookup)
     return unless body.is_a?(Array)
     i = 0
     while i < body.length
       stmt = body[i]
       hoists = T.let([], T::Array[T.untyped])
-      collect_stmt_hoists!(stmt, hoists, ctr)
+      collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup)
       hoists.each_with_index { |decl, j| body.insert(i + j, decl) }
       i += hoists.length
       # Recurse into nested statement bodies (control flow). Nested
       # functions / lambdas / BG blocks are separate frames -- each is
       # reached as its own AST::FunctionDef or handled separately.
-      child_bodies(stmt).each { |b| hoist_body!(b, ctr) }
+      child_bodies(stmt).each { |b| hoist_body!(b, ctr, schema_lookup) }
       i += 1
     end
   end
@@ -71,12 +82,19 @@ module Hoist
   # Find element-store method calls in this statement's expression tree.
   # Composite element stores are escaping positions; hoist allocating
   # argument fragments so the escape pass sees bindings.
-  sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).void }
-  def collect_stmt_hoists!(stmt, hoists, ctr)
+  sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc)).void }
+  def collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup)
+    each_call(stmt) do |call|
+      call.args.each_with_index do |arg, idx|
+        next unless allocating?(arg, schema_lookup)
+        call.args[idx] = make_temp!(arg, hoists, ctr, moved: moved_arg?(arg))
+      end
+    end
+
     each_method_call(stmt) do |call|
       next unless ELEMENT_STORE.include?(call.name.to_s)
       next unless composite_element_store?(call)
-      (call.args || []).each_with_index do |arg, idx|
+      call.args.each_with_index do |arg, idx|
         if concat?(arg)
           call.args[idx] = make_temp!(arg, hoists, ctr)
         else
@@ -88,19 +106,19 @@ module Hoist
     # escaping value is anonymous and allocating, give it a binding first.
     case stmt
     when AST::ReturnNode
-      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr) if stmt.value
+      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup) if stmt.value
     when AST::YieldExpr
-      stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr) if stmt.expr
+      stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
     when AST::Assignment
       if stmt.name.is_a?(AST::GetField) || stmt.name.is_a?(AST::GetIndex)
-        stmt.value = hoist_escape_value!(stmt.value, hoists, ctr) if stmt.value
+        stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup) if stmt.value
       end
     end
   end
 
-  sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).returns(T.untyped) }
-  def hoist_escape_value!(value, hoists, ctr)
-    return make_temp!(value, hoists, ctr) if allocating?(value)
+  sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc)).returns(T.untyped) }
+  def hoist_escape_value!(value, hoists, ctr, schema_lookup)
+    return make_temp!(value, hoists, ctr) if allocating?(value, schema_lookup)
     if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
       hoist_concats_within!(value, hoists, ctr)
     end
@@ -109,11 +127,20 @@ module Hoist
 
   # An anonymous expression that allocates a fresh heap-able value and so
   # needs its own binding for escape analysis to place it.
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def allocating?(node)
+  sig { params(node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def allocating?(node, schema_lookup)
     return false unless node
-    concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit) ||
-      node.is_a?(AST::MethodCall)
+    return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
+    return true if concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
+
+    ti = Type.from_node(node)
+    return false unless ti
+    ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, schema_lookup)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def moved_arg?(node)
+    node.respond_to?(:was_moved) && node.was_moved == true
   end
 
   # Yield every MethodCall reachable inside one statement's OWN
@@ -138,6 +165,27 @@ module Hoist
       when Array then child.each { |c| each_method_call(c, &blk) }
       when Hash  then child.each_value { |v| each_method_call(v, &blk) }
       else each_method_call(child, &blk)
+      end
+    end
+  end
+
+  # Yield every call reachable inside one statement's own expressions. This
+  # is the call-argument hoist path: anonymous allocating call arguments become
+  # named bindings before escape/cleanup placement runs.
+  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def each_call(node, &blk)
+    return if node.nil? || node.is_a?(Array)
+    return unless node.is_a?(Struct)
+    return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
+              node.is_a?(AST::BgBlock) || node.is_a?(AST::WithBlock) ||
+              node.is_a?(AST::DoBlock)
+    blk.call(node) if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+    children = non_body_exprs(node) || node.to_a
+    children.each do |child|
+      case child
+      when Array then child.each { |c| each_call(c, &blk) }
+      when Hash  then child.each_value { |v| each_call(v, &blk) }
+      else each_call(child, &blk)
       end
     end
   end
@@ -201,17 +249,22 @@ module Hoist
 
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl
   # to `hoists`, and return the Identifier that replaces the concat.
-  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer]).returns(T.untyped) }
-  def make_temp!(concat, hoists, ctr)
+  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], moved: T::Boolean).returns(T.untyped) }
+  def make_temp!(concat, hoists, ctr, moved: true)
     n = T.must(ctr[0]) + 1
     ctr[0] = n
     name = "__hoist_#{n}"
     tok = concat.respond_to?(:token) ? concat.token : nil
     ti = Type.from_node!(concat, context: "AST hoist temp")
-    storage = (concat.respond_to?(:storage) && concat.storage) || :frame
+    storage = if ast_borrow_expr?(concat, moved) || (concat.respond_to?(:container_borrow) && concat.container_borrow)
+      :borrow
+    else
+      (concat.respond_to?(:storage) && concat.storage) || :frame
+    end
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
     decl.full_type = ti
+    decl.container_borrow = true if storage == :borrow && decl.respond_to?(:container_borrow=)
     # The temp is always consumed by the statement it was lifted from
     # (return / yield / element store), so it is used by construction --
     # var-use analysis ran before this pass and cannot know that.
@@ -229,13 +282,44 @@ module Hoist
     # position (element-store arg / struct field of one). Stamp the
     # move so ownership dataflow transfers the temp into the container
     # instead of cleaning it up at scope exit.
-    ident.was_moved = true if ident.respond_to?(:was_moved=)
+    ident.was_moved = moved if ident.respond_to?(:was_moved=)
     # An @indirect field value carries needs_heap_create; the stamp must
     # follow the value to its new position.
     if concat.respond_to?(:needs_heap_create) && concat.needs_heap_create
       ident.needs_heap_create = true
     end
     ident
+  end
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def ast_container_borrow_expr?(ast_node)
+    return false unless ast_node
+    if ast_node.is_a?(AST::GetIndex)
+      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
+      return ti.indexed_container_borrow?
+    end
+    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+      return ast_container_borrow_expr?(ast_node.left)
+    end
+    false
+  rescue StandardError
+    false
+  end
+
+  sig { params(ast_node: T.untyped, moved: T::Boolean).returns(T::Boolean) }
+  def ast_borrow_expr?(ast_node, moved)
+    return false if moved
+    return true if ast_access_path?(ast_node)
+    ast_container_borrow_expr?(ast_node)
+  end
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def ast_access_path?(ast_node)
+    node = ast_node
+    if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_RESCUE)
+      node = node.left
+    end
+    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
   end
 end
 
@@ -307,7 +391,7 @@ module MIRHoistLowering
     return node.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === node }
     case node
     when MIR::Call, MIR::TryCatch
-      !!node.heap_provenance
+      false
     when MIR::Cast
       mir_allocates?(node.expr)
     when MIR::InlineZig
@@ -322,7 +406,7 @@ module MIRHoistLowering
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
   def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
     return :heap if mir_allocates?(init)
-    return :heap if node.respond_to?(:storage) && node.storage == :heap
+    Kernel.raise "Hoist cannot choose heap/frame from node storage; placement must be on the binding symbol"
     if binding_entry.present? && binding_entry.alloc == :heap &&
        T.unsafe(self).alloc_for_node(node) != :heap && !ft.needs_heap_backing? &&
        binding_entry.kind != :frozen
@@ -333,11 +417,19 @@ module MIRHoistLowering
 
   sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean), mutable: T::Boolean).returns(T.untyped) }
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false)
-    return expr unless mir_allocates?(expr) || T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
+    return expr unless mir_allocates?(expr) ||
+                       (expr.is_a?(MIR::Call) && expr.owned_return?) ||
+                       T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node!(ast_node, context: "MIR allocating hoist")
-    @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
+    mark = MIR::AllocMark.new(name, :heap, ti)
+    mark.scope = :heap
+    @pending_stmts << mark
+    if expr.is_a?(MIR::InlineZig) && expr.allocs && !expr.allocs.empty?
+      emits = expr.stdlib_def&.emit
+      expr.target_var = name unless emits&.mutates_receiver
+    end
     @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
@@ -346,42 +438,6 @@ module MIRHoistLowering
       (@guarded_cleanup_names ||= {})[name] = true if entry.has_moved_guard?
     end
     MIR::Ident.new(name)
-  end
-
-  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean)).returns(T.untyped) }
-  def hoist_owned_value_temp(expr, ast_node, err_cleanup: false)
-    return expr unless owned_value_temp_needs_cleanup?(ast_node)
-
-    @tmp_counter += 1
-    name = "__tmp_#{@tmp_counter}"
-    ti = Type.from_node!(ast_node, context: "owned value temp")
-    zig_t = Type.new(ti.resolved).zig_type
-    schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
-    alloc = if ti.recursive_cleanup_shape?(schema_lookup)
-              :heap
-            else
-              @decl_alloc == :heap ? :heap : :frame
-            end
-    entry = CleanupEntry.from({ kind: :uniform, alloc: alloc, has_moved_guard: false, zig_type: zig_t })
-
-    @pending_stmts << MIR::AllocMark.new(name, alloc, ti)
-    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
-    @pending_stmts << (err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry))
-    MIR::Ident.new(name)
-  end
-
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def owned_value_temp_needs_cleanup?(ast_node)
-    return false unless ast_node
-    return false if ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode) || ast_node.is_a?(AST::MoveNode)
-    return false if ast_node.is_a?(AST::Identifier) || ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
-    return false if container_borrow_expr?(ast_node)
-    ti = Type.from_node!(ast_node, context: "owned value temp decision")
-    ti = ti.payload_type || ti if ti.error_union?
-    @union_schemas&.key?(ti.resolved) &&
-      ti.needs_explicit_cleanup?(:heap, @schema_lookup)
-  rescue
-    false
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
@@ -508,7 +564,7 @@ module MIRHoistLowering
     returned_names.to_a.each { |n| names[n.to_s] = true } if returned_names
     mir_ident_names(value).each { |n| names[n.to_s] = true }
     names.keys
-      .select { |n| @guarded_cleanup_names&.[](n) }
+      .select { |n| n.start_with?("__tmp_") && @guarded_cleanup_names&.[](n) }
       .map { |n| MIR::MoveMark.new(n) }
   end
 end

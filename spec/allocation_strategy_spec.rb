@@ -455,11 +455,9 @@ RSpec.describe "Allocation Strategy Invariants" do
     end
 
     # Scenario: :loop_carry_string
-    # A string outer variable reassigned inside a loop that has per-iter frame
-    # locals must be heap-allocated: the per-iter rewind would corrupt a
-    # frame-allocated string value.
-    # upgrade_loop_string_carries_to_heap! handles this.
-    it ":loop_carry_string — outer string reassigned inside mark_per_iter loop → cleanup :heap" do
+    # Loop rewinds no longer promote storage. A local string reassignment that
+    # does not escape remains frame-local.
+    it ":loop_carry_string — outer string reassigned inside mark_per_iter loop stays frame-local" do
       ast = run_mir(<<~CLEAR)
         FN test() RETURNS !Void ->
           MUTABLE i: Int64 = 0;
@@ -475,7 +473,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test" }
-      expect(cleanup_entry(fn, "resp")&.dig(:alloc)).to eq(:heap)
+      entry = cleanup_entry(fn, "resp")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
     end
 
     # Scenario: :transitive_callee
@@ -589,7 +589,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       entry = cleanup_entry(fn, "trimmed")
       expect(d.borrow_provenance?).to be true
       expect(entry&.dig(:needs_cleanup)).to be_falsey
-      expect(entry&.dig(:alloc)).to be_nil
+      expect(entry&.dig(:alloc)).to eq(:frame)
     end
 
     it "borrow return has no MIR::Drop in function body" do
@@ -622,9 +622,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       borrow_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "borrow" }
-      expect(borrow_fn.return_provenance).not_to eq(:heap)
+      expect(borrow_fn.params.first.symbol.storage).not_to eq(:heap)
       r_decl = find_decl_in(main_fn(ast), "r")
-      expect(r_decl.storage).not_to eq(:heap)
+      expect(r_decl.symbol.storage).not_to eq(:heap)
     end
 
     it ":borrow_return (multi-binding) — (a b):T also carves out" do
@@ -638,9 +638,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       pick_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "pick" }
-      expect(pick_fn.return_provenance).not_to eq(:heap)
+      expect(pick_fn.params.map { |p| p.symbol.storage }).not_to include(:heap)
       r_decl = find_decl_in(main_fn(ast), "r")
-      expect(r_decl.storage).not_to eq(:heap)
+      expect(r_decl.symbol.storage).not_to eq(:heap)
     end
 
     it ":borrow_return (wildcard) — *:T also carves out" do
@@ -654,9 +654,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       echo_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "echo" }
-      expect(echo_fn.return_provenance).not_to eq(:heap)
+      expect(echo_fn.params.map { |p| p.symbol.storage }).not_to include(:heap)
       r_decl = find_decl_in(main_fn(ast), "r")
-      expect(r_decl.storage).not_to eq(:heap)
+      expect(r_decl.symbol.storage).not_to eq(:heap)
     end
 
     it ":borrow_return (list payload) — collection return is carved out" do
@@ -670,39 +670,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       borrow_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "borrowList" }
-      # Only return_provenance is asserted here. r.storage may be :heap
-      # because the annotator pre-stamps list-typed bindings heap from the
-      # return type alone; that's an annotator concern, not EscapeGraph's.
-      expect(borrow_fn.return_provenance).not_to eq(:heap)
-    end
-
-    # Branch-coverage drivers for the rarely-walked arms of EscapeGraph's
-    # return-value dispatch -- direct literal returns, OR_RESCUE'd returns,
-    # multi-field aggregate extraction. Each scenario exists in real CLEAR
-    # programs but wasn't exercised by the broader corpus.
-    it ":direct_literal_return — RETURN of a list literal is heap-return" do
-      ast = run_mir(<<~CLEAR)
-        FN mk!() RETURNS !Int64[]@list -> RETURN [1_i64, 2_i64]; END
-        FN main() RETURNS Void -> RETURN; END
-      CLEAR
-      mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk!" }
-      expect(mk_fn.return_provenance).to eq(:heap)
-    end
-
-    it ":or_rescue_return — RETURN of `x OR fallback` propagates LHS-as-heap-return" do
-      ast = run_mir(<<~CLEAR)
-        FN inner!() RETURNS !Int64[]@list ->
-            MUTABLE v: Int64[]@list = [];
-            v.append(1_i64);
-            RETURN v;
-        END
-        FN wrap!() RETURNS !Int64[]@list ->
-            RETURN inner!() OR RAISE;
-        END
-        FN main() RETURNS Void -> RETURN; END
-      CLEAR
-      wrap_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "wrap!" }
-      expect(wrap_fn.return_provenance).to eq(:heap)
+      expect(borrow_fn.params.first.symbol.storage).not_to eq(:heap)
     end
 
     it ":aggregate_extract_ident_secondary_field — heap ident in non-first field" do

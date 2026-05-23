@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../ast/ast"
 # Auto inference — Pass B (constraint collection).
 #
 # Given a parsed program and the @fn_nodes registry produced by
@@ -42,7 +43,9 @@ class AutoConstraintCollector
   # this cached copy.
   Slot = Struct.new(:kind, :fn_name, :index, :decl_node, :sources, :shape, :auto_token, keyword_init: true)
 
-  sig { params(fn_nodes: T::Hash[String, T.untyped]).void }
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+
+  sig { params(fn_nodes: FnNodes).void }
   def initialize(fn_nodes)
     # fn_nodes: { name => AST::FunctionDef }, exactly as the existing
     # annotator's signature-collection pass produces.
@@ -526,7 +529,7 @@ end
 class ShapeEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
+  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
@@ -684,7 +687,7 @@ end
 class OperatorEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: T::Hash[String, T.untyped]).void }
+  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes

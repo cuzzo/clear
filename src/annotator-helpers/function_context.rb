@@ -5,8 +5,9 @@ require "sorbet-runtime"
 # that were manually reset in visit_FunctionDef and could leak across functions.
 class FunctionContext
     extend T::Sig
+  LifetimeSource = T.type_alias { T.any(String, Symbol) }
 
-  attr_accessor :name, :lifetime, :type_params,
+  attr_accessor :name, :type_params,
                 :frame_count, :heap_count, :alloc_count,
                 :needs_rt,  # explicit "fn body references rt" flag (independent of allocation counters)
                 :loop_depth, :conditional_depth, :returns,
@@ -19,17 +20,20 @@ class FunctionContext
   sig { returns(Type) }
   attr_reader :return_type
 
+  sig { returns(T::Array[LifetimeSource]) }
+  attr_reader :lifetime
+
   sig { params(val: T.untyped).void }
   def return_type=(val)
     @return_type = val.nil? ? Type.new(:Void) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
-  sig { params(name: String, return_type: T.nilable(Type), lifetime: T.nilable(T::Array[String]), type_params: T::Array[Symbol]).void }
-  def initialize(name:, return_type: nil, lifetime: nil, type_params: [])
+  sig { params(name: String, return_type: T.nilable(Type), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
+  def initialize(name:, return_type: nil, lifetime: [], type_params: [])
     @name = name
     @return_type = T.let(Type.new(:Void), Type)
     self.return_type = return_type
-    @lifetime = lifetime
+    @lifetime = T.let(lifetime, T::Array[LifetimeSource])
     @type_params = type_params
     @frame_count = T.let(0, Integer)
     @heap_count = T.let(0, Integer)

@@ -1356,7 +1356,7 @@ module MIR
   # ================================================================
 
   # Marks an allocation point. Subsumes old MIR::Alloc.
-  AllocMark = Struct.new(:name, :alloc, :type_info) do
+  AllocMark = Struct.new(:name, :alloc, :type_info, :scope) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }
@@ -1408,9 +1408,15 @@ module MIR
 
   # Function call.
   # Zig: [try] callee(args)
-  # heap_provenance: true if return type is heap-allocated (for HPT_LEAK check).
-  Call = Struct.new(:callee, :args, :try_wrap, :heap_provenance) do
+  #
+  # `owned_return` is a checker-visible structural fact from lowering:
+  # this call returns an owning value that must be bound/cleaned or
+  # transferred. The emitter ignores it.
+  Call = Struct.new(:callee, :args, :try_wrap, :owned_return) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def owned_return? = owned_return == true
   end
 
   # Tail call (emits @call(.always_tail, callee, .{args})).
@@ -1519,7 +1525,7 @@ module MIR
   # Try-catch expression.
   # Zig: expr catch |err| fallback
   # or   (expr catch fallback)
-  TryCatch = Struct.new(:expr, :catch_body, :capture, :heap_provenance) do
+  TryCatch = Struct.new(:expr, :catch_body, :capture) do
     include Expr
     # capture: error variable name or nil
   end

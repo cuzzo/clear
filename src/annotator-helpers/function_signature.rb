@@ -3,7 +3,7 @@
 # Replaces the plain Hash that was previously used for function signatures.
 #
 # Carries both the static signature (params, return type, visibility) and
-# computed metadata (needs_rt, can_fail, return_provenance) that callers
+# computed metadata (needs_rt, can_fail) that callers
 # need for code generation and cleanup planning.
 require "sorbet-runtime"
 require_relative "intrinsic_emit"
@@ -11,10 +11,19 @@ require_relative "function_return"
 
 class FunctionSignature
     extend T::Sig
+  LifetimeSource = T.type_alias { T.any(String, Symbol) }
 
   # Static signature fields (set at creation)
   attr_reader :visibility, :type_params, :reentrant
-  attr_accessor :return_lifetime, :return_strategy
+  attr_accessor :return_strategy
+
+  sig { returns(T::Array[LifetimeSource]) }
+  attr_reader :return_lifetime
+
+  sig { params(val: T.untyped).void }
+  def return_lifetime=(val)
+    @return_lifetime = normalize_lifetime(val)
+  end
 
   # Always a list of AST::Param (coerced at the seam). No Hash.
   sig { returns(T::Array[AST::Param]) }
@@ -37,7 +46,7 @@ class FunctionSignature
   attr_accessor :fn_type_params, :owner_type, :owner_type_params
 
   # Computed metadata (set after annotation passes)
-  attr_accessor :needs_rt, :can_fail, :alloc_fault, :error_fallible, :return_provenance, :effects, :stack_tier
+  attr_accessor :needs_rt, :can_fail, :alloc_fault, :error_fallible, :effects, :stack_tier
 
   # Intrinsic marker
   attr_accessor :intrinsic, :zig_pattern
@@ -96,11 +105,13 @@ class FunctionSignature
     sig.can_fail = fn.can_fail if fn.respond_to?(:can_fail)
     sig.alloc_fault = fn.alloc_fault if fn.respond_to?(:alloc_fault)
     sig.error_fallible = fn.error_fallible if fn.respond_to?(:error_fallible)
-    sig.return_provenance = fn.return_provenance if fn.respond_to?(:return_provenance)
     sig.effects = fn.effects if fn.respond_to?(:effects)
     sig.requires = fn.requires if fn.respond_to?(:requires)
     sig.return_strategy = fn.return_strategy if fn.respond_to?(:return_strategy)
+    sig.return_type = fn.return_type if fn.respond_to?(:return_type) && fn.return_type
     sig.stack_tier = fn.stack_tier if fn.respond_to?(:stack_tier)
+    sig.heap_carry_return = fn.heap_carry_return if fn.respond_to?(:heap_carry_return)
+    sig.heap_carry_return_vars = fn.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
     sig
   end
 
@@ -113,7 +124,8 @@ class FunctionSignature
     @params = params
     @return_type = T.let(Type.new(:Void), Type)
     self.return_type = return_type
-    @return_lifetime = return_lifetime
+    @return_lifetime = T.let([], T::Array[LifetimeSource])
+    self.return_lifetime = return_lifetime
     @visibility = visibility
     @type_params = type_params
     @reentrant = reentrant
@@ -129,11 +141,12 @@ class FunctionSignature
     @can_fail          = T.let(nil, T.untyped)
     @alloc_fault       = T.let(nil, T.untyped)
     @error_fallible    = T.let(nil, T.untyped)
-    @return_provenance = T.let(nil, T.untyped)
     @effects           = T.let(nil, T.untyped)
     @return_strategy   = T.let(nil, T.untyped)
     @stack_tier        = T.let(nil, T.untyped)
     @requires          = T.let(nil, T.untyped)
+    @heap_carry_return = T.let(nil, T.untyped)
+    @heap_carry_return_vars = T.let(nil, T.untyped)
     @arg_validator     = T.let(nil, T.nilable(Proc))
     @arg_spec          = T.let(nil, T.untyped)
     @arity             = T.let(nil, T.nilable(Integer))
@@ -148,6 +161,22 @@ class FunctionSignature
   sig { returns(T::Boolean) }
   def fixed_return? = @return_def.fixed?
 
+  sig { returns(T.untyped) }
+  def heap_carry_return = @heap_carry_return
+
+  sig { params(val: T.untyped).void }
+  def heap_carry_return=(val)
+    @heap_carry_return = val
+  end
+
+  sig { returns(T.untyped) }
+  def heap_carry_return_vars = @heap_carry_return_vars
+
+  sig { params(val: T.untyped).void }
+  def heap_carry_return_vars=(val)
+    @heap_carry_return_vars = val
+  end
+
   sig { returns(FunctionSignature) }
   def dup
     FunctionSignature.new(
@@ -160,16 +189,32 @@ class FunctionSignature
     ).tap do |s|
       s.needs_rt = @needs_rt
       s.can_fail = @can_fail
-      s.return_provenance = @return_provenance
       s.effects = @effects
       s.return_strategy = @return_strategy
       s.stack_tier = @stack_tier
       s.requires = @requires
+      s.heap_carry_return = @heap_carry_return
+      s.heap_carry_return_vars = @heap_carry_return_vars
       s.arg_validator = @arg_validator
       s.arg_spec = @arg_spec
       s.arity = @arity
       s.emit = @emit
       s.return_def = @return_def
+    end
+  end
+
+  private
+
+  sig { params(val: T.untyped).returns(T::Array[LifetimeSource]) }
+  def normalize_lifetime(val)
+    return [] if val.nil?
+    raw = val.is_a?(Array) ? val : [val]
+    raw.map do |item|
+      if item.respond_to?(:name)
+        item.name.to_s
+      else
+        T.cast(item.is_a?(Symbol) ? item : item.to_s, LifetimeSource)
+      end
     end
   end
 end

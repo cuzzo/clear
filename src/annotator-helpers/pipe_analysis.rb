@@ -6,6 +6,9 @@ require 'set'
 
 module PipeAnalysis
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # =========================================================
   # SMOOTH OPERATOR (|>)
@@ -130,8 +133,10 @@ module PipeAnalysis
   sig { returns(T.nilable(T::Boolean)) }
   def has_catch_blocks?
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[T.untyped, T.untyped]))
-    fn = @fn_nodes&.dig(current_fn_ctx&.name)
+    fn_name = current_fn_ctx&.name
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn = fn_name ? fn_nodes[fn_name] : nil
     fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
   end
 

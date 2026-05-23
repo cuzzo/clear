@@ -19,17 +19,14 @@
 #
 # Oracle: every cell must COMPILE, RUN, its ASSERT hold, and -- via the
 # runner's aggregated DebugAllocator pass -- leak ZERO and double-free
-# ZERO. Cells known-broken on the pre-refactor HEAD are marked :in_dev
-# with the observed reason (so the baseline is green); the collapse
-# refactor flips them to :pass with everything else still green.
+# ZERO. Every generated cell is active; broken ownership transfer must fail
+# the fuzz run instead of being parked.
 #
 # Every producer yields length 2 so the caller assert is uniform.
 
 # [value, ret_form, bind_form, decl] tuples that FAIL on the
-# pre-refactor HEAD (compile error / leak / double-free). Empirically
-# harvested, not guessed. These are exactly the heap-ownership
-# over-complexity manifesting; the collapse refactor must flip every
-# one of them to :pass with zero regressions elsewhere.
+# pre-refactor HEAD (compile error / leak / double-free). Kept empty now:
+# no heap-ownership transfer cell may be parked.
 HOT_KNOWN_FAILING = [].freeze
 
 HOT_CELLS = []
@@ -63,7 +60,7 @@ HOT_CELLS = []
         next if ret_form == :or_rescue && decl == :plain
 
         key = [value, ret_form, bind_form, decl]
-        expected = HOT_KNOWN_FAILING.include?(key) ? :in_dev : :pass
+        expected = :pass
         HOT_CELLS << { value: value, ret_form: ret_form,
                        bind_form: bind_form, decl: decl, expected: expected }
       end

@@ -29,6 +29,10 @@
 #     container binding's AllocMark allocator. Frame data stored in a
 #     heap container becomes a dangling pointer after frame rewind.
 #
+#   INV-ALLOCATOR-CLOSED-SET: MIR allocator facts are closed to :heap
+#     and :frame. Any other symbol means a downstream pass is carrying
+#     placement side-channel state instead of finalized placement.
+#
 #   INV-FRAME-REWIND: Every loop body that frame-allocates must contain
 #     a restoreLoopMark defer to prevent unbounded frame arena growth.
 #
@@ -66,6 +70,7 @@
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
 require "sorbet-runtime"
+require "set"
 
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
@@ -81,12 +86,9 @@ class MIRChecker
     @errors = T.let([], T::Array[T.untyped])
   end
 
-  # strict: true enables the UNHOISTED_ALLOC check.
-  # Disabled by default until Phase 1-3 hoisting is complete -- enabling it
-  # on the current codebase would flag every string return, @indirect field,
-  # and list literal that hasn't been hoisted yet.  Each phase task fixes a
-  # category and re-enables the check for that category.  Once all violations
-  # are resolved this parameter will be removed and the check always runs.
+  # `strict` is retained for call-site compatibility only. MIR ownership
+  # checks are always strict: an unhoisted allocation or provenance placement
+  # side channel is a compiler bug, not an optional lint.
   sig { params(fn_def: MIR::FnDef, strict: T::Boolean).returns(T::Array[String]) }
   def check_fn!(fn_def, strict: false)
     @fn_name = fn_def.name
@@ -117,6 +119,9 @@ class MIRChecker
         end
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
+        if node.init.is_a?(MIR::InlineZig) && node.init.allocs
+          inline_alloc_nodes << node.init
+        end
         all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
@@ -145,6 +150,7 @@ class MIRChecker
     end
 
     hpt_leaks.each { |e| @errors << e }
+    verify_allocator_closed_set!(allocs, cleanups, inline_alloc_nodes)
     verify_owned_return_alloc_marks!(owned_return_lets, allocs)
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
@@ -152,7 +158,8 @@ class MIRChecker
     verify_zig_contracts!(all_zig_nodes)
     verify_raw_justified!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
-    verify_unhoisted_allocs!(fn_def.body) if strict
+    verify_inline_alloc_targets!(inline_alloc_nodes)
+    verify_unhoisted_allocs!(fn_def.body)
     verify_heap_create_single_indirection!(fn_def.body)
 
     @errors
@@ -201,8 +208,8 @@ class MIRChecker
 
   sig { params(init: T.untyped).returns(T::Boolean) }
   def owned_return_init?(init)
-    return true if init.is_a?(MIR::Call) && init.heap_provenance
-    return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
+    return true if init.is_a?(MIR::Call) && init.owned_return?
+
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
       # Receiver-dependent (Proc-resolved) returns -- collection
@@ -373,6 +380,70 @@ class MIRChecker
 
   private
 
+  VALID_ALLOCATORS = T.let([:heap, :frame].freeze, T::Array[Symbol])
+  VALID_ALLOC_SCOPES = T.let([:heap, :function, :iteration].freeze, T::Array[Symbol])
+
+  sig do
+    params(
+      allocs: T::Hash[String, T::Array[T.untyped]],
+      cleanups: T::Hash[String, T::Array[T.untyped]],
+      inline_nodes: T::Array[T.untyped],
+    ).returns(T.nilable(T::Array[T.untyped]))
+  end
+  def verify_allocator_closed_set!(allocs, cleanups, inline_nodes)
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        next if VALID_ALLOCATORS.include?(mark.alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "AllocMark uses #{mark.alloc.inspect}; MIR allocator facts must be :heap or :frame")
+      end
+    end
+
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        scope = mark.respond_to?(:scope) ? mark.scope : nil
+        next if VALID_ALLOC_SCOPES.include?(scope)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "AllocMark has scope #{scope.inspect}; MIR allocation lifetime must be :heap, :function, or :iteration")
+      end
+    end
+
+    cleanups.each do |name, nodes|
+      nodes.each do |cleanup|
+        alloc = cleanup.cleanup_entry.alloc
+        next if VALID_ALLOCATORS.include?(alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "#{cleanup.class.name} uses #{alloc.inspect}; MIR cleanup allocators must be :heap or :frame")
+      end
+    end
+
+    inline_nodes.each do |node|
+      next unless node.allocs
+      node.allocs.each do |alloc_key, alloc|
+        next if VALID_ALLOCATORS.include?(alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, node.target_var || node.reason || "inline_zig",
+          "InlineZig #{alloc_key} uses #{alloc.inspect}; MIR allocator metadata must be :heap or :frame")
+      end
+    end
+  end
+
+  # INV-INLINE-TARGET: allocator-bearing InlineZig must name the binding or
+  # receiver whose placement it consumes. Without that target, the checker
+  # cannot compare allocator use to authoritative placement and lowering can
+  # smuggle local guesses through codegen.
+  sig { params(inline_nodes: T::Array[T.anything]).returns(T.nilable(T::Array[T.anything])) }
+  def verify_inline_alloc_targets!(inline_nodes)
+    inline_nodes.each do |node|
+      unsafe_node = T.unsafe(node)
+      next unless unsafe_node.allocs && !unsafe_node.allocs.empty?
+      next if unsafe_node.target_var && !unsafe_node.target_var.to_s.empty?
+
+      @errors << error(:INLINE_ALLOC_WITHOUT_TARGET, unsafe_node.reason || "inline_zig",
+        "InlineZig has allocator metadata #{unsafe_node.allocs.inspect} but no target_var; " \
+        "allocator use is not checker-verifiable against binding placement")
+    end
+  end
+
   # Tree walker -- yields every node in the MIR tree.
   sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def walk_mir(stmts, &block)
@@ -427,15 +498,10 @@ class MIRChecker
   sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
-    if node.is_a?(MIR::Call) && node.heap_provenance
+    if node.is_a?(MIR::Call) && node.owned_return?
       leaks << error(:HPT_LEAK, node.callee,
-        "heap-returning call result not bound to variable (leak)")
-    end
-    if node.is_a?(MIR::TryCatch) && node.heap_provenance
-      leaks << error(:HPT_LEAK, "try-catch",
-        "heap-returning try/catch result not bound to variable (leak)")
-    end
-    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
+        "owned-return call result not bound to variable (leak)")
+    elsif (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
        node.stdlib_def.fixed_return?
       ret = node.stdlib_def.return_type
       unless ret.void?
@@ -459,20 +525,20 @@ class MIRChecker
     inline_nodes.each do |iz|
       next unless iz.allocs
       target = iz.target_var
-      next unless target && allocs.key?(target)
+      next unless target && !target.to_s.empty?
+
+      unless allocs.key?(target)
+        @errors << error(:INLINE_ALLOC_WITHOUT_ALLOCMARK, target,
+          "InlineZig has allocator metadata #{iz.allocs.inspect} for '#{target}' but no MIR::AllocMark")
+        next
+      end
 
       container_alloc = T.must(allocs[target]).first.alloc
 
-      # Check primary allocator. :cleanup is a mixed-provenance
-      # container -- it tolerates any op allocator (the runtime
-      # cleanupAlloc.free dispatches per-pointer). Per the
-      # "one collection = one allocator" policy this kind is being
-      # phased out, but while it exists it's correct for ops to use
-      # the actual element's allocator (often :frame) inside a
-      # :cleanup container.
+      # Check primary allocator.
       if iz.allocs.key?(:alloc)
         op_alloc = iz.allocs[:alloc]
-        if op_alloc != container_alloc && container_alloc != :cleanup
+        if op_alloc != container_alloc
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
         end
@@ -670,7 +736,9 @@ class MIRChecker
     end
   end
 
-  # FRAME_NO_REWIND: every loop that frame-allocates must rewind per iteration.
+  # FRAME_NO_REWIND: every iteration-scoped frame allocation must be inside a
+  # loop restore, and every restored loop may contain only iteration-scoped
+  # frame allocations.
   #
   # Post-lowering check: walks the MIR tree looking for loops that contain
   # frame AllocMarks or InlineZig with frame allocs but lack mark_per_iter.
@@ -690,10 +758,16 @@ class MIRChecker
         # Structural check: verify the actual DeferStmt(restoreLoopMark) is present,
         # not a flag. This catches lowerer bugs where mark_per_iter is set but the
         # defer was not emitted, and unifies the check with the actual MIR structure.
-        unless stmt.tight || body_has_loop_restore?(stmt.body)
-          if body_has_frame_alloc?(stmt.body)
+        has_restore = body_has_loop_restore?(stmt.body)
+        if !stmt.tight && !has_restore
+          if body_has_iteration_frame_alloc?(stmt.body)
             @errors << error(:FRAME_NO_REWIND, @fn_name,
-              "loop body frame-allocates but has no restoreLoopMark defer")
+              "loop body has iteration-scoped frame allocations but no restoreLoopMark defer")
+          end
+        elsif has_restore
+          if body_has_non_iteration_frame_alloc?(stmt.body)
+            @errors << error(:FRAME_NO_REWIND, @fn_name,
+              "loop restore encloses frame allocations not scoped to one iteration")
           end
         end
         check_loop_rewind!(stmt.body)
@@ -750,40 +824,49 @@ class MIRChecker
     end
   end
 
-  # Does this statement list contain frame allocations, recursing into all
+  # Does this statement list contain iteration-scoped frame allocations,
+  # recursing into branch/block nodes but stopping at nested loop and
+  # fiber/lambda boundaries.
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  def body_has_iteration_frame_alloc?(stmts)
+    body_has_frame_alloc_scope?(stmts) { |scope| scope == :iteration }
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  def body_has_non_iteration_frame_alloc?(stmts)
+    body_has_frame_alloc_scope?(stmts) { |scope| scope != :iteration }
+  end
+
+  # Does this statement list contain frame allocations matching a scope
+  # predicate, recursing into all
   # branch/block nodes (IfStmt, SwitchStmt, IfChain, ScopeBlock, BlockExpr)
   # but stopping at nested loop and fiber/lambda boundaries.
   # Mirrors the same traversal used by check_loop_rewind! so both methods
   # see the same nodes -- no special-cased paths.
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
-  def body_has_frame_alloc?(stmts)
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
+  def body_has_frame_alloc_scope?(stmts, &block)
     return false unless stmts.is_a?(Array)
     stmts.any? do |s|
       case s
       when MIR::AllocMark
-        s.alloc == :frame
-      when MIR::ExprStmt
-        expr_has_frame_alloc?(s.expr)
-      when MIR::Let
-        expr_has_frame_alloc?(s.init)
-      when MIR::BatchWindowPush
-        expr_has_frame_alloc?(s.item_expr) || expr_has_frame_alloc?(s.value_expr)
-      when MIR::BatchWindowFlush
-        expr_has_frame_alloc?(s.value_expr)
+        next false unless s.alloc == :frame
+        scope = T.unsafe(s).scope
+        scope = scope.is_a?(Symbol) ? scope : :unknown
+        block.call(scope)
       when MIR::IfStmt
-        body_has_frame_alloc?(s.then_body) || body_has_frame_alloc?(s.else_body)
+        body_has_frame_alloc_scope?(s.then_body, &block) || body_has_frame_alloc_scope?(s.else_body, &block)
       when MIR::ScopeBlock, MIR::BlockExpr
-        body_has_frame_alloc?(s.body)
+        body_has_frame_alloc_scope?(s.body, &block)
       when MIR::SwitchStmt
-        (s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }) ||
-          body_has_frame_alloc?(s.default_body)
+        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) } ||
+          body_has_frame_alloc_scope?(s.default_body, &block)
       when MIR::IfChain
-        (s.branches&.any? { |b| body_has_frame_alloc?(b[:body]) }) ||
-          body_has_frame_alloc?(s.default_body)
+        s.branches.any? { |b| body_has_frame_alloc_scope?(b[:body], &block) } ||
+          body_has_frame_alloc_scope?(s.default_body, &block)
       when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        body_has_frame_alloc?(s.body)
+        body_has_frame_alloc_scope?(s.body, &block)
       when MIR::WithMatchDispatch
-        s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }
+        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) }
       # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops are checked independently
       # MIR::BgBlock, MIR::LambdaExpr: stop -- separate fiber/function frame scopes
       else

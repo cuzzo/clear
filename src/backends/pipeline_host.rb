@@ -539,7 +539,7 @@ class PipelineHost
   # per binding; the pipeline is placed like every other value.
   sig { returns(Symbol) }
   def pipeline_result_alloc
-    @lowering.instance_variable_get(:@decl_alloc) == :heap ? :heap : :frame
+    @lowering.instance_variable_get(:@current_decl_alloc) == :heap ? :heap : :frame
   end
 
   # Convert allocator symbol to Zig string (for InlineZig content only).
@@ -550,6 +550,34 @@ class PipelineHost
     when :frame then "rt.frameAlloc()"
     else "rt.heapAlloc()"
     end
+  end
+
+  sig { returns(T.nilable(Proc)) }
+  def pipeline_schema_lookup
+    T.unsafe(@lowering).instance_variable_get(:@schema_lookup)
+  end
+
+  sig { params(type_info: T.untyped).returns(T::Boolean) }
+  def cleanup_bearing_type?(type_info)
+    ti = Type.from_node(type_info)
+    return false unless ti
+    ti.recursive_cleanup_shape?(pipeline_schema_lookup)
+  end
+
+  sig do
+    params(name: String, source: T.untyped, type_info: T.untyped,
+           zig_type: String, alloc: Symbol).returns(T::Array[T.untyped])
+  end
+  def owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
+    ti = Type.from_node!(type_info, context: "pipeline ownership boundary")
+    mark = MIR::AllocMark.new(name, alloc, ti)
+    mark.scope = alloc == :heap ? :heap : :iteration
+    entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
+    [
+      mark,
+      MIR::Let.new(name, MIR::DeepCopy.new(source, zig_type, nil, :full_value, alloc), false, zig_type, nil),
+      MIR::ErrCleanup.new(name, entry),
+    ]
   end
 
   # stdlib_def for InlineZig nodes that pass an allocator (borrows only).
@@ -1078,7 +1106,7 @@ class PipelineHost
 
   sig { params(smooth_node: AST::BinaryOp).returns(Symbol) }
   def pipeline_alloc(smooth_node)
-    smooth_node.respond_to?(:storage) && smooth_node.storage == :heap ? :heap : :frame
+    pipeline_result_alloc
   end
 
   sig { params(site: PipelineHost::PipelineSite, expr_node: T.untyped).returns(MIR::BlockExpr) }
@@ -1777,7 +1805,6 @@ class PipelineHost
   sig { params(mir: T.untyped).returns(T::Boolean) }
   def mir_allocates_owned_string?(mir)
     return false unless mir
-    return true if mir.respond_to?(:heap_provenance) && mir.heap_provenance
     return true if mir.is_a?(MIR::DupeSlice)
     return true if mir.is_a?(MIR::ConcatStr)
     if mir.is_a?(MIR::Call)
@@ -1870,9 +1897,12 @@ class PipelineHost
     left_zig  = transpile_type(list_node.full_type.element_type.resolved.to_s)
     right_src_mir = visit_mir(join_node.right_source)
     right_type_info = join_node.right_source.full_type
+    left_type_info = list_node.full_type.element_type
     right_zig = transpile_type(right_type_info.element_type.resolved.to_s)
     result_zig = "struct { left: #{left_zig}, right: ?#{right_zig} }"
-    alloc = :frame
+    alloc = pipeline_result_alloc
+    left_owns = cleanup_bearing_type?(left_type_info)
+    right_owns = cleanup_bearing_type?(right_type_info.element_type)
 
     key_expr = join_node.key_expr
     is_lambda = key_expr.is_a?(AST::LambdaLit)
@@ -1895,6 +1925,12 @@ class PipelineHost
     source_mir = visit_mir(list_node)
     @current_pipe_label = label
 
+    left_value = left_owns ? MIR::Ident.new("__jl_owned") : MIR::Ident.new("__jl")
+    right_value = MIR::Ident.new("__match")
+    after_append = []
+    after_append << MIR::MoveMark.new("__jl_owned") if left_owns
+    after_append << MIR::MoveMark.new("__match") if right_owns
+
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__jl_src", source_mir, false, nil, nil),
       MIR::Let.new("__jr_src", right_src_mir, false, nil, nil),
@@ -1907,19 +1943,26 @@ class PipelineHost
           :list_empty, alloc, nil), true, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
         MIR::Let.new("__match", MIR::Lit.new("null"), true, "?#{right_zig}", nil),
+        *(right_owns ? [
+          MIR::ErrCleanup.new("__match",
+            CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: "?#{right_zig}")),
+        ] : []),
         MIR::ForStmt.new(MIR::Ident.new("__jr_items"), "__jr", [
           MIR::IfStmt.new(pred_mir, [
-            MIR::Set.new(MIR::Ident.new("__match"), MIR::Ident.new("__jr")),
+            MIR::Set.new(MIR::Ident.new("__match"),
+              right_owns ? MIR::DeepCopy.new(MIR::Ident.new("__jr"), right_zig, nil, :full_value, alloc) : MIR::Ident.new("__jr")),
             MIR::BreakStmt.new(nil, nil),
           ], nil)
         ], nil),
+        *(left_owns ? owning_pipeline_temp_stmts("__jl_owned", MIR::Ident.new("__jl"), left_type_info, left_zig, alloc) : []),
         MIR::ExprStmt.new(MIR::MethodCall.new(
           MIR::Ident.new("res_list"), "append",
           [MIR::AllocatorRef.new(alloc),
            MIR::StructInit.new(nil, [
-             {name: "left",  value: MIR::Ident.new("__jl")},
-             {name: "right", value: MIR::Ident.new("__match")}])],
-          true), nil)
+             {name: "left",  value: left_value},
+             {name: "right", value: right_value}])],
+          true), nil),
+        *after_append
       ], nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
     ])

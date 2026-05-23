@@ -804,7 +804,7 @@ RSpec.describe ZigTranspiler do
   # Function-level frame mark (saveFrameMark / restoreFrameMark)
   # ===========================================================================
   describe "function-level frame mark" do
-    it "emits saveFrameMark for uses_alloc function returning Void" do
+    it "does not emit saveFrameMark for heap-only allocator use returning Void" do
       src = <<~CLEAR
         FN f(s: String) RETURNS !Void ->
           parts = split(s, ",");
@@ -816,7 +816,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("saveFrameMark")
+      expect(zig).not_to include("saveFrameMark")
     end
 
     it "skips frame mark for frame-string-returning function (result in caller's frame region)" do
@@ -839,7 +839,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("__pr_body")
     end
 
-    it "emits saveFrameMark for function returning an ENUM value (value type)" do
+    it "does not emit saveFrameMark for heap-only allocator use returning an ENUM value" do
       src = <<~CLEAR
         ENUM Status { Ok, Err }
         FN check(s: String) RETURNS !Status ->
@@ -852,8 +852,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Enums are value types (returned by copy), so frame mark is safe.
-      expect(zig).to include("saveFrameMark")
+      expect(zig).not_to include("saveFrameMark")
     end
   end
 
@@ -877,7 +876,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
     end
 
     it "moves owned map assignment values without deep-copying them" do
@@ -894,7 +893,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
     end
 
     it "emits source_moved for MATCH AS on non-Copy variant (auto-TAKES)" do
@@ -1036,8 +1035,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The temp from makeStr() is heap-allocated and hoisted to __tmp_N. Must be freed.
-      expect(zig).to match(/heapAlloc\(\)\.free|defer.*makeStr|__tmp/)
+      # The temp from makeStr() is heap-allocated and hoisted before cleanup classification.
+      expect(zig).to match(/defer.*__hoist_\d+/)
     end
   end
 
@@ -1141,10 +1140,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # wrapper() should return makeValue() directly, not via __hpt temp
+      # wrapper() may bind the returned value so ownership markers have a
+      # named target, but it must not use the deleted __hpt promotion path.
       fn_body = zig[zig.index("fn wrapper")..zig.index("fn clearMain")]
       expect(fn_body).not_to include("__hpt")
-      expect(fn_body).to include("return try makeValue")
+      expect(fn_body).to include("try makeValue")
+      expect(fn_body).to include("return __hoist_")
     end
   end
 
@@ -1163,9 +1164,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The RETURN Value{ List: items } must set items_moved = true
-      # so the TAKES defer doesn't double-free the returned data.
-      expect(zig).to match(/items_moved = true;.*\n(?:.*\n)*?\s*return Value/)
+      # Hoisting may name the union literal, but the move marker must be
+      # emitted before returning the hoisted value.
+      expect(zig).to match(/items_moved = true;.*\n(?:.*\n)*?\s*return __hoist_/)
     end
   end
 
@@ -1608,7 +1609,7 @@ RSpec.describe ZigTranspiler do
       # makeVal!() returns a heap-owning Value. useVal borrows it (non-TAKES).
       # The temporary must be hoisted to a named let with a cleanup defer,
       # otherwise the Lambda's @indirect body pointer leaks.
-      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__tmp_\d+\)/)
+      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__hoist_\d+\)/)
     end
 
     it "does not hoist Copy types (Int64) used as non-TAKES args" do
@@ -1623,8 +1624,8 @@ RSpec.describe ZigTranspiler do
     end
   end
 
-  describe "INV-1: HPT string dupe matches return_provenance" do
-    it "uses heapAlloc for dupe when function has heap return_provenance" do
+  describe "INV-1: HPT string dupe matches storage" do
+    it "uses heapAlloc for dupe when function has heap storage" do
       # Use a named binding so makeStr!'s result is properly cleaned up
       # (inline `transform!(makeStr!())` would leak the temp string -- ERRDEFER_LEAK).
       src = <<~CLEAR

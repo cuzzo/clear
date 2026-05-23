@@ -17,6 +17,9 @@ require 'set'
 
 module TestAnnotation
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
   # Used by `validate_strict_io!` to demand a STUB for any reachable
@@ -176,8 +179,9 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
-      @fn_nodes = T.let(@fn_nodes, T.untyped)
-      fn = @fn_nodes[name]
+      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+      fn_nodes = T.must(@fn_nodes)
+      fn = fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
         if has_io

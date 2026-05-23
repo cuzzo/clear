@@ -118,6 +118,7 @@ module MethodAnalysis
       resolved_defn.emit.alloc = alloc if alloc
       node.zig_pattern = zig
       node.matched_stdlib_def = resolved_defn
+      node.matched_signature = resolved_defn if node.respond_to?(:matched_signature=)
     end
 
     node.stdlib_allocates = true if em&.allocates

@@ -203,7 +203,8 @@ RSpec.describe "MIR pipeline comparison" do
     body.filter_map { |stmt|
       begin
         mir_node = lowering.lower(stmt)
-        new_zig = emitter.emit(mir_node)
+        mir_nodes = mir_node.is_a?(Array) ? mir_node : [mir_node]
+        new_zig = mir_nodes.map { |node| emitter.emit(node) }.join("\n")
         { ast_class: stmt.class.name, new_zig: new_zig }
       rescue => e
         { ast_class: stmt.class.name, error: e.message }

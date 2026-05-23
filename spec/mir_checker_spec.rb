@@ -1,5 +1,7 @@
 require 'bundler/setup'
+require_relative '../src/ast/ast'
 require_relative '../src/mir/mir'
+require_relative '../src/mir/cleanup_entry'
 require_relative '../src/mir/mir_checker'
 
 # Tests the post-lowering MIRChecker -- only two checks remain:
@@ -17,6 +19,14 @@ RSpec.describe MIRChecker do
     MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
   end
 
+  def alloc_mark(name, alloc, type_info = nil, scope: nil)
+    MIR::AllocMark.new(name, alloc, type_info, scope || (alloc == :heap ? :heap : :function))
+  end
+
+  def owned_call(name = "makeList")
+    MIR::Call.new(name, [MIR::Ident.new("rt")], false, true)
+  end
+
   # ===========================================================================
   # HPT_LEAK -- heap-returning call result discarded
   # ===========================================================================
@@ -25,7 +35,7 @@ RSpec.describe MIRChecker do
     it "flags a HeapCreate whose cell type is already a pointer" do
       hc = MIR::HeapCreate.new("*Val", MIR::Ident.new("v"), :heap, "blk")
       body = [
-        MIR::AllocMark.new("t", :heap),
+        alloc_mark("t", :heap),
         MIR::Let.new("t", hc, false, nil, nil),
         MIR::Cleanup.new("t", CleanupEntry.from({ kind: :heap, alloc: :heap, has_moved_guard: false })),
       ]
@@ -36,7 +46,7 @@ RSpec.describe MIRChecker do
     it "passes a HeapCreate boxing a bare pointee type" do
       hc = MIR::HeapCreate.new("[]const u8", MIR::Ident.new("s"), :heap, "blk")
       body = [
-        MIR::AllocMark.new("t", :heap),
+        alloc_mark("t", :heap),
         MIR::Let.new("t", hc, false, nil, nil),
         MIR::Cleanup.new("t", CleanupEntry.from({ kind: :heap, alloc: :heap, has_moved_guard: false })),
       ]
@@ -47,7 +57,7 @@ RSpec.describe MIRChecker do
 
   describe "HPT_LEAK" do
     it "detects discarded heap-returning call" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
         MIR::ExprStmt.new(call, true),
       ]
@@ -56,9 +66,9 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for heap-returning call bound to Let" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
-        MIR::AllocMark.new("x", :heap),
+        alloc_mark("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
         MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
       ]
@@ -67,7 +77,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects bound heap-returning call with no AllocMark" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
         MIR::Let.new("x", call, false, nil, nil),
       ]
@@ -76,9 +86,9 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for bound heap-returning call transferred out of scope" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
-        MIR::AllocMark.new("x", :heap),
+        alloc_mark("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
         MIR::TransferMark.new("x", :moved),
       ]
@@ -87,9 +97,9 @@ RSpec.describe MIRChecker do
     end
 
     it "detects bound heap-returning call marked allocated but neither cleaned nor transferred" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
-        MIR::AllocMark.new("x", :heap),
+        alloc_mark("x", :heap),
         MIR::Let.new("x", call, false, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("hpt_bound_alloc_only", body))
@@ -97,9 +107,9 @@ RSpec.describe MIRChecker do
     end
 
     it "detects heap-returning binding marked as frame-allocated" do
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [
-        MIR::AllocMark.new("x", :frame),
+        alloc_mark("x", :frame),
         MIR::Let.new("x", call, false, nil, nil),
         MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :frame, has_moved_guard: false })),
       ]
@@ -125,7 +135,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects heap call nested as argument" do
-      inner = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      inner = owned_call
       outer = MIR::Call.new("process", [inner], false)
       body = [
         MIR::ExprStmt.new(outer, true),
@@ -153,7 +163,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects HPT_LEAK inside nested lambda" do
-      inner_call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      inner_call = owned_call
       lambda_body = [
         MIR::ExprStmt.new(inner_call, true),
       ]
@@ -176,7 +186,7 @@ RSpec.describe MIRChecker do
       iz.allocs = { alloc: :heap }
       iz.target_var = "parts"
       body = [
-        MIR::AllocMark.new("parts", :frame),
+        alloc_mark("parts", :frame),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("mismatch_inline", body))
@@ -189,7 +199,7 @@ RSpec.describe MIRChecker do
       iz.target_var = "parts"
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::AllocMark.new("parts", :frame),
+        alloc_mark("parts", :frame),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("ok_inline", body))
@@ -202,7 +212,7 @@ RSpec.describe MIRChecker do
       iz.target_var = "map"
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::AllocMark.new("map", :heap),
+        alloc_mark("map", :heap),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("frame_val_in_heap", body))
@@ -216,7 +226,7 @@ RSpec.describe MIRChecker do
       cleanup = MIR::Cleanup.new("map", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false,
                                            zig_type: "CheatLib.StringMap(i64)" }))
       body = [
-        MIR::AllocMark.new("map", :heap),
+        alloc_mark("map", :heap),
         MIR::ExprStmt.new(iz, false),
         cleanup,
       ]
@@ -224,7 +234,7 @@ RSpec.describe MIRChecker do
       expect(errors).to be_empty
     end
 
-    it "skips operations on non-local containers (no AllocMark)" do
+    it "rejects operations on non-local containers without an AllocMark" do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :heap }
       iz.target_var = "external_list"
@@ -232,7 +242,7 @@ RSpec.describe MIRChecker do
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("external_ok", body))
-      expect(errors).to be_empty
+      expect(errors.join("\n")).to include("INLINE_ALLOC_WITHOUT_ALLOCMARK")
     end
 
     it "detects mismatch for InlineZig found directly (not wrapped in ExprStmt)" do
@@ -241,7 +251,7 @@ RSpec.describe MIRChecker do
       iz.target_var = "items"
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::AllocMark.new("items", :frame),
+        alloc_mark("items", :frame),
         iz,
       ]
       errors = checker.check_fn!(fn_def("direct_iz", body))
@@ -279,7 +289,11 @@ RSpec.describe MIRChecker do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :heap }
       iz.target_var = "items"
-      body = [MIR::ExprStmt.new(iz, false)]
+      body = [
+        alloc_mark("items", :heap, Type.new(:"String[]", collection: :list)),
+        MIR::TransferMark.new("items", :external_param),
+        MIR::ExprStmt.new(iz, false),
+      ]
       errors = checker.check_fn!(fn_with_ptr_param(body))
       expect(errors).to be_empty
     end
@@ -290,7 +304,7 @@ RSpec.describe MIRChecker do
       iz.target_var = "local_list"
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::AllocMark.new("local_list", :frame),
+        alloc_mark("local_list", :frame),
         MIR::ExprStmt.new(iz, false),
       ]
       # Plain locals: cross-frame doesn't apply. The other invariants may
@@ -318,7 +332,7 @@ RSpec.describe MIRChecker do
       iz.target_var = "anything"
       body = [
         MIR::FrameSave.new("rt"),
-        MIR::AllocMark.new("anything", :frame),
+        alloc_mark("anything", :frame),
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("paramless", body))
@@ -354,19 +368,19 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for function body with frame alloc (only loop-level checked)" do
-      body = [MIR::AllocMark.new("x", :frame)]
+      body = [alloc_mark("x", :frame)]
       errors = checker.check_fn!(fn_def("no_save", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
     it "passes for function body with only heap allocs" do
-      body = [MIR::AllocMark.new("x", :heap)]
+      body = [alloc_mark("x", :heap)]
       errors = checker.check_fn!(fn_def("heap_only", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
     it "detects loop with frame alloc but no restoreLoopMark defer" do
-      loop_body = [MIR::AllocMark.new("tmp", :frame)]
+      loop_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
@@ -376,7 +390,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for loop with restoreLoopMark defer (structural check)" do
-      loop_body = [loop_restore_defer, MIR::AllocMark.new("tmp", :frame)]
+      loop_body = [loop_restore_defer, alloc_mark("tmp", :frame, scope: :iteration)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
@@ -387,7 +401,7 @@ RSpec.describe MIRChecker do
 
     it "detects loop with mark_per_iter flag but no restoreLoopMark defer (lowerer bug)" do
       # mark_per_iter=true but lowerer failed to emit the defer -- checker catches it
-      loop_body = [MIR::AllocMark.new("tmp", :frame)]
+      loop_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
@@ -399,7 +413,8 @@ RSpec.describe MIRChecker do
     it "detects loop with frame InlineZig alloc but no restoreLoopMark defer" do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :frame }
-      loop_body = [MIR::ExprStmt.new(iz, false)]
+      iz.target_var = "tmp"
+      loop_body = [alloc_mark("tmp", :frame, scope: :iteration), MIR::ExprStmt.new(iz, false)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
@@ -411,7 +426,8 @@ RSpec.describe MIRChecker do
     it "detects ForStmt with frame Let init but no restoreLoopMark defer" do
       iz = MIR::InlineZig.new("try CheatLib.init({alloc})", "intrinsic")
       iz.allocs = { alloc: :frame }
-      loop_body = [MIR::Let.new("tmp", iz, false, nil, nil)]
+      iz.target_var = "tmp"
+      loop_body = [alloc_mark("tmp", :frame, scope: :iteration), MIR::Let.new("tmp", iz, false, nil, nil)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::ForStmt.new("i", MIR::Ident.new("items"), loop_body, nil, nil, nil),
@@ -421,7 +437,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects loop with frame alloc inside an if-branch (no restore)" do
-      if_body = [MIR::AllocMark.new("tmp", :frame)]
+      if_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
       body = [
         MIR::FrameSave.new("rt"),
@@ -432,7 +448,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects loop with frame alloc inside an else-branch (no restore)" do
-      else_body = [MIR::AllocMark.new("tmp", :frame)]
+      else_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), [], else_body)]
       body = [
         MIR::FrameSave.new("rt"),
@@ -443,7 +459,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects loop with frame alloc inside a ScopeBlock (no restore)" do
-      scope_body = [MIR::AllocMark.new("tmp", :frame)]
+      scope_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       loop_body = [MIR::ScopeBlock.new(scope_body)]
       body = [
         MIR::FrameSave.new("rt"),
@@ -454,7 +470,7 @@ RSpec.describe MIRChecker do
     end
 
     it "does NOT flag outer loop for frame alloc only inside a nested inner loop" do
-      inner_loop_body = [MIR::AllocMark.new("tmp", :frame)]
+      inner_loop_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       inner_loop = MIR::WhileStmt.new(MIR::Lit.new("true"), inner_loop_body, nil, nil, nil)
       outer_loop_body = [inner_loop]
       body = [
@@ -467,7 +483,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for loop with frame alloc inside if-branch when restoreLoopMark defer present" do
-      if_body = [MIR::AllocMark.new("tmp", :frame)]
+      if_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       loop_body = [loop_restore_defer, MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
       body = [
         MIR::FrameSave.new("rt"),
@@ -478,7 +494,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for tight loop (no frame rewind needed)" do
-      loop_body = [MIR::AllocMark.new("tmp", :frame)]
+      loop_body = [alloc_mark("tmp", :frame, scope: :iteration)]
       ws = MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil)
       ws.tight = true
       body = [MIR::FrameSave.new("rt"), ws]
@@ -531,7 +547,7 @@ RSpec.describe MIRChecker do
     it "detects frame alloc with heap cleanup" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
       body = [
-        MIR::AllocMark.new("data", :frame),
+        alloc_mark("data", :frame),
         MIR::Cleanup.new("data", cleanup_entry),
       ]
       errors = checker.check_fn!(fn_def("frame_alloc_heap_cleanup", body))
@@ -541,7 +557,7 @@ RSpec.describe MIRChecker do
     it "detects heap alloc with frame cleanup" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
       body = [
-        MIR::AllocMark.new("data", :heap),
+        alloc_mark("data", :heap),
         MIR::Cleanup.new("data", cleanup_entry),
       ]
       errors = checker.check_fn!(fn_def("heap_alloc_frame_cleanup", body))
@@ -551,7 +567,7 @@ RSpec.describe MIRChecker do
     it "passes for matching frame alloc and frame cleanup" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :frame, has_moved_guard: false })
       body = [
-        MIR::AllocMark.new("data", :frame),
+        alloc_mark("data", :frame),
         MIR::Cleanup.new("data", cleanup_entry),
       ]
       errors = checker.check_fn!(fn_def("ok_frame", body))
@@ -561,7 +577,7 @@ RSpec.describe MIRChecker do
     it "passes for matching heap alloc and heap cleanup" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: true })
       body = [
-        MIR::AllocMark.new("data", :heap),
+        alloc_mark("data", :heap),
         MIR::Cleanup.new("data", cleanup_entry),
       ]
       errors = checker.check_fn!(fn_def("ok_heap", body))
@@ -579,7 +595,7 @@ RSpec.describe MIRChecker do
 
     it "passes for alloc with no cleanup (moved/escaped via return)" do
       body = [
-        MIR::AllocMark.new("data", :heap),
+        alloc_mark("data", :heap),
       ]
       errors = checker.check_fn!(fn_def("moved", body))
       expect(errors.select { |e| e.include?("ALLOC_CLEANUP_MISMATCH") }).to be_empty
@@ -588,7 +604,7 @@ RSpec.describe MIRChecker do
     it "detects mismatch inside an if branch" do
       cleanup_entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: false })
       branch_body = [
-        MIR::AllocMark.new("line", :frame),
+        alloc_mark("line", :frame),
         MIR::Cleanup.new("line", cleanup_entry),
       ]
       body = [
@@ -780,7 +796,7 @@ RSpec.describe MIRChecker do
 
     it "does not flag existing non-strict checks for non-allocating expressions" do
       # Ensure strict mode doesn't accidentally break the normal HPT_LEAK check
-      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call = owned_call
       body = [MIR::ExprStmt.new(call, true)]
       errors = checker.check_fn!(fn_def("hpt_still_works", body), strict: true)
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
@@ -793,14 +809,14 @@ RSpec.describe MIRChecker do
 
   describe "#check_program!" do
     it "collects errors across multiple functions" do
-      call1 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call1 = owned_call
       fn1 = fn_def("good", [
-        MIR::AllocMark.new("x", :heap),
+        alloc_mark("x", :heap),
         MIR::Let.new("x", call1, false, nil, nil),
         MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
       ])
 
-      call2 = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      call2 = owned_call
       fn2 = fn_def("bad", [
         MIR::ExprStmt.new(call2, true),
       ])

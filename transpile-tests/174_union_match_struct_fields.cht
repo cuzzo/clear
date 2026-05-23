@@ -24,8 +24,8 @@ END
 FN prStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
-        Value.Str AS s -> RETURN s;,
-        Value.Wrapped AS w -> RETURN w.inner;,
+        Value.Str AS s -> RETURN COPY s;,
+        Value.Wrapped AS w -> RETURN COPY w.inner;,
         Value.Error AS e -> RETURN "error:" + e.errMsg;
     END
     RETURN "";

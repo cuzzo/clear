@@ -69,7 +69,8 @@ module MIRLoweringFunctions
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
-    @current_fn_return_alloc = T.let(@current_fn_return_alloc, T.untyped)
+    @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
+    @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
     @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
     @current_fn_returned_names = T.let(@current_fn_returned_names, T.untyped)
     @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
@@ -97,12 +98,10 @@ module MIRLoweringFunctions
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
-    # Return-expression allocator: a RETURN value inherits the function's
-    # finalized return placement (escape analysis sets return_provenance).
-    @current_fn_return_alloc = node.return_provenance == :heap ? :heap : nil
     @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
     @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
     @current_fn_returned_names = collect_fn_returned_names(node.body)
+    @current_fn_heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
@@ -149,9 +148,13 @@ module MIRLoweringFunctions
       p_type_obj.needs_pointer_passing? ||
         (p.mutable && p_type_obj.list_collection?)
     }.map { |p| p.name }.to_set
+    @current_fn_collection_params.each do |name|
+      @current_bindings[name.to_s] ||= CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
+    end
 
     # All param names: used to distinguish params (slices) from locals (ArrayLists)
     @current_fn_param_names = node.params.map { |p| p.name }.to_set
+    @current_fn_takes_param_names = node.params.select { |p| p.takes }.map { |p| p.name }.to_set
 
     # Build param list
     params_mir = node.params.map { |param|
@@ -236,14 +239,14 @@ module MIRLoweringFunctions
     # uses_frame from annotation is stale after escape analysis marks locals heap.
     # When cleanup_bindings is set (post-MIRPass), derive from it: it reflects the
     # final allocators. Fall back to uses_frame when cleanup_bindings is absent
-    # (synthetic functions, specs). uses_alloc tracks stdlib frame calls (append,
-    # concat) which are not in cleanup_bindings and are always accurate.
+    # (synthetic functions, specs). Generic allocator use is not a frame
+    # lifetime fact; heap-only stdlib calls must not force frame save/restore.
     has_frame_bindings = if node.cleanup_bindings
                            node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
                          else
                            node.uses_frame
                          end
-    uses_frame_or_alloc = has_frame_bindings || node.uses_alloc
+    uses_frame_or_alloc = has_frame_bindings
     ret_type_obj = node.return_type || Type.new(:Void)
     # Unwrap `!T` so value-type and string-return classification sees the
     # payload; otherwise frame save/restore is skipped for error-union returns.
@@ -341,8 +344,21 @@ module MIRLoweringFunctions
       ti = p.type || Type.new(:Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
-      takes_mir << MIR::AllocMark.new(p.name.to_s, entry.alloc, ti)
+      mark = MIR::AllocMark.new(p.name.to_s, entry.alloc, ti)
+      mark.scope = entry.scope
+      takes_mir << mark
       takes_mir << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
+    end
+
+    pointer_param_mir = []
+    node.params.each do |p|
+      next if p.takes
+      next unless @current_fn_collection_params&.include?(p.name)
+      ti = p.type || Type.new(:Any)
+      mark = MIR::AllocMark.new(p.name.to_s, :heap, ti)
+      mark.scope = :heap
+      pointer_param_mir << mark
+      pointer_param_mir << MIR::TransferMark.new(p.name.to_s, :external_param)
     end
 
     # Lower body (track snapshot types for catch blocks)
@@ -352,12 +368,12 @@ module MIRLoweringFunctions
     # Trampoline bodies are synthesized directly while preserving the
     # normal function signature seen by callers.
     if node.thunk_plan
-      body_mir = takes_mir + [ThunkTransform::Emit.build_trampoline(node, self)]
+      body_mir = takes_mir + pointer_param_mir + [ThunkTransform::Emit.build_trampoline(node, self)]
     elsif node.mutual_thunk_plan
-      body_mir = takes_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
+      body_mir = takes_mir + pointer_param_mir + [ThunkTransform::Emit.build_mutual_trampoline(node, self)]
     else
       pre_checks = lower_pre_clauses(node)
-      body_mir = takes_mir + pre_checks + T.must(lower_body(node.body))
+      body_mir = takes_mir + pointer_param_mir + pre_checks + T.must(lower_body(node.body))
     end
 
     # POST + CATCH is rejected at annotation time (see
@@ -460,10 +476,10 @@ module MIRLoweringFunctions
     payload_type   = is_error_union ? rt_obj.payload_type : rt_obj
     is_void        = !!(payload_type && payload_type.respond_to?(:void?) && payload_type.void?)
 
-    # Structured: MIR::Call(callee, args, try_wrap, heap_provenance).
+    # Structured: MIR::Call(callee, args, try_wrap).
     # The `try_wrap` field forwards errors verbatim before any POST
     # predicate evaluates; on success, `result` binds the payload.
-    inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, nil)
+    inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, call_owned_return?(node))
     call_zig = emit_expr(inner_call_mir)
 
     # Each predicate check decomposes into structured MIR:
@@ -648,7 +664,7 @@ module MIRLoweringFunctions
   def infer_catch_value_allocator(expr)
     T.bind(self, MIRLowering) rescue nil
     return nil unless expr
-    return :heap if expr.is_a?(AST::Locatable) && expr.heap_provenance?
+    return :heap if expr.respond_to?(:symbol) && expr.symbol&.storage == :heap
     storage = expr.respond_to?(:storage) ? expr.storage : nil
     return storage if storage == :heap || storage == :frame
     nil
@@ -762,7 +778,7 @@ module MIRLoweringFunctions
       copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
                           callee_param_type.collection? &&
                           ti.collection_value?)
-      arg_alloc = takes_arg_alloc(callee_param)
+      arg_alloc = takes ? allocator_for_takes_param!(callee_param) : :heap
       raw_arg = with_decl_alloc(arg_alloc) do
         copy_to_owning ?
           MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
@@ -772,7 +788,6 @@ module MIRLoweringFunctions
       # *const T); the callee's anytype binding then allows mutable methods
       # (xs.deinit, xs.count, ...) on the duplicated owning container.
       arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
-      arg = hoist_owned_value_temp(arg, a, err_cleanup: takes) if !takes && arg.equal?(raw_arg)
       cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     }
 
@@ -782,7 +797,7 @@ module MIRLoweringFunctions
     if node.respond_to?(:fn_var_call) && node.fn_var_call
       # fn-type variable call
       all_args = [MIR::Ident.new(@rt_name)] + args_mir
-      return MIR::Call.new("try #{node.name}", all_args, false)
+      return MIR::Call.new("try #{node.name}", all_args, false, call_owned_return?(node))
     end
 
     # Resolve rt/fail from fn_sigs
@@ -802,15 +817,11 @@ module MIRLoweringFunctions
 
     # Heap dupe result
     if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
-      inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
+      inner_call = MIR::Call.new(fn_zig, all_args, can_fail, call_owned_return?(node))
       return MIR::DupeSlice.new(inner_call, :heap)
     end
 
-    call = MIR::Call.new(fn_zig, all_args, can_fail)
-    call.heap_provenance = call_heap_provenance?(node) ||
-                           (callee_sig.respond_to?(:return_provenance) && callee_sig.return_provenance == :heap) ||
-                           callee_returns_heap_string?(callee_sig)
-    call
+    MIR::Call.new(fn_zig, all_args, can_fail, call_owned_return?(node))
   end
 
   sig { params(node: AST::MethodCall).returns(T.untyped) }
@@ -851,7 +862,7 @@ module MIRLoweringFunctions
       copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
                           callee_param_type.collection? &&
                           ti.collection_value?)
-      arg_alloc = takes_arg_alloc(callee_param)
+      arg_alloc = takes ? allocator_for_takes_param!(callee_param) : :heap
       raw_arg = with_decl_alloc(arg_alloc) do
         copy_to_owning ?
           MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
@@ -877,14 +888,77 @@ module MIRLoweringFunctions
     fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
 
     if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
-      inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
+      inner_call = MIR::Call.new(fn_zig, all_args, can_fail, call_owned_return?(node))
       return MIR::DupeSlice.new(inner_call, :heap)
     end
 
-    call = MIR::Call.new(fn_zig, all_args, can_fail)
-    call.heap_provenance = call_heap_provenance?(node) ||
-                           (callee_sig.respond_to?(:return_provenance) && callee_sig.return_provenance == :heap)
-    call
+    MIR::Call.new(fn_zig, all_args, can_fail, call_owned_return?(node))
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def call_owned_return?(node)
+    T.bind(self, MIRLowering) rescue nil
+    sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s) if node.respond_to?(:name)
+    sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+    return false if sig && !sig.return_lifetime.empty?
+    dep = call_owned_return_from_args?(node, sig)
+    return dep unless dep.nil?
+    ti = sig&.return_type || Type.from_node(node)
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    return false unless ti
+    ti = ti.payload_type if ti.error_union?
+    return false unless ti
+    if ti.string?
+      return false if ti.symbol? || ti.raw?
+      return ti.heap?
+    end
+    schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
+    ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
+      ti.resource? || ti.recursive_cleanup_shape?(schema_lookup)
+  end
+
+  sig { params(node: T.untyped, sig_obj: T.nilable(FunctionSignature)).returns(T.nilable(T::Boolean)) }
+  def call_owned_return_from_args?(node, sig_obj)
+    return nil unless sig_obj&.heap_carry_return_vars && !sig_obj.heap_carry_return_vars.empty?
+    by_name = T.let({}, T::Hash[String, Integer])
+    sig_obj.params.each_with_index { |param, idx| by_name[param.name.to_s] = idx }
+    has_param_return = T.let(false, T::Boolean)
+    sig_obj.heap_carry_return_vars.each do |name|
+      idx = by_name[name.to_s]
+      unless idx
+        return true
+      end
+      has_param_return = true
+      arg = node.args[idx]
+      return true if ast_expr_produces_heap?(arg)
+    end
+    if has_param_return
+      ret = sig_obj.return_type
+      ret = Type.new(ret) if ret && !ret.is_a?(Type)
+      ret = ret.payload_type if ret&.error_union?
+      schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
+      return true if ret&.string? || ret&.recursive_cleanup_shape?(schema_lookup)
+      return false
+    end
+    nil
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def ast_expr_produces_heap?(expr)
+    node = expr
+    node = node.value if node.is_a?(AST::MoveNode)
+    node = node.left if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
+    return false if node.respond_to?(:storage) && [:rodata, :borrow].include?(node.storage)
+    return false if node.respond_to?(:rodata_provenance?) && node.rodata_provenance?
+    return false if node.respond_to?(:borrow_provenance?) && node.borrow_provenance?
+    return true if node.respond_to?(:heap_storage?) && node.heap_storage?
+    return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
+    return true if node.is_a?(AST::StringConcat)
+    return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
+    ti = Type.from_node(node)
+    return false unless ti
+    schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
+    ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
   end
 
   # Safe navigation for method calls: expr?.method(args)
@@ -1018,7 +1092,6 @@ module MIRLoweringFunctions
     if stdlib_args_for_hoist.is_a?(Array)
       ast_args_for_hoist = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
       mir_args = mir_args.each_with_index.map do |arg_mir, i|
-        next arg_mir if node.is_a?(AST::MethodCall) && i == 0
         ast_arg = ast_args_for_hoist[i]
         spec = stdlib_args_for_hoist[i]
         takes = spec.is_a?(Hash) && spec[:takes]
@@ -1293,7 +1366,7 @@ module MIRLoweringFunctions
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
-    is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_provenance?) || !!pt&.heap?
+    is_heap = (ast_node.respond_to?(:symbol) && ast_node.symbol&.storage == :heap) || !!pt&.heap?
     iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
     iz
   end

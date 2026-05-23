@@ -15,7 +15,7 @@ module IntrinsicRegistry
   EMIT_BOOL = %i[bc is_method suspends narrows_collection mutates_receiver
                  allocates takes_value container_borrow].freeze
   EMIT_STRSYM = %i[zig numeric_zig sharded_zig shard_direct_zig].freeze
-  EMIT_STR    = %i[lifetime reject_error fsm_finish_value elem].freeze
+  EMIT_STR    = %i[reject_error fsm_finish_value elem].freeze
   EMIT_SYM    = %i[tag builtin alloc return_alloc val_alloc key_alloc
                    shard_alloc sharded_alloc reject_when bc_op
                    error_kind error_type].freeze
@@ -40,6 +40,7 @@ module IntrinsicRegistry
       when *EMIT_BOOL   then e.public_send("#{k}=", !!v)
       when *EMIT_STRSYM then e.public_send("#{k}=", v)
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
+      when :lifetime    then e.lifetime = normalize_lifetime(v).map(&:to_s)
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
       when *EMIT_PASS   then e.public_send("#{k}=", v)
       when *EMIT_INTARR then e.public_send("#{k}=", Array(v).map(&:to_i))
@@ -121,9 +122,11 @@ module IntrinsicRegistry
   def convert_entry(_name, h, registries)
     ret  = h.key?(:return_type) ? h[:return_type] : h[:return]
     rdef = to_return_def(ret)
+    params = params_from_arg_spec(h[:args], h)
     fs = FunctionSignature.new(
-      params: [],
+      params: params,
       return_type: to_return_type(rdef),
+      return_lifetime: normalize_lifetime(h[:lifetime]),
       intrinsic: true
     )
     fs.return_def      = rdef
@@ -134,6 +137,38 @@ module IntrinsicRegistry
     fs.needs_rt        = h[:needs_rt]
     fs.emit            = build_emit(h, registries)
     fs
+  end
+
+  def normalize_lifetime(value)
+    return [] if value.nil?
+    return value if value.is_a?(Array)
+
+    [value]
+  end
+
+  def params_from_arg_spec(spec, h)
+    return [] unless spec.is_a?(Array)
+    takes_args = Array(h[:takes_args])
+    mutates_receiver = h[:mutates_receiver] == true
+    spec.each_with_index.map do |arg_def, i|
+      if arg_def.is_a?(Hash)
+        AST::Param.new(
+          name: arg_def[:name] || "arg#{i}",
+          type: arg_def[:type],
+          required: true,
+          mutable: arg_def[:mutable] || (i == 0 && mutates_receiver),
+          takes: arg_def[:takes] || takes_args.include?(i) || (mutates_receiver && takes_args.include?(i - 1))
+        )
+      else
+        AST::Param.new(
+          name: "arg#{i}",
+          type: arg_def,
+          required: true,
+          mutable: (i == 0 && mutates_receiver),
+          takes: takes_args.include?(i) || (mutates_receiver && takes_args.include?(i - 1))
+        )
+      end
+    end
   end
 
   # registries: { Symbol => Hash<String, Hash> }

@@ -105,7 +105,7 @@ class SemanticAnnotator
     @call_graph  = T.let({}, T::Hash[T.untyped, T.untyped])  # name => Set of directly-called function names (excluding self-calls)
     @fn_propagating_callees = T.let({}, T::Hash[T.untyped, T.untyped]) # name => Set of callees whose error channel can propagate (NOT OR-absorbed); authority for can_fail (#11)
     @fn_has_fnptr = T.let({}, T::Hash[T.untyped, T.untyped]) # name => true if function calls a fn-type variable or lambda
-    @fn_nodes    = T.let({}, T::Hash[T.untyped, T.untyped])  # name => FunctionDef node (for error reporting in the post-pass)
+    @fn_nodes    = T.let({}, T::Hash[String, AST::FunctionDef])  # name => FunctionDef node (for error reporting in the post-pass)
     # Performance analysis
     @fn_raises_directly = T.let({}, T::Hash[T.untyped, T.untyped])  # name => true if body has Raise/OrRaise, uses_frame, has_fnptr, or @nonReentrant
     # Capability audit — tracks declarations and usage to detect over-engineering.
@@ -467,7 +467,6 @@ private
       next unless sig
       sig.needs_rt = fn.needs_rt
       sig.can_fail = fn.can_fail
-      sig.return_provenance = fn.return_provenance
       sig.effects = fn.effects
       sig.stack_tier = fn.stack_tier
     end
@@ -1474,7 +1473,7 @@ private
         else
           # Simple payload: non-Copy if @indirect or a collection/array (not string)
           t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-          t && (t.indirect? || (!t.string? && (t.collection? || (t.array? && !t.fixed?))))
+          t&.heap_ptr?
         end
       }
       if has_non_copy_as
@@ -1640,6 +1639,7 @@ private
                 # MATCH TAKES: owned extraction - source is consumed.
                 unless node.takes
                   @og[c.binding]&.kind = :borrowed
+                  current_scope.locals[c.binding]&.storage = :borrow
                 end
               end
             end
@@ -2412,6 +2412,7 @@ private
     node.zig_pattern = method_def.emit&.zig
     node.full_type   = method_def.return_def.resolve(nil, node.args, self)
     node.matched_stdlib_def = method_def
+    node.matched_signature = method_def if node.respond_to?(:matched_signature=)
     node.stdlib_allocates = true if method_def.emit&.allocates
     node.mutates_receiver = true if method_def.emit&.mutates_receiver
     node.can_fail = true if method_def.can_fail
@@ -2605,6 +2606,7 @@ private
     # 4. Store Zig pattern and stdlib metadata for transpiler
     node.zig_pattern = matched_def.emit&.zig
     node.matched_stdlib_def = matched_def
+    node.matched_signature = matched_def if node.respond_to?(:matched_signature=)
     node.stdlib_allocates = true if matched_def.emit&.allocates
     node.mutates_receiver = true if matched_def.emit&.mutates_receiver
     node.can_fail = true if matched_def.can_fail || matched_def.emit&.allocates
@@ -2909,7 +2911,7 @@ private
   # If x is not yet in scope → immutable declaration (like old VAR x = val).
   # If x is in scope and mutable → assignment (like old SET x = val).
   # If x is in scope and immutable → error.
-  sig { params(node: AST::BindExpr).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
+  sig { params(node: AST::BindExpr).void }
   def visit_BindExpr(node)
     # Same pre-set as visit_VarDecl: mark fixed-array list literals as :stack before visiting.
     if node.value.is_a?(AST::ListLit) && node.type&.fixed?
@@ -4347,7 +4349,7 @@ private
 
     if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
       sym = val_node.symbol
-      unless sym&.heap_provenance?
+      unless sym&.heap_storage?
         error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
       end
     end
@@ -4816,7 +4818,7 @@ private
         fn_node    = @fn_nodes[current_fn_ctx.name]
         has_req    = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
                      fn_node.requires.key?(bound_name)
-        if is_param && !has_req
+        if is_param && !has_req && fn_node
           current_fn_ctx.needs_rt = true
           fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
         end
@@ -5625,16 +5627,16 @@ private
   def resolve_borrow_source(call_node)
     # Path 1: stdlib functions with lifetime: "self"
     matched_def = call_node.matched_stdlib_def
-    if matched_def && matched_def.emit&.lifetime
-      lifetime = matched_def.emit.lifetime
-      if lifetime == "self" && call_node.is_a?(AST::MethodCall)
+    if matched_def && matched_def.emit && !matched_def.emit.lifetime.empty?
+      lifetimes = matched_def.emit.lifetime
+      if lifetimes.include?("self") && call_node.is_a?(AST::MethodCall)
         return call_node.object
       end
       # Named param lifetime -- find by index in args list
       args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
       arg_types = matched_def.arg_spec
       if arg_types.is_a?(Array)
-        idx = arg_types.index { |a| a.is_a?(Hash) && a[:name] == lifetime }
+        idx = arg_types.index { |a| a.is_a?(Hash) && lifetimes.include?(a[:name].to_s) }
         return args[idx] if idx && args[idx]
       end
       return nil
@@ -5656,8 +5658,6 @@ private
     # is already borrowed) needs broader audit work. Wildcard returns nil
     # because there is no specific source to track.
     lifetime = func_type.return_lifetime
-    return nil if lifetime.nil?
-    lifetime = [lifetime] unless lifetime.is_a?(Array)
     return nil if lifetime.empty? || lifetime == [:wildcard]
     primary = lifetime.first
     return nil if primary == :wildcard
@@ -6099,7 +6099,7 @@ private
   #   - Captures whose binding has no SymbolEntry on capture_symbols
   #     (e.g. observable view aliases); those are already errored at
   #     visit_BgBlock via has_non_escaping_capture.
-  sig { params(decl_node: T.untyped).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
+  sig { params(decl_node: T.untyped).void }
   def stamp_bg_handle_lifetime!(decl_node)
     sources = collect_bg_sources_in_expr(decl_node.value).uniq
     return if sources.empty?
@@ -6108,10 +6108,8 @@ private
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
   end
 
-  # Single-writer stamp: "this binding's heap-bearing contents are already
-  # in heap_provenance" -- so return-time promote is unnecessary (and would
-  # leak by re-allocating). Legacy compatibility field. ONE writer
-  # (bind-time), many readers (return-time). See docs/agents/provenance-collapse.md.
+  # Single-writer stamp: this binding's heap-bearing contents were already
+  # materialized for heap storage at bind time.
   sig { params(decl_node: T.untyped).void }
   def stamp_init_contents_heap!(decl_node)
     sym = decl_node.symbol
@@ -6129,10 +6127,10 @@ private
         next true unless fval
         fti = Type.from_node!(fval, context: "heap init field")
         next true unless fti.string? || fti.collection?
-        fval.is_a?(AST::Locatable) && fval.heap_provenance?
+        fval.is_a?(AST::Locatable) && fval.heap_storage?
       end
     when AST::FuncCall, AST::MethodCall
-      init.is_a?(AST::Locatable) && init.heap_provenance?
+      init.is_a?(AST::Locatable) && init.heap_storage?
     when AST::Identifier
       !!init.symbol&.init_contents_heap
     when AST::CopyNode, AST::CloneNode
@@ -6611,7 +6609,7 @@ private
       matched_def = val.matched_stdlib_def
       if matched_def
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
-        if matched_def.emit&.lifetime
+        if matched_def.emit && !matched_def.emit.lifetime.empty?
           val.storage = :borrow if val.respond_to?(:storage=)
           node.storage = :borrow if node.respond_to?(:storage=)
           return
@@ -6714,7 +6712,7 @@ private
     return if vti&.generic_instance?
     # Skip generic type parameters - can't determine borrowability at annotation time.
     return if current_fn_ctx&.type_params&.include?(vti&.resolved)
-    has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
+    has_pointer = vti&.heap_ptr?
     return if !has_pointer && !vti&.struct?
     error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)
   end

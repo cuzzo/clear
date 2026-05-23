@@ -122,6 +122,28 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    escape_mechanism_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      collection_shapes: [:list, :pool, :set, :hash_map],
+      escape_sources: [:frame_local, :loop_local, :function_param, :bg_capture, :bg_stream_capture, :or_expression, :stream_next],
+      escape_sinks: [
+        :return_value,
+        :struct_field_store,
+        :list_append,
+        :set_insert,
+        :map_put,
+        :pool_insert,
+        :collection_literal,
+        :function_arg,
+        :takes_arg,
+        :give_arg,
+        :bg_capture,
+        :bg_stream_capture,
+      ],
+      execution_boundaries: [:bg, :bg_stream],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
+    },
+
     # 89-cell ret_form x bind_form x decl matrix for :heap_list / :string
     # (the deep RET×BIND axis from origin/register-machine #13). The
     # complementary breadth-across-all-shapes axis is return_value_modality.

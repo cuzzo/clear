@@ -234,7 +234,8 @@ RSpec.describe "Per-statement source-line attribution" do
 
       main_table = bc.var_names.find { |fv| fv.bindings.any? { |b| b.name == "x" } }
       expect(main_table).not_to be_nil
-      by_name = main_table.bindings.to_h { |b| [b.name, b] }
+      user_bindings = main_table.bindings.reject { |b| b.name.start_with?("__hoist_") }
+      by_name = user_bindings.to_h { |b| [b.name, b] }
       expect(by_name.keys).to contain_exactly("x", "y", "z")
 
       # Each binding's source_line matches the CLEAR line of its decl.
@@ -256,7 +257,7 @@ RSpec.describe "Per-statement source-line attribution" do
       # slot, the shadowing case never arises). If the allocator
       # changes and this assertion fails, the test stops exercising
       # the actual fix; pick a different fixture that forces reuse.
-      phys_set = main_table.bindings.map { |b| [b.kind, b.virt] }.uniq
+      phys_set = user_bindings.map { |b| [b.kind, b.virt] }.uniq
       expect(phys_set.size).to eq(1)
     end
   end

@@ -15,7 +15,7 @@ FN prStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Number AS n -> RETURN n.toString();,
-        Value.Str AS s -> RETURN s;,
+        Value.Str AS s -> RETURN COPY s;,
         Value.List -> RETURN "(list)";
     END
     RETURN "";

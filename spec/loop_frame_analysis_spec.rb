@@ -205,15 +205,12 @@ RSpec.describe LoopFrameAnalysis do
   end
 
   # ===========================================================================
-  # Group C: heap carry var promotion (outer string reassigned in mark_per_iter loop)
+  # Group C: outer string reassignment in mark_per_iter loop
   # ===========================================================================
-  # Previously used loopPreserveAndRewind (frame-copy before rewind).
-  # Now: carry vars are promoted to heap so they survive the per-iter rewind.
-  describe "Group C: heap carry var promotion for outer string reassignment" do
+  # Placement is decided by escape analysis, not loop rewinds.
+  describe "Group C: outer string reassignment remains local unless it escapes" do
 
-    it "outer string reassigned with frame concat → declaration promoted to heap" do
-      # resp = resp + i.toString(): resp is outer, i.toString() is loop-local frame string.
-      # Phase 1.5c promotes resp's declaration to heap so it survives the per-iter rewind.
+    it "outer string reassigned with frame concat stays frame-local" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE resp = "";
@@ -231,7 +228,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
       resp_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "resp" }
       expect(loop.mark_per_iter).to be true
-            expect(resp_decl.symbol.heap_provenance?).to be true
+      expect(resp_decl.symbol.heap_storage?).to be false
     end
 
     it "no heap carry promotion when no outer string reassignment occurs" do
@@ -271,9 +268,8 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("rt.heapAlloc()")
     end
 
-    it "outer string reassigned with user function call result → declaration promoted to heap" do
-      # last = makePrefix(i): the loop has mark_per_iter=true (tmp forces it).
-      # Phase 1.5c promotes last's declaration to heap so it survives the rewind.
+    it "outer string reassigned with user function call result stays frame-local unless it escapes" do
+      # Placement is decided by escape analysis, not by loop rewinds.
       ast = run_mir(<<~CLEAR)
         FN makePrefix(i: Int64) RETURNS !String ->
           RETURN "entry-" + i.toString();
@@ -291,11 +287,10 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-            expect(last_decl.symbol.heap_provenance?).to be true
+      expect(last_decl.symbol.heap_storage?).to be false
     end
 
-    it "outer string reassigned with method call result → declaration promoted to heap" do
-      # last = i.toString(): loop has mark_per_iter=true (tmp forces it).
+    it "outer string reassigned with method call result stays frame-local unless it escapes" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE last = "";
@@ -310,13 +305,11 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-            expect(last_decl.symbol.heap_provenance?).to be true
+      expect(last_decl.symbol.heap_storage?).to be false
     end
 
-    it "outer string reassigned with concat of outer (non-local) vars → declaration promoted to heap" do
-      # result = prefix + "-" + suffix: ALL parts are outer vars, not frame locals.
-      # The concat is still frame-allocated by default and corrupted by the rewind.
-      # Phase 1.5c promotes result's declaration to heap.
+    it "outer string reassigned with concat of outer vars stays frame-local unless it escapes" do
+      # result = prefix + "-" + suffix is a local overwrite; no escape means no heap storage.
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE prefix = "hello";
@@ -333,15 +326,15 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       result_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "result" }
       expect(loop.mark_per_iter).to be true
-            expect(result_decl.symbol.heap_provenance?).to be true
+      expect(result_decl.symbol.heap_storage?).to be false
     end
 
   end
 
   # ===========================================================================
-  # Group D: outer container heap promotion (promote_outer_mutations!)
+  # Group D: outer container placement
   # ===========================================================================
-  describe "Group D: outer container promoted to heap when loop rewinds" do
+  describe "Group D: outer container placement is not driven by loop rewinds" do
 
     it "outer @list that receives append of loop-local value gets promoted to heap" do
       # outer_list.append(local_frame_val): when mark_per_iter=true and the
@@ -366,7 +359,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("saveLoopMark")
     end
 
-    it "loop with local frame list AND outer append: outer promoted to heap, loop rewound" do
+    it "loop with local frame list AND outer append rewinds the loop without promoting the outer list" do
       # A loop with BOTH a loop-local frame list AND an outer container that gets
       # its backing-store extended (append of a non-local value).
       # The outer must be heap-promoted so the rewind doesn't corrupt its backing.
@@ -385,16 +378,10 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      # log must be heap-allocated because it's extended inside a rewinding loop
-      expect(zig).to include("heapAlloc")
+      expect(zig).to include("log.append(rt.frameAlloc()")
     end
 
-    # Regression for the bc_runner UAF family (#76, #89, #115, #121, #156, #174,
-    # #271, #78). When a rewinding loop has the outer-mutation buried inside a
-    # nested loop / nested control-flow, scan_direct stops at the inner loop
-    # boundary and never sees the mutation. The outer container then keeps its
-    # frame allocator and the per-iteration rewind frees its growth buffer mid-run.
-    it "outer @list mutated inside a nested loop INSIDE a rewinding loop is heap-promoted" do
+    it "outer @list mutated inside a nested loop keeps its authoritative frame placement" do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
@@ -416,16 +403,10 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      # outer.append must use heapAlloc — anything else is a UAF when the
-      # WHILE rewinds.
-      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(rt\.frameAlloc\(\)/)
     end
 
-    # Same pattern but the nested control-flow is a MATCH instead of a FOR.
-    # MATCH is currently included in scan_direct's recursion, so this passes
-    # today — keep the invariant explicit so a future scan_direct refactor
-    # doesn't quietly drop coverage.
-    it "outer @list mutated inside a MATCH branch INSIDE a rewinding loop is heap-promoted" do
+    it "outer @list mutated inside a MATCH branch keeps its authoritative frame placement" do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
@@ -444,7 +425,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(rt\.frameAlloc\(\)/)
     end
 
   end
@@ -514,7 +495,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "WhileLoop heap-allocates a loop-local string that escapes into an outer list" do
+    it "WhileLoop stores a loop-local string into a frame-owned outer list without heap promotion" do
       src = <<~CLEAR
         FN isCommand(ch: String) RETURNS Bool ->
           RETURN ch == ">" || ch == "<";
@@ -536,10 +517,11 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("charAtCodepoint(rt.heapAlloc()")
+      expect(zig).to include("try parts.append(rt.frameAlloc(), try rt.frameAlloc().dupe(u8, ch))")
+      expect(zig).not_to include("rt.heapAlloc().dupe(u8, try CheatLib.charAtCodepoint")
     end
 
-    it "WhileLoop heap-allocates a loop-local list that escapes into an outer list" do
+    it "WhileLoop keeps a moved loop-local list frame-owned when the outer list is frame-owned" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -556,11 +538,12 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("inner.append(rt.heapAlloc()")
+      expect(zig).to include("try inner.append(rt.frameAlloc(), i)")
+      expect(zig).to include("try outer.append(rt.frameAlloc(), inner)")
       expect(zig).to include("inner_moved = true")
     end
 
-    it "WhileLoop heap-allocates a loop-local dynamic array that escapes into an outer list" do
+    it "WhileLoop keeps a loop-local dynamic array frame-owned when the outer list is frame-owned" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -576,7 +559,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("try CheatLib.makeList(i64, rt.frameAlloc()")
+      expect(zig).to include("try outer.append(rt.frameAlloc(), inner)")
     end
 
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
@@ -715,9 +699,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig.scan("restoreLoopMark").length).to eq(2)
     end
 
-    it "heap carry string in nested loop: initial value heap-duped, not comptime literal" do
-      # When resp is promoted to heap (carry var), its initial value "" must be
-      # heap-duped so defer heapAlloc().free(resp) does not free a comptime literal.
+    it "nested loop-carried string initializes as heap-owned because it survives inner loop restore" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -737,13 +719,11 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      # resp's initial value must be a heap dupe, not the comptime literal ""
-      expect(zig).to include('heapAlloc().dupe(u8, "")')
-      expect(zig).not_to match(/var resp.*=\s*""\s*;/)
+      expect(zig).to include('var resp: []const u8 = try rt.heapAlloc().dupe(u8, "")')
+      expect(zig).to include("defer if (!resp_moved) CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
     end
 
-    it "heap carry string in nested loop: reassignment uses ReassignWithCleanup" do
-      # resp = resp + ... must free the old resp before assigning new.
+    it "nested loop-carried string reassignment uses heap allocation because it survives inner loop restore" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -763,13 +743,9 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      # The pattern is: allocate __new_resp, cleanup old resp, assign new
+      expect(zig).to include("try std.mem.concat(rt.heapAlloc()")
       expect(zig).to include("__new_resp")
-      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf/)
-      # And the final defer must free resp (loop-carry reassignment makes resp
-      # move-tracked, so the free is guarded by the _moved flag). Post-collapse,
-      # the free routes through CheatLib.cleanup's []const u8 arm.
-      expect(zig).to match(/defer if \(!resp_moved\) CheatLib\.cleanup\(@TypeOf\(resp\), rt\.heapAlloc\(\), &resp\)/)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
     end
 
   end
