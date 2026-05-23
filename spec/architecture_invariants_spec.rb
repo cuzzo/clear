@@ -31,7 +31,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
       rel == "backends/pipeline_host.rb" ||
       rel == "backends/pipeline_rewriter.rb" ||
       rel == "backends/string_concat_rewriter.rb" ||
-      rel == "mir/mir_lowering.rb"
+      rel == "mir/mir_lowering.rb" ||
+      rel.start_with?("mir/lowering/")
   end
 
   # symbol.storage is made DEFINITIVE by escape analysis.
