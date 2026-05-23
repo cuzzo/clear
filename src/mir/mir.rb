@@ -334,6 +334,12 @@ module MIR
     # discard: true -> emit `_ = expr;`
   end
 
+  # Owning expression used as a statement.
+  # Zig: evaluate into a scoped temp and clean it at the end of that scope.
+  DiscardOwned = Struct.new(:expr, :cleanup_entry, :zig_type) do
+    include Stmt
+  end
+
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
   # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
   #
@@ -1767,7 +1773,7 @@ module MIR
   #                template uses it).
   #   map_kind:    :string_map | :numeric_map -- chooses key encoding.
   #   stdlib_def:  the INDEX_OPS entry (with :zig, :shard_direct_zig,
-  #                :sharded_zig, allocator keys, value_transforms,
+  #                :sharded_zig, allocator keys,
   #                bc_op). The Zig emitter reads this to pick the
   #                template; the checker reads it to validate
   #                ownership effects.

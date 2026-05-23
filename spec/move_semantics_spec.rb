@@ -183,11 +183,13 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "implicit-copies @list to TAKES param (source not consumed)" do
+    it "implicit-copies @list to TAKES param using the source allocator when frame-safe" do
       body = fn_body(zig, "clearMain")
-      # @list is implicit-copied for TAKES: callee gets heap buffer,
-      # source list is NOT consumed (its defer still fires).
-      expect(body).to include("heapAlloc")
+      # @list is implicit-copied for TAKES: source list is NOT consumed
+      # (its defer still fires), and plain Int64 slice data can remain frame-backed.
+      expect(body).to include("CheatLib.dupeValue([]i64")
+      expect(body).to include("rt.frameAlloc()")
+      expect(body).not_to include("vals_moved")
     end
   end
 

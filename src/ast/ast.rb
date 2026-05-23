@@ -1305,6 +1305,7 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
+    attr_accessor :matched_signature # resolved FunctionSignature for named calls; escape/lowering read it directly
     attr_accessor :arg_families      # per-arg Set<Family> for ?-form effect resolution
     attr_accessor :collapsed_errors  # Set<Symbol> of errors this
                                      # specific call site can surface, projected per actual-family of

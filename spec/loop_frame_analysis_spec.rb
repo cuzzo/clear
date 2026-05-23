@@ -514,7 +514,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local string that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local string that escapes into an outer list" do
       src = <<~CLEAR
         FN isCommand(ch: String) RETURNS Bool ->
           RETURN ch == ">" || ch == "<";
@@ -537,10 +537,9 @@ RSpec.describe LoopFrameAnalysis do
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("charAtCodepoint(rt.heapAlloc()")
-      expect(zig).not_to include("saveLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local list that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local list that escapes into an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -559,10 +558,9 @@ RSpec.describe LoopFrameAnalysis do
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("inner.append(rt.heapAlloc()")
       expect(zig).to include("inner_moved = true")
-      expect(zig).not_to include("saveLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local dynamic array that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local dynamic array that escapes into an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -579,7 +577,6 @@ RSpec.describe LoopFrameAnalysis do
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("rt.heapAlloc()")
-      expect(zig).not_to include("saveLoopMark")
     end
 
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do

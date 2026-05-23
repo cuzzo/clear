@@ -93,7 +93,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       # binding is what carries the heap allocator; THIS test asserts
       # the function-side state, which is correctly :frame + no entry.
       "FN make() RETURNS !String -> MUTABLE s = \"a\" + \"b\"; RETURN s; END",
-      "s", :frame, nil,
+      "s", :heap, nil,
     ],
     list_int: [
       "FN make() RETURNS !Int64[]@list -> MUTABLE lst: Int64[]@list = []; lst.append(1_i64); RETURN lst; END",
@@ -122,14 +122,12 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       "p", :stack, nil,
     ],
     struct_with_list: [
-      # Struct with heap-bearing field: storage stays :stack (the struct
-      # is SROA'd on the stack). cleanup_alloc inherits the binding's
-      # provenance -- frame for non-escaping, heap for escapers. The
-      # previous :cleanup workaround dispatched at runtime via the
-      # cleanupAlloc vtable; uniform now via EscapeGraph promotion.
+      # Struct with heap-bearing field returned by value: recursive
+      # ownership shape marks the binding heap so the nested list buffer
+      # uses the same allocator its returned cleanup will use.
       "STRUCT C { items: Int64[]@list }\n" \
       "FN make() RETURNS !C -> MUTABLE c = C{ items: [] }; c.items.append(1_i64); RETURN c; END",
-      "c", :stack, :frame,
+      "c", :heap, :heap,
     ],
     union_pure: [
       "UNION U { Empty, Some: Int64 }\n" \
@@ -159,7 +157,8 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       d = find_decl(fn, decl_name) or raise "no decl for `#{decl_name}` in `make`"
       entry = cleanup_entry(fn, decl_name)
       aggregate_failures do
-        expect(d.storage).to eq(expected_storage), "storage for #{name}: got #{d.storage.inspect}, want #{expected_storage.inspect}"
+        storage = d.respond_to?(:symbol) && d.symbol ? d.symbol.storage : d.storage
+        expect(storage).to eq(expected_storage), "storage for #{name}: got #{storage.inspect}, want #{expected_storage.inspect}"
         if expected_cleanup.nil?
           # No cleanup entry expected (Copy types) OR entry exists but
           # cleanup is unnecessary (frame-string returned via codegen

@@ -1734,7 +1734,7 @@ class PipelineHost
         MIR::Let.new("idx_result",
           MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(alloc)}]),
           true, map_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", build_index_gop_body(expr_mir, alloc, "it"), nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", build_index_gop_body(expr_mir, alloc, "it", cleanup_key: index_key_allocates?(expr_node)), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
     end
@@ -1744,10 +1744,10 @@ class PipelineHost
   # Lowered to MIR::IndexInsert which both backends decompose: Zig emits the
   # getOrPut + dupe/free + value_ptr.append idiom; the VM emits MAP_GET +
   # APPEND/MAKE_LIST + MAP_PUT.
-  sig { params(expr_mir: T.untyped, alloc: Symbol, item_var: String).returns(T::Array[T.untyped]) }
-  def build_index_gop_body(expr_mir, alloc, item_var)
+  sig { params(expr_mir: T.untyped, alloc: Symbol, item_var: String, cleanup_key: T::Boolean).returns(T::Array[T.untyped]) }
+  def build_index_gop_body(expr_mir, alloc, item_var, cleanup_key: false)
     elem_zig_type = "@TypeOf(#{item_var})"
-    [
+    body = [
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       MIR::IndexInsert.new(
         MIR::Ident.new("idx_result"),
@@ -1755,6 +1755,37 @@ class PipelineHost
         MIR::Ident.new(item_var),
         "u8", elem_zig_type, alloc)
     ]
+    if cleanup_key || mir_allocates_owned_string?(expr_mir)
+      body << MIR::ExprStmt.new(
+        MIR::Call.new("CheatLib.cleanup", [
+          MIR::Ident.new("@TypeOf(idx_key)"),
+          MIR::AllocatorRef.new(:heap),
+          MIR::AddressOf.new(MIR::Ident.new("idx_key"))
+        ], false), false)
+    end
+    body
+  end
+
+  sig { params(mir: T.untyped).returns(T::Boolean) }
+  def mir_allocates_owned_string?(mir)
+    return false unless mir
+    return true if mir.respond_to?(:heap_provenance) && mir.heap_provenance
+    return true if mir.is_a?(MIR::DupeSlice)
+    return true if mir.is_a?(MIR::ConcatStr)
+    if mir.is_a?(MIR::Call)
+      return true if mir.name.to_s.include?("intToString")
+      return true if mir.name.to_s.include?("floatToString")
+    end
+    return mir_allocates_owned_string?(mir.expr) if mir.respond_to?(:expr)
+    false
+  end
+
+  sig { params(expr_node: T.untyped).returns(T::Boolean) }
+  def index_key_allocates?(expr_node)
+    return true if expr_node.is_a?(AST::FuncCall) || expr_node.is_a?(AST::MethodCall)
+    return true if expr_node.is_a?(AST::StringConcat)
+    return true if expr_node.is_a?(AST::BinaryOp) && expr_node.op == :ADD && expr_node.string_concat
+    false
   end
 
   sig { params(range_chain: T::Hash[T.untyped, T.untyped], expr_node: T.untyped, elem_zig: String, alloc: Symbol, map_type: String).returns(MIR::BlockExpr) }
@@ -1803,7 +1834,7 @@ class PipelineHost
             true, map_type, nil),
           MIR::ForStmt.new(iter, p[:initial_capture], [
             *p[:stage_stmts],
-            *build_index_gop_body(expr_mir, :heap, item_var)
+            *build_index_gop_body(expr_mir, :heap, item_var, cleanup_key: index_key_allocates?(expr_node))
           ], nil),
           MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
         ])
@@ -1818,7 +1849,7 @@ class PipelineHost
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next, [
         *p[:stage_stmts],
-        *build_index_gop_body(expr_mir, :heap, item_var)
+        *build_index_gop_body(expr_mir, :heap, item_var, cleanup_key: index_key_allocates?(expr_node))
       ], p[:initial_capture], nil, nil, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
     ])

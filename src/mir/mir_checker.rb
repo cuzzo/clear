@@ -124,6 +124,11 @@ class MIRChecker
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
+      when MIR::DiscardOwned
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+          inline_alloc_nodes << node.expr
+        end
+        all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::InlineZig
         if node.allocs && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
@@ -227,7 +232,11 @@ class MIRChecker
   def verify_owned_return_alloc_marks!(lets, allocs)
     lets.each do |let|
       marks = allocs[let.name]
-      next unless marks
+      unless marks
+        @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
+          "owned-return initializer is heap-provenance but no MIR::AllocMark exists")
+        next
+      end
 
       if marks.any? { |m| m.alloc == :frame }
         @errors << error(:OWNED_RETURN_ALLOC_NOT_HEAP, let.name,
@@ -396,6 +405,7 @@ class MIRChecker
       walk_mir(node.default_body, &block)
     when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
+    when MIR::DiscardOwned then walk_mir_node(node.expr, &block) if node.expr
     when MIR::BatchWindowPush
       walk_mir_node(node.item_expr, &block)
       walk_mir_node(node.value_expr, &block)
@@ -866,6 +876,8 @@ class MIRChecker
       check_expr_for_unhoisted(node.value, allow_top: true)
     when MIR::ExprStmt
       check_expr_for_unhoisted(node.expr, allow_top: false)
+    when MIR::DiscardOwned
+      check_expr_for_unhoisted(node.expr, allow_top: true)
     when MIR::ReturnStmt
       check_expr_for_unhoisted(node.value, allow_top: false)
     when MIR::BreakStmt

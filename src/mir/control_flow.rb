@@ -202,6 +202,11 @@ class FunctionCFG
         current_block.add_successor(cfg.exit_block)
         return nil  # no fall-through after return
 
+      when AST::Raise
+        current_block.stmts << stmt
+        current_block.add_successor(cfg.exit_block)
+        return nil  # no fall-through after raise
+
       when AST::BreakNode
         current_block.stmts << stmt
         return nil  # break exits the loop - handled by loop structure
@@ -269,6 +274,8 @@ class FunctionCFG
       node.items.any? { |v| stmt_can_fail?(v, can_fail_fns) }
     when AST::ReturnNode
       stmt_can_fail?(node.value, can_fail_fns)
+    when AST::Raise, AST::OrRaise
+      true
     else
       false
     end
@@ -472,6 +479,10 @@ class OwnershipDataflow
       elsif !df_entry[:has_moved_guard] && entry.has_moved_guard?
         # Never moved on any path -> unconditional cleanup, no guard.
         entry[:has_moved_guard] = false
+      elsif df_entry[:has_moved_guard] && !entry.has_moved_guard?
+        # Moved on at least one path -> guard cleanup and let SuppressCleanup
+        # mark the transfer at the consuming statement.
+        entry[:has_moved_guard] = true
       end
     end
   end
@@ -626,20 +637,7 @@ class OwnershipDataflow
       state[stmt.name.to_s] = make_owner_entry(stmt) if stmt.mode == :decl
 
     when AST::Assignment
-      # Map indexed assignments: only skip rhs moves for UNION values (dupeUnionValue
-      # creates a true deep copy, so the original retains ownership). For struct values,
-      # CheatLib.promote() shallow-copies heap string pointers, so nested list-field
-      # variables ARE consumed (moved) into the promoted copy -- suppress their cleanup.
-      lhs = stmt.name
-      lhs_is_map = lhs.is_a?(AST::GetIndex) && (Type.from_node(lhs.target)&.map? rescue false)
-      skip_rhs_move = if lhs_is_map
-        val_resolved = stmt.value.full_type.resolved
-        schema = @schema_lookup&.call(val_resolved)
-        Schemas.union?(schema)
-      else
-        false
-      end
-      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) } unless skip_rhs_move
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
 
     when AST::ReturnNode
       collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
@@ -693,6 +691,8 @@ class OwnershipDataflow
       collect_bg_body_gives(stmt).each do |name|
         mark_moved!(state, name) if state[name]
       end
+    else
+      collect_explicit_moves(stmt, state).each { |n| mark_moved!(state, n) }
     end
   end
 
@@ -815,6 +815,11 @@ class OwnershipDataflow
     end
     collect_share_transfers_in(node, step)
     step.consumed.to_a
+  end
+
+  sig { params(node: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Array[String]) }
+  def collect_map_store_moves(node, state)
+    collect_binding_moves(node, state)
   end
 
   sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
@@ -956,6 +961,8 @@ class OwnershipDataflow
       walk_expr(node.value, &block)
     when AST::ReturnNode
       walk_expr(node.value, &block)
+    when AST::Assert
+      walk_expr(node.condition, &block)
     when AST::Assignment
       walk_expr(node.value, &block)
     when AST::VarDecl, AST::BindExpr
@@ -1001,6 +1008,8 @@ class OwnershipDataflow
       walk_expr_skip_copy(node.value, &block)
     when AST::ReturnNode
       walk_expr_skip_copy(node.value, &block)
+    when AST::Assert
+      walk_expr_skip_copy(node.condition, &block)
     when AST::Assignment
       walk_expr_skip_copy(node.value, &block)
     when AST::VarDecl, AST::BindExpr

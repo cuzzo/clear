@@ -18,8 +18,9 @@ module EscapeGraph
 
   ELEMENT_STORE_METHODS = T.let(%w[append insert push put].freeze, T::Array[String])
 
-  sig { params(fn_nodes: FnNodes, _schema_lookup: T.untyped).returns([T::Set[String], T::Set[String]]) }
-  def apply!(fn_nodes, _schema_lookup = nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.untyped).returns([T::Set[String], T::Set[String]]) }
+  def apply!(fn_nodes, schema_lookup = nil)
+    @schema_lookup = T.let(schema_lookup, T.untyped)
     heap_decls = T.let(Set.new, T::Set[String])
 
     fn_nodes.each_value do |fn|
@@ -72,17 +73,17 @@ module EscapeGraph
   sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, heap_decls: T::Set[String]).void }
   def escape_fn!(fn, fn_nodes, heap_decls)
     scopes = T.let([], T::Array[T::Hash[String, T.untyped]])
-    walk_scope(fn.body, scopes, false, fn_nodes) do |decl|
+    walk_scope(fn, fn.body, scopes, false, fn_nodes) do |decl|
       stamp_heap!(decl)
       heap_decls << decl.name.to_s if decl.respond_to?(:name)
     end
   end
 
   sig do
-    params(body: T.untyped, scopes: T::Array[T::Hash[String, T.untyped]], in_fiber: T::Boolean,
+    params(fn: AST::FunctionDef, body: T.untyped, scopes: T::Array[T::Hash[String, T.untyped]], in_fiber: T::Boolean,
            fn_nodes: FnNodes, mark: T.proc.params(arg0: T.untyped).void).void
   end
-  def walk_scope(body, scopes, in_fiber, fn_nodes, &mark)
+  def walk_scope(fn, body, scopes, in_fiber, fn_nodes, &mark)
     return unless body.is_a?(Array)
     locals = local_decls(body)
     local_names = Set.new(locals.keys)
@@ -95,7 +96,9 @@ module EscapeGraph
       when AST::ReturnNode
         each_binding_ref(node.value) do |id|
           sym = id.symbol
+          next if value_shaped_return_param?(node.value, sym)
           next if sym&.is_param && !sym&.takes
+          next unless returned_binding_escapes?(fn, id)
           mark.call(sym&.reg)
         end
       when AST::YieldExpr
@@ -104,8 +107,13 @@ module EscapeGraph
         if in_fiber && outer_names.include?(node.name.to_s)
           mark.call(node.symbol&.reg)
         end
+      when AST::VarDecl
+        mark_heap_payloads!(node, &mark)
       when AST::BindExpr
-        next if node.mode == :decl
+        if node.mode == :decl
+          mark_heap_payloads!(node, &mark)
+          next
+        end
         mark_enclosing_store!(node.name, node.value, local_names, outer_names, outer_decls, &mark)
       when AST::Assignment
         mark_enclosing_store!(node.name, node.value, local_names, outer_names, outer_decls, &mark)
@@ -119,7 +127,7 @@ module EscapeGraph
     end
 
     nested_scopes(body).each do |nested_body, fiber|
-      walk_scope(nested_body, scopes, in_fiber || fiber, fn_nodes, &mark)
+      walk_scope(fn, nested_body, scopes, in_fiber || fiber, fn_nodes, &mark)
     end
   ensure
     scopes.pop if scopes.last.equal?(locals)
@@ -180,6 +188,13 @@ module EscapeGraph
     mark.call(decl) if escapes
   end
 
+  sig { params(decl: T.untyped, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_heap_payloads!(decl, &mark)
+    return unless decl.respond_to?(:value)
+    return unless decl.respond_to?(:symbol) && decl.symbol&.heap_provenance?
+    each_binding_ref(decl.value) { |id| mark.call(id.symbol&.reg) }
+  end
+
   sig { params(expr: T.untyped).returns(T::Boolean) }
   def heap_binding_ref?(expr)
     found = T.let(false, T::Boolean)
@@ -197,9 +212,44 @@ module EscapeGraph
       next unless arg
       pt = param.type
       mutable_collection = param.mutable && pt.is_a?(Type) && collection_type?(pt)
-      next unless param.takes || mutable_collection
+      takes_collection = param.takes && pt.is_a?(Type) && collection_type?(pt)
+      takes_owned_shape = param.takes && pt.is_a?(Type) && type_shape_needs_recursive_cleanup?(pt)
+      next unless mutable_collection || takes_collection || takes_owned_shape || param_storage_heap?(param)
       each_binding_ref(arg) { |id| mark.call(id.symbol&.reg) }
     end
+  end
+
+  sig { params(param: T.untyped).returns(T::Boolean) }
+  def param_storage_heap?(param)
+    sym = param.respond_to?(:symbol) ? param.symbol : nil
+    !!(sym&.heap_provenance? || sym&.storage == :heap)
+  end
+
+  sig { params(fn: AST::FunctionDef, id: AST::Identifier).returns(T::Boolean) }
+  def returned_binding_escapes?(fn, id)
+    rt = fn.return_type
+    return true if rt.is_a?(Type) && inherent_heap_type?(rt)
+    bare_rt = rt.respond_to?(:error_union?) && rt.error_union? ? (rt.payload_type || rt) : rt
+    return true if bare_rt.is_a?(Type) && inherent_heap_type?(bare_rt)
+
+    decl = id.symbol&.reg
+    storage = decl.respond_to?(:storage) ? decl.storage : nil
+    return false if storage == :rodata
+
+    ti = type_of(id)
+    return false unless ti.is_a?(Type)
+    return true if ti.string?
+    return true if collection_type?(ti)
+    return true if type_shape_needs_recursive_cleanup?(ti)
+    false
+  rescue
+    false
+  end
+
+  sig { params(value: T.untyped, sym: T.untyped).returns(T::Boolean) }
+  def value_shaped_return_param?(value, sym)
+    return false unless sym&.is_param
+    value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit)
   end
 
   sig { params(decl: T.untyped).void }
@@ -216,6 +266,11 @@ module EscapeGraph
 
   sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes).void }
   def stamp_return_provenance!(fn, fn_nodes)
+    if borrow_return?(fn)
+      fn.return_provenance = :borrow
+      return
+    end
+
     rt = fn.return_type
     if rt.is_a?(Type) && inherent_heap_type?(rt)
       fn.return_provenance = :heap
@@ -262,6 +317,8 @@ module EscapeGraph
     when AST::FuncCall
       callee = fn_nodes[expr.name.to_s] || fn_nodes[expr.name]
       return callee.return_provenance if callee.is_a?(AST::FunctionDef) && callee.return_provenance
+      sig = expr.respond_to?(:matched_signature) ? expr.matched_signature : nil
+      return sig.return_provenance if sig.respond_to?(:return_provenance) && sig.return_provenance
       return :heap if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
       return :borrow if expr.respond_to?(:borrow_provenance?) && expr.borrow_provenance?
       return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
@@ -273,9 +330,6 @@ module EscapeGraph
       return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
       ti = expr.full_type if expr.respond_to?(:full_type)
       :heap if ti.is_a?(Type) && inherent_heap_type?(ti)
-    when AST::NextExpr
-      ti = type_of(expr)
-      :heap if ti.is_a?(Type) && (ti.string? || collection_type?(ti))
     when AST::BinaryOp
       return pipeline_return_provenance(expr, fn_nodes) if expr.op == :SMOOTH
       expr.op == :OR_RESCUE ? call_return_provenance(expr.left, fn_nodes) : nil
@@ -314,7 +368,8 @@ module EscapeGraph
     each_binding_ref(expr) do |id|
       sym = id.symbol
       prov = if sym&.heap_provenance?
-        :heap
+        ti = type_of(id)
+        ti.is_a?(Type) && ti.primitive? ? nil : :heap
       elsif sym&.borrow_provenance?
         :borrow
       elsif sym&.is_param && !sym&.takes
@@ -344,6 +399,8 @@ module EscapeGraph
     when AST::FuncCall
       callee = fn_nodes[expr.name.to_s] || fn_nodes[expr.name]
       return callee.return_provenance == :heap if callee.is_a?(AST::FunctionDef) && callee.return_provenance
+      sig = expr.respond_to?(:matched_signature) ? expr.matched_signature : nil
+      return sig.return_provenance == :heap if sig.respond_to?(:return_provenance) && sig.return_provenance
       ti = type_of(expr)
       ti.is_a?(Type) && (ti.string? || collection_type?(ti))
     when AST::MethodCall
@@ -364,6 +421,13 @@ module EscapeGraph
     return :heap if current == :heap || incoming == :heap
     return :borrow if current == :borrow || incoming == :borrow
     incoming
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def borrow_return?(fn)
+    lifetime = fn.respond_to?(:return_lifetime) ? fn.return_lifetime : nil
+    return false unless lifetime && !lifetime.empty?
+    true
   end
 
   sig { params(body: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
@@ -401,6 +465,44 @@ module EscapeGraph
   sig { params(ti: T.untyped).returns(T::Boolean) }
   def collection_type?(ti)
     ti.is_a?(Type) && (ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?)
+  end
+
+  sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  def type_shape_needs_recursive_cleanup?(ti, seen = nil)
+    seen ||= Set.new
+    key = "#{ti.resolved}|#{ti.collection}|#{ti.ownership}|#{ti.sync}|#{ti.provenance}"
+    return false if seen.include?(key)
+    seen.add(key)
+    return false if ti.provenance == :borrow
+    return true if ti.string? || ti.any_rc? || ti.link? || collection_type?(ti)
+    if ti.array? && !ti.string?
+      et = ti.element_type
+      return false unless et
+      return type_shape_needs_recursive_cleanup?(et.is_a?(Type) ? et : Type.new(et), seen)
+    end
+
+    schema = @schema_lookup.call(ti.resolved) rescue nil
+    if Schemas.union?(schema)
+      return (schema.variants || {}).any? do |_, vt|
+        if Schemas.inline_struct?(vt)
+          vt.fields.any? do |_, ft|
+            type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen)
+          end
+        else
+          type_shape_needs_recursive_cleanup?(vt.is_a?(Type) ? vt : Type.new(vt || :Any), seen)
+        end
+      end
+    end
+
+    if Schemas.field_bearing?(schema)
+      return schema.fields.any? do |_, field|
+        next false if field.is_a?(AST::StructField) && field.borrowed
+        ft = field.is_a?(AST::StructField) ? field.type : field
+        type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen)
+      end
+    end
+
+    false
   end
 
   sig { params(decl: T.untyped).returns(T::Boolean) }
@@ -504,11 +606,13 @@ module EscapeGraph
   sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
   def expr_children(node)
     case node
-    when AST::IfStatement then [node.condition]
+    when AST::IfStatement then [node.condition, node.then_branch, node.else_branch]
     when AST::ForRange then [node.start_expr, node.end_expr]
     when AST::ForEach then [node.collection]
     when AST::WhileLoop, AST::WhileBindLoop then [node.condition]
-    when AST::MatchStatement then [node.expr]
+    when AST::MatchStatement
+      bodies = node.cases.flat_map { |c| c.respond_to?(:body) ? c.body : [] }
+      [node.expr, bodies, node.default_case]
     else node.to_a
     end.compact
   end

@@ -132,8 +132,9 @@ Per-cell parameters:
 - `move` ∈ {borrow, copy, give, clone, lend}    (CLONE only for @shared/@split)
 - `value` ∈ {int, string, struct}               (struct used for non-atomic @shared cells)
 
-**Phase A** (12 active): `@local` × {borrow, copy} × {int, string} × 3 consumers. DO+@local
-cells expected `:compile_error` (DO branches don't capture outer @local locals).
+**Phase A** (12 active): `@local` × {borrow, copy} × {int, string} × 3 consumers.
+DO+@local+borrow+string is expected `:compile_error`; DO+@local+copy+string is legal
+because each branch receives its own owned copy.
 
 **Phase B** (36 active, was 90 :in_dev): `@shared` with each of 4 sync wrappers ×
 {borrow, copy, clone} × 3 consumers. Per-sync value: `@atomic` uses Int64 (bare

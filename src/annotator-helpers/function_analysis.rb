@@ -166,10 +166,12 @@ module FunctionAnalysis
         substituted = substitute_type_params(func_type, T.must(subst))
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, substituted)
+        node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         node.full_type = substituted.return_type
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
+        node.matched_signature = func_type if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
         rt = func_type.return_type
@@ -300,6 +302,7 @@ module FunctionAnalysis
   sig { params(node: T.untyped, signature: FunctionSignature).returns(T.nilable(T::Array[String])) }
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
+    node.matched_signature = signature if node.respond_to?(:matched_signature=)
     params = signature.params
     min_args = params.count { |param| param.required }
     max_args = params.size

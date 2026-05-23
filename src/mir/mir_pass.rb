@@ -449,16 +449,7 @@ class MIRPass
     rhs = case stmt
           when AST::VarDecl    then stmt.value
           when AST::BindExpr   then stmt.value
-          when AST::Assignment
-            # Map indexed assignments (map[k] = val) apply dupeUnionValue before
-            # calling put, so the map stores a deep copy. The original value is NOT
-            # consumed -- its cleanup defer must fire normally.
-            lhs = stmt.name
-            if lhs.is_a?(AST::GetIndex)
-              lhs.target.full_type.map? ? nil : stmt.value
-            else
-              stmt.value
-            end
+          when AST::Assignment then stmt.value
           else nil
           end
 
@@ -687,8 +678,14 @@ class MIRPass
   def collect_return_escapes(ret_node, bindings, fn_node: nil)
     return [] unless ret_node.value
     ids = collect_escaping_ids(ret_node.value)
-    ids.map { |id| id.name.to_s }
-       .select { |n| bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup) }
+    ids.select { |id|
+        n = id.name.to_s
+        (bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup)) ||
+          (n.start_with?("__hoist_") &&
+            id.respond_to?(:was_moved) && id.was_moved == true &&
+            bindings[n]&.dig(:needs_cleanup))
+      }
+      .map { |id| id.name.to_s }
        .uniq
   end
 
@@ -698,7 +695,8 @@ class MIRPass
     case node
     when AST::Identifier then [node]
     when AST::MoveNode   then collect_escaping_ids(node.value)
-    when AST::StructLit  then node.fields.values.flat_map { |v| collect_escaping_ids(v) }
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.values.flat_map { |v| collect_escaping_ids(v) }
     when AST::FuncCall, AST::MethodCall
       node.args.select(&:was_moved).flat_map { |a| collect_escaping_ids(a) }
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []

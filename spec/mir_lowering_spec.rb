@@ -21,6 +21,7 @@ RSpec.describe MIRLowering do
   end
 
   def emit(mir_node)
+    return mir_node.map { |n| emit(n) }.join("\n") if mir_node.is_a?(Array)
     emitter.emit(mir_node)
   end
 
@@ -215,13 +216,6 @@ RSpec.describe MIRLowering do
 
   end
 
-  # apply_container_promote_zig has been removed. Container promote was
-  # replaced by an AST-level per-field CopyNode(:heap) rewrite in
-  # mir_pass.insert_container_promote!. The deep-copy at field
-  # construction time is exercised by the StructLit/UnionVariantLit
-  # container-store transpile-tests; no separate unit test pins the
-  # removed runtime-promote wrapper.
-
   describe "#emit_builtin" do
     it "passes a bare type name through to dupeUnionValue unchanged" do
       mir = lowering.send(
@@ -276,6 +270,7 @@ RSpec.describe MIRLowering do
       charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
       charat.full_type = :String
       charat.matched_stdlib_def = STD_LIB["charAt"].first
+      charat.zig_pattern = charat.matched_stdlib_def.emit.zig
       eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
       eq_node.full_type = :Boolean
       eq_node.left.full_type = :String
@@ -746,8 +741,10 @@ RSpec.describe MIRLowering do
       node.instance_variable_set(:@reassign_cleanup, MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap))
       def node.reassign_cleanup; @reassign_cleanup; end
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::ReassignWithCleanup)
-      zig = emit(result)
+      expect(result).to be_a(Array)
+      expect(result[0]).to be_a(MIR::ReassignWithCleanup)
+      expect(result[1]).to be_a(MIR::MoveMark)
+      zig = result.map { |node| emit(node) }.join("\n")
       expect(zig).to include("CheatLib.cleanup")
       expect(zig).to include("buf = __new_buf")
     end
@@ -898,11 +895,6 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::ExprStmt)
       expect(emit(result)).to eq("CheatLib.setAt(bag, 0, 42);")
     end
-
-    # container_promote_zig_type annotation was removed. The container-
-    # promote path is now AST-level per-field CopyNode(:heap) rewrite
-    # in mir_pass; lowering no longer needs to read a promote-zig hint
-    # off the Assignment node.
 
     it "cleans up overwritten list elements that own heap fields before indexed storage" do
       target = make_id("items", full_type: Type.new(:"Point[]", collection: :list))
@@ -1378,15 +1370,16 @@ RSpec.describe MIRLowering do
       expect(zig).to include(".age = 30")
     end
 
-    it "lowers heap-allocated struct literal" do
+    it "keeps heap-marked struct literals value-shaped" do
       val = make_lit(:NUMBER, 1.0)
       node = AST::StructLit.new(tok, "Node", { value: val }, :heap, nil)
       node.full_type = :Node
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::HeapCreate)
+      expect(result).to be_a(MIR::StructInit)
       zig = emit(result)
-      expect(zig).to include("create(Node)")
+      expect(zig).to include("Node{")
+      expect(zig).not_to include("create(Node)")
       expect(zig).to include(".value = 1.0")
     end
   end
@@ -1574,7 +1567,7 @@ RSpec.describe MIRLowering do
   describe "function definitions" do
     def make_fn(name, params: [], return_type: :Void, body: [], visibility: nil,
                 needs_rt: true, can_fail: true, uses_frame: false, uses_alloc: false,
-                type_params: nil, catch_clauses: nil, default_catch: nil, has_promotion: false)
+                type_params: nil, catch_clauses: nil, default_catch: nil)
       fn = AST::FunctionDef.new(tok, name, params, nil, return_type, nil, body,
                                  catch_clauses, default_catch, visibility, nil, uses_frame)
       fn.full_type = return_type
@@ -1582,7 +1575,6 @@ RSpec.describe MIRLowering do
       fn.can_fail = can_fail
       fn.uses_alloc = uses_alloc
       fn.type_params = type_params
-      fn.has_promotion = has_promotion
       fn
     end
 
@@ -2653,7 +2645,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::TryCatch)
       expect(result.heap_provenance).to be true
-      expect(emit(result)).to include("make(rt) catch undefined")
+      expect(emit(result)).to include("make(rt) catch @as(std.ArrayListUnmanaged(i64), .empty)")
     end
 
     it "hoists heap-provenance TryCatch returns with err cleanup" do
@@ -2741,7 +2733,7 @@ RSpec.describe MIRLowering do
       zig = result.map { |t| emit(t) }.join("\n")
       expect(zig).to include('test "MyTest: given input: works"')
       expect(zig).to include("Runtime.init(allocator")
-      expect(zig).to include("rt.wireAllocator()")
+      expect(zig).to include("__rt_box.wireAllocator()")
     end
 
     it "lowers test block with setup code" do
@@ -3093,7 +3085,7 @@ RSpec.describe MIRLowering do
       zig = emit(result)
 
       expect(result).to be_a(MIR::BlockExpr)
-      expect(zig).to include("materializeNext(rt.heapAlloc())")
+      expect(zig).to include("materializeNext(rt.frameAlloc())")
       expect(zig).to include(".destroy(rt.heapAlloc())")
     end
 
@@ -3243,9 +3235,7 @@ RSpec.describe MIRLowering do
         result = l.lower(node)
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)
-        expect(result.fallback).to be_a(MIR::BlockExpr)
-        # The hoisted dupe Let lives inside the BlockExpr's body.
-        expect(result.fallback.body).to include(an_instance_of(MIR::Let))
+      expect(result.fallback).to be_a(MIR::StructInit)
       end
 
       it "leaves a non-allocating fallback unwrapped" do

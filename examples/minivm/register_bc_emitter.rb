@@ -5345,6 +5345,8 @@ class RegisterBcEmitter
       return { kind: :atomic_primitive, payload_kind: kind, reg: reg } if reg
     end
 
+    inner = inner.init if inner.is_a?(MIR::HeapCreate)
+
     unless inner.is_a?(MIR::StructInit)
       raise Unsupported, "register emitter only supports CapWrap of StructInit in this tranche (got #{inner.class.name.split('::').last})"
     end

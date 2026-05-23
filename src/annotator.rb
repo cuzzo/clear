@@ -6614,6 +6614,7 @@ private
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
         if matched_def.emit&.lifetime
           val.storage = :borrow if val.respond_to?(:storage=)
+          node.storage = :borrow if node.respond_to?(:storage=)
           return
         end
         ret_alloc = matched_def.emit&.return_alloc

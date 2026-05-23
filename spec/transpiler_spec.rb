@@ -873,13 +873,14 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # val is deep-copied by the runtime before map storage; original needs cleanup
+      # Owned values move into map storage directly; no hidden promotion or deep copy.
       expect(zig).not_to include("val_moved")
-      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include("&val")
+      expect(zig).not_to include("dupeUnionValue(Value, val")
+      expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
     end
 
-    it "does not suppress val cleanup when map assignment deep-copies the value" do
+    it "moves owned map assignment values without deep-copying them" do
       src = <<~CLEAR
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
         FN test!(MUTABLE map: HashMap<Value>) RETURNS !Void ->
@@ -889,11 +890,11 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The runtime deep-copies val via dupeUnionValue before storing in map.
-      # val itself must be cleaned up -- its cleanup defer must NOT be suppressed.
+      # Map storage owns val after assignment; cleanup belongs to the map.
       expect(zig).not_to include("val_moved")
-      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include("&val")
+      expect(zig).not_to include("dupeUnionValue(Value, val")
+      expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
     end
 
     it "emits source_moved for MATCH AS on non-Copy variant (auto-TAKES)" do
@@ -1435,10 +1436,10 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
-  # BG string capture: defer free only for promoted captures
+  # BG string capture: do not free non-duped captures
   # ===========================================================================
   describe "BG string capture defer free" do
-    it "emits defer free for promoted (frame-allocated) string capture" do
+    it "captures an already-owned heap string without promotion-era dup/free glue" do
       src = <<~CLEAR
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN main() RETURNS Void ->
@@ -1449,9 +1450,10 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # msg is frame-allocated, captured by BG -> must be duped + freed
-      expect(zig).to include("dupe(u8, msg)")
-      expect(zig).to include(".free(")
+      user_code = zig.split("// 3. Main Entry").first
+      expect(user_code).to include(".msg = msg")
+      expect(user_code).not_to include("dupe(u8, msg)")
+      expect(user_code).not_to match(/free.*msg/)
     end
 
     it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do
@@ -1531,7 +1533,7 @@ RSpec.describe ZigTranspiler do
   # NEXT on ~T[]@list (promise list await-all)
   # ===========================================================================
   describe "NEXT on promise list (~T[]@list)" do
-    it "emits an await-all loop that collects results into a frame list" do
+    it "emits an await-all loop that collects local results into a frame list" do
       src = <<~CLEAR
         FN work(n: Int64) RETURNS Int64 -> RETURN n; END
         FN main() RETURNS Void ->

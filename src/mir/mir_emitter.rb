@@ -36,6 +36,7 @@ class MIREmitter
     @rt_name = T.let("rt", String)
     @flow_alias_zig = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(nil, T.nilable(Integer))
+    @discard_counter = T.let(0, Integer)
   end
 
   # Emit Zig code from an MIR node. Returns a String.
@@ -81,6 +82,7 @@ class MIREmitter
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
+    when MIR::DiscardOwned     then emit_discard_owned(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
     when MIR::RawZig           then node.code
@@ -1292,6 +1294,42 @@ class MIREmitter
     catch_body = emit(node.catch_body)
     cap = node.capture ? " |#{node.capture}|" : ""
     "(#{expr} catch#{cap} #{catch_body})"
+  end
+
+  sig { params(node: MIR::DiscardOwned).returns(String) }
+  def emit_discard_owned(node)
+    @discard_counter += 1
+    name = "__discard_#{@discard_counter}"
+
+    if discard_success_only?(node.expr)
+      opt = "#{name}_opt"
+      expr = emit(node.expr.expr)
+      body = [
+        "{",
+        "const #{opt}: ?#{node.zig_type} = (#{expr} catch null);",
+        "if (#{opt}) |#{name}_val| {",
+        "var #{name} = #{name}_val;",
+        indent_block(emit_cleanup(MIR::Cleanup.new(name, node.cleanup_entry), errdefer: false), 4),
+        "}",
+        "}",
+      ].join("\n")
+      return body
+    end
+
+    [
+      "{",
+      "var #{name} = #{emit(node.expr)};",
+      indent_block(emit_cleanup(MIR::Cleanup.new(name, node.cleanup_entry), errdefer: false), 4),
+      "}",
+    ].join("\n")
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def discard_success_only?(expr)
+    expr.is_a?(MIR::TryCatch) &&
+      expr.capture.nil? &&
+      ((expr.catch_body.is_a?(MIR::Ident) && expr.catch_body.name.to_s == "undefined") ||
+       expr.catch_body.is_a?(MIR::Undef))
   end
 
   sig { params(node: MIR::Conditional).returns(String) }

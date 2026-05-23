@@ -23,7 +23,6 @@ module IntrinsicRegistry
   # (internal), fsm_* (FsmOps op-object arrays, not strings).
   EMIT_PASS   = %i[borrows fallible_clauses fsm_setup fsm_state_decls
                    fsm_finish_block fsm_state_finalize].freeze
-  EMIT_SYMARR = %i[value_transforms shard_direct_value_transforms].freeze
   EMIT_INTARR = %i[takes_args].freeze
   EMIT_PROC   = %i[label].freeze
   EMIT_NESTED = %i[eql strcmp cleanup assert array list pool set get
@@ -43,7 +42,6 @@ module IntrinsicRegistry
       when *EMIT_STR    then e.public_send("#{k}=", v.to_s)
       when *EMIT_SYM    then e.public_send("#{k}=", v.to_sym)
       when *EMIT_PASS   then e.public_send("#{k}=", v)
-      when *EMIT_SYMARR then e.public_send("#{k}=", Array(v).map(&:to_sym))
       when *EMIT_INTARR then e.public_send("#{k}=", Array(v).map(&:to_i))
       when *EMIT_PROC   then e.public_send("#{k}=", v)
       when *EMIT_NESTED

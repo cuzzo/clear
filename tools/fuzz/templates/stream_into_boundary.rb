@@ -42,15 +42,14 @@ PHASE_B_VALUE_FOR_SYNC = {
 #
 # Findings encoded as expectations:
 #   - (DO + @local + :borrow + non-Copy): USE AFTER MOVE — both DO branches
-#     capture val and capture-of-non-Copy is a move.
-#   - (DO + @local + string): non-Copy strings still cannot be implicitly
-#     shared across both DO branches.
+#     capture val and capture-of-non-Copy is a move. Explicit COPY is legal:
+#     each branch receives its own owned value.
 COPY_VALUES = [:int]
 CONSUMERS.each do |c|
   VALUES_PHASE_A.each do |v|
     LOCAL_MOVES.each do |m|
       cell = { consumer: c, ownership: :local, sync: :none, move: m, value: v }
-      cell[:expected] = :compile_error if c == :do && v == :string
+      cell[:expected] = :compile_error if c == :do && m == :borrow && v == :string
       STREAM_BOUNDARY_CELLS << cell
     end
   end

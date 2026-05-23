@@ -285,7 +285,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(entry&.dig(:needs_cleanup)).to be true
       expect(entry&.dig(:alloc)).to eq(:heap)
       # storage is WRONG: :stack instead of :heap
-      expect(d.storage).to eq(:heap)
+      expect(d.symbol.storage).to eq(:heap)
     end
 
   end
@@ -430,7 +430,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeNode!" }
       d = find_decl_in(fn, "n")
-      expect(d.storage).to eq(:heap)
+      expect(d.symbol.storage).to eq(:heap)
     end
 
     # Scenario: :assign_escape
@@ -451,7 +451,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test!" }
       d = find_decl_in(fn, "child")
-      expect(d.storage).to eq(:heap)
+      expect(d.symbol.storage).to eq(:heap)
     end
 
     # Scenario: :loop_carry_string
@@ -720,8 +720,8 @@ RSpec.describe "Allocation Strategy Invariants" do
       mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk!" }
       a_decl = find_decl_in(mk_fn, "a")
       b_decl = find_decl_in(mk_fn, "b")
-      expect(a_decl.storage).to eq(:heap)
-      expect(b_decl.storage).to eq(:heap)
+      expect(a_decl.symbol.storage).to eq(:heap)
+      expect(b_decl.symbol.storage).to eq(:heap)
     end
 
   end

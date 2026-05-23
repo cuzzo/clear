@@ -19,13 +19,19 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
   # ── the ONE sanctioned writer of each field ─────────────────────────
 
-  # node.storage is derived from the type during annotation.
+  # node.storage is expression-shape metadata. Annotation is the source for
+  # parsed nodes; rewrite/lowering adapters may copy that metadata onto
+  # synthetic nodes, but escape placement must not be written here.
   NODE_STORAGE_OK = lambda do |rel|
     rel == "annotator.rb" ||
       rel.start_with?("annotator-helpers/") ||
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
-      rel == "mir/alloc.rb"            # downgrade_frame_to_stack: mixed into SemanticAnnotator
+      rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
+      rel == "backends/pipeline_host.rb" ||
+      rel == "backends/pipeline_rewriter.rb" ||
+      rel == "backends/string_concat_rewriter.rb" ||
+      rel == "mir/mir_lowering.rb"
   end
 
   # symbol.storage is made DEFINITIVE by escape analysis.
@@ -35,7 +41,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
   # CleanupEntry#alloc is set once, by cleanup classification.
   CLEANUP_ALLOC_OK = lambda do |rel|
-    rel == "mir/promotion_plan.rb" || rel == "mir/cleanup_entry.rb"
+    rel == "mir/cleanup_classifier.rb" || rel == "mir/cleanup_entry.rb"
   end
 
   # ── scan every source file for placement-field writes ───────────────
