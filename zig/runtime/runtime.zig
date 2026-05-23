@@ -432,44 +432,6 @@ pub const Runtime = struct {
         return fp.__pinned_local_alloc orelse self.heap_allocator;
     }
 
-    /// Allocator for cleanup of mixed-provenance data. free checks if the
-    /// pointer is in the frame arena (skip) or heap (delegate to heapAlloc).
-    /// Used by list_with_elem_cleanup where elements may contain frame strings,
-    /// heap-duped strings, or rodata — all in the same list.
-    pub fn cleanupAlloc(self: *Runtime) std.mem.Allocator {
-        return std.mem.Allocator{
-            .ptr = self,
-            .vtable = &CleanupAllocatorVTable,
-        };
-    }
-
-    const CleanupAllocatorVTable = std.mem.Allocator.VTable{
-        .alloc = smartAlloc, // reuse frame allocator for alloc (shouldn't be called)
-        .resize = smartResize,
-        .free = cleanupFree,
-        .remap = smartRemap,
-    };
-
-    fn cleanupFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-        const self: *Runtime = @ptrCast(@alignCast(ctx));
-        const p = @intFromPtr(buf.ptr);
-        // Determine if this pointer is frame-arena-owned (should be skipped —
-        // rewind/restoreFrameMark will reclaim it).
-        //
-        // Production: check if pointer falls within the static block (O(1)).
-        // Debug mode: every alloc is a large_object; scan the list (O(n), acceptable).
-        const is_frame = if (use_debug_arena)
-            self.overflow_arena.isLargeObject(buf.ptr)
-        else blk: {
-            const frame_mem = self.overflow_arena.static_block;
-            const frame_base = @intFromPtr(frame_mem.ptr);
-            break :blk (p >= frame_base and p < frame_base + frame_mem.len);
-        };
-        if (is_frame) return; // frame-arena owned — rewind reclaims it
-        // Everything else (heap, overflow blocks): delegate to real heap allocator.
-        self.heap_allocator.rawFree(buf, buf_align, ret_addr);
-    }
-
     pub fn globalAlloc(self: *Runtime) std.mem.Allocator {
         return self.heap_allocator;
     }

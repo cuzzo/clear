@@ -75,7 +75,10 @@ module PreMirTypeCheck
     elsif node.is_a?(Hash)
       node.each_value { |v| walk(v, violations, seen) }
     elsif node.respond_to?(:each_pair) # Struct AST node
-      node.each_pair { |_, v| walk(v, violations, seen) }
+      node.each_pair do |member, value|
+        next if node.is_a?(AST::FunctionDef) && member == :return_lifetime
+        walk(value, violations, seen)
+      end
     end
   end
 end

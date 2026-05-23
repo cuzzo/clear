@@ -76,7 +76,7 @@ RSpec.describe "COPY keyword" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("dupeUnionValue")
+    expect(zig).to match(/dupeUnionValue|dupeValue\(/)
   end
 
   # =========================================================================
@@ -100,6 +100,6 @@ RSpec.describe "COPY keyword" do
       END
     CLEAR
     zig = transpile(src)
-    expect(zig).to include("dupeUnionValue")
+    expect(zig).to match(/dupeUnionValue|dupeValue\(/)
   end
 end

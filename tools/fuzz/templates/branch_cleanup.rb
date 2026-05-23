@@ -78,7 +78,7 @@ FuzzGenerator.register(:branch_cleanup, cells: BRANCH_CLEANUP_CELLS) do |p|
     CHT
   else
     <<~CHT.chomp
-      IF NOT cond THEN
+      IF !cond THEN
                 #{else_body}
             END
     CHT

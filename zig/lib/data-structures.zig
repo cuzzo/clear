@@ -35,6 +35,10 @@ pub fn bind(comptime deps: type) type {
             deps.releaseOne(T, alloc, value);
         }
 
+        fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
+            return deps.dupeValue(T, value, alloc);
+        }
+
     pub fn makeHashMap(comptime V: type) std.StringHashMapUnmanaged(V) {
         return std.StringHashMapUnmanaged(V){};
     }
@@ -644,6 +648,19 @@ pub fn bind(comptime deps: type) type {
             pub fn retain(self: Self) Self {
                 _ = self.inner.ref_count.fetchAdd(1, .acquire);
                 return Self{ .inner = self.inner, .alloc = self.alloc, .resolved = null };
+            }
+
+            /// Drop an unconsumed handle: decrement ref_count and free Inner
+            /// if last. Idempotent for consumed handles (next() already
+            /// decremented). Required so CheatLib.cleanup can teardown a
+            /// SharedPromise binding uniformly via struct-with-deinit.
+            pub fn deinit(self: *Self) void {
+                if (self.resolved != null) return; // already consumed
+                const prev = self.inner.ref_count.fetchSub(1, .release);
+                if (prev == 1) {
+                    _ = self.inner.ref_count.load(.acquire);
+                    self.alloc.destroy(self.inner);
+                }
             }
         };
     }
@@ -2467,6 +2484,25 @@ pub fn bind(comptime deps: type) type {
                     }
                     shard.map.deinit(remote_alloc);
                 }
+            }
+
+            pub fn dupe(self: *const Self, _: std.mem.Allocator) !Self {
+                var result: Self = .{};
+                errdefer result.deinit(remote_alloc, remote_alloc);
+                var src_mut = self.*;
+                for (&src_mut.shards, 0..) |*shard, shard_idx| {
+                    var it = shard.map.iterator();
+                    while (it.next()) |entry| {
+                        const v_dup = if (comptime needsCleanup(V))
+                            try dupeValue(V, entry.value_ptr.*, remote_alloc)
+                        else
+                            entry.value_ptr.*;
+                        const key_dup = try remote_alloc.dupe(u8, entry.key_ptr.*);
+                        errdefer remote_alloc.free(key_dup);
+                        try result.shards[shard_idx].map.put(remote_alloc, key_dup, v_dup);
+                    }
+                }
+                return result;
             }
 
             pub fn getOpCounts(self: *const Self) [N]u64 {

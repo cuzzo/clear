@@ -124,6 +124,11 @@ class MIRChecker
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
+      when MIR::DiscardOwned
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+          inline_alloc_nodes << node.expr
+        end
+        all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::InlineZig
         if node.allocs && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
@@ -229,7 +234,7 @@ class MIRChecker
       marks = allocs[let.name]
       unless marks
         @errors << error(:OWNED_RETURN_WITHOUT_ALLOC, let.name,
-          "owned-return initializer is bound without MIR::AllocMark; cleanup cannot be verified")
+          "owned-return initializer is heap-provenance but no MIR::AllocMark exists")
         next
       end
 
@@ -400,6 +405,7 @@ class MIRChecker
       walk_mir(node.default_body, &block)
     when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
+    when MIR::DiscardOwned then walk_mir_node(node.expr, &block) if node.expr
     when MIR::BatchWindowPush
       walk_mir_node(node.item_expr, &block)
       walk_mir_node(node.value_expr, &block)
@@ -457,10 +463,16 @@ class MIRChecker
 
       container_alloc = T.must(allocs[target]).first.alloc
 
-      # Check primary allocator
+      # Check primary allocator. :cleanup is a mixed-provenance
+      # container -- it tolerates any op allocator (the runtime
+      # cleanupAlloc.free dispatches per-pointer). Per the
+      # "one collection = one allocator" policy this kind is being
+      # phased out, but while it exists it's correct for ops to use
+      # the actual element's allocator (often :frame) inside a
+      # :cleanup container.
       if iz.allocs.key?(:alloc)
         op_alloc = iz.allocs[:alloc]
-        if op_alloc != container_alloc
+        if op_alloc != container_alloc && container_alloc != :cleanup
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
         end
@@ -864,6 +876,8 @@ class MIRChecker
       check_expr_for_unhoisted(node.value, allow_top: true)
     when MIR::ExprStmt
       check_expr_for_unhoisted(node.expr, allow_top: false)
+    when MIR::DiscardOwned
+      check_expr_for_unhoisted(node.expr, allow_top: true)
     when MIR::ReturnStmt
       check_expr_for_unhoisted(node.value, allow_top: false)
     when MIR::BreakStmt
@@ -945,23 +959,19 @@ class MIRChecker
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
+  # MIR nodes whose `allocates?` decision is just `alloc == :heap`.
+  ALLOC_HEAP_MIR_CLASSES = [
+    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::ConcatStr,
+    MIR::CapWrap, MIR::SharePromote, MIR::ContainerInit,
+  ].freeze
+
   def allocating_expr?(expr)
     # Only flag HEAP allocations. Frame allocations are managed by the frame
     # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.
-    case expr
-    when MIR::HeapCreate   then true              # always heap by definition
-    when MIR::DupeSlice    then expr.alloc == :heap
-    when MIR::AllocSlice   then expr.alloc == :heap
-    when MIR::MakeList     then expr.alloc == :heap
-    when MIR::ConcatStr    then expr.alloc == :heap
-    when MIR::CapWrap      then expr.alloc == :heap
-    when MIR::SharePromote then expr.alloc == :heap
-    when MIR::ContainerInit then expr.alloc == :heap
-    when MIR::DeepCopy
-      expr.strategy != :passthrough && expr.alloc == :heap
-    else
-      false
-    end
+    return true if MIR::HeapCreate === expr  # always heap by definition
+    return expr.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === expr }
+    return expr.strategy != :passthrough && expr.alloc == :heap if MIR::DeepCopy === expr
+    false
   end
 
   # Yield each immediate sub-expression of expr.

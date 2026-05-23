@@ -68,7 +68,7 @@ RSpec.describe MIREmitter do
     node = MIR::ReassignWithCleanup.new("buf", MIR::Lit.new("new_val"), "[]const u8", :heap)
     zig = e.emit(node)
     expect(zig).to include("const __new_buf = new_val;")
-    expect(zig).to include("CheatLib.cleanup([]const u8, rt.heapAlloc(), &buf);")
+    expect(zig).to include("CheatLib.cleanup(@TypeOf(buf), rt.heapAlloc(), &buf);")
     expect(zig).to include("buf = __new_buf;")
   end
 
@@ -416,10 +416,10 @@ RSpec.describe MIREmitter do
 
   describe "Cleanup" do
     it "emits unguarded defer for list" do
-      entry = CleanupEntry.from({ kind: :list, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.ArrayListUnmanaged(i64)", alloc: :frame, has_moved_guard: false })
       node = MIR::Cleanup.new("nums", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer CheatLib.cleanup(CheatLib.ArrayListUnmanaged(i64), rt.frameAlloc(), &nums);")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(nums), rt.frameAlloc(), &nums);")
       expect(zig).not_to include("_moved")
     end
 
@@ -427,8 +427,11 @@ RSpec.describe MIREmitter do
       entry = CleanupEntry.from({ kind: :heap_string, alloc: :heap, has_moved_guard: true })
       node = MIR::Cleanup.new("name", entry)
       zig = e.emit(node)
+      # Post-collapse: heap strings route through CheatLib.cleanup shim
+      # ([]const u8 arm calls alloc.free internally with an empty-string
+      # guard). One unified emit form across all cleanup kinds.
       expect(zig).to include("var name_moved = false;")
-      expect(zig).to include("defer if (!name_moved) rt.heapAlloc().free(name);")
+      expect(zig).to include("defer if (!name_moved) CheatLib.cleanup(@TypeOf(name), rt.heapAlloc(), &name);")
     end
 
     it "emits resource cleanup" do
@@ -439,10 +442,13 @@ RSpec.describe MIREmitter do
     end
 
     it "emits pool cleanup" do
-      entry = CleanupEntry.from({ kind: :pool, alloc: :heap, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.Pool(User, 100)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("pool", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer pool.deinit(rt.heapAlloc());")
+      # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
+      # calls ptr.deinit(alloc) internally). One emit form across all
+      # collection shapes.
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool);")
     end
 
     it "emits rc cleanup with release fields" do
@@ -451,15 +457,28 @@ RSpec.describe MIREmitter do
                 base_zig: "User", needs_release_fields: true })
       node = MIR::Cleanup.new("user_rc", entry)
       zig = e.emit(node)
-      expect(zig).to include("CheatLib.cleanup(CheatLib.Rc(User), rt.heapAlloc(), &user_rc)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(user_rc), rt.heapAlloc(), &user_rc)")
       expect(zig).to include("CheatLib.releaseFields(User, rt.heapAlloc(), user_rc.ctrl.data.*)")
     end
 
+    it "emits rc cleanup with release fields AND moved guard" do
+      # Pins the guarded branch of the :rc releaseFields side-channel:
+      # has_moved_guard=true makes the post-cleanup releaseFields wrap in
+      # `if (!name_moved)`. Without this spec the guarded arm was dead.
+      entry = CleanupEntry.from({ kind: :rc, zig_type: "CheatLib.Rc(User)", alloc: :heap,
+                has_moved_guard: true, rc_variant: nil, rc_alloc: :heap,
+                base_zig: "User", needs_release_fields: true })
+      node = MIR::Cleanup.new("user_rc", entry)
+      zig = e.emit(node)
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(user_rc), rt.heapAlloc(), &user_rc)")
+      expect(zig).to include("defer if (!user_rc_moved) CheatLib.releaseFields(User, rt.heapAlloc(), user_rc.ctrl.data.*)")
+    end
+
     it "emits locked cleanup" do
-      entry = CleanupEntry.from({ kind: :locked, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
+      entry = CleanupEntry.from({ kind: :uniform, zig_type: "CheatLib.Locked(Counter)", alloc: :heap, has_moved_guard: false })
       node = MIR::Cleanup.new("counter", entry)
       zig = e.emit(node)
-      expect(zig).to include("defer CheatLib.lockedDestroy(CheatLib.Locked(Counter), rt.heapAlloc(), counter);")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(counter), rt.heapAlloc(), &counter);")
     end
   end
 
@@ -469,76 +488,32 @@ RSpec.describe MIREmitter do
     end
   end
 
-  describe "EscapePromote" do
-    it "emits list promotion" do
-      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt", "i64")
-      expect(e.emit(node)).to eq("try CheatLib.promoteList(i64, rt, &items);")
-    end
-
-    it "emits nested list promotion from explicit elem_type" do
-      node = MIR::EscapePromote.new(
-        "items",
-        "CheatLib.ArrayListUnmanaged(CheatLib.Promise(i64))",
-        :list,
-        nil,
-        "rt",
-        "CheatLib.Promise(i64)"
-      )
-      expect(e.emit(node)).to eq("try CheatLib.promoteList(CheatLib.Promise(i64), rt, &items);")
-    end
-
-    it "requires explicit elem_type for list promotion" do
-      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt")
-      expect { e.emit(node) }.to raise_error(RuntimeError, /missing elem_type/)
-    end
-
-    it "emits string_map promotion" do
-      node = MIR::EscapePromote.new("cache", nil, :string_map, nil, "rt")
-      expect(e.emit(node)).to eq("cache.alloc = rt.heapAlloc();")
-    end
-
-    it "emits generic promotion" do
-      node = MIR::EscapePromote.new("val", "User", :generic, nil, "rt")
-      expect(e.emit(node)).to eq("try CheatLib.promote(User, rt, &val);")
-    end
-
-    it "raises on unknown strategy" do
-      node = MIR::EscapePromote.new("x", nil, :unknown_strategy, nil, "rt")
-      expect { e.emit(node) }.to raise_error(RuntimeError, /unhandled strategy/)
-    end
-  end
-
   describe "DeepCopy" do
-    it "emits string copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :string, :heap)
-      expect(e.emit(node)).to eq("@as([]const u8, try rt.heapAlloc().dupe(u8, src))")
+    it "emits string copy via dupeValue with explicit []const u8 type" do
+      node = MIR::DeepCopy.new(MIR::Ident.new("src"), "[]const u8", nil, :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]const u8, src, rt.heapAlloc())")
     end
 
-    it "emits union copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :union, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeUnionValue(Result, val, rt.heapAlloc())")
+    it "emits union copy via dupeValue with explicit union type" do
+      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue(Result, val, rt.heapAlloc())")
     end
 
-    it "emits shallow list copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "i64", :list_shallow, :heap)
-      zig = e.emit(node)
-      expect(zig).to include("@memcpy(__buf, __src)")
-      expect(zig).to include("rt.heapAlloc().alloc(i64, __src.len)")
+    it "emits slice copy via CheatLib.dupeValue (subsumes the old :list_shallow / :list_deep strategies)" do
+      # Lower_copy now stamps zig_type = "[]ElemT" and strategy :full_value
+      # for any list/slice COPY. CheatLib.dupeValue's slice arm handles
+      # both shallow (Copy elements -> @memcpy) and deep (heap-owning
+      # elements -> recursive dupeValue) internally.
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]i64", "i64", :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]i64, items, rt.heapAlloc())")
+
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]Value", "Value", :full_value, :heap)
+      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]Value, items, rt.heapAlloc())")
     end
 
-    it "emits deep list copy via the canonical per-element dupeValue" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "Value", :list_deep, :heap)
-      zig = e.emit(node)
-      expect(zig).to include("dupeValue(Value, __src[__i], rt.heapAlloc())")
-      expect(zig).to include("errdefer rt.heapAlloc().free(__buf)")
-    end
-
-    it "emits passthrough for value types" do
+    it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
-      zig = e.emit(node)
-      expect(zig).to include("blk_copy_value")
-      expect(zig).to include("const __src = n")
-      expect(zig).to include("break :blk_copy_value __src")
+      expect(e.emit(node)).to eq("(if (@typeInfo(@TypeOf(n)) == .pointer) n.* else n)")
     end
   end
 

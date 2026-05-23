@@ -10,22 +10,22 @@ RSpec.describe Type, "provenance" do
   it "can be set to :rodata" do
     t = Type.new(:String)
     t.provenance = :rodata
-    expect(t.rodata_provenance?).to be true
-    expect(t.heap_provenance?).to be false
-    expect(t.frame_provenance?).to be false
+    expect(t.rodata?).to be true
+    expect(t.heap?).to be false
+    expect(t.frame?).to be false
   end
 
   it "can be set to :frame" do
     t = Type.new(:String)
     t.provenance = :frame
-    expect(t.frame_provenance?).to be true
+    expect(t.frame?).to be true
     expect(t.provenance_alloc).to eq(:frame)
   end
 
   it "can be set to :heap" do
     t = Type.new(:String)
     t.provenance = :heap
-    expect(t.heap_provenance?).to be true
+    expect(t.heap?).to be true
     expect(t.provenance_alloc).to eq(:heap)
   end
 
@@ -40,6 +40,6 @@ RSpec.describe Type, "provenance" do
     t.provenance = :heap
     copy = Type.new(t)
     expect(copy.provenance).to eq(:heap)
-    expect(copy.heap_provenance?).to be true
+    expect(copy.heap?).to be true
   end
 end

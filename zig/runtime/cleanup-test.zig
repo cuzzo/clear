@@ -120,107 +120,6 @@ test "cleanup: Map with nested Array values" {
     // freeUnionPayload should recursively free the inner ArrayList
 }
 
-test "promote: Null variant is no-op" {
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(std.heap.page_allocator);
-    var rt = try makeRuntime(&ebr);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    var val = TestValue{ .Null = {} };
-    try CheatLib.promote(TestValue, &rt, &val);
-}
-
-test "promote: Str variant dupes to heap" {
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(std.heap.page_allocator);
-    var rt = try makeRuntime(&ebr);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    // promote() only dupes strings whose pointer falls within the frame
-    // arena's static_block — string literals (.rodata) are left alone.
-    // Allocate via frameAlloc so promote actually escapes it to heap.
-    const frame_str = try rt.frameAlloc().dupe(u8, "frame string");
-    var val = TestValue{ .Str = frame_str };
-    try CheatLib.promote(TestValue, &rt, &val);
-    // After promote, val.Str should be a heap-duped copy
-    try std.testing.expectEqualStrings("frame string", val.Str);
-    // Free the duped string
-    rt.heapAlloc().free(val.Str);
-}
-
-test "promote: Array of Str elements dupes strings to heap" {
-    // promote recursively dupes strings inside union elements.
-    // cleanup frees the list backing but not bare Str variants.
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(std.heap.page_allocator);
-    var rt = try makeRuntime(&ebr);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    var list = std.ArrayListUnmanaged(TestValue).empty;
-    // Frame-allocate so promote will escape to heap (literals are no-ops).
-    const hello = try rt.frameAlloc().dupe(u8, "hello");
-    try list.append(rt.frameAlloc(), TestValue{ .Str = hello });
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 42.0 });
-
-    var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &rt, &val);
-
-    try std.testing.expect(val.Array.items.len == 2);
-    try std.testing.expectEqualStrings("hello", val.Array.items[0].Str);
-
-    // cleanup frees everything: list backing + promoted strings.
-    CheatLib.cleanup(TestValue, rt.heapAlloc(), &val);
-}
-
-test "promote: nested Map inside Array" {
-    // Scenario: array containing map values (like JSON [{...}, {...}])
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(std.heap.page_allocator);
-    var rt = try makeRuntime(&ebr);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    const heap = rt.heapAlloc();
-    var inner_map = CheatLib.StringMap(TestValue){ .alloc = heap };
-    try inner_map.put(heap, heap, "key", TestValue{ .Num = 99.0 });
-
-    var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(rt.frameAlloc(), TestValue{ .Map = inner_map });
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
-
-    var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &rt, &val);
-
-    // Cleanup recursively frees map inside array
-    CheatLib.cleanup(TestValue, heap, &val);
-}
-
-test "full cycle: promote then cleanup Array of mixed values" {
-    // End-to-end: promote frame data to heap, then cleanup.
-    // Strings in union variants are promoted by promote() and freed
-    // when they're inside a collection (StringMap.freeUnionPayload).
-    // Bare strings at the top-level Array need manual cleanup since
-    // cleanup() doesn't free string union variants directly.
-    const alloc = std.testing.allocator;
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(alloc);
-    var arena_buf: [4096]u8 = undefined;
-    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
-    try list.append(rt.frameAlloc(), TestValue{ .Null = {} });
-
-    var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &rt, &val);
-    CheatLib.cleanup(TestValue, alloc, &val);
-}
-
 test "cleanup: ArrayList of unions frees element slice variants" {
     // The scheme interpreter pattern: ArrayList(Value) where Value.List
     // holds a heap-promoted []Value slice. When the ArrayList is cleaned up,
@@ -292,48 +191,6 @@ test "cleanup: nested List variants recursively freed" {
     var val = TestValue{ .List = outer };
     // Must free: outer slice + inner1 slice + inner2 slice = 3 allocations
     CheatLib.cleanup(TestValue, alloc, &val);
-}
-
-test "cleanup: List variant ([]T slice) is freed by cleanup" {
-    // Simulates the json_parser leak: promoteList creates a heap slice
-    // inside a union List variant. cleanup must free it.
-    const alloc = std.testing.allocator;
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(alloc);
-    var arena_buf: [4096]u8 = undefined;
-    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    // Build a List variant: ArrayList promoted to heap slice.
-    var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 2.0 });
-    try CheatLib.promoteList(TestValue, &rt, &list);
-    // Now list.items is heap-backed. Extract slice into union.
-    var val = TestValue{ .List = list.items };
-    // cleanup should free the List slice (and any nested union elements).
-    CheatLib.cleanup(TestValue, alloc, &val);
-    // If we get here without leak/double-free, the test passes.
-}
-
-test "promote: Array variant promotes backing" {
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(std.heap.page_allocator);
-    var rt = try makeRuntime(&ebr);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
-    try list.append(rt.frameAlloc(), TestValue{ .Num = 2.0 });
-
-    var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &rt, &val);
-
-    // After promote, backing is on heap - can cleanup with heapAlloc
-    try std.testing.expect(val.Array.items.len == 2);
-    val.Array.deinit(rt.heapAlloc());
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -703,49 +560,11 @@ test "needsCleanup: recursive union with 17 variants compiles" {
     try std.testing.expect(CheatLib.needsCleanup(RecValue_Pair));
 }
 
-test "cleanupAlloc: mixed-provenance strings in union list" {
-    // Simulates an @list containing Val.Str elements where some strings
-    // are heap-allocated and some are frame-allocated. cleanup with heapAlloc
-    // would crash on frame strings. cleanup with frameAlloc would leak heap
-    // strings. cleanupAlloc handles both by checking pointer provenance.
-    const alloc = std.testing.allocator;
-    var ebr = ebr_mod.EbrContext{};
-    defer ebr.deinit(alloc);
-    // Heap-alloc the arena (not stack) so the 256 KB kcov-widened
-    // variant doesn't blow the test thread's stack. See makeRuntime
-    // above for the kcov+frame-arena rationale.
-    const arena_size: usize = if (@import("build_options").coverage) 256 * 1024 else 16384;
-    const arena_buf = try alloc.alloc(u8, arena_size);
-    defer alloc.free(arena_buf);
-    var rt = try Runtime.initFromSlice(arena_buf, &ebr, alloc, 0);
-    defer rt.deinit();
-    rt.wireAllocator();
-
-    const frame = rt.frameAlloc();
-    const safe = rt.cleanupAlloc();
-
-    // Build an ArrayList with mixed-provenance TestValue.Str elements.
-    var items = std.ArrayListUnmanaged(TestValue).empty;
-
-    // Element 1: heap-allocated string (from COPY)
-    const heap_str = try alloc.dupe(u8, "heap-owned");
-    try items.append(frame, TestValue{ .Str = heap_str });
-
-    // Element 2: frame-allocated string (from concat)
-    const frame_str = try std.mem.concat(frame, u8, &.{ "frame", "-owned" });
-    try items.append(frame, TestValue{ .Str = frame_str });
-
-    // Element 3: no string (Number — trivial cleanup)
-    try items.append(frame, TestValue{ .Num = 42.0 });
-
-    // Cleanup with cleanupAlloc: should free heap_str, skip frame_str, skip Num.
-    for (items.items) |*elem| {
-        CheatLib.cleanup(TestValue, safe, elem);
-    }
-    items.deinit(frame);
-    // testing.allocator detects leaks (heap_str must be freed)
-    // and panics on invalid frees (frame_str must NOT be freed with heap).
-}
+// cleanupAlloc + the mixed-provenance test were removed: EscapeGraph now
+// promotes any frame container that would receive heap-owned elements
+// to heap at the binding site, so the "mixed-provenance" scenario this
+// test simulated cannot arise in compiler output. tools/audit_provenance_mismatch
+// pins this invariant across the transpile-test corpus.
 
 test "cleanup: recursive union Str variant" {
     const alloc = std.testing.allocator;

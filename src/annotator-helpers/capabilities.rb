@@ -101,13 +101,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    if var_node.full_type
-      case var_node.full_type.ownership
-      when :shared     then return :shared
-      when :multiowned then return :multiowned
-      end
-    end
-    nil
+    var_node.full_type&.ownership_storage
   end
 
   # Read layout from the SymbolEntry when available, or from full_type before
@@ -966,7 +960,6 @@ module CapabilityHelper
     # Authority: BgCaptureClassifier.classify_one!. Every downstream
     # consumer reads these instead of re-walking the BG body.
     :strategies,        # Hash<name => CaptureStrategy::*>
-    :heap_promote_names,# Set<name> -- needs heap promotion at decl
     :move_mark_names,   # Set<name> -- needs MIR::SuppressCleanup at outer scope
     :alloc_mark_entries,# Hash<name => alloc_sym> -- FreshHeapCopy markers
     keyword_init: true
@@ -989,7 +982,7 @@ module CapabilityHelper
       captures: {}, capture_symbols: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
       site_moved: Set.new, site_copied: Set.new,
-      strategies: nil, heap_promote_names: nil, move_mark_names: nil, alloc_mark_entries: nil
+      strategies: nil, move_mark_names: nil, alloc_mark_entries: nil
     )
     _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
     result
@@ -1035,7 +1028,7 @@ module CapabilityHelper
       captures: {}, capture_symbols: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
       site_moved: Set.new, site_copied: Set.new,
-      strategies: nil, heap_promote_names: nil, move_mark_names: nil, alloc_mark_entries: nil
+      strategies: nil, move_mark_names: nil, alloc_mark_entries: nil
     )
     _unified_capture_walk(body, locally_bound, result, false)
     result.has_outer_ref

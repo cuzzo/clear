@@ -26,6 +26,25 @@ if ARGV[0] == "delta"
   exit 0
 end
 
+if ARGV[0] == "state-mesh"
+  require_relative "../lib/decomplex/state_mesh"
+  args = ARGV[1..]
+  out_path = nil
+  args = args.reject { |a| a =~ /\A--output=(.+)/ && (out_path = Regexp.last_match(1)) }
+  files = collect_files(args)
+  abort "no .rb files" if files.empty?
+  sm = Decomplex::StateMesh.scan(files)
+  sm.run
+  json = JSON.pretty_generate(sm.to_json_graph)
+  if out_path
+    File.write(out_path, json)
+    warn "wrote #{out_path} (#{files.size} files)"
+  else
+    puts json
+  end
+  exit 0
+end
+
 if ARGV[0] == "report"
   require_relative "../lib/decomplex/report"
   args = ARGV[1..]
@@ -56,12 +75,20 @@ if ARGV.empty? || ARGV[0] == "-h" || ARGV[0] == "--help"
     decomplex -- decision-level duplication + neglected-condition detector
 
       decomplex FILE_OR_DIR [FILE_OR_DIR ...]
+      decomplex report [--output=FILE] [--emit-json=FILE] FILE_OR_DIR ...
+      decomplex state-mesh [--output=FILE] FILE_OR_DIR ...
+      decomplex delta BASELINE.json FILE_OR_DIR ...
 
     Reports:
       MISSING ABSTRACTION  identical guard tuple recomputed across >=2
                            decision units, ranked support x scatter.
       NEGLECTED CONDITION  a site that is a high-support pattern minus
                            one element -- a likely bug.
+
+    Subcommands:
+      report       Full markdown report with all detectors
+      state-mesh   JSON graph of reader/writer hierarchy by field
+      delta        Before/after diff against a baseline snapshot
 
     v0 mines exact-match case/when dispatch + && conjunction only.
   USAGE

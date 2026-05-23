@@ -137,25 +137,13 @@ module EscapeAnalysis
   private_class_method def self.param_accepts_caller_sync?(fn_node, param, sync)
     t = param.type
     return true if t.is_a?(Type) && (t.shared? || t.any_sync?)
+    # Sync axes other than :atomic were already accepted above (via shared?
+    # / any_sync?) -- only :atomic needs the REQUIRES family check.
     return true unless sync == :atomic
 
     requires = fn_node.respond_to?(:requires) ? fn_node.requires : nil
     families = requires && requires[param.name.to_s]
     return false unless families.respond_to?(:include?)
-
-    case sync
-    when :atomic
-      families.include?(:ATOMIC) || families.include?(:SNAPSHOTTED)
-    when :versioned
-      families.include?(:VERSIONED) || families.include?(:SNAPSHOTTED)
-    when :locked
-      families.include?(:LOCKED)
-    when :write_locked
-      families.include?(:LOCKED)
-    when :local
-      families.include?(:LOCAL)
-    else
-      false
-    end
+    families.include?(:ATOMIC) || families.include?(:SNAPSHOTTED)
   end
 end

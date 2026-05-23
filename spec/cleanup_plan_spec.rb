@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/mir/promotion_plan"
+require_relative "../src/mir/cleanup_classifier"
 require_relative "../src/mir/control_flow"
 require_relative "../src/mir/mir"
 
@@ -85,7 +85,7 @@ RSpec.describe CleanupClassifier do
         entry = plan["val"]
         expect(entry).not_to be_nil
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:alloc]).to eq(:heap)
       end
@@ -109,13 +109,13 @@ RSpec.describe CleanupClassifier do
       it "marks original for cleanup" do
         entry = plan["d"]
         expect(entry).not_to be_nil
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
       end
 
       it "marks COPY result for cleanup" do
         entry = plan["d2"]
         expect(entry).not_to be_nil
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -171,7 +171,10 @@ RSpec.describe CleanupClassifier do
       it "marks TAKES string param for cleanup" do
         entry = plan["s"]
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:takes_string)
+        # :takes_string was a vestigial alias of :heap_string (same emit).
+        # source_kind: :takes_param now carries the TAKES origin.
+        expect(entry[:kind]).to eq(:heap_string)
+        expect(entry[:source_kind]).to eq(:takes_param)
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -189,7 +192,7 @@ RSpec.describe CleanupClassifier do
       it "marks TAKES slice param for cleanup with heap alloc (callee owns buffer)" do
         entry = plan["items"]
         expect(entry).not_to be_nil
-        expect(entry[:kind]).to eq(:takes_slice)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:has_moved_guard]).to eq(true)
         expect(entry[:source_kind]).to eq(:takes_param)
@@ -217,7 +220,23 @@ RSpec.describe CleanupClassifier do
 
       it "marks AS binding for cleanup (auto-TAKES)" do
         expect(plan["items"]).not_to be_nil
-        expect(plan["items"][:kind]).to eq(:match_as_slice)
+        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
+        expect(plan["items"][:kind]).to eq(:uniform)
+        expect(plan["items"][:match_as]).to eq(true)
+      end
+    end
+
+    context "MATCH AS variant payload is a map" do
+      # match_as_entry_for has a code path for non-array collection
+      # payloads (the only reachable case is map?, since list-typed
+      # payloads are also array? and hit the :takes_slice arm first).
+      # Exercise it on a HashMap-typed variant.
+      it "produces :string_map for a HashMap variant payload" do
+        map_ty = Type.new(:"HashMap<Int64>")
+        entry = CleanupClassifier.send(:match_as_entry_for, map_ty, :U, "Items")
+        expect(entry).not_to be_nil
+        expect(entry[:kind]).to eq(:uniform)
+        expect(entry[:match_as]).to eq(true)
       end
     end
   end
@@ -242,7 +261,10 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:kind]).to eq(:match_as_slice)
+        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
+        # match_as: true flag now carries the MATCH AS origin.
+        expect(entry[:kind]).to eq(:uniform)
+        expect(entry[:match_as]).to eq(true)
       end
 
       it "uses heap allocator (slice contents may be heap-allocated via COPY/promote)" do
@@ -307,7 +329,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup with _moved guard" do
         entry = plan["m"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:string_map)
+        expect(entry[:kind]).to eq(:uniform)
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -383,7 +405,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup (union returned from promoted function)" do
         entry = plan["v"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:kind]).to eq(:heap_union)
+        expect(entry[:kind]).to eq(:uniform)
       end
     end
   end
@@ -408,7 +430,7 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         # Provenance-based: :heap_union (COPY produces :heap provenance)
-        expect([:non_copy_union, :heap_union]).to include(entry[:kind])
+        expect([:uniform]).to include(entry[:kind])
         expect(entry[:has_moved_guard]).to eq(true)
       end
     end
@@ -490,7 +512,7 @@ RSpec.describe CleanupClassifier do
       it "pool has _moved guard through collection cleanup" do
         entry = plan["pool"]
         expect(entry[:has_moved_guard]).to eq(true)
-        expect(entry[:kind]).to eq(:pool)
+        expect(entry[:kind]).to eq(:uniform)
       end
     end
   end
@@ -515,7 +537,7 @@ RSpec.describe CleanupClassifier do
       entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (CopyNode field gives :heap provenance)
-      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
+      expect([:uniform]).to include(entry[:kind])
     end
   end
 
@@ -535,7 +557,7 @@ RSpec.describe CleanupClassifier do
       entry = plan["p"]
       expect(entry).not_to be_nil
       # Provenance-based: :heap_struct (COPY field gives :heap provenance)
-      expect([:struct_with_cleanup_fields, :heap_struct]).to include(entry[:kind])
+      expect([:uniform]).to include(entry[:kind])
     end
   end
 
@@ -596,7 +618,11 @@ RSpec.describe CleanupClassifier do
 
   # ── Array literal of structs with string fields ────────────────────
   describe "array literal of structs with string fields" do
-    it "gets :array_with_struct_strings cleanup" do
+    it "gets :heap_slice cleanup (uniform slice arm of CheatLib.cleanup)" do
+      # No "array of struct with strings" special case: a plain T[] slice
+      # with owning element fields routes through the slice arm. Element
+      # cleanup recurses into String fields; buffer free is alloc-driven
+      # (no-op for frame, real free for heap).
       plan = cleanup_for(<<~CLEAR, "main")
         STRUCT Item { name: String, value: Int64 }
         FN main() RETURNS Void ->
@@ -606,7 +632,7 @@ RSpec.describe CleanupClassifier do
       CLEAR
       entry = plan["items"]
       expect(entry).not_to be_nil, "struct array literal with string fields should have cleanup"
-      expect(entry[:kind]).to eq(:array_with_struct_strings)
+      expect(entry[:kind]).to eq(:uniform)
     end
   end
 
@@ -712,101 +738,3 @@ end
 
 # All StaticLeakChecker checks have been migrated to MIRChecker
 # (post-lowering). See spec/mir_checker_spec.rb for unit tests.
-
-# ===========================================================================
-# BG escape promotion: BgBlock.capture_string_dupes annotation for string captures
-# (Tests MIRPass behavior, not checker)
-# ===========================================================================
-RSpec.describe "BG escape promotion for string captures" do
-    # Helper: run full pipeline through MIR, return fn body statements
-    def mir_body_for(src, fn_name)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-      mir.transform!(ast)
-      fn_nodes[fn_name].body
-    end
-
-    def bg_string_dupes_in(body)
-      # Find all BgBlock nodes (direct or nested in VarDecl/BindExpr/MethodCall args)
-      dupes = []
-      body.each do |stmt|
-        collect_bg_string_dupes(stmt, dupes)
-      end
-      dupes
-    end
-
-    def collect_bg_string_dupes(node, result)
-      return unless node
-      if node.is_a?(AST::BgBlock)
-        result.concat(node.capture_string_dupes&.to_a || [])
-        return
-      end
-      # Recurse into value/args
-      [:value, :args, :target, :receiver].each do |field|
-        val = node.respond_to?(field) ? node.send(field) : nil
-        if val.is_a?(Array)
-          val.each { |v| collect_bg_string_dupes(v, result) }
-        else
-          collect_bg_string_dupes(val, result)
-        end
-      end
-    end
-
-    it "annotates capture_string_dupes on BgBlock for direct BG assignment capturing a string" do
-      body = mir_body_for(<<~CLEAR, "test")
-        FN greet!(name: String) RETURNS String -> RETURN name; END
-        FN test() RETURNS !Void ->
-            msg = greet!("hello");
-            p: ~Void = BG { print(msg); };
-            NEXT p;
-            RETURN;
-        END
-      CLEAR
-      expect(bg_string_dupes_in(body)).to include("msg")
-    end
-
-    it "annotates capture_string_dupes on BgBlock inside a MethodCall arg" do
-      body = mir_body_for(<<~CLEAR, "test")
-        FN greet!(name: String) RETURNS String -> RETURN name; END
-        FN test() RETURNS !Void ->
-            msg = greet!("hello");
-            MUTABLE futures: ~Void[]@list = [];
-            futures.append(BG { print(msg); });
-            NEXT futures[0];
-            RETURN;
-        END
-      CLEAR
-      expect(bg_string_dupes_in(body)).to include("msg")
-    end
-
-    it "annotates capture_string_dupes on BgBlock inside a FuncCall arg" do
-      body = mir_body_for(<<~CLEAR, "test")
-        FN greet!(name: String) RETURNS String -> RETURN name; END
-        FN consume(p: ~Void) RETURNS Void -> NEXT p; RETURN; END
-        FN test() RETURNS !Void ->
-            msg = greet!("hello");
-            consume(BG { print(msg); });
-            RETURN;
-        END
-      CLEAR
-      expect(bg_string_dupes_in(body)).to include("msg")
-    end
-
-    it "does NOT annotate capture_string_dupes for string literals (no frame alloc)" do
-      body = mir_body_for(<<~CLEAR, "test")
-        FN test() RETURNS !Void ->
-            p: ~Void = BG { print("hello"); };
-            NEXT p;
-            RETURN;
-        END
-      CLEAR
-      # "hello" is a literal, not a frame-allocated binding — no dupe annotation needed
-      expect(bg_string_dupes_in(body)).to be_empty
-    end
-end

@@ -1247,7 +1247,7 @@ RSpec.describe SemanticAnnotator do
     # Resource cleanup: deinit is emitted
     # -------------------------------------------------------------------
     describe "resource cleanup" do
-      it "emits plain defer s.deinit() when infinite stream is never moved" do
+      it "emits plain defer cleanup when infinite stream is never moved" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
@@ -1255,7 +1255,9 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer s.deinit(")
+        # CheatLib.cleanup's struct-with-deinit arm dispatches to s.deinit().
+        expect(out).to include("defer CheatLib.cleanup(")
+        expect(out).to include("&s")
         expect(out).not_to include("s_moved")
       end
     end

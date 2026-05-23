@@ -159,9 +159,8 @@ RSpec.describe "String@symbol" do
       expect(t.zig_type).to eq("[]const u8")
     end
 
-    it "symbol type created via sync= setter also gets :rodata" do
-      t = Type.new(:String)
-      t.sync = :symbol
+    it "symbol type via constructor sets provenance to :rodata explicitly" do
+      t = Type.new(:String, sync: :symbol, location: :rodata)
       expect(t.symbol?).to be true
       expect(t.provenance).to eq(:rodata)
       expect(t.any_sync?).to be false

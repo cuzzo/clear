@@ -282,7 +282,7 @@ module FsmTransform
     # blk_label, ctx_type, promise_zig, capture_fields, alloc_var,
     # promise_var, ctx_var, rt_name, pin_mode, promoted_decls,
     # capture_inits, captured, capture_close_zig, pointer_captures,
-    # bg_string_promotes, arena_init_flag, is_void).
+    # arena_init_flag, is_void).
     #
     # `lowering` is the MIRLowering instance; we use it for
     # capture-map context (with_fiber_capture_map), AST -> MIR
@@ -298,7 +298,6 @@ module FsmTransform
       id = ctx[:id]
       bg_rt = ctx[:bg_rt]
       captured = ctx[:captured] || {}
-      bg_string_promotes = ctx[:bg_string_promotes] || []
       capture_close_zig = ctx[:capture_close_zig] || {}
       pointer_captures = ctx[:pointer_captures]
       arena_init_flag = ctx[:arena_init_flag]
@@ -390,8 +389,7 @@ module FsmTransform
       # Three categories converge here:
       #   :lock     -- per-cap unlock (push at expand_lock_segment
       #                time). Ordered LIFO of acquisition.
-      #   :capture  -- string-promoted heap captures + resource-
-      #                close_zig captures.
+      #   :capture  -- resource close_zig captures.
       #   :body     -- (reserved) MIR::Cleanup nodes for body-local
       #                vars promoted to ctx (cross-segment). Lifted
       #                from segment Zig if the invariant scan finds
@@ -402,9 +400,7 @@ module FsmTransform
       ctx[:fsm_destroy_lines] = []
       captured.each do |name, _|
         zig =
-          if bg_string_promotes.include?(name)
-            "__ctx_#{id}.alloc.free(__ctx_#{id}.#{name});"
-          elsif capture_close_zig[name]
+          if capture_close_zig[name]
             tpl = capture_close_zig[name]
                     .gsub('{0}', "__ctx_#{id}.#{name}")
                     .gsub(/\brt\./, "__ctx_#{id}.rt.")
@@ -461,15 +457,6 @@ module FsmTransform
           lowering.instance_variable_set(:@current_bg_pointer_captures, pointer_captures)
           prev_pending = lowering.instance_variable_get(:@pending_stmts)
           lowering.instance_variable_set(:@pending_stmts, [])
-          # exit_promote drives :string_dupe (and other escape-
-          # promotion strategies) so heap-typed BG return values
-          # are duped to the BG's heap allocator before
-          # `inner.result = <expr>` -- without this, a frame-
-          # allocated String would be returned to main and freed
-          # against the wrong allocator. exit_promote lives on the
-          # BgBlock AST node, set by escape analysis.
-          exit_promote = ctx[:node].respond_to?(:exit_promote) ?
-                           ctx[:node].exit_promote : nil
           # Per-segment alias overrides (e.g. WITH's `inner` ->
           # __ctx_<id>.c.ctrl.data.*.data) merged into the rendering
           # capture_map so identifier resolution sees the alias.
@@ -480,7 +467,7 @@ module FsmTransform
           lowered = lowering.with_fiber_capture_map(eff_capture_map, rt_override: bg_rt) do
             if want_result
               lowering.emit_step_stmts(
-                ast_stmts, no_result: false, ctx_id: id, exit_promote: exit_promote,
+                ast_stmts, no_result: false, ctx_id: id,
               )
             else
               lowering.emit_step_stmts(ast_stmts, no_result: true)

@@ -573,9 +573,13 @@ pub const CheatLib = struct {
     pub const File = struct {
         fd: std.posix.fd_t,
 
-        pub fn close(self: File) void {
+        /// Idempotent cleanup: close the fd. `deinit` is the canonical
+        /// name CheatLib.cleanup's struct-with-deinit arm looks for; the
+        /// `close` alias preserves user-facing CLEAR code.
+        pub fn deinit(self: File) void {
             compat.closeFd(self.fd);
         }
+        pub const close = deinit;
 
         pub fn read(self: File, buffer: []u8) !usize {
             return try std.posix.read(self.fd, buffer);
@@ -655,21 +659,6 @@ pub const CheatLib = struct {
         var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, items.len);
         list.appendSliceAssumeCapacity(items);
         return list;
-    }
-
-    // Promote a @list's arena-backed buffer to heap before returning from a frame-using
-    // function.  The frame arena rewinds on function exit; without promotion the caller
-    // would hold a dangling pointer.  After promotion the caller must deinit with
-    // rt.heapAlloc() — the annotator sets heap_list=true on the receiving variable so
-    // emit_cleanup emits the correct allocator.
-    //
-    // Empty lists are a no-op (items.len == 0 means no backing allocation).
-    pub fn promoteList(comptime T: type, rt: *Runtime, list: *std.ArrayListUnmanaged(T)) !void {
-        if (list.items.len == 0) return;
-        const heap_buf = try rt.heapAlloc().alloc(T, list.items.len);
-        @memcpy(heap_buf, list.items);
-        list.items = heap_buf;
-        list.capacity = heap_buf.len;
     }
 
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
@@ -844,9 +833,19 @@ pub const CheatLib = struct {
     pub fn len(container: anytype) i64 {
         const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
         const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
-        // If it has .items (ArrayList), use that. Otherwise assume it's a Slice.
-        if (@hasField(@TypeOf(c), "items")) {
+        const T = @TypeOf(c);
+        const can_inspect = comptime blk: {
+            const ti = @typeInfo(T);
+            break :blk ti == .@"struct" or ti == .@"union" or ti == .@"enum" or ti == .@"opaque";
+        };
+        if (@hasField(T, "items")) {
             return @intCast(c.items.len);
+        } else if (comptime can_inspect and @hasDecl(T, "length")) {
+            return @intCast(c.length());
+        } else if (comptime can_inspect and @hasDecl(T, "count")) {
+            return @intCast(c.count());
+        } else if (comptime can_inspect and @hasDecl(T, "len")) {
+            return @intCast(c.len());
         } else {
             return @intCast(c.len);
         }
@@ -880,6 +879,10 @@ pub const CheatLib = struct {
 
         pub fn releaseOne(comptime T: type, alloc: std.mem.Allocator, value: T) void {
             CheatLib.releaseOne(T, alloc, value);
+        }
+
+        pub fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
+            return CheatLib.dupeValue(T, value, alloc);
         }
 
         pub fn partitionedMapDelayCtxDestroy() bool {
@@ -2945,22 +2948,27 @@ pub const CheatLib = struct {
             return;
         }
 
-        // Heap-allocated sync wrappers created by COPY need top-level
-        // pointer cleanup. The generic struct-field pointer cleanup below
-        // only fires when the pointer is stored inside another value.
+        // Heap-allocated sync wrappers (Locked / RwLocked / Versioned) +
+        // RefCell-like single-field cells: destroy the wrapper. CLEAR's
+        // lowering owns inner-field cleanup via per-reassignment paths
+        // (no recursion into .data here; would over-free static
+        // assignments). Versioned needs deinitSync to release its
+        // current EBR-retired ptr before destroy.
         if (comptime blk: {
             const ti = @typeInfo(T);
             if (ti != .pointer or ti.pointer.size != .one) break :blk false;
             const child = ti.pointer.child;
             if (@typeInfo(child) != .@"struct") break :blk false;
-            break :blk isLockWrapper(child) or isVersionedWrapper(child);
+            // Lock wrappers (mutex/rw field), Versioned, RefCell (only
+            // `data` field). RefCell shape: struct with one field named
+            // `data` and no `init` decl that needs args.
+            if (isLockWrapper(child) or isVersionedWrapper(child)) break :blk true;
+            const cfields = @typeInfo(child).@"struct".fields;
+            break :blk cfields.len == 1 and std.mem.eql(u8, cfields[0].name, "data");
         }) {
             const ChildT = @typeInfo(T).pointer.child;
             if (comptime isVersionedWrapper(ChildT)) {
                 ptr.*.deinitSync(alloc);
-            } else {
-                const DataT = @TypeOf(ptr.*.data);
-                if (comptime needsCleanup(DataT)) cleanup(DataT, alloc, &ptr.*.data);
             }
             alloc.destroy(ptr.*);
             return;
@@ -3014,6 +3022,23 @@ pub const CheatLib = struct {
                 alloc.destroy(ip);
             }
             alloc.destroy(ptr.*);
+            return;
+        }
+
+        // Pointer-to-ObservableTerminal(Inner): the producer fiber may
+        // still be publishing when cleanup fires, so wait() for finish
+        // before destroying. wait+destroy mirrors the bespoke Ruby
+        // :observable teardown the classifier used to emit inline.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            if (ti != .pointer or ti.pointer.size != .one) break :blk false;
+            const child = ti.pointer.child;
+            if (@typeInfo(child) != .@"struct") break :blk false;
+            break :blk @hasDecl(child, "wait") and @hasDecl(child, "destroy") and
+                @hasDecl(child, "isFinished") and @hasField(child, "inner");
+        }) {
+            ptr.*.wait();
+            ptr.*.destroy(alloc);
             return;
         }
 
@@ -3129,8 +3154,24 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 9. Structs: recursively clean up all owned fields
+        // Generic *T (pointer to a single owning value) cleanup: recurse
+        // into the pointee if it carries owned heap, then destroy the
+        // pointer. This is the uniform path for any *Struct binding the
+        // earlier specific-shape arms (lock/versioned/observable wrappers,
+        // Atomic, Rc) didn't claim -- no "plain struct" special case.
         const info = @typeInfo(T);
+        if (info == .pointer and info.pointer.size == .one and
+            @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
+        {
+            const ChildT = info.pointer.child;
+            if (comptime needsCleanup(ChildT)) {
+                cleanup(ChildT, alloc, ptr.*);
+            }
+            alloc.destroy(ptr.*);
+            return;
+        }
+
+        // 9. Structs: recursively clean up all owned fields
         if (info == .@"struct") {
             inline for (info.@"struct".fields) |field| {
                 const FT = field.type;
@@ -3261,6 +3302,10 @@ pub const CheatLib = struct {
             return try T.init(alloc, inner);
         }
 
+        if (info == .@"struct" and @hasDecl(T, "dupe")) {
+            return try value.dupe(alloc);
+        }
+
         if (info == .@"struct" and !@hasDecl(T, "deinit")) {
             var result = value;
             inline for (info.@"struct".fields) |field| {
@@ -3292,6 +3337,58 @@ pub const CheatLib = struct {
                 }
             } else {
                 result.appendSliceAssumeCapacity(value.items);
+            }
+            return result;
+        }
+
+        // Set(T): allocate fresh and re-insert each element. Set.insert dupes
+        // string keys internally, so this is correct for both string and
+        // non-string element shapes. (#42 -- COPY of @set into TAKES.)
+        if (comptime isSetType(T)) {
+            var result: T = .{};
+            errdefer result.deinit(alloc);
+            var src_mut = value;
+            var it = src_mut.keyIterator();
+            while (it.next()) |k| try result.insert(alloc, k.*);
+            return result;
+        }
+
+        // Pool(T): preallocate same capacity, re-insert each alive slot's
+        // value. IDs may differ between source and copy -- COPY semantics =
+        // new owning value with same observable contents (count/iteration).
+        // Recursively dupes element values when their type needs cleanup.
+        // (#42 -- COPY of @pool into TAKES.)
+        if (comptime isPool(T)) {
+            var result = try T.initCapacity(alloc, value.capacity);
+            errdefer result.deinit(alloc);
+            const max_used = value.capacity - value.free_top;
+            for (value.slots[0..max_used]) |slot| {
+                if (!slot.alive) continue;
+                const ElemT = @TypeOf(slot.value);
+                const v = if (comptime needsCleanup(ElemT))
+                    try dupeValue(ElemT, slot.value, alloc)
+                else
+                    slot.value;
+                _ = try result.insert(alloc, v);
+            }
+            return result;
+        }
+
+        // StringMap(V): allocate fresh and re-put each (key, value). put()
+        // dupes the string key internally. Values are recursively duped via
+        // dupeValue when they need cleanup. (#42 -- COPY of @map into TAKES.)
+        if (comptime isStringMap(T)) {
+            var result: T = .{};
+            errdefer result.deinit(alloc, alloc);
+            var src_mut = value;
+            var it = src_mut.inner.iterator();
+            while (it.next()) |entry| {
+                const ValT = @TypeOf(entry.value_ptr.*);
+                const v = if (comptime needsCleanup(ValT))
+                    try dupeValue(ValT, entry.value_ptr.*, alloc)
+                else
+                    entry.value_ptr.*;
+                try result.put(alloc, alloc, entry.key_ptr.*, v);
             }
             return result;
         }
@@ -3470,189 +3567,6 @@ pub const CheatLib = struct {
             }
         }
         return result;
-    }
-
-    pub fn promoteFields(comptime T: type, rt: *Runtime, value: *T) !void {
-        try promote(T, rt, value);
-    }
-
-    /// Deep promote: unconditionally dupe ALL strings (including heap).
-    /// Used for HPT independence -- the source is about to be freed,
-    /// so the returned copy must own its own data regardless of allocator.
-    pub fn promoteDeep(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
-        const info = @typeInfo(T);
-
-        if (T == []const u8 or T == []u8) {
-            if (value.len == 0) return;
-            value.* = try rt.heapAlloc().dupe(u8, value.*);
-            return;
-        }
-
-        if (comptime isArrayList(T)) {
-            const ElemT = comptime arrayListElemType(T).?;
-            try promoteList(ElemT, rt, value);
-            if (comptime needsPromotion(ElemT)) {
-                for (value.items) |*elem| {
-                    try promoteDeep(ElemT, rt, elem);
-                }
-            }
-            return;
-        }
-
-        if (comptime isStringMap(T)) {
-            value.alloc = rt.heapAlloc();
-            return;
-        }
-
-        if (info == .@"union" and info.@"union".tag_type != null) {
-            inline for (info.@"union".fields) |field| {
-                if (comptime needsPromotion(field.type)) {
-                    if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
-                        const FT = field.type;
-                        const ft_info = @typeInfo(FT);
-                        if (ft_info == .pointer and ft_info.pointer.size == .one and
-                            @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
-                        {
-                            const ChildT = ft_info.pointer.child;
-                            if (comptime needsPromotion(ChildT)) {
-                                try promoteDeep(ChildT, rt, @field(value, field.name));
-                            }
-                        } else {
-                            try promoteDeep(FT, rt, &@field(value, field.name));
-                        }
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-
-        if (info == .@"struct") {
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                const ft_info = @typeInfo(FT);
-                if (ft_info == .pointer and ft_info.pointer.size == .one and
-                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
-                {
-                    const ChildT = ft_info.pointer.child;
-                    if (comptime needsPromotion(ChildT)) {
-                        try promoteDeep(ChildT, rt, @field(value, field.name));
-                    }
-                } else if (comptime needsPromotion(FT)) {
-                    try promoteDeep(FT, rt, &@field(value, field.name));
-                }
-            }
-            return;
-        }
-    }
-
-    /// Generic comptime promotion: walks any type and dupes all frame-arena
-    /// data to heap. Handles strings, ArrayLists, StringMaps, structs, and
-    /// tagged unions recursively. No-op for primitives (comptime eliminated).
-    pub fn promote(comptime T: type, rt: *Runtime, value: *T) std.mem.Allocator.Error!void {
-        const info = @typeInfo(T);
-
-        // 1. Strings: dupe only frame-arena strings to heap.
-        // Heap strings (from COPY, toString, etc.) are already escaped —
-        // duping them again leaks the original.
-        if (T == []const u8 or T == []u8) {
-            if (value.len == 0) return;
-            const frame_mem = rt.overflow_arena.static_block;
-            const p = @intFromPtr(value.*.ptr);
-            const frame_base = @intFromPtr(frame_mem.ptr);
-            if (p >= frame_base and p < frame_base + frame_mem.len) {
-                value.* = try rt.heapAlloc().dupe(u8, value.*);
-            }
-            return;
-        }
-
-        // 2. ArrayList: promote backing buffer + recurse into elements
-        if (comptime isArrayList(T)) {
-            const ElemT = comptime arrayListElemType(T).?;
-            try promoteList(ElemT, rt, value);
-            // Recursively promote elements if they contain escapable data
-            if (comptime needsPromotion(ElemT)) {
-                for (value.items) |*elem| {
-                    try promote(ElemT, rt, elem);
-                }
-            }
-            return;
-        }
-
-        // 3. StringMap: alloc is already heapAlloc (set at construction).
-        // Ensure alloc field is heap. Keys and values are managed by StringMap.
-        if (comptime isStringMap(T)) {
-            value.alloc = rt.heapAlloc();
-            return;
-        }
-
-        // 4. Tagged unions: promote the active variant's payload
-        if (info == .@"union" and info.@"union".tag_type != null) {
-            inline for (info.@"union".fields) |field| {
-                if (comptime needsPromotion(field.type)) {
-                    if (std.meta.activeTag(value.*) == @field(std.meta.Tag(T), field.name)) {
-                        const FT = field.type;
-                        const ft_info = @typeInfo(FT);
-                        if (ft_info == .pointer and ft_info.pointer.size == .one and
-                            @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
-                        {
-                            const ChildT = ft_info.pointer.child;
-                            if (comptime needsPromotion(ChildT)) {
-                                try promote(ChildT, rt, @field(value, field.name));
-                            }
-                        } else {
-                            try promote(FT, rt, &@field(value, field.name));
-                        }
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-
-        // 5. Structs: walk fields recursively
-        if (info == .@"struct") {
-            inline for (info.@"struct".fields) |field| {
-                const FT = field.type;
-                const ft_info = @typeInfo(FT);
-                if (ft_info == .pointer and ft_info.pointer.size == .one and
-                    @typeInfo(ft_info.pointer.child) != .@"opaque" and @typeInfo(ft_info.pointer.child) != .@"fn")
-                {
-                    // Single pointer (*T) from @indirect: promote the pointee.
-                    const ChildT = ft_info.pointer.child;
-                    if (comptime needsPromotion(ChildT)) {
-                        try promote(ChildT, rt, @field(value, field.name));
-                    }
-                } else if (comptime needsPromotion(FT)) {
-                    try promote(FT, rt, &@field(value, field.name));
-                }
-            }
-            return;
-        }
-
-        // Primitives, enums, etc.: no-op (comptime-eliminated)
-    }
-
-    /// Returns true if a type has data that needs promotion (frame -> heap).
-    fn needsPromotion(comptime FT: type) bool {
-        if (FT == []const u8 or FT == []u8) return true;
-        if (isArrayList(FT)) return true;
-        if (isStringMap(FT)) return true;
-        const ft_info = @typeInfo(FT);
-        // Single pointer (*T) from @indirect: return true without recursing
-        // to avoid infinite comptime recursion on self-referential types.
-        if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
-        if (ft_info == .@"struct") {
-            inline for (ft_info.@"struct".fields) |field| {
-                if (comptime needsPromotion(field.type)) return true;
-            }
-        }
-        if (ft_info == .@"union" and ft_info.@"union".tag_type != null) {
-            inline for (ft_info.@"union".fields) |field| {
-                if (comptime needsPromotion(field.type)) return true;
-            }
-        }
-        return false;
     }
 
     fn isArrayList(comptime T: type) bool {

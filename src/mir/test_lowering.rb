@@ -37,9 +37,10 @@ module TestLowering
         const allocator = da.allocator();
         var global_ctx = EbrContext{};
         defer global_ctx.deinit(allocator);
-        var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-        defer rt.deinit();
-        rt.wireAllocator();
+        var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
+        defer __rt_box.deinit();
+        __rt_box.wireAllocator();
+        const rt: *Runtime = &__rt_box; _ = &rt;
   ZIG
 
   sig { params(node: AST::TestBlock).returns(T::Array[T.untyped]) }
@@ -405,7 +406,7 @@ module TestLowering
       # invocation must thread the runtime through and `try` because
       # the lambda's return type is `anyerror!T`.
       args_mir = call_inputs.map { |a| lower(a) }
-      MIR::Call.new(stub_info[:var], [MIR::Ident.new("&#{@rt_name}")] + args_mir, true)
+      MIR::Call.new(stub_info[:var], [MIR::Ident.new(@rt_name)] + args_mir, true)
     end
   end
 

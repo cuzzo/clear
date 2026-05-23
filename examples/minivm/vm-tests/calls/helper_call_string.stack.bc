@@ -1,14 +1,16 @@
 instructions:
-0000 JUMP              11
+0000 JUMP              15
 0002 LOAD_CONST        0 ; S:7:Hello,
 0004 LOAD_SLOT         0
 0006 CONCAT
 0007 LOAD_CONST        1 ; S:1:!
 0009 CONCAT
-0010 BC_RET
-0011 LOAD_CONST        2 ; S:5:Clear
-0013 BC_CALL           2 1 0
-0017 HALT
+0010 STORE_SLOT        1
+0012 LOAD_SLOT         1
+0014 BC_RET
+0015 LOAD_CONST        2 ; S:5:Clear
+0017 BC_CALL           2 1 0
+0021 HALT
 consts:
 S:7:Hello,
 S:1:!

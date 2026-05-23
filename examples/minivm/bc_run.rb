@@ -118,6 +118,14 @@ if $PROGRAM_NAME == __FILE__
     register_names_file = File.join(__dir__, "_register_names.txt")
     debug_mode = !ENV["BC_DEBUG"].nil? && ENV["BC_DEBUG"] != "0"
 
+    # The cached register runner reads a fixed set of _register_* artifact
+    # paths baked into vm_generated_*.cht. Parallel integration/fuzz runs can
+    # otherwise overwrite or delete another runner's bytecode/source tables
+    # mid-execution, surfacing as FileNotFound or mismatched breakpoints.
+    artifact_lock_path = File.join(__dir__, "_register_artifacts.lock")
+    $register_artifact_lock = File.open(artifact_lock_path, "w")
+    $register_artifact_lock.flock(File::LOCK_EX)
+
     register_runner_stale = !File.exist?(register_runner_path) ||
                              File.mtime(register_runner_path) < File.mtime(register_runner_template_src)
 

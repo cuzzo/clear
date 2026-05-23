@@ -12,6 +12,7 @@ require_relative "annotator-helpers/function_analysis"
 require_relative "annotator-helpers/pipe_analysis"
 require_relative "mir/ownership_graph"
 require_relative "mir/escape_analysis"
+require_relative "mir/escape_graph"
 require_relative "mir/bg_capture_classifier"
 require_relative "mir/effect_inference"
 require_relative "mir/concurrency_checks"
@@ -689,8 +690,7 @@ private
     signature.requires = node.requires
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
-    # Register function node BEFORE body analysis so visit_ReturnNode can
-    # set returns_promoted on it and callers in the same pass can read it.
+    # Register function node before body analysis so recursive references can resolve it.
     @fn_nodes[node.name] = node
 
     # 4. Routine Analysis
@@ -825,20 +825,8 @@ private
         end
       end
 
-      # CATCH wrappers heap-dupe all string returns (both success and catch paths).
-      # A fallible String return is an error union, so unwrap the payload
-      # before classifying string-return ownership.
-      ret_type = node.return_type || Type.new(:Void)
-      bare_ret = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
-                    ret_type.respond_to?(:payload_type)
-                   ret_type.payload_type || ret_type
-                 else
-                   ret_type
-                 end
-      if bare_ret.string?
-        node.return_provenance = :heap
-      end
     end
+
 
     @function_context_stack.pop
   end
@@ -1486,7 +1474,7 @@ private
         else
           # Simple payload: non-Copy if @indirect or a collection/array (not string)
           t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-          t && (t.indirect? || (!t.string? && (t.collection? || t.map? || (t.array? && !t.fixed?))))
+          t && (t.indirect? || (!t.string? && (t.collection? || (t.array? && !t.fixed?))))
         end
       }
       if has_non_copy_as
@@ -2212,28 +2200,6 @@ private
 
     # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
     # so the caller receives heap-allocated data.
-    # But COPY of an implicitly-copyable value (e.g. Id<T>) is value-like and
-    # must not force heap return provenance.
-    if node.value.is_a?(AST::CopyNode)
-      fn_node = @fn_nodes[current_fn_ctx.name]
-      copy_ti = node.value.full_type
-      resolver = ->(name) { lookup_type_schema(name) rescue nil }
-      unless copy_ti&.implicitly_copyable?(resolver)
-        if fn_node
-          fn_node.return_provenance = :heap
-        end
-      end
-    elsif node.value.is_a?(AST::StructLit)
-      # ensure_owned_value! only wraps @list/rodata in CopyNode, never value types.
-      # No implicitly_copyable? gate needed here.
-      has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
-      if has_copy_field
-        fn_node = @fn_nodes[current_fn_ctx.name]
-        if fn_node
-          fn_node.return_provenance = :heap
-        end
-      end
-    end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
     unless node.value.is_a?(AST::Identifier)
@@ -2684,8 +2650,7 @@ private
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
-    # Walk the value so BG-handle lifetimes propagate through structural
-    # construction, not just direct BG initializers.
+    stamp_init_contents_heap!(node)
     stamp_bg_handle_lifetime!(node)
   end
 
@@ -2844,6 +2809,12 @@ private
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
     set_cleanup_alloc!(node)
+    # The symbol is born with the annotation-derived placement only.
+    # Escape analysis is the single writer that makes Symbol#storage
+    # definitive (promotes to :heap when the binding escapes); the
+    # annotator must not pre-fold a type's heap-capable provenance onto
+    # the symbol -- that over-promotes (e.g. a union typed heap-capable
+    # but never actually escaping).
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
     node.full_type.is_resource = true if is_resource && node.full_type.respond_to?(:is_resource=)
@@ -2873,6 +2844,8 @@ private
       close_zig: resource_close
     )
     node.symbol = current_scope.locals[node.name]
+    # (The late-provenance fold now happens BEFORE declare, above, so the
+    # symbol is born with the correct storage -- no post-declare write.)
     # Propagate @link_source from the value type to the scope entry.
     val_ti = node.value&.full_type
     if val_ti&.link?
@@ -2957,8 +2930,7 @@ private
         node.symbol.non_escaping   = true
         node.symbol.borrowed_alias = true
       end
-      # A BG handle inherits the lifetime of captured bindings that cannot
-      # outlive their declaring scope.
+      stamp_init_contents_heap!(node)
       stamp_bg_handle_lifetime!(node)
 
     elsif scope.is_immutable?(node.name)
@@ -3514,8 +3486,14 @@ private
         psch = (lookup_type_schema(field_type.resolved) rescue nil)
         struct_pointee = Schemas.struct?(psch)
         node.indirect_field = true if node.is_a?(AST::GetField) && !struct_pointee
-        field_type = field_type.dup
-        field_type.layout = nil
+        # For non-struct pointees, the read-deref produces a value of the
+        # inner type (layout no longer applies). For struct pointees, the
+        # binding holds the *T pointer directly -- keep layout=:indirect so
+        # ti.zig_type renders "*T".
+        if !struct_pointee
+          field_type = field_type.dup
+          field_type.layout = nil
+        end
       end
       node.full_type = field_type
     elsif struct_schema && node.token
@@ -3700,7 +3678,6 @@ private
       unless expected_type.accepts?(actual)
         error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
       end
-      # Move: union literal captures non-Copy values.
       move_if_not_copyable!(val_node)
       node.full_type = if node.type_args&.any?
         :"#{node.name}<#{node.type_args.join(',')}>"
@@ -3798,12 +3775,6 @@ private
         val_node.coerced_type = expected_type
       end
 
-      # Flag @list fields so the transpiler passes the ArrayList directly
-      # instead of converting to a slice via .items.
-      et = expected_type.is_a?(Type) ? expected_type : nil
-      val_node.target_is_list_field = true if et&.list_collection?
-
-      # Move: struct literal captures non-Copy values (skip for borrowed fields).
       move_if_not_copyable!(val_node) unless field_is_borrowed
     end
 
@@ -3929,15 +3900,19 @@ private
       when :NUMBER then Type.new(:Float64)
       when :INT64 then Type.new(:Int64)
       when :STRING
-        # provenance auto-inferred from location: :rodata in Type constructor
+        # SIMP-13f: stamp storage_override so Locatable#rodata_provenance? returns
+        # true without needing the type.provenance fallback.
         if node.storage == :stack
+          node.storage = :rodata
           Type.new(:"Byte[#{node.value.length}]", location: :rodata)
         else
+          node.storage = :rodata
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
       when :SYMBOL
         # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
-        Type.new(Type::STRING_TYPE, sync: :symbol)
+        node.storage = :rodata
+        Type.new(Type::STRING_TYPE, sync: :symbol, location: :rodata)
       when :BYTE         then Type.new(:Byte)
       when :PREFIXED_INT then Type.new(:Byte)  # Default; overflows checked after coercion context is known
       when :INT8    then Type.new(:Int8)
@@ -3992,6 +3967,7 @@ private
       node.string_concat = true
       current_fn_ctx.frame_count += 1 if current_fn_ctx
       # String concat result is frame-allocated.
+      node.storage = :frame
       ti = node.full_type
       ti.provenance = :frame if ti.is_a?(Type)
     end
@@ -4019,9 +3995,9 @@ private
 
     # When binding a collection source (users AS $u), $u refers to each *element*,
     # not the collection. Subsequent $u.field accesses need the element type.
-    # Note: collection? covers pool/list/map; array? is needed for plain T[] arrays.
+    # collection_value? covers declared collections plus plain non-string arrays.
     lhs_ti = Type.new(lhs_type)
-    binding_type = if (lhs_ti.array? || lhs_ti.collection?) && !lhs_ti.string? && lhs_ti.element_type
+    binding_type = if lhs_ti.collection_value? && lhs_ti.element_type
       lhs_ti.element_type.to_s
     else
       lhs_type
@@ -4327,8 +4303,8 @@ private
   # +val_node+:      the AST value node being stored
   # +expected_type+: the target field/param type (Type or Symbol)
   # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
-  sig { params(val_node: T.untyped, expected_type: T.untyped, container_desc: T.nilable(String)).returns(T.nilable(AST::CopyNode)) }
-  def ensure_owned_value!(val_node, expected_type, container_desc = nil)
+  sig { params(val_node: T.untyped, expected_type: T.untyped, container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::CopyNode)) }
+  def ensure_owned_value!(val_node, expected_type, container_desc = nil, container_alloc: :heap)
     # Non-escaping values (WITH block aliases) cannot be stored in containers
     if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
       error!(val_node, :STORE_WITH_SCOPED_INTO_CONTAINER, name: val_node.name, container: container_desc || 'a container')
@@ -4347,6 +4323,8 @@ private
 
       copy = AST::CopyNode.new(val_node.token, val_node)
       copy.full_type = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type || :Any)
+      copy.storage = container_alloc
+      copy.alloc = container_alloc
       elem = vti.element_type
       if elem
         es = lookup_type_schema(elem.resolved) rescue nil
@@ -4358,13 +4336,20 @@ private
 
     if vti.string? && vti.rodata?
       copy = AST::CopyNode.new(val_node.token, val_node)
-      # provenance auto-inferred from location: :heap in Type constructor
-      copy.full_type = Type.new(Type::STRING_TYPE, location: :heap)
+      # Auto-COPY of rodata literal into a non-rodata container -- new
+      # string lives in the container's allocator so the container has
+      # uniform-provenance elements (no cleanupAlloc needed).
+      copy.full_type = Type.new(Type::STRING_TYPE, location: container_alloc)
+      copy.storage = container_alloc
+      copy.alloc = container_alloc
       return copy
     end
 
     if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
-      error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
+      sym = val_node.symbol
+      unless sym&.heap_provenance?
+        error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
+      end
     end
 
     nil
@@ -4377,7 +4362,6 @@ private
     # Clone the Type so mutating provenance doesn't affect the inner node.
     inner_type = node.value.full_type
     node.full_type = inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type
-    node.storage = :stack
     ti = node.full_type
     resolver = ->(name) { lookup_type_schema(name) rescue nil }
 
@@ -4387,18 +4371,23 @@ private
     is_value_copy = ti.is_a?(Type) &&
       source_sync.nil? && !ti.multiowned? && !ti.shared? &&
       (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
-    unless is_value_copy
+    if is_value_copy
+      node.storage = :stack
+    else
       # COPY always produces heap-owned data for non-value types.
+      # Type's clone constructor inherits source provenance (e.g., :rodata from
+      # a string literal); override on the cloned Type so internal Type
+      # predicates (needs_cleanup?, finalize_storage) see :heap. The
+      # storage_override is the authoritative signal for Locatable readers.
       ti.provenance = :heap if ti.is_a?(Type)
-      # Mark as heap usage - COPY allocates via heapAlloc
+      node.storage = :heap
       current_fn_ctx.heap_count += 1 if current_fn_ctx
     end
 
     # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
     # For list/array types, check if element type is a non-Copy union.
-    vti = node.value.full_type
-    vti = Type.new(vti) if vti && !vti.is_a?(Type)
-    if vti && (vti.list_collection? || (vti.array? && !vti.string?))
+    vti = Type.from_node!(node.value, context: "array/list deep-copy")
+    if vti.direct_indexable_collection?
       elem = vti.element_type
       if elem
         schema = lookup_type_schema(elem.resolved) rescue nil
@@ -4493,7 +4482,6 @@ private
     base = ti.resolved.to_s.sub(/^\?/, '')
     result_type = Type.new(base.to_sym)
     result_type.ownership  = :frozen
-    result_type.provenance = :heap
     node.full_type = result_type
     node.storage   = :frozen
   end
@@ -4560,7 +4548,6 @@ private
     end
 
     result = Type.new(source_type, ownership: :shared)
-    result.provenance = :heap
     node.full_type = result
     node.storage = :heap
 
@@ -5274,10 +5261,6 @@ private
 
     node.full_type = Type.new(:"~?#{elem_syms.first}[]")
 
-    # Detect YIELD of frame strings: when any YIELD expression is frame-allocated,
-    # the MIR pass will heap-dupe it before push. NEXT callers own the duped copy.
-    node.yields_frame_strings = true if stream_body_yields_frame_string?(node.body)
-
     # Compute captures for transpiler (same as BG blocks).
     stream_analysis = analyze_fiber_captures(node.body)
     node.capture_analysis = stream_analysis
@@ -5285,30 +5268,6 @@ private
     if stream_analysis.has_non_escaping_capture
       error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
              "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
-    end
-  end
-
-  # Returns true if any YieldExpr in the stream body yields a frame-allocated string.
-  # Stops recursion at nested BgStreamBlock boundaries.
-  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
-  def stream_body_yields_frame_string?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |stmt|
-      case stmt
-      when AST::YieldExpr
-        bg_exit_frame_string?(stmt.expr)
-      when AST::WhileLoop
-        stream_body_yields_frame_string?(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        stream_body_yields_frame_string?(stmt.body)
-      when AST::IfStatement
-        stream_body_yields_frame_string?(stmt.then_branch) ||
-          stream_body_yields_frame_string?(stmt.else_branch)
-      when AST::BgStreamBlock
-        false  # nested stream boundary — don't descend
-      else
-        false
-      end
     end
   end
 
@@ -5354,19 +5313,6 @@ private
       last_type = T.must(last_type_str[1..]).to_sym
     end
     node.full_type = Type.new(:"~#{last_type}")
-
-    # Propagate returns_promoted through BG blocks: if the last expression
-    # calls a function with returns_promoted, the BG block's promise carries
-    # heap-promoted data that the NEXT caller must clean up.
-    last_expr = node.body.last
-    if has_heap_promoted_call?(last_expr)
-      node.return_provenance = :heap
-    elsif bg_exit_frame_string?(last_expr)
-      # Last expression is a frame-allocated string. The MIR pass will heap-dup it
-      # so the fiber's result outlives the frame rewind. The NEXT caller owns that
-      # heap string and must free it.
-      node.return_provenance = :heap
-    end
 
     # @arena implies @pinned — thread-local arena memory can't be stolen.
     if node.arena_mode
@@ -5532,21 +5478,7 @@ private
       node.full_type = promise_type.tense_type.to_sym
     end
 
-    # Propagate heap provenance through NEXT: if the fiber's exit/yield value was
-    # frame-allocated and heap-duped, the NEXT caller owns that heap allocation
-    # and must free it.
-    if node.expr.is_a?(AST::Identifier)
-      sym = node.expr.symbol
-      decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
-      bg_value = decl_node&.value
-      needs_heap =
-        (bg_value.is_a?(AST::BgBlock) && bg_value.return_provenance == :heap) ||
-        (bg_value.is_a?(AST::BgStreamBlock) && bg_value.yields_frame_strings)
-      if needs_heap
-        ti = node.full_type
-        ti.provenance = :heap if ti.is_a?(Type)
-      end
-    end
+    nil
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
@@ -6176,6 +6108,53 @@ private
     sym.lifetime = SymbolEntry.tied_lifetime(sources)
   end
 
+  # Single-writer stamp: "this binding's heap-bearing contents are already
+  # in heap_provenance" -- so return-time promote is unnecessary (and would
+  # leak by re-allocating). Legacy compatibility field. ONE writer
+  # (bind-time), many readers (return-time). See docs/agents/provenance-collapse.md.
+  sig { params(decl_node: T.untyped).void }
+  def stamp_init_contents_heap!(decl_node)
+    sym = decl_node.symbol
+    return unless sym
+    init = decl_node.respond_to?(:value) ? decl_node.value : nil
+    sym.init_contents_heap = init_value_contents_heap?(init)
+  end
+
+  sig { params(init: T.untyped).returns(T::Boolean) }
+  def init_value_contents_heap?(init)
+    return false unless init
+    case init
+    when AST::StructLit, AST::UnionVariantLit
+      init.fields.all? do |_, fval|
+        next true unless fval
+        fti = Type.from_node!(fval, context: "heap init field")
+        next true unless fti.string? || fti.collection?
+        fval.is_a?(AST::Locatable) && fval.heap_provenance?
+      end
+    when AST::FuncCall, AST::MethodCall
+      init.is_a?(AST::Locatable) && init.heap_provenance?
+    when AST::Identifier
+      !!init.symbol&.init_contents_heap
+    when AST::CopyNode, AST::CloneNode
+      true
+    when AST::Cast
+      init_value_contents_heap?(init.value)
+    when AST::IfStatement
+      then_tail = (init.then_branch || []).last
+      else_tail = (init.else_branch || []).last
+      tails = [then_tail, else_tail].compact
+      tails.size == 2 && tails.all? { |t| init_value_contents_heap?(t) }
+    when AST::MatchStatement
+      cases = (init.cases || []).map { |c| c.is_a?(Hash) ? c[:body]&.last : (c.respond_to?(:body) ? c.body&.last : nil) }.compact
+      default = init.default_case
+      default_tail = default.is_a?(Array) ? default.last : (default.respond_to?(:body) ? default.body&.last : nil)
+      tails = cases + (default_tail ? [default_tail] : [])
+      tails.any? && tails.all? { |t| init_value_contents_heap?(t) }
+    else
+      false
+    end
+  end
+
   # AST node types that DON'T propagate a BG handle's tied lifetime
   # to their enclosing expression. Their own lifetime semantics are
   # determined by the symbol / return-type the node resolves to, not
@@ -6633,7 +6612,8 @@ private
       if matched_def
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
         if matched_def.emit&.lifetime
-          ti.provenance = :borrow
+          val.storage = :borrow if val.respond_to?(:storage=)
+          node.storage = :borrow if node.respond_to?(:storage=)
           return
         end
         ret_alloc = matched_def.emit&.return_alloc
@@ -6641,7 +6621,9 @@ private
         # alloc IS the return alloc (e.g. map.values() on sharded maps).
         ret_alloc ||= matched_def.emit&.alloc if matched_def.emit&.allocates
         if ret_alloc
-          ti.provenance ||= ret_alloc if [:heap, :frame].include?(ret_alloc)
+          if [:heap, :frame].include?(ret_alloc)
+            val.storage = ret_alloc if val.respond_to?(:storage=)
+          end
           return
         end
       end
@@ -6658,7 +6640,7 @@ private
   def og_declare(name, node, type_info)
     entry = current_scope.locals[name] rescue nil
     kind = classify_og_kind(type_info, sync: entry&.sync)
-    ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
+    ti = Type.from_node(type_info) || Type.new(:Untyped)
     @og.declare(name, kind: kind, type_info: ti,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end

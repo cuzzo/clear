@@ -495,7 +495,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.ShardedPool(Score, 4).initCapacity(rt.heapAlloc(), 100)")
       end
 
-      it "emits plain defer sp.deinit when sharded pool is never moved" do
+      it "emits plain defer cleanup when sharded pool is never moved" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
@@ -503,7 +503,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("defer sp.deinit(rt.heapAlloc())")
+        # Post-collapse: sharded pool routes through CheatLib.cleanup shim.
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(sp), rt.heapAlloc(), &sp)")
         expect(out).not_to include("sp_moved")
       end
 
@@ -948,13 +949,14 @@ RSpec.describe SemanticAnnotator do
       expect(zig).not_to include("SoaPool")
     end
 
-    it "emits defer deinit for @pool:soa" do
+    it "emits defer cleanup for @pool:soa" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
         FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
-      expect(zig).to include("pool.deinit(")
+      # Post-collapse: SOA pool routes through CheatLib.cleanup shim.
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
     end
 
     it "uses field-slice iteration for scalar folds without materializing structs" do

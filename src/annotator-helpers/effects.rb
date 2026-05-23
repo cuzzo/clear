@@ -350,7 +350,10 @@ module EffectTracker
   # Post-pass: compute needs_rt for every function.
   # A function needs rt if it uses the frame arena, calls a fn pointer, or any
   # transitive callee needs rt. main always needs rt (entry point).
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  #
+  # Stamps fn_node.needs_rt as a side effect; the caller-visible result is
+  # the boolean stamp, not a returned hash, so the method is void.
+  sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_nodes = T.let(@fn_nodes, T.untyped)
@@ -365,7 +368,10 @@ module EffectTracker
       has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
         ti = Type.new(p.type || :Any)
-        ti.string? || ti.array? || ti.list_collection? || ti.map?
+        is_pure_copy = ti.primitive? ||
+                       (ti.respond_to?(:generic_instance?) && ti.generic_instance? &&
+                        ti.generic_base == :Id)
+        !is_pure_copy
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
       has_raise = @fn_raises_directly[name]
@@ -378,7 +384,7 @@ module EffectTracker
       # `rt.checkYield()` injected at entry by mir_lowering, so they
       # need rt threaded.
       yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || fn_node.uses_rt || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = fn_node.uses_runtime? || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
@@ -497,6 +503,9 @@ module EffectTracker
     alloc_fault = {}
     @fn_nodes.each do |name, fn_node|
       # Direct body allocation (counted at annotation: append/split/...).
+      # uses_rt deliberately excluded -- alloc_fault is "fn could OOM" and
+      # uses_rt fns reference rt without necessarily allocating (e.g.
+      # Versioned.read EBR pin).
       direct_alloc =
         (fn_node.uses_frame == true) ||
         (fn_node.uses_heap == true) ||

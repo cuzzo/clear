@@ -88,6 +88,8 @@ class Formatter
     WITH RETRY WINDOW RECOVER JOIN SHARD REDUCE CONCURRENT
     ASSERT ASSERT_RAISES CAST
   ].to_set.freeze
+  BRACKET_OPEN = ["(", "[", "{"].freeze
+  BRACKET_CLOSE = [")", "]", "}"].freeze
 
   sig { params(source: String).returns(T.nilable(String)) }
   def self.format(source)
@@ -277,6 +279,8 @@ class Formatter::Emitter
   CLOSE_LEADING   = Formatter::CLOSE_LEADING
   OUTDENT_LEADING = Formatter::OUTDENT_LEADING
   BLANK_BEFORE    = Formatter::BLANK_BEFORE
+  BRACKET_OPEN    = Formatter::BRACKET_OPEN
+  BRACKET_CLOSE   = Formatter::BRACKET_CLOSE
 
   # State for emitting one FN signature. Reek flagged the
   # (toks, start, arrow_idx, po, pc) clump across 5 methods.
@@ -285,6 +289,31 @@ class Formatter::Emitter
   sig { params(tokens: Array).void }
   def initialize(tokens)
     @tokens = tokens
+  end
+
+  sig { params(raw: String).returns(T::Boolean) }
+  def bracket_open?(raw)
+    BRACKET_OPEN.include?(raw)
+  end
+
+  sig { params(raw: String).returns(T::Boolean) }
+  def bracket_close?(raw)
+    BRACKET_CLOSE.include?(raw)
+  end
+
+  sig { params(out: Array).returns(T::Boolean) }
+  def out_ends_with_nl?(out)
+    out.last&.type == :NL
+  end
+
+  sig { params(token: Formatter::FormatLexer::Token, depth: Integer).returns(T::Boolean) }
+  def top_level_keyword?(token, depth)
+    depth.zero? && token.type == :KEYWORD
+  end
+
+  sig { params(out: Array, body_start: Integer).void }
+  def trim_trailing_body_nls(out, body_start)
+    out.pop while out_ends_with_nl?(out) && out.length > body_start
   end
 
   sig { returns(String) }
@@ -474,12 +503,12 @@ class Formatter::Emitter
         return false if %w[FN END THEN DO ELSE ELSE_IF CATCH].include?(t.raw)
       end
       if t.type == :SYM
-        case t.raw
-        when ')', ']', '}' then depth += 1
-        when '(', '[', '{'
+        if bracket_close?(t.raw)
+          depth += 1
+        elsif bracket_open?(t.raw)
           depth -= 1
           return false if depth < 0
-        when ';'
+        elsif t.raw == ';'
           return false if depth.zero?
         end
       end
@@ -500,11 +529,9 @@ class Formatter::Emitter
     while j < toks.length
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1
-        when ')', ']', '}' then bdepth -= 1
-        end
-      elsif bdepth.zero? && t.type == :KEYWORD
+        bdepth += 1 if bracket_open?(t.raw)
+        bdepth -= 1 if bracket_close?(t.raw)
+      elsif top_level_keyword?(t, bdepth)
         case t.raw
         when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
           kdepth += 1
@@ -553,10 +580,11 @@ class Formatter::Emitter
     while j < stop
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1
-        when ')', ']', '}' then bdepth -= 1
-        when ','
+        if bracket_open?(t.raw)
+          bdepth += 1
+        elsif bracket_close?(t.raw)
+          bdepth -= 1
+        elsif t.raw == ','
           if bdepth.zero? && kdepth.zero?
             arms << build_match_arm(toks, arm_start, j, arrow_idx, j)
             arm_start = skip_nls(toks, j + 1)
@@ -567,7 +595,7 @@ class Formatter::Emitter
         end
       elsif t.type == :OP && t.raw == '->' && bdepth.zero? && kdepth.zero?
         arrow_idx ||= j
-      elsif t.type == :KEYWORD && bdepth.zero?
+      elsif top_level_keyword?(t, bdepth)
         case t.raw
         when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
           kdepth += 1
@@ -600,13 +628,14 @@ class Formatter::Emitter
           # the comment extends to end-of-line and eats the body.
           has_comment = true if bdepth.zero? && kdepth.zero?
         elsif t.type == :SYM
-          case t.raw
-          when '(', '[', '{' then bdepth += 1
-          when ')', ']', '}' then bdepth -= 1
-          when ';'
+          if bracket_open?(t.raw)
+            bdepth += 1
+          elsif bracket_close?(t.raw)
+            bdepth -= 1
+          elsif t.raw == ';'
             semi_count += 1 if bdepth.zero? && kdepth.zero?
           end
-        elsif t.type == :KEYWORD && bdepth.zero?
+        elsif top_level_keyword?(t, bdepth)
           case t.raw
           when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
             has_block = true if kdepth.zero?
@@ -646,7 +675,7 @@ class Formatter::Emitter
       # Drop trailing NL so the `,` (or INDENT_CLOSE) sits on the same
       # line as the body's last `;`. Without this, the comma orphan-
       # lands on its own line.
-      out.pop while out.last && out.last.type == :NL
+      out.pop while out_ends_with_nl?(out)
       out << phantom(:INDENT_CLOSE)
       out << toks[sep] if sep
     else
@@ -695,15 +724,22 @@ class Formatter::Emitter
         # breaks (between END of a nested block and the next statement)
         # without producing the orphan blank lines that arise from the
         # source-NL after a `;` we just NL-terminated ourselves.
-        out << t unless out.last && out.last.type == :NL
+        out << t unless out_ends_with_nl?(out)
         j += 1
         next
       end
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1; out << t; j += 1; next
-        when ')', ']', '}' then bdepth -= 1; out << t; j += 1; next
-        when ';'
+        if bracket_open?(t.raw)
+          bdepth += 1
+          out << t
+          j += 1
+          next
+        elsif bracket_close?(t.raw)
+          bdepth -= 1
+          out << t
+          j += 1
+          next
+        elsif t.raw == ';'
           if bdepth.zero? && kdepth.zero?
             out << t
             j += 1
@@ -711,7 +747,7 @@ class Formatter::Emitter
             next
           end
         end
-      elsif t.type == :KEYWORD && bdepth.zero?
+      elsif top_level_keyword?(t, bdepth)
         case t.raw
         when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
           kdepth += 1
@@ -836,7 +872,7 @@ class Formatter::Emitter
 
     # Strip any trailing NLs in the body and insert exactly one before END.
     if body_start < out.length
-      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      trim_trailing_body_nls(out, body_start)
       insert_nl(out)
     end
     if j < toks.length
@@ -908,10 +944,17 @@ class Formatter::Emitter
     while j < sig.pc
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1; out << t; j += 1; next
-        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
-        when ','
+        if bracket_open?(t.raw)
+          depth += 1
+          out << t
+          j += 1
+          next
+        elsif bracket_close?(t.raw)
+          depth -= 1
+          out << t
+          j += 1
+          next
+        elsif t.raw == ','
           if depth == 0
             out << t; j += 1
             insert_nl(out)
@@ -1016,10 +1059,17 @@ class Formatter::Emitter
     while j < sig.pc
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1; out << t; j += 1; next
-        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
-        when ','
+        if bracket_open?(t.raw)
+          depth += 1
+          out << t
+          j += 1
+          next
+        elsif bracket_close?(t.raw)
+          depth -= 1
+          out << t
+          j += 1
+          next
+        elsif t.raw == ','
           if depth == 0
             out << t; j += 1
             insert_nl(out)
@@ -1132,11 +1182,12 @@ class Formatter::Emitter
     while j < end_idx
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1
-        when ')', ']', '}' then bdepth -= 1
+        if bracket_open?(t.raw)
+          bdepth += 1
+        elsif bracket_close?(t.raw)
+          bdepth -= 1
         end
-      elsif t.type == :KEYWORD && bdepth.zero?
+      elsif top_level_keyword?(t, bdepth)
         case t.raw
         when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
           kdepth += 1
@@ -1176,11 +1227,12 @@ class Formatter::Emitter
     while j < toks.length
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1
-        when ')', ']', '}' then bdepth -= 1
+        if bracket_open?(t.raw)
+          bdepth += 1
+        elsif bracket_close?(t.raw)
+          bdepth -= 1
         end
-      elsif bdepth.zero? && t.type == :KEYWORD
+      elsif top_level_keyword?(t, bdepth)
         case t.raw
         when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
           kdepth += 1
@@ -1286,7 +1338,7 @@ class Formatter::Emitter
       if tj.type == :NL
         # Collapse adjacent NLs but preserve user-written line breaks
         # inside nested blocks so further passes still see structure.
-        out << tj unless out.last && out.last.type == :NL
+        out << tj unless out_ends_with_nl?(out)
         j += 1
         next
       end
@@ -1335,7 +1387,7 @@ class Formatter::Emitter
 
     # Strip any trailing NLs in body; insert exactly one before END.
     if body_start < out.length
-      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      trim_trailing_body_nls(out, body_start)
       insert_nl(out)
     end
     out << toks[end_idx]  # END
@@ -1459,7 +1511,7 @@ class Formatter::Emitter
       out << toks[j]
       j += 1
     end
-    out.pop while out.last && out.last.type == :NL
+    out.pop while out_ends_with_nl?(out)
     insert_nl(out)
     out << toks[close_idx]  # `}`
 
@@ -1550,9 +1602,10 @@ class Formatter::Emitter
     while j < toks.length
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1
-        when ')', ']', '}' then depth -= 1
+        if bracket_open?(t.raw)
+          depth += 1
+        elsif bracket_close?(t.raw)
+          depth -= 1
         end
       end
       if t.type == :NL && depth == 0
@@ -1698,10 +1751,11 @@ class Formatter::Emitter
             (seg[:start]...seg[:end]).each do |j|
               t = toks[j]
               if t.type == :SYM
-                case t.raw
-                when '(', '[', '{' then seg_depth += 1
-                when ')', ']', '}' then seg_depth -= 1
-                end
+                if bracket_open?(t.raw)
+          seg_depth += 1
+        elsif bracket_close?(t.raw)
+          seg_depth -= 1
+        end
               end
               next if t.type == :NL && seg_depth.zero?
               out << t
@@ -1920,10 +1974,17 @@ class Formatter::Emitter
     while j < inner.length
       t = inner[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1; out << t; j += 1; next
-        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
-        when ','
+        if bracket_open?(t.raw)
+          depth += 1
+          out << t
+          j += 1
+          next
+        elsif bracket_close?(t.raw)
+          depth -= 1
+          out << t
+          j += 1
+          next
+        elsif t.raw == ','
           if depth == 0
             out << t
             j += 1
@@ -1937,7 +1998,7 @@ class Formatter::Emitter
       j += 1
     end
 
-    out.pop while out.last && out.last.type == :NL
+    out.pop while out_ends_with_nl?(out)
     out << phantom(:INDENT_CLOSE) if use_markers
     insert_nl(out)
     out << close_tok
@@ -1991,9 +2052,10 @@ class Formatter::Emitter
     (brace_idx + 1 ... close_idx).each do |j|
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1
-        when ')', ']', '}' then depth -= 1
+        if bracket_open?(t.raw)
+          depth += 1
+        elsif bracket_close?(t.raw)
+          depth -= 1
         end
       elsif t.type == :KEYWORD && depth.zero? && %w[DO THEN].include?(t.raw)
         return true
@@ -2088,10 +2150,17 @@ class Formatter::Emitter
     while j < close_idx
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then depth += 1; out << t; j += 1; next
-        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
-        when ';'
+        if bracket_open?(t.raw)
+          depth += 1
+          out << t
+          j += 1
+          next
+        elsif bracket_close?(t.raw)
+          depth -= 1
+          out << t
+          j += 1
+          next
+        elsif t.raw == ';'
           # Insert NL on `;` only at the BG-level top — inside a
           # `DO ... END` or `THEN ... END` block, leave the `;` to be
           # handled by the inner block's own expansion (expand_then_do_blocks
@@ -2114,7 +2183,7 @@ class Formatter::Emitter
     end
 
     if body_start < out.length
-      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      trim_trailing_body_nls(out, body_start)
       out << phantom(:INDENT_CLOSE) if needs_arrow_balance
       insert_nl(out)
     end
@@ -2134,13 +2203,14 @@ class Formatter::Emitter
     while j < close_idx
       t = toks[j]
       if t.type == :SYM
-        case t.raw
-        when '(', '[', '{' then bdepth += 1
-        when ')', ']', '}' then bdepth -= 1
+        if bracket_open?(t.raw)
+          bdepth += 1
+        elsif bracket_close?(t.raw)
+          bdepth -= 1
         end
       elsif t.type == :OP && t.raw == '->' && bdepth.zero?
         return true
-      elsif t.type == :KEYWORD && bdepth.zero? &&
+      elsif top_level_keyword?(t, bdepth) &&
             %w[FN IF WHILE FOR TEST WHEN START].include?(t.raw)
         return false
       end
@@ -2379,7 +2449,7 @@ class Formatter::Emitter
     end
 
     if body_start < out.length
-      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      trim_trailing_body_nls(out, body_start)
       insert_nl(out)
     end
     if j < toks.length
@@ -2393,7 +2463,7 @@ class Formatter::Emitter
   # is already :NL, leave it. Otherwise append a fresh :NL.
   sig { params(out: Array).returns(T.nilable(Array)) }
   def insert_nl(out)
-    return if out.last && out.last.type == :NL
+    return if out_ends_with_nl?(out)
     out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
   end
 

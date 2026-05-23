@@ -77,7 +77,7 @@ export -f build_one
 {
   local_t0=$SECONDS
   echo "=== nil-kill workload [examples-build] start (jobs=$JOBS) ==="
-  find examples benchmarks -type f -name '*.cht' -print0 \
+  find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 \
     | xargs -0 -P "$JOBS" -I{} bash -c 'build_one "$@"' _ {} || true
   echo "=== nil-kill workload [examples-build] done in $((SECONDS - local_t0))s ==="
 }

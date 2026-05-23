@@ -15,6 +15,7 @@ require_relative "../ast/ast"
 require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
+require_relative "../mir/hoist"
 require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
 
@@ -43,6 +44,10 @@ class CompilerFrontend
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
+
+    # Hoist anonymous allocating expressions into temp bindings so escape
+    # analysis only ever sees symbol-bearing declarations.
+    Hoist.apply!(T.must(ast))
 
     PipelineRewriter.new(annotator).rewrite!(ast)
     StringConcatRewriter.new.rewrite!(T.must(ast))

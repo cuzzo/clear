@@ -338,7 +338,7 @@ class Type
     return :refcounted     if any_rc?
     return :sync_wrapped   if any_sync?
     return (rodata? ? :slice_rodata : :slice_managed) if string?
-    return :slice_managed  if list_collection? || set_collection? || pool? || map?
+    return :slice_managed  if collection?
     return :value          if array? && !string?
     :by_ref
   end
@@ -586,16 +586,6 @@ class Type
     @provenance == :rodata
   end
 
-  # Aliases: provenance predicates (same as heap?/frame?/rodata? now that provenance is authoritative)
-  alias heap_provenance?   heap?
-  alias frame_provenance?  frame?
-  alias rodata_provenance? rodata?
-
-  sig { returns(T::Boolean) }
-  def borrow_provenance?
-    @provenance == :borrow
-  end
-
   # Returns the allocator symbol for this provenance (:heap or :frame), or nil.
   sig { returns(T.nilable(Symbol)) }
   def provenance_alloc
@@ -785,6 +775,46 @@ class Type
     map? || pool? || list_collection? || set_collection?
   end
 
+  # True for collection-shaped values that may need collection copy/cleanup
+  # handling at ownership boundaries. `collection?` is declaration-level
+  # collections (HashMap/@pool/@list/@set); plain non-string arrays/slices are
+  # value-shaped but need the same boundary treatment.
+  sig { returns(T::Boolean) }
+  def collection_value?
+    collection? || non_string_array?
+  end
+
+  sig { returns(T::Boolean) }
+  def associative_collection?
+    map?
+  end
+
+  sig { returns(T::Boolean) }
+  def linear_collection?
+    pool? || list_collection? || set_collection? || non_string_array?
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def ownership_storage
+    return ownership if ownership == :shared || ownership == :multiowned
+    nil
+  end
+
+  sig { returns(T::Boolean) }
+  def direct_indexable_collection?
+    list_collection? || (array? && !string?)
+  end
+
+  sig { returns(T::Boolean) }
+  def non_string_array?
+    array? && !string?
+  end
+
+  sig { returns(T::Boolean) }
+  def indexed_container_borrow?
+    map? || pool? || direct_indexable_collection?
+  end
+
   # Iteration shape for the FSM ForEach lowering. The recursive
   # splitter dispatches on the kind to build a per-iteration
   # segment graph. Returns nil for collection shapes the FSM
@@ -869,7 +899,7 @@ class Type
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   sig { returns(T::Boolean) }
   def needs_heap_backing?
-    pool? || sharded? || heap_provenance? || map? || tense_observable?
+    pool? || sharded? || heap? || map? || tense_observable?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.
@@ -1482,6 +1512,47 @@ class Type
 
   # ── Recursive type analysis (mirrors Zig comptime functions) ──────
 
+  sig { params(schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  def recursive_cleanup_shape?(schema_lookup = nil, seen = nil)
+    seen ||= Set.new
+    key = "#{resolved}|#{collection}|#{ownership}|#{sync}|#{provenance}"
+    return false if seen.include?(key)
+    seen.add(key)
+
+    return false if provenance == :borrow
+    return true if string? || any_rc? || link? || collection?
+
+    if array?
+      et = element_type
+      return false unless et
+      return Type.from_node(et)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+    end
+
+    return false unless schema_lookup
+    schema = schema_lookup.call(resolved) rescue nil
+    if Schemas.union?(schema)
+      return (schema.variants || {}).any? do |_, vt|
+        if Schemas.inline_struct?(vt)
+          vt.fields.any? do |_, ft|
+            Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+          end
+        else
+          Type.from_node(vt || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+        end
+      end
+    end
+
+    if Schemas.field_bearing?(schema)
+      return schema.fields.any? do |_, field|
+        next false if field.is_a?(AST::StructField) && field.borrowed
+        ft = field.is_a?(AST::StructField) ? field.type : field
+        Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+      end
+    end
+
+    false
+  end
+
   # Mirror of Zig's needsPromotion. Returns true if this type contains
   # frame-allocated data that must be duped to heap on escape.
   # Recurses into struct fields and union variants.
@@ -1513,9 +1584,9 @@ class Type
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
-    return true if any_rc? || link? || list_collection? || map? || pool? ||
-                   set_collection? || (string? && heap_provenance?) ||
-                   (array? && !string?) || any_sync?
+    return true if any_rc? || link? || collection_value? || (string? && heap?) ||
+                   any_sync? ||
+                   (respond_to?(:indirect?) && indirect?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(schema))
@@ -1539,7 +1610,7 @@ class Type
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
     # Copy types never need cleanup regardless of allocator
-    return false if string? && !heap_provenance? && allocator == :frame
+    return false if string? && !heap? && allocator == :frame
 
     # Heap-allocated non-Copy: always needs cleanup
     return true if allocator == :heap
@@ -1551,7 +1622,7 @@ class Type
 
     # Frame collections/maps: backing buffer uses frame allocator, arena rewind handles it.
     # UNLESS elements have heap internals (e.g. list of RC pointers).
-    if list_collection? || (map? && !numeric_map?) || numeric_map? || pool? || set_collection?
+    if collection?
       return elem_has_heap_internals?(schema_lookup)
     end
 
@@ -1603,7 +1674,7 @@ class Type
   # in-depth backstop rather than the load-bearing path.
   sig { params(schema_lookup: T.nilable(Proc)).returns(Symbol) }
   def cleanup_allocator(schema_lookup = nil)
-    return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
+    return :heap if heap? || map? || any_rc? || any_sync? ||
                      resource? || sharded? || striped? || link? ||
                      tense_observable?
     if schema_lookup
@@ -1626,12 +1697,12 @@ class Type
       fields = vt.fields
       return fields.any? { |_, ft|
         t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && (t.indirect? || t.string? || t.collection? || t.map? || (t.array? && !t.fixed?))
+        t && (t.indirect? || t.string? || t.collection? || (t.array? && !t.fixed?))
       }
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.indirect? || t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
+    (t.indirect? || t.collection? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
@@ -1639,12 +1710,25 @@ class Type
   # Replaces the repeated inline pattern:
   #   ti = node.full_type rescue nil
   #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(Type)) }
   def self.from_node(node)
     return nil unless node
     t = node.respond_to?(:full_type) ? node.full_type : node
     return nil unless t
-    t.is_a?(Type) ? t : (Type.new(t) rescue nil)
+    return t if t.is_a?(Type)
+    begin
+      Type.new(t)
+    rescue StandardError
+      nil
+    end
+  end
+
+  sig { params(node: T.untyped, context: String).returns(Type) }
+  def self.from_node!(node, context: "post-annotation MIR")
+    t = from_node(node)
+    raise "#{context}: missing type info for #{node.class}" unless t
+    raise "#{context}: unresolved type info for #{node.class}" if t.untyped?
+    t
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -1657,9 +1741,6 @@ class Type
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
-    # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
-    @provenance = :heap if value && value != :raw && value != :symbol && @ownership == :affine
-    @provenance = :rodata if value == :symbol
   end
 
   # Returns the Zig type string representation of this type.
@@ -2184,10 +2265,6 @@ class Type
       end
     end
 
-    # :frame means "allocated in the frame arena". Strings/arrays are value-typed (slice), only
-    # frame-allocated structs are stored as *T pointers so large data stays off the fiber stack.
-    is_pointer = heap? || (frame? && struct?)
-
     # 3. Handle Special primitive mapping
     # String and Byte[N] (fixed-size string literals) both map to []const u8.
     # Byte[N] is the inferred type for string literals; their contents are always const.
@@ -2243,7 +2320,7 @@ class Type
       else
         zig = "[]#{base_zig}"
       end
-      return is_pointer && zig != "void" ? "*#{zig}" : zig
+      return zig
     end
 
     # 5. Handle HashMaps
@@ -2285,15 +2362,11 @@ class Type
     if generic_instance?
       return "u64" if @generic_base_raw == :Id
       args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
-      zig = "#{@generic_base_raw}(#{args_zig})"
-      return is_pointer && zig != "void" ? "*#{zig}" : zig
+      return "#{@generic_base_raw}(#{args_zig})"
     end
 
     # 6. Map primitives and builtins to Zig types; user types pass through.
-    zig = ZIG_TYPE_MAP[resolved] || resolved.to_s
-
-    # 7. Add pointer prefix if heap-allocated and not void
-    is_pointer && zig != "void" ? "*#{zig}" : zig
+    ZIG_TYPE_MAP[resolved] || resolved.to_s
   end
 end
 

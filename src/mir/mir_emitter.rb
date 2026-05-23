@@ -36,6 +36,7 @@ class MIREmitter
     @rt_name = T.let("rt", String)
     @flow_alias_zig = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(nil, T.nilable(Integer))
+    @discard_counter = T.let(0, Integer)
   end
 
   # Emit Zig code from an MIR node. Returns a String.
@@ -81,6 +82,7 @@ class MIREmitter
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
+    when MIR::DiscardOwned     then emit_discard_owned(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
     when MIR::RawZig           then node.code
@@ -101,7 +103,6 @@ class MIREmitter
     when MIR::Cleanup          then emit_cleanup(node, errdefer: false)
     when MIR::ErrCleanup       then emit_cleanup(node, errdefer: true)
     when MIR::MoveMark         then emit_move_mark(node)
-    when MIR::EscapePromote    then emit_escape_promote(node)
     when MIR::DeepCopy         then emit_deep_copy(node)
     when MIR::ContainerInit    then emit_container_init(node)
     when MIR::CapWrap          then emit_cap_wrap(node)
@@ -619,9 +620,7 @@ class MIREmitter
     tmp = "__new_#{node.name}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
-    zt = node.zig_type
-    zt = zt[1..] if zt.start_with?("!")
-    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{zt}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
   end
 
   sig { params(node: MIR::IfStmt).returns(String) }
@@ -986,143 +985,53 @@ class MIREmitter
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
     name = node.name
-    g = !errdefer && entry.has_moved_guard?
-    zig_type = entry.zig_type || "UNKNOWN"
-    # Cleanup operates on the storage (success) type. After the
-    # `RETURNS !T` migration the annotator may stamp a binding with
-    # `!T`, but the Zig variable holds `T` post-`try`. Strip a leading
-    # `!` so the type argument matches the variable's actual type.
-    zig_type = zig_type[1..] if zig_type.start_with?("!")
-    elem_zig = entry.elem_zig_type || "UNKNOWN"
-    elem_zig = elem_zig[1..] if elem_zig.start_with?("!")
+    g = entry.has_moved_guard?
     # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
-    # TAKES params). Skip the & wrappers and use .* / direct access.
+    # TAKES params). Cleanup unwraps one pointer level via @TypeOf(name.*).
     vp = entry.via_pointer?
-    deref = vp ? "#{name}.*" : name
 
     case entry.kind
     when :resource
+      # Schema-driven close hook: user-provided Zig snippet with `{0}` =
+      # the binding name. Future: lift into a deinit method on the type
+      # itself (requires wrapping raw-fd sockets as Zig structs).
       close = entry.resource_close_zig.gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)
 
-    when :inf_stream
-      # Signal the generator fiber to stop and free Inner. No moved guard:
-      # InfStream is not linearly-affine (NEXT borrows, not moves).
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}.deinit();\n"
-
-    when :observable
-      # ~T@observable / ~T[]@set:observable: wait for the consumer fiber
-      # to publish .finish() (spins on isFinished), then free the heap
-      # allocation. Wait-then-destroy is critical: destroying while the
-      # fiber still publishes is a UAF.
-      #
-      # Use `wait()` not `next()` so collection inners (StreamSet) don't
-      # acquire a snapshot the cleanup would discard -- that would leak
-      # the snapshot's buffer refcount. Shape-independent: same body
-      # for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND/REDUCE/DISTINCT.
-      # M7 (now landable, after A1): derive the destroy allocator from
-      # the entry. classify_observable stamps `:heap`; A1 added
-      # tense_observable? to Type#needs_heap_backing? so lower_var_decl
-      # no longer downgrades the entry to :frame. alloc_from_entry now
-      # returns "rt.heapAlloc()" reliably for every observable binding,
-      # matching the allocator that built the *ObservableTerminal
-      # wrapper in lower_range_fold_observable.
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
-
-    when :list_with_elem_cleanup
-      body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{deref}.deinit(rt.frameAlloc()); }"
-      guarded_defer(name, body, g, errdefer:)
-
-    when :list, :string_map, :numeric_map
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
-
-    when :frozen
-      kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
-
-    when :pool, :fixed_soa
-      guarded_defer(name, "#{deref}.deinit(#{alloc})", g, errdefer:)
-
-    when :set
-      arg = vp ? name : "&#{name}"
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", g, errdefer:)
-
-    when :rc
-      rc_alloc = entry.rc_alloc ? alloc_from_sym(entry.rc_alloc) : alloc
-      case entry.rc_variant
-      when :link
-        guarded_defer(name, "CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{name})", g, errdefer:)
-      when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry.rc_release_func}(#{entry.base_zig}, #{rc_alloc}, _strong_ref); }", g, errdefer:)
-      else
-        result = guarded_cleanup(name, zig_type, rc_alloc, g, errdefer:)
-        if entry.needs_release_fields?
-          guard = g ? "if (!#{name}_moved) " : ""
-          kw = errdefer ? "errdefer" : "defer"
-          result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
-        end
-        result
-      end
-
-    when :locked
-      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
-
-    when :write_locked
-      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
-
-    when :always_mutable
-      guarded_defer(name, "CheatLib.refCellDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
-
-    when :versioned
-      # MVCC L6: tear down a *Versioned(T) cell. EBR-retire the live
-      # ptr then destroy the outer struct.
-      guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, #{@rt_name || 'rt'}, #{alloc}, #{name})", g, errdefer:)
-
-    when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", true, errdefer:)
-
-    when :heap_slice, :heap_union, :heap_struct
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :optional_owned
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :atomic_ptr
-      # AtomicPtr M3 / review item J: same cleanup shape as :heap_struct
-      # (CheatLib.cleanup with the binding's *AtomicPtr(T) zig_type),
-      # but routed through a dedicated kind so the entry hash doesn't
-      # carry the unused rc_variant/rc_release_func fields. The
-      # runtime cleanup() shim dispatches via @hasDecl(child,
-      # "compareAndPublish") and recursively cleans the inner *T.
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
-    when :heap_struct_plain
-      guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
-
-    when :array_with_struct_strings
-      if entry.is_fixed?
-        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
-      else
-        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
-      end
-
-    when :takes_union
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
-
-    when :takes_slice, :match_as_slice
-      body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
-      guarded_defer(name, body, g, errdefer:)
-
-    when :match_as_inline_struct
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
-
     else
-      raise "MIREmitter#emit_cleanup: unhandled kind :#{entry.kind} for '#{name}'"
+      # The uniform cleanup path. Every other kind dispatches identically
+      # through CheatLib.cleanup(@TypeOf(name), alloc, &name) -- the
+      # runtime arms (ArrayList, slice, String, Pool, Set, StringMap,
+      # Locked, RwLocked, Versioned, Rc/Arc/WeakRc/WeakArc, Observable,
+      # struct-with-deinit, struct-recursive, generic *T) comptime-
+      # dispatch on the binding's actual type. The kind axis signals
+      # three side-channel behaviors:
+      #   :rc + rc_alloc          -> binding-specific allocator
+      #   :rc + needs_release_fields -> post-cleanup releaseFields call
+      #   :frozen                 -> cleanup operates on the paired
+      #                              `name__buf` binding
+      use_alloc =
+        if entry.kind == :rc && entry.rc_alloc
+          alloc_from_sym(entry.rc_alloc)
+        else
+          alloc
+        end
+      use_name = entry.kind == :frozen ? "#{name}__buf" : name
+      # via_pointer bindings hold *T directly; strip one pointer level
+      # so cleanup's T matches the pointee shape.
+      use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
+      # Heap strings force a moved guard in defer context. Some classifier
+      # paths (heap_carry promotion) build the entry with has_moved_guard
+      # false; the string IS move-tracked at scope end though, so the
+      # guard is unconditional for the kind.
+      use_guard = entry.kind == :heap_string ? (!errdefer || entry.has_moved_guard?) : g
+      result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
+      if entry.kind == :rc && entry.needs_release_fields?
+        guard = g ? "if (!#{name}_moved) " : ""
+        kw = errdefer ? "errdefer" : "defer"
+        result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
+      end
+      result
     end
   end
 
@@ -1131,65 +1040,22 @@ class MIREmitter
     "#{node.name}_moved = true;"
   end
 
-  sig { params(node: MIR::EscapePromote).returns(T.nilable(String)) }
-  def emit_escape_promote(node)
-    rt = node.rt_expr || "rt"
-    case node.strategy
-    when :list
-      elem = node.elem_type or
-        raise "MIREmitter#emit_escape_promote: :list promotion for '#{node.name}' missing elem_type"
-      "try CheatLib.promoteList(#{elem}, #{rt}, &#{node.name});"
-    when :string_map
-      "#{node.name}.alloc = #{rt}.heapAlloc();"
-    when :generic
-      "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
-    when :generic_deep
-      "try CheatLib.promoteDeep(#{node.zig_type}, #{rt}, &#{node.name});"
-    else
-      raise "MIREmitter#emit_escape_promote: unhandled strategy :#{node.strategy}"
-    end
-  end
-
   sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }
   def emit_deep_copy(node)
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
+    # Uniquify the blk label across nested DeepCopy emits in the same scope.
+    @deep_copy_counter = T.let(T.let(@deep_copy_counter || 0, Integer) + 1, T.nilable(Integer))
+    bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
-    when :string
-      # dupe returns []u8 (mutable); cast to []const u8 so comparisons with
-      # string literals type-check (CLEAR strings are always []const u8).
-      "@as([]const u8, try #{alloc}.dupe(u8, #{src}))"
-    when :union
-      "try CheatLib.dupeUnionValue(#{node.zig_type}, #{src}, #{alloc})"
-    when :list_shallow
-      elem = node.elem_type
-      "blk_copy: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (__src.len > 0) {\n" \
-      "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
-      "        @memcpy(__buf, __src);\n" \
-      "        break :blk_copy __buf;\n" \
-      "    } else break :blk_copy #{src};\n" \
-      "}"
-    when :list_deep
-      elem = node.elem_type
-      "blk_copy: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (__src.len > 0) {\n" \
-      "        const __buf = try #{alloc}.alloc(#{elem}, __src.len);\n" \
-      "        errdefer #{alloc}.free(__buf);\n" \
-      "        for (__buf, 0..) |*__dst, __i| { __dst.* = try CheatLib.dupeValue(#{elem}, __src[__i], #{alloc}); }\n" \
-      "        break :blk_copy __buf;\n" \
-      "    } else break :blk_copy #{src};\n" \
-      "}"
     when :passthrough
-      "blk_copy_value: {\n" \
-      "    const __src = #{src};\n" \
-      "    if (@typeInfo(@TypeOf(__src)) == .pointer) break :blk_copy_value __src.*;\n" \
-      "    break :blk_copy_value __src;\n" \
-      "}"
+      # Borrow-to-owned passthrough: auto-deref single pointers but keep
+      # value-shaped sources unchanged. No allocation -- this is the
+      # no-op COPY for Copy-type sources. comptime-evaluated branch.
+      "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
-      "try CheatLib.dupeValue(@TypeOf(#{src}), #{src}, #{alloc})"
+      type_arg = node.zig_type || "@TypeOf(#{src})"
+      "try CheatLib.dupeValue(#{type_arg}, #{src}, #{alloc})"
     else
       raise "MIREmitter#emit_deep_copy: unhandled strategy :#{node.strategy}"
     end
@@ -1430,6 +1296,42 @@ class MIREmitter
     "(#{expr} catch#{cap} #{catch_body})"
   end
 
+  sig { params(node: MIR::DiscardOwned).returns(String) }
+  def emit_discard_owned(node)
+    @discard_counter += 1
+    name = "__discard_#{@discard_counter}"
+
+    if discard_success_only?(node.expr)
+      opt = "#{name}_opt"
+      expr = emit(node.expr.expr)
+      body = [
+        "{",
+        "const #{opt}: ?#{node.zig_type} = (#{expr} catch null);",
+        "if (#{opt}) |#{name}_val| {",
+        "var #{name} = #{name}_val;",
+        indent_block(emit_cleanup(MIR::Cleanup.new(name, node.cleanup_entry), errdefer: false), 4),
+        "}",
+        "}",
+      ].join("\n")
+      return body
+    end
+
+    [
+      "{",
+      "var #{name} = #{emit(node.expr)};",
+      indent_block(emit_cleanup(MIR::Cleanup.new(name, node.cleanup_entry), errdefer: false), 4),
+      "}",
+    ].join("\n")
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def discard_success_only?(expr)
+    expr.is_a?(MIR::TryCatch) &&
+      expr.capture.nil? &&
+      ((expr.catch_body.is_a?(MIR::Ident) && expr.catch_body.name.to_s == "undefined") ||
+       expr.catch_body.is_a?(MIR::Undef))
+  end
+
   sig { params(node: MIR::Conditional).returns(String) }
   def emit_conditional(node)
     "(if (#{emit(node.cond)}) #{emit(node.then_val)} else #{emit(node.else_val)})"
@@ -1451,7 +1353,6 @@ class MIREmitter
     case node.kind
     when :heap    then "#{rt}.heapAlloc()"
     when :frame   then "#{rt}.frameAlloc()"
-    when :cleanup then "#{rt}.cleanupAlloc()"
     else               "#{rt}.heapAlloc()"
     end
   end
@@ -1511,7 +1412,12 @@ class MIREmitter
       # The `*ArrayList` arm fires for callees whose caller passed a
       # `MUTABLE @list` param straight through (e.g. forwarding a
       # pointer-passed list to a borrow-shape callee).
-      "blk_items: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :blk_items if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
+      # Uniquify the blk label so multiple ItemsAccess emits in the same
+      # Zig scope don't redefine each other. Zig rejects duplicate labels
+      # even in nested expression positions.
+      @items_block_counter = T.let(T.let(@items_block_counter || 0, Integer) + 1, T.nilable(Integer))
+      label = "blk_items_#{@items_block_counter}"
+      "#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
     else
       "#{inner}.items"
     end
@@ -1554,7 +1460,6 @@ class MIREmitter
     case sym
     when :heap    then "#{rt}.heapAlloc()"
     when :frame   then "#{rt}.frameAlloc()"
-    when :cleanup then "#{rt}.cleanupAlloc()"
     else raise "alloc_zig: unknown allocator symbol :#{sym.inspect}"
     end
   end

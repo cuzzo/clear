@@ -564,11 +564,6 @@ module AST
     def needs_mut_ref=(val); @needs_mut_ref = T.let(val, T.untyped); end
 
     sig { returns(T.untyped) }
-    def target_is_list_field; @target_is_list_field = T.let(@target_is_list_field, T.untyped); end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def target_is_list_field=(val); @target_is_list_field = T.let(val, T.untyped); end
-
-    sig { returns(T.untyped) }
     def needs_heap_create; @needs_heap_create = T.let(@needs_heap_create, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def needs_heap_create=(val); @needs_heap_create = T.let(val, T.untyped); end
@@ -771,6 +766,7 @@ module AST
         new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
         new_t.elem_sync = final_type.elem_sync if final_type.elem_sync
         new_t.elem_sync ||= val_ti.elem_sync if val_ti&.respond_to?(:elem_sync) && val_ti&.elem_sync
+        new_t.layout = final_type.layout if final_type.respond_to?(:layout) && final_type.layout
         # Propagate @link_source from value's type
         if val_ti&.link?
           link_src = val_ti.link_source
@@ -798,14 +794,12 @@ module AST
       when :frame
         t.provenance = :frame
       when :heap
-        if value_sync == :locked
-          t.sync = :locked          # sync= setter sets provenance = :heap
-        elsif value_sync == :write_locked
-          t.sync = :write_locked    # sync= setter sets provenance = :heap
-        else
-          t.provenance = :heap
-        end
         t.provenance = :heap
+        if value_sync == :locked
+          t.sync = :locked
+        elsif value_sync == :write_locked
+          t.sync = :write_locked
+        end
       # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
       end
 
@@ -841,7 +835,31 @@ module AST
 
     sig { returns(T.nilable(Symbol)) }
     def storage
-      @storage_override || (@type_object && (@type_object.provenance || :stack))
+      @storage_override || :stack
+    end
+
+    # Canonical "is this expression's value heap-allocated?" — SIMP-13f.
+    # Reads sym.storage when a symbol is attached (binding-level), else the
+    # node's @storage_override (expression-level, stamped by annotator).
+    sig { returns(T::Boolean) }
+    def heap_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.heap_provenance?
+      @storage_override == :heap
+    end
+
+    sig { returns(T::Boolean) }
+    def rodata_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.rodata_provenance?
+      @storage_override == :rodata
+    end
+
+    sig { returns(T::Boolean) }
+    def borrow_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.borrow_provenance?
+      @storage_override == :borrow
     end
 
     sig { params(val: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -986,12 +1004,20 @@ module AST
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
     attr_accessor :uses_rt       # true when body references rt without allocating (e.g. Versioned.read for EBR pin)
+    # uses_runtime? = true iff this fn's body touches any allocator (frame/heap/alloc) or
+    # references rt directly. Used by compute_needs_rt! and alloc_fault seed.
+    # ONE predicate replaces the per-source disjunction (the four counters track distinct
+    # signal sources but the consumer is "any of them?" -- there is one consumer-facing
+    # decision, hence one predicate).
+    sig { returns(T::Boolean) }
+    def uses_runtime?
+      uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
+    end
     attr_accessor :return_provenance # :rodata, :frame, :heap — provenance of the return value
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
     attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
-    attr_accessor :has_promotion      # set by MIRPass when function has escape promotions
     attr_accessor :moved_guard_info   # stamped by MIRPass: { var_name => bool } for has_moved_guard lookups
     attr_accessor :cleanup_bindings   # stamped by MIRPass: { var_name => entry_hash } for MIRLowering
     attr_accessor :heap_carry_return      # true when a heap carry var is the return value (caller must free)
@@ -1067,8 +1093,7 @@ module AST
     include Locatable
     include StatementVoidType
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
-    attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
-    attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
+    attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
     attr_accessor :compound_op
@@ -1081,7 +1106,7 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :mode
-    attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
+    attr_accessor :reassign_cleanup  # MIR::ReassignPlan(alloc:, zig_type:) when the OLD value of this :assign target needs cleanup before overwrite. nil = no pre-cleanup.
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :compound_op
     attr_accessor :auto_atomic_op
@@ -1116,7 +1141,6 @@ module AST
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
-    attr_accessor :storage        # :heap when carry-var concat is promoted to heap
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
     attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
@@ -1281,6 +1305,7 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
+    attr_accessor :matched_signature # resolved FunctionSignature for named calls; escape/lowering read it directly
     attr_accessor :arg_families      # per-arg Set<Family> for ?-form effect resolution
     attr_accessor :collapsed_errors  # Set<Symbol> of errors this
                                      # specific call site can surface, projected per actual-family of
@@ -1340,10 +1365,7 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping
-    attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
-    attr_accessor :ret_field_promote_data # Hash { zig_type:, fields: } for struct field promotion on return
-  end
+    end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
   # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)
@@ -1571,7 +1593,6 @@ module AST
   # Any backend emits a single allocation covering all parts.
   StringConcat   = Struct.new(:token, :parts) do
     include Locatable
-    attr_accessor :storage  # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
   end
 
   # CapabilityWrap: single AST node for all capability wrapping.
@@ -1608,7 +1629,24 @@ module AST
     def write_locked? = sync == :write_locked
   end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
-  CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
+  # CopyNode -- explicit COPY expr (deep copy of value).
+  #   deep_copy: true for unions with heap variants.
+  #   alloc:     :heap (default) | :frame -- the allocator the duped buffer
+  #              lives in. Inherited from the CONTAINER at auto-COPY sites
+  #              so a `String[]@list` (frame list) auto-COPY allocates the
+  #              new string in frame, not heap. Without this, frame
+  #              containers ended up with heap elements -- the "mixed
+  #              provenance" bug that forced cleanupAlloc. lower_copy reads
+  #              this; hard-coded :heap pre-policy.
+  CopyNode          = Struct.new(:token, :value) do
+    extend T::Sig
+    include Locatable
+    attr_accessor :deep_copy
+    sig { params(val: Symbol).returns(Symbol) }
+    def alloc=(val); T.must(@alloc = T.let(val, T.nilable(Symbol))); end
+    sig { returns(Symbol) }
+    def alloc; @alloc = T.let(@alloc, T.nilable(Symbol)); @alloc || :heap; end
+  end
   CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
   ShareNode         = Struct.new(:token, :value) { include Locatable }  # SHARE expr              -> promote/retain as T@shared (semantic lowering follows)
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
@@ -1719,12 +1757,10 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
-    attr_accessor :return_provenance # :heap when BG body calls a returns_promoted function
+    attr_accessor :return_provenance # :heap when the value escapes as heap-owned
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
-    attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
-    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the BG run fn
     # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
     # on the BG body's transitive call set. Phase A only records this; Phase B
     # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.
@@ -1756,9 +1792,7 @@ module AST
     def child_bodies = [body].compact
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
-    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
-    attr_accessor :yields_frame_strings  # true when any YIELD expr is a frame string (NEXT caller owns the duped copy)
-    # FSM Phase A: set by FsmClassifier (see effects.rb).
+      # FSM Phase A: set by FsmClassifier (see effects.rb).
     attr_accessor :spawn_form
     attr_accessor :fsm_ineligible_reason
     attr_accessor :fsm_suspend_points
@@ -1768,8 +1802,7 @@ module AST
   # Only valid inside a BgStreamBlock body. expr: the value to yield.
   YieldExpr         = Struct.new(:token, :expr) do
     include Locatable
-    attr_accessor :yield_dupe  # true when the yielded value must be heap-duped before push (frame string)
-  end
+    end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.
@@ -2006,39 +2039,20 @@ module MIR
   # kind:              cleanup template symbol (matches emit_cleanup_from_entry cases):
   #                    :resource, :list, :list_with_elem_cleanup, :string_map, :numeric_map,
   #                    :pool, :set, :rc, :locked, :write_locked, :heap_string, :heap_slice,
-  #                    :heap_union, :heap_struct, :heap_struct_plain, :struct_with_cleanup_fields,
-  #                    :struct_rc, :array_with_struct_strings, :non_copy_union, :takes_union,
+  #                    :heap_union, :heap_struct, :struct_with_cleanup_fields,
+  #                    :struct_rc, :non_copy_union, :takes_union,
   #                    :takes_string, :takes_slice
   # alloc:             :heap or :frame — which allocator owns this value
   # has_moved_guard:   boolean — emit `var x_moved = false; defer if (!x_moved) ...`
   # resource_close_zig: string template for :resource kind (e.g. "{0}.deinit()")
-  Drop = Struct.new(:token, :name, :kind, :alloc, :has_moved_guard, :type_info,
-                     :resource_close_zig, :source_node) do
+  # MIR::Drop carries a cleanup_entry that captures the full classifier
+  # output (zig_type / alloc / has_moved_guard / kind side-channels). The
+  # raw Struct fields (token, name) are the marker; everything cleanup-
+  # relevant lives on the cleanup_entry attribute.
+  Drop = Struct.new(:token, :name) do
     extend T::Sig
     include AST::Locatable
-    attr_accessor :cleanup_entry  # full classifier hash with pre-computed RC fields
-    sig { returns(TrueClass) }
-    def needs_cleanup; true; end
-    # Carrier struct: the type lives in the :type_info member, NOT
-    # Locatable's @type_object. Override Locatable so the canonical
-    # full_type accessor reads/writes the member (member name kept).
-    sig { returns(T.untyped) }
-    def full_type; type_info; end
-    sig { params(val: T.untyped).returns(T.untyped) }
-    def full_type=(val); self.type_info = val; end
-  end
-
-  # Promote: escape promotion inserted before return statements.
-  # Emits frame->heap copy/promotion code. Replaces PromotionClassifier lookups in transpiler.
-  #
-  # strategy:  :list     — promoteList (dupe backing buffer to heap; elem_type required)
-  #            :string_map — swap allocator to heapAlloc
-  #            :fields   — promoteFields (recursive field promotion)
-  #            :generic  — promote (single value deep copy)
-  Promote = Struct.new(:token, :name, :zig_type, :strategy, :fields, :elem_type) do
-    include AST::Locatable
-    # fields: Set of field names for :fields strategy (nil = all fields)
-    # elem_type: Zig element type for :list promotion.
+    attr_accessor :cleanup_entry
   end
 
   # SuppressCleanup: move suppression marker inserted at consumption points
@@ -2053,9 +2067,8 @@ module MIR
   # with cleanup. The StaticLeakChecker verifies every Alloc has exactly one
   # Drop or Move/Escape on every path through the function.
   #
-  # kind:  cleanup template symbol (same as Drop - :list, :string_map, etc.)
   # alloc: :heap or :frame - which allocator owns this value
-  Alloc = Struct.new(:token, :name, :kind, :alloc) do
+  Alloc = Struct.new(:token, :name, :alloc) do
     include AST::Locatable
   end
 
@@ -2082,4 +2095,23 @@ module MIR
   FieldCleanup = Struct.new(:token, :target_name, :field, :alloc) do
     include AST::Locatable
   end
+
+  # ReassignPlan: stamped on AST::BindExpr (:assign mode) by MIRPass when
+  # the OLD value of the binding needs cleanup before the overwrite.
+  # Replaces a `{ alloc:, zig_type: }` hash; the struct is the single
+  # consumer-facing contract.
+  ReassignPlan = Struct.new(:alloc, :zig_type, keyword_init: true) do
+    extend T::Sig
+
+    sig { returns(Symbol) }
+    def alloc!
+      T.cast(alloc, Symbol)
+    end
+
+    sig { returns(String) }
+    def zig_type!
+      T.cast(zig_type, String)
+    end
+  end
+
 end

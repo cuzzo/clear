@@ -180,7 +180,7 @@ jobs:
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
   tools-fuzz:
-    name: tools/fuzz stable matrix
+    name: tools/fuzz full matrix (gate)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -202,7 +202,10 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --templates access_gate,execution_boundary,stream_into_boundary,loop_carry_collection,mutable_collection_param --out /tmp/clear-fuzz-ci --clean
+      # Required gate: the FULL template matrix minus quarantine
+      # (tools/fuzz/quarantine.txt). Every non-quarantined template must
+      # pass -- this is what stops templates bit-rotting unnoticed.
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean
       - run: bundle exec ruby spec/collate_coverage.rb
       - uses: codecov/codecov-action@v5
         with:
@@ -210,6 +213,34 @@ jobs:
           flags: ruby,fuzz
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  tools-fuzz-quarantined:
+    name: tools/fuzz quarantined (known-broken, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Non-blocking: runs the quarantined templates (templates with a
+    # known compiler bug or generator defect, listed in
+    # tools/fuzz/quarantine.txt). Visible signal without blocking PRs.
+    # A template leaves quarantine.txt the moment its bug is fixed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/clear-fuzz-quar --clean
 
   bc-lower-coverage:
     name: bc-lowering coverage (@target==:bc arms)

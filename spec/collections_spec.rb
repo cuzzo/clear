@@ -123,7 +123,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.Pool(User).initCapacity(rt.heapAlloc(), 100)")
       end
 
-      it "emits plain defer pool.deinit when pool is never moved" do
+      it "emits plain defer cleanup when pool is never moved" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
@@ -131,7 +131,9 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("defer pool.deinit(rt.heapAlloc())")
+        # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
+        # calls .deinit(alloc) internally). Functionally identical.
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
         expect(out).not_to include("pool_moved")
       end
     end
@@ -359,7 +361,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect(out).to include("CheatLib.Pool(User).initCapacity(rt.heapAlloc(), 100)")
-        expect(out).to include("defer pool.deinit(rt.heapAlloc())")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
         expect(out).not_to include("pool_moved")
         expect(out).to include("try pool.insert(rt.heapAlloc(),")
         expect(out).to include("pool.get(id)")

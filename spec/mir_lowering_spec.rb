@@ -21,6 +21,7 @@ RSpec.describe MIRLowering do
   end
 
   def emit(mir_node)
+    return mir_node.map { |n| emit(n) }.join("\n") if mir_node.is_a?(Array)
     emitter.emit(mir_node)
   end
 
@@ -170,8 +171,8 @@ RSpec.describe MIRLowering do
 
   describe "old MIR node translation" do
     it "translates MIR::Drop to MIR::Cleanup" do
-      entry = { kind: :list, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
-      drop = MIR::Drop.new(tok, "items", :list, :frame, false, nil, nil, nil)
+      entry = { kind: :uniform, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
+      drop = MIR::Drop.new(tok, "items")
       drop.cleanup_entry = entry
 
       l = lowering
@@ -190,7 +191,7 @@ RSpec.describe MIRLowering do
     end
 
     it "translates MIR::Alloc to MIR::AllocMark" do
-      alloc = MIR::Alloc.new(tok, "x", :list, :heap)
+      alloc = MIR::Alloc.new(tok, "x", :heap)
       result = lowering.lower(alloc)
       expect(result).to be_a(MIR::AllocMark)
       expect(result.name).to eq("x")
@@ -213,25 +214,6 @@ RSpec.describe MIRLowering do
       expect(result.name).to eq("buf")
     end
 
-    it "translates MIR::Promote to MIR::EscapePromote" do
-      promote = MIR::Promote.new(tok, "items", "ArrayListUnmanaged(i64)", :list, nil, "i64")
-      result = lowering.lower(promote)
-      expect(result).to be_a(MIR::EscapePromote)
-      expect(result.name).to eq("items")
-      expect(result.strategy).to eq(:list)
-      expect(result.zig_type).to eq("ArrayListUnmanaged(i64)")
-      expect(result.elem_type).to eq("i64")
-      zig = emit(result)
-      expect(zig).to include("promoteList")
-    end
-  end
-
-  describe "#apply_container_promote_zig" do
-    it "uses the bare pointee type for promoted values" do
-      zig = lowering.send(:apply_container_promote_zig, "val", "rt", "*Value")
-      expect(zig).to include("CheatLib.promote(Value, rt, &__prm)")
-      expect(zig).not_to include("CheatLib.promote(*Value")
-    end
   end
 
   describe "#emit_builtin" do
@@ -288,6 +270,7 @@ RSpec.describe MIRLowering do
       charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
       charat.full_type = :String
       charat.matched_stdlib_def = STD_LIB["charAt"].first
+      charat.zig_pattern = charat.matched_stdlib_def.emit.zig
       eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
       eq_node.full_type = :Boolean
       eq_node.left.full_type = :String
@@ -755,11 +738,13 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       node.instance_variable_set(:@mode, :assign)
       def node.mode; @mode; end
-      node.instance_variable_set(:@reassign_cleanup, { zig_type: "[]const u8", alloc: :heap })
+      node.instance_variable_set(:@reassign_cleanup, MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap))
       def node.reassign_cleanup; @reassign_cleanup; end
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::ReassignWithCleanup)
-      zig = emit(result)
+      expect(result).to be_a(Array)
+      expect(result[0]).to be_a(MIR::ReassignWithCleanup)
+      expect(result[1]).to be_a(MIR::MoveMark)
+      zig = result.map { |node| emit(node) }.join("\n")
       expect(zig).to include("CheatLib.cleanup")
       expect(zig).to include("buf = __new_buf")
     end
@@ -909,22 +894,6 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ExprStmt)
       expect(emit(result)).to eq("CheatLib.setAt(bag, 0, 42);")
-    end
-
-    it "promotes container values before indexed storage when requested" do
-      target = make_id("items", full_type: :"Value[]@list")
-      index = make_lit(:INT64, 0, full_type: :Int64)
-      value = make_id("value", full_type: :Value)
-      get_index = AST::GetIndex.new(tok, target, index)
-      node = AST::Assignment.new(tok, get_index, value)
-      node.container_promote_zig_type = "Value"
-
-      result = lowering.lower(node)
-
-      expect(result).to be_a(MIR::ExprStmt)
-      expect(result.expr).to be_a(MIR::InlineZig)
-      expect(result.expr.stdlib_def.emit.value_transforms).not_to be_nil
-      expect(emit(result)).to include("CheatLib.setAt(items, 0,")
     end
 
     it "cleans up overwritten list elements that own heap fields before indexed storage" do
@@ -1207,21 +1176,18 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:string)
-      expect(emit(result)).to include("dupe(u8,")
+      expect(result.strategy).to eq(:full_value)
+      expect(emit(result)).to include("dupeValue([]const u8, s")
     end
 
-    it "lowers COPY passthrough for value types" do
+    it "lowers COPY passthrough for value types as an inline auto-deref expression" do
       inner = make_id("x", full_type: :Int64)
       node = AST::CopyNode.new(tok, inner)
       node.full_type = :Int64
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
-      zig = emit(result)
-      expect(zig).to include("blk_copy_value")
-      expect(zig).to include("const __src = x")
-      expect(zig).to include("break :blk_copy_value __src")
+      expect(emit(result)).to eq("(if (@typeInfo(@TypeOf(x)) == .pointer) x.* else x)")
     end
 
     it "lowers COPY of sync values as full-value dupes" do
@@ -1245,8 +1211,19 @@ RSpec.describe MIRLowering do
       node = AST::VarDecl.new(tok, "dst", nil, copy, false)
       node.full_type = locked_type
       node.var_used = true
+      node.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
+                                    mutable: true, storage: :stack, sync: :locked)
 
-      result = lowering.lower(node)
+      # CleanupClassifier is the cleanup-recipe authority; lowering inherits
+      # from @current_bindings (INV-14). Drive it as the pipeline does
+      # rather than the removed destination-synthesis fallback.
+      fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [node],
+                                nil, nil, nil, nil, false)
+      low = lowering
+      low.instance_variable_set(:@current_bindings,
+        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+
+      result = low.lower(node)
       expect(result).to be_a(Array)
       expect(result[0]).to be_a(MIR::AllocMark)
       expect(result[1]).to be_a(MIR::Let)
@@ -1254,7 +1231,7 @@ RSpec.describe MIRLowering do
       expect(result[1].init).to be_a(MIR::DeepCopy)
       expect(result[1].init.strategy).to eq(:full_value)
       expect(result[2]).to be_a(MIR::Cleanup)
-      expect(result[2].cleanup_entry).to include(kind: :locked, alloc: :heap)
+      expect(result[2].cleanup_entry).to include(kind: :uniform, alloc: :heap)
     end
 
     it "lowers MOVE as identity" do
@@ -1352,8 +1329,8 @@ RSpec.describe MIRLowering do
       l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:union)
-      expect(emit(result)).to include("dupeUnionValue")
+      expect(result.strategy).to eq(:full_value)
+      expect(emit(result)).to include("dupeValue(Value")
     end
 
     it "lowers COPY of borrowed union using bare union type" do
@@ -1366,9 +1343,9 @@ RSpec.describe MIRLowering do
       l = lowering(union_schemas: { Value: Schemas::UnionSchema.new(variants: { Num: :Number, Str: :String }) })
       result = l.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
-      expect(result.strategy).to eq(:union)
+      expect(result.strategy).to eq(:full_value)
       expect(result.zig_type).to eq("Value")
-      expect(emit(result)).to eq("try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc())")
+      expect(emit(result)).to eq("try CheatLib.dupeValue(Value, val, rt.heapAlloc())")
     end
   end
 
@@ -1393,15 +1370,16 @@ RSpec.describe MIRLowering do
       expect(zig).to include(".age = 30")
     end
 
-    it "lowers heap-allocated struct literal" do
+    it "keeps heap-marked struct literals value-shaped" do
       val = make_lit(:NUMBER, 1.0)
       node = AST::StructLit.new(tok, "Node", { value: val }, :heap, nil)
       node.full_type = :Node
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::HeapCreate)
+      expect(result).to be_a(MIR::StructInit)
       zig = emit(result)
-      expect(zig).to include("create(Node)")
+      expect(zig).to include("Node{")
+      expect(zig).not_to include("create(Node)")
       expect(zig).to include(".value = 1.0")
     end
   end
@@ -1589,7 +1567,7 @@ RSpec.describe MIRLowering do
   describe "function definitions" do
     def make_fn(name, params: [], return_type: :Void, body: [], visibility: nil,
                 needs_rt: true, can_fail: true, uses_frame: false, uses_alloc: false,
-                type_params: nil, catch_clauses: nil, default_catch: nil, has_promotion: false)
+                type_params: nil, catch_clauses: nil, default_catch: nil)
       fn = AST::FunctionDef.new(tok, name, params, nil, return_type, nil, body,
                                  catch_clauses, default_catch, visibility, nil, uses_frame)
       fn.full_type = return_type
@@ -1597,7 +1575,6 @@ RSpec.describe MIRLowering do
       fn.can_fail = can_fail
       fn.uses_alloc = uses_alloc
       fn.type_params = type_params
-      fn.has_promotion = has_promotion
       fn
     end
 
@@ -2308,6 +2285,8 @@ RSpec.describe MIRLowering do
       decl = AST::VarDecl.new(tok, "dst", nil, copy, false)
       decl.full_type = locked_type
       decl.var_used = true
+      decl.symbol = SymbolEntry.new(reg: "dst", type: locked_type,
+                                    mutable: true, storage: :stack, sync: :locked)
       branch = {
         body: [decl],
         capture_analysis: nil,
@@ -2318,9 +2297,17 @@ RSpec.describe MIRLowering do
       node = AST::DoBlock.new(tok, [branch])
       node.full_type = :Void
 
-      zig = emit(lowering.lower(node))
+      # Cleanup recipe inherited from the classifier (INV-14), as the pipeline
+      # wires it -- not the removed destination-synthesis fallback.
+      fn = AST::FunctionDef.new(tok, "f", [], nil, :Void, nil, [decl],
+                                nil, nil, nil, nil, false)
+      low = lowering
+      low.instance_variable_set(:@current_bindings,
+        CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
+
+      zig = emit(low.lower(node))
       expect(zig).to include("var dst = try CheatLib.dupeValue")
-      expect(zig).to include("defer CheatLib.lockedDestroy")
+      expect(zig).to include("defer if (!dst_moved) CheatLib.cleanup(@TypeOf(dst), __rt.heapAlloc(), &dst)")
     end
 
     it "lowers DoBlock with stack tier" do
@@ -2658,7 +2645,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::TryCatch)
       expect(result.heap_provenance).to be true
-      expect(emit(result)).to include("make(rt) catch undefined")
+      expect(emit(result)).to include("make(rt) catch @as(std.ArrayListUnmanaged(i64), .empty)")
     end
 
     it "hoists heap-provenance TryCatch returns with err cleanup" do
@@ -2686,7 +2673,7 @@ RSpec.describe MIRLowering do
       end
 
       expect(alloc&.alloc).to eq(:heap)
-      expect(cleanup&.cleanup_entry).to include(kind: :list, alloc: :heap)
+      expect(cleanup&.cleanup_entry).to include(kind: :uniform, alloc: :heap)
       expect(ret_stmt).not_to be_nil
     end
 
@@ -2746,7 +2733,7 @@ RSpec.describe MIRLowering do
       zig = result.map { |t| emit(t) }.join("\n")
       expect(zig).to include('test "MyTest: given input: works"')
       expect(zig).to include("Runtime.init(allocator")
-      expect(zig).to include("rt.wireAllocator()")
+      expect(zig).to include("__rt_box.wireAllocator()")
     end
 
     it "lowers test block with setup code" do
@@ -2915,7 +2902,10 @@ RSpec.describe MIRLowering do
       },
       "transpile-tests/305_observable_collect.cht" => {
         description: "observable COLLECT wait/destroy cleanup",
-        required_patterns: [/running\.wait\(\)/, /running\.destroy\(rt\.heapAlloc\(\)\)/, /try running\.next\(\)/]
+        # wait+destroy lives in CheatLib.cleanup's observable arm now; the
+        # codegen contract is "binding cleanup routes through CheatLib.cleanup
+        # with heapAlloc, calling running.next() in the body."
+        required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
       },
       "transpile-tests/329_versioned_snapshot_mutable.cht" => {
         description: "versioned mutable snapshot update conflict handling",
@@ -3095,7 +3085,7 @@ RSpec.describe MIRLowering do
       zig = emit(result)
 
       expect(result).to be_a(MIR::BlockExpr)
-      expect(zig).to include("materializeNext(rt.heapAlloc())")
+      expect(zig).to include("materializeNext(rt.frameAlloc())")
       expect(zig).to include(".destroy(rt.heapAlloc())")
     end
 
@@ -3245,9 +3235,7 @@ RSpec.describe MIRLowering do
         result = l.lower(node)
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)
-        expect(result.fallback).to be_a(MIR::BlockExpr)
-        # The hoisted dupe Let lives inside the BlockExpr's body.
-        expect(result.fallback.body).to include(an_instance_of(MIR::Let))
+      expect(result.fallback).to be_a(MIR::StructInit)
       end
 
       it "leaves a non-allocating fallback unwrapped" do
@@ -3302,25 +3290,31 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
     expect(l.send(:hoist_cleanup_entry, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), nil)).to include(kind: :heap_string)
     expect(l.send(:hoist_cleanup_entry, MIR::ConcatStr.new([MIR::Ident.new("a"), MIR::Ident.new("b")], :heap, "rt"), nil)).to include(kind: :heap_string)
-    expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
-    expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :list, zig_type: "std.ArrayListUnmanaged(i64)")
-    expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :heap_struct_plain, zig_type: "Node")
-    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :list)
+    expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :uniform, elem_zig_type: "i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :uniform, zig_type: "std.ArrayListUnmanaged(i64)")
+    expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :uniform, zig_type: "Node")
+    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :uniform)
   end
 
-  it "classifies DeepCopy cleanup entries by copy strategy" do
+  it "classifies DeepCopy cleanup entries uniformly via :full_value (slice and value)" do
     l = lowering
 
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap), nil)).to include(kind: :heap_string)
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "i64", :list_shallow, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "Value", :list_deep, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "Value")
-    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :union, :heap), nil)).to include(kind: :non_copy_union, zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]i64", "i64", :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), "[]Value", "Value", :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap), nil)).to include(kind: :uniform, zig_type: "[]const u8")
   end
 
-  it "raises when a heap DeepCopy strategy lacks a cleanup mapping" do
+  it "raises when a heap DeepCopy uses a strategy other than :full_value" do
     expect {
-      lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :full_value, :heap), nil)
-    }.to raise_error(/DeepCopy with unknown strategy :full_value/)
+      lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :unknown_strategy, :heap), nil)
+    }.to raise_error(/unexpected DeepCopy strategy :unknown_strategy/)
+  end
+
+  it "raises when rc_cleanup_entry's ast_node carries no Type" do
+    expect {
+      lowering.send(:rc_cleanup_entry, nil, source: "test")
+    }.to raise_error(/RC hoist cleanup: missing type info/)
   end
 
   it "classifies capability wrappers and share promotion cleanup entries" do
@@ -3332,8 +3326,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     passthrough = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :passthrough, nil, nil, nil, :heap)
     shared_node = typed_node(Type.new(:Box, ownership: :shared))
 
-    expect(l.send(:hoist_cleanup_entry, locked, nil)).to include(kind: :locked, zig_type: "CheatLib.Locked(Box)")
-    expect(l.send(:hoist_cleanup_entry, rw_locked, nil)).to include(kind: :write_locked, zig_type: "CheatLib.RwLocked(Box)")
+    expect(l.send(:hoist_cleanup_entry, locked, nil)).to include(kind: :uniform, zig_type: "CheatLib.Locked(Box)")
+    expect(l.send(:hoist_cleanup_entry, rw_locked, nil)).to include(kind: :uniform, zig_type: "CheatLib.RwLocked(Box)")
     expect(l.send(:hoist_cleanup_entry, owned, shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
     expect(l.send(:hoist_cleanup_entry, passthrough, nil)).to be_nil
     expect(l.send(:hoist_cleanup_entry, MIR::SharePromote.new(MIR::Ident.new("box"), "Box", :heap), shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
@@ -3341,8 +3335,8 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
   it "delegates cleanup classification through Cast wrappers" do
     l = lowering
-    inner = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap)
+    inner = MIR::DeepCopy.new(MIR::Ident.new("s"), "[]const u8", nil, :full_value, :heap)
 
-    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :heap_string)
+    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :uniform, zig_type: "[]const u8")
   end
 end

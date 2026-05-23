@@ -12,7 +12,9 @@ instructions:
 0019 STORE_SLOT        0
 0021 LOAD_SLOT         0
 0023 NATIVE_CALL       13 1
-0026 HALT
+0026 STORE_SLOT        1
+0028 LOAD_SLOT         1
+0030 HALT
 consts:
 F:1.5
 F:2.25

@@ -1,584 +1,603 @@
 # typed: strict
-# EscapeGraph -- the single value-flow escape analysis. Replaces the 5
-# fragmented escape proxies (compute_heap_return_fns!, analyze!,
-# tag_transitive_provenance!, tag_carry_call_sites!, the escape half
-# of PromotionClassifier). See docs/agents/escape-graph-spec.md.
+# EscapeGraph -- deliberately small escape placement pass.
 #
-#   storage(D) = :heap iff inherently_heap?(D) (Arc/Rc/Locked) ∨ escapes?(D)
+# This pass answers one question for symbol-bearing bindings:
+#   does this binding escape the frame where it was declared?
 #
-# MIRChecker (7 invariants) is the fail-closed oracle: any escape gap
-# surfaces as a located allocator/leak/double-free error, never a
-# silent miscompile.
+# Output is intentionally tiny: escaped bindings get SymbolEntry#storage = :heap.
+# Lowering and cleanup read that storage. They do not re-decide escape.
 require "set"
 require "sorbet-runtime"
+require_relative "escape_analysis"
 
 module EscapeGraph
   extend T::Sig
   module_function
 
-  FnNodes = T.type_alias { T::Hash[T.untyped, T.untyped] }
-  RetHeap = T.type_alias { T::Hash[T.untyped, T::Boolean] }
+  FnNodes = T.type_alias { T::Hash[T.untyped, AST::FunctionDef] }
 
-  sig { params(fn_nodes: FnNodes).returns([T::Set[String], T::Set[String]]) }
-  def apply!(fn_nodes)
-    # Loop-carry / concat-into-heap promotions must run BEFORE the RET
-    # fixpoint so a `RETURN resp` of a loop-promoted heap string is
-    # seen as heap-return.
-    fn_nodes.each do |_n, fn|
-      next unless fn&.body
-      loop_carry_names(fn)           # side-effect: promote carry values
-      promote_heapmut_concats!(fn)
-    end
-    ret_heap = compute_ret_heap_fixpoint(fn_nodes)
+  ELEMENT_STORE_METHODS = T.let(%w[append insert push put].freeze, T::Array[String])
+
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.untyped).returns([T::Set[String], T::Set[String]]) }
+  def apply!(fn_nodes, schema_lookup = nil)
+    @schema_lookup = T.let(schema_lookup, T.untyped)
     heap_decls = T.let(Set.new, T::Set[String])
-    fn_nodes.each do |name, fn|
-      next unless fn&.body
-      stamp_fn!(fn, decide_fn(fn, ret_heap, fn_nodes), name, heap_decls, ret_heap)
+
+    fn_nodes.each_value do |fn|
+      next unless fn.body
+      mark_inherent_heap!(fn)
+      escape_fn!(fn, fn_nodes, heap_decls)
+      stamp_return_provenance!(fn, fn_nodes)
     end
-    heap_fns = ret_heap.each_with_object(T.let(Set.new, T::Set[String])) { |(n, h), s| s << n.to_s if h }
+
+    fn_nodes.each_value do |fn|
+      next unless fn.body
+      mark_return_receivers!(fn, fn_nodes, heap_decls)
+      stamp_return_provenance!(fn, fn_nodes)
+    end
+
+    fn_nodes.each_value do |fn|
+      next unless fn.body
+      escape_fn!(fn, fn_nodes, heap_decls)
+      stamp_return_provenance!(fn, fn_nodes)
+    end
+
+    EscapeAnalysis.propagate_caller_sync!(fn_nodes)
+    heap_fns = fn_nodes.each_with_object(T.let(Set.new, T::Set[String])) do |(name, fn), set|
+      set << name.to_s if fn.return_provenance == :heap
+    end
     [heap_fns, heap_decls]
   end
 
-  sig { params(fn_nodes: FnNodes).returns(RetHeap) }
-  def compute_ret_heap_fixpoint(fn_nodes)
-    ret = T.let({}, RetHeap)
-    # Seed from cross-module return_provenance for imported functions
-    # whose body isn't re-analyzed here.
-    fn_nodes.each { |n, fn| ret[n] = fn.return_provenance == :heap }
-    changed = T.let(true, T::Boolean)
-    iters = 0
-    while changed && iters < 200
-      changed = false
-      iters += 1
-      fn_nodes.each do |name, fn|
-        next if ret[name] || !fn&.body
-        next if borrow_return?(fn)            # borrow carve-out: caller doesn't own
-        rvals = return_values(fn.body)
-        next if rvals.empty?
-        if rvals.any? { |rv| return_value_is_heap?(rv, ret) }
-          ret[name] = true
-          fn.return_provenance = :heap
-          changed = true
+  sig { params(storage: T.nilable(Symbol)).returns(Symbol) }
+  def storage_to_alloc(storage)
+    storage == :heap ? :heap : :frame
+  end
+
+  sig { params(sym: T.untyped).returns(T.nilable(Symbol)) }
+  def authoritative_storage(sym)
+    return nil unless sym
+    decl = sym.respond_to?(:reg) ? sym.reg : nil
+    decl_sym = decl && decl.respond_to?(:symbol) ? decl.symbol : nil
+    decl_sym&.storage || sym.storage
+  end
+
+  sig { params(fn: AST::FunctionDef).void }
+  def mark_inherent_heap!(fn)
+    each_decl(fn.body) do |decl|
+      ti = type_of(decl)
+      stamp_heap!(decl) if ti.is_a?(Type) && inherent_heap_type?(ti)
+    end
+  end
+
+  sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, heap_decls: T::Set[String]).void }
+  def escape_fn!(fn, fn_nodes, heap_decls)
+    scopes = T.let([], T::Array[T::Hash[String, T.untyped]])
+    walk_scope(fn, fn.body, scopes, false, fn_nodes) do |decl|
+      stamp_heap!(decl)
+      heap_decls << decl.name.to_s if decl.respond_to?(:name)
+    end
+  end
+
+  sig do
+    params(fn: AST::FunctionDef, body: T.untyped, scopes: T::Array[T::Hash[String, T.untyped]], in_fiber: T::Boolean,
+           fn_nodes: FnNodes, mark: T.proc.params(arg0: T.untyped).void).void
+  end
+  def walk_scope(fn, body, scopes, in_fiber, fn_nodes, &mark)
+    return unless body.is_a?(Array)
+    locals = local_decls(body)
+    local_names = Set.new(locals.keys)
+    outer_decls = scopes.reduce(T.let({}, T::Hash[String, T.untyped])) { |acc, s| acc.merge(s) }
+    outer_names = Set.new(outer_decls.keys)
+    scopes.push(locals)
+
+    walk_current_frame(body) do |node|
+      case node
+      when AST::ReturnNode
+        each_binding_ref(node.value) do |id|
+          sym = id.symbol
+          next if value_shaped_return_param?(node.value, sym)
+          next if sym&.is_param && !sym&.takes
+          next unless returned_binding_escapes?(fn, id)
+          mark.call(sym&.reg)
         end
-      end
-    end
-    ret
-  end
-
-  sig { params(rv: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
-  def return_value_is_heap?(rv, ret_heap)
-    e = unwrap(rv)
-    case e
-    when AST::ListLit, AST::HashLit then true
-    when AST::Literal               then false      # rodata scalar/string
-    when AST::BinaryOp
-      return return_value_is_heap?(e.left, ret_heap) if e.op == :OR_RESCUE
-      ret_heap_type?(type_of(e)) || node_heap_provenance?(e)
-    when AST::FuncCall
-      return true if ret_heap[e.name.to_s] == true
-      ret_heap_type?(type_of(e)) || node_heap_provenance?(e)
-    else
-      ret_heap_type?(type_of(e)) || node_heap_provenance?(e)
-    end
-  end
-
-  # Only counts a returned IDENTIFIER naming a local heap-owned decl
-  # the fn itself owns (loop-carry-promoted `resp`). Excludes returned
-  # field/match-alias borrows (`w.inner`, `Value.Str AS s`) -- those
-  # carry :heap on their type but are not ownership transfers; counting
-  # them double-frees the source's field cleanup (174 prStr).
-  sig { params(e: T.untyped).returns(T::Boolean) }
-  def node_heap_provenance?(e)
-    return false unless e.is_a?(AST::Identifier)
-    sym = e.symbol
-    return false if sym.nil? || sym.is_param || sym.storage != :heap
-    # An @atomic-or-sync primitive cell has :heap symbol storage in M1
-    # but is LOADED on return, not transferred.
-    t = sym.type
-    return true unless t.is_a?(Type)
-    !(t.primitive? || t.any_sync?)
-  end
-
-  sig { params(fn: T.untyped, ret_heap: RetHeap, fn_nodes: FnNodes).returns(T::Hash[String, Symbol]) }
-  def decide_fn(fn, ret_heap, fn_nodes = {})
-    decls = T.let({}, T::Hash[String, T.untyped])
-    walk(fn.body) do |n|
-      decls[n.name.to_s] = n if decl?(n)
-    end
-
-    esc_strong  = T.let(Set.new, T::Set[String])
-    esc_listret = T.let(Set.new, T::Set[String])
-    each_sink_expr(fn) { |se| referenced_decls(se).each { |d| esc_strong << d } }
-    loop_carry_names(fn).each   { |d| esc_strong << d }
-    bg_capture_names(fn).each   { |d| esc_strong << d }
-    callarg_escape_names(fn, fn_nodes).each { |d| esc_strong << d }
-    if !borrow_return?(fn)
-      if heap_ptr_return?(fn)
-        return_values(fn.body).each { |rv| referenced_decls(rv).each { |d| esc_strong << d } }
-      else
-        # Plain return: a directly-returned list is moved out. A list
-        # nested in a returned aggregate escapes ONLY if the field-value
-        # node keeps its list_collection? type (moved into a @list
-        # field); a plain-slice field is deep-copied by the transpiler
-        # (dupeValue/blk_copy) so the source stays frame.
-        return_values(fn.body).each do |rv|
-          direct_return_decls(rv).each       { |d| esc_listret << d }
-          aggregate_moved_list_decls(rv).each { |d| esc_listret << d }
+      when AST::YieldExpr
+        each_binding_ref(node.expr) { |id| mark.call(id.symbol&.reg) }
+      when AST::Identifier
+        if in_fiber && outer_names.include?(node.name.to_s)
+          mark.call(node.symbol&.reg)
         end
+      when AST::VarDecl
+        mark_heap_payloads!(node, &mark)
+      when AST::BindExpr
+        if node.mode == :decl
+          mark_heap_payloads!(node, &mark)
+          next
+        end
+        mark_enclosing_store!(node.name, node.value, local_names, outer_names, outer_decls, &mark)
+      when AST::Assignment
+        mark_enclosing_store!(node.name, node.value, local_names, outer_names, outer_decls, &mark)
+        mark_heap_container_assignment!(node.name, node.value, &mark)
+      when AST::FuncCall, AST::MethodCall
+        mark_takes_args!(node, fn_nodes, &mark)
+        mark_element_store!(node, local_names, outer_names, &mark) if node.is_a?(AST::MethodCall)
+        mark_heap_element_store!(node, &mark) if node.is_a?(AST::MethodCall)
+        mark_heap_value_container_store!(node, fn_nodes, &mark) if node.is_a?(AST::MethodCall)
       end
     end
 
-    reassigned_heap = T.let(Set.new, T::Set[String])
-    init_refs = T.let({}, T::Hash[String, T::Array[String]])
-    decls.each do |dn, dnode|
-      init_refs[dn] = referenced_decls(dnode.value)
-      reassigned_heap << dn if decl_value_is_heap_call?(dnode.value, ret_heap)
+    nested_scopes(body).each do |nested_body, fiber|
+      walk_scope(fn, nested_body, scopes, in_fiber || fiber, fn_nodes, &mark)
     end
-    walk(fn.body) do |n|
-      next unless n.is_a?(AST::Assignment) || (n.is_a?(AST::BindExpr) && !decl?(n))
-      root = root_ident_name(n.name)
-      next unless root && decls.key?(root)
-      (init_refs[root] ||= []).concat(referenced_decls(n.value))
-      reassigned_heap << root if decl_value_is_heap_call?(n.value, ret_heap)
-    end
-    [esc_strong, esc_listret].each do |esc|
-      changed = T.let(true, T::Boolean)
-      while changed
-        changed = false
-        esc.to_a.each do |a|
-          (init_refs[a] || []).each { |b| (changed = true; esc << b) unless esc.include?(b) }
-        end
-      end
-    end
-
-    result = T.let({}, T::Hash[String, Symbol])
-    decls.each do |dn, dnode|
-      ti = type_of(dnode)
-      heap =
-        if struct_aggregate?(ti)
-          # Structs/unions RVO to :stack with per-field cleanup; flat-
-          # heap only via inherent (Arc) or a strong sink. NOT via
-          # list-return / transitive call (would double-free the RVO'd
-          # / dupeUnionValue'd copy -- 174 union_match_struct_fields).
-          inherently_heap?(dnode) || esc_strong.include?(dn)
-        else
-          inherently_heap?(dnode) ||
-            esc_strong.include?(dn) ||
-            (collection_ti?(ti) && esc_listret.include?(dn)) ||
-            reassigned_heap.include?(dn)
-        end
-      heap = false if heap && cannot_own_heap?(ti)
-      result[dn] = heap ? :heap : :frame
-    end
-    result
+  ensure
+    scopes.pop if scopes.last.equal?(locals)
   end
 
-  # Type#struct? covers any non-primitive/string/array/map/optional
-  # composite, including tagged unions.
-  sig { params(ti: T.untyped).returns(T::Boolean) }
-  def struct_aggregate?(ti)
-    !!(ti.is_a?(Type) && ti.struct? && !ti.any_sync?)
+  sig do
+    params(target: T.untyped, value: T.untyped, locals: T::Set[String], outer_names: T::Set[String],
+           outer_decls: T::Hash[String, T.untyped],
+           mark: T.proc.params(arg0: T.untyped).void).void
+  end
+  def mark_enclosing_store!(target, value, locals, outer_names, outer_decls, &mark)
+    root = root_name(target)
+    return unless root && outer_names.include?(root) && !locals.include?(root)
+    each_binding_ref(value) { |id| mark.call(id.symbol&.reg) }
+    root_decl = root_decl_from(target) || outer_decls[root]
+    mark.call(root_decl) if root_decl && frame_backed_container?(root_decl)
   end
 
-  sig { params(fn: T.untyped).returns(T::Boolean) }
-  def heap_ptr_return?(fn)
+  sig do
+    params(call: AST::MethodCall, locals: T::Set[String], outer_names: T::Set[String],
+           mark: T.proc.params(arg0: T.untyped).void).void
+  end
+  def mark_element_store!(call, locals, outer_names, &mark)
+    return unless ELEMENT_STORE_METHODS.include?(call.name.to_s)
+    root = root_name(call.object)
+    return unless root && outer_names.include?(root) && !locals.include?(root)
+    call.args.each { |arg| each_binding_ref(arg) { |id| mark.call(id.symbol&.reg) } }
+    decl = root_decl_from(call.object)
+    mark.call(decl) if decl && frame_backed_container?(decl)
+  end
+
+  sig { params(target: T.untyped, value: T.untyped, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_heap_container_assignment!(target, value, &mark)
+    return unless target.is_a?(AST::GetIndex) || target.is_a?(AST::GetField)
+    decl = root_decl_from(target)
+    target_owner = target.respond_to?(:target) ? target.target : target
+    return unless heap_backed_container?(decl) || heap_backed_container_expr?(target_owner)
+    each_binding_ref(value) { |id| mark.call(id.symbol&.reg) }
+  end
+
+  sig { params(call: AST::MethodCall, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_heap_element_store!(call, &mark)
+    return unless ELEMENT_STORE_METHODS.include?(call.name.to_s)
+    decl = root_decl_from(call.object)
+    return unless heap_backed_container?(decl) || heap_backed_container_expr?(call.object)
+    call.args.each { |arg| each_binding_ref(arg) { |id| mark.call(id.symbol&.reg) } }
+  end
+
+  sig { params(call: AST::MethodCall, fn_nodes: FnNodes, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_heap_value_container_store!(call, fn_nodes, &mark)
+    return unless ELEMENT_STORE_METHODS.include?(call.name.to_s)
+    decl = root_decl_from(call.object)
+    return unless decl && frame_backed_container?(decl)
+    escapes = (call.args || []).any? do |arg|
+      return_expr_provenance(arg, fn_nodes) == :heap ||
+        heap_binding_ref?(arg)
+    end
+    mark.call(decl) if escapes
+  end
+
+  sig { params(decl: T.untyped, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_heap_payloads!(decl, &mark)
+    return unless decl.respond_to?(:value)
+    return unless decl.respond_to?(:symbol) && decl.symbol&.heap_provenance?
+    each_binding_ref(decl.value) { |id| mark.call(id.symbol&.reg) }
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def heap_binding_ref?(expr)
+    found = T.let(false, T::Boolean)
+    each_binding_ref(expr) { |id| found = true if id.symbol&.heap_provenance? }
+    found
+  end
+
+  sig { params(call: T.untyped, fn_nodes: FnNodes, mark: T.proc.params(arg0: T.untyped).void).void }
+  def mark_takes_args!(call, fn_nodes, &mark)
+    callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
+    return unless callee.is_a?(AST::FunctionDef)
+    args = call.args || []
+    callee.params.each_with_index do |param, idx|
+      arg = args[idx]
+      next unless arg
+      pt = param.type
+      mutable_collection = param.mutable && pt.is_a?(Type) && collection_type?(pt)
+      takes_collection = param.takes && pt.is_a?(Type) && collection_type?(pt)
+      takes_owned_shape = param.takes && pt.is_a?(Type) && type_shape_needs_recursive_cleanup?(pt)
+      next unless mutable_collection || takes_collection || takes_owned_shape || param_storage_heap?(param)
+      each_binding_ref(arg) { |id| mark.call(id.symbol&.reg) }
+    end
+  end
+
+  sig { params(param: T.untyped).returns(T::Boolean) }
+  def param_storage_heap?(param)
+    sym = param.respond_to?(:symbol) ? param.symbol : nil
+    !!(sym&.heap_provenance? || sym&.storage == :heap)
+  end
+
+  sig { params(fn: AST::FunctionDef, id: AST::Identifier).returns(T::Boolean) }
+  def returned_binding_escapes?(fn, id)
     rt = fn.return_type
-    !!(rt.is_a?(Type) && (rt.indirect? || rt.heap?))
-  end
+    return true if rt.is_a?(Type) && inherent_heap_type?(rt)
+    bare_rt = rt.respond_to?(:error_union?) && rt.error_union? ? (rt.payload_type || rt) : rt
+    return true if bare_rt.is_a?(Type) && inherent_heap_type?(bare_rt)
 
-  # Mirrors MIRChecker INV-COPY-CLEANUP: capability-free primitive or
-  # Id<T> is a Copy handle and never owns heap.
-  sig { params(ti: T.untyped).returns(T::Boolean) }
-  def cannot_own_heap?(ti)
+    decl = id.symbol&.reg
+    storage = decl.respond_to?(:storage) ? decl.storage : nil
+    return false if storage == :rodata
+
+    ti = type_of(id)
     return false unless ti.is_a?(Type)
-    no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
-    !!(no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id)))
+    return true if ti.string?
+    return true if collection_type?(ti)
+    return true if type_shape_needs_recursive_cleanup?(ti)
+    false
+  rescue
+    false
   end
 
-  sig { params(expr: T.untyped, ret_heap: RetHeap).returns(T::Boolean) }
-  def decl_value_is_heap_call?(expr, ret_heap)
-    e = unwrap(expr)
-    case e
-    when AST::BinaryOp
-      !!(e.op == :OR_RESCUE && decl_value_is_heap_call?(e.left, ret_heap))
+  sig { params(value: T.untyped, sym: T.untyped).returns(T::Boolean) }
+  def value_shaped_return_param?(value, sym)
+    return false unless sym&.is_param
+    value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit)
+  end
+
+  sig { params(decl: T.untyped).void }
+  def stamp_heap!(decl)
+    stamp_storage!(decl, :heap)
+  end
+
+  sig { params(decl: T.untyped, storage: Symbol).void }
+  def stamp_storage!(decl, storage)
+    return unless decl && decl.respond_to?(:symbol) && decl.symbol
+    return if decl.symbol.storage == :heap && storage != :heap
+    decl.symbol.storage = storage
+  end
+
+  sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes).void }
+  def stamp_return_provenance!(fn, fn_nodes)
+    if borrow_return?(fn)
+      fn.return_provenance = :borrow
+      return
+    end
+
+    rt = fn.return_type
+    if rt.is_a?(Type) && inherent_heap_type?(rt)
+      fn.return_provenance = :heap
+      return
+    end
+    if owned_string_return_type?(rt)
+      fn.return_provenance = :heap
+      return
+    end
+    fn.return_provenance = nil
+    return_values(fn.body).each do |rv|
+      fn.return_provenance = merge_provenance(fn.return_provenance, return_expr_provenance(rv, fn_nodes))
+      return if fn.return_provenance == :heap
+    end
+  end
+
+  sig { params(rt: T.untyped).returns(T::Boolean) }
+  def owned_string_return_type?(rt)
+    return false unless rt.is_a?(Type)
+    bare = rt.respond_to?(:error_union?) && rt.error_union? ? (rt.payload_type || rt) : rt
+    return false unless bare.respond_to?(:string?) && bare.string?
+    sync = bare.respond_to?(:sync) ? bare.sync : nil
+    sync != :symbol && sync != :raw
+  end
+
+  sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, heap_decls: T::Set[String]).void }
+  def mark_return_receivers!(fn, fn_nodes, heap_decls)
+    each_decl(fn.body) do |decl|
+      prov = call_return_provenance(decl.respond_to?(:value) ? decl.value : nil, fn_nodes)
+      next unless prov
+      stamp_storage!(decl, prov)
+      heap_decls << decl.name.to_s if prov == :heap && decl.respond_to?(:name)
+    end
+  end
+
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
+  def call_returns_heap?(expr, fn_nodes)
+    call_return_provenance(expr, fn_nodes) == :heap
+  end
+
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T.nilable(Symbol)) }
+  def call_return_provenance(expr, fn_nodes)
+    case expr
     when AST::FuncCall
-      ret_heap[e.name.to_s] == true
+      callee = fn_nodes[expr.name.to_s] || fn_nodes[expr.name]
+      return callee.return_provenance if callee.is_a?(AST::FunctionDef) && callee.return_provenance
+      sig = expr.respond_to?(:matched_signature) ? expr.matched_signature : nil
+      return sig.return_provenance if sig.respond_to?(:return_provenance) && sig.return_provenance
+      return :heap if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
+      return :borrow if expr.respond_to?(:borrow_provenance?) && expr.borrow_provenance?
+      return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
+      ti = Type.from_node!(expr, context: "function call return provenance")
+      :heap if inherent_heap_type?(ti)
+    when AST::MethodCall
+      return :heap if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
+      return :borrow if expr.respond_to?(:borrow_provenance?) && expr.borrow_provenance?
+      return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
+      ti = Type.from_node!(expr, context: "method call return provenance")
+      :heap if inherent_heap_type?(ti)
+    when AST::BinaryOp
+      return pipeline_return_provenance(expr, fn_nodes) if expr.op == :SMOOTH
+      expr.op == :OR_RESCUE ? call_return_provenance(expr.left, fn_nodes) : nil
+    else
+      nil
+    end
+  end
+
+  sig { params(expr: AST::BinaryOp, fn_nodes: FnNodes).returns(T.nilable(Symbol)) }
+  def pipeline_return_provenance(expr, fn_nodes)
+    rhs = expr.right
+    callee_name = case rhs
+                  when AST::Identifier then rhs.name
+                  when AST::FuncCall then rhs.name
+                  else nil
+                  end
+    return nil unless callee_name
+    callee = fn_nodes[callee_name.to_s] || fn_nodes[callee_name]
+    return nil unless callee.is_a?(AST::FunctionDef)
+    callee.return_provenance
+  end
+
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T.nilable(Symbol)) }
+  def return_expr_provenance(expr, fn_nodes)
+    return nil unless expr
+    return :heap if return_expr_allocates_owned?(expr, fn_nodes)
+    case expr
+    when AST::Literal
+      ti = type_of(expr)
+      return :rodata if ti.is_a?(Type) && ti.string?
+    when AST::FuncCall, AST::MethodCall
+      return call_return_provenance(expr, fn_nodes)
+    end
+
+    found = T.let(nil, T.nilable(Symbol))
+    each_binding_ref(expr) do |id|
+      sym = id.symbol
+      prov = if sym&.heap_provenance?
+        ti = type_of(id)
+        ti.is_a?(Type) && ti.primitive? ? nil : :heap
+      elsif sym&.borrow_provenance?
+        :borrow
+      elsif sym&.is_param && !sym&.takes
+        :borrow
+      elsif sym&.rodata_provenance?
+        :rodata
+      else
+        ti = type_of(id)
+        ti.is_a?(Type) && ti.string? ? :borrow : nil
+      end
+      found = merge_provenance(found, prov)
+    end
+    found
+  end
+
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
+  def return_expr_allocates_owned?(expr, fn_nodes)
+    return false unless expr
+    case expr
+    when AST::CopyNode, AST::CloneNode
+      true
+    when AST::Literal
+      false
+    when AST::BinaryOp
+      ti = type_of(expr)
+      (ti.is_a?(Type) && ti.string?) || return_expr_allocates_owned?(expr.left, fn_nodes) || return_expr_allocates_owned?(expr.right, fn_nodes)
+    when AST::FuncCall
+      callee = fn_nodes[expr.name.to_s] || fn_nodes[expr.name]
+      return callee.return_provenance == :heap if callee.is_a?(AST::FunctionDef) && callee.return_provenance
+      sig = expr.respond_to?(:matched_signature) ? expr.matched_signature : nil
+      return sig.return_provenance == :heap if sig.respond_to?(:return_provenance) && sig.return_provenance
+      ti = type_of(expr)
+      ti.is_a?(Type) && (ti.string? || collection_type?(ti))
+    when AST::MethodCall
+      ti = type_of(expr)
+      ti.is_a?(Type) && (ti.string? || collection_type?(ti))
+    when AST::StructLit, AST::UnionVariantLit
+      expr.fields.values.any? { |v| return_expr_allocates_owned?(v, fn_nodes) }
+    when AST::ListLit
+      true
     else
       false
     end
   end
 
-  sig { params(fn: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
-  def each_sink_expr(fn, &blk)
-    walk(fn.body) do |n|
-      case n
-      when AST::Assignment
-        if (n.name.is_a?(AST::GetField) || n.name.is_a?(AST::GetIndex)) &&
-           heap_root_storage?(n.name)
-          blk.call(n.value)                       # S-heapfield
-        end
-      end
+  sig { params(current: T.nilable(Symbol), incoming: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
+  def merge_provenance(current, incoming)
+    return current unless incoming
+    return :heap if current == :heap || incoming == :heap
+    return :borrow if current == :borrow || incoming == :borrow
+    incoming
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def borrow_return?(fn)
+    lifetime = fn.respond_to?(:return_lifetime) ? fn.return_lifetime : nil
+    return false unless lifetime && !lifetime.empty?
+    true
+  end
+
+  sig { params(body: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def each_decl(body, &blk)
+    walk_all(body) do |node|
+      blk.call(node) if decl?(node)
     end
   end
 
-  # Frame string-concat appended to a collection with composite element
-  # type dangles after frame rewind (container cleanup frees the
-  # embedded string field). String/primitive element types are excluded
-  # because heap-promoting their concats LEAKS on deinit (matches old
-  # E2 cond7 element-type gate).
-  sig { params(fn: T.untyped).void }
-  def promote_heapmut_concats!(fn)
-    walk(fn.body) do |node|
-      next unless node.is_a?(AST::MethodCall)
-      next unless %w[append insert push put].include?(node.name.to_s)
-      obj = node.object
-      sym = obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField) ? obj.symbol : nil
-      next unless sym
-      ti = sym.type
-      next unless ti.collection?
-      elem_t = ti.element_type
-      next unless elem_t && !elem_t.primitive? && !elem_t.string?
-      node.args.each { |arg| promote_frame_concats!(arg) }
-    end
+  sig { params(stmts: T.untyped).returns(T::Hash[String, T.untyped]) }
+  def local_decls(stmts)
+    decls = T.let({}, T::Hash[String, T.untyped])
+    walk_current_frame(stmts) { |n| decls[n.name.to_s] = n if decl?(n) }
+    decls
   end
 
-  sig { params(node: T.untyped).void }
-  def promote_frame_concats!(node)
-    return unless node # :nocov: defensive (callers internal-recurse + Array.compact upstream)
-    case node
-    when AST::BinaryOp
-      if node.op == :ADD && node.string_concat
-        node.storage = :heap
-        ti = node.full_type
-        ti.provenance = :heap if ti.is_a?(Type)
-      end
-      promote_frame_concats!(node.left)
-      promote_frame_concats!(node.right)
-    when AST::StringConcat
-      node.storage = :heap
-      node.parts&.each { |p| promote_frame_concats!(p) }
-    else
-      AST.wrapped_children(node).each { |c| promote_frame_concats!(c) }
-    end
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def decl?(node)
+    node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
   end
 
-  sig { params(expr: T.untyped, acc: T::Array[String]).returns(T::Array[String]) }
-  def referenced_decls(expr, acc = [])
-    return acc if expr.nil?
-    e = unwrap(expr)
-    case e
-    when AST::Identifier
-      acc << e.name.to_s
-    when AST::StructLit, AST::UnionVariantLit
-      e.fields.each { |k, v| referenced_decls(v.nil? ? k : v, acc) }
-    when AST::BinaryOp
-      # OR_RESCUE aliases the LHS success value. Other binary ops
-      # (string concat, arithmetic) produce a fresh value; operands
-      # are read by value and don't escape through the result.
-      referenced_decls(e.left, acc) if e.op == :OR_RESCUE
-    when AST::FuncCall
-      e.args.each { |a| referenced_decls(a, acc) }
-    when AST::MethodCall
-      referenced_decls(e.object, acc)
-      e.args.each { |a| referenced_decls(a, acc) }
-    end
-    acc
+  sig { params(node: T.untyped).returns(Type) }
+  def type_of(node)
+    Type.from_node!(node, context: "escape graph")
   end
 
-  # Outer-scope binding reassigned inside a per-iteration-rewound loop
-  # escapes the iteration frame. Reuses LoopFrameAnalysis's mark_per_iter
-  # determination (single source of truth).
-  sig { params(fn: T.untyped).returns(T::Set[String]) }
-  def loop_carry_names(fn)
-    out = T.let(Set.new, T::Set[String])
-    walk(fn.body) do |node|
-      body = case node
-             when AST::WhileLoop then (node.tight ? nil : node.do_branch)
-             when AST::ForRange  then node.body
-             when AST::ForEach   then node.body
-             end
-      next unless body
-      local_names = LoopFrameAnalysis.collect_local_names(body)
-      rewound = LoopFrameAnalysis.local_frame_decls(body, local_names).reject { |d|
-        LoopFrameAnalysis.escapes_to_outer?(d.name.to_s, body, local_names)
-      }
-      next if rewound.empty?      # loop has no mark_per_iter -> no carry hazard
-      walk(body) do |bind|
-        next unless bind.is_a?(AST::BindExpr) && bind.mode == :assign
-        nm = bind.name
-        next unless nm.is_a?(String) && !local_names.include?(nm)
-        ti = bind.full_type
-        next unless ti.is_a?(Type)
-        str_carry = ti.string?
-        carry = str_carry || (ti.escape_class == :slice_managed && !ti.numeric_map?)
-        next unless carry
-        out << nm
-        # Stamp the carry DECL heap here (not only later via decide_fn)
-        # so the RET fixpoint sees `RETURN resp` as a heap return. The
-        # reassignment value must allocate heap too, else restoreLoopMark
-        # rewinds the concat buffer -> UAF + invalid heap-free.
-        if str_carry
-          LoopFrameAnalysis.promote_value_to_heap!(bind.value)
-          stamp_decl_heap!(fn, nm)
-        end
-      end
-    end
-    out
-  end
-
-  # A collection arg passed to a TAKES param or a MUTABLE @list param
-  # must be heap: the callee frees / reallocs using its own allocator,
-  # which must match the source (INV-1 single allocator per binding).
-  sig { params(fn: T.untyped, fn_nodes: FnNodes).returns(T::Set[String]) }
-  def callarg_escape_names(fn, fn_nodes)
-    out = T.let(Set.new, T::Set[String])
-    walk(fn.body) do |call|
-      next unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
-      callee = fn_nodes[call.name.to_s] || fn_nodes[call.name]
-      next unless callee.is_a?(AST::FunctionDef)
-      args = call.args || []
-      callee.params.each_with_index do |param, idx|
-        arg = args[idx]
-        next unless arg
-        src = unwrap(arg)
-        next unless src.is_a?(AST::Identifier)
-        ti = src.full_type
-        next unless ti.is_a?(Type) && collection_ti?(ti)
-        pt = param.type
-        mut_list = param.mutable && pt.is_a?(Type) && pt.list_collection?
-        out << src.name.to_s if param.takes || mut_list
-      end
-    end
-    out
-  end
-
-  # capture_analysis.heap_promote_names deliberately excludes string
-  # captures (those use the in-fiber bg_string-dupe mechanism, not heap
-  # storage). Reading the stamp avoids re-deriving the exclusion here.
-  sig { params(fn: T.untyped).returns(T::Set[String]) }
-  def bg_capture_names(fn)
-    out = T.let(Set.new, T::Set[String])
-    AST.each_bg_block(fn.body) do |bg|
-      names = bg.capture_analysis&.heap_promote_names
-      out.merge(names) if names # :nocov: capture_analysis can be nilable upstream
-    end
-    out
-  end
-
-  # Decls returned directly (through GIVE/COPY/OR_RESCUE unwrap), not
-  # nested in a Struct/Union literal (those are deep-copied, not moved).
-  sig { params(rv: T.untyped).returns(T::Array[String]) }
-  def direct_return_decls(rv)
-    e = unwrap(rv)
-    case e
-    when AST::Identifier then [e.name.to_s]
-    when AST::BinaryOp
-      e.op == :OR_RESCUE ? direct_return_decls(e.left) : []
-    else []
-    end
-  end
-
-  # List decls moved (not deep-copied) into a returned Struct/Union
-  # field. Discriminator: the field-value node's type is still
-  # list_collection? (a same-shape @list field); a CopyNode / plain-
-  # slice-coerced field loses that type and is deep-copied instead.
-  sig { params(node: T.untyped, acc: T::Array[String]).returns(T::Array[String]) }
-  def aggregate_moved_list_decls(node, acc = [])
-    return acc if node.nil?
-    case node
-    when AST::BinaryOp
-      aggregate_moved_list_decls(node.left, acc) if node.op == :OR_RESCUE
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.each do |k, v|
-        fv = v.nil? ? k : v
-        if fv.is_a?(AST::Identifier)
-          acc << fv.name.to_s if collection_ti?(fv.full_type)
-        else
-          aggregate_moved_list_decls(fv, acc)
-        end
-      end
-    end
-    acc
-  end
-
-  WRAPPER_NODES = T.let(
-    [AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::FreezeNode, AST::ShareNode].freeze,
-    T::Array[T.untyped]
-  )
-
-  sig { params(e: T.untyped).returns(T.untyped) }
-  def unwrap(e)
-    e = e.value while WRAPPER_NODES.any? { |k| e.is_a?(k) }
-    e
-  end
-
-  sig { params(decl_node: T.untyped).returns(T::Boolean) }
-  def inherently_heap?(decl_node)
-    ti = type_of(decl_node)
-    ti.is_a?(Type) && inherently_heap_ti?(ti)
-  end
-
-  # Arc/Rc/Locked control block is heap by construction. @atomic is
-  # NOT (a lock-free CPU cell, often inline primitive -- marking it
-  # heap fires MIRChecker OWNED_RETURN_WITHOUT_ALLOC). map/set/pool
-  # are NOT inherent either: their backing allocator follows the
-  # binding (local non-escaping HashMap stays frame -- 25_index).
   sig { params(ti: Type).returns(T::Boolean) }
-  def inherently_heap_ti?(ti)
-    ti.locked? || ti.write_locked? || ti.versioned? || ti.multiowned? || ti.shared?
+  def inherent_heap_type?(ti)
+    ti.any_sync? || ti.any_rc? || ti.link? || ti.sharded? || ti.striped? ||
+      ti.set_collection? || ti.map_init_needs_alloc? ||
+      (ti.respond_to?(:indirect?) && ti.indirect?) ||
+      ti.stream? || ti.tense_observable? || ti.shared_promise? || ti.promise_list?
   end
 
   sig { params(ti: T.untyped).returns(T::Boolean) }
-  def collection_ti?(ti)
-    return false unless ti.is_a?(Type)
-    ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?
+  def collection_type?(ti)
+    !!(ti.is_a?(Type) && ti.collection?)
   end
 
-  # Returning a string does NOT transfer heap ownership: strings are
-  # codegen-duped at the RETURN site / bg_string-duped at capture. A
-  # type-level :heap (e.g. an @indirect field borrow `RETURN w.inner`)
-  # is NOT used here either -- that's not an ownership transfer.
-  # node_heap_provenance? handles the legitimate loop-carry-local case.
-  sig { params(ti: T.untyped).returns(T::Boolean) }
-  def ret_heap_type?(ti)
-    return false unless ti.is_a?(Type)
-    inherently_heap_ti?(ti) || collection_ti?(ti)
+  sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  def type_shape_needs_recursive_cleanup?(ti, seen = nil)
+    ti.recursive_cleanup_shape?(@schema_lookup, seen)
   end
 
-  sig do
-    params(
-      fn: T.untyped, decisions: T::Hash[String, Symbol], _name: T.untyped,
-      heap_decls: T::Set[String], ret_heap: RetHeap,
-    ).void
-  end
-  def stamp_fn!(fn, decisions, _name, heap_decls, ret_heap = {})
-    return_nodes = return_values_nodes(fn.body)
-    walk(fn.body) do |n|
-      next unless decl?(n)
-      # Each `_ = expr` is an independent declaration; the name-keyed
-      # `decisions` map collapses them, so discards must be stamped
-      # per-node here (else the hoisted HPT temp leaks).
-      if n.name.to_s == "_"
-        if decl_value_is_heap_call?(n.value, ret_heap)
-          heap_decls << "_"
-          stamp_node_heap!(n, return_nodes)
-        end
-        next
-      end
-      next unless decisions[n.name.to_s] == :heap
-      heap_decls << n.name.to_s
-      stamp_node_heap!(n, return_nodes)
-    end
+  sig { params(decl: T.untyped).returns(T::Boolean) }
+  def frame_backed_container?(decl)
+    ti = type_of(decl)
+    ti.string? || ti.collection_value?
   end
 
-  sig { params(n: T.untyped, return_nodes: T::Array[T.untyped]).void }
-  def stamp_node_heap!(n, return_nodes)
-    n.storage = :heap
-    ft = n.full_type
-    ft.provenance = :heap if ft.is_a?(Type) && !ft.heap_provenance?
-    # Annotator stamps symbol on every binding-decl node; MIRPass runs
-    # strictly after. Raises if nil -- means an annotator hole.
-    sym = n.symbol
-    Kernel.raise "EscapeGraph: stamp_node_heap! got nil symbol on #{n.class}" if sym.nil?
-    sym.storage = :heap
-    sym.type.provenance = :heap
-    stamp_return_symbol!(return_nodes, n.name.to_s)
-    v = n.value
-    v.storage = :heap if v.is_a?(AST::Locatable)
+  sig { params(decl: T.untyped).returns(T::Boolean) }
+  def heap_backed_container?(decl)
+    return false unless decl
+    return true if decl.respond_to?(:symbol) && decl.symbol&.heap_provenance?
+    ti = type_of(decl)
+    !!(ti.is_a?(Type) && inherent_heap_type?(ti))
   end
 
-  sig { params(fn: T.untyped, name: String).void }
-  def stamp_decl_heap!(fn, name)
-    return_nodes = return_values_nodes(fn.body)
-    walk(fn.body) do |n|
-      next unless decl?(n) && n.name.to_s == name
-      stamp_node_heap!(n, return_nodes)
-    end
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def heap_backed_container_expr?(node)
+    return false unless node
+    return true if node.respond_to?(:symbol) && node.symbol&.heap_provenance?
+    ti = type_of(node)
+    !!(ti.is_a?(Type) && inherent_heap_type?(ti))
   end
 
-  sig { params(return_nodes: T::Array[T.untyped], var_name: String).void }
-  def stamp_return_symbol!(return_nodes, var_name)
-    return_nodes.each do |ret|
-      next unless ret.value # :nocov: redundant -- return_values_nodes pre-filters
-      ident = extract_ident(ret.value, var_name)
-      sym = ident&.symbol
-      next unless sym
-      sym.storage = :heap
-      sym.type.provenance = :heap
-    end
-  end
-
-  sig { params(node: T.untyped, var_name: String).returns(T.untyped) }
-  def extract_ident(node, var_name)
-    case node
+  sig { params(expr: T.untyped, blk: T.proc.params(arg0: AST::Identifier).void).void }
+  def each_binding_ref(expr, &blk)
+    return unless expr
+    case expr
     when AST::Identifier
-      node.name.to_s == var_name ? node : nil
+      blk.call(expr)
+    when AST::MoveNode, AST::ShareNode
+      each_binding_ref(expr.value, &blk)
+    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+      return
     when AST::StructLit, AST::UnionVariantLit
-      node.fields.each_value { |v| r = extract_ident(v, var_name); return r if r }
-      nil
+      expr.fields.each_value { |v| each_binding_ref(v, &blk) }
+    when AST::ListLit
+      expr.items.each { |v| each_binding_ref(v, &blk) }
+    when AST::BinaryOp
+      if expr.op == :OR_RESCUE
+        each_binding_ref(expr.left, &blk)
+        each_binding_ref(expr.right, &blk)
+      end
+    when AST::GetField, AST::GetIndex
+      return
     end
+  end
+
+  sig { params(node: T.untyped).returns(T.nilable(String)) }
+  def root_name(node)
+    case node
+    when String, Symbol then node.to_s
+    when AST::Identifier then node.name.to_s
+    when AST::GetField, AST::GetIndex then root_name(node.target)
+    else nil
+    end
+  end
+
+  sig { params(node: T.untyped).returns(T.untyped) }
+  def root_decl_from(node)
+    AST.root_identifier(node)&.symbol&.reg
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def walk_current_frame(node, &blk)
+    return if node.nil?
+    if node.is_a?(Array)
+      node.each { |c| walk_current_frame(c, &blk) }
+      return
+    end
+    return unless node.is_a?(Struct)
+    blk.call(node)
+    return if nested_frame?(node)
+    expr_children(node).each { |child| walk_current_frame(child, &blk) }
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def walk_all(node, &blk)
+    return if node.nil?
+    if node.is_a?(Array)
+      node.each { |c| walk_all(c, &blk) }
+      return
+    end
+    return unless node.is_a?(Struct)
+    blk.call(node)
+    node.to_a.each { |child| walk_all(child, &blk) }
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def nested_frame?(node)
+    node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach) ||
+      node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
+      node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) ||
+      node.is_a?(AST::LambdaLit)
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  def expr_children(node)
+    case node
+    when AST::IfStatement then [node.condition, node.then_branch, node.else_branch]
+    when AST::ForRange then [node.start_expr, node.end_expr]
+    when AST::ForEach then [node.collection]
+    when AST::WhileLoop, AST::WhileBindLoop then [node.condition]
+    when AST::MatchStatement
+      bodies = node.cases.flat_map { |c| c.respond_to?(:body) ? c.body : [] }
+      [node.expr, bodies, node.default_case]
+    else node.to_a
+    end.compact
+  end
+
+  sig { params(stmts: T.untyped).returns(T::Array[[T.untyped, T::Boolean]]) }
+  def nested_scopes(stmts)
+    out = T.let([], T::Array[[T.untyped, T::Boolean]])
+    walk_current_frame(stmts) do |node|
+      case node
+      when AST::ForRange, AST::ForEach then out << [node.body, false]
+      when AST::WhileLoop, AST::WhileBindLoop then out << [node.do_branch, false]
+      when AST::BgBlock, AST::BgStreamBlock then out << [node.body, true]
+      when AST::LambdaLit then out << [node.body, true]
+      end
+    end
+    out
   end
 
   sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
   def return_values(body)
-    vs = T.let([], T::Array[T.untyped])
-    walk(body) { |n| vs << n.value if n.is_a?(AST::ReturnNode) && n.value }
-    vs
-  end
-
-  sig { params(body: T.untyped).returns(T::Array[T.untyped]) }
-  def return_values_nodes(body)
-    ns = T.let([], T::Array[T.untyped])
-    walk(body) { |n| ns << n if n.is_a?(AST::ReturnNode) && n.value }
-    ns
-  end
-
-  sig { params(fn: T.untyped).returns(T::Boolean) }
-  def borrow_return?(fn)
-    return true if fn.return_lifetime
-    rt = fn.return_type
-    !!(rt.is_a?(Type) && rt.borrow_provenance?)
-  end
-
-  sig { params(n: T.untyped).returns(T::Boolean) }
-  def decl?(n)
-    !!(n.is_a?(AST::VarDecl) || (n.is_a?(AST::BindExpr) && n.mode == :decl))
-  end
-
-  sig { params(lhs: T.untyped).returns(T.nilable(String)) }
-  def root_ident_name(lhs)
-    return lhs if lhs.is_a?(String)        # BindExpr(:assign).name is a bare String
-    n = T.let(lhs, T.untyped)
-    n = n.target while n.is_a?(AST::GetField) || n.is_a?(AST::GetIndex)
-    n.is_a?(AST::Identifier) ? n.name.to_s : nil
-  end
-
-  # Locatable provides full_type uniformly; non-Locatable nodes (rare:
-  # Literal etc. in some contexts) have no resolved type for us to read.
-  sig { params(node: T.untyped).returns(T.nilable(Type)) }
-  def type_of(node)
-    node.is_a?(AST::Locatable) ? node.full_type : nil
-  end
-
-  HEAP_STORAGES = T.let(%i[heap multiowned shared].freeze, T::Array[Symbol])
-
-  sig { params(lhs: T.untyped).returns(T::Boolean) }
-  def heap_root_storage?(lhs)
-    root = T.let(lhs, T.untyped)
-    root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
-    sym = root.is_a?(AST::Identifier) ? root.symbol : nil
-    !!(sym && HEAP_STORAGES.include?(sym.storage))
-  end
-
-  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
-  def walk(node, &blk)
-    case node
-    when nil               then nil
-    when Array             then node.each { |x| walk(x, &blk) }
-    when AST::FunctionDef  then nil  # do not descend into nested fns
-    when AST::Locatable
-      blk.call(node)
-      node.each_pair { |_, v| walk(v, &blk) } if node.is_a?(Struct)
-    end
+    vals = T.let([], T::Array[T.untyped])
+    walk_all(body) { |n| vals << n.value if n.is_a?(AST::ReturnNode) && n.value }
+    vals
   end
 end

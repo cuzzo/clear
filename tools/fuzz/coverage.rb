@@ -73,6 +73,21 @@ FuzzSurfaceRegistry::REQUIRED_SURFACES_BY_TEMPLATE.each do |template, surfaces|
   end
 end
 
+# Cross-cut shape check: a sink isn't truly covered unless the templates
+# claiming it collectively touch each of the required value shapes (#41).
+# Without this, a struct-only claim masks collection-shape blind spots --
+# the exact pattern that hid #37/#39/#40/#42.
+FuzzSurfaceRegistry::SINK_REQUIRES_SHAPES.each do |sink, required_shapes|
+  covering = FuzzSurfaceRegistry.templates_covering_sink(sink)
+  exercised = covering.flat_map { |t|
+    FuzzSurfaceRegistry.covered(t, :cleanup_value_shapes)
+  }.uniq
+  missing = required_shapes - exercised
+  next if missing.empty?
+
+  gaps << "sink #{sink} -- no template's cleanup_value_shapes covers: #{missing.join(', ')} (covered by: #{covering.join(', ')})"
+end
+
 puts "Fuzz coverage report"
 puts "templates: #{templates.size} registered"
 puts "documented: #{documented_templates.size}"

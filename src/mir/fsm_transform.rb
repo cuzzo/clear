@@ -50,7 +50,7 @@ module FsmTransform
   #
   # ctx is a hash with keys:
   #   :node, :captured, :capture_close_zig, :pointer_captures,
-  #   :bg_string_promotes, :alloc_var, :promise_var, :ctx_var,
+  #   :alloc_var, :promise_var, :ctx_var,
   #   :promoted_decls, :capture_inits, :rt_name, :pin_mode,
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields

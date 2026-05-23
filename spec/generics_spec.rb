@@ -728,7 +728,7 @@ RSpec.describe SemanticAnnotator do
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Cache(CheatLib.Arc(CheatLib.Locked(Box)))")
         expect(out).to include("get(CheatLib.Arc(CheatLib.Locked(Box)), c)")
-        expect(out).to include("set(CheatLib.Arc(CheatLib.Locked(Box)), &c, got)")
+        expect(out).to include("set(CheatLib.Arc(CheatLib.Locked(Box)), rt, &c, got)")
         expect(out).to include("CheatLib.arcRetain(CheatLib.Locked(Box), b)")
       end
 
@@ -748,8 +748,8 @@ RSpec.describe SemanticAnnotator do
         CLEAR
 
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("fn keep(comptime T: type, x: CheatLib.Arc(T)) @TypeOf(x)")
-        expect(out).to include("keep(CheatLib.Versioned(Box), b)")
+        expect(out).to include("fn keep(comptime T: type, rt: *Runtime, x: CheatLib.Arc(T)) @TypeOf(x)")
+        expect(out).to include("keep(CheatLib.Versioned(Box), rt, b)")
         expect(out).to include("CheatLib.arcRetain(T, x)")
       end
     end

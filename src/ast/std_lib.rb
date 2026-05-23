@@ -92,6 +92,7 @@ STD_LIB = T.let({
   "pop" => {
     args: [:"Any[]"],
     return: :infer_optional_element_type,
+    return_alloc: :heap,  # popped element is now owned by caller
     zig: "{0}.pop()",
     bc: true,
     mutates_receiver: true,
@@ -212,10 +213,10 @@ STD_LIB = T.let({
     {
       args: [:"Any[]"],
       return: :infer_to_list,
-      zig: "try ({0}).toList({rt}.heapAlloc())",
+      zig: "try ({0}).toList({alloc})",
       bc: true, bc_op: :to_list,
       allocates: true,
-      alloc: :heap,
+      alloc: :node_storage,
       is_method: true,
     }
   ],
@@ -1020,7 +1021,7 @@ POOL_METHODS = T.let({
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
@@ -1088,7 +1089,7 @@ SET_METHODS = T.let({
     arity: 1, tag: :set_method, allocates: true,
     zig: "try {0}.insert({alloc}, {1})",
     bc: true,
-    alloc: :heap,
+    alloc: :receiver_storage,
     mutates_receiver: true,
     borrows: :all,  # set dupes strings internally; caller retains ownership
     args: [:"Any[]", :Any],
@@ -1153,7 +1154,7 @@ MAP_METHODS = T.let({
     bc: true,
     takes_args: [1],  # value (arg 1) is TAKES
     zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     args: [:"String{}", :String, { type: :Any, takes: true }],
     numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
     validate: ->(node, args, obj_type, error_fn) {
@@ -1171,7 +1172,7 @@ MAP_METHODS = T.let({
     arity: 1, tag: :map_method,
     bc: true,
     zig: "{0}.remove({alloc}, {1})",
-    alloc: :heap,
+    alloc: :receiver_storage,
     mutates_receiver: true,
     numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
@@ -1295,11 +1296,6 @@ MAP_METHODS = T.let({
 #   :frame             always rt.frameAlloc()
 #   :receiver_storage  heap if escaped/provenance/sharded/striped, frame otherwise
 #
-# Value transforms (ordered, applied to {value} before substitution):
-#   :dupe_string_literal   heap-dupe string literals (rodata can't be freed)
-#   :dupe_borrowed_union   deep-copy borrowed non-Copy union values
-#   :container_promote     promote frame-allocated sub-collections to heap
-
 INDEX_OPS = T.let({
   string_map: {
     get: {
@@ -1315,9 +1311,7 @@ INDEX_OPS = T.let({
       allocates: true,
       key_alloc: :heap,
       val_alloc: :receiver_storage,
-      value_transforms: [:dupe_string_literal, :dupe_borrowed_union, :container_promote],
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
-      shard_direct_value_transforms: [],  # putDirect dupes key+value internally; no caller-side transforms
       shard_alloc: :heap,
       bc: true, bc_op: :map_set,
     },
@@ -1336,10 +1330,8 @@ INDEX_OPS = T.let({
       takes_value: true,
       allocates: true,
       alloc: :receiver_storage,
-      value_transforms: [],
       sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})",
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
-      shard_direct_value_transforms: [],
       shard_alloc: :heap,
       bc: true, bc_op: :map_set,
     },
@@ -1353,7 +1345,6 @@ INDEX_OPS = T.let({
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
       takes_value: false,
-      value_transforms: [],
     },
   },
   list: {
@@ -1365,7 +1356,6 @@ INDEX_OPS = T.let({
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
       takes_value: false,
-      value_transforms: [],
     },
   },
   pool: {
@@ -1379,7 +1369,6 @@ INDEX_OPS = T.let({
       takes_value: true,
       allocates: true,
       alloc: :heap,
-      value_transforms: [:container_promote],
     },
   },
   set_collection: {
@@ -1393,7 +1382,6 @@ INDEX_OPS = T.let({
       takes_value: true,
       allocates: true,
       alloc: :heap,
-      value_transforms: [],
     },
   },
   string_raw: {

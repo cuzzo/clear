@@ -22,6 +22,26 @@ class PipelineHost
   include PipelineGenerator
   include ZigTypeMapper
 
+  # Single-source loopMark save/restore pair for shard contexts that emit
+  # InlineZig (vs MIR::Let used by mir_lowering.prepend_loop_mark). Returns
+  # an array of two MIR::InlineZig nodes; caller concats into its inner
+  # body. Inline-string variant (for raw key_loop_mark / body_loop_mark
+  # interpolation) is shard_loop_mark_string below.
+  sig { params(var: String, rt: String, tag: String).returns(T::Array[T.untyped]) }
+  def shard_loop_mark_pair(var, rt, tag: "shard_loop")
+    [
+      MIR::InlineZig.new("const #{var} = #{rt}.saveLoopMark();", "#{tag}_save_mark"),
+      MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{var});", "#{tag}_restore_mark"),
+    ]
+  end
+
+  # String-template variant for sites that interpolate the marker into a
+  # larger Zig template literal (key_loop_mark / body_loop_mark).
+  sig { params(var: String, rt: String, indent: String).returns(String) }
+  def shard_loop_mark_string(var, rt, indent: "              ")
+    "const #{var} = #{rt}.saveLoopMark();\n#{indent}defer #{rt}.restoreLoopMark(#{var});"
+  end
+
   # Per-stage state for sequential pipeline lowering. `list` is the source
   # list AST, `options` is the smooth-node carrying alloc/error policy/etc.
   # Reek flagged the (list_node, smooth_node) clump across 13+ lower_*
@@ -280,7 +300,9 @@ class PipelineHost
       if @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         @soa_needed_fields << node.field
         soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
+        soa_field.full_type = soa_field_slice_type(node)
         soa_idx = AST::Identifier.new(node.token, "__soa_i")
+        soa_idx.full_type = :Int64
         new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
         copy_type_info(node, new_gi)
         return new_gi
@@ -378,6 +400,12 @@ class PipelineHost
     dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
     dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)
     dst.var_used = src.var_used if src.respond_to?(:var_used) && dst.respond_to?(:var_used=)
+  end
+
+  sig { params(field_node: AST::GetField).returns(Type) }
+  def soa_field_slice_type(field_node)
+    field_type = Type.from_node!(field_node, context: "SOA field slice")
+    Type.new(:"#{field_type.resolved}[]")
   end
 
   public
@@ -505,6 +533,15 @@ class PipelineHost
 
   HEAP_ALLOC = "rt.heapAlloc()"
 
+  # A pipeline result is built with the allocator of the binding it
+  # flows into -- escape analysis already decided that placement (frame
+  # when the result does not escape, heap when it does). One allocator
+  # per binding; the pipeline is placed like every other value.
+  sig { returns(Symbol) }
+  def pipeline_result_alloc
+    @lowering.instance_variable_get(:@decl_alloc) == :heap ? :heap : :frame
+  end
+
   # Convert allocator symbol to Zig string (for InlineZig content only).
   sig { params(sym: T.anything).returns(String) }
   def alloc_zig_str(sym)
@@ -531,11 +568,11 @@ class PipelineHost
     # Value.List to grow via list-push.
     var_decl = MIR::Let.new("pipe_mat",
       MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
-        :list_empty, :heap, nil),
+        :list_empty, pipeline_result_alloc, nil),
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
-        [MIR::AllocatorRef.new(:heap)], false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc)], false)
     )
     [var_decl, defer]
   end
@@ -551,7 +588,7 @@ class PipelineHost
   def mat_append(value_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
-        [MIR::AllocatorRef.new(:heap), value_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), value_expr], true), false)
   end
 
   # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
@@ -559,7 +596,7 @@ class PipelineHost
   def mat_append_slice(slice_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
-        [MIR::AllocatorRef.new(:heap), slice_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), slice_expr], true), false)
   end
 
   # Sharded pool: for each shard, for each slot, append alive values.
@@ -1705,7 +1742,7 @@ class PipelineHost
         MIR::Let.new("idx_result",
           MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(alloc)}]),
           true, map_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", build_index_gop_body(expr_mir, alloc, "it"), nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", build_index_gop_body(expr_mir, alloc, "it", cleanup_key: index_key_allocates?(expr_node)), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
     end
@@ -1715,17 +1752,48 @@ class PipelineHost
   # Lowered to MIR::IndexInsert which both backends decompose: Zig emits the
   # getOrPut + dupe/free + value_ptr.append idiom; the VM emits MAP_GET +
   # APPEND/MAKE_LIST + MAP_PUT.
-  sig { params(expr_mir: T.untyped, alloc: Symbol, item_var: String).returns(T::Array[T.untyped]) }
-  def build_index_gop_body(expr_mir, alloc, item_var)
+  sig { params(expr_mir: T.untyped, alloc: Symbol, item_var: String, cleanup_key: T::Boolean).returns(T::Array[T.untyped]) }
+  def build_index_gop_body(expr_mir, alloc, item_var, cleanup_key: false)
     elem_zig_type = "@TypeOf(#{item_var})"
-    [
+    body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       MIR::IndexInsert.new(
         MIR::Ident.new("idx_result"),
         MIR::Ident.new("idx_key"),
         MIR::Ident.new(item_var),
         "u8", elem_zig_type, alloc)
-    ]
+    ], T::Array[T.untyped])
+    if cleanup_key || mir_allocates_owned_string?(expr_mir)
+      body << MIR::ExprStmt.new(
+        MIR::Call.new("CheatLib.cleanup", [
+          MIR::Ident.new("@TypeOf(idx_key)"),
+          MIR::AllocatorRef.new(:heap),
+          MIR::AddressOf.new(MIR::Ident.new("idx_key"))
+        ], false), false)
+    end
+    body
+  end
+
+  sig { params(mir: T.untyped).returns(T::Boolean) }
+  def mir_allocates_owned_string?(mir)
+    return false unless mir
+    return true if mir.respond_to?(:heap_provenance) && mir.heap_provenance
+    return true if mir.is_a?(MIR::DupeSlice)
+    return true if mir.is_a?(MIR::ConcatStr)
+    if mir.is_a?(MIR::Call)
+      return true if mir.callee.to_s.include?("intToString")
+      return true if mir.callee.to_s.include?("floatToString")
+    end
+    return mir_allocates_owned_string?(mir.expr) if mir.respond_to?(:expr)
+    false
+  end
+
+  sig { params(expr_node: T.untyped).returns(T::Boolean) }
+  def index_key_allocates?(expr_node)
+    return true if expr_node.is_a?(AST::FuncCall) || expr_node.is_a?(AST::MethodCall)
+    return true if expr_node.is_a?(AST::StringConcat)
+    return true if expr_node.is_a?(AST::BinaryOp) && expr_node.op == :ADD && expr_node.string_concat
+    false
   end
 
   sig { params(range_chain: T::Hash[T.untyped, T.untyped], expr_node: T.untyped, elem_zig: String, alloc: Symbol, map_type: String).returns(MIR::BlockExpr) }
@@ -1774,7 +1842,7 @@ class PipelineHost
             true, map_type, nil),
           MIR::ForStmt.new(iter, p[:initial_capture], [
             *p[:stage_stmts],
-            *build_index_gop_body(expr_mir, :heap, item_var)
+            *build_index_gop_body(expr_mir, :heap, item_var, cleanup_key: index_key_allocates?(expr_node))
           ], nil),
           MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
         ])
@@ -1789,7 +1857,7 @@ class PipelineHost
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next, [
         *p[:stage_stmts],
-        *build_index_gop_body(expr_mir, :heap, item_var)
+        *build_index_gop_body(expr_mir, :heap, item_var, cleanup_key: index_key_allocates?(expr_node))
       ], p[:initial_capture], nil, nil, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
     ])
@@ -3540,10 +3608,7 @@ class PipelineHost
       # The key expression allocates from the frame arena (e.g. a string
       # concat). Save/restore per iteration so successive iterations
       # don't accumulate frame memory.
-      lm_var = "__sh#{id}_loop_mark"
-      rt = @do_rt_name || "rt"
-      inner << MIR::InlineZig.new("const #{lm_var} = #{rt}.saveLoopMark();", "shard_loop_save_mark")
-      inner << MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{lm_var});", "shard_loop_restore_mark")
+      inner.concat(shard_loop_mark_pair("__sh#{id}_loop_mark", @do_rt_name || "rt", tag: "shard_loop"))
     end
     inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
     inner.concat(body_mir)
@@ -3619,16 +3684,10 @@ class PipelineHost
       @lowering.instance_variable_set(:@rt_name, saved_low_rt)
     end
 
-    key_loop_mark = if ctx[:key_allocates_frame]
-      "const __sh#{id}_key_mark = rt.saveLoopMark();\n              defer rt.restoreLoopMark(__sh#{id}_key_mark);"
-    else
-      ""
-    end
-    body_loop_mark = if ctx[:body_allocates_frame]
-      "const __sh#{id}_body_mark = __rt.saveLoopMark();\n                      defer __rt.restoreLoopMark(__sh#{id}_body_mark);"
-    else
-      ""
-    end
+    key_loop_mark = ctx[:key_allocates_frame] ?
+      shard_loop_mark_string("__sh#{id}_key_mark", "rt") : ""
+    body_loop_mark = ctx[:body_allocates_frame] ?
+      shard_loop_mark_string("__sh#{id}_body_mark", "__rt", indent: " " * 22) : ""
     key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
     key_free_work = if string_key
       "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n                  __rt.heapAlloc().free(__work.keys);"
@@ -4040,7 +4099,7 @@ class PipelineHost
       MIR::Ident.new(result_t.zig_type),
       MIR::Lit.new(lhs.full_type.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4069,7 +4128,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Lit.new(lhs.full_type.stream_capacity.to_s),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4175,7 +4234,7 @@ class PipelineHost
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4211,7 +4270,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4247,7 +4306,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Lit.new(is_inf),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4322,7 +4381,7 @@ class PipelineHost
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
@@ -4350,7 +4409,7 @@ class PipelineHost
     call = @lowering.send(:emit_builtin, :concurrentListWhere, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
-      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),

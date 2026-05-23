@@ -78,15 +78,11 @@ module FsmLowering
   # final expression's MIR plus any pending hoists, wrapped in a
   # typed MIR::Set assignment to ctx.inner.result. The strip-try
   # rewrite is applied to the lowered MIR via the existing
-  # `strip_try` helper; the string_dupe exit-promote case wraps
-  # the value in a typed MIR::MethodCall(ctx.alloc, "dupe", ...).
-  # No RawZig is constructed.
-  #
-  # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
+  # `strip_try` helper.\n  #\n  # `lower_step_stmts` produces MIR statements; `emit_step_stmts`
   # below renders the same MIR to Zig text via MIREmitter. The
   # recursive emit path uses emit_step_stmts.
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T::Array[T.untyped]) }
-  def lower_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[T.untyped]) }
+  def lower_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     flat_steps = []
     stmts.each do |stmt|
@@ -114,12 +110,16 @@ module FsmLowering
 
       result_mir = []
       if last_step
-        last_mir = lower(last_step[:expr])
+        expr_type = last_step[:expr].full_type
+        expr_t = expr_type.is_a?(Type) ? expr_type : (Type.new(expr_type) rescue nil)
+        result_alloc = expr_t&.string? ? :heap : nil
+        last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
+        last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, expr_t) if last_mir
+        last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
         result_mir.concat(last_pending)
 
         last_is_assign = last_step[:expr].is_a?(AST::Assignment)
-        expr_type = last_step[:expr].full_type
         is_step_void = expr_type.nil? || expr_type == :Void ||
           (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
 
@@ -140,19 +140,11 @@ module FsmLowering
             MIR::FieldGet.new(ctx_ident, "inner"),
             "result",
           )
-          value =
-            if exit_promote&.dig(:strategy) == :string_dupe
-              # try ctx.alloc.dupe(u8, last_mir)
-              MIR::MethodCall.new(
-                MIR::FieldGet.new(ctx_ident, "alloc"),
-                "dupe",
-                [MIR::Ident.new("u8"), last_mir],
-                true,
-              )
-            else
-              strip_try(last_mir)
-            end
-          result_mir << MIR::Set.new(target, value, false)
+          # The fiber's tail value is escape-placed on the heap like any
+          # other escaping binding; the promise stores it directly and
+          # the consumer (NEXT) owns and frees it. No per-promise
+          # allocator, no dupe.
+          result_mir << MIR::Set.new(target, strip_try(last_mir), false)
         end
       end
 
@@ -209,10 +201,10 @@ module FsmLowering
   # no_result: true, or a [pre, result] tuple otherwise (where
   # `result` is the trailing `__ctx.inner.result = <expr>;`
   # assignment ready for splicing into the dispatch).
-  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer), exit_promote: T.nilable(T::Hash[Symbol, Symbol])).returns(T.untyped) }
-  def emit_step_stmts(stmts, no_result:, ctx_id: nil, exit_promote: nil)
+  sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T.untyped) }
+  def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
-    result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id, exit_promote: exit_promote)
+    result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
     if no_result
       render_mir_list(result)
     else

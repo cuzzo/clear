@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 # Single source of truth for compiler-emitted diagnostics.
 #
 # Before this file existed, `MESSAGES` (in source_error.rb) held just
@@ -1808,14 +1810,14 @@ module DiagnosticRegistry
       template: "%{message}",
       summary:  "MIR::AllocMark with no matching Cleanup or ErrCleanup on every path.",
       cause: "Every heap allocation must have a matching cleanup on every control-flow path, including error paths and early returns. The checker found a path where the AllocMark is reachable but no Cleanup/ErrCleanup is.",
-      fix_hint: "Usually a lowering bug — the cleanup classifier should have inserted the cleanup. Check src/mir/promotion_plan.rb. If your code has an unusual control-flow shape (early RETURN inside a complex block), that path may need explicit attention.",
+      fix_hint: "Usually a lowering bug — the cleanup classifier should have inserted the cleanup. Check src/mir/cleanup_classifier.rb. If your code has an unusual control-flow shape (early RETURN inside a complex block), that path may need explicit attention.",
     },
     CLEANUP_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "MIR::Cleanup or ErrCleanup with no matching AllocMark — orphan cleanup.",
       cause: "The MIR has a Cleanup node naming a binding the AllocMark side never declared. Means the lowering emitted cleanup for a value the allocator never tracked — runtime would try to free unknown memory.",
-      fix_hint: "Lowering bug — the cleanup classifier disagreed with the alloc classifier. Trace the binding name through promotion_plan.rb.",
+      fix_hint: "Lowering bug — the cleanup classifier disagreed with the alloc classifier. Trace the binding name through cleanup_classifier.rb.",
     },
     INDIRECT_DOUBLE_BOX: {
       severity: :error, category: :mir,
@@ -1829,7 +1831,7 @@ module DiagnosticRegistry
       template: "%{message}",
       summary:  "Cleanup's allocator (heap/frame) doesn't match its AllocMark's allocator.",
       cause: "AllocMark allocated on heap but Cleanup is freeing on frame, or vice versa. Calling `frame.free()` on heap memory (or `heap.free()` on frame memory) is an allocator mismatch — runtime crash or corruption.",
-      fix_hint: "Lowering bug — the per-binding allocator decision drifted between alloc and cleanup. Check that promotion_plan.rb gives both nodes the same allocator stamp.",
+      fix_hint: "Lowering bug — the per-binding allocator decision drifted between alloc and cleanup. Check that cleanup_classifier.rb gives both nodes the same allocator stamp.",
     },
     INLINE_ALLOC_MISMATCH: {
       severity: :error, category: :mir,

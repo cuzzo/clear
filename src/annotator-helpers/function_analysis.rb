@@ -84,7 +84,7 @@ module FunctionAnalysis
   # Resolve a function call: look up the function, dispatch based on type
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
-  # heap_promoted_call flags.
+  # call result placement is decided later by escape analysis.
   sig { params(node: T.untyped, args: T::Array[T.untyped]).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -166,10 +166,12 @@ module FunctionAnalysis
         substituted = substitute_type_params(func_type, T.must(subst))
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, substituted)
+        node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         node.full_type = substituted.return_type
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
+        node.matched_signature = func_type if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
         rt = func_type.return_type
@@ -241,35 +243,7 @@ module FunctionAnalysis
       error!(node, :NOT_A_FUNCTION, name: func_name)
     end
 
-    # Tag calls that return collections (direct or via struct fields) so the
-    # caller knows to use heapAlloc for cleanup of promoted data.
-    # String returns only get heap_promoted_call from callee.returns_promoted
-    # (not from type alone) because stdlib string functions like readFile use
-    # frameAlloc internally — the caller shouldn't try to free those.
-    if node.full_type
-      callee_node = @fn_nodes[func_name]
-      sig_return_heap = fsig && fsig.return_provenance == :heap
-      if callee_node&.return_provenance == :heap || sig_return_heap
-        node.full_type.provenance = :heap
-      elsif node.full_type.needs_escape_promotion? && !node.full_type.string?
-        node.full_type.provenance = :heap
-      else
-        # Union return types with heap variants need heap_promoted_call
-        # when the callee allocates at all (frame, heap, or alloc).
-        ret_type = node.full_type
-        if ret_type
-          ret_sym = ret_type.is_a?(Type) ? ret_type.resolved : ret_type
-          schema = lookup_type_schema(ret_sym)
-          if Schemas.union?(schema)
-            has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-            callee_allocates = callee_node&.return_provenance == :heap || callee_node&.uses_frame || callee_node&.uses_heap || callee_node&.uses_alloc
-            if has_heap && callee_allocates
-              node.full_type.provenance = :heap
-            end
-          end
-        end
-      end
-    end
+    nil
   end
 
   sig { params(config: FunctionSignature).returns(T.nilable(FunctionSignature)) }
@@ -307,9 +281,28 @@ module FunctionAnalysis
     )
   end
 
+  # Single point: what allocator does the receiver/container of this call use?
+  # For MethodCall on a list/struct/etc, the receiver's binding storage tells
+  # us the container allocator -- auto-COPY into this container must produce
+  # values in this allocator (per "one collection = one allocator").
+  # Returns nil when the call has no container context (plain function call,
+  # or receiver storage not yet determined).
+  sig { params(node: T.untyped).returns(T.nilable(Symbol)) }
+  def receiver_container_alloc(node)
+    return nil unless node.is_a?(AST::MethodCall)
+    obj = node.object
+    sym = obj.respond_to?(:symbol) ? obj.symbol : nil
+    storage = sym&.storage
+    return nil unless storage
+    return :frame if storage == :frame
+    return :heap if storage == :heap
+    nil
+  end
+
   sig { params(node: T.untyped, signature: FunctionSignature).returns(T.nilable(T::Array[String])) }
   def verify_function_signature!(node, signature)
     T.bind(self, SemanticAnnotator) rescue nil
+    node.matched_signature = signature if node.respond_to?(:matched_signature=)
     params = signature.params
     min_args = params.count { |param| param.required }
     max_args = params.size
@@ -390,10 +383,22 @@ module FunctionAnalysis
           end
         end
 
-        # Ensure @list args to TAKES params are heap-owned (implicit COPY).
-        if inner_node.is_a?(AST::Identifier)
-          owned = ensure_owned_value!(inner_node, param.type)
-          node.args[i] = owned if owned
+        # Ensure TAKES args are owned per the "one collection = one allocator"
+        # policy. ensure_owned_value! handles each shape (list_collection
+        # auto-COPY for @list/heap mismatch; rodata-string auto-COPY for
+        # literal-at-use-site DEFAULT; named string Identifier raises
+        # STORE_STRING_NEEDS_COPY when its source isn't heap-owned).
+        # Pass the receiver's allocator so the auto-COPY uses the
+        # container's allocator (frame list -> frame COPY, heap list ->
+        # heap COPY).
+        container_alloc = receiver_container_alloc(node) || :heap
+        owned = ensure_owned_value!(inner_node, param.type, nil, container_alloc: container_alloc)
+        node.args[i] = owned if owned
+        # If the arg was an EXISTING CopyNode (user explicit COPY), inherit
+        # the container's allocator -- a COPY into a frame list copies to
+        # frame, not heap. Single source of truth: container decides.
+        if node.args[i].is_a?(AST::CopyNode) && container_alloc != :heap
+          node.args[i].alloc = container_alloc
         end
 
         # `is_give` already had visit_GiveNode set the :give action;

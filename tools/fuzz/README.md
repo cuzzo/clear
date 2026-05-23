@@ -19,6 +19,22 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
+    # CI gate: full matrix MINUS quarantine (must pass)
+    ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/fuzz --clean
+
+    # Just the quarantined (known-broken) templates
+    ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/fuzz --clean
+
+## Quarantine
+
+`tools/fuzz/quarantine.txt` lists templates with a known compiler bug or
+generator defect. They are excluded from the required CI gate
+(`--skip-quarantined`) and run in a separate non-blocking job
+(`--only-quarantined`). Each line carries the reason; delete a line the
+moment its bug is fixed and the template rejoins the gate. This is what
+stops templates bit-rotting unnoticed — every template either passes the
+gate or is explicitly, visibly quarantined.
+
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
 
@@ -77,6 +93,14 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
+| `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
+| `return_value_modality`     | 8 (+8 in_dev)   | EVERY :cleanup_value_shapes member returned from `FN producer() RETURNS T -> ... END`. Breadth axis complementing heap_ownership_transfer's depth on list/string. in_dev cells gated by #43 (union return), #52 (sharded/soa cleanup), #54 (set/pool return loses contents at runtime). |
+| `struct_field_store_modality` | ~30 (+24 in_dev) | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare. Registry-driven (18 shapes including frame_*). in_dev cells gated by #55 (COPY broken across most shapes), #56 (GIVE/bare type mismatches), #57 (String bare annotator quirk). |
+| `list_append_modality`     | ~15 (+39 in_dev / :compile_error) | EVERY :cleanup_value_shapes member appended to `MUTABLE container: T[]@list = []` via GIVE / COPY / bare. Registry-driven. 30 cells marked :compile_error documenting language limits (no list-of-@pool/@set/sharded/soa); 9 :in_dev across #43/#56/#58/#59. |
+| `heap_ownership_transfer`   | 89              | ret_form (ident/literal/call/give/or_rescue) x bind_form (bare/or_raise/or_fallback/discard/discard_or_raise/onward) x decl (T/!T) -- the depth axis for :heap_list and :string returns (ported from origin/register-machine #13 manifest). |
+| `bg_capture_typing`         | small           | Type-inference cells for BG-block captures. |
+| `bg_copy_param_reentrant`   | 6               | COPY of @list param into BG calling reentrant function. |
+| `infallible_signature`      | small           | Cells exercising infallible (non-`!T`) function signature lowering. |
 | `binary_op_matrix`         | 30           | Binary operator lowering/admission combinations. |
 | `capability_wrap_matrix`   | 7            | Capability wrapper construction/admission cells. |
 | `catch_allocator_matrix`   | 10           | Error/catch paths that preserve allocator identity. |
@@ -108,8 +132,9 @@ Per-cell parameters:
 - `move` ∈ {borrow, copy, give, clone, lend}    (CLONE only for @shared/@split)
 - `value` ∈ {int, string, struct}               (struct used for non-atomic @shared cells)
 
-**Phase A** (12 active): `@local` × {borrow, copy} × {int, string} × 3 consumers. DO+@local
-cells expected `:compile_error` (DO branches don't capture outer @local locals).
+**Phase A** (12 active): `@local` × {borrow, copy} × {int, string} × 3 consumers.
+DO+@local+borrow+string is expected `:compile_error`; DO+@local+copy+string is legal
+because each branch receives its own owned copy.
 
 **Phase B** (36 active, was 90 :in_dev): `@shared` with each of 4 sync wrappers ×
 {borrow, copy, clone} × 3 consumers. Per-sync value: `@atomic` uses Int64 (bare

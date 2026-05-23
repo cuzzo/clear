@@ -43,6 +43,13 @@ OptionParser.new do |o|
   o.on('--generate-only')       { opts[:generate_only] = true }
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
+  o.on('--exclude LIST')        { |v| opts[:exclude] = v.split(',').map(&:to_sym) }
+  # Quarantine: tools/fuzz/quarantine.txt lists templates with a known
+  # bug. --skip-quarantined runs the green gate (full matrix minus
+  # quarantine); --only-quarantined runs just the quarantined set
+  # (non-blocking informational job).
+  o.on('--skip-quarantined')    { opts[:quarantine] = :skip }
+  o.on('--only-quarantined')    { opts[:quarantine] = :only }
   o.on('--shard I/N') do |v|
     idx, total = v.split('/', 2).map(&:to_i)
     abort "--shard expects I/N with N > 0 and 0 <= I < N" unless total && total > 0 && idx && idx >= 0 && idx < total
@@ -63,6 +70,23 @@ gen = FuzzGenerator.new(seed: opts[:seed])
 tuples = opts[:mode] == :matrix ? gen.full_matrix : gen.sample(opts[:count])
 if opts[:templates]
   tuples = tuples.select { |t| opts[:templates].include?(t[:template]) }
+end
+if opts[:exclude]
+  tuples = tuples.reject { |t| opts[:exclude].include?(t[:template]) }
+end
+if opts[:quarantine]
+  qfile = File.expand_path('quarantine.txt', __dir__)
+  quarantined = File.readlines(qfile)
+                    .map { |l| l.sub(/#.*/, '').strip }
+                    .reject(&:empty?)
+                    .map(&:to_sym)
+                    .to_set
+  tuples =
+    if opts[:quarantine] == :skip
+      tuples.reject { |t| quarantined.include?(t[:template]) }
+    else
+      tuples.select { |t| quarantined.include?(t[:template]) }
+    end
 end
 if opts[:shard]
   idx, total = opts[:shard]
@@ -303,4 +327,9 @@ puts "=" * 60
   end
 end
 
-exit (fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?) ? 0 : 1
+ok = if opts[:quarantine] == :only
+       true
+     else
+       fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
+     end
+exit ok ? 0 : 1

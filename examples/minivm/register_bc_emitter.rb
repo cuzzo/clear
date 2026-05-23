@@ -629,7 +629,7 @@ class RegisterBcEmitter
     case stmt
     when MIR::Comment, MIR::Suppress, MIR::Noop
       nil
-    when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt, MIR::EscapePromote,
+    when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt,
          MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark
       nil
     when MIR::CatchWrapper
@@ -5344,6 +5344,8 @@ class RegisterBcEmitter
             end
       return { kind: :atomic_primitive, payload_kind: kind, reg: reg } if reg
     end
+
+    inner = inner.init if inner.is_a?(MIR::HeapCreate)
 
     unless inner.is_a?(MIR::StructInit)
       raise Unsupported, "register emitter only supports CapWrap of StructInit in this tranche (got #{inner.class.name.split('::').last})"

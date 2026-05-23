@@ -23,6 +23,7 @@ require_relative '../src/backends/transpiler'
 ROOT = File.expand_path('..', __dir__)
 files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht'))
               .reject { |f| File.basename(f).start_with?('._') }
+              .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
               .sort
 
 ok = 0

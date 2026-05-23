@@ -157,12 +157,11 @@ class Scope
     when :frame
       base_type.provenance = :frame   # large local var: arena pointer (*T in Zig)
     when :heap
+      base_type.provenance = :heap
       if entry.locked?
         base_type.sync = :locked
       elsif entry.write_locked?
         base_type.sync = :write_locked
-      else
-        base_type.provenance = :heap
       end
     end
 

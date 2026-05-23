@@ -866,7 +866,6 @@ class BcEmitter
     # slot's ownership so the subsequent slot-restore in BC_RET (and any
     # reassignment overwrite) doesn't double-free the heap payload that
     # was moved into the return value / callee argument.
-    n.is_a?(MIR::EscapePromote)   ||
     n.is_a?(MIR::FrameSave)       || n.is_a?(MIR::FrameRestore)     ||
     n.is_a?(MIR::Noop)            || n.is_a?(MIR::Comment)          ||
     n.is_a?(MIR::Suppress)        || n.is_a?(MIR::DeferStmt)        ||
@@ -886,7 +885,7 @@ class BcEmitter
     body.reject { |n|
       # Old-style MIR nodes inserted by MIRPass into the AST
       n.is_a?(MIR::Alloc) || n.is_a?(MIR::Drop) ||
-      n.is_a?(MIR::SuppressCleanup) || n.is_a?(MIR::Promote) ||
+      n.is_a?(MIR::SuppressCleanup) ||
       n.is_a?(MIR::Return) || n.is_a?(MIR::ReassignCleanup) ||
       n.is_a?(MIR::FieldCleanup) ||
       # Bare returns with no value
@@ -5722,7 +5721,7 @@ class BcEmitter
     stmts = stmts.reject { |s| (s.is_a?(AST::ReturnNode) && s.value.nil?) }
     stmts.reject! { |s|
       s.is_a?(MIR::Alloc) || s.is_a?(MIR::Drop) || s.is_a?(MIR::SuppressCleanup) ||
-      s.is_a?(MIR::Promote) || s.is_a?(MIR::Return) || s.is_a?(MIR::ReassignCleanup) ||
+      s.is_a?(MIR::Return) || s.is_a?(MIR::ReassignCleanup) ||
       s.is_a?(MIR::FieldCleanup)
     }
     stmts.each do |stmt|

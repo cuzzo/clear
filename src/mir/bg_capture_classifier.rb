@@ -21,8 +21,6 @@ require_relative "../ast/scope"
 # `BgBlock.capture_analysis`:
 #
 #   - strategies         : Hash<name => CaptureStrategy::*>
-#   - heap_promote_names : Set<name> -- read by EscapeAnalysis instead
-#                          of re-walking BG bodies via e2_bg_capture_names.
 #   - move_mark_names    : Set<name> -- read by MIRPass.insert_bg_give_suppress!
 #                          and OwnershipDataflow.collect_bg_body_gives instead
 #                          of each re-walking the BG body looking for GIVE.
@@ -91,30 +89,6 @@ module BgCaptureClassifier
     end
 
     a.strategies = strategies
-
-    # heap_promote_names: any captured @list / @set / non-numeric-map that
-    # is NOT pointer-passing. Mirrors the predicate the old
-    # EscapeAnalysis.e2_bg_capture_names used (which is broader than the
-    # CaptureStrategy classification: e2 promotes bare-reference captures
-    # too, since `items.append(2.0)` inside a BG body mutates the shared
-    # backing and needs heap allocation regardless of GIVE/COPY intent).
-    #
-    # Stream cursors (@split open streams, plain open streams) ALSO need
-    # heap promotion when captured by a BG that runs asynchronously --
-    # the cursor struct is otherwise frame-allocated and the spawning
-    # frame may rewind before the fiber has finished consuming. See
-    # benchmarks/concurrent/08_pubsub for the regression that motivated
-    # adding split_open_stream? / open_stream? to this predicate.
-    a.heap_promote_names = a.captures.each_with_object(Set.new) do |(name, type_obj), set|
-      sym = a.capture_symbols&.dig(name)
-      t = resolve_capture_type(type_obj, sym)
-      next unless t
-      next if t.needs_pointer_passing?
-      promote = (t.collection? && !t.numeric_map?) ||
-                t.split_open_stream? ||
-                t.open_stream?
-      set << name if promote
-    end
 
     # move_mark_names: explicit user-written GIVE intent (or its
     # type-adapted CopyNode-with-was_moved equivalent). Drives

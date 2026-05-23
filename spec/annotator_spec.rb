@@ -1697,7 +1697,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS Void -> v = makeList(); RETURN; END
         CLEAR
-        annotated = run(src)
+        annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
         expect(fn.return_provenance).to eq(:heap)
       end
@@ -2072,14 +2072,12 @@ RSpec.describe SemanticAnnotator do
 
       it "sets provenance to :borrow (no cleanup, caller owns data)" do
         decl = ast.statements.first
-        ti = decl.full_type
-        expect(ti.provenance).to eq(:borrow)
+        expect(decl.borrow_provenance?).to be true
       end
 
       it "sets provenance to :borrow" do
         decl = ast.statements.first
-        ti = decl.full_type
-        expect(ti.provenance).to eq(:borrow)
+        expect(decl.borrow_provenance?).to be true
       end
     end
 
@@ -2231,18 +2229,6 @@ RSpec.describe SemanticAnnotator do
         FLUX
       end
 
-      it "uses heap_struct_plain cleanup for promoted plain struct (no heap fields)" do
-        ast = run_mir_escape(<<~FLUX)
-          STRUCT Config { id: Float64 }
-          FN create() RETURNS !Config @indirect ->
-            x = Config { id: 1 };
-            RETURN x;
-          END
-        FLUX
-        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "create" }
-        expect(fn.cleanup_bindings["x"][:kind]).to eq(:heap_struct_plain)
-      end
-
       it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Person { name: String, age: Float64 }
@@ -2252,7 +2238,7 @@ RSpec.describe SemanticAnnotator do
           END
         FLUX
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make" }
-        expect(fn.cleanup_bindings["p"][:kind]).to eq(:heap_struct)
+        expect(fn.cleanup_bindings["p"][:kind]).to eq(:uniform)
       end
 
       it "does NOT promote primitives (Float64)" do
@@ -3810,13 +3796,14 @@ RSpec.describe SemanticAnnotator do
       expect(decl.full_type.frame?).to be true
     end
 
-    it "emits *BigS as the Zig type for the frame-allocated variable" do
-      expect(zig).to match(/const s = blk:/)
-      expect(zig).to include("rt.frameAlloc().create(BigS)")
+    it "emits BigS as a value-shaped Zig type" do
+      expect(zig).to include("const s = BigS{")
+      expect(zig).not_to match(/const s = blk:/)
+      expect(zig).not_to include("rt.frameAlloc().create(BigS)")
     end
 
-    it "emits __p.* initialiser inside the allocation block" do
-      expect(zig).to include("__p.* = BigS{")
+    it "does not wrap the BigS initializer in an allocation block" do
+      expect(zig).not_to include("__p.* = BigS{")
     end
 
     it "does NOT use heapAlloc for the BigS struct" do
@@ -3892,7 +3879,7 @@ RSpec.describe SemanticAnnotator do
       expect(zig).to include("const s = BigS{")
     end
 
-    it "still uses frameAlloc for the same large struct declared OUTSIDE a loop" do
+    it "keeps the same large struct value-shaped outside a loop" do
       chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
       big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
       outside_code = preamble + <<~CLEAR
@@ -3902,7 +3889,8 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       zig = ZigTranspiler.new.transpile(outside_code)
-      expect(zig).to include("frameAlloc().create(BigS)")
+      expect(zig).to include("const s = BigS{")
+      expect(zig).not_to include("frameAlloc().create(BigS)")
     end
   end
 

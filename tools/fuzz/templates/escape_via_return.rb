@@ -1,33 +1,218 @@
-# Template: collection escapes via RETURN.
-# Stresses E2 :always_returned + :heap_ptr_return.
+# Template: a value escapes via RETURN.
 #
-# Pattern: build a value of type T inside a function, return it. The fix
-# path is heap-promotion at the boundary; if the compiler skips it for
-# any T, the caller holds a dangling pointer to a frame buffer.
+# TWO axes, both exhaustive for the "escape via return" scope:
 #
-# Type axis intentionally exhaustive: every escape-relevant type
-# category exists here so a missing `needs_escape_promotion?` case
-# becomes a runtime UAF in CI rather than a silent class of bugs.
-# Categories: list (was the only original), set, pool (handles), map
-# (string-key non-numeric vs Int-key numeric), struct-with-heap-field,
-# union-with-heap-variant. Each category corresponds to a different
-# heap-cleanup shape; missing any one of them surfaces a leak/UAF in
-# the test runner.
+#  1. value TYPE  -- elem ∈ {int,string,set,pool,map,struct,union}
+#                    crossed with body context + size. Pinned to the
+#                    `ident` return shape (RETURN <var>).
+#  2. return-expression SHAPE -- the namesake axis. `return_value_is_heap?`
+#     branches per AST shape of the returned expression: a bare var, a
+#     list/hash literal, a string literal, a concat, a call result, a
+#     multi-branch return. Each shape is its own `return_value_is_heap?`
+#     case arm; before this expansion only `ident` was ever generated.
+#
+# The COPY-of-collection-field / COPY-of-collection-index return shapes
+# are marked :compile_error -- `RETURN COPY x.field` / `RETURN COPY x[i]`
+# for a collection element currently lowers COPY to a []T slice that
+# does not match the ArrayList return type. Real bug, tracked separately.
 
 ESCAPE_VIA_RETURN_CELLS = []
 
+# Axis 1: value type x body x size (return shape pinned to :ident).
+# set_int / set_string / pool / map_int_numeric returns are :in_dev:
+# `RETURNS !T@set` / `!T@pool` mis-lowers -- the Zig return type is
+# ArrayList but the value is a Set/Pool (bug #54, also documented in
+# return_value_modality's override table, which owns the type-breadth
+# axis properly). escape_via_return keeps the WORKING element types for
+# body-context coverage and owns the return-SHAPE axis below.
+EVR_DEV_ELEMS = %i[set_int set_string pool map_int_numeric].freeze
 [:int, :string,
  :set_int, :set_string,
  :pool, :map_str, :map_int_numeric,
  :struct_with_list, :union_with_heap].each do |elem|
   [:none, :loop, :early_if].each do |body|
     [3, 7].each do |size|
-      ESCAPE_VIA_RETURN_CELLS << { elem: elem, body: body, size: size }
+      cell = { elem: elem, body: body, size: size, return_shape: :ident }
+      cell[:expected] = :in_dev if EVR_DEV_ELEMS.include?(elem)
+      ESCAPE_VIA_RETURN_CELLS << cell
     end
   end
 end
 
+# Axis 2: return-expression shape (the under-tested namesake axis).
+[:list_literal, :hash_literal, :str_literal, :concat,
+ :call_result, :if_branches,
+ :indirect_struct, :indirect_struct_string].each do |shape|
+  ESCAPE_VIA_RETURN_CELLS << { return_shape: shape }
+end
+# Language-limited shapes: COPY of a collection field/index returns a
+# []T slice that mismatches the ArrayList return type.
+[:field_copy, :index_copy].each do |shape|
+  ESCAPE_VIA_RETURN_CELLS << { return_shape: shape, expected: :compile_error }
+end
+
+# Axis-2 renderer: one self-contained program per return-expression shape.
+# Each shape is a distinct `return_value_is_heap?` case arm.
+def escape_via_return_shape_cell(shape)
+  case shape
+  when :list_literal
+    <<~CHT
+      FN make() RETURNS !Int64[] ->
+          RETURN [1_i64, 2_i64, 3_i64];
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT length(result) == 3_i64, "return list literal";
+          RETURN;
+      END
+    CHT
+  when :hash_literal
+    <<~CHT
+      FN make() RETURNS !HashMap<Int64> ->
+          RETURN {};
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT result.count() == 0_i64, "return hash literal";
+          RETURN;
+      END
+    CHT
+  when :str_literal
+    <<~CHT
+      FN make() RETURNS !String ->
+          RETURN COPY "literal";
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT result == "literal", "return string literal";
+          RETURN;
+      END
+    CHT
+  when :concat
+    <<~CHT
+      FN make(a: String, b: String) RETURNS !String ->
+          RETURN a + b;
+      END
+
+      FN main() RETURNS Void ->
+          result = make("he", "llo");
+          ASSERT result == "hello", "return concat";
+          RETURN;
+      END
+    CHT
+  when :call_result
+    <<~CHT
+      FN inner() RETURNS !Int64[]@list ->
+          MUTABLE xs: Int64[]@list = [];
+          xs.append(9_i64);
+          RETURN xs;
+      END
+
+      FN make() RETURNS !Int64[]@list ->
+          RETURN inner();
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT result.length() == 1_i64, "return call result";
+          RETURN;
+      END
+    CHT
+  when :if_branches
+    <<~CHT
+      FN make(flag: Bool) RETURNS !Int64[]@list ->
+          MUTABLE a: Int64[]@list = [];
+          a.append(1_i64);
+          MUTABLE b: Int64[]@list = [];
+          b.append(2_i64);
+          b.append(3_i64);
+          IF flag THEN RETURN a; END
+          RETURN b;
+      END
+
+      FN main() RETURNS Void ->
+          r1 = make(TRUE);
+          ASSERT r1.length() == 1_i64, "return if-branch then";
+          r2 = make(FALSE);
+          ASSERT r2.length() == 2_i64, "return if-branch else";
+          RETURN;
+      END
+    CHT
+  when :field_copy
+    <<~CHT
+      STRUCT Holder { items: Int64[]@list }
+
+      FN make() RETURNS !Int64[]@list ->
+          MUTABLE xs: Int64[]@list = [];
+          xs.append(3_i64);
+          hld = Holder{ items: xs };
+          RETURN COPY hld.items;
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT result.length() == 1_i64, "return field copy";
+          RETURN;
+      END
+    CHT
+  when :index_copy
+    <<~CHT
+      FN make() RETURNS !Int64[]@list ->
+          MUTABLE inner: Int64[]@list = [];
+          inner.append(2_i64);
+          MUTABLE outer: Int64[][]@list = [];
+          outer.append(inner);
+          RETURN COPY outer[0_i64];
+      END
+
+      FN main() RETURNS Void ->
+          result = make();
+          ASSERT result.length() == 1_i64, "return index copy";
+          RETURN;
+      END
+    CHT
+  when :indirect_struct
+    <<~CHT
+      STRUCT Cfg { setting: Int64 }
+
+      FN make() RETURNS !Cfg @indirect ->
+          cfg = Cfg{ setting: 7_i64 };
+          RETURN cfg;
+      END
+
+      FN main() RETURNS Void ->
+          c = make();
+          ASSERT c.setting == 7_i64, "return @indirect struct";
+          RETURN;
+      END
+    CHT
+  when :indirect_struct_string
+    <<~CHT
+      STRUCT Person { name: String }
+
+      FN make() RETURNS !Person @indirect ->
+          p = Person{ name: COPY "alice" };
+          RETURN p;
+      END
+
+      FN main() RETURNS Void ->
+          r = make();
+          ASSERT r.name == "alice", "return @indirect struct w/ String field";
+          RETURN;
+      END
+    CHT
+  end
+end
+
 FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p|
+  # Axis 2 dispatch: return-expression-shape cells are self-contained.
+  if p[:return_shape] && p[:return_shape] != :ident
+    next escape_via_return_shape_cell(p[:return_shape])
+  end
+
   size = p[:size]
 
   # ── Per-type wiring: declared return type, allocation literal,

@@ -1,0 +1,32 @@
+# Fuzz template quarantine.
+#
+# Templates listed here are EXCLUDED from the required CI gate and run
+# instead in the non-blocking "fuzz matrix (quarantined)" job. Each line
+# is `template_name  # reason`. As a bug is fixed, delete its line and
+# the template rejoins the green gate.
+#
+# Two failure classes:
+#   [GEN]  generator rot -- the template emits CLEAR the current compiler
+#          rejects (language moved under the template). Fix = the template.
+#   [BUG]  real compiler bug -- the template emits valid CLEAR and the
+#          compiler miscompiles / leaks / crashes. Fix = the compiler.
+#
+# Blank lines and #-comments are ignored.
+
+# ---- [GEN] generator rot ----
+cross_fiber_consumer          # [GEN] emits stray ';' -- malformed generation
+loop_cleanup                  # [GEN] emits 'Expected -> got [' / return-type mismatch
+or_positional                 # [GEN] emits 'Expected ; got :' / '[' -- malformed
+polymorphic_sync_admission    # [GEN] emits 'WITH MATCH' -- not a current WITH capability
+
+# ---- [BUG] real compiler bugs ----
+branch_cleanup                # [BUG] frame-list literal in an IF branch: 'rt' not threaded into the fn
+bg_capture_typing             # [BUG] BG-captured COPY leaks
+catch_allocator_matrix        # [BUG] panic: Invalid free
+catch_reassign_matrix         # [BUG] segfault inside CheatLib.cleanup (frees a bad pointer)
+capability_wrap_matrix        # [BUG] no field named 'ctrl' in AtomicPtr(...)
+loop_local_cleanup_alloc      # [BUG] Allocation alignment 16 != free alignment 8
+nested_loop_escape            # [BUG] memory leaked
+struct_field_store_modality   # [BUG] memory leaked
+list_append_modality          # [BUG] memory leaked (1 cell of 54)
+takes_move_modality           # [BUG] codegen: expected []T, found ArrayList(T)

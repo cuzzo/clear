@@ -114,8 +114,13 @@ class SymbolEntry
                 :layout,         # nil | :indirect — heap-pinned cell with stable address
                 :mutable_ref_target, # This binding is passed to a MUTABLE parameter by reference.
                                      # Forces Zig `var` storage so &binding yields *T, not *const T.
-                :poly_borrow_target  # address is taken at a universal-polymorphic call site;
+                :poly_borrow_target, # address is taken at a universal-polymorphic call site;
                                      # forces mutable Zig storage so the callee can write back.
+                :init_contents_heap  # true when the binding's init expression's heap-bearing
+                                     # fields are all in heap_provenance already (e.g. struct
+                                     # lit with COPY'd strings). Legacy field; not an escape decision.
+                                     # Escape placement is symbol.storage. See docs/agents/
+                                     # provenance-collapse.md.
 
   # The binding's type. Single coercing seam: every input is laundered
   # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
@@ -197,6 +202,43 @@ class SymbolEntry
     @storage == :shared || @storage == :multiowned
   end
 
+  # Canonical "where does this binding's data live?" accessor — SIMP-13b.
+  # Returns the storage axis filtered to provenance values
+  # (:heap, :frame, :rodata, :borrow) so callers replacing
+  # `type.provenance` get an equivalent answer. Storage modes that aren't
+  # provenance (:multiowned, :shared, :link, :local, :frozen) → nil
+  # because Type#provenance also returned nil for those.
+  PROVENANCE_STORAGE = T.let(
+    [:heap, :frame, :rodata, :borrow, :stack].freeze,
+    T::Array[Symbol]
+  )
+  sig { returns(T.nilable(Symbol)) }
+  def provenance
+    return nil unless PROVENANCE_STORAGE.include?(@storage)
+    @storage
+  end
+
+  # Provenance predicates — SIMP-13f. Symbol#storage is the canonical source.
+  sig { returns(T::Boolean) }
+  def heap_provenance?
+    @storage == :heap
+  end
+
+  sig { returns(T::Boolean) }
+  def frame_provenance?
+    @storage == :frame
+  end
+
+  sig { returns(T::Boolean) }
+  def rodata_provenance?
+    @storage == :rodata
+  end
+
+  sig { returns(T::Boolean) }
+  def borrow_provenance?
+    @storage == :borrow
+  end
+
   sig { returns(T::Boolean) }
   def non_escaping
     @lifetime == :current_scope
@@ -271,5 +313,6 @@ class SymbolEntry
     @is_param = T.let(false, T::Boolean)
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
+    @init_contents_heap = T.let(false, T::Boolean)
   end
 end

@@ -2,6 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
+require_relative "../src/mir/escape_graph"
 
 # Phase 2 validation: provenance is set correctly during annotation
 # and agrees with existing flags (heap_promoted, location, cleanup_alloc).
@@ -11,6 +12,10 @@ RSpec.describe "Provenance annotation" do
     ast = Parser.new(tokens, src).parse
     a = SemanticAnnotator.new
     a.annotate!(ast)
+    fn_nodes = ast.statements.each_with_object({}) do |s, h|
+      h[s.name] = s if s.is_a?(AST::FunctionDef)
+    end
+    EscapeGraph.apply!(fn_nodes)
     [ast, a]
   end
 
@@ -87,7 +92,7 @@ RSpec.describe "Provenance annotation" do
       ti = binding.full_type
       ti = Type.new(ti) if !ti.is_a?(Type)
       # Provenance should be :heap for promoted return values
-      if ti.heap_provenance?
+      if ti.heap?
         expect(ti.provenance).to eq(:heap)
       end
     end

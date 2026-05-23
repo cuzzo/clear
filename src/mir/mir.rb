@@ -334,6 +334,12 @@ module MIR
     # discard: true -> emit `_ = expr;`
   end
 
+  # Owning expression used as a statement.
+  # Zig: evaluate into a scoped temp and clean it at the end of that scope.
+  DiscardOwned = Struct.new(:expr, :cleanup_entry, :zig_type) do
+    include Stmt
+  end
+
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
   # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
   #
@@ -1095,24 +1101,6 @@ module MIR
     include Stmt
   end
 
-  # --- Escape Promotion ---
-
-  # Escape promotion. Subsumes old MIR::Promote.
-  # Strategy determines the Zig pattern:
-  #   :list         -> try CheatLib.promoteList(elem, rt, &name);
-  #   :string_map   -> name.alloc = rt.heapAlloc();
-  #   :generic      -> try CheatLib.promote(zig_type, rt, &name);
-  #   :generic_deep -> try CheatLib.promoteDeep(zig_type, rt, &name);
-  # `name` may be a dotted path (e.g. "__ret.field") for per-field
-  # promotion in a return-with-promotion pattern; the emitter takes &name
-  # verbatim.
-  EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr, :elem_type) do
-    include Stmt
-    # data: strategy-specific payload (field set, alloc symbol, etc.)
-    # rt_expr: Zig expression for runtime (e.g. "rt", "do_rt")
-    # elem_type: Zig element type for :list promotion.
-  end
-
   # --- Deep Copy ---
 
   # Explicit deep copy (COPY keyword). Strategy determines the pattern:
@@ -1785,7 +1773,7 @@ module MIR
   #                template uses it).
   #   map_kind:    :string_map | :numeric_map -- chooses key encoding.
   #   stdlib_def:  the INDEX_OPS entry (with :zig, :shard_direct_zig,
-  #                :sharded_zig, allocator keys, value_transforms,
+  #                :sharded_zig, allocator keys,
   #                bc_op). The Zig emitter reads this to pick the
   #                template; the checker reads it to validate
   #                ownership effects.

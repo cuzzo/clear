@@ -16,9 +16,7 @@ require_relative "capture_strategy"
 #   init:       `.name = name`
 #   body access: `<prefix>.name`
 #
-# (with a per-name override to `[]const u8` + a promoted-local init for
-# BG string captures that get heap-duped via fiber_string_promotes,
-# AND a FreshHeapCopy override -- see below.)
+# FreshHeapCopy captures may override the field/init shape; see below.
 #
 # This builder produces a normalized list of CaptureSpec entries that
 # each callsite can render either as a Zig string (BG / BG STREAM /
@@ -92,10 +90,8 @@ module FiberCtxBuilder
   # `body_access_prefix`  -- the Zig identifier the body uses to reach
   #                          captured fields (e.g. "ctx" for DO/CONCURRENT,
   #                          "__ctx_<id>" for BG).
-  # `promoted_names`      -- BG-only override map. For names in this hash,
-  #                          the field type is []const u8 and the init
-  #                          uses the promoted local (heap-duped string).
-  #                          Pass {} when no string-promotes apply.
+  # `promoted_names`      -- legacy compatibility override map. New escape
+  #                          placement should prefer FreshHeapCopy captures.
   # `fresh_heap_alloc`    -- Zig variable name for the allocator that
   #                          owns FreshHeapCopy dupes. Required for
   #                          FreshHeapCopy emission; when nil, FreshHeapCopy

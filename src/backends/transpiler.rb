@@ -13,7 +13,7 @@ require_relative "../ast/ast"
 require_relative "./importer"
 require_relative "../annotator"
 require_relative "./zig_type_mapper"
-require_relative "../mir/promotion_plan"
+require_relative "../mir/cleanup_classifier"
 require_relative "./pipeline_rewriter"
 require_relative "./string_concat_rewriter"
 require_relative "../mir/control_flow"
@@ -321,6 +321,7 @@ if __FILE__ == $0
   if script_file
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
+    ENV["AUDIT_CURRENT_FILE"] = script_file
     transpiler = ZigTranspiler.new
 
     case options[:mode]

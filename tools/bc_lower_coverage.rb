@@ -27,6 +27,7 @@ files = (
   Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.cht')) +
   Dir.glob(File.join(ROOT, 'transpile-tests', 'fuzz', '*.cht'))
 ).reject { |f| File.basename(f).start_with?('._') }
+  .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
   .uniq.sort
 
 lowered = 0

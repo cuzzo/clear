@@ -1,27 +1,27 @@
 # typed: strict
 # src/mir_pass.rb - MIR transformation pass
 #
-# Runs after annotation. Classifies cleanup bindings, stamps fn.cleanup_bindings,
-# inserts MIR promotion/suppress nodes, and propagates heap provenance.
+# Runs after annotation. Escape analysis has already decided binding storage;
+# this pass classifies cleanup bindings and inserts cleanup/suppress nodes.
 #
-# Dependencies are defined in control_flow.rb (required first) and promotion_plan.rb.
+# Dependencies are defined in control_flow.rb (required first) and cleanup_classifier.rb.
 
 require "sorbet-runtime"
 
-require_relative "promotion_plan"
+require_relative "cleanup_classifier"
 require_relative "escape_analysis"
 require_relative "escape_graph"
+require_relative "control_flow"
 
 class MIRPass
     extend T::Sig
 
   # Read-only context threaded through transform_body / recurse_branches!.
-  # Reek flagged the (bindings, promo) carry-down across many call sites.
-  WalkCtx = Struct.new(:bindings, :promo, keyword_init: true) do
+  WalkCtx = Struct.new(:bindings, keyword_init: true) do
     extend T::Sig
 
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.untyped).void }
-    def initialize(bindings:, promo:)
+    sig { params(bindings: T::Hash[String, CleanupEntry]).void }
+    def initialize(bindings:)
       super
     end
 
@@ -30,14 +30,9 @@ class MIRPass
       self[:bindings]
     end
 
-    sig { returns(T.untyped) }
-    def promo
-      self[:promo]
-    end
-
-    sig { params(bindings: T::Hash[String, CleanupEntry], promo: T.untyped).returns(MIRPass::WalkCtx) }
-    def with(bindings: self.bindings, promo: self.promo)
-      MIRPass::WalkCtx.new(bindings: bindings, promo: promo)
+    sig { params(bindings: T::Hash[String, CleanupEntry]).returns(MIRPass::WalkCtx) }
+    def with(bindings: self.bindings)
+      MIRPass::WalkCtx.new(bindings: bindings)
     end
   end
 
@@ -50,68 +45,58 @@ class MIRPass
     @fn_nodes = fn_nodes
     @schema_lookup = schema_lookup
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
-    @fn_has_catch = T.let(false, T::Boolean)
+  end
+
+  sig { params(bindings: T::Hash[String, CleanupEntry], name: T.untyped).returns(T.nilable(CleanupEntry)) }
+  def live_cleanup_entry(bindings, name)
+    entry = bindings[name.to_s]
+    entry&.needs_cleanup? ? entry : nil
   end
 
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
-  # Phase 0 hoists heap-promoted temporaries (HPTs) into VarDecl nodes so that
-  # existing classify_binding + cleanup_bindings infrastructure handles their cleanup.
-  # PromotionClassifier must run before cleanup classification because its Phase 0
-  # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
-  # that the classifier depends on.
+  # Hoist has already lifted anonymous allocating expressions into bindings.
+  # Escape analysis writes final binding storage; this pass inserts MIR markers.
   sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def transform!(ast)
-    # The single value-flow escape analysis. ONE rule per declaration:
-    #   storage = :heap iff inherently_heap?(type)
-    #                     ∨ (escapes?(value-flow graph) ∧ @list/String)
-    # Replaces the 5 fragmented proxies (E1 compute_heap_return_fns!,
-    # E2 analyze! 9 conditions, E3a tag_transitive_provenance!, E3b
-    # tag_carry_call_sites!, and the escape half of PromotionClassifier).
-    # Produces heap_fns and stamps storage/provenance on heap decls.
-    # MIRChecker's 7 invariants are unchanged and PROVE the result
-    # (fail-closed: any escape gap surfaces as a located error).
-    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes)
+    # Dead-simple escape analysis: mark SymbolEntry#storage = :heap for the
+    # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
+    heap_fns, @bg_heap_upgraded = EscapeGraph.apply!(@fn_nodes, @schema_lookup)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
 
-    # Propagate caller arg sync into callee param SymbolEntry#sync.
-    # Runs after annotation has stamped local bindings; before classification
-    # passes that read sync (CleanupClassifier, mir_lowering).
-    EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
+    # SYNC propagation ran inside EscapeGraph.apply! above (single-pass
+    # escape principle). Nothing to do here.
 
-    # Phase 1: classify promotions for all functions. Storage is already
-    # decided at declaration time by EscapeGraph; this builds the
-    # (now mostly degenerate) promotion plan downstream lowering reads.
-    promotion_plans = {}
-    @fn_nodes.each do |name, fn|
-      promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
-    end
+    # needs_rt finalization: the annotator computed needs_rt before
+    # escape analysis, so it could not see a function that owns a
+    # heap-placed local (escape analysis decides that). Any function
+    # with a heap binding allocates via `rt`; propagate to its callers
+    # (they must thread rt to pass it).
+    finalize_needs_rt!
 
-    # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
-    # provenance before classification.
-    LoopFrameAnalysis.analyze!(@fn_nodes)
+    # Promotion planning is gone: escape analysis writes symbol.storage;
+    # lowering and cleanup only read that fact.
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
     end
 
+    LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup)
+
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(stmt, promotion_plans[stmt.name])
+      transform_function!(stmt)
     end
 
     # Synthetic test-body wrappers live in @fn_nodes but never appear
     # under ast.statements, so the loop above skips them. Run the same
     # transform on each so MIR::Drop / MIR::Cleanup nodes land on the
-    # shared body array (which is also AST::TestThat.body). Keyed by
-    # the wrapper name prefix CompilerFrontend.synthesize_test_body_wrappers!
-    # generates -- intentionally narrow so we don't transform anything
-    # else that someone might add to fn_nodes later.
+    # shared body array (which is also AST::TestThat.body).
     @fn_nodes.each do |name, fn|
       next unless name.is_a?(String) && name.start_with?("__test_body_")
       next unless fn&.body
-      transform_function!(fn, promotion_plans[name])
+      transform_function!(fn)
     end
 
     # MIR escape analysis can discover heap-return provenance after the
@@ -127,22 +112,64 @@ class MIRPass
 
   private
 
-  sig { params(fn: AST::FunctionDef, promo: T::Hash[Symbol, T.any(T::Array[T::Hash[Symbol, String]], T::Set[Integer])]).returns(T.nilable(T::Hash[String, TrueClass])) }
-  def transform_function!(fn, promo)
+  # Finalize needs_rt after escape analysis. The annotator's
+  # compute_needs_rt! ran before placement was decided, so it could not
+  # see a function that owns a heap-placed LOCAL (escape analysis
+  # decides that). Any function with a heap binding allocates via `rt`;
+  # propagate to callers, which must thread rt to pass it.
+  sig { void }
+  def finalize_needs_rt!
+    @fn_nodes.each do |_name, fn|
+      next unless fn.body
+      next if fn.needs_rt
+      if fn.return_provenance == :heap
+        fn.needs_rt = true
+        next
+      end
+      AST.walk_body(fn.body) do |n|
+        if (n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.heap_provenance?
+          fn.needs_rt = true
+        end
+      end
+    end
+    callees = T.let({}, T::Hash[String, T::Set[String]])
+    @fn_nodes.each do |name, fn|
+      next unless fn.body
+      cs = T.let(Set.new, T::Set[String])
+      collect_callees(fn.body, cs)
+      callees[name] = cs
+    end
+    changed = T.let(true, T::Boolean)
+    while changed
+      changed = false
+      @fn_nodes.each do |name, fn|
+        next unless fn.body && !fn.needs_rt
+        if callees[name]&.any? { |c| @fn_nodes[c]&.needs_rt }
+          fn.needs_rt = true
+          changed = true
+        end
+      end
+    end
+  end
+
+  sig { params(node: T.untyped, acc: T::Set[String]).void }
+  def collect_callees(node, acc)
+    return if node.nil?
+    if node.is_a?(Array)
+      node.each { |c| collect_callees(c, acc) }
+      return
+    end
+    return unless node.is_a?(Struct)
+    acc << node.name.to_s if (node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)) && node.name
+    node.to_a.each { |c| collect_callees(c, acc) }
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T.nilable(T::Hash[String, TrueClass])) }
+  def transform_function!(fn)
     bindings = @cleanup_bindings[fn.name] || {}
     has_bindings = bindings && !bindings.empty?
-    promo = nil if promo.empty?
 
-    fn.has_promotion = true if promo
-
-    has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
-    has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
-
-    # BG scope-exit annotation runs unconditionally: the function may have no
-    # bindings/promotions but still contain BG blocks returning frame values.
-    annotate_bg_exits_in_body!(fn.body)
-
-    return unless has_bindings || promo || has_bg_escapes || has_catch
+    return unless has_bindings
 
     # Borrow checking: verify no moves of borrowed variables inside WITH blocks.
     bc_errors = BorrowChecker.check(fn, schema_lookup: @schema_lookup)
@@ -172,8 +199,8 @@ class MIRPass
     # and collect_return_escapes emits SuppressCleanup before the return.
     if fn.respond_to?(:heap_carry_return_vars) && fn.heap_carry_return_vars&.any? && bindings
       fn.heap_carry_return_vars.each do |var_name|
-        entry = bindings[var_name.to_s]
-        next unless entry && entry.needs_cleanup?
+        entry = live_cleanup_entry(bindings, var_name)
+        next unless entry
         entry[:has_moved_guard] = true
       end
     end
@@ -185,23 +212,9 @@ class MIRPass
     # Stamp field pre-cleanup info directly on Assignment nodes.
     CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
 
-    @fn_has_catch = has_catch
     @current_transform_fn = T.let(fn, T.untyped)
-    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings, promo: promo))
+    fn.body = transform_body(fn.body, WalkCtx.new(bindings: bindings))
     @current_transform_fn = T.let(nil, T.untyped)
-
-    # Transform catch clause bodies so string returns are annotated for heap-dupe.
-    if has_catch
-      empty_ctx = WalkCtx.new(bindings: {}, promo: nil)
-      fn.catch_clauses.each do |clause|
-        tb = transform_body(clause.body, empty_ctx)
-        clause.body = tb if tb
-      end
-      if fn.default_catch.is_a?(Array)
-        fn.default_catch = transform_body(fn.default_catch, empty_ctx)
-      end
-    end
-    @fn_has_catch = false
 
     # Build moved_guard_info map: { var_name => bool } for all bindings.
     stamp_moved_guard_info!(fn, bindings) if has_bindings
@@ -227,8 +240,8 @@ class MIRPass
         resource_captures = bg.capture_analysis&.resource_captures
         next unless resource_captures&.any?
         resource_captures.each do |name|
-          entry = bindings.dig(name)
-          next unless entry && entry.needs_cleanup?
+          entry = live_cleanup_entry(bindings, name)
+          next unless entry
           entry[:has_moved_guard] = true
         end
       end
@@ -261,18 +274,13 @@ class MIRPass
     return stmts unless stmts.is_a?(Array)
     result = []
     bindings = ctx.bindings
-    promo = ctx.promo
     stmts.each do |stmt|
       # Recurse into nested control flow first.
       recurse_branches!(stmt, ctx)
 
-      # Insert Return (escape markers) + Promote before ReturnNode.
+      # Insert Return (escape markers) before ReturnNode.
       if stmt.is_a?(AST::ReturnNode)
         insert_return!(result, stmt, bindings, fn_node: @current_transform_fn)
-        insert_promotion!(result, stmt, promo)
-        # Catch string dupe: heap-dupe string returns so both success and
-        # error paths have consistent allocation for caller cleanup.
-        insert_catch_string_dupe!(result, stmt) if @fn_has_catch
       end
 
       # Stamp cleanup info on reassignment / match-as nodes.
@@ -281,37 +289,17 @@ class MIRPass
       stamp_while_bind_cleanup!(stmt, bindings)
       stamp_if_bind_cleanup!(stmt, bindings)
 
-      # Insert MIR::Promote before container stores that need frame-to-heap promotion.
-      insert_container_promote!(result, stmt)
-
-      # BG escape promotions: frame-allocated captures must be promoted to heap.
-      insert_bg_escape_promote!(result, stmt)
-
-      # BG scope-exit promotion: annotate BgBlocks with what their exit value needs.
-      # Must run after recurse_branches! so the BgBlock body is already transformed.
-      AST.each_bg_block_in_stmt(stmt) do |bg|
-        if bg.is_a?(AST::BgBlock)
-          annotate_bg_exit_promote!(bg)
-        elsif bg.is_a?(AST::BgStreamBlock)
-          annotate_yield_string_dupes!(bg)
-        end
-      end
-
-      # OrRescue fallback dupe: when success path is heap-promoted and fallback
-      # is a struct literal, string fields need heap-duping for consistent cleanup.
-      insert_or_fallback_dupe!(result, stmt)
-
       # Emit the original statement.
       result << stmt
 
       # Insert MIR verification nodes for reassignment and field pre-cleanup.
       if stmt.is_a?(AST::BindExpr) && stmt.reassign_cleanup
-        result << MIR::ReassignCleanup.new(stmt.token, stmt.name.to_s, stmt.reassign_cleanup[:alloc])
+        result << MIR::ReassignCleanup.new(stmt.token, stmt.name.to_s, stmt.reassign_cleanup.alloc!)
       end
       if stmt.is_a?(AST::Assignment) && stmt.field_pre_cleanup
         target = stmt.name
         target_name = target.is_a?(AST::GetField) && target.target.respond_to?(:name) ? target.target.name.to_s : nil
-        result << MIR::FieldCleanup.new(stmt.token, target_name, target.field, stmt.field_pre_cleanup[:alloc]) if target_name
+        result << MIR::FieldCleanup.new(stmt.token, target_name, target.field, stmt.field_pre_cleanup) if target_name
       end
 
       # Insert SuppressCleanup after statements that consume bindings.
@@ -422,8 +410,7 @@ class MIRPass
     # call when it processes the inner BG's body.
     AST.each_bg_block_in_stmt(stmt) do |bg|
       bg.capture_analysis&.move_mark_names&.each do |name|
-        entry = bindings.dig(name)
-        next unless entry && entry.needs_cleanup?
+        next unless live_cleanup_entry(bindings, name)
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
     end
@@ -454,228 +441,6 @@ class MIRPass
     end
   end
 
-  # Quick check: does the function body contain any BG/stream blocks with
-  # captures needing escape promotion? Used to ensure transform_body runs
-  # even for functions with no cleanup bindings.
-  sig { params(stmts: T::Array[T.untyped]).returns(T::Boolean) }
-  def body_has_bg_escape_promotes?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |stmt|
-      found = T.let(false, T::Boolean)
-      AST.each_bg_block(stmt) do |bg|
-        captured = bg.capture_analysis&.captures
-        next unless captured&.any?
-        found = true if captured.any? do |name, type_obj|
-          t = type_obj ? Type.new(type_obj) : nil
-          t && t.needs_escape_promotion? && !t.needs_pointer_passing? && !@bg_heap_upgraded&.include?(name)
-        end
-      end
-      found
-    end
-  end
-
-  # Annotate a BgBlock with the scope-exit promotion its last expression needs.
-  # Mirrors the logic insert_promotion!/insert_catch_string_dupe! apply to
-  # function ReturnNodes, but for the BG fiber's implicit return value.
-  # Currently handles strings; struct field promotion is left for future work.
-  # Walk a statement list looking for BgBlocks (in expression position) and
-  # annotate each with the scope-exit promotion its last expression needs.
-  # Must run unconditionally — the outer function may have no bindings/promotions
-  # but still contain BG blocks that return frame-allocated values.
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
-  def annotate_bg_exits_in_body!(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      AST.each_bg_block_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
-      # Recurse into control-flow branches.
-      case stmt
-      when AST::IfStatement
-        annotate_bg_exits_in_body!(stmt.then_branch)
-        annotate_bg_exits_in_body!(stmt.else_branch)
-      when AST::WhileLoop
-        annotate_bg_exits_in_body!(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        annotate_bg_exits_in_body!(stmt.body)
-      when AST::MatchStatement
-        stmt.cases.each { |c| annotate_bg_exits_in_body!(c.body) }
-        annotate_bg_exits_in_body!(stmt.default_case)
-      when AST::WithBlock
-        annotate_bg_exits_in_body!(stmt.body)
-      when AST::DoBlock
-        stmt.branches.each { |b| annotate_bg_exits_in_body!(b[:body]) }
-      end
-    end
-  end
-
-  sig { params(bg_node: AST::BgBlock).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-  def annotate_bg_exit_promote!(bg_node)
-    body = bg_node.body
-    return unless body.is_a?(Array)
-
-    # Walk backward past MIR marker nodes to find the last real expression.
-    last_expr = T.let(nil, T.untyped)
-    body.reverse_each do |stmt|
-      next if stmt.is_a?(MIR::Alloc) || stmt.is_a?(MIR::Drop) ||
-              stmt.is_a?(MIR::SuppressCleanup) || stmt.is_a?(MIR::Return) ||
-              stmt.is_a?(MIR::Promote) || stmt.is_a?(MIR::AllocMark) ||
-              stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::MoveMark)
-      last_expr = stmt.is_a?(AST::ThenChain) ? stmt.steps.last&.dig(:expr) : stmt
-      break
-    end
-
-    return unless last_expr
-    return if last_expr.is_a?(AST::Assignment)
-
-    t = last_expr.full_type
-    return if t.void?
-
-    bg_node.exit_promote = { strategy: :string_dupe } if bg_exit_needs_string_dupe?(last_expr, t)
-  end
-
-  # Returns true when a BG block's last expression is a frame-allocated string
-  # that will be invalidated when the fiber's frame is rewound on exit.
-  # - rodata strings (literals) live in the binary — safe without dupe.
-  # - heap strings are already owned by the caller — no dupe needed.
-  # - frame strings (from allocating stdlib calls or frame-provenance types) must be duped.
-  sig { params(expr: T.untyped, t: Type).returns(T::Boolean) }
-  def bg_exit_needs_string_dupe?(expr, t)
-    return false unless t.string?
-    return false if t.heap? || t.rodata?
-    return true  if t.frame?
-    # No explicit provenance: check the stdlib def for frame allocation.
-    msd = expr.matched_stdlib_def
-    !!(msd && msd.emit&.return_alloc == :frame)
-  end
-
-  # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.
-  # Sets yield_node.yield_dupe = true; the lowerer then wraps the push arg in a heap dupe.
-  sig { params(stream_node: AST::BgStreamBlock).returns(T.nilable(T::Array[T.untyped])) }
-  def annotate_yield_string_dupes!(stream_node)
-    walk_stream_yields(stream_node.body)
-  end
-
-  sig { params(stmts: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
-  def walk_stream_yields(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      if stmt.is_a?(AST::YieldExpr)
-        t = stmt.expr.full_type
-        stmt.yield_dupe = true if bg_exit_needs_string_dupe?(stmt.expr, t)
-      else
-        case stmt
-        when AST::WhileLoop    then walk_stream_yields(stmt.do_branch)
-        when AST::ForRange, AST::ForEach then walk_stream_yields(stmt.body)
-        when AST::IfStatement
-          walk_stream_yields(stmt.then_branch)
-          walk_stream_yields(stmt.else_branch)
-        when AST::BgStreamBlock  # stop at nested stream boundaries
-        end
-      end
-    end
-  end
-
-  # Insert MIR::Promote for frame-allocated variables captured by BG/stream fibers.
-  # Lists get :list strategy (in-place promoteList). Strings get :bg_string
-  # strategy (transpiler emits dupe inside the BG block where the allocator is available).
-  sig { params(result: T::Array[T.untyped], stmt: T.untyped).returns(T.untyped) }
-  def insert_bg_escape_promote!(result, stmt)
-    # Shallow walk: MIR::Promote is emitted in this scope. Nested BG
-    # captures from inner scope; their own Promote is emitted by the
-    # recursive transform_body call on the inner BG body.
-    AST.each_bg_block_in_stmt(stmt) do |bg|
-      captured = bg.capture_analysis&.captures
-      next unless captured&.any?
-      captured.each do |name, type_obj|
-        t = type_obj ? Type.new(type_obj) : nil
-        next unless t && t.needs_escape_promotion?
-        next if t.needs_pointer_passing?
-        # A captured param is borrowed `*const T`: in-place
-        # promoteList(&param) discards const, and the COPY capture
-        # strategy already deep-copies it. Only locals are promotable.
-        next if bg.capture_analysis&.capture_symbols&.dig(name)&.is_param
-        next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
-        if t.list_collection?
-          result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil, list_elem_zig_type(t))
-        else
-          # :bg_string: annotate directly on BgBlock (no MIR::Promote needed)
-          bg.capture_string_dupes ||= Set.new
-          bg.capture_string_dupes.add(name)
-        end
-      end
-    end
-  end
-
-  # Annotate the ReturnNode when a catch function returns a string type.
-  # Both success and error paths must return heap-backed strings for
-  # consistent caller cleanup. Annotation on the node replaces the old
-  # MIR::Promote(:catch_string_dupe) pending-flag mechanism.
-  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode).returns(T.nilable(T::Boolean)) }
-  def insert_catch_string_dupe!(result, ret_node)
-    return unless ret_node.value
-    return unless ret_node.value.full_type.string?
-    ret_node.catch_string_dupe_ret = true
-  end
-
-  # Annotate an OrRescue node where the success path is heap-promoted and the
-  # fallback is a struct literal. Sets or_fallback_dupe on the BinaryOp so the
-  # transpiler heap-dupes string fields in the fallback to match cleanup semantics.
-  sig { params(result: T::Array[T.untyped], stmt: T.untyped).void }
-  def insert_or_fallback_dupe!(result, stmt)
-    or_node = find_or_rescue_in_value(stmt)
-    return unless or_node
-    return unless or_node.right.is_a?(AST::StructLit)
-    return unless or_rescue_needs_fallback_dupe?(or_node)
-    # Annotate directly on BinaryOp node (no MIR::Promote needed)
-    or_node.or_fallback_dupe = true
-  end
-
-  # Walk into a statement's value expression to find an OrRescue node.
-  sig { params(stmt: T.untyped).returns(T.nilable(AST::BinaryOp)) }
-  def find_or_rescue_in_value(stmt)
-    expr = case stmt
-           when AST::VarDecl, AST::BindExpr then stmt.value
-           when AST::Assignment then stmt.value
-           when AST::ReturnNode then stmt.value
-           else nil
-           end
-    find_or_rescue_expr(expr)
-  end
-
-  sig { params(expr: T.untyped).returns(T.nilable(AST::BinaryOp)) }
-  def find_or_rescue_expr(expr)
-    return nil unless expr
-    if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
-      return expr
-    end
-    if expr.is_a?(AST::BinaryOp) && expr.op == :OR
-      return find_or_rescue_expr(expr.left)
-    end
-    nil
-  end
-
-  # Check if an OrRescue's success path is heap-promoted (same logic as
-  # the transpiler's has_heap_promoted_call? but at MIR insertion time).
-  sig { params(or_node: AST::BinaryOp).returns(T::Boolean) }
-  def or_rescue_needs_fallback_dupe?(or_node)
-    return false unless or_node.is_a?(AST::BinaryOp) && or_node.op == :OR_RESCUE
-    left = or_node.left
-    return true if left.full_type.heap_provenance?
-    if left.is_a?(AST::BinaryOp) && (left.op == :OR || left.op == :OR_RESCUE)
-      return or_rescue_needs_fallback_dupe_left?(left)
-    end
-    false
-  end
-
-  sig { params(expr: T.untyped).returns(T::Boolean) }
-  def or_rescue_needs_fallback_dupe_left?(expr)
-    return false unless expr
-    return true if expr.full_type.heap_provenance?
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
-      return or_rescue_needs_fallback_dupe_left?(expr.left)
-    end
-    false
-  end
-
   # Collect names of bindings consumed by a statement.
   # Three consumption paths:
   #   1. Direct RHS: identifier used as value in assignment/declaration
@@ -689,28 +454,20 @@ class MIRPass
     rhs = case stmt
           when AST::VarDecl    then stmt.value
           when AST::BindExpr   then stmt.value
-          when AST::Assignment
-            # Map indexed assignments (map[k] = val) apply dupeUnionValue before
-            # calling put, so the map stores a deep copy. The original value is NOT
-            # consumed -- its cleanup defer must fire normally.
-            lhs = stmt.name
-            if lhs.is_a?(AST::GetIndex)
-              lhs.target.full_type.map? ? nil : stmt.value
-            else
-              stmt.value
-            end
+          when AST::Assignment then stmt.value
           else nil
           end
 
     if rhs
-      is_move = rhs.is_a?(AST::MoveNode)
-      ident = is_move ? rhs.value : rhs
-      add_if_consumed(ident, names, bindings, is_move) if ident.is_a?(AST::Identifier)
+      # Structural unwrap only; the move decision reads the annotator's
+      # was_moved stamp, not the MoveNode node type (INV-13).
+      ident = rhs.is_a?(AST::MoveNode) ? rhs.value : rhs
+      add_if_consumed(ident, names, bindings, ident.was_moved == true) if ident.is_a?(AST::Identifier)
     end
 
     # 2. Standalone GIVE: `GIVE x;` as a bare statement
     if stmt.is_a?(AST::MoveNode) && stmt.value.is_a?(AST::Identifier)
-      add_if_consumed(stmt.value, names, bindings, true)
+      add_if_consumed(stmt.value, names, bindings, stmt.value.was_moved == true)
     end
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
@@ -742,9 +499,24 @@ class MIRPass
           walk_consumed(v, names, bindings)
         end
       end
+    when AST::ListLit
+      node.items.each { |i| walk_consumed(i, names, bindings) }
+    when AST::GetField
+      if owning_field_move?(node)
+        root = AST.root_identifier(node)
+        if root
+          entry = live_cleanup_entry(bindings, root.name)
+          if entry
+            entry[:has_moved_guard] = true
+            names << root.name.to_s
+          end
+        end
+      else
+        walk_consumed(node.target, names, bindings)
+      end
     when AST::MoveNode
       if node.value.is_a?(AST::Identifier)
-        add_if_consumed(node.value, names, bindings, true)
+        add_if_consumed(node.value, names, bindings, node.value.was_moved == true)
       else
         walk_consumed(node.value, names, bindings)
       end
@@ -789,48 +561,59 @@ class MIRPass
     names << name
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def owning_field_move?(node)
+    return false unless node.is_a?(AST::GetField)
+    ti = Type.from_node(node)
+    ti.is_a?(Type) && ti.indirect?
+  rescue
+    false
+  end
+
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_reassign_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::BindExpr) && stmt.mode == :assign
 
     entry = bindings[stmt.name.to_s]
-    return unless entry && entry.needs_cleanup? && entry.kind != :resource
+    return unless entry && entry.kind != :resource
+    # A heap-owned binding reassigned in a loop must free the OLD value
+    # before storing the new one -- even if the binding is ultimately
+    # moved out (only the final value is moved; the intermediates would
+    # otherwise leak). needs_cleanup? alone misses the moved-out case.
+    return unless entry.needs_cleanup? || entry.alloc == :heap
 
     ti = stmt.full_type
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
-    stmt.reassign_cleanup = { kind: entry.kind, alloc: entry.alloc, zig_type: zig_type }
+    stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
   # Previously stamp-only; now inserts MIR::Alloc + MIR::Drop + MIR::SuppressCleanup
   # so the checker verifies match_as cleanup like any other binding.
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Boolean)) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_match_as_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
 
-    src_entry = bindings[stmt.expr.name.to_s]
+    src_entry = live_cleanup_entry(bindings, stmt.expr.name)
     has_as_cleanup = T.let(false, T::Boolean)
 
     stmt.cases.each do |c|
       next unless c.binding
-      as_entry = bindings[c.binding.to_s]
-      next unless as_entry && as_entry.needs_cleanup?
+      as_entry = live_cleanup_entry(bindings, c.binding)
+      next unless as_entry
 
       has_as_cleanup = true
 
       # Insert MIR nodes at the start of case body for checker coverage.
       # Order: source suppression, then AS binding Alloc + Drop.
       mir_prefix = []
-      if src_entry && src_entry.needs_cleanup?
+      if src_entry
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
-      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.kind, as_entry.alloc)
-      drop = MIR::Drop.new(
-        stmt.token, c.binding.to_s, as_entry.kind, as_entry.alloc,
-        true, nil, nil, nil
-      )
+      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.alloc)
+      drop = MIR::Drop.new(stmt.token, c.binding.to_s)
       drop.cleanup_entry = as_entry
       mir_prefix << drop
       c.body = mir_prefix + c.body
@@ -838,77 +621,33 @@ class MIRPass
 
     # Ensure source has moved guard so _moved variable exists for suppression.
     # Only set if the source still needs cleanup (dataflow may have eliminated it).
-    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry.needs_cleanup?
+    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry
   end
 
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_while_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::WhileBindLoop)
-    entry = bindings[stmt.binding_name.to_s]
-    return unless entry && entry.needs_cleanup?
-    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.kind, entry.alloc)
-    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s, entry.kind, entry.alloc,
-                         true, nil, nil, nil)
+    entry = live_cleanup_entry(bindings, stmt.binding_name)
+    return unless entry
+    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.alloc)
+    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
     drop.cleanup_entry = entry
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
   end
 
-  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_if_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      entry = bindings[b.name.to_s]
-      next unless entry && entry.needs_cleanup?
-      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.kind, entry.alloc)
-      drop = MIR::Drop.new(stmt.token, b.name.to_s, entry.kind, entry.alloc,
-                           true, nil, nil, nil)
+      entry = live_cleanup_entry(bindings, b.name)
+      next unless entry
+      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.alloc)
+      drop = MIR::Drop.new(stmt.token, b.name.to_s)
       drop.cleanup_entry = entry
       mir_prefix << drop
     end
     stmt.then_branch = mir_prefix + (stmt.then_branch || []) unless mir_prefix.empty?
-  end
-
-  # Insert MIR::Promote before indexed Assignment nodes where the container's
-  # INDEX_OPS :set has takes_value and the value type needs frame-to-heap
-  # promotion. Driven by the INDEX_OPS registry in std_lib.rb.
-  sig { params(result: T::Array[T.untyped], stmt: T.untyped).returns(T.nilable(String)) }
-  def insert_container_promote!(result, stmt)
-    return unless stmt.is_a?(AST::Assignment)
-    return unless stmt.name.is_a?(AST::GetIndex)
-    target_node = stmt.name.target
-
-    # Look up the INDEX_OPS :set entry for this container type.
-    target_ti = target_node.full_type
-    set_op = resolve_container_set_op(target_ti)
-    return unless set_op && set_op[:takes_value]
-
-    # Check if the value type needs frame-to-heap promotion.
-    # Strings are handled by the :dupe_string_literal transform in the lowerer;
-    # :container_promote only fires for !string? values.
-    val_ti = stmt.value.full_type
-    return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
-
-    # Annotate directly on Assignment node (no MIR::Promote needed).
-    # Use bare type (strip *) — promote(T, rt, &v) expects T = base, not pointer.
-    zig_t = val_ti.zig_type
-    zig_t = zig_t[1..] if zig_t.start_with?("*")
-    stmt.container_promote_zig_type = zig_t
-  end
-
-  # Resolve the INDEX_OPS :set entry for a container type.
-  sig { params(type_info: T.nilable(T.any(FalseClass, Type))).returns(T.nilable(T::Hash[Symbol, T::Array[Symbol]])) }
-  def resolve_container_set_op(type_info)
-    return nil unless type_info
-    kind = container_kind(type_info)
-    return nil unless kind
-    INDEX_OPS.dig(kind, :set)
-  end
-
-  # Map a type to its INDEX_OPS container kind symbol.
-  sig { params(type_info: Type).returns(T.nilable(Symbol)) }
-  def container_kind(type_info)
-    type_info.dispatch_key
   end
 
 
@@ -920,37 +659,6 @@ class MIRPass
       info[name] = true if entry.has_moved_guard? && entry.needs_cleanup?
     end
     fn.moved_guard_info = info unless info.empty?
-  end
-
-  # Insert MIR::Promote before a return statement and annotate the
-  # ReturnNode for struct-level promotion wrapping.
-  #
-  # Defer suppression for escaped variables is handled by MIR::Return
-  # (inserted by insert_return!) and consumed by the transpiler's
-  # collect_escaping_identifiers in the ReturnNode handler.
-  sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, promo: T.nilable(T::Hash[Symbol, T.any(T::Array[T::Hash[Symbol, String]], T::Set[Integer])])).returns(T.nilable(T.any(T::Hash[T.untyped, T.untyped], Symbol, T::Hash[T.untyped, T.untyped]))) }
-  def insert_promotion!(result, ret_node, promo)
-    return unless promo && !promo.empty?
-
-    filtered = PromotionClassifier.filter_for_return(promo, ret_node.value)
-
-    # Per-variable promotions.
-    (filtered[:var_promotes] || []).each do |vp|
-      strategy = classify_promote_strategy(vp[:zig_type])
-      result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil, vp[:elem_zig_type])
-    end
-
-    # Struct-level field promotion: annotate the ReturnNode directly so
-    # lower_return can apply promotion without global pending-flag state.
-    if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
-      ret_node.promote_ret_wrap = :var
-      ret_node.ret_field_promote_data = {
-        zig_type: filtered[:struct_promote],
-        fields:   filtered[:unhandled_promote_fields]
-      }
-    elsif filtered[:var_promotes]&.any?
-      ret_node.promote_ret_wrap = :const
-    end
   end
 
   # Insert MIR::Return before a ReturnNode to mark which local variables'
@@ -975,8 +683,14 @@ class MIRPass
   def collect_return_escapes(ret_node, bindings, fn_node: nil)
     return [] unless ret_node.value
     ids = collect_escaping_ids(ret_node.value)
-    ids.map { |id| id.name.to_s }
-       .select { |n| bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup) }
+    ids.select { |id|
+        n = id.name.to_s
+        (bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup)) ||
+          (n.start_with?("__hoist_") &&
+            id.respond_to?(:was_moved) && id.was_moved == true &&
+            bindings[n]&.dig(:needs_cleanup))
+      }
+      .map { |id| id.name.to_s }
        .uniq
   end
 
@@ -986,31 +700,13 @@ class MIRPass
     case node
     when AST::Identifier then [node]
     when AST::MoveNode   then collect_escaping_ids(node.value)
-    when AST::StructLit  then node.fields.values.flat_map { |v| collect_escaping_ids(v) }
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.values.flat_map { |v| collect_escaping_ids(v) }
     when AST::FuncCall, AST::MethodCall
       node.args.select(&:was_moved).flat_map { |a| collect_escaping_ids(a) }
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []
     else []
     end
-  end
-
-  sig { params(zig_type: T.untyped).returns(Symbol) }
-  def classify_promote_strategy(zig_type)
-    return :generic unless zig_type
-    if zig_type.include?("ArrayListUnmanaged")
-      :list
-    elsif zig_type.include?("StringMap")
-      :string_map
-    else
-      :generic
-    end
-  end
-
-  sig { params(type_obj: T.nilable(Type)).returns(T.nilable(String)) }
-  def list_elem_zig_type(type_obj)
-    elem = type_obj&.element_type
-    return nil unless elem
-    Type.new(elem).zig_type
   end
 
 end

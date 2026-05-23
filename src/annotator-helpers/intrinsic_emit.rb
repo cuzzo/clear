@@ -72,10 +72,6 @@ class IntrinsicEmit < T::Struct
   # --- Arg-shape (element typing deferred; union keeps it bounded) ---
   prop :arity,           T.nilable(Integer),                 default: nil
   prop :takes_args,      T.nilable(T::Array[Integer]),       default: nil
-  prop :value_transforms,
-       T.nilable(T::Array[Symbol]),                          default: nil
-  prop :shard_direct_value_transforms,
-       T.nilable(T::Array[Symbol]),                          default: nil
 
   # --- Procs (varying arity by role) ---
   prop :label,           T.nilable(Proc),                    default: nil

@@ -2,16 +2,14 @@
 #
 # Targets src/mir/mir_lowering.rb#lower_indexed_assignment (the largest
 # fuzz_axis dark cluster: `kind = ti.dispatch_key` ->
-# INDEX_OPS.dig(kind,:set) crossed with value_transforms
-# {:dupe_string_literal, :dupe_borrowed_union, :container_promote} and
-# shard_direct). The corpus only ever wrote `lst[i] = int` into a plain
-# list; this enumerates container_shape x key_kind x value_ownership x
-# map_wrap so every dispatch/transform arm lowers.
+# INDEX_OPS.dig(kind,:set) crossed with keyed allocator resolution,
+# `takes_value`, and shard_direct. The corpus only ever wrote `lst[i] = int`
+# into a plain list; this enumerates container_shape x key_kind x
+# value_ownership x map_wrap so every indexed sink path lowers.
 #
-# Value type DERIVES from the container (int containers take an Int64
-# value; String-valued maps take string / COPY-string values -- the
-# :dupe_string_literal transform arm). Mixing them would be an invalid
-# program, not a surfaced bug.
+# Value type DERIVES from the container (int containers take an Int64 value;
+# String-valued maps take string / COPY-string values). Mixing them would be
+# an invalid program, not a surfaced bug.
 #
 # expected :pass with a self-checking ASSERT. A :pass cell that fails,
 # leaks, or mir-errors is a SURFACED lowering bug (do not fix here).

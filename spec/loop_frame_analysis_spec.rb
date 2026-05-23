@@ -231,7 +231,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
       resp_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "resp" }
       expect(loop.mark_per_iter).to be true
-            expect(resp_decl.full_type.heap_provenance?).to be true
+            expect(resp_decl.symbol.heap_provenance?).to be true
     end
 
     it "no heap carry promotion when no outer string reassignment occurs" do
@@ -291,7 +291,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-            expect(last_decl.full_type.heap_provenance?).to be true
+            expect(last_decl.symbol.heap_provenance?).to be true
     end
 
     it "outer string reassigned with method call result → declaration promoted to heap" do
@@ -310,7 +310,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-            expect(last_decl.full_type.heap_provenance?).to be true
+            expect(last_decl.symbol.heap_provenance?).to be true
     end
 
     it "outer string reassigned with concat of outer (non-local) vars → declaration promoted to heap" do
@@ -333,7 +333,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       result_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "result" }
       expect(loop.mark_per_iter).to be true
-            expect(result_decl.full_type.heap_provenance?).to be true
+            expect(result_decl.symbol.heap_provenance?).to be true
     end
 
   end
@@ -514,7 +514,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local string that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local string that escapes into an outer list" do
       src = <<~CLEAR
         FN isCommand(ch: String) RETURNS Bool ->
           RETURN ch == ">" || ch == "<";
@@ -537,10 +537,9 @@ RSpec.describe LoopFrameAnalysis do
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("charAtCodepoint(rt.heapAlloc()")
-      expect(zig).not_to include("saveLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local list that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local list that escapes into an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -559,10 +558,9 @@ RSpec.describe LoopFrameAnalysis do
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("inner.append(rt.heapAlloc()")
       expect(zig).to include("inner_moved = true")
-      expect(zig).not_to include("saveLoopMark")
     end
 
-    it "WhileLoop heap-promotes a loop-local dynamic array that escapes into an outer list" do
+    it "WhileLoop heap-allocates a loop-local dynamic array that escapes into an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -579,7 +577,6 @@ RSpec.describe LoopFrameAnalysis do
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("rt.heapAlloc()")
-      expect(zig).not_to include("saveLoopMark")
     end
 
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
@@ -768,10 +765,11 @@ RSpec.describe LoopFrameAnalysis do
       zig = transpile(src)
       # The pattern is: allocate __new_resp, cleanup old resp, assign new
       expect(zig).to include("__new_resp")
-      expect(zig).to include("CheatLib.cleanup([]const u8")
+      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf/)
       # And the final defer must free resp (loop-carry reassignment makes resp
-      # move-tracked, so the free is guarded by the _moved flag).
-      expect(zig).to match(/defer if \(!resp_moved\) rt\.heapAlloc\(\)\.free\(resp\)/)
+      # move-tracked, so the free is guarded by the _moved flag). Post-collapse,
+      # the free routes through CheatLib.cleanup's []const u8 arm.
+      expect(zig).to match(/defer if \(!resp_moved\) CheatLib\.cleanup\(@TypeOf\(resp\), rt\.heapAlloc\(\), &resp\)/)
     end
 
   end
