@@ -248,6 +248,7 @@ end
 # escape; it reads the placement facts already stamped on symbols/nodes.
 module MIRHoistLowering
   extend T::Sig
+  include Kernel
 
   # Nodes whose "allocates?" decision is simply `node.alloc == :heap`.
   ALLOC_HEAP_MIR_CLASSES = [
@@ -294,9 +295,9 @@ module MIRHoistLowering
   def descend(parent, field)
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
-      lower_scoped { lower(child) }
+      lower_scoped { T.unsafe(self).lower(child) }
     else
-      lower(child)
+      T.unsafe(self).lower(child)
     end
   end
 
@@ -323,7 +324,7 @@ module MIRHoistLowering
     return :heap if mir_allocates?(init)
     return :heap if node.respond_to?(:storage) && node.storage == :heap
     if binding_entry.present? && binding_entry.alloc == :heap &&
-       alloc_for_node(node) != :heap && !ft.needs_heap_backing? &&
+       T.unsafe(self).alloc_for_node(node) != :heap && !ft.needs_heap_backing? &&
        binding_entry.kind != :frozen
       return :frame
     end
@@ -332,7 +333,7 @@ module MIRHoistLowering
 
   sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean), mutable: T::Boolean).returns(T.untyped) }
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false)
-    return expr unless mir_allocates?(expr) || call_union_return_needs_hoist?(expr, ast_node)
+    return expr unless mir_allocates?(expr) || T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     @pending_stmts << MIR::AllocMark.new(name, :heap, nil)
@@ -354,8 +355,8 @@ module MIRHoistLowering
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node(ast_node)
     zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
-    alloc = if respond_to?(:type_shape_needs_recursive_cleanup?, true) && ti.is_a?(Type) &&
-               type_shape_needs_recursive_cleanup?(ti)
+    alloc = if T.unsafe(self).respond_to?(:type_shape_needs_recursive_cleanup?, true) && ti.is_a?(Type) &&
+               T.unsafe(self).send(:type_shape_needs_recursive_cleanup?, ti)
               :heap
             else
               @decl_alloc == :heap ? :heap : :frame

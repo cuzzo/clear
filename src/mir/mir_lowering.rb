@@ -296,10 +296,12 @@ class MIRLowering
       hoisted_discard = false
       if needs_discard &&
          s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void &&
-         mir_allocates?(mir)
+        mir_allocates?(mir)
         entry = hoist_cleanup_entry(mir, s)
-        mir = MIR::DiscardOwned.new(mir, entry, discard_owned_zig_type(s, entry))
-        hoisted_discard = true
+        if entry
+          mir = MIR::DiscardOwned.new(mir, entry, discard_owned_zig_type(s, entry))
+          hoisted_discard = true
+        end
       end
       pending = flush_pending
       if needs_discard &&
@@ -506,8 +508,8 @@ class MIRLowering
     return @decl_alloc unless callee_param
     sym = callee_param.respond_to?(:symbol) ? callee_param.symbol : nil
     return :heap if sym&.heap_provenance? || sym&.storage == :heap
-    ti = callee_param.respond_to?(:type) ? callee_param.type : nil
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    raw_ti = callee_param.respond_to?(:type) ? callee_param.type : nil
+    ti = raw_ti.is_a?(Type) ? raw_ti : (raw_ti ? Type.new(raw_ti) : nil)
     return :heap if takes_param_needs_heap_cleanup?(ti)
     @decl_alloc || :heap
   end
@@ -5186,7 +5188,9 @@ class MIRLowering
     # @decl_alloc; a rodata string literal must be duped to the heap.
     if @decl_alloc == :heap && node.right.is_a?(AST::Literal) &&
        Type.new(node.right.full_type).string?
-      right = MIR::DupeSlice.new(right, :heap)
+      right = lower_scoped do
+        hoist_alloc(MIR::DupeSlice.new(lower(node.right), :heap), node.right, err_cleanup: true)
+      end
     end
 
     if is_error
@@ -7162,10 +7166,10 @@ class MIRLowering
       @tmp_counter += 1
       name = "__tmp_#{@tmp_counter}"
       entry = hoist_cleanup_entry(stmt.value, ast_value)
-      out = [
+      out = T.let([
         MIR::AllocMark.new(name, :heap, nil),
         MIR::Let.new(name, stmt.value, false, nil, nil)
-      ]
+      ], T::Array[T.untyped])
       out << MIR::ErrCleanup.new(name, entry) if entry
       out << MIR::ReturnStmt.new(MIR::Ident.new(name))
       out
@@ -7278,7 +7282,8 @@ class MIRLowering
     return unless expr
     case expr
     when AST::Identifier
-      names << zig_safe_name(expr.name)
+      name = zig_safe_name(expr.name)
+      names << name if name
     when AST::MoveNode, AST::ShareNode
       collect_returned_binding_names(expr.value, names)
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
@@ -7304,6 +7309,8 @@ class MIRLowering
   sig { params(sig_obj: T.untyped).returns(T::Boolean) }
   def callee_returns_heap_string?(sig_obj)
     return false unless sig_obj && sig_obj.respond_to?(:return_type)
+    lifetime = sig_obj.respond_to?(:return_lifetime) ? sig_obj.return_lifetime : nil
+    return false if lifetime && !(lifetime.respond_to?(:empty?) && lifetime.empty?)
     ti = Type.new(sig_obj.return_type)
     ti = ti.payload_type || ti if ti.error_union?
     ti.string? && !ti.symbol? && !ti.raw?

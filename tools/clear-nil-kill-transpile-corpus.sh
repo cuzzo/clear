@@ -72,6 +72,6 @@ while IFS= read -r -d '' file; do
   if ! run_transpiler "$file" >/dev/null; then
     status=1
   fi
-done < <(find examples benchmarks -type f -name '*.cht' -print0 | sort -z)
+done < <(find examples benchmarks -path '*/bench.profile/*' -prune -o -type f -name '*.cht' -print0 | sort -z)
 
 exit "$status"

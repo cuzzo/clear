@@ -42,10 +42,6 @@ class AST::BgBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def capture_analysis=(value); end
   sig { returns(T.untyped) }
-  def capture_string_dupes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def capture_string_dupes=(value); end
-  sig { returns(T.untyped) }
   def captures_resource; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def captures_resource=(value); end
@@ -53,10 +49,6 @@ class AST::BgBlock
   def computed_stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
-  sig { returns(T.untyped) }
-  def exit_promote; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def exit_promote=(value); end
   sig { returns(T.untyped) }
   def fsm_ineligible_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -89,10 +81,6 @@ class AST::BgStreamBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def capture_analysis=(value); end
   sig { returns(T.untyped) }
-  def capture_string_dupes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def capture_string_dupes=(value); end
-  sig { returns(T.untyped) }
   def computed_stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
@@ -108,10 +96,6 @@ class AST::BgStreamBlock
   def spawn_form; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def spawn_form=(value); end
-  sig { returns(T.untyped) }
-  def yields_frame_strings; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def yields_frame_strings=(value); end
 end
 
 class AST::BinaryOp
@@ -267,6 +251,10 @@ class AST::FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
   sig { returns(T.untyped) }
+  def matched_signature; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def matched_signature=(value); end
+  sig { returns(T.untyped) }
   def module_alias; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def module_alias=(value); end
@@ -329,10 +317,6 @@ class AST::FunctionDef
   def fsm_suspend_points; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fsm_suspend_points=(value); end
-  sig { returns(T.untyped) }
-  def has_promotion; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def has_promotion=(value); end
   sig { returns(T.untyped) }
   def heap_carry_return; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -545,13 +529,6 @@ class AST::Program
   def sync_policy=(value); end
 end
 
-class AST::ReturnNode
-  sig { returns(T.untyped) }
-  def catch_string_dupe_ret; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def catch_string_dupe_ret=(value); end
-end
-
 class AST::StructLit
   sig { returns(T.untyped) }
   def borrowed_field_names; end
@@ -695,13 +672,6 @@ class AST::WithBlock
   def view_kind=(value); end
 end
 
-class AST::YieldExpr
-  sig { returns(T.untyped) }
-  def yield_dupe; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def yield_dupe=(value); end
-end
-
 class Assignment
   sig { returns(T.untyped) }
   def auto_atomic_op; end
@@ -750,10 +720,6 @@ class BgBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def capture_analysis=(value); end
   sig { returns(T.untyped) }
-  def capture_string_dupes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def capture_string_dupes=(value); end
-  sig { returns(T.untyped) }
   def captures_resource; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def captures_resource=(value); end
@@ -761,10 +727,6 @@ class BgBlock
   def computed_stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
-  sig { returns(T.untyped) }
-  def exit_promote; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def exit_promote=(value); end
   sig { returns(T.untyped) }
   def fsm_ineligible_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -797,10 +759,6 @@ class BgStreamBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def capture_analysis=(value); end
   sig { returns(T.untyped) }
-  def capture_string_dupes; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def capture_string_dupes=(value); end
-  sig { returns(T.untyped) }
   def computed_stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
@@ -816,10 +774,6 @@ class BgStreamBlock
   def spawn_form; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def spawn_form=(value); end
-  sig { returns(T.untyped) }
-  def yields_frame_strings; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def yields_frame_strings=(value); end
 end
 
 class BinaryOp
@@ -1056,6 +1010,10 @@ class FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
   sig { returns(T.untyped) }
+  def matched_signature; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def matched_signature=(value); end
+  sig { returns(T.untyped) }
   def module_alias; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def module_alias=(value); end
@@ -1178,10 +1136,6 @@ class FunctionDef
   def fsm_suspend_points; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fsm_suspend_points=(value); end
-  sig { returns(T.untyped) }
-  def has_promotion; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def has_promotion=(value); end
   sig { returns(T.untyped) }
   def heap_carry_return; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1614,13 +1568,6 @@ class ResourceSchema
   def type_params; end
   sig { returns(Symbol) }
   def visibility; end
-end
-
-class ReturnNode
-  sig { returns(T.untyped) }
-  def catch_string_dupe_ret; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def catch_string_dupe_ret=(value); end
 end
 
 class Schemas::EnumSchema
@@ -2125,13 +2072,6 @@ class WithBlock
   def view_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def view_kind=(value); end
-end
-
-class YieldExpr
-  sig { returns(T.untyped) }
-  def yield_dupe; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def yield_dupe=(value); end
 end
 
 class ZigTranspiler

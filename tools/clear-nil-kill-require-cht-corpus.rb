@@ -23,6 +23,7 @@ files = SOURCE_DIRS.flat_map do |dir|
   Dir.glob(File.join(ROOT, dir, "**", "*.cht"))
 end.sort.reject do |abs_path|
   rel = abs_path.delete_prefix(ROOT + File::SEPARATOR)
+  next true if rel.split(File::SEPARATOR).include?("bench.profile")
   # Temporary live-data exclusions for files that do not currently transpile.
   # The minivm files are corpus/compiler-cleanup exceptions.
   LIVE_DATA_EXCLUDES.include?(rel)

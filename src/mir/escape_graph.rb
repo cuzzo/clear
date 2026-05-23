@@ -120,7 +120,7 @@ module EscapeGraph
         mark_heap_container_assignment!(node.name, node.value, &mark)
       when AST::FuncCall, AST::MethodCall
         mark_takes_args!(node, fn_nodes, &mark)
-        mark_element_store!(node, locals, outer_names, &mark) if node.is_a?(AST::MethodCall)
+        mark_element_store!(node, local_names, outer_names, &mark) if node.is_a?(AST::MethodCall)
         mark_heap_element_store!(node, &mark) if node.is_a?(AST::MethodCall)
         mark_heap_value_container_store!(node, fn_nodes, &mark) if node.is_a?(AST::MethodCall)
       end
@@ -437,7 +437,7 @@ module EscapeGraph
     end
   end
 
-  sig { params(stmts: T.untyped).returns(T::Set[String]) }
+  sig { params(stmts: T.untyped).returns(T::Hash[String, T.untyped]) }
   def local_decls(stmts)
     decls = T.let({}, T::Hash[String, T.untyped])
     walk_current_frame(stmts) { |n| decls[n.name.to_s] = n if decl?(n) }
@@ -464,7 +464,7 @@ module EscapeGraph
 
   sig { params(ti: T.untyped).returns(T::Boolean) }
   def collection_type?(ti)
-    ti.is_a?(Type) && (ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?)
+    !!(ti.is_a?(Type) && (ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?))
   end
 
   sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
@@ -508,7 +508,7 @@ module EscapeGraph
   sig { params(decl: T.untyped).returns(T::Boolean) }
   def frame_backed_container?(decl)
     ti = type_of(decl)
-    ti.is_a?(Type) && (ti.string? || ti.array? || collection_type?(ti))
+    !!(ti.is_a?(Type) && (ti.string? || ti.array? || collection_type?(ti)))
   end
 
   sig { params(decl: T.untyped).returns(T::Boolean) }
@@ -516,7 +516,7 @@ module EscapeGraph
     return false unless decl
     return true if decl.respond_to?(:symbol) && decl.symbol&.heap_provenance?
     ti = type_of(decl)
-    ti.is_a?(Type) && inherent_heap_type?(ti)
+    !!(ti.is_a?(Type) && inherent_heap_type?(ti))
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -524,7 +524,7 @@ module EscapeGraph
     return false unless node
     return true if node.respond_to?(:symbol) && node.symbol&.heap_provenance?
     ti = type_of(node)
-    ti.is_a?(Type) && inherent_heap_type?(ti)
+    !!(ti.is_a?(Type) && inherent_heap_type?(ti))
   end
 
   sig { params(expr: T.untyped, blk: T.proc.params(arg0: AST::Identifier).void).void }

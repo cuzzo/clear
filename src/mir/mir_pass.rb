@@ -560,7 +560,7 @@ class MIRPass
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = Type.from_node(node)
-    !!(ti.respond_to?(:indirect?) && ti.indirect?)
+    ti.is_a?(Type) && ti.indirect?
   rescue
     false
   end

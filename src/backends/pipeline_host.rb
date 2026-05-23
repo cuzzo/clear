@@ -1747,14 +1747,14 @@ class PipelineHost
   sig { params(expr_mir: T.untyped, alloc: Symbol, item_var: String, cleanup_key: T::Boolean).returns(T::Array[T.untyped]) }
   def build_index_gop_body(expr_mir, alloc, item_var, cleanup_key: false)
     elem_zig_type = "@TypeOf(#{item_var})"
-    body = [
+    body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       MIR::IndexInsert.new(
         MIR::Ident.new("idx_result"),
         MIR::Ident.new("idx_key"),
         MIR::Ident.new(item_var),
         "u8", elem_zig_type, alloc)
-    ]
+    ], T::Array[T.untyped])
     if cleanup_key || mir_allocates_owned_string?(expr_mir)
       body << MIR::ExprStmt.new(
         MIR::Call.new("CheatLib.cleanup", [
@@ -1773,8 +1773,8 @@ class PipelineHost
     return true if mir.is_a?(MIR::DupeSlice)
     return true if mir.is_a?(MIR::ConcatStr)
     if mir.is_a?(MIR::Call)
-      return true if mir.name.to_s.include?("intToString")
-      return true if mir.name.to_s.include?("floatToString")
+      return true if mir.callee.to_s.include?("intToString")
+      return true if mir.callee.to_s.include?("floatToString")
     end
     return mir_allocates_owned_string?(mir.expr) if mir.respond_to?(:expr)
     false
