@@ -239,7 +239,7 @@ module CleanupClassifier
     return coll if coll
 
     # Plain slice (Int64[] without a collection modifier).
-    if ti.array? && !ti.string?
+    if ti.direct_indexable_collection?
       elem_zig = ti.element_type ? (Type.new(ti.element_type).zig_type rescue ti.element_type.to_s) : "UNKNOWN"
       return entry(:uniform, elem_zig_type: elem_zig)
     end
@@ -469,7 +469,7 @@ module CleanupClassifier
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
     val = node.respond_to?(:value) ? node.value : nil
-    return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
+    return nil unless ti.non_string_array? && !ti.collection? && val.is_a?(AST::ListLit)
     return nil unless elem_type_needs_cleanup?(ti.element_type, schema_lookup)
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     container_alloc = container_alloc_from(sym, node)

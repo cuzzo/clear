@@ -355,8 +355,8 @@ module MIRHoistLowering
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node(ast_node)
     zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
-    alloc = if T.unsafe(self).respond_to?(:type_shape_needs_recursive_cleanup?, true) && ti.is_a?(Type) &&
-               T.unsafe(self).send(:type_shape_needs_recursive_cleanup?, ti)
+    schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
+    alloc = if ti&.recursive_cleanup_shape?(schema_lookup)
               :heap
             else
               @decl_alloc == :heap ? :heap : :frame
@@ -389,7 +389,7 @@ module MIRHoistLowering
     return false unless ast_node
     if ast_node.is_a?(AST::GetIndex)
       ti = ast_node.target.full_type
-      return !!(ti.map? || ti.pool? || ti.list_collection? || (ti.array? && !ti.string?))
+      return !!ti&.indexed_container_borrow?
     end
     if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
       return container_borrow_expr?(ast_node.left)

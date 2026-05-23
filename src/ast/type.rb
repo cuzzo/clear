@@ -775,6 +775,27 @@ class Type
     map? || pool? || list_collection? || set_collection?
   end
 
+  sig { returns(T.nilable(Symbol)) }
+  def ownership_storage
+    return ownership if ownership == :shared || ownership == :multiowned
+    nil
+  end
+
+  sig { returns(T::Boolean) }
+  def direct_indexable_collection?
+    list_collection? || (array? && !string?)
+  end
+
+  sig { returns(T::Boolean) }
+  def non_string_array?
+    array? && !string?
+  end
+
+  sig { returns(T::Boolean) }
+  def indexed_container_borrow?
+    map? || pool? || direct_indexable_collection?
+  end
+
   # Iteration shape for the FSM ForEach lowering. The recursive
   # splitter dispatches on the kind to build a per-iteration
   # segment graph. Returns nil for collection shapes the FSM
@@ -1471,6 +1492,47 @@ class Type
   end
 
   # ── Recursive type analysis (mirrors Zig comptime functions) ──────
+
+  sig { params(schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  def recursive_cleanup_shape?(schema_lookup = nil, seen = nil)
+    seen ||= Set.new
+    key = "#{resolved}|#{collection}|#{ownership}|#{sync}|#{provenance}"
+    return false if seen.include?(key)
+    seen.add(key)
+
+    return false if provenance == :borrow
+    return true if string? || any_rc? || link? || collection?
+
+    if array?
+      et = element_type
+      return false unless et
+      return Type.from_node(et)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+    end
+
+    return false unless schema_lookup
+    schema = schema_lookup.call(resolved) rescue nil
+    if Schemas.union?(schema)
+      return (schema.variants || {}).any? do |_, vt|
+        if Schemas.inline_struct?(vt)
+          vt.fields.any? do |_, ft|
+            Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+          end
+        else
+          Type.from_node(vt || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+        end
+      end
+    end
+
+    if Schemas.field_bearing?(schema)
+      return schema.fields.any? do |_, field|
+        next false if field.is_a?(AST::StructField) && field.borrowed
+        ft = field.is_a?(AST::StructField) ? field.type : field
+        Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+      end
+    end
+
+    false
+  end
 
   # Mirror of Zig's needsPromotion. Returns true if this type contains
   # frame-allocated data that must be duped to heap on escape.

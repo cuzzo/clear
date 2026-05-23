@@ -47,6 +47,12 @@ class MIRPass
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
   end
 
+  sig { params(bindings: T::Hash[String, CleanupEntry], name: T.untyped).returns(T.nilable(CleanupEntry)) }
+  def live_cleanup_entry(bindings, name)
+    entry = bindings[name.to_s]
+    entry&.needs_cleanup? ? entry : nil
+  end
+
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Hoist has already lifted anonymous allocating expressions into bindings.
   # Escape analysis writes final binding storage; this pass inserts MIR markers.
@@ -193,8 +199,8 @@ class MIRPass
     # and collect_return_escapes emits SuppressCleanup before the return.
     if fn.respond_to?(:heap_carry_return_vars) && fn.heap_carry_return_vars&.any? && bindings
       fn.heap_carry_return_vars.each do |var_name|
-        entry = bindings[var_name.to_s]
-        next unless entry && entry.needs_cleanup?
+        entry = live_cleanup_entry(bindings, var_name)
+        next unless entry
         entry[:has_moved_guard] = true
       end
     end
@@ -234,8 +240,8 @@ class MIRPass
         resource_captures = bg.capture_analysis&.resource_captures
         next unless resource_captures&.any?
         resource_captures.each do |name|
-          entry = bindings.dig(name)
-          next unless entry && entry.needs_cleanup?
+          entry = live_cleanup_entry(bindings, name)
+          next unless entry
           entry[:has_moved_guard] = true
         end
       end
@@ -404,8 +410,7 @@ class MIRPass
     # call when it processes the inner BG's body.
     AST.each_bg_block_in_stmt(stmt) do |bg|
       bg.capture_analysis&.move_mark_names&.each do |name|
-        entry = bindings.dig(name)
-        next unless entry && entry.needs_cleanup?
+        next unless live_cleanup_entry(bindings, name)
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
     end
@@ -500,8 +505,8 @@ class MIRPass
       if owning_field_move?(node)
         root = AST.root_identifier(node)
         if root
-          entry = bindings[root.name.to_s]
-          if entry && entry.needs_cleanup?
+          entry = live_cleanup_entry(bindings, root.name)
+          if entry
             entry[:has_moved_guard] = true
             names << root.name.to_s
           end
@@ -591,20 +596,20 @@ class MIRPass
     return unless stmt.is_a?(AST::MatchStatement)
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
 
-    src_entry = bindings[stmt.expr.name.to_s]
+    src_entry = live_cleanup_entry(bindings, stmt.expr.name)
     has_as_cleanup = T.let(false, T::Boolean)
 
     stmt.cases.each do |c|
       next unless c.binding
-      as_entry = bindings[c.binding.to_s]
-      next unless as_entry && as_entry.needs_cleanup?
+      as_entry = live_cleanup_entry(bindings, c.binding)
+      next unless as_entry
 
       has_as_cleanup = true
 
       # Insert MIR nodes at the start of case body for checker coverage.
       # Order: source suppression, then AS binding Alloc + Drop.
       mir_prefix = []
-      if src_entry && src_entry.needs_cleanup?
+      if src_entry
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
       mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.alloc)
@@ -616,14 +621,14 @@ class MIRPass
 
     # Ensure source has moved guard so _moved variable exists for suppression.
     # Only set if the source still needs cleanup (dataflow may have eliminated it).
-    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry.needs_cleanup?
+    src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry
   end
 
   sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_while_bind_cleanup!(stmt, bindings)
     return unless stmt.is_a?(AST::WhileBindLoop)
-    entry = bindings[stmt.binding_name.to_s]
-    return unless entry && entry.needs_cleanup?
+    entry = live_cleanup_entry(bindings, stmt.binding_name)
+    return unless entry
     alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.alloc)
     drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
     drop.cleanup_entry = entry
@@ -635,8 +640,8 @@ class MIRPass
     return unless stmt.is_a?(AST::IfBind)
     mir_prefix = []
     stmt.bindings.each do |b|
-      entry = bindings[b.name.to_s]
-      next unless entry && entry.needs_cleanup?
+      entry = live_cleanup_entry(bindings, b.name)
+      next unless entry
       mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.alloc)
       drop = MIR::Drop.new(stmt.token, b.name.to_s)
       drop.cleanup_entry = entry

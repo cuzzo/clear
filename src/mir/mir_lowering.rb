@@ -517,46 +517,12 @@ class MIRLowering
   sig { params(ti: T.nilable(Type)).returns(T::Boolean) }
   def takes_param_needs_heap_cleanup?(ti)
     return false unless ti
-    return true if ti.string? || ti.any_rc? || ti.link? || ti.collection? || ti.map? || ti.pool? || ti.set_collection?
-    if ti.array? && !ti.string?
-      et = ti.element_type
-      return false unless et
-      et = Type.new(et) unless et.is_a?(Type)
-      return type_shape_needs_recursive_cleanup?(et)
-    end
-    type_shape_needs_recursive_cleanup?(ti)
+    ti.recursive_cleanup_shape?(@schema_lookup)
   end
 
   sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   def type_shape_needs_recursive_cleanup?(ti, seen = nil)
-    seen ||= Set.new
-    key = "#{ti.resolved}|#{ti.collection}|#{ti.ownership}|#{ti.sync}|#{ti.provenance}"
-    return false if seen.include?(key)
-    seen.add(key)
-    return false if ti.provenance == :borrow
-    return true if ti.string? || ti.any_rc? || ti.link? || ti.collection? || ti.map? || ti.pool? || ti.set_collection?
-    if ti.array? && !ti.string?
-      et = ti.element_type
-      return false unless et
-      return type_shape_needs_recursive_cleanup?(et.is_a?(Type) ? et : Type.new(et), seen)
-    end
-    schema = @schema_lookup.call(ti.resolved) rescue nil
-    if Schemas.union?(schema)
-      return (schema.variants || {}).any? do |_, vt|
-        if Schemas.inline_struct?(vt)
-          vt.fields.any? { |_, ft| type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen) }
-        else
-          type_shape_needs_recursive_cleanup?(vt.is_a?(Type) ? vt : Type.new(vt || :Any), seen)
-        end
-      end
-    elsif Schemas.field_bearing?(schema)
-      return schema.fields.any? do |_, field|
-        next false if field.is_a?(AST::StructField) && field.borrowed
-        ft = field.is_a?(AST::StructField) ? field.type : field
-        type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen)
-      end
-    end
-    false
+    ti.recursive_cleanup_shape?(@schema_lookup, seen)
   end
 
   # True when `node` is heap-placed. Symbol#storage is escape analysis's
@@ -671,12 +637,9 @@ class MIRLowering
   # root or an op's allocator diverges from its AllocMark.
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_receiver_node(node)
-    case node
-    when AST::Identifier then node
-    when AST::GetField, AST::GetIndex then root_receiver_node(node.target)
-    else
-      node.respond_to?(:target) ? root_receiver_node(node.target) : nil
-    end
+    root = AST.root_identifier(node)
+    return root if root
+    node.respond_to?(:target) ? root_receiver_node(node.target) : nil
   end
 
   # A nested @list inside a heap container element is itself heap-
@@ -1588,7 +1551,7 @@ class MIRLowering
   def cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     ti = a.full_type
 
-    if ti.is_a?(Type) && ti.array? && !ti.string? && !ti.pool? &&
+    if ti.is_a?(Type) && ti.non_string_array? && !ti.pool? &&
        !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) &&
        !callee_param_type.collection?
       return MIR::ItemsAccess.new(arg, true)
@@ -2451,11 +2414,7 @@ class MIRLowering
     if var_node.is_a?(AST::GetField) && var_node.full_type
       ft = var_node.full_type
       sync = ft.sync
-      storage = case ft.ownership
-                when :shared     then :shared
-                when :multiowned then :multiowned
-                else nil
-                end
+      storage = ft.ownership_storage
       return [sync, storage]
     end
     if var_node.is_a?(AST::Identifier) &&
@@ -7470,7 +7429,7 @@ class MIRLowering
   sig { params(type_info: Type).returns(T::Boolean) }
   def direct_indexable_collection_type?(type_info)
     ti = Type.new(type_info)
-    ti.list_collection? || (ti.array? && !ti.string?)
+    ti.direct_indexable_collection?
   end
 
   sig { params(ast_node: T.untyped, type_info: Type).returns(T.nilable(T::Boolean)) }
@@ -7510,7 +7469,7 @@ class MIRLowering
     # MUST NOT re-derive shape from "is this a param?" or similar shortcuts
     # (TAKES @list params receive ArrayList; borrow @list params receive a
     # slice via .items; the runtime helper handles both).
-    return nil if ti.list_collection? || (ti.array? && !ti.string?)
+    return nil if ti.direct_indexable_collection?
 
     recv = lower(recv_ast)
     len_expr =

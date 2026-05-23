@@ -101,13 +101,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    if var_node.full_type
-      case var_node.full_type.ownership
-      when :shared     then return :shared
-      when :multiowned then return :multiowned
-      end
-    end
-    nil
+    var_node.full_type&.ownership_storage
   end
 
   # Read layout from the SymbolEntry when available, or from full_type before

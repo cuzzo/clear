@@ -464,51 +464,18 @@ module EscapeGraph
 
   sig { params(ti: T.untyped).returns(T::Boolean) }
   def collection_type?(ti)
-    !!(ti.is_a?(Type) && (ti.list_collection? || ti.map? || ti.set_collection? || ti.pool?))
+    !!(ti.is_a?(Type) && ti.collection?)
   end
 
   sig { params(ti: Type, seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   def type_shape_needs_recursive_cleanup?(ti, seen = nil)
-    seen ||= Set.new
-    key = "#{ti.resolved}|#{ti.collection}|#{ti.ownership}|#{ti.sync}|#{ti.provenance}"
-    return false if seen.include?(key)
-    seen.add(key)
-    return false if ti.provenance == :borrow
-    return true if ti.string? || ti.any_rc? || ti.link? || collection_type?(ti)
-    if ti.array? && !ti.string?
-      et = ti.element_type
-      return false unless et
-      return type_shape_needs_recursive_cleanup?(et.is_a?(Type) ? et : Type.new(et), seen)
-    end
-
-    schema = @schema_lookup.call(ti.resolved) rescue nil
-    if Schemas.union?(schema)
-      return (schema.variants || {}).any? do |_, vt|
-        if Schemas.inline_struct?(vt)
-          vt.fields.any? do |_, ft|
-            type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen)
-          end
-        else
-          type_shape_needs_recursive_cleanup?(vt.is_a?(Type) ? vt : Type.new(vt || :Any), seen)
-        end
-      end
-    end
-
-    if Schemas.field_bearing?(schema)
-      return schema.fields.any? do |_, field|
-        next false if field.is_a?(AST::StructField) && field.borrowed
-        ft = field.is_a?(AST::StructField) ? field.type : field
-        type_shape_needs_recursive_cleanup?(ft.is_a?(Type) ? ft : Type.new(ft || :Any), seen)
-      end
-    end
-
-    false
+    ti.recursive_cleanup_shape?(@schema_lookup, seen)
   end
 
   sig { params(decl: T.untyped).returns(T::Boolean) }
   def frame_backed_container?(decl)
     ti = type_of(decl)
-    !!(ti.is_a?(Type) && (ti.string? || ti.array? || collection_type?(ti)))
+    !!(ti.is_a?(Type) && (ti.string? || ti.array? || ti.collection?))
   end
 
   sig { params(decl: T.untyped).returns(T::Boolean) }
@@ -563,11 +530,7 @@ module EscapeGraph
 
   sig { params(node: T.untyped).returns(T.untyped) }
   def root_decl_from(node)
-    case node
-    when AST::Identifier then node.symbol&.reg
-    when AST::GetField, AST::GetIndex then root_decl_from(node.target)
-    else nil
-    end
+    AST.root_identifier(node)&.symbol&.reg
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
