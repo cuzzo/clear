@@ -835,8 +835,8 @@ class OwnershipDataflow
     return if source.is_a?(AST::CopyNode)
 
     if source.is_a?(AST::Identifier)
-      ti = Type.from_node(source)
-      return if ti&.shared?
+      ti = Type.from_node!(source, context: "share transfer")
+      return if ti.shared?
       name = source.name.to_s
       step.consumed << name if step.state[name]
       return
@@ -1239,8 +1239,8 @@ class UseAfterMoveChecker
     if source.is_a?(AST::CopyNode)
       check_reads_in_expr(source.value, state)
     elsif source.is_a?(AST::Identifier)
-      ti = Type.from_node(source)
-      check_identifier_read(source.name.to_s, state, source.token) if ti&.shared?
+      ti = Type.from_node!(source, context: "share read")
+      check_identifier_read(source.name.to_s, state, source.token) if ti.shared?
     else
       check_reads_in_expr(source, state)
     end
@@ -1378,10 +1378,9 @@ module LoopFrameAnalysis
     names
   end
 
-  sig { params(ti: T.untyped).returns(T::Boolean) }
+  sig { params(ti: Type).returns(T::Boolean) }
   def self.frame_local_collection?(ti)
-    return false unless ti
-    collection_shaped = ti.list_collection? || ti.map? || ti.array? || ti.string?
+    collection_shaped = ti.collection_value? || ti.string?
     collection_shaped && !ti.heap? && !ti.rodata?
   end
 
@@ -1391,11 +1390,11 @@ module LoopFrameAnalysis
     scan_direct(body) do |s|
       case s
       when AST::VarDecl
-        next unless frame_local_collection?(Type.from_node(s)) && s.name.is_a?(String)
+        next unless frame_local_collection?(Type.from_node!(s, context: "loop frame decl")) && s.name.is_a?(String)
         decls << s
       when AST::BindExpr
         next unless s.mode == :decl && s.name.is_a?(String)
-        decls << s if frame_local_collection?(Type.from_node(s))
+        decls << s if frame_local_collection?(Type.from_node!(s, context: "loop frame bind"))
       end
     end
     decls

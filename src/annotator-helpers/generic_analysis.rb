@@ -637,8 +637,8 @@ module GenericAnalysis
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
     if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:full_type)
-      ti = expr.target.full_type
-      if ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?)
+      ti = Type.from_node!(expr.target, context: "container source")
+      if ti.collection_value?
         return root_variable_name(expr.target)
       end
     end

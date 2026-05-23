@@ -7,7 +7,9 @@ instructions:
 0009 LOAD_CONST_I64    2 ; I:8
 0011 I_TO_VAL
 0012 NATIVE_CALL       43 3
-0015 HALT
+0015 STORE_SLOT        1
+0017 LOAD_SLOT         1
+0019 HALT
 consts:
 S:11:register-vm
 I:0

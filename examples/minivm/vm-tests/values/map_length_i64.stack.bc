@@ -13,7 +13,9 @@ instructions:
 0018 MAP_PUT
 0019 LOAD_SLOT         0
 0021 MAP_LENGTH
-0022 HALT
+0022 STORE_SLOT        1
+0024 LOAD_SLOT         1
+0026 HALT
 consts:
 S:1:a
 I:10

@@ -332,10 +332,10 @@ class MIRLowering
   sig { params(node: T.untyped, entry: CleanupEntry).returns(String) }
   def discard_owned_zig_type(node, entry)
     return entry[:zig_type] if entry[:zig_type]
-    ti = Type.from_node(node)
-    ti = ti.payload_type || ti if ti&.error_union?
-    return "[]const u8" if ti&.string?
-    ti&.zig_type || Type.new(ti.resolved).zig_type
+    ti = Type.from_node!(node, context: "discard owned type")
+    ti = ti.payload_type || ti if ti.error_union?
+    return "[]const u8" if ti.string?
+    ti.zig_type || Type.new(ti.resolved).zig_type
   end
 
   # Stamps `MIR::Stmt#source_line` (and `source_column`) from the
@@ -509,14 +509,13 @@ class MIRLowering
     sym = callee_param.respond_to?(:symbol) ? callee_param.symbol : nil
     return :heap if sym&.heap_provenance? || sym&.storage == :heap
     raw_ti = callee_param.respond_to?(:type) ? callee_param.type : nil
-    ti = raw_ti.is_a?(Type) ? raw_ti : (raw_ti ? Type.new(raw_ti) : nil)
+    ti = Type.from_node!(raw_ti, context: "TAKES parameter allocator")
     return :heap if takes_param_needs_heap_cleanup?(ti)
     @decl_alloc || :heap
   end
 
-  sig { params(ti: T.nilable(Type)).returns(T::Boolean) }
+  sig { params(ti: Type).returns(T::Boolean) }
   def takes_param_needs_heap_cleanup?(ti)
-    return false unless ti
     ti.recursive_cleanup_shape?(@schema_lookup)
   end
 
@@ -588,8 +587,8 @@ class MIRLowering
 
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
   # to a concrete :heap/:frame symbol. Used by InlineZig allocs field.
-  sig { params(alloc_sym: Symbol, receiver_type: T.nilable(Type), target_node: T.untyped, node: T.untyped).returns(Symbol) }
-  def resolve_alloc_sym(alloc_sym, receiver_type = nil, target_node = nil, node = nil)
+  sig { params(alloc_sym: Symbol, target_node: T.untyped, node: T.untyped).returns(Symbol) }
+  def resolve_alloc_sym(alloc_sym, target_node = nil, node = nil)
     case alloc_sym
     when :heap  then :heap
     when :frame then :frame
@@ -1610,7 +1609,7 @@ class MIRLowering
       # this arg on success (param.takes || GIVE) -- the single ownership
       # signal (INV-13). COPY into a borrow param is NOT a take.
       takes = a.was_moved == true
-      ti = a.full_type
+      ti = Type.from_node!(a, context: "function call argument")
       callee_param = callee_sig ? callee_sig.params[idx] : nil
       # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
       callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
@@ -1622,10 +1621,9 @@ class MIRLowering
       # CheatLib.dupeValue has comptime arms for ArrayList (list_collection?),
       # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
       # variants share isStringMap-shape via the inner-field heuristic.
-      copy_to_owning = a.is_a?(AST::CopyNode) &&
-                       callee_param_type.collection? &&
-                       (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
-                        (ti&.array? && !ti&.string?))
+      copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
+                          callee_param_type.collection? &&
+                          ti.collection_value?)
       arg_alloc = takes_arg_alloc(callee_param)
       raw_arg = with_decl_alloc(arg_alloc) do
         copy_to_owning ?
@@ -1702,17 +1700,16 @@ class MIRLowering
     args_mir = node.args.each_with_index.map { |a, idx|
       # was_moved is the single ownership-transfer signal (INV-13).
       takes = a.was_moved == true
-      ti = a.full_type
+      ti = Type.from_node!(a, context: "method call argument")
       # UFCS: the receiver is param[0], so args[i] -> params[i+1].
       callee_param = callee_sig&.params&.[](idx + 1)
       # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
       callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
       # COPY of an owning collection into a TAKES collection param (#37 COPY):
       # produce owning ArrayList via dupeValue; see lower_func_call note.
-      copy_to_owning = a.is_a?(AST::CopyNode) &&
-                       callee_param_type.collection? &&
-                       (ti&.list_collection? || ti&.set_collection? || ti&.pool? || ti&.map? ||
-                        (ti&.array? && !ti&.string?))
+      copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
+                          callee_param_type.collection? &&
+                          ti.collection_value?)
       arg_alloc = takes_arg_alloc(callee_param)
       raw_arg = with_decl_alloc(arg_alloc) do
         copy_to_owning ?
@@ -1790,13 +1787,7 @@ class MIRLowering
     pre_resolved_alloc = nil
     if pattern.include?("{alloc}")
       alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
-      receiver_type = if node.is_a?(AST::MethodCall)
-        Type.new(node.object.full_type)
-      else
-        ti = node.args&.first&.full_type
-        ti ? Type.new(ti) : nil
-      end
-      pre_resolved_alloc = resolve_alloc_sym(alloc_sym, receiver_type, nil, node)
+      pre_resolved_alloc = resolve_alloc_sym(alloc_sym, nil, node)
     end
     stdlib_args_for_lower = node.matched_stdlib_def&.arg_spec
 
@@ -2664,11 +2655,7 @@ class MIRLowering
         is_value_shape = inner_t.primitive? || inner_t.string? ||
                          (inner_t.optional? && inner_t.wrapped_type &&
                           (inner_t.wrapped_type.primitive? || inner_t.wrapped_type.string?))
-        wants_release = !is_value_shape && (
-                          inner_t.array? || inner_t.list_collection? ||
-                          inner_t.set_collection? || inner_t.pool? ||
-                          inner_t.map? || !inner_t.primitive?
-                        )
+        wants_release = !is_value_shape && (inner_t.collection_value? || !inner_t.primitive?)
         # Drain channels FIRST so SPSC-queued spawns (e.g. the consumer
         # fiber for a sibling observable) become Ready before pickNext;
         # without this, in a tight `WHILE { WITH VIEW ... }` loop a
@@ -5162,10 +5149,10 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(T.untyped) }
   def or_pass_fallback(node)
-    ti = Type.from_node(node)
-    ti = ti.payload_type || ti if ti&.error_union?
-    return MIR::Lit.new('@as([]const u8, "")') if ti&.string?
-    return MIR::Lit.new("@as(#{ti.zig_type}, .empty)") if ti&.list_collection?
+    ti = Type.from_node!(node, context: "OR fallback")
+    ti = ti.payload_type || ti if ti.error_union?
+    return MIR::Lit.new('@as([]const u8, "")') if ti.string?
+    return MIR::Lit.new("@as(#{ti.zig_type}, .empty)") if ti.list_collection?
     MIR::Ident.new("undefined")
   end
 
@@ -5185,13 +5172,13 @@ class MIRLowering
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
     if node.target.is_a?(AST::OptionalUnwrap)
-      inner_ti = node.target.full_type  # T (unwrapped)
+      inner_ti = Type.from_node!(node.target, context: "optional field target")  # T (unwrapped)
       inner_mir = lower(node.target.target)
       inner_sync = node.target.target.symbol&.sync
-      field_expr = if inner_ti&.multiowned? || inner_ti&.shared? ||
+      field_expr = if inner_ti.multiowned? || inner_ti.shared? ||
                        inner_sync == :locked || inner_sync == :write_locked
         "_r.ctrl.data.#{node.field}"
-      elsif inner_ti&.frozen?
+      elsif inner_ti.frozen?
         "_r.#{node.field}"
       elsif inner_sync == :always_mutable
         "_r.data.#{node.field}"
@@ -5206,7 +5193,7 @@ class MIRLowering
     end
 
     target = lower(node.target)
-    ti = node.target.full_type
+    ti = Type.from_node!(node.target, context: "field target")
 
     # Rc/Arc: unwrap through .ctrl.data
     rc_map = @rc_unwrap_map || {}
@@ -5215,12 +5202,12 @@ class MIRLowering
     is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
 
     target_sync = node.target.symbol&.sync
-    if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
+    if (ti.multiowned? || ti.shared?) && !is_rc_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")
       data = MIR::FieldGet.new(ctrl, "data")
       return MIR::FieldGet.new(data, node.field.to_s)
-    elsif ti&.frozen?
+    elsif ti.frozen?
       # *const T auto-derefs in Zig — no _root needed
       return MIR::FieldGet.new(target, node.field.to_s)
     elsif (target_sync == :locked || target_sync == :write_locked) && !is_locked_unwrapped
@@ -5238,8 +5225,8 @@ class MIRLowering
     # field name matches a declared variant. Emit MIR::UnionVariantGet so
     # bc_emitter / checker can dispatch on node class rather than name
     # matching (vs. plain struct-field access).
-    target_type_sym = ti&.resolved&.to_s&.to_sym
-    union_schema = target_type_sym && @union_schemas&.dig(target_type_sym)
+    target_type_sym = ti.resolved.to_s.to_sym
+    union_schema = @union_schemas&.dig(target_type_sym)
     union_variants = Schemas.union?(union_schema) ? union_schema.variants : nil
     field_str = node.field.to_s
     if union_variants && (union_variants.key?(node.field) ||
@@ -5259,7 +5246,7 @@ class MIRLowering
   def lower_get_index(node)
     target = lower(node.target)
     index = lower(node.index)
-    ti = node.target.full_type
+    ti = Type.from_node!(node.target, context: "index target")
 
     # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
     # Zig only -- BC has no Arc-wrapping (values are uniformly value-typed
@@ -5267,7 +5254,7 @@ class MIRLowering
     # PUT path (which short-circuits the Arc deref for BC) and the GET
     # path use different identifiers; PUTs land in `map` while GETs read
     # from `Deref(map.ctrl.data)` and miss every entry.
-    if ti&.map? && (ti&.shared? || ti&.multiowned?) && @target != :bc
+    if ti.map? && (ti.shared? || ti.multiowned?) && @target != :bc
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -5294,7 +5281,7 @@ class MIRLowering
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
         next unless template&.include?("{#{alloc_key}}")
         sym = op[alloc_key] || :heap
-        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, map_ft, node.target, node)
+        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, node.target, node)
       end
       key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
       val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
@@ -5305,7 +5292,7 @@ class MIRLowering
           kind, op, key_zig, val_zig, resolved_allocs, template_kind)
       end
       MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, resolved_allocs, template_kind)
-    elsif ti&.pool?
+    elsif ti.pool?
       # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
       # BC dispatches via compile_inline_bc :get on tag == :pool_method
       # (-> list-ref). Zig emits {0}.get({1}) from stdlib_def[:zig]. The
@@ -5318,7 +5305,7 @@ class MIRLowering
       pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
       pool_get_def.emit.elem = elem_name
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
-    elsif ti&.set_collection?
+    elsif ti.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)
       elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
       emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
@@ -5335,7 +5322,7 @@ class MIRLowering
     else
       # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
       # array → getAt, etc.). Falls back to :getAt for unregistered types.
-      builtin = INDEX_OPS.dig(ti&.dispatch_key, :get, :builtin) || :getAt
+      builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
       emit_builtin(builtin, [target, index])
     end
   end
@@ -5449,7 +5436,7 @@ class MIRLowering
       # @indirect is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
       if v.needs_heap_create
-        field_sym = v.full_type&.resolved
+        field_sym = Type.from_node!(v, context: "indirect union field").resolved
         zig_t = transpile_type(field_sym.to_s)
         # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
         # If the field holds a union value, deep-copy so the new allocation's
@@ -5541,8 +5528,8 @@ class MIRLowering
     end_expr = lower(node.end)
     exclusive = node.instance_variable_get(:@exclusive)
 
-    target_ti = node.target.full_type
-    if target_ti&.list_collection? || target_ti&.array?
+    target_ti = Type.from_node!(node.target, context: "slice target")
+    if target_ti.direct_indexable_collection?
       target = MIR::ItemsAccess.new(target, true)
     end
 
@@ -5663,10 +5650,9 @@ class MIRLowering
     ["expectEqualDeep", []]
   end
 
-  sig { params(ast_node: T.untyped).returns(T.untyped) }
+  sig { params(ast_node: T.untyped).returns(Type) }
   def type_info_for(ast_node)
-    return nil unless ast_node.respond_to?(:full_type)
-    ast_node.full_type
+    Type.from_node!(ast_node, context: "equality helper")
   end
 
   # If `t` is a list/slice type whose element type renders cleanly to
@@ -5674,7 +5660,6 @@ class MIRLowering
   # falls back to expectEqualDeep.
   sig { params(t: Type).returns(T.nilable(String)) }
   def slice_element_zig_type(t)
-    return nil unless t
     return nil unless t.respond_to?(:array?) && t.array?
     return nil if t.string?  # strings handled by expectEqualStrings
     elem = t.respond_to?(:element_type) ? t.element_type : nil
@@ -5718,20 +5703,20 @@ class MIRLowering
   def lower_copy(node)
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
-    ti = node.value.full_type
+    ti = Type.from_node!(node.value, context: "COPY value")
     # CopyNode.alloc is set by ensure_owned_value! at auto-COPY sites to
     # match the container's allocator. Defaults to :heap for explicit user
     # COPY (no container context) -- the COPY produces a fresh heap-owned
     # value the user binds independently.
     alloc = @decl_alloc || node.alloc || :heap
 
-    if ti && @union_schemas&.key?(ti.resolved)
+    if @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
-    elsif ti&.any_sync?
+    elsif ti.any_sync?
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
-    elsif ti&.string?
+    elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
-    elsif ti&.list_collection? || (ti&.array? && !ti&.string? && !ti&.collection?)
+    elsif ti.direct_indexable_collection?
       # COPY of a list/slice: ItemsAccess produces a []T view; the slice arm of
       # CheatLib.dupeValue allocates a fresh buffer and per-element dupes when
       # elements need cleanup (or @memcpy when they don't). Subsumes the old
@@ -5740,7 +5725,7 @@ class MIRLowering
       elem_zig = transpile_type(ti.element_type)
       src = MIR::ItemsAccess.new(source, true)
       MIR::DeepCopy.new(src, "[]#{elem_zig}", elem_zig, :full_value, alloc)
-    elsif ti&.collection? || (ti && ti.struct? && ti.needs_promotion?(@schema_lookup))
+    elsif ti.collection? || (ti.struct? && ti.needs_promotion?(@schema_lookup))
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
@@ -5749,17 +5734,17 @@ class MIRLowering
 
   sig { params(node: AST::CloneNode).returns(MIR::RcRetain) }
   def lower_clone(node)
-    ti = node.value.full_type
-    func = if ti&.split_open_stream?
+    ti = Type.from_node!(node.value, context: "CLONE value")
+    func = if ti.split_open_stream?
       "splitRetain"
-    elsif ti&.shared_promise? || ti&.shared?
+    elsif ti.shared_promise? || ti.shared?
       "arcRetain"
-    elsif ti&.multiowned?
+    elsif ti.multiowned?
       "rcRetain"
     else
-      raise "Internal: lower_clone on unsupported type #{ti&.resolved || node.value.resolved_type}"
+      raise "Internal: lower_clone on unsupported type #{ti.resolved || node.value.resolved_type}"
     end
-    zig_base = ti&.split_open_stream? ? ti.zig_type : rc_payload_zig_type(ti)
+    zig_base = ti.split_open_stream? ? ti.zig_type : rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(node.value), zig_base, func)
   end
 
@@ -6472,7 +6457,7 @@ class MIRLowering
 
         # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
         # .ctrl.data wrapping and a single MapRef cell holds the data).
-        if ti&.map? && (ti&.shared? || ti&.multiowned?)
+        if ti.map? && (ti.shared? || ti.multiowned?)
           target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
         end
       end
@@ -6489,7 +6474,7 @@ class MIRLowering
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
         next unless template&.include?("{#{alloc_key}}")
         sym = op[alloc_key] || :heap
-        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, receiver_type, target_node, node)
+        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, target_node, node)
       end
       if shard_direct
         return MIR::ShardedMapPut.new(target, idx, val,
@@ -6528,7 +6513,7 @@ class MIRLowering
       placeholder = "{#{alloc_key}}"
       next unless zig.include?(placeholder)
       alloc_sym = op[alloc_key] || :heap
-      resolved = resolve_alloc_sym(alloc_sym, receiver_type, target_node, node)
+      resolved = resolve_alloc_sym(alloc_sym, target_node, node)
       resolved_allocs[alloc_key] = resolved
     end
 
@@ -7212,8 +7197,7 @@ class MIRLowering
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def return_value_already_payload_pointer?(ast_node)
     return false unless ast_node && @current_fn_return_payload_zig
-    ti = ast_node.respond_to?(:full_type) ? ast_node.full_type : nil
-    return false unless ti.respond_to?(:zig_type)
+    ti = Type.from_node!(ast_node, context: "return payload pointer")
     ti.zig_type == @current_fn_return_payload_zig
   rescue StandardError
     false
@@ -7432,13 +7416,12 @@ class MIRLowering
     ti.direct_indexable_collection?
   end
 
-  sig { params(ast_node: T.untyped, type_info: Type).returns(T.nilable(T::Boolean)) }
+  sig { params(ast_node: T.untyped, type_info: Type).returns(T::Boolean) }
   def direct_slice_backed_expr?(ast_node, type_info)
     ti = Type.new(type_info)
     return true if ti.fixed?
     return true if ast_node.is_a?(AST::GetField)
-    ast_node.is_a?(AST::Identifier) &&
-      @current_fn_param_names&.include?(ast_node.name)
+    ast_node.is_a?(AST::Identifier) ? !!@current_fn_param_names&.include?(ast_node.name) : false
   end
 
   sig { params(target: T.untyped, index: T.untyped, ast_node: T.untyped, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
@@ -7459,7 +7442,7 @@ class MIRLowering
     recv_ast = node.is_a?(AST::MethodCall) ? node.object : node.args.first
     return nil unless recv_ast
 
-    recv_ti = recv_ast.full_type
+    recv_ti = Type.from_node!(recv_ast, context: "direct length")
 
     ti = Type.new(recv_ti)
     # Containers (list/array/slice) all defer to CheatLib.len, which dispatches
@@ -7604,8 +7587,7 @@ class MIRLowering
   sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol).returns(T.untyped) }
   def materialize_owned_sink_value(value, ast_node, sink_alloc)
     return value unless ast_node
-    ti = ast_node.respond_to?(:full_type) ? ast_node.full_type : nil
-    return value unless ti.is_a?(Type)
+    ti = Type.from_node!(ast_node, context: "owned sink materialization")
 
     if ti.string?
       return value if owned_sink_value?(value, ast_node)
@@ -7643,8 +7625,8 @@ class MIRLowering
   def rc_retain_needed?(value_node)
     return false unless value_node.is_a?(AST::Identifier)
     return false if value_node.is_a?(AST::MoveNode)
-    ti = value_node.full_type
-    return false unless ti&.any_rc?
+    ti = Type.from_node!(value_node, context: "rc retain")
+    return false unless ti.any_rc?
     return false if ti.atomic_ptr?
     rc_map = @rc_unwrap_map || {}
     return false if rc_map.key?(value_node.name)
@@ -7653,7 +7635,7 @@ class MIRLowering
 
   sig { params(value_node: AST::Identifier).returns(MIR::RcRetain) }
   def make_rc_retain(value_node)
-    ti = value_node.full_type
+    ti = Type.from_node!(value_node, context: "rc retain emit")
     func = ti.shared? ? "arcRetain" : "rcRetain"
     zig_base = rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(value_node), zig_base, func)

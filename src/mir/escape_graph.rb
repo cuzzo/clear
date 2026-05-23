@@ -322,14 +322,14 @@ module EscapeGraph
       return :heap if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
       return :borrow if expr.respond_to?(:borrow_provenance?) && expr.borrow_provenance?
       return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
-      ti = expr.full_type if expr.respond_to?(:full_type)
-      :heap if ti.is_a?(Type) && inherent_heap_type?(ti)
+      ti = Type.from_node!(expr, context: "function call return provenance")
+      :heap if inherent_heap_type?(ti)
     when AST::MethodCall
       return :heap if expr.respond_to?(:heap_provenance?) && expr.heap_provenance?
       return :borrow if expr.respond_to?(:borrow_provenance?) && expr.borrow_provenance?
       return :rodata if expr.respond_to?(:rodata_provenance?) && expr.rodata_provenance?
-      ti = expr.full_type if expr.respond_to?(:full_type)
-      :heap if ti.is_a?(Type) && inherent_heap_type?(ti)
+      ti = Type.from_node!(expr, context: "method call return provenance")
+      :heap if inherent_heap_type?(ti)
     when AST::BinaryOp
       return pipeline_return_provenance(expr, fn_nodes) if expr.op == :SMOOTH
       expr.op == :OR_RESCUE ? call_return_provenance(expr.left, fn_nodes) : nil
@@ -449,9 +449,9 @@ module EscapeGraph
     node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(Type) }
   def type_of(node)
-    node.respond_to?(:full_type) ? node.full_type : nil
+    Type.from_node!(node, context: "escape graph")
   end
 
   sig { params(ti: Type).returns(T::Boolean) }
@@ -475,7 +475,7 @@ module EscapeGraph
   sig { params(decl: T.untyped).returns(T::Boolean) }
   def frame_backed_container?(decl)
     ti = type_of(decl)
-    !!(ti.is_a?(Type) && (ti.string? || ti.array? || ti.collection?))
+    ti.string? || ti.collection_value?
   end
 
   sig { params(decl: T.untyped).returns(T::Boolean) }

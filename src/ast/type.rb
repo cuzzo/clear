@@ -338,7 +338,7 @@ class Type
     return :refcounted     if any_rc?
     return :sync_wrapped   if any_sync?
     return (rodata? ? :slice_rodata : :slice_managed) if string?
-    return :slice_managed  if list_collection? || set_collection? || pool? || map?
+    return :slice_managed  if collection?
     return :value          if array? && !string?
     :by_ref
   end
@@ -773,6 +773,25 @@ class Type
   sig { returns(T::Boolean) }
   def collection?
     map? || pool? || list_collection? || set_collection?
+  end
+
+  # True for collection-shaped values that may need collection copy/cleanup
+  # handling at ownership boundaries. `collection?` is declaration-level
+  # collections (HashMap/@pool/@list/@set); plain non-string arrays/slices are
+  # value-shaped but need the same boundary treatment.
+  sig { returns(T::Boolean) }
+  def collection_value?
+    collection? || non_string_array?
+  end
+
+  sig { returns(T::Boolean) }
+  def associative_collection?
+    map?
+  end
+
+  sig { returns(T::Boolean) }
+  def linear_collection?
+    pool? || list_collection? || set_collection? || non_string_array?
   end
 
   sig { returns(T.nilable(Symbol)) }
@@ -1565,9 +1584,8 @@ class Type
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
-    return true if any_rc? || link? || list_collection? || map? || pool? ||
-                   set_collection? || (string? && heap?) ||
-                   (array? && !string?) || any_sync? ||
+    return true if any_rc? || link? || collection_value? || (string? && heap?) ||
+                   any_sync? ||
                    (respond_to?(:indirect?) && indirect?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
@@ -1604,7 +1622,7 @@ class Type
 
     # Frame collections/maps: backing buffer uses frame allocator, arena rewind handles it.
     # UNLESS elements have heap internals (e.g. list of RC pointers).
-    if list_collection? || (map? && !numeric_map?) || numeric_map? || pool? || set_collection?
+    if collection?
       return elem_has_heap_internals?(schema_lookup)
     end
 
@@ -1679,12 +1697,12 @@ class Type
       fields = vt.fields
       return fields.any? { |_, ft|
         t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && (t.indirect? || t.string? || t.collection? || t.map? || (t.array? && !t.fixed?))
+        t && (t.indirect? || t.string? || t.collection? || (t.array? && !t.fixed?))
       }
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.indirect? || t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
+    (t.indirect? || t.collection? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
@@ -1703,6 +1721,14 @@ class Type
     rescue StandardError
       nil
     end
+  end
+
+  sig { params(node: T.untyped, context: String).returns(Type) }
+  def self.from_node!(node, context: "post-annotation MIR")
+    t = from_node(node)
+    raise "#{context}: missing type info for #{node.class}" unless t
+    raise "#{context}: unresolved type info for #{node.class}" if t.untyped?
+    t
   end
 
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }

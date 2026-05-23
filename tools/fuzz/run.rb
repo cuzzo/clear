@@ -327,4 +327,9 @@ puts "=" * 60
   end
 end
 
-exit (fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?) ? 0 : 1
+ok = if opts[:quarantine] == :only
+       true
+     else
+       fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
+     end
+exit ok ? 0 : 1

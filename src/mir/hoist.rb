@@ -207,7 +207,7 @@ module Hoist
     ctr[0] = n
     name = "__hoist_#{n}"
     tok = concat.respond_to?(:token) ? concat.token : nil
-    ti = concat.full_type
+    ti = Type.from_node!(concat, context: "AST hoist temp")
     storage = (concat.respond_to?(:storage) && concat.storage) || :frame
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
@@ -336,7 +336,8 @@ module MIRHoistLowering
     return expr unless mir_allocates?(expr) || T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
-    @pending_stmts << MIR::AllocMark.new(name, :heap, nil)
+    ti = Type.from_node!(ast_node, context: "MIR allocating hoist")
+    @pending_stmts << MIR::AllocMark.new(name, :heap, ti)
     @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
@@ -353,10 +354,10 @@ module MIRHoistLowering
 
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
-    ti = Type.from_node(ast_node)
-    zig_t = ti ? Type.new(ti.resolved).zig_type : "UNKNOWN"
+    ti = Type.from_node!(ast_node, context: "owned value temp")
+    zig_t = Type.new(ti.resolved).zig_type
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
-    alloc = if ti&.recursive_cleanup_shape?(schema_lookup)
+    alloc = if ti.recursive_cleanup_shape?(schema_lookup)
               :heap
             else
               @decl_alloc == :heap ? :heap : :frame
@@ -375,8 +376,7 @@ module MIRHoistLowering
     return false if ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode) || ast_node.is_a?(AST::MoveNode)
     return false if ast_node.is_a?(AST::Identifier) || ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
     return false if container_borrow_expr?(ast_node)
-    ti = Type.from_node(ast_node)
-    return false unless ti
+    ti = Type.from_node!(ast_node, context: "owned value temp decision")
     ti = ti.payload_type || ti if ti.error_union?
     @union_schemas&.key?(ti.resolved) &&
       ti.needs_explicit_cleanup?(:heap, @schema_lookup)
@@ -388,8 +388,8 @@ module MIRHoistLowering
   def container_borrow_expr?(ast_node)
     return false unless ast_node
     if ast_node.is_a?(AST::GetIndex)
-      ti = ast_node.target.full_type
-      return !!ti&.indexed_container_borrow?
+      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
+      return ti.indexed_container_borrow?
     end
     if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
       return container_borrow_expr?(ast_node.left)
@@ -402,8 +402,7 @@ module MIRHoistLowering
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
   def copy_container_borrow_if_needed(expr, ast_node)
     return expr unless container_borrow_expr?(ast_node)
-    ti = Type.from_node(ast_node)
-    return expr unless ti
+    ti = Type.from_node!(ast_node, context: "container borrow copy")
     ti = ti.payload_type || ti if ti.error_union?
     return expr unless @union_schemas&.key?(ti.resolved)
     copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :full_value, :heap)
@@ -412,9 +411,8 @@ module MIRHoistLowering
 
   sig { params(ast_node: T.untyped, source: String).returns(CleanupEntry) }
   def rc_cleanup_entry(ast_node, source:)
-    ti = Type.from_node(ast_node)
-    zig_t = ti&.zig_type
-    raise "hoist_cleanup_entry: #{source} has no zig_type -- ast_node type_info unavailable" unless zig_t
+    ti = Type.from_node!(ast_node, context: "RC hoist cleanup")
+    zig_t = ti.zig_type
     CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false,
                        zig_type: zig_t, rc_variant: :standard, rc_alloc: :heap)
   end

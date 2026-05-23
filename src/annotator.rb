@@ -1474,7 +1474,7 @@ private
         else
           # Simple payload: non-Copy if @indirect or a collection/array (not string)
           t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-          t && (t.indirect? || (!t.string? && (t.collection? || t.map? || (t.array? && !t.fixed?))))
+          t && (t.indirect? || (!t.string? && (t.collection? || (t.array? && !t.fixed?))))
         end
       }
       if has_non_copy_as
@@ -3995,9 +3995,9 @@ private
 
     # When binding a collection source (users AS $u), $u refers to each *element*,
     # not the collection. Subsequent $u.field accesses need the element type.
-    # Note: collection? covers pool/list/map; array? is needed for plain T[] arrays.
+    # collection_value? covers declared collections plus plain non-string arrays.
     lhs_ti = Type.new(lhs_type)
-    binding_type = if (lhs_ti.array? || lhs_ti.collection?) && !lhs_ti.string? && lhs_ti.element_type
+    binding_type = if lhs_ti.collection_value? && lhs_ti.element_type
       lhs_ti.element_type.to_s
     else
       lhs_type
@@ -4386,9 +4386,8 @@ private
 
     # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
     # For list/array types, check if element type is a non-Copy union.
-    vti = node.value.full_type
-    vti = Type.new(vti) if vti && !vti.is_a?(Type)
-    if vti && (vti.list_collection? || (vti.array? && !vti.string?))
+    vti = Type.from_node!(node.value, context: "array/list deep-copy")
+    if vti.direct_indexable_collection?
       elem = vti.element_type
       if elem
         schema = lookup_type_schema(elem.resolved) rescue nil
@@ -6127,9 +6126,9 @@ private
     case init
     when AST::StructLit, AST::UnionVariantLit
       init.fields.all? do |_, fval|
-        fti = fval&.full_type
-        fti = Type.new(fti) if fti && !fti.is_a?(Type)
-        next true unless fti.is_a?(Type) && (fti.string? || fti.list_collection? || fti.map?)
+        next true unless fval
+        fti = Type.from_node!(fval, context: "heap init field")
+        next true unless fti.string? || fti.collection?
         fval.is_a?(AST::Locatable) && fval.heap_provenance?
       end
     when AST::FuncCall, AST::MethodCall
@@ -6641,7 +6640,7 @@ private
   def og_declare(name, node, type_info)
     entry = current_scope.locals[name] rescue nil
     kind = classify_og_kind(type_info, sync: entry&.sync)
-    ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
+    ti = Type.from_node(type_info) || Type.new(:Untyped)
     @og.declare(name, kind: kind, type_info: ti,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end

@@ -7,7 +7,7 @@ RSpec.describe OwnershipGraph do
 
   describe "#declare" do
     it "adds a live node" do
-      graph.declare("x", kind: :affine, type_info: nil)
+      graph.declare("x", kind: :affine)
       expect(graph["x"]).to be_live
       expect(graph.live?("x")).to be true
     end

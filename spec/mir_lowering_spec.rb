@@ -3314,7 +3314,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   it "raises when rc_cleanup_entry's ast_node carries no Type" do
     expect {
       lowering.send(:rc_cleanup_entry, nil, source: "test")
-    }.to raise_error(/test has no zig_type/)
+    }.to raise_error(/RC hoist cleanup: missing type info/)
   end
 
   it "classifies capability wrappers and share promotion cleanup entries" do

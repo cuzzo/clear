@@ -1,16 +1,18 @@
 instructions:
 0000 LOAD_CONST_I64    0 ; I:1
-0002 I_TO_VAL          
+0002 I_TO_VAL
 0003 NATIVE_CALL       10 1
 0006 STORE_SLOT        0
 0008 LOAD_SLOT         0
 0010 LOAD_CONST_I64    1 ; I:2
-0012 I_TO_VAL          
+0012 I_TO_VAL
 0013 NATIVE_CALL       36 2
 0016 STORE_SLOT        0
 0018 LOAD_SLOT         0
 0020 NATIVE_CALL       13 1
-0023 HALT              
+0023 STORE_SLOT        1
+0025 LOAD_SLOT         1
+0027 HALT
 consts:
 I:1
 I:2

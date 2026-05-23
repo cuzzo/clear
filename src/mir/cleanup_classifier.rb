@@ -65,18 +65,18 @@ module CleanupClassifier
       next unless stmt.name.is_a?(AST::GetField)
       target_node = stmt.name.target
 
-      field_ti = stmt.name.full_type
+      field_ti = Type.from_node!(stmt.name, context: "field pre-cleanup")
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
-      if !field_ti&.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti&.string?
+      if !field_ti.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti.string?
         stmt.field_pre_cleanup = :heap
         next
       end
 
       # Heap struct string fields: heap-allocated structs dupe their string
       # fields to heap at creation. Overwriting without freeing the old leaks.
-      if field_ti&.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
+      if field_ti.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         if target_entry && target_entry[:alloc] == :heap
           stmt.field_pre_cleanup = :heap
@@ -84,7 +84,7 @@ module CleanupClassifier
         end
       end
 
-      next unless field_ti&.needs_cleanup?(schema_lookup)
+      next unless field_ti.needs_cleanup?(schema_lookup)
 
       stmt.field_pre_cleanup = if target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
@@ -317,7 +317,8 @@ module CleanupClassifier
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless AST.call?(expr)
       next if expr.is_a?(AST::ResolveNode)
-      inner_ti = expr.full_type&.wrapped_type
+      expr_ti = Type.from_node!(expr, context: "capture binding")
+      inner_ti = expr_ti.wrapped_type
       next unless inner_ti
       e = classify_binding(name, inner_ti, anchor_node, promoted_fns, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
@@ -375,7 +376,6 @@ module CleanupClassifier
   # array_struct_strings) stay as separate methods due to their size.
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
-    return nil unless ti
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil if node_sym&.borrow_provenance?  # borrow return -- caller owns data
@@ -470,7 +470,8 @@ module CleanupClassifier
   private_class_method def self.classify_array_struct_strings(ti, node, schema_lookup)
     val = node.respond_to?(:value) ? node.value : nil
     return nil unless ti.non_string_array? && !ti.collection? && val.is_a?(AST::ListLit)
-    return nil unless elem_type_needs_cleanup?(ti.element_type, schema_lookup)
+    et = ti.element_type
+    return nil unless et && elem_type_needs_cleanup?(et, schema_lookup)
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     container_alloc = container_alloc_from(sym, node)
     entry(:uniform, alloc: container_alloc, has_moved_guard: false)
@@ -650,7 +651,7 @@ module CleanupClassifier
       (field.is_a?(AST::StructField) && field.borrowed) ||
         borrowed.include?(k.to_s) ||
         (fval.respond_to?(:symbol) && fval.symbol&.borrow_provenance?) ||
-        (fval.respond_to?(:full_type) && (fval.full_type.is_a?(Type) ? fval.full_type.provenance == :borrow : false))
+        (fval && Type.from_node!(fval, context: "struct literal borrowed field").provenance == :borrow)
     end
   end
 
@@ -671,9 +672,10 @@ module CleanupClassifier
       if struct_lit
         fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
         next false if fval.respond_to?(:symbol) && fval.symbol&.borrow_provenance?
-        fval_ti = fval&.full_type
-        fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
-        next false if fval_ti.is_a?(Type) && (fval_ti.rodata? || fval_ti.provenance == :borrow)
+        if fval
+          fval_ti = Type.from_node!(fval, context: "struct cleanup field")
+          next false if fval_ti.rodata? || fval_ti.provenance == :borrow
+        end
       end
       elem_type_needs_cleanup?(t, schema_lookup)
     end
@@ -715,12 +717,13 @@ module CleanupClassifier
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.elem_needs_cleanup?(ti, schema_lookup)
-    elem_type_needs_cleanup?(ti.element_type, schema_lookup)
+    et = ti.element_type
+    return false unless et
+    elem_type_needs_cleanup?(et, schema_lookup)
   end
 
-  sig { params(et: T.nilable(Type), schema_lookup: Proc).returns(T::Boolean) }
+  sig { params(et: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.elem_type_needs_cleanup?(et, schema_lookup)
-    return false unless et
     return false if et.provenance == :borrow
     return true if et.string?
     return true if et.needs_cleanup?(schema_lookup)
@@ -763,9 +766,8 @@ module CleanupClassifier
       next false if v.is_a?(AST::StructField) && v.borrowed
       t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
       t.string? ||
-        t.array? ||
+        t.non_string_array? ||
         t.collection? ||
-        t.map? ||
         t.any_rc? ||
         t.link? ||
         (schema_lookup && t.needs_cleanup?(schema_lookup))

@@ -5,7 +5,9 @@ instructions:
 0006 LOAD_CONST_I64    1 ; I:2
 0008 I_TO_VAL
 0009 NATIVE_CALL       29 2
-0012 HALT
+0012 STORE_SLOT        1
+0014 LOAD_SLOT         1
+0016 HALT
 consts:
 S:5:clear
 I:2

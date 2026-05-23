@@ -10,7 +10,9 @@ instructions:
 0015 CONCAT
 0016 STORE_SLOT        0
 0018 LOAD_SLOT         0
-0020 HALT
+0020 STORE_SLOT        1
+0022 LOAD_SLOT         1
+0024 HALT
 consts:
 S:0:
 S:4:SET=

@@ -300,7 +300,9 @@ class PipelineHost
       if @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         @soa_needed_fields << node.field
         soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
+        soa_field.full_type = soa_field_slice_type(node)
         soa_idx = AST::Identifier.new(node.token, "__soa_i")
+        soa_idx.full_type = :Int64
         new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
         copy_type_info(node, new_gi)
         return new_gi
@@ -398,6 +400,12 @@ class PipelineHost
     dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
     dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)
     dst.var_used = src.var_used if src.respond_to?(:var_used) && dst.respond_to?(:var_used=)
+  end
+
+  sig { params(field_node: AST::GetField).returns(Type) }
+  def soa_field_slice_type(field_node)
+    field_type = Type.from_node!(field_node, context: "SOA field slice")
+    Type.new(:"#{field_type.resolved}[]")
   end
 
   public
