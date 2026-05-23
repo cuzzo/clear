@@ -115,6 +115,8 @@ class MIRLowering
     @do_block_counter = T.let(0, Integer)
     @bg_block_counter = T.let(0, Integer)
     @stream_gen_counter = T.let(0, Integer)
+    @current_stream_is_inf = T.let(nil, T.nilable(T::Boolean))
+    @current_stream_local = T.let(nil, T.nilable(String))
     @loop_mark_counter = T.let(0, Integer)
     @for_counter = T.let(0, Integer)
     @_emitter = T.let(nil, T.nilable(MIREmitter))

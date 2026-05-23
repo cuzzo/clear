@@ -1,11 +1,18 @@
-# typed: false
+# typed: strict
 require "sorbet-runtime"
 
 module MIRLoweringControlFlow
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { MIRLowering }
 
   sig { params(node: AST::IfStatement).returns(T.untyped) }
   def lower_if(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
+    @enum_schemas = T.let(@enum_schemas, T.untyped)
     cond, cond_pending = lower_head { lower(node.condition) }
     if node.expr_mode
       @block_expr_counter += 1
@@ -23,6 +30,7 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
   def lower_if_bind(node)
+    T.bind(self, MIRLowering) rescue nil
     mir_bindings = node.bindings.map do |b|
       { expr: lower(b.expr), capture: b.name }
     end
@@ -57,6 +65,11 @@ module MIRLoweringControlFlow
   # iteration-variable decl).
   sig { params(body: T.untyped, mark_per_iter: T.untyped, tight: T.untyped, after_mark: T::Array[T.untyped]).returns(T.untyped) }
   def prepend_loop_mark(body, mark_per_iter:, tight:, after_mark: [])
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
+    @loop_mark_counter = T.let(@loop_mark_counter, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     suffix = after_mark + body
     return suffix unless !tight && mark_per_iter && @current_fn_has_rt
     rt = MIR::Ident.new(@rt_name)
@@ -69,6 +82,10 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::WhileLoop).returns(MIR::WhileStmt) }
   def lower_while(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
     cond = lower(node.condition)
     b = node.do_branch
@@ -86,6 +103,10 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::WhileBindLoop).returns(MIR::WhileStmt) }
   def lower_while_bind(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
     cond = lower(node.condition)
     body = lower_body(node.do_branch)
@@ -115,12 +136,20 @@ module MIRLoweringControlFlow
   # unconditional exit (break/continue/return), making any trailing code unreachable.
   sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
   def loop_body_exits?(body)
+    T.bind(self, MIRLowering) rescue nil
     return false unless body.is_a?(Array) && !body.empty?
     body.last.is_a?(MIR::BreakStmt) || body.last.is_a?(MIR::ContinueStmt) || body.last.is_a?(MIR::ReturnStmt)
   end
 
   sig { params(node: AST::ForEach).returns(T.untyped) }
   def lower_for_each(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
+    @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
+    @for_counter = T.let(@for_counter, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
+    @struct_schemas = T.let(@struct_schemas, T.untyped)
     var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
     rt = MIR::Ident.new(@rt_name)
@@ -238,6 +267,11 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::ForRange).returns(MIR::ScopeBlock) }
   def lower_for_range(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
+    @for_counter = T.let(@for_counter, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     start_val = lower(node.start_expr)
     end_val = lower(node.end_expr)
     var = zig_safe_name(node.var_name)
@@ -272,6 +306,9 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::MatchStatement).returns(T.untyped) }
   def lower_match(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     if node.expr_mode
       @block_expr_counter += 1
       expr_label = "__match_#{@block_expr_counter}"
@@ -439,6 +476,9 @@ module MIRLoweringControlFlow
 
   sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def hoist_unhoisted_return_allocs(body, ast_stmts)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
     return body unless body
     returns = T.let([], T::Array[T.untyped])
     Array(ast_stmts).each { |s| returns << s.value if s.is_a?(AST::ReturnNode) && s.value }
@@ -467,6 +507,14 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::ReturnNode).returns(T.untyped) }
   def lower_return(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_return_alloc = T.let(@current_fn_return_alloc, T.untyped)
+    @current_fn_tail_call = T.let(@current_fn_tail_call, T.untyped)
+    @current_fn_zig_name = T.let(@current_fn_zig_name, T.untyped)
+    @debug_mode = T.let(@debug_mode, T.untyped)
+    @pending_stmts = T.let(@pending_stmts, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     # The return expression's allocating sub-nodes inherit the function's
     # finalized return placement -- the return slot is their "binding".
     pending_start = @pending_stmts.length
@@ -541,6 +589,9 @@ module MIRLoweringControlFlow
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def return_value_already_payload_pointer?(ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
     return false unless ast_node && @current_fn_return_payload_zig
     ti = Type.from_node!(ast_node, context: "return payload pointer")
     ti.zig_type == @current_fn_return_payload_zig
@@ -550,6 +601,7 @@ module MIRLoweringControlFlow
 
   sig { params(expr: T.untyped).returns(T::Set[String]) }
   def returned_binding_names(expr)
+    T.bind(self, MIRLowering) rescue nil
     names = T.let(Set.new, T::Set[String])
     collect_returned_binding_names(expr, names)
     names
@@ -557,6 +609,7 @@ module MIRLoweringControlFlow
 
   sig { params(body: T.nilable(T::Array[T.untyped])).returns(T::Set[String]) }
   def collect_fn_returned_names(body)
+    T.bind(self, MIRLowering) rescue nil
     names = T.let(Set.new, T::Set[String])
     return names unless body
     AST.walk_body(body) do |node|
@@ -567,6 +620,7 @@ module MIRLoweringControlFlow
 
   sig { params(expr: T.untyped, names: T::Set[String]).void }
   def collect_returned_binding_names(expr, names)
+    T.bind(self, MIRLowering) rescue nil
     return unless expr
     case expr
     when AST::Identifier
@@ -591,11 +645,13 @@ module MIRLoweringControlFlow
   # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_heap_provenance?(node)
+    T.bind(self, MIRLowering) rescue nil
     !!(node.is_a?(AST::Locatable) && node.heap_provenance?)
   end
 
   sig { params(sig_obj: T.untyped).returns(T::Boolean) }
   def callee_returns_heap_string?(sig_obj)
+    T.bind(self, MIRLowering) rescue nil
     return false unless sig_obj && sig_obj.respond_to?(:return_type)
     lifetime = sig_obj.respond_to?(:return_lifetime) ? sig_obj.return_lifetime : nil
     return false if lifetime && !(lifetime.respond_to?(:empty?) && lifetime.empty?)
@@ -613,6 +669,9 @@ module MIRLoweringControlFlow
   # they must be hoisted to a named let with a defer.
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
   def call_union_return_needs_hoist?(expr, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @union_schemas = T.let(@union_schemas, T.untyped)
     return false unless expr.is_a?(MIR::Call)
     ti = Type.from_node(ast_node)
     return false unless ti
@@ -627,6 +686,7 @@ module MIRLoweringControlFlow
   # the polymorphic helper.
   sig { params(arg_node: T.untyped, callee_sig: T.untyped, idx: Integer).returns(T::Boolean) }
   def universal_poly_arg_needs_addr?(arg_node, callee_sig, idx)
+    T.bind(self, MIRLowering) rescue nil
     return false unless callee_sig.is_a?(FunctionSignature)
     return false unless callee_sig.requires
     param = callee_sig.params[idx]
@@ -654,6 +714,9 @@ module MIRLoweringControlFlow
 
   sig { params(name: String).returns(T::Boolean) }
   def callee_needs_rt?(name)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @fn_sigs = T.let(@fn_sigs, T.untyped)
     return true if false || name.to_s.empty?
     sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
     sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true

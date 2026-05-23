@@ -1,11 +1,17 @@
-# typed: false
+# typed: strict
 require "sorbet-runtime"
 
 module MIRLoweringConcurrency
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { MIRLowering }
 
   sig { params(node: AST::DoBlock).returns(MIR::DoBlock) }
   def lower_do_block(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_block_counter = T.let(@do_block_counter, T.untyped)
     @do_block_counter = (@do_block_counter || 0) + 1
     id = @do_block_counter - 1
     n = node.branches.length
@@ -120,6 +126,13 @@ module MIRLoweringConcurrency
 
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }
   def lower_bg_block(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @bg_block_counter = T.let(@bg_block_counter, T.untyped)
+    @current_bg_pointer_captures = T.let(@current_bg_pointer_captures, T.untyped)
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
+    @pending_stmts = T.let(@pending_stmts, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     @bg_block_counter = (@bg_block_counter || 0) + 1
     id = @bg_block_counter - 1
 
@@ -417,6 +430,7 @@ module MIRLoweringConcurrency
   # @shared:locked / @multiowned for shared access.
   sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), _captured: T::Hash[String, Type]).void }
   def enforce_bg_capture_strategies!(node, _captured)
+    T.bind(self, MIRLowering) rescue nil
     refused = (node.capture_analysis&.strategies || {}).select do |_name, strat|
       strat.is_a?(CaptureStrategy::Refuse)
     end
@@ -445,6 +459,13 @@ module MIRLoweringConcurrency
 
   sig { params(node: AST::BgStreamBlock).returns(T.any(MIR::BgBlock, MIR::BlockExpr, MIR::InlineBc, MIR::StreamSpawn)) }
   def lower_bg_stream_block(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_stream_is_inf = T.let(@current_stream_is_inf, T.untyped)
+    @current_stream_local = T.let(@current_stream_local, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
+    @stream_gen_counter = T.let(@stream_gen_counter, T.untyped)
+    @target = T.let(@target, T.untyped)
     @stream_gen_counter = (@stream_gen_counter || 0) + 1
     id = @stream_gen_counter - 1
 
@@ -582,6 +603,11 @@ module MIRLoweringConcurrency
 
   sig { params(node: AST::YieldExpr).returns(T.any(MIR::MethodCall, MIR::StreamYield)) }
   def lower_yield(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_stream_is_inf = T.let(@current_stream_is_inf, T.untyped)
+    @current_stream_local = T.let(@current_stream_local, T.untyped)
+    @target = T.let(@target, T.untyped)
     stream_local = @current_stream_local || "__stream_local"
     lowered = lower(node.expr)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
@@ -600,6 +626,12 @@ module MIRLoweringConcurrency
 
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
   def lower_next_expr(node, alloc_sym = :frame)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @decl_alloc = T.let(@decl_alloc, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
+    @target = T.let(@target, T.untyped)
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
     promise_type = Type.new(node.expr.full_type)
 
     if promise_type.promise_list?

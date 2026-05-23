@@ -1,11 +1,15 @@
-# typed: false
+# typed: strict
 require "sorbet-runtime"
 
 module MIRLoweringVariables
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { MIRLowering }
 
   sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[String]).returns(T.nilable(String)) }
   def tied_shared_family_return_param(node, mutable_scalar_params)
+    T.bind(self, MIRLowering) rescue nil
     ret = node.return_type
     return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
     return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
@@ -40,6 +44,7 @@ module MIRLoweringVariables
   # Returns the wrapped MIR node (typically MIR::CapWrap).
   sig { params(inner_mir: T.any(MIR::ContainerInit, MIR::StructInit), bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.any(MIR::CapWrap, MIR::ContainerInit, MIR::StructInit)) }
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
+    T.bind(self, MIRLowering) rescue nil
     # AtomicPtr and primitive Atomic use distinct constructors.
     is_atomic_ptr = ft.atomic_ptr?
     sync_fn = case ft.sync
@@ -76,6 +81,13 @@ module MIRLoweringVariables
 
   sig { params(node: AST::VarDecl).returns(T.untyped) }
   def lower_var_decl(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+    @fn_alloc_marked_names = T.let(@fn_alloc_marked_names, T.untyped)
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
     is_mutable = node.respond_to?(:mutable) && node.mutable
     ft = Type.new(node.full_type)
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
@@ -225,7 +237,7 @@ module MIRLoweringVariables
     end
     if has_mir_drop && @fn_alloc_marked_names
       @fn_alloc_marked_names[safe_name] = true
-      T.must(@decl_zig_name_map)[node.object_id] = safe_name
+      @decl_zig_name_map[node.object_id] = safe_name
       # Name-keyed view used by AST markers lowered later (see
       # @fn_name_rename_map init comment). Overwrites when the same name
       # is re-declared in a sibling branch — lowering order matches the
@@ -271,6 +283,7 @@ module MIRLoweringVariables
 
   sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }
   def owned_return_transfer_binding?(binding_entry, init)
+    T.bind(self, MIRLowering) rescue nil
     return false if binding_entry.needs_cleanup?
     return false unless binding_entry.present?
     return false unless binding_entry.alloc == :heap || binding_entry.alloc == :cleanup
@@ -293,6 +306,11 @@ module MIRLoweringVariables
 
   sig { params(node: AST::BindExpr).returns(T.untyped) }
   def lower_bind_expr(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     if node.mode == :decl
       # Proxy to VarDecl logic. Copy mir_binding_entry so lower_var_decl
       # uses node-identity lookup rather than the name-keyed dict.
@@ -361,6 +379,11 @@ module MIRLoweringVariables
   # form passes node.value as-is.
   sig { params(node: AST::BindExpr).returns(MIR::ExprStmt) }
   def lower_atomic_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     op_name = node.auto_atomic_op.to_s
     target_name = node.name.is_a?(String) ? node.name : node.name.name
     safe = zig_safe_name(target_name)
@@ -394,6 +417,10 @@ module MIRLoweringVariables
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
   def lower_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
     # Indexed assignment: map[k]=v, list[i]=v
     if node.name.is_a?(AST::GetIndex)
       return lower_indexed_assignment(node)
@@ -444,6 +471,9 @@ module MIRLoweringVariables
 
   sig { params(value: T.untyped).returns(T.nilable(MIR::MoveMark)) }
   def move_mark_for_transferred_temp(value)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     return nil unless value.is_a?(MIR::Ident)
     name = value.name.to_s
     return nil unless @guarded_cleanup_names && @guarded_cleanup_names[name]
@@ -452,6 +482,12 @@ module MIRLoweringVariables
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
   def lower_indexed_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
+    @shard_context = T.let(@shard_context, T.untyped)
+    @target = T.let(@target, T.untyped)
     target_node = node.name.target
     ti = target_node.full_type
 
@@ -660,6 +696,7 @@ module MIRLoweringVariables
 
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }
   def lower_field_assignment_with_cleanup(node)
+    T.bind(self, MIRLowering) rescue nil
     target = lower(node.name.target)
     field = node.name.field.to_s
     value = lower(node.value)
@@ -684,6 +721,10 @@ module MIRLoweringVariables
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
   def lower_auto_lock_assignment(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
+    @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     var_name = node.auto_lock[:var]
     sync = node.auto_lock[:sync]
     guard_var = "__#{var_name}_guard"

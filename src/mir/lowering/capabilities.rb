@@ -1,11 +1,15 @@
-# typed: false
+# typed: strict
 require "sorbet-runtime"
 
 module MIRLoweringCapabilities
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { MIRLowering }
 
   sig { params(var_node: AST::Identifier).returns(String) }
   def with_cap_var_name(var_node)
+    T.bind(self, MIRLowering) rescue nil
     case var_node
     when AST::GetField then var_node.field.to_s
     else
@@ -29,6 +33,9 @@ module MIRLoweringCapabilities
   # only works for non-Arc parameters.
   sig { params(var_node: AST::Identifier).returns(T::Array[T.nilable(Symbol)]) }
   def with_cap_sync_storage(var_node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @current_fiber_capture_symbols = T.let(@current_fiber_capture_symbols, T.untyped)
     if var_node.is_a?(AST::GetField) && var_node.full_type
       ft = var_node.full_type
       sync = ft.sync
@@ -48,6 +55,9 @@ module MIRLoweringCapabilities
   # `env.vars`), built recursively for nested fields.
   sig { params(var_node: AST::Identifier, var_name: String).returns(String) }
   def with_cap_zig_target(var_node, var_name)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
     if var_node.is_a?(AST::GetField)
       build_field_path_zig(var_node)
     else
@@ -60,6 +70,7 @@ module MIRLoweringCapabilities
   # not be statically known at this fn's codegen time.
   sig { params(var_node: AST::Identifier).returns(T::Boolean) }
   def with_cap_is_param?(var_node)
+    T.bind(self, MIRLowering) rescue nil
     return false unless var_node.is_a?(AST::Identifier)
     var_node.symbol&.is_param == true
   end
@@ -71,6 +82,7 @@ module MIRLoweringCapabilities
   # Mutable parameters arrive as `*T`, so probe and deref through `*`.
   sig { params(zig_var: String).returns(String) }
   def comptime_arc_unwrap_expr(zig_var)
+    T.bind(self, MIRLowering) rescue nil
     "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
   end
 
@@ -78,6 +90,9 @@ module MIRLoweringCapabilities
   # Stops at the root Identifier; intermediate GetFields chain via `.`.
   sig { params(node: T.untyped).returns(String) }
   def build_field_path_zig(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
     case node
     when AST::Identifier
       @do_capture_map&.dig(node.name) || node.name
@@ -90,6 +105,13 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_with_block(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
+    @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
+    @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     return lower_with_match_block(node) if node.arms
 
     # Universal polymorphic WITH lowers to a helper that dispatches by
@@ -421,6 +443,7 @@ module MIRLoweringCapabilities
   # is the RETRY(N) count or nil.
   sig { params(var_name: String, alias_name: String, clause: T::Hash[Symbol, T.untyped]).returns(T::Hash[Symbol, T.untyped]) }
   def build_fallible_clause_mir(var_name, alias_name, clause)
+    T.bind(self, MIRLowering) rescue nil
     desc = {
       var_name:      var_name.to_s,
       alias_name:    alias_name.to_s,
@@ -468,6 +491,7 @@ module MIRLoweringCapabilities
   # mapping that classifies a binding's family at the call site.
   sig { params(family: Symbol, zig_var: String, node: T.nilable(AST::WithBlock)).returns(String) }
   def with_match_probe_for_family(family, zig_var, node = nil)
+    T.bind(self, MIRLowering) rescue nil
     inner_t = "CheatLib.WithMatchInner(@TypeOf(#{zig_var}))"
     snapshot = node.respond_to?(:snapshot_mode) && T.must(node).snapshot_mode
     case family
@@ -504,6 +528,7 @@ module MIRLoweringCapabilities
   # expressions in not-taken comptime branches are elided by Zig.
   sig { params(zig_var: String).returns(String) }
   def with_match_unwrap_value(zig_var)
+    T.bind(self, MIRLowering) rescue nil
     is_ptr  = "@typeInfo(@TypeOf(#{zig_var})) == .pointer"
     inner_t = "@typeInfo(@TypeOf(#{zig_var})).pointer.child"
     "(if (comptime #{is_ptr}) " \
@@ -528,6 +553,9 @@ module MIRLoweringCapabilities
   # families. The Guard's `defer release()` handles teardown.
   sig { params(family: Symbol, zig_var: String, alias_name: String, node: AST::WithBlock).returns(T.nilable(String)) }
   def with_match_arm_prelude(family, zig_var, alias_name, node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     safe_alias = zig_safe_name(alias_name)
     unwrap = with_match_unwrap_value(zig_var)
     guard_var = "__#{alias_name}_match_#{node.object_id.abs}"
@@ -570,6 +598,7 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock).returns(MIR::ScopeBlock) }
   def lower_with_match_block(node)
+    T.bind(self, MIRLowering) rescue nil
     cap = node.capabilities.first
     var_name = with_cap_var_name(cap[:var_node])
     zig_var  = with_cap_zig_target(cap[:var_node], var_name)
@@ -596,6 +625,9 @@ module MIRLoweringCapabilities
   # it (e.g. `ON :Deadlock -> { ... }`), in which case its action runs.
   sig { params(lock_expr: String, err_method: String, guard_var: String, alias_name: String, clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
   def emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, with_node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     action_zig = emit_lock_action_zig(clause, with_label, with_node)
     retries    = clause[:retries]
     matched    = clause[:matched_types]
@@ -678,6 +710,11 @@ module MIRLoweringCapabilities
   # runtime heap allocation instead of treating them as opaque InlineZig.
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_polymorphic_universal(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
+    @rt_name = T.let(@rt_name, T.untyped)
     cap = node.capabilities.first
     var_node   = cap[:var_node]
     var_name   = with_cap_var_name(var_node)
@@ -716,12 +753,14 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock).returns(T::Boolean) }
   def polymorphic_flow_required?(node)
+    T.bind(self, MIRLowering) rescue nil
     return true if (node.capabilities || []).any? { |cap| cap[:guard_expr] }
     ast_contains_return?(node.body)
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def ast_contains_return?(node)
+    T.bind(self, MIRLowering) rescue nil
     case node
     when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
       false
@@ -740,6 +779,9 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock).returns(T.nilable(T.any(T::Array[T.untyped], T::Array[T.untyped]))) }
   def guard_fail_flow_body(node)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     clause = node.lock_error_clause
     return [] unless clause && (clause[:matched_types] || []).include?(:GuardFail)
 
@@ -776,6 +818,7 @@ module MIRLoweringCapabilities
   # PRE returns; later PREs are not evaluated.
   sig { params(node: AST::FunctionDef).returns(T::Array[T.untyped]) }
   def lower_pre_clauses(node)
+    T.bind(self, MIRLowering) rescue nil
     pre_clauses = node.respond_to?(:pre_clauses) ? (node.pre_clauses || []) : []
     return [] if pre_clauses.empty?
 
@@ -807,6 +850,7 @@ module MIRLoweringCapabilities
   # accepts UTF-8 in string literals.
   sig { params(text: String).returns(String) }
   def zig_string_lit(text)
+    T.bind(self, MIRLowering) rescue nil
     out = +'"'
     text.each_byte do |b|
       case b
@@ -827,6 +871,7 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock, body_mir: T::Array[T.untyped], with_label: T.nilable(String)).returns(T::Array[T.untyped]) }
   def wrap_body_with_guard(node, body_mir, with_label)
+    T.bind(self, MIRLowering) rescue nil
     guard_cond = combined_guard_cond(node)
     return body_mir unless guard_cond
 
@@ -838,6 +883,7 @@ module MIRLoweringCapabilities
   # body runs only when every predicate holds (multi-object consistency).
   sig { params(node: AST::WithBlock).returns(T.nilable(MIR::BinOp)) }
   def combined_guard_cond(node)
+    T.bind(self, MIRLowering) rescue nil
     guarded = (node.capabilities || []).select { |cap| cap[:guard_expr] }
     return nil if guarded.empty?
     guarded.map { |g| lower(g[:guard_expr]) }
@@ -846,6 +892,7 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.nilable(T::Array[T.untyped])) }
   def guard_fail_body(node, with_label)
+    T.bind(self, MIRLowering) rescue nil
     clause = node.lock_error_clause
     return nil unless clause && (clause[:matched_types] || []).include?(:GuardFail)
 
@@ -857,6 +904,9 @@ module MIRLoweringCapabilities
 
   sig { params(node: AST::WithBlock, with_label: T.nilable(String)).returns(T.untyped) }
   def emit_snapshot_mutable_call(node, with_label)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     snap_caps = node.capabilities || []
     body_mir = lower_body(node.body)
     # User RETRY(N) wraps the whole snapshot call; runtime update helpers
@@ -917,6 +967,9 @@ module MIRLoweringCapabilities
   # not inside this action.
   sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]], with_label: T.nilable(String), with_node: AST::WithBlock, conflict_error: Symbol).returns(String) }
   def emit_conflict_action_zig(clause, with_label, with_node, conflict_error = :MvccConflict)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     line = with_node.token&.line.to_s
     err_name = conflict_error.to_s
     msg = err_name == "AtomicConflict" ? "atomic CAS retries exhausted" : "MVCC commit conflict"
@@ -928,11 +981,15 @@ module MIRLoweringCapabilities
   # / @panic, or break :__with_<id> (for PASS / `-> { }`).
   sig { params(clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
   def emit_lock_action_zig(clause, with_label, with_node)
+    T.bind(self, MIRLowering) rescue nil
     emit_error_action_zig(clause, with_label, with_node, :LockTimeout, "lock acquire timed out")
   end
 
   sig { params(clause: T::Hash[Symbol, T::Array[T.untyped]], with_label: T.nilable(String), with_node: AST::WithBlock, error_type: Symbol, default_msg: String).returns(String) }
   def emit_error_action_zig(clause, with_label, with_node, error_type, default_msg)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     line = with_node.token&.line.to_s
     err_name = error_type.to_s
     kind = AST.kind_of_type(error_type) || :Transient
@@ -966,6 +1023,9 @@ module MIRLoweringCapabilities
   # future lowering changes.
   sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @do_capture_map = T.let(@do_capture_map, T.untyped)
     suffix = with_node ? "_#{with_node.object_id.abs}" : ""
     fallible_caps.each_with_index.map do |cap, i|
       var_name   = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
@@ -1005,6 +1065,9 @@ module MIRLoweringCapabilities
   # ON-clause handling. The fallible-variant emitter sits beside this.
   sig { params(fallible_caps: T::Array[T::Hash[Symbol, T.untyped]], with_node: T.nilable(AST::WithBlock)).returns(String) }
   def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
+    T.bind(self, MIRLowering) rescue nil
+    # mir-lowering strict ivars
+    @rt_name = T.let(@rt_name, T.untyped)
     n = fallible_caps.length
     entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
 
@@ -1062,6 +1125,7 @@ module MIRLoweringCapabilities
   # release on scope exit as usual.
   sig { params(fallible_caps: T::Array[T.untyped], clause: T::Hash[T.untyped, T.untyped], with_label: T.nilable(T.any(NilClass, String)), with_node: AST::WithBlock).returns(String) }
   def emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, with_node)
+    T.bind(self, MIRLowering) rescue nil
     n = fallible_caps.length
     entries = build_sorted_acquire_entries(fallible_caps, fallible: true, with_node: with_node)
 
