@@ -148,6 +148,10 @@ RSpec.describe "pipeline backend coverage" do
           [yield, []]
         end
 
+        def mir_allocates?(_node)
+          false
+        end
+
         def append_ownership_transfers_for_mir_body(body)
           body
         end

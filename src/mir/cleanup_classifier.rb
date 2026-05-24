@@ -176,11 +176,13 @@ module CleanupClassifier
 
   sig { params(expr: T.untyped, local_entries: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.mark_iteration_values_function!(expr, local_entries)
-    collect_expr_identifiers(expr).each do |ident|
-      entry = local_entries[ident.name.to_s]
-      next unless entry&.present?
-      entry[:scope] = :function if entry.alloc == :frame && entry.scope == :iteration
-    end
+    ident = AST.root_identifier(expr) rescue nil
+    return unless ident
+
+    entry = local_entries[ident.name.to_s]
+    return unless entry&.present?
+
+    entry[:scope] = :function if entry.alloc == :frame && entry.scope == :iteration
   end
 
   sig { params(expr: T.untyped).returns(T::Array[AST::Identifier]) }

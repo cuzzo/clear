@@ -112,7 +112,8 @@ module MIRLoweringFunctions
     # flat name-keyed allocs dict would conflate them.  Track which names have
     # had AllocMarks emitted and remap collisions to <name>_L<line>.
     @fn_alloc_marked_names = {}   # safe_name => true (seen at least once)
-    @lowered_alloc_names = Set.new
+    @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
+    @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
     @decl_zig_name_map    = {}    # node.object_id => disambiguated Zig name
     @guarded_cleanup_names = {}   # safe Zig local name => true when a moved guard was emitted
     # Name-keyed fallback used by AST-level markers (SuppressCleanup, Drop,
@@ -375,7 +376,8 @@ module MIRLoweringFunctions
       end
     end
     takes_mir.each do |node|
-      @lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      T.must(@lowered_alloc_names) << node.name.to_s if node.is_a?(MIR::AllocMark)
+      T.must(@lowered_guarded_cleanup_names) << node.name.to_s if (node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)) && node.cleanup_entry.has_moved_guard?
     end
 
     pointer_param_mir = []

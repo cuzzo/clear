@@ -410,6 +410,8 @@ module MIRHoistLowering
     mark = MIR::AllocMark.new(name, alloc, ti)
     mark.scope = alloc == :heap ? :heap : :iteration
     @pending_stmts << mark
+    @lowered_alloc_names&.add(name)
+    @lowered_alloc_names&.add(name)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
@@ -474,6 +476,7 @@ module MIRHoistLowering
     mark = MIR::AllocMark.new(name, alloc, ti)
     mark.scope = alloc == :heap ? :heap : :iteration
     @pending_stmts << mark
+    @lowered_alloc_names&.add(name)
     if expr.is_a?(MIR::InlineZig) && expr.allocs && !expr.allocs.empty?
       emits = expr.stdlib_def&.emit
       expr.target_var = name unless emits&.mutates_receiver
@@ -485,6 +488,7 @@ module MIRHoistLowering
       cleanup = err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
       @pending_stmts << cleanup
       (@guarded_cleanup_names ||= {})[name] = true if entry.has_moved_guard?
+      @lowered_guarded_cleanup_names&.add(name) if entry.has_moved_guard?
     end
     MIR::Ident.new(name)
   end
@@ -630,8 +634,11 @@ module MIRHoistLowering
     when MIR::HeapCreate
       mir_ident_names(node.init)
     when MIR::BlockExpr
+      local_names = node.body.each_with_object(Set.new) do |stmt, names|
+        names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
+      end
       last = node.body.reverse.find { |s| s.is_a?(MIR::BreakStmt) }
-      last ? mir_ident_names(last.value) : []
+      last ? mir_ident_names(last.value).reject { |name| local_names.include?(name.to_s) } : []
     else
       []
     end

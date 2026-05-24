@@ -88,7 +88,8 @@ class MIRLowering
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @lowered_alloc_names = T.let(Set.new, T::Set[String])
+    @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
+    @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @guarded_cleanup_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -453,7 +454,7 @@ class MIRLowering
 
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
   def visible_alloc_names_for_transfer(result, mir)
-    names = T.let(@lowered_alloc_names.dup, T::Set[String])
+    names = T.let(T.must(@lowered_alloc_names).dup, T::Set[String])
     walk_mir_node(result) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
     walk_mir_node(mir) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
     names
@@ -461,14 +462,22 @@ class MIRLowering
 
   sig { params(root: T.untyped).void }
   def register_visible_alloc_names!(root)
-    @lowered_alloc_names = T.let(@lowered_alloc_names, T::Set[String])
-    walk_mir_node(root) { |node| @lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark) }
+    lowered_alloc_names = T.must(@lowered_alloc_names)
+    lowered_guarded_cleanup_names = T.must(@lowered_guarded_cleanup_names)
+    walk_mir_node(root) do |node|
+      lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+
+      entry = node.cleanup_entry
+      guarded = entry.respond_to?(:has_moved_guard?) ? entry.has_moved_guard? : !!(entry.respond_to?(:[]) && entry[:has_moved_guard])
+      lowered_guarded_cleanup_names << node.name.to_s if guarded
+    end
     nil
   end
 
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
   def visible_guarded_cleanup_names_for_transfer(result, mir)
-    names = T.let(Set.new((@guarded_cleanup_names || {}).keys.map(&:to_s)), T::Set[String])
+    names = T.let(T.must(@lowered_guarded_cleanup_names).dup, T::Set[String])
     [result, mir].each do |root|
       walk_mir_node(root) do |node|
         next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
@@ -522,6 +531,8 @@ class MIRLowering
 
   sig { params(mir: T.untyped, visible_alloc_names: T::Set[String], visible_guarded_names: T::Set[String]).returns(T::Array[T.untyped]) }
   def ownership_transfers_for_mir(mir, visible_alloc_names, visible_guarded_names)
+    return [] if mir.is_a?(MIR::BreakStmt) || mir.is_a?(MIR::ReturnStmt)
+
     names = T.let([], T::Array[String])
     nodes = mir.is_a?(Array) ? mir : [mir]
     nodes.compact.each do |node|
@@ -530,9 +541,8 @@ class MIRLowering
     marks = T.let([], T::Array[T.untyped])
     names.uniq.each do |name|
       next unless visible_alloc_names.include?(name.to_s)
-      entry = @current_bindings[name] || CleanupEntry::NONE
       marks << MIR::TransferMark.new(name, :owned_sink)
-      marks << MIR::MoveMark.new(name) if entry.present? && visible_guarded_names.include?(name.to_s)
+      marks << MIR::MoveMark.new(name) if visible_guarded_names.include?(name.to_s)
     end
     marks
   end
@@ -558,7 +568,9 @@ class MIRLowering
     end
     return if node.is_a?(MIR::BlockExpr) || node.is_a?(MIR::Pipeline) ||
               node.is_a?(MIR::WhileStmt) || node.is_a?(MIR::ForStmt) ||
-              node.is_a?(MIR::IfStmt) || node.is_a?(MIR::FnDef)
+              node.is_a?(MIR::IfStmt) || node.is_a?(MIR::IfBindStmt) ||
+              node.is_a?(MIR::IfChain) || node.is_a?(MIR::SwitchStmt) ||
+              node.is_a?(MIR::ScopeBlock) || node.is_a?(MIR::FnDef)
     return unless node.class.respond_to?(:members)
     node.class.members.each do |member|
       value = node[member]
@@ -590,32 +602,17 @@ class MIRLowering
   def structural_ownership_consumes(node)
     case node
     when MIR::Let
-      mir_ident_names(node.init).select do |name|
-        entry = @current_bindings[name] || CleanupEntry::NONE
-        entry.present? || @guarded_cleanup_names&.[](name)
-      end
+      mir_ident_names(node.init)
     when MIR::Set
-      mir_ident_names(node.value).select do |name|
-        entry = @current_bindings[name] || CleanupEntry::NONE
-        entry.present? || @guarded_cleanup_names&.[](name)
-      end
+      mir_ident_names(node.value)
     when MIR::ReassignWithCleanup
-      mir_ident_names(node.value).select do |name|
-        entry = @current_bindings[name] || CleanupEntry::NONE
-        entry.present? || @guarded_cleanup_names&.[](name)
-      end
+      mir_ident_names(node.value)
     when MIR::ShardedMapPut
       emit = node.stdlib_def&.emit
       return [] unless emit&.takes_value
-      mir_ident_names(node.value).select do |name|
-        entry = @current_bindings[name] || CleanupEntry::NONE
-        entry.present? || @guarded_cleanup_names&.[](name)
-      end
+      mir_ident_names(node.value)
     when MIR::StructInit
-      node.fields.flat_map { |field| mir_ident_names(field[:value]) }.select do |name|
-        entry = @current_bindings[name] || CleanupEntry::NONE
-        entry.present? || @guarded_cleanup_names&.[](name)
-      end
+      node.fields.flat_map { |field| mir_ident_names(field[:value]) }
     else
       []
     end
@@ -1512,16 +1509,23 @@ class MIRLowering
 
     # Non-empty hash: init + puts
     items = []
-    alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), map_alloc == :heap ? "heapAlloc" : "frameAlloc", [], false)
+    alloc_expr = MIR::MethodCall.new(MIR::Ident.new(rt_name), map_alloc == :heap ? "heapAlloc" : "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
     items << MIR::Let.new("__hm", MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       k = lower(key_node)
       v = lower(val_node)
-      put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true)
+      consumed = (mir_ident_names(k) + mir_ident_names(v)).uniq
+      base_contract = MIR::CallableContract.no_ownership(4)
+      put_contract = MIR::CallableContract.new(
+        base_contract.signature,
+        MIR::OwnershipContract.consumes(consumed),
+        4,
+      )
+      put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true, put_contract)
       items << MIR::ExprStmt.new(put_call, false)
     end
     items << MIR::BreakStmt.new("__hm_blk", MIR::Ident.new("__hm"))
-    MIR::BlockExpr.new("__hm_blk", items)
+    MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
   end
 
   sig { params(node: AST::Cast).returns(MIR::Cast) }

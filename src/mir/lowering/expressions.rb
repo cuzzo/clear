@@ -438,7 +438,7 @@ module MIRLoweringExpressions
               MIR::MethodCall.new(MIR::Ident.new(@rt_name), "captureSnapshot", [
                 MIR::Ident.new(snap_zig_type),
                 MIR::AddressOf.new(MIR::Ident.new("__snap_input"))
-              ], false), false)
+              ], false, MIR::CallableContract.no_ownership(2)), false)
           ]
           # Rewrite left to use the hoisted variable
           left = MIR::Ident.new("__snap_input")
@@ -984,8 +984,15 @@ module MIRLoweringExpressions
     if hoisted.any?
       @block_expr_counter += 1
       label = "__ind_blk_#{@block_expr_counter}"
+      local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
+        names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
+      end
+      result_names = mir_ident_names(result).map(&:to_s).to_set
+      local_alloc_names.intersection(result_names).each do |name|
+        hoisted << MIR::TransferMark.new(name, :block_result)
+      end
       hoisted << MIR::BreakStmt.new(label, result)
-      MIR::BlockExpr.new(label, hoisted)
+      MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
     else
       result
     end
@@ -1066,8 +1073,15 @@ module MIRLoweringExpressions
     if hoisted.any?
       @block_expr_counter += 1
       label = "__ind_blk_#{@block_expr_counter}"
+      local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
+        names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
+      end
+      result_names = mir_ident_names(result).map(&:to_s).to_set
+      local_alloc_names.intersection(result_names).each do |name|
+        hoisted << MIR::TransferMark.new(name, :block_result)
+      end
       hoisted << MIR::BreakStmt.new(label, result)
-      MIR::BlockExpr.new(label, hoisted)
+      MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
     else
       result
     end

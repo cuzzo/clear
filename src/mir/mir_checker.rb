@@ -101,6 +101,12 @@ class MIRChecker
     attr_reader :err_finalizers
     sig { returns(T::Set[String]) }
     attr_reader :pending_return_transfers
+    sig { returns(T::Set[String]) }
+    attr_reader :pending_block_transfers
+    sig { returns(T::Hash[String, Symbol]) }
+    attr_reader :alloc_kinds
+    sig { returns(T::Hash[String, Symbol]) }
+    attr_reader :alloc_scopes
     sig { returns(T::Boolean) }
     attr_accessor :terminated
 
@@ -113,6 +119,9 @@ class MIRChecker
       @guarded_finalizers = T.let(Set.new, T::Set[String])
       @err_finalizers = T.let(Set.new, T::Set[String])
       @pending_return_transfers = T.let(Set.new, T::Set[String])
+      @pending_block_transfers = T.let(Set.new, T::Set[String])
+      @alloc_kinds = T.let({}, T::Hash[String, Symbol])
+      @alloc_scopes = T.let({}, T::Hash[String, Symbol])
       @terminated = T.let(false, T::Boolean)
     end
 
@@ -126,6 +135,9 @@ class MIRChecker
       other.guarded_finalizers.merge(@guarded_finalizers)
       other.err_finalizers.merge(@err_finalizers)
       other.pending_return_transfers.merge(@pending_return_transfers)
+      other.pending_block_transfers.merge(@pending_block_transfers)
+      other.alloc_kinds.merge!(@alloc_kinds)
+      other.alloc_scopes.merge!(@alloc_scopes)
       other.terminated = @terminated
       other
     end
@@ -140,6 +152,8 @@ class MIRChecker
         "guarded=#{@guarded_finalizers.to_a.sort.join(",")}",
         "err=#{@err_finalizers.to_a.sort.join(",")}",
         "return=#{@pending_return_transfers.to_a.sort.join(",")}",
+        "block=#{@pending_block_transfers.to_a.sort.join(",")}",
+        "alloc=#{@alloc_kinds.map { |k, v| "#{k}:#{v}" }.sort.join(",")}",
       ]
     end
   end
@@ -308,7 +322,7 @@ class MIRChecker
 
     case stmt
     when MIR::AllocMark
-      linear_alloc!(stmt.name.to_s, state)
+      linear_alloc!(stmt, state)
     when MIR::Cleanup
       linear_register_cleanup!(stmt.name.to_s, stmt.cleanup_entry.has_moved_guard?, state)
     when MIR::ErrCleanup
@@ -341,6 +355,14 @@ class MIRChecker
       check_linear_expr_uses!(stmt.expr, state)
     when MIR::BreakStmt
       check_linear_expr_uses!(stmt.value, state)
+      break_names = linear_expr_ident_names(stmt.value)
+      state.pending_block_transfers.each { |name| linear_release!(name, :block_result, state) }
+      state.pending_block_transfers.each do |name|
+        next if break_names.include?(name)
+        @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
+          "TransferMark(:block_result) does not match the block break expression")
+      end
+      state.pending_block_transfers.clear
     when MIR::IfStmt
       check_linear_expr_uses!(stmt.cond, state)
       check_linear_branch_join!(stmt.then_body, stmt.else_body, state, "if")
@@ -407,19 +429,23 @@ class MIRChecker
     nil
   end
 
-  sig { params(name: String, state: LinearOwnershipState).void }
-  def linear_alloc!(name, state)
+  sig { params(mark: MIR::AllocMark, state: LinearOwnershipState).void }
+  def linear_alloc!(mark, state)
+    name = mark.name.to_s
     if state.owned.include?(name) && !state.released.include?(name)
       @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
         "AllocMark appears while prior ownership for the same binding is still active")
     end
     state.owned.add(name)
+    state.alloc_kinds[name] = mark.alloc if mark.alloc.is_a?(Symbol)
+    state.alloc_scopes[name] = mark.scope if mark.scope.is_a?(Symbol)
     state.released.delete(name)
     state.maybe_released.delete(name)
     state.cleanup_finalizers.delete(name)
     state.guarded_finalizers.delete(name)
     state.err_finalizers.delete(name)
     state.pending_return_transfers.delete(name)
+    state.pending_block_transfers.delete(name)
     nil
   end
 
@@ -456,6 +482,10 @@ class MIRChecker
   def linear_transfer!(name, target, state)
     if target == :return
       state.pending_return_transfers.add(name)
+      return
+    end
+    if target == :block_result
+      state.pending_block_transfers.add(name)
       return
     end
     if state.cleanup_finalizers.include?(name) && !state.guarded_finalizers.include?(name)
@@ -496,7 +526,11 @@ class MIRChecker
   def check_linear_branch_join!(then_body, else_body, state, label)
     then_state = check_linear_stmts!(then_body, state.copy)
     else_state = check_linear_stmts!(else_body, state.copy)
-    linear_merge_branch_states!([then_state, else_state], state, label)
+    projected_then = state.copy
+    projected_else = state.copy
+    linear_exit_scope!(projected_then, then_state, label)
+    linear_exit_scope!(projected_else, else_state, label)
+    linear_merge_branch_states!([projected_then, projected_else], state, label)
     nil
   end
 
@@ -555,7 +589,8 @@ class MIRChecker
     local_names.each do |name|
       unless projected.released.include?(name) ||
              projected.cleanup_finalizers.include?(name) ||
-             projected.err_finalizers.include?(name)
+             projected.err_finalizers.include?(name) ||
+             projected.alloc_kinds[name] == :frame
         @errors << error(:OWNERSHIP_UNVERIFIED_PATH, label,
           "scope-local owned binding '#{name}' exits without cleanup or transfer")
       end
@@ -565,7 +600,10 @@ class MIRChecker
       projected.guarded_finalizers.delete(name)
       projected.err_finalizers.delete(name)
       projected.pending_return_transfers.delete(name)
+      projected.pending_block_transfers.delete(name)
       projected.maybe_released.delete(name)
+      projected.alloc_kinds.delete(name)
+      projected.alloc_scopes.delete(name)
     end
     copy_linear_state!(projected, outer)
     nil
@@ -580,12 +618,20 @@ class MIRChecker
     target.guarded_finalizers.replace(source.guarded_finalizers)
     target.err_finalizers.replace(source.err_finalizers)
     target.pending_return_transfers.replace(source.pending_return_transfers)
+    target.pending_block_transfers.replace(source.pending_block_transfers)
+    target.alloc_kinds.replace(source.alloc_kinds)
+    target.alloc_scopes.replace(source.alloc_scopes)
     target.terminated = source.terminated
     nil
   end
 
   sig { params(expr: T.untyped, state: LinearOwnershipState).void }
   def check_linear_expr_uses!(expr, state)
+    if expr.is_a?(MIR::BlockExpr)
+      inner = check_linear_stmts!(expr.body, state.copy)
+      linear_exit_scope!(state, inner, "block-expr")
+      return
+    end
     linear_expr_ident_names(expr).each do |name|
       next unless state.released.include?(name) || state.maybe_released.include?(name)
       @errors << error(:OWNERSHIP_USE_AFTER_TRANSFER, name,
@@ -1132,6 +1178,10 @@ class MIRChecker
   def walk_mir_expr(expr, &block)
     return unless expr
     yield expr
+    if expr.is_a?(MIR::BlockExpr)
+      walk_mir(expr.body, &block)
+      return
+    end
     each_sub_expr(expr) { |sub| walk_mir_expr(sub, &block) }
     nil
   end

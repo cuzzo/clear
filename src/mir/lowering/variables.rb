@@ -137,8 +137,11 @@ module MIRLoweringVariables
     # cleanup_bindings alloc (which correctly handles sharded/pool/always-heap types).
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
     heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
-    decl_alloc = if heap_return_var || node.symbol&.heap_storage?
+    heap_return_binding_allocates = heap_return_var && escaping_value_alloc(ft) == :heap
+    decl_alloc = if heap_return_binding_allocates || (!heap_return_var && node.symbol&.heap_storage?)
       :heap
+    elsif heap_return_var
+      :frame
     else
       (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
     end
@@ -304,7 +307,7 @@ module MIRLoweringVariables
       alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
       alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-    elsif owned_return_transfer_binding?(binding_entry, init) && !(ft.generic_instance? && ft.generic_base == :Id)
+    elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !(ft.generic_instance? && ft.generic_base == :Id)
       mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || :heap
       alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
       alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
@@ -326,7 +329,7 @@ module MIRLoweringVariables
       alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.scope || :iteration)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif binding_entry.present? && !binding_entry.needs_cleanup?
-      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || decl_alloc
+      mir_alloc = resolve_decl_stdlib_alloc(node) || (heap_return_var ? decl_alloc : binding_entry.alloc) || decl_alloc
       alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
       alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.scope || :iteration)
       [alloc_mark, let_node]
@@ -822,7 +825,7 @@ module MIRLoweringVariables
       type_expr, alloc, MIR::AddressOf.new(field_get)
     ], false, false, MIR::CallableContract.no_ownership(3))
     assign = MIR::Set.new(field_get, value)
-    MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), assign])
+    MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body([MIR::ExprStmt.new(cleanup_call, false), assign]))
   end
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
@@ -855,15 +858,17 @@ module MIRLoweringVariables
         materialize_owned_sink_value(placed, node.value, alloc_sym, node.name.full_type)
       end
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value)
+      value_pending = flush_pending
       get_field = MIR::FieldGet.new(MIR::MethodCall.new(MIR::Ident.new(zig_var), "get", [], false,
         MIR::CallableContract.no_ownership(0)), field)
       if cleanup_alloc
         stmts = T.let([
+          *value_pending,
           MIR::Let.new("__old", get_field, false, nil, nil),
           MIR::Set.new(get_field, value),
         ], T::Array[T.untyped])
         stmts << len_guard.call("__old", cleanup_alloc)
-        return MIR::ScopeBlock.new(stmts)
+        return MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body(stmts))
       else
         set = MIR::Set.new(get_field, value)
         return set
@@ -881,6 +886,7 @@ module MIRLoweringVariables
       materialize_owned_sink_value(placed, node.value, alloc_sym, node.name.full_type)
     end
     value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value)
+    value_pending = flush_pending
     @locked_unwrap_map = prev_locked
     alias_field = MIR::FieldGet.new(MIR::Ident.new(alias_var), field)
     stmts = T.let([
@@ -890,6 +896,7 @@ module MIRLoweringVariables
         MIR::CallableContract.no_ownership(0))),
       MIR::Let.new(alias_var, MIR::MethodCall.new(MIR::Ident.new(guard_var), "get", [], false,
         MIR::CallableContract.no_ownership(0)), false, nil, nil),
+      *value_pending,
     ], T::Array[T.untyped])
     if cleanup_alloc
       stmts << MIR::Let.new("__old", alias_field, false, nil, nil)
@@ -898,7 +905,7 @@ module MIRLoweringVariables
     else
       stmts << MIR::Set.new(alias_field, value)
     end
-    MIR::ScopeBlock.new(stmts)
+    MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body(stmts))
   end
 
   # ================================================================

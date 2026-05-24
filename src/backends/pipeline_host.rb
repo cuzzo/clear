@@ -487,6 +487,15 @@ class PipelineHost
   def lower_pipeline_block(list_node, &blk)
     label = next_pipe_label
     source_mir = visit_mir(list_node)
+    source_prefix = T.let([], T::Array[T.untyped])
+    if source_mir.is_a?(MIR::InlineZig) && source_mir.allocs && !source_mir.allocs.empty?
+      source_mir.target_var = "pipe_src_list"
+      alloc_values = source_mir.allocs.values.select { |value| value.is_a?(Symbol) }
+      alloc = alloc_values.include?(:heap) ? :heap : :frame
+      mark = MIR::AllocMark.new("pipe_src_list", alloc, list_node.full_type)
+      mark.scope = alloc == :heap ? :heap : :iteration
+      source_prefix << mark
+    end
     @current_pipe_label = label
 
     lhs_type = list_node.full_type
@@ -495,6 +504,7 @@ class PipelineHost
     body_stmts = blk.call(items_ident, label)
 
     MIR::BlockExpr.new(label, [
+      *source_prefix,
       MIR::Let.new("pipe_src_list", source_mir, false, nil, nil),
       *mat_stmts,
       *body_stmts
@@ -607,7 +617,7 @@ class PipelineHost
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
-        [MIR::AllocatorRef.new(pipeline_result_alloc)], false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc)], false, MIR::CallableContract.no_ownership(1))
     )
     [var_decl, defer]
   end
@@ -623,7 +633,7 @@ class PipelineHost
   def mat_append(value_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
-        [MIR::AllocatorRef.new(pipeline_result_alloc), value_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), value_expr], true, MIR::CallableContract.no_ownership(2)), false)
   end
 
   # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
@@ -631,7 +641,7 @@ class PipelineHost
   def mat_append_slice(slice_expr)
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
-        [MIR::AllocatorRef.new(pipeline_result_alloc), slice_expr], true), false)
+        [MIR::AllocatorRef.new(pipeline_result_alloc), slice_expr], true, MIR::CallableContract.no_ownership(2)), false)
   end
 
   # Sharded pool: for each shard, for each slot, append alive values.
@@ -1315,7 +1325,7 @@ class PipelineHost
 
       source_ti    = range_chain[:source].full_type
       defer_deinit = source_ti&.bounded_stream? ?
-        MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+        MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false, MIR::CallableContract.no_ownership(0))) :
         nil
 
       # BC: identifier-backed stream sources go through ForStmt so the
@@ -1718,7 +1728,7 @@ class PipelineHost
           MIR::Lit.new(timeout_ns)
         ], false),
         true, nil, nil),
-      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("__bw"), "deinit", [], false))
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("__bw"), "deinit", [], false, MIR::CallableContract.no_ownership(0)))
     ]
   end
 
@@ -1862,7 +1872,7 @@ class PipelineHost
 
     source_ti    = range_chain[:source].full_type
     defer_deinit = source_ti&.bounded_stream? ?
-      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false, MIR::CallableContract.no_ownership(0))) :
       nil
 
     if bc_target?
@@ -2702,7 +2712,7 @@ class PipelineHost
     # drain unconsumed Promise.Inner allocations.  No-op when all items are consumed.
     source_ti = range_lit.full_type
     defer_deinit = source_ti&.bounded_stream? ?
-      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false, MIR::CallableContract.no_ownership(0))) :
       nil
 
     # BC backend: there's no LazyRange / .next() protocol; iterate ranges
@@ -3340,7 +3350,7 @@ class PipelineHost
     # drain unconsumed Promise.Inner allocations.  No-op when all items are consumed.
     source_ti = range_lit.full_type
     defer_deinit = source_ti&.bounded_stream? ?
-      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false, MIR::CallableContract.no_ownership(0))) :
       nil
 
     if bc_target? && range_lit.is_a?(AST::RangeLit)
@@ -3398,7 +3408,7 @@ class PipelineHost
 
     source_ti = range_lit.full_type
     defer_deinit = source_ti&.bounded_stream? ?
-      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false, MIR::CallableContract.no_ownership(0))) :
       nil
 
     if bc_target? && range_lit.is_a?(AST::RangeLit)

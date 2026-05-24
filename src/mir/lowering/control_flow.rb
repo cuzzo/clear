@@ -85,8 +85,7 @@ module MIRLoweringControlFlow
 
   sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
   def lowered_loop_body_needs_mark?(body)
-    lowered_loop_body_has_frame_scope?(body) { |scope| scope == :iteration } &&
-      !lowered_loop_body_has_frame_scope?(body) { |scope| scope != :iteration }
+    lowered_loop_body_has_frame_scope?(body) { |scope| scope == :iteration }
   end
 
   sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
@@ -207,6 +206,7 @@ module MIRLoweringControlFlow
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
       mark = MIR::AllocMark.new(source_name, source_alloc, ct)
       mark.scope = source_alloc == :heap ? :heap : :iteration
+      coll.target_var = source_name if coll.is_a?(MIR::InlineZig)
       collection_setup << mark
       collection_setup << MIR::Let.new(source_name, coll, false, nil, nil)
       collection_setup << MIR::Cleanup.new(source_name, entry)
@@ -334,7 +334,8 @@ module MIRLoweringControlFlow
   def for_each_owned_collection_source_alloc(mir, type_info)
     return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
     return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
-    return :heap if T.unsafe(self).mir_allocates?(mir)
+    owned_alloc = T.unsafe(self).mir_owned_alloc(mir)
+    return owned_alloc if owned_alloc.is_a?(Symbol)
 
     type_info.cleanup_allocator(@schema_lookup)
   end
