@@ -10,7 +10,9 @@ instructions:
 0014 BC_RET
 0015 LOAD_CONST        2 ; S:5:Clear
 0017 BC_CALL           2 1 0
-0021 HALT
+0021 STORE_SLOT        0
+0023 LOAD_SLOT         0
+0025 HALT
 consts:
 S:7:Hello,
 S:1:!

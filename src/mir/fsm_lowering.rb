@@ -112,7 +112,7 @@ module FsmLowering
       if last_step
         expr_type = last_step[:expr].full_type
         expr_t = expr_type.is_a?(Type) ? expr_type : (Type.new(expr_type) rescue nil)
-        result_alloc = expr_t&.string? ? :heap : nil
+        result_alloc = escaping_value_alloc(expr_t)
         last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
         last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, expr_t) if last_mir
         last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)

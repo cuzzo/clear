@@ -14,6 +14,7 @@
 # enclosing/container stores) are lifted to real declarations. Escape analysis
 # then marks only bindings; it never promotes expression nodes.
 require "sorbet-runtime"
+require "set"
 require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "../ast/ast"
@@ -85,6 +86,7 @@ module Hoist
   sig { params(stmt: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc)).void }
   def collect_stmt_hoists!(stmt, hoists, ctr, schema_lookup)
     each_call(stmt) do |call|
+      next if call.is_a?(AST::MethodCall) && ELEMENT_STORE.include?(call.name.to_s)
       call.args.each_with_index do |arg, idx|
         next unless allocating?(arg, schema_lookup)
         call.args[idx] = make_temp!(arg, hoists, ctr, moved: moved_arg?(arg))
@@ -110,7 +112,7 @@ module Hoist
     when AST::YieldExpr
       stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
     when AST::Assignment
-      if stmt.name.is_a?(AST::GetField) || stmt.name.is_a?(AST::GetIndex)
+      if stmt.name.is_a?(AST::GetField)
         stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup) if stmt.value
       end
     end
@@ -334,8 +336,9 @@ module MIRHoistLowering
   extend T::Sig
   include Kernel
 
-  # Nodes whose "allocates?" decision is simply `node.alloc == :heap`.
-  ALLOC_HEAP_MIR_CLASSES = [
+  # Nodes whose ownership must be verifier-visible when nested, regardless of
+  # whether placement selected heap or frame.
+  ALLOC_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
     MIR::SharePromote, MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
   ].freeze
@@ -357,7 +360,16 @@ module MIRHoistLowering
     return result if scoped.empty?
     @block_expr_counter += 1
     label = "__lazy_#{@block_expr_counter}"
-    MIR::BlockExpr.new(label, scoped + [MIR::BreakStmt.new(label, result)])
+    alloc_names = scoped.each_with_object(Set.new) do |stmt, names|
+      names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
+    end
+    result_names = mir_ident_names(result).map(&:to_s).to_set
+    transfer_marks = alloc_names.intersection(result_names).flat_map do |name|
+      marks = T.let([MIR::TransferMark.new(name, :block_result)], T::Array[T.untyped])
+      marks << MIR::MoveMark.new(name) if @guarded_cleanup_names&.[](name)
+      marks
+    end
+    MIR::BlockExpr.new(label, scoped + transfer_marks + [MIR::BreakStmt.new(label, result)])
   end
 
   sig { params(blk: T.proc.returns(T.untyped)).returns([T.untyped, T::Array[T.untyped]]) }
@@ -379,25 +391,52 @@ module MIRHoistLowering
   def descend(parent, field)
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
-      lower_scoped { T.unsafe(self).lower(child) }
+      lower_scoped do
+        result = T.unsafe(self).lower(child)
+        hoist_lazy_alloc_result(result, child)
+      end
     else
       T.unsafe(self).lower(child)
     end
   end
 
+  sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  def hoist_lazy_alloc_result(expr, ast_node)
+    return expr unless mir_allocates?(expr)
+    @tmp_counter += 1
+    name = "__tmp_#{@tmp_counter}"
+    ti = Type.from_node!(ast_node, context: "lazy allocating expression")
+    alloc = mir_owned_alloc(expr) || :heap
+    mark = MIR::AllocMark.new(name, alloc, ti)
+    mark.scope = alloc == :heap ? :heap : :iteration
+    @pending_stmts << mark
+    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    MIR::Ident.new(name)
+  end
+
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_allocates?(node)
     return true if MIR::HeapCreate === node
-    return node.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === node }
+    return false if node.is_a?(MIR::DeepCopy) && node.strategy == :passthrough
+    return true if ALLOC_MIR_CLASSES.any? { |c| c === node }
     case node
-    when MIR::Call, MIR::TryCatch
+    when MIR::Call
       false
+    when MIR::TryExpr
+      mir_allocates?(node.expr) || (node.expr.is_a?(MIR::Call) && node.expr.owned_return?)
+    when MIR::TryCatch
+      mir_allocates?(node.expr) ||
+        (node.expr.is_a?(MIR::Call) && node.expr.owned_return?) ||
+        mir_allocates?(node.catch_body) ||
+        (node.catch_body.is_a?(MIR::Call) && node.catch_body.owned_return?)
     when MIR::Cast
       mir_allocates?(node.expr)
     when MIR::InlineZig
       return false unless node.stdlib_def&.emit&.allocates
       return true unless node.allocs
-      node.allocs.any? { |_k, v| v == :heap }
+      node.allocs.any? { |_k, v| v.is_a?(Symbol) }
+    when MIR::BgBlock
+      true
     else
       false
     end
@@ -415,16 +454,25 @@ module MIRHoistLowering
     (binding_entry.present? && binding_entry.alloc) || decl_alloc
   end
 
-  sig { params(expr: T.untyped, ast_node: T.untyped, err_cleanup: T.nilable(T::Boolean), mutable: T::Boolean).returns(T.untyped) }
-  def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false)
+  sig do
+    params(
+      expr: T.untyped,
+      ast_node: T.untyped,
+      err_cleanup: T.nilable(T::Boolean),
+      mutable: T::Boolean,
+      transfer_on_success: T::Boolean
+    ).returns(T.untyped)
+  end
+  def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
     return expr unless mir_allocates?(expr) ||
                        (expr.is_a?(MIR::Call) && expr.owned_return?) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     ti = Type.from_node!(ast_node, context: "MIR allocating hoist")
-    mark = MIR::AllocMark.new(name, :heap, ti)
-    mark.scope = :heap
+    alloc = mir_owned_alloc(expr) || :heap
+    mark = MIR::AllocMark.new(name, alloc, ti)
+    mark.scope = alloc == :heap ? :heap : :iteration
     @pending_stmts << mark
     if expr.is_a?(MIR::InlineZig) && expr.allocs && !expr.allocs.empty?
       emits = expr.stdlib_def&.emit
@@ -433,6 +481,7 @@ module MIRHoistLowering
     @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
+      entry[:has_moved_guard] = true if err_cleanup
       cleanup = err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
       @pending_stmts << cleanup
       (@guarded_cleanup_names ||= {})[name] = true if entry.has_moved_guard?
@@ -473,44 +522,70 @@ module MIRHoistLowering
                        zig_type: zig_t, rc_variant: :standard, rc_alloc: :heap)
   end
 
-  sig { params(zig_type: String).returns(CleanupEntry) }
-  def uniform_cleanup_entry(zig_type)
-    CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false, zig_type: zig_type)
+  sig { params(zig_type: String, alloc: Symbol).returns(CleanupEntry) }
+  def uniform_cleanup_entry(zig_type, alloc: :heap)
+    CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: zig_type)
   end
 
-  sig { returns(CleanupEntry) }
-  def heap_string_entry
-    CleanupEntry.build(:heap_string, alloc: :heap, has_moved_guard: true)
+  sig { params(alloc: Symbol).returns(CleanupEntry) }
+  def heap_string_entry(alloc: :heap)
+    CleanupEntry.build(:heap_string, alloc: alloc, has_moved_guard: true)
+  end
+
+  sig { params(mir: T.untyped).returns(T.nilable(Symbol)) }
+  def mir_owned_alloc(mir)
+    case mir
+    when MIR::HeapCreate
+      :heap
+    when MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
+         MIR::SharePromote, MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit
+      mir.alloc if mir.respond_to?(:alloc) && mir.alloc.is_a?(Symbol)
+    when MIR::Call
+      alloc_arg = mir.args.find { |arg| arg.is_a?(MIR::AllocatorRef) }
+      alloc_arg&.kind if alloc_arg&.kind.is_a?(Symbol)
+    when MIR::Cast
+      mir_owned_alloc(mir.expr)
+    when MIR::TryExpr
+      mir_owned_alloc(mir.expr)
+    when MIR::TryCatch
+      left = mir_owned_alloc(mir.expr)
+      right = mir_owned_alloc(mir.catch_body)
+      left == right ? left : nil
+    when MIR::InlineZig
+      allocs = mir.allocs&.values&.select { |value| value.is_a?(Symbol) }
+      allocs&.uniq&.one? ? allocs.first : nil
+    end
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
   def hoist_cleanup_entry(mir, ast_node)
+    alloc = mir_owned_alloc(mir) || :heap
     case mir
     when MIR::DupeSlice, MIR::ConcatStr
-      heap_string_entry
+      heap_string_entry(alloc: alloc)
     when MIR::AllocSlice
-      e = uniform_cleanup_entry("[]#{mir.elem_type}")
+      e = uniform_cleanup_entry("[]#{mir.elem_type}", alloc: alloc)
       e[:elem_zig_type] = mir.elem_type
       e
     when MIR::MakeList
-      uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})")
+      uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})", alloc: alloc)
     when MIR::HeapCreate, MIR::ContainerInit
-      uniform_cleanup_entry(mir.zig_type)
+      uniform_cleanup_entry(mir.zig_type, alloc: alloc)
     when MIR::DeepCopy
       raise "hoist_cleanup_entry: unexpected DeepCopy strategy :#{mir.strategy}" unless mir.strategy == :full_value
-      uniform_cleanup_entry(deep_copy_zig_type(mir, ast_node))
+      uniform_cleanup_entry(deep_copy_zig_type(mir, ast_node), alloc: alloc)
     when MIR::CapWrap
       if mir.sync_fn
-        uniform_cleanup_entry(mir.sync_type)
+        uniform_cleanup_entry(mir.sync_type, alloc: alloc)
       elsif mir.own_fn
         rc_cleanup_entry(ast_node, source: "MIR::CapWrap (own_fn=#{mir.own_fn})")
       end
     when MIR::SharePromote
       rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
-    when MIR::Cast
+    when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::TryCatch, MIR::InlineZig
-      cleanup_entry_for_heap_result(ast_node)
+    when MIR::Call, MIR::TryCatch, MIR::InlineZig, MIR::BgBlock
+      cleanup_entry_for_owned_result(ast_node, alloc: alloc)
     else
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
@@ -527,16 +602,16 @@ module MIRHoistLowering
     bare.zig_type
   end
 
-  sig { params(ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
-  def cleanup_entry_for_heap_result(ast_node)
+  sig { params(ast_node: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
+  def cleanup_entry_for_owned_result(ast_node, alloc: :heap)
     ti = Type.from_node(ast_node)
     return nil unless ti
     ti = ti.payload_type || ti if ti.error_union?
-    return heap_string_entry if ti.string?
-    return uniform_cleanup_entry(ti.zig_type) if ti.list_collection?
+    return heap_string_entry(alloc: alloc) if ti.string?
+    return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.list_collection?
     zig_t = (Type.new(ti.resolved).zig_type rescue nil)
     return nil unless zig_t
-    uniform_cleanup_entry(zig_t)
+    uniform_cleanup_entry(zig_t, alloc: alloc)
   end
 
   sig { params(node: T.untyped).returns(T::Array[String]) }
@@ -546,6 +621,10 @@ module MIRHoistLowering
       [node.name.to_s]
     when MIR::StructInit
       node.fields.flat_map { |f| mir_ident_names(f[:value]) }
+    when MIR::ItemsAccess
+      mir_ident_names(node.expr)
+    when MIR::CapWrap
+      mir_ident_names(node.inner)
     when MIR::Cast
       mir_ident_names(node.expr)
     when MIR::HeapCreate
@@ -558,13 +637,47 @@ module MIRHoistLowering
     end
   end
 
-  sig { params(value: T.untyped, returned_names: T.untyped).returns(T::Array[MIR::MoveMark]) }
-  def returned_transfer_marks(value, returned_names)
+  sig { params(value: T.untyped, returned_names: T.untyped, cleanup_transfer_names: T.untyped).returns(T::Array[T.untyped]) }
+  def returned_transfer_marks(value, returned_names, cleanup_transfer_names = nil)
     names = {}
     returned_names.to_a.each { |n| names[n.to_s] = true } if returned_names
-    mir_ident_names(value).each { |n| names[n.to_s] = true }
+    cleanup_transfer_names.to_a.each { |n| names[n.to_s] = true } if cleanup_transfer_names
+    value_names = T.let(mir_ident_names(value).map(&:to_s).to_set, T::Set[String])
+    value_names.each { |n| names[n.to_s] = true }
     names.keys
-      .select { |n| n.start_with?("__tmp_") && @guarded_cleanup_names&.[](n) }
-      .map { |n| MIR::MoveMark.new(n) }
+      .select { |n| cleanup_transfer_names&.include?(n) || @guarded_cleanup_names&.[](n) ||
+                   n.start_with?("__tmp_") || returned_hoist_binding?(n) ||
+                   (value_names.include?(n) && returned_no_cleanup_binding?(n)) ||
+                   returned_takes_param?(n) }
+      .flat_map do |n|
+        nodes = T.let([MIR::TransferMark.new(n, :return)], T::Array[T.untyped])
+        if cleanup_transfer_names&.include?(n) || @guarded_cleanup_names&.[](n)
+          nodes << MIR::MoveMark.new(n)
+        end
+        nodes
+      end
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_takes_param?(name)
+    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
+    entry = bindings[name] if bindings.respond_to?(:[])
+    entry.respond_to?(:[]) && entry[:source_kind] == :takes_param
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_hoist_binding?(name)
+    return false unless name.start_with?("__hoist_")
+    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
+    entry = bindings[name] if bindings.respond_to?(:[])
+    entry.respond_to?(:present?) && entry.present?
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_no_cleanup_binding?(name)
+    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
+    entry = bindings[name] if bindings.respond_to?(:[])
+    entry.respond_to?(:present?) && entry.present? &&
+      entry.respond_to?(:needs_cleanup?) && !entry.needs_cleanup?
   end
 end

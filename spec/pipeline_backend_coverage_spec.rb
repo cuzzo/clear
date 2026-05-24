@@ -144,6 +144,14 @@ RSpec.describe "pipeline backend coverage" do
           nodes.map { |n| lower(n) }
         end
 
+        def lower_head
+          [yield, []]
+        end
+
+        def append_ownership_transfers_for_mir_body(body)
+          body
+        end
+
         def with_fiber_capture_map(_entries, capture_symbols: nil, rt_override: "__rt")
           yield
         end

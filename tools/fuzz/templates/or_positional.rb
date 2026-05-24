@@ -55,6 +55,13 @@ def or_inner_value_type(t)
   end
 end
 
+def or_outer_list_type(t)
+  case t
+  when :heap_list   then "Int64[][]@list"
+  when :heap_string then "String[]@list"
+  end
+end
+
 def or_inner_default(t)
   case t
   when :heap_list   then "[]"
@@ -97,28 +104,28 @@ def or_body(p)
 
   case p[:position]
   when :assign_rhs
-    "result: #{vt} = #{expr};"
+    "MUTABLE result: #{vt} = #{expr};"
   when :fn_arg
     # consume(...) accepts a value of type vt and returns Int64 length.
-    "len: Int64 = consume(#{expr});"
+    "MUTABLE len: Int64 = consume(#{expr});"
   when :method_arg
     # method-arg position: append a heap-allocated value into outer list.
-    "MUTABLE outer: #{vt}[]@list = []; outer.append(#{expr});"
+    "MUTABLE outer: #{or_outer_list_type(p[:inner_t])} = []; outer.append(#{expr});"
   when :return_expr
     # The OR expression IS the function's return; signature differs from
     # other positions. Caller binds the result.
     "RETURN #{expr};"
   when :with_source
     # WITH source — wrap expr in @locked so WITH EXCLUSIVE has a target.
-    "container = (#{expr}) @locked; WITH EXCLUSIVE container AS x { _ = #{x_use(p[:inner_t])}; }"
+    "MUTABLE container = (#{expr}) @locked; WITH EXCLUSIVE container AS x { _ = #{x_use(p[:inner_t])}; }"
   when :collection_lit
-    "list: #{vt}[]@list = [#{expr}];"
+    "MUTABLE items: #{or_outer_list_type(p[:inner_t])} = [#{expr}];"
   end
 end
 
 def x_use(t)
   case t
-  when :heap_list   then "x[0_i64]"
+  when :heap_list   then "length(x)"
   when :heap_string then "x.length()"
   end
 end

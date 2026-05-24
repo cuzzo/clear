@@ -729,7 +729,7 @@ when 'build'
       end
 
       # Phase 2: Exact stack sizing via call graph analysis
-      tier_order = { micro: 0, standard: 1, large: 2, xl: 3 }
+      tier_order = { micro: 0, standard: 1, large: 2, xl: 3, service: 4 }
       optimal = verifier.compute_optimal_tiers(fn_nodes: fn_nodes)
       main_optimal = verifier.compute_main_optimal_tier
 

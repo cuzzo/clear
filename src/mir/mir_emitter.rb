@@ -161,6 +161,7 @@ class MIREmitter
     when MIR::RangeLit         then emit_range_lit(node)
     when MIR::HasField         then emit_has_field(node)
     when MIR::ItemsAccess      then emit_items_access(node)
+    when MIR::OwnedSlice       then emit_owned_slice(node)
     when MIR::LambdaExpr       then emit_lambda(node)
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
@@ -950,7 +951,7 @@ class MIREmitter
 
   sig { params(node: MIR::DupeSlice).returns(String) }
   def emit_dupe_slice(node)
-    "try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)})"
+    "@as([]const u8, try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)}))"
   end
 
   sig { params(node: MIR::AllocSlice).returns(String) }
@@ -1050,7 +1051,13 @@ class MIREmitter
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
       type_arg = node.zig_type || "@TypeOf(#{src})"
-      "try CheatLib.dupeValue(#{type_arg}, #{src}, #{alloc})"
+      if type_arg.start_with?("[]")
+        "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
+      else
+        pointer_type_arg = node.zig_type || "@TypeOf(__copy_src)"
+        pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
+        "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
+      end
     else
       raise "MIREmitter#emit_deep_copy: unhandled strategy :#{node.strategy}"
     end
@@ -1416,6 +1423,17 @@ class MIREmitter
     else
       "#{inner}.items"
     end
+  end
+
+  sig { params(node: MIR::OwnedSlice).returns(String) }
+  def emit_owned_slice(node)
+    inner = emit(node.expr)
+    label = "blk_owned_slice_#{node.object_id.abs}"
+    alloc = alloc_expr(node.alloc)
+    "#{label}: { var __x = #{inner}; " \
+      "break :#{label} if (comptime @typeInfo(@TypeOf(__x)) == .@\"struct\" and @hasDecl(@TypeOf(__x), \"toOwnedSlice\")) " \
+      "try __x.toOwnedSlice(#{alloc}) else " \
+      "__x; }"
   end
 
   # --- Helpers ---

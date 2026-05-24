@@ -716,13 +716,17 @@ class PipelineRewriter
       [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
-      call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
+      value = AST::CopyNode.new(token, current_val.dup)
+      value.full_type = current_val.full_type
+      call = AST::MethodCall.new(token, res_ident, "append", [value])
       call.full_type = Type.new(:Void)
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
       [call]
     else
-      call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
+      value = AST::CopyNode.new(token, current_val.dup)
+      value.full_type = current_val.full_type
+      call = AST::MethodCall.new(token, res_ident, "append", [value])
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
       [call]

@@ -27,12 +27,17 @@ module EscapeAnalysis
       mark_heap_return_facts!(fn, schema_lookup) if fn.body
     end
 
+    fn_nodes.each_value do |fn|
+      mark_param_receiver_allocations_heap!(fn.body) if fn.body
+      mark_recursive_aggregate_owners_heap!(fn, schema_lookup) if fn.body
+    end
+
     fn_nodes.each do |name, fn|
       next unless fn.body
       before = heap_symbol_count(fn)
       mark_body_escapes!(fn, fn_nodes, bg_heap, schema_lookup)
-      propagate_hoist_dependencies!(fn)
-      propagate_assignment_ownership!(fn, fn_nodes, schema_lookup)
+      mark_loop_receiver_allocations_heap!(fn.body)
+      propagate_hoist_dependencies!(fn, schema_lookup)
       heap_fns << name if heap_symbol_count(fn) > before
     end
 
@@ -82,7 +87,11 @@ module EscapeAnalysis
 
           # ── sync axis ────────────────────────────────────────────────
           unless entry.sync && param_sync_was_declared?(param)
-            unified = unify_caller_attr(sites, idx) { |s| s&.sync }
+            unified = unify_caller_attr(sites, idx) do |s|
+              next s.sync if s&.sync
+              t = s&.type
+              t.is_a?(Type) ? t.sync : nil
+            end
             if unified && entry.sync != unified && param_accepts_caller_sync?(callee_fn, param, unified)
               entry.sync = unified
               changed = true
@@ -195,7 +204,7 @@ module EscapeAnalysis
           mark_heap_return!(fn, node.value)
         end
       when AST::Assignment
-        mark_expr_identifiers_heap!(node.value) if heap_destination?(node.name)
+        mark_expr_identifiers_heap!(node.value) if heap_destination?(fn, node.name)
       when AST::VarDecl, AST::BindExpr
         if borrow_return_expr?(node.value)
           mark_symbol_borrow!(node.symbol)
@@ -204,12 +213,164 @@ module EscapeAnalysis
         end
       when AST::BgBlock, AST::BgStreamBlock
         mark_capture_analysis_heap!(node.capture_analysis, bg_heap)
+        mark_fsm_ctx_locals_heap!(node, schema_lookup) if node.is_a?(AST::BgBlock)
       when AST::LambdaLit
         mark_lambda_captures_heap!(node, bg_heap)
       when AST::FuncCall
         mark_takes_args_heap!(node.args, params_for_call(node, fn_nodes))
       when AST::MethodCall
-        mark_method_takes_heap!(node, params_for_method_call(node))
+        mark_method_takes_heap!(node, params_for_method_call(node), fn_nodes, schema_lookup)
+      end
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  private_class_method def self.mark_param_receiver_allocations_heap!(body)
+    walk_body(body) do |node|
+      case node
+      when AST::MethodCall
+        sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
+        emit = sig&.emit
+        next unless emit&.allocates && emit&.mutates_receiver
+        root = AST.root_identifier(node.object)
+      when AST::Assignment
+        next unless node.name.is_a?(AST::GetIndex)
+        root = AST.root_identifier(node.name)
+        ti = root&.symbol&.type
+        next unless ti.is_a?(Type) && ti.collection?
+      else
+        next
+      end
+      sym = root&.symbol
+      next unless sym&.is_param
+      mark_symbol_heap!(sym)
+    end
+  end
+
+  sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_recursive_aggregate_owners_heap!(fn, schema_lookup)
+    fn.params.each do |param|
+      next unless aggregate_owner_requires_heap?(Type.from_node(param.type), schema_lookup)
+      mark_symbol_heap!(param.symbol)
+    end
+
+    walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
+      ti = Type.from_node(node.full_type)
+      ti = Type.from_node(node.value) unless ti
+      next unless aggregate_owner_requires_heap?(ti, schema_lookup)
+      mark_symbol_heap!(node.symbol)
+    end
+  end
+
+  sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.aggregate_owner_requires_heap?(ti, schema_lookup)
+    return false unless ti
+    t = ti.error_union? ? ti.payload_type : ti
+    t = t.wrapped_type if t&.optional?
+    return false unless t
+    return false if t.rodata? || t.provenance == :borrow
+
+    if t.collection? || (t.array? && !t.string?)
+      elem = t.element_type
+      return false unless elem.is_a?(Type)
+      return type_contains_cleanup_payload?(elem, schema_lookup)
+    end
+
+    return false if t.string? || t.heap_ptr?
+    type_contains_cleanup_payload?(t, schema_lookup)
+  rescue StandardError
+    false
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  private_class_method def self.mark_loop_receiver_allocations_heap!(body)
+    body.each do |stmt|
+      case stmt
+      when AST::WhileLoop, AST::WhileBindLoop
+        mark_receiver_allocations_in_loop!(stmt.do_branch)
+        mark_loop_receiver_allocations_heap!(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        mark_receiver_allocations_in_loop!(stmt.body)
+        mark_loop_receiver_allocations_heap!(stmt.body)
+      when AST::IfStatement
+        mark_loop_receiver_allocations_heap!(stmt.then_branch)
+        mark_loop_receiver_allocations_heap!(stmt.else_branch)
+      when AST::MatchStatement
+        stmt.cases.each { |c| mark_loop_receiver_allocations_heap!(c.body) }
+        mark_loop_receiver_allocations_heap!(stmt.default_case) if stmt.default_case
+      when AST::WithBlock
+        mark_loop_receiver_allocations_heap!(stmt.body)
+      when AST::DoBlock
+        stmt.branches.each { |b| mark_loop_receiver_allocations_heap!(T.cast(b.fetch(:body), T::Array[T.untyped])) }
+      end
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  private_class_method def self.mark_receiver_allocations_in_loop!(body)
+    local_names = loop_local_names(body)
+    scan_loop_body(body) do |node|
+      case node
+      when AST::MethodCall
+        sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
+        emit = sig&.emit
+        next unless emit&.allocates && emit&.mutates_receiver
+        root = AST.root_identifier(node.object)
+        value_params = sig ? sig.params.drop(1) : []
+      when AST::Assignment
+        next unless node.name.is_a?(AST::GetIndex)
+        root = AST.root_identifier(node.name)
+        ti = root&.symbol&.type
+        next unless ti.is_a?(Type) && ti.collection?
+        value_params = []
+      else
+        next
+      end
+      next unless root&.symbol
+      next if local_names.include?(root.name.to_s)
+      mark_symbol_heap!(root.symbol)
+      if node.is_a?(AST::MethodCall)
+        value_params.each_with_index do |param, idx|
+          next unless param.takes || param.mutable
+          arg = node.args[idx]
+          mark_expr_identifiers_heap!(arg) if arg
+        end
+      end
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  private_class_method def self.loop_local_names(body)
+    names = T.let(Set.new, T::Set[String])
+    scan_loop_body(body) do |node|
+      case node
+      when AST::VarDecl
+        names << node.name.to_s if node.name.is_a?(String)
+      when AST::BindExpr
+        names << node.name.to_s if node.name.is_a?(String) && node.mode == :decl
+      end
+    end
+    names
+  end
+
+  sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: T.untyped).void).void }
+  private_class_method def self.scan_loop_body(body, &block)
+    body.each do |node|
+      yield node
+      case node
+      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
+        next
+      when AST::IfStatement
+        scan_loop_body(node.then_branch, &block)
+        scan_loop_body(node.else_branch, &block)
+      when AST::MatchStatement
+        node.cases.each { |c| scan_loop_body(c.body, &block) }
+        scan_loop_body(node.default_case, &block) if node.default_case
+      when AST::WithBlock
+        scan_loop_body(node.body, &block)
+      when AST::DoBlock
+        node.branches.each { |b| scan_loop_body(T.cast(b.fetch(:body), T::Array[T.untyped]), &block) }
       end
     end
   end
@@ -255,7 +416,9 @@ module EscapeAnalysis
   private_class_method def self.mark_expr_identifiers_heap!(expr)
     stack = T.let([expr], T::Array[T.untyped])
     until stack.empty?
-      node = unwrap_value(stack.pop)
+      node = stack.pop
+      next if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+      node = unwrap_value(node)
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::Identifier)
         mark_symbol_heap!(node.symbol)
@@ -300,50 +463,99 @@ module EscapeAnalysis
     end
   end
 
+  sig { params(node: AST::BgBlock, schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_fsm_ctx_locals_heap!(node, schema_lookup)
+    return unless node.spawn_form == :fsm
+    walk_body(node.body) do |child|
+      next unless child.is_a?(AST::VarDecl) || (child.is_a?(AST::BindExpr) && child.mode == :decl)
+      ti = Type.from_node(child.full_type)
+      ti = ti.payload_type if ti&.error_union?
+      next unless ti&.heap_ptr? || ti&.recursive_cleanup_shape?(schema_lookup)
+      mark_symbol_heap!(child.symbol)
+    end
+  end
+
   sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param]).void }
   private_class_method def self.mark_takes_args_heap!(args, params)
     params.each_with_index do |param, idx|
       arg = args[idx]
       next unless arg
-      if param.takes || param.mutable
-        mark_expr_roots_heap!(arg)
-      end
+      next unless param.takes || param.symbol&.storage == :heap
+      next unless ownership_bearing_transfer_expr?(arg, nil)
+      mark_expr_roots_heap!(arg)
     end
   end
 
-  sig { params(call: AST::MethodCall, params: T::Array[AST::Param]).void }
-  private_class_method def self.mark_method_takes_heap!(call, params)
+  sig { params(call: AST::MethodCall, params: T::Array[AST::Param], fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_method_takes_heap!(call, params, fn_nodes, schema_lookup)
     receiver_param = params.first
-    if receiver_is_param?(call.object) &&
-       receiver_param && receiver_param.respond_to?(:takes) &&
-       (receiver_param.takes || receiver_param.mutable)
+    if receiver_is_param?(call.object) && receiver_param&.symbol&.storage == :heap
       mark_expr_roots_heap!(call.object)
     end
 
-    mark_takes_args_heap!(call.args, params.drop(1))
-    mark_collection_owner_for_owned_store!(call, params)
+    value_params = params.drop(1)
+    mark_takes_args_heap!(call.args, value_params)
+    mark_receiver_for_owned_sink!(call.object, call.args, value_params, fn_nodes, schema_lookup)
+    mark_receiver_scope_escapes!(call.object, call.args, value_params)
   end
 
-  sig { params(call: AST::MethodCall, params: T::Array[AST::Param]).void }
-  private_class_method def self.mark_collection_owner_for_owned_store!(call, params)
-    receiver = AST.root_identifier(call.object)
-    receiver_sym = receiver&.symbol
-    receiver_type = receiver_sym&.type
-    return unless receiver_sym && receiver_type.is_a?(Type) && receiver_type.collection?
+  sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param], fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_receiver_for_owned_sink!(receiver, args, params, fn_nodes, schema_lookup)
+    receiver_root = AST.root_identifier(receiver)
+    receiver_sym = receiver_root&.symbol
+    return unless receiver_sym
 
-    params.drop(1).each_with_index do |param, idx|
+    params.each_with_index do |param, idx|
       next unless param.takes
-      arg = call.args[idx]
-      next unless arg
-      if expr_has_heap_identifier?(arg) || string_concat_expr?(unwrap_value(arg))
-        mark_reassigned_symbol_heap!(receiver_sym)
-        return
-      end
+      arg = args[idx]
+      next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||
+                  call_result_is_heap?(arg, fn_nodes, schema_lookup)
+      mark_symbol_heap!(receiver_sym)
+      return
     end
   end
 
-  sig { params(fn: AST::FunctionDef).void }
-  private_class_method def self.propagate_hoist_dependencies!(fn)
+  sig { params(arg: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.ownership_bearing_transfer_expr?(arg, schema_lookup)
+    if arg.is_a?(AST::MoveNode)
+      return type_requires_owned_storage?(Type.from_node(arg.value), schema_lookup)
+    end
+    return true if heap_owned_transfer_source?(arg)
+    return true if ownership_transferring_expr?(arg, include_allocating_expr: true) &&
+                   type_requires_owned_storage?(Type.from_node(arg), schema_lookup)
+    false
+  rescue StandardError
+    false
+  end
+
+  sig { params(arg: T.untyped).returns(T::Boolean) }
+  private_class_method def self.heap_owned_transfer_source?(arg)
+    return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
+    root = AST.root_identifier(unwrap_value(arg))
+    sym = root&.symbol
+    sym&.storage == :heap
+  rescue StandardError
+    false
+  end
+
+  sig { params(receiver: T.untyped, args: T::Array[T.untyped], params: T::Array[AST::Param]).void }
+  private_class_method def self.mark_receiver_scope_escapes!(receiver, args, params)
+    receiver_root = AST.root_identifier(receiver)
+    receiver_depth = receiver_root&.symbol&.scope_depth
+    return unless receiver_depth.is_a?(Integer)
+
+    params.each_with_index do |param, idx|
+      next unless param.takes || param.mutable
+      arg = args[idx]
+      arg_root = AST.root_identifier(arg)
+      arg_depth = arg_root&.symbol&.scope_depth
+      next unless arg_depth.is_a?(Integer) && arg_depth > receiver_depth
+      mark_expr_identifiers_heap!(arg)
+    end
+  end
+
+  sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.propagate_hoist_dependencies!(fn, schema_lookup)
     bindings = T.let({}, T::Hash[String, T.untyped])
     walk_body(fn.body) do |node|
       next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
@@ -357,22 +569,23 @@ module EscapeAnalysis
       bindings.each do |name, value|
         sym = symbol_for_name(fn, name)
         next unless sym&.storage == :heap
+        next unless heap_binding_carries_sources?(value)
         before = heap_symbol_count(fn)
         mark_expr_identifiers_heap!(value)
         changed = true if heap_symbol_count(fn) > before
       end
-
-      bindings.each do |name, value|
-        sym = symbol_for_name(fn, name)
-        next if sym&.storage == :heap || sym&.storage == :borrow || sym&.storage == :rodata
-        next if borrow_return_expr?(value)
-        next unless heap_bearing_binding?(sym, value)
-        next unless expr_has_heap_identifier?(value) || expr_has_owned_inline_value?(value)
-        before = heap_symbol_count(fn)
-        mark_symbol_heap!(sym)
-        changed = true if heap_symbol_count(fn) > before
-      end
     end
+  end
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  private_class_method def self.heap_binding_carries_sources?(value)
+    node = value
+    return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+    node = unwrap_value(node)
+    return true if node.is_a?(AST::Identifier)
+    return true if node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) ||
+                   node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
+    false
   end
 
   sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
@@ -399,18 +612,35 @@ module EscapeAnalysis
     return nil unless node.is_a?(AST::Assignment)
     target = unwrap_value(node.name)
     return target.name.to_s if target.is_a?(AST::Identifier)
+    root = AST.root_identifier(target)
+    return root.name.to_s if root
     nil
   end
 
   sig { params(node: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.assignment_value_is_owned?(node, fn_nodes, schema_lookup)
     return false unless node.respond_to?(:value)
-    value = unwrap_value(node.value)
+    value = node.value
+    return true if ownership_transferring_expr?(value, include_allocating_expr: false)
+    return false if string_concat_expr?(unwrap_value(value))
+    return true if expr_has_owned_inline_value?(value)
+    return true if call_result_is_heap?(value, fn_nodes, schema_lookup)
+    false
+  end
+
+  sig { params(expr: T.untyped, include_allocating_expr: T::Boolean).returns(T::Boolean) }
+  private_class_method def self.ownership_transferring_expr?(expr, include_allocating_expr:)
+    value = unwrap_value(expr)
+    value = unwrap_value(value.left) if value.is_a?(AST::BinaryOp) && value.op == :OR_RESCUE
     return true if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
     return true if expr_has_heap_identifier?(value)
-    return true if call_result_is_heap?(value, fn_nodes, schema_lookup)
-    return false if string_concat_expr?(value)
-    type_requires_owned_storage?(Type.from_node(value), schema_lookup)
+    return true if include_allocating_expr && string_concat_expr?(value)
+    return true if value.respond_to?(:heap_storage?) && value.heap_storage?
+    return true if value.respond_to?(:symbol) && value.symbol&.heap_storage?
+    ti = Type.from_node(value)
+    !!(ti && !ti.string? && !ti.rodata? && ti.provenance != :borrow && ti.heap_ptr?)
+  rescue StandardError
+    false
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
@@ -425,19 +655,46 @@ module EscapeAnalysis
     t = ti.error_union? ? ti.payload_type : ti
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
-    t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup)
+    t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup) || type_contains_cleanup_payload?(t, schema_lookup)
   rescue StandardError
     false
   end
 
-  sig { params(sym: T.nilable(SymbolEntry), value: T.untyped).returns(T::Boolean) }
-  private_class_method def self.heap_bearing_binding?(sym, value)
+  sig { params(sym: T.nilable(SymbolEntry), value: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.heap_bearing_binding?(sym, value, schema_lookup)
     ti = sym&.type
     ti = Type.from_node(value) unless ti.is_a?(Type)
     return false unless ti.is_a?(Type)
-    ti.heap_ptr? || ti.recursive_cleanup_shape?(nil)
+    ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup) || type_contains_cleanup_payload?(ti, schema_lookup)
   rescue StandardError
     false
+  end
+
+  sig { params(ti: Type, schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
+  private_class_method def self.type_contains_cleanup_payload?(ti, schema_lookup, seen = nil)
+    t = ti.error_union? ? ti.payload_type : ti
+    return false unless t
+    return true if t.string? && !t.rodata? && t.provenance != :borrow
+    if t.array? && !t.string?
+      elem = t.element_type
+      return false unless elem.is_a?(Type)
+      return type_contains_cleanup_payload?(elem, schema_lookup, seen)
+    end
+    return false unless schema_lookup
+    key = t.resolved.to_s
+    seen ||= Set.new
+    return false unless seen.add?(key)
+    schema = schema_lookup.call(t.resolved) rescue nil
+    if Schemas.union?(schema)
+      return (schema.variants || {}).any? do |_name, vt|
+        vt.is_a?(Type) && type_contains_cleanup_payload?(vt, schema_lookup, seen)
+      end
+    end
+    return false unless Schemas.field_bearing?(schema)
+    schema.fields.any? do |_name, field|
+      ft = field.is_a?(AST::StructField) ? field.type : field
+      ft.is_a?(Type) && type_contains_cleanup_payload?(ft, schema_lookup, seen)
+    end
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
@@ -578,14 +835,21 @@ module EscapeAnalysis
     return false unless ti
     top_heap_ptr = ti.heap_ptr?
     ti = ti.payload_type if ti.error_union?
+    ti = ti.wrapped_type if ti&.optional?
+    return false unless ti
     return false if ti.primitive? || ti.void? || ti.any?
+    if expr.is_a?(AST::Identifier) && expr.symbol
+      storage = expr.symbol.storage
+      return false if storage == :rodata || storage == :borrow
+    end
     if expr.is_a?(AST::Identifier) && expr.symbol&.storage == :heap
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
     end
     expr_t = Type.from_node(expr)
-    return false if expr_t&.rodata? || expr_t&.provenance == :borrow
+    return false if !expr.is_a?(AST::Identifier) && (expr_t&.rodata? || expr_t&.provenance == :borrow)
     return false if ti.rodata? || ti.provenance == :borrow
-    top_heap_ptr || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
+    ti.string? || top_heap_ptr || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup) ||
+      type_contains_cleanup_payload?(ti, schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
@@ -598,6 +862,7 @@ module EscapeAnalysis
   private_class_method def self.mark_heap_return!(fn, expr)
     ret = fn.return_type
     ret = ret.payload_type if ret.respond_to?(:error_union?) && ret.error_union? && ret.respond_to?(:payload_type)
+    ret = ret.wrapped_type if ret.respond_to?(:optional?) && ret.optional? && ret.respond_to?(:wrapped_type)
     ret.provenance = :heap if ret.respond_to?(:provenance=)
     fn.heap_carry_return = true if fn.respond_to?(:heap_carry_return=)
 
@@ -606,6 +871,15 @@ module EscapeAnalysis
     return if names.empty?
     fn.heap_carry_return_vars ||= Set.new if fn.respond_to?(:heap_carry_return_vars)
     names.each { |name| fn.heap_carry_return_vars << name } if fn.respond_to?(:heap_carry_return_vars)
+    mark_decl_symbols_heap_by_name!(fn.body, names)
+  end
+
+  sig { params(body: T::Array[T.untyped], names: T::Set[String]).void }
+  private_class_method def self.mark_decl_symbols_heap_by_name!(body, names)
+    walk_body(body) do |node|
+      next unless (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && names.include?(node.name.to_s)
+      mark_symbol_heap!(node.symbol)
+    end
   end
 
   sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
@@ -640,17 +914,20 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(target: T.untyped).returns(T::Boolean) }
-  private_class_method def self.heap_destination?(target)
+  sig { params(fn: AST::FunctionDef, target: T.untyped).returns(T::Boolean) }
+  private_class_method def self.heap_destination?(fn, target)
     root = AST.root_identifier(target)
-    root&.symbol&.storage == :heap
+    return false unless root
+    return true if root.symbol&.storage == :heap
+    sym = symbol_for_name(fn, root.name.to_s)
+    sym&.storage == :heap
   end
 
   sig { params(value: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup)
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
-    return false unless call.is_a?(AST::FuncCall)
+    return false unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
     return call_result_is_heap_for_callee?(call, callee, schema_lookup) if callee
@@ -661,18 +938,21 @@ module EscapeAnalysis
     dep = signature_heap_return_from_args?(call, sig)
     return dep unless dep.nil?
 
-    return_type_requires_heap?(sig.return_type, schema_lookup)
+    emit = sig.respond_to?(:emit) ? sig.emit : nil
+    return true if sig.respond_to?(:heap_carry_return) && sig.heap_carry_return == true
+    return true if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :heap
+    false
   end
 
-  sig { params(call: AST::FuncCall, callee: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  sig { params(call: T.untyped, callee: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.call_result_is_heap_for_callee?(call, callee, schema_lookup)
     dep = heap_return_from_args?(call.args, callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup)
     return dep unless dep.nil?
 
-    body_has_heap_return_binding?(callee.body) || return_type_requires_heap?(callee.return_type, schema_lookup)
+    callee.heap_carry_return == true || body_has_heap_return_binding?(callee.body)
   end
 
-  sig { params(call: AST::FuncCall, sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
+  sig { params(call: T.untyped, sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
   private_class_method def self.signature_heap_return_from_args?(call, sig_obj)
     heap_return_from_args?(call.args, sig_obj.params, sig_obj.heap_carry_return_vars, sig_obj.return_type, nil)
   end
@@ -725,7 +1005,8 @@ module EscapeAnalysis
     return false unless t
     return false if t.primitive? || t.void? || t.any?
     return false if t.rodata? || t.provenance == :borrow
-    top_heap_ptr || t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup)
+    t.string? || top_heap_ptr || t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup) ||
+      type_contains_cleanup_payload?(t, schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
@@ -784,7 +1065,6 @@ module EscapeAnalysis
     decl = sym.respond_to?(:reg) ? sym.reg : nil
     sym_entry = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
     return false if sym_entry.storage == :heap
-    return false if sym_entry.storage == :rodata
     return false if sym_entry.storage == :borrow
     sym_entry.storage = :heap
     names << name if names && name

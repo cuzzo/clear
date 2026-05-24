@@ -1850,7 +1850,7 @@ end
 class MIR::FnDef
   sig { returns(T.untyped) }
   def name; end
-  sig { returns(T.any(T::Array[MIR::Param], T::Array[T.untyped])) }
+  sig { returns(T::Array[MIR::Param]) }
   def params; end
   sig { returns(T.untyped) }
   def ret_type; end

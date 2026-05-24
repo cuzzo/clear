@@ -346,10 +346,11 @@ module CleanupClassifier
         next if node.is_a?(AST::BindExpr) && node.mode == :assign
 
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+        moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
         cleanup = classify_binding(var_name, node.full_type, node, promoted_fns, schema_lookup)
+        cleanup ||= transferred_payload_entry(node.full_type, schema_lookup) if moved_alloc
         if cleanup
-          alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
-          cleanup[:alloc] = alloc if alloc
+          cleanup[:alloc] = moved_alloc if moved_alloc
         else
           cleanup = no_cleanup_alloc_entry(node.full_type, schema_lookup)
         end
@@ -381,11 +382,30 @@ module CleanupClassifier
 
   sig { params(node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
   private_class_method def self.moved_payload_alloc(node, bindings)
+    return nil unless ownership_transfer_payload?(node)
     names = []
     collect_payload_binding_names(node, names)
-    allocs = names.filter_map { |name| bindings[name]&.alloc }
+    allocs = names.filter_map do |name|
+      entry = bindings[name]
+      entry&.needs_cleanup? ? entry.alloc : nil
+    end
     return nil if allocs.empty?
     allocs.include?(:heap) ? :heap : :frame
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  private_class_method def self.ownership_transfer_payload?(node)
+    return false unless node
+    return true if node.is_a?(AST::MoveNode)
+    return true if node.respond_to?(:was_moved) && node.was_moved == true
+    case node
+    when AST::Cast, AST::FreezeNode, AST::CapabilityWrap
+      ownership_transfer_payload?(node.value)
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields.any? { |_k, v| ownership_transfer_payload?(v) }
+    else
+      false
+    end
   end
 
   sig { params(node: T.untyped, names: T::Array[String]).void }
@@ -398,6 +418,11 @@ module CleanupClassifier
     when AST::StructLit, AST::UnionVariantLit
       node.fields.each_value { |v| collect_payload_binding_names(v, names) }
     end
+  end
+
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.transferred_payload_entry(ti, schema_lookup)
+    takes_param_base_entry(ti, schema_lookup)
   end
 
   # ── Walk TAKES parameters ───────────────────────────────────────
@@ -451,6 +476,9 @@ module CleanupClassifier
       return has_heap ? entry(:takes_union) : nil
     end
 
+    opt = classify_optional(ti, schema_lookup)
+    return opt if opt
+
     return entry(:heap_string) if ti.string?
 
     # Collection kinds: reuse the locals classifier (covers @list, @pool,
@@ -474,6 +502,7 @@ module CleanupClassifier
   private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
+      next unless node.takes
       next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
 
       source_ti = node.expr.full_type
@@ -543,7 +572,7 @@ module CleanupClassifier
       e = classify_binding(name, inner_ti, anchor_node, promoted_fns, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
       next unless e
-      e[:alloc] = :heap if capture_expr_heap?(expr, promoted_fns)
+      e[:alloc] = :heap if capture_expr_heap?(expr, promoted_fns, schema_lookup)
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
       if inner_ti.element_type
         e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
@@ -552,21 +581,38 @@ module CleanupClassifier
     end
   end
 
-  sig { params(expr: T.untyped, promoted_fns: T::Set[String]).returns(T::Boolean) }
-  private_class_method def self.capture_expr_heap?(expr, promoted_fns)
+  sig { params(expr: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T::Boolean) }
+  private_class_method def self.capture_expr_heap?(expr, promoted_fns, schema_lookup)
     case expr
     when AST::FuncCall
       return false if call_has_return_lifetime?(expr)
-      promoted_fns.include?(expr.name.to_s) ||
+      call_returns_heap_owned?(expr, schema_lookup) ||
+        promoted_fns.include?(expr.name.to_s) ||
         (expr.respond_to?(:heap_storage?) && expr.heap_storage?)
     when AST::MethodCall
       return false if call_has_return_lifetime?(expr)
+      return true if call_returns_heap_owned?(expr, schema_lookup)
       return true if expr.respond_to?(:heap_storage?) && expr.heap_storage?
       receiver = expr.object
       !!(receiver.respond_to?(:symbol) && receiver.symbol&.heap_storage?)
     else
       false
     end
+  end
+
+  sig { params(expr: T.untyped, schema_lookup: Proc).returns(T::Boolean) }
+  private_class_method def self.call_returns_heap_owned?(expr, schema_lookup)
+    sig = expr.respond_to?(:matched_signature) ? FunctionSignature.unwrap(expr.matched_signature) : nil
+    return false unless sig
+    return false if sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
+    return true if sig.respond_to?(:heap_carry_return) && sig.heap_carry_return == true
+    emit = sig.respond_to?(:emit) ? sig.emit : nil
+    return true if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :heap
+    return false if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :frame
+    return false unless sig.respond_to?(:return_type)
+    ret = Type.new(sig.return_type)
+    ret = ret.payload_type || ret if ret.error_union?
+    !!ret && ret.needs_explicit_cleanup?(:heap, schema_lookup)
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
@@ -608,6 +654,10 @@ module CleanupClassifier
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil if node_sym&.borrow_provenance? ||
                   (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?)
+    return nil if ti.string? && !node_sym&.heap_storage? &&
+                  !mutable_owning_slot?(ti, node, schema_lookup) &&
+                  (node_sym&.rodata_provenance? ||
+                   (node.respond_to?(:rodata_provenance?) && node.rodata_provenance?))
 
     sync = node_sym&.sync
     entry = nil
@@ -617,9 +667,14 @@ module CleanupClassifier
       entry = entry(:frozen, has_moved_guard: false)
       entry[:fixed_alloc] = true
     end
-    entry ||= entry(:uniform, has_moved_guard: false) if ti.inf_stream?
+    entry ||= entry(:uniform, has_moved_guard: true) if stream_handle_type?(ti)
     if !entry && node.respond_to?(:resource_close_zig) && node.resource_close_zig
       entry = entry(:resource, resource_close_zig: node.resource_close_zig)
+    end
+    entry ||= classify_mutable_owning_slot(ti, node, schema_lookup)
+    if !entry && node_sym&.heap_storage? && ti.recursive_cleanup_shape?(schema_lookup)
+      entry = entry(:uniform, has_moved_guard: false)
+      entry[:fixed_alloc] = true
     end
     entry ||= classify_owned_return_call(ti, node, schema_lookup)
     entry ||= classify_collection(ti, schema_lookup, node: node)
@@ -629,9 +684,11 @@ module CleanupClassifier
       entry = entry(:uniform)
     end
     entry ||= classify_rc_or_link(ti, schema_lookup)
-    entry ||= entry(:uniform) if sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
+    entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? ||
+                                                          sync == :locked || sync == :write_locked ||
+                                                          sync == :always_mutable || sync == :versioned
     entry ||= classify_optional(ti, schema_lookup, node: node)
-    entry ||= classify_owned_string(ti, node, promoted_fns)
+    entry ||= classify_owned_string(ti, node, promoted_fns, schema_lookup)
     entry ||= classify_heap_storage(ti, node, schema_lookup, sync)
     entry ||= classify_heap_composite(ti, node, schema_lookup, sync)
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
@@ -658,6 +715,32 @@ module CleanupClassifier
   sig { params(kind: Symbol, alloc: Symbol, has_moved_guard: T::Boolean, extra: T.untyped).returns(CleanupEntry) }
   private_class_method def self.entry(kind, alloc: :heap, has_moved_guard: true, **extra)
     CleanupEntry.build(kind, alloc: alloc, has_moved_guard: has_moved_guard, **extra)
+  end
+
+  sig { params(ti: Type).returns(T::Boolean) }
+  private_class_method def self.stream_handle_type?(ti)
+    ti.dynamic_stream? || ti.bounded_stream? || ti.open_stream? ||
+      ti.inf_stream? || ti.split_open_stream? || ti.shared_promise?
+  end
+
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T::Boolean) }
+  private_class_method def self.mutable_owning_slot?(ti, node, schema_lookup)
+    return false unless node.respond_to?(:var_mutated) && node.var_mutated == true
+    ownership_bearing_type?(ti, schema_lookup)
+  end
+
+  sig { params(ti: Type, schema_lookup: Proc).returns(T::Boolean) }
+  private_class_method def self.ownership_bearing_type?(ti, schema_lookup)
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
+  end
+
+  sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_mutable_owning_slot(ti, node, schema_lookup)
+    return nil unless mutable_owning_slot?(ti, node, schema_lookup)
+    kind = ti.string? ? :heap_string : :uniform
+    alloc = ti.cleanup_allocator(schema_lookup)
+    e = entry(kind, alloc: alloc, has_moved_guard: true)
+    e
   end
 
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -838,13 +921,14 @@ module CleanupClassifier
     false
   end
 
-  sig { params(ti: Type, node: T.untyped, promoted_fns: T::Set[String]).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_owned_string(ti, node, promoted_fns)
+  sig { params(ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_owned_string(ti, node, promoted_fns, schema_lookup)
     return nil unless ti.string?
     value = node.respond_to?(:value) ? node.value : nil
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    return nil if node_sym&.rodata_provenance? || node_sym&.borrow_provenance?
-    fixed_heap = value.is_a?(AST::NextExpr) || capture_expr_heap?(value, promoted_fns)
+    return nil if !node_sym&.heap_storage? &&
+                  (node_sym&.rodata_provenance? || node_sym&.borrow_provenance?)
+    fixed_heap = value.is_a?(AST::NextExpr) || capture_expr_heap?(value, promoted_fns, schema_lookup)
     owns_heap = value.is_a?(AST::CopyNode) ||
                 fixed_heap ||
                 value.is_a?(AST::StringConcat) ||

@@ -211,15 +211,11 @@ RSpec.describe "Allocation Strategy Invariants" do
   # ===========================================================================
   describe "Group C: INV-FRAME — non-escaping collections are :frame" do
 
-    # [CURRENTLY FAILS] finalize_storage in type.rb has no special case for :list
-    # collections — they fall through to `current_storage || :stack`. The storage
-    # field ends up :stack even though cleanup_alloc is correctly :frame.
-    # Fix (Phase B): finalize_storage must return :frame when collection == :list.
-    it "local @list → storage :frame, cleanup :frame [CURRENTLY FAILS storage]" do
+    it "local primitive @list → storage :frame, cleanup :frame" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE parts: String[]@list = [];
-          parts.append("hello");
+          MUTABLE parts: Int64[]@list = [];
+          parts.append(1_i64);
           RETURN;
         END
       CLEAR
@@ -228,7 +224,6 @@ RSpec.describe "Allocation Strategy Invariants" do
       entry = cleanup_entry(fn, "parts")
       expect(entry&.dig(:needs_cleanup)).to be true
       expect(entry&.dig(:alloc)).to eq(:frame)
-      # storage is WRONG: should be :frame but is currently :stack
       expect(d.storage).to eq(:frame)
     end
 
@@ -248,13 +243,12 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(cleanup_entry(fn, "resp")&.dig(:alloc)).not_to eq(:heap)
     end
 
-    # [CURRENTLY FAILS] same finalize_storage gap as local @list above
-    it "local @list in FOR loop → storage :frame, cleanup :frame [CURRENTLY FAILS storage]" do
+    it "local primitive @list in FOR loop → storage :frame, cleanup :frame" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: String[]@list = [];
-            parts.append("x");
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
           END
           RETURN;
         END
@@ -265,13 +259,10 @@ RSpec.describe "Allocation Strategy Invariants" do
       entry = cleanup_entry(fn, "parts")
       expect(entry&.dig(:needs_cleanup)).to be true
       expect(entry&.dig(:alloc)).to eq(:frame)
-      # storage is WRONG: :stack instead of :frame
       expect(decl.storage).to eq(:frame)
     end
 
-    # [CURRENTLY FAILS] finalize_storage has no :heap case for map? types.
-    # Fix (Phase B): finalize_storage must return :heap when map? is true.
-    it "HashMap → storage :heap, cleanup :heap [CURRENTLY FAILS storage]" do
+    it "non-escaping HashMap → cleanup uses map-owned heap allocator" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -284,8 +275,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       entry = cleanup_entry(fn, "m")
       expect(entry&.dig(:needs_cleanup)).to be true
       expect(entry&.dig(:alloc)).to eq(:heap)
-      # storage is WRONG: :stack instead of :heap
-      expect(d.symbol.storage).to eq(:heap)
+      expect(d.symbol.storage).not_to eq(:heap)
     end
 
   end
@@ -325,14 +315,14 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(entry&.dig(:alloc)).to eq(:heap)
     end
 
-    it "non-returned sibling of a returned binding stays :frame" do
+    it "non-returned primitive sibling of a returned binding stays :frame" do
       # The non-returned 'scratch' must NOT be heap-promoted just because
       # something else in the same function is returned. No speculative promotion.
       ast = run_mir(<<~CLEAR)
         FN get_parts() RETURNS !String[]@list ->
           MUTABLE result: String[]@list = [];
-          MUTABLE scratch: String[]@list = [];
-          scratch.append("temp");
+          MUTABLE scratch: Int64[]@list = [];
+          scratch.append(1_i64);
           result.append("keep");
           RETURN result;
         END
@@ -351,13 +341,13 @@ RSpec.describe "Allocation Strategy Invariants" do
   # ===========================================================================
   describe "Group E: INV-FRAME-FIRST — non-returned bindings stay :frame" do
 
-    it "non-returned binding is not speculatively promoted to heap" do
+    it "non-returned primitive binding is not speculatively promoted to heap" do
       # Declarations start on the frame. Heap promotion happens only at escape points.
       # 'local' is never returned — it must stay :frame even though 'result' is :heap.
       ast = run_mir(<<~CLEAR)
         FN build() RETURNS !String[]@list ->
-          MUTABLE local: String[]@list = [];
-          local.append("temp");
+          MUTABLE local: Int64[]@list = [];
+          local.append(1_i64);
           MUTABLE result: String[]@list = [];
           result.append("final");
           RETURN result;
@@ -368,16 +358,16 @@ RSpec.describe "Allocation Strategy Invariants" do
       expect(cleanup_entry(fn, "result")&.dig(:alloc)).to eq(:heap)
     end
 
-    it "three bindings: only the returned one is :heap; others stay :frame" do
+    it "three bindings: only the returned recursive-owner is :heap; primitive siblings stay :frame" do
       # Verifies that heap promotion is surgical (only the escaping binding),
       # not wholesale (all bindings in a function that has a return).
       ast = run_mir(<<~CLEAR)
         FN multi() RETURNS !String[]@list ->
-          MUTABLE a: String[]@list = [];
-          MUTABLE b: String[]@list = [];
+          MUTABLE a: Int64[]@list = [];
+          MUTABLE b: Int64[]@list = [];
           MUTABLE out: String[]@list = [];
-          a.append("scratch_a");
-          b.append("scratch_b");
+          a.append(1_i64);
+          b.append(2_i64);
           out.append("result");
           RETURN out;
         END

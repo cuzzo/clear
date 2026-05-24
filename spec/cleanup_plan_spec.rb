@@ -86,7 +86,7 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
         expect([:uniform]).to include(entry[:kind])
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -204,7 +204,7 @@ RSpec.describe CleanupClassifier do
   # MATCH AS bindings (the double-free bug fix)
   # =========================================================================
   describe "MATCH AS binding (borrow)" do
-    context "MATCH AS auto-promotes to TAKES for non-Copy variants" do
+    context "plain MATCH AS borrows non-Copy variants" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
@@ -218,11 +218,8 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks AS binding for cleanup (auto-TAKES)" do
-        expect(plan["items"]).not_to be_nil
-        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
-        expect(plan["items"][:kind]).to eq(:uniform)
-        expect(plan["items"][:match_as]).to eq(true)
+      it "does not synthesize owned cleanup for the AS binding" do
+        expect(plan["items"]).to be_nil
       end
     end
 
@@ -326,7 +323,7 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks for heap cleanup with _moved guard" do
+      it "marks for map-owned heap cleanup with a moved guard" do
         entry = plan["m"]
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:kind]).to eq(:uniform)
@@ -358,7 +355,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup" do
         entry = plan["list1"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
       end
     end
 
@@ -425,13 +422,13 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks for cleanup with _moved guard" do
+      it "marks for cleanup without a moved guard until a move site exists" do
         entry = plan["v"]
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         # Provenance-based: :heap_union (COPY produces :heap provenance)
         expect([:uniform]).to include(entry[:kind])
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
       end
     end
   end
@@ -510,9 +507,9 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "pool has _moved guard through collection cleanup" do
+      it "pool uses unguarded cleanup until a move site requires a guard" do
         entry = plan["pool"]
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
         expect(entry[:kind]).to eq(:uniform)
       end
     end
@@ -582,7 +579,7 @@ RSpec.describe CleanupClassifier do
       CLEAR
       entry = plan["r"]
       expect(entry).not_to be_nil, "CATCH string return should have cleanup"
-      expect(entry[:kind]).to eq(:heap_string)
+      expect(entry[:kind]).to eq(:uniform)
     end
   end
 
@@ -721,7 +718,7 @@ RSpec.describe CleanupClassifier do
         FN main() RETURNS Void ->
             d = makeNested();
             d2 = COPY d;
-            PARTIAL MATCH d2 START
+            PARTIAL MATCH TAKES d2 START
                 Data.Nested AS n -> print(n.label);,
                 DEFAULT -> print("wrong");
             END

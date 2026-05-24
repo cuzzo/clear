@@ -11,10 +11,10 @@
 #     multi-branch return. Each shape is its own `return_value_is_heap?`
 #     case arm; before this expansion only `ident` was ever generated.
 #
-# The COPY-of-collection-field / COPY-of-collection-index return shapes
-# are marked :compile_error -- `RETURN COPY x.field` / `RETURN COPY x[i]`
-# for a collection element currently lowers COPY to a []T slice that
-# does not match the ArrayList return type. Real bug, tracked separately.
+# The COPY-of-collection-index return shape is marked :compile_error:
+# `RETURN COPY x[i]` for a collection element currently lowers COPY to a
+# []T slice that does not match the ArrayList return type. Real bug,
+# tracked separately.
 
 ESCAPE_VIA_RETURN_CELLS = []
 
@@ -45,11 +45,10 @@ end
  :indirect_struct, :indirect_struct_string].each do |shape|
   ESCAPE_VIA_RETURN_CELLS << { return_shape: shape }
 end
-# Language-limited shapes: COPY of a collection field/index returns a
-# []T slice that mismatches the ArrayList return type.
-[:field_copy, :index_copy].each do |shape|
-  ESCAPE_VIA_RETURN_CELLS << { return_shape: shape, expected: :compile_error }
-end
+# COPY of a collection field is supported; COPY of a collection index still
+# returns a []T slice that mismatches the ArrayList return type.
+ESCAPE_VIA_RETURN_CELLS << { return_shape: :field_copy }
+ESCAPE_VIA_RETURN_CELLS << { return_shape: :index_copy, expected: :compile_error }
 
 # Axis-2 renderer: one self-contained program per return-expression shape.
 # Each shape is a distinct `return_value_is_heap?` case arm.
@@ -246,7 +245,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "Point[100]@pool"
     decl_init   = "MUTABLE p: #{return_type} = [];"
     return_var  = "p"
-    append      = ->(_v, i = nil) { i ||= 1; "    pid = p.insert(Point{ x: #{i}.0, y: #{i}.0 });" }
+    append      = ->(_v, i = nil) { i ||= 1; "    p.insert(Point{ x: #{i}.0, y: #{i}.0 });" }
     values      = (1..size).to_a
     len_check   = "ASSERT result.length() == #{size}_i64, \"returned pool length\";"
     first_check = ""
@@ -263,7 +262,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     type_decl   = ""
 
   when :map_int_numeric
-    return_type = "Int64[Int64]@map"
+    return_type = "HashMap<Int64, Int64>"
     decl_init   = "MUTABLE m: #{return_type} = {};"
     return_var  = "m"
     append      = ->(v) { "    m[#{v[:k]}] = #{v[:val]};" }

@@ -3,8 +3,6 @@ instructions:
 0002 STORE_SLOT        0
 0004 LOAD_SLOT         0
 0006 NATIVE_CALL       13 1
-0009 STORE_SLOT        1
-0011 LOAD_SLOT         1
-0013 HALT
+0009 HALT
 consts:
 S:5:clear

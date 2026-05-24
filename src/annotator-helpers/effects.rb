@@ -416,9 +416,10 @@ module EffectTracker
       end
     end
 
-    fn_nodes.each do |name, fn_node|
-      fn_node.needs_rt = (needs_rt[name] == true)
-    end
+    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
+    # on finalized storage and cleanup facts. This annotator pass only
+    # computes local analysis used by can_fail/effects; it must not stamp the
+    # final calling convention bit.
   end
 
   # Post-pass: compute can_fail for every function.
@@ -723,7 +724,7 @@ module EffectTracker
           if arg.is_a?(AST::Identifier) && arg_ft.is_a?(Type) && arg_ft.fn_type?
             fn = fn_nodes[arg.name]
             if fn
-              fn.needs_rt = true
+              fn.fn_value_ref = true
               fn.can_fail  = true
             end
           end
@@ -950,9 +951,9 @@ module EffectTracker
   #   :standard (16 KB)  - heap allocations, extern calls, moderate locals
   #   :large    (64 KB)  - recursive functions, deep call chains
   #   :xl       (256 KB) - recursive + heap-heavy
-  #   :service  (2 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
+  #   :service  (4 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
   #
-  STACK_TIER_BUDGET = T.let({ micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze, T::Hash[Symbol, Integer])
+  STACK_TIER_BUDGET = T.let({ micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 4_194_304 }.freeze, T::Hash[Symbol, Integer])
 
   # Recursion co-op yield budget: matches the runtime's YIELD_BUDGET
   # constant in zig/runtime/runtime.zig. The compiler injects
@@ -1028,9 +1029,15 @@ module EffectTracker
       # is bounded; treat per-frame size as the worst-case stack
       # contribution (modulo MAX_DEPTH's *N already applied above).
 
+      return_t = fn_node.return_type
+      return_t = Type.new(return_t) if return_t && !return_t.is_a?(Type)
+      declared_runtime_return = !!(return_t && (return_t.heap? || return_t.indirect? || return_t.needs_escape_promotion?))
+
       tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
-      elsif fn_node.needs_rt
+      elsif fn_node.uses_runtime? || fn_node.fn_value_ref == true ||
+            !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil? ||
+            recursion_yield_needed?(fn_node) || declared_runtime_return
         :standard
       else
         :micro

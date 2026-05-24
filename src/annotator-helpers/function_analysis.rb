@@ -243,6 +243,7 @@ module FunctionAnalysis
       )
       call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, synthetic_sig)
+      node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
       node.full_type = sig.return_type
 
     elsif func_type.is_a?(Symbol)
@@ -376,6 +377,9 @@ module FunctionAnalysis
 
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
+      if is_give && !param.takes
+        error!(arg_node, :GIVE_TO_BORROW_PARAM, param: param.name)
+      end
       if param.takes || is_give
         # Reject borrowed values passed to TAKES params.
         # Container index access (arr[i], map[key]) returns a borrow -

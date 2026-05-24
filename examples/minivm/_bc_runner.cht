@@ -2514,7 +2514,7 @@ END
 # Returns the value on top of the stack at halt.
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
-         entryIp: Int64, initCaps: Value[]) RETURNS !Value
+         entryIp: Int64, TAKES initCaps: Value[]) RETURNS !Value
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->

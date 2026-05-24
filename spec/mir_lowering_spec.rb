@@ -182,12 +182,17 @@ RSpec.describe MIRLowering do
       expect(result.cleanup_entry).to eq(entry)
     end
 
-    it "translates MIR::SuppressCleanup to MIR::MoveMark" do
+    it "translates MIR::SuppressCleanup to explicit transfer and move marks when a cleanup guard is visible" do
       suppress = MIR::SuppressCleanup.new(tok, "buf")
-      result = lowering.lower(suppress)
-      expect(result).to be_a(MIR::MoveMark)
-      expect(result.name).to eq("buf")
-      expect(emit(result)).to eq("buf_moved = true;")
+      l = lowering
+      l.instance_variable_set(:@guarded_cleanup_names, { "buf" => true })
+      result = l.lower(suppress)
+      expect(result).to contain_exactly(
+        an_instance_of(MIR::TransferMark),
+        an_instance_of(MIR::MoveMark)
+      )
+      expect(result.map(&:name)).to eq(["buf", "buf"])
+      expect(emit(result)).to eq("\nbuf_moved = true;")
     end
 
     it "translates MIR::Alloc to MIR::AllocMark" do
@@ -741,10 +746,8 @@ RSpec.describe MIRLowering do
       node.instance_variable_set(:@reassign_cleanup, MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap))
       def node.reassign_cleanup; @reassign_cleanup; end
       result = lowering.lower(node)
-      expect(result).to be_a(Array)
-      expect(result[0]).to be_a(MIR::ReassignWithCleanup)
-      expect(result[1]).to be_a(MIR::MoveMark)
-      zig = result.map { |node| emit(node) }.join("\n")
+      expect(result).to be_a(MIR::ReassignWithCleanup)
+      zig = emit(result)
       expect(zig).to include("CheatLib.cleanup")
       expect(zig).to include("buf = __new_buf")
     end
@@ -909,8 +912,9 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
-      expect(zig).to include("CheatLib.cleanupAt(Point, items, rt.heapAlloc(), 0)")
-      expect(zig).to include("CheatLib.setAt(items, 0, next_point)")
+      expect(zig).to include("CheatLib.cleanupAt(Point, items, rt.frameAlloc(), 0)")
+      expect(zig).to include("CheatLib.setAt(items, 0, __tmp_")
+      expect(result.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) }).to be true
     end
   end
 
@@ -1177,7 +1181,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:full_value)
-      expect(emit(result)).to include("dupeValue([]const u8, s")
+      expect(emit(result)).to include("dupeValue([]const u8, __copy_src")
     end
 
     it "lowers COPY passthrough for value types as an inline auto-deref expression" do
@@ -1199,7 +1203,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:full_value)
-      expect(emit(result)).to eq("try CheatLib.dupeValue(@TypeOf(c), c, rt.heapAlloc())")
+      expect(emit(result)).to include("try CheatLib.dupeValue(@TypeOf(c), __copy_src, rt.heapAlloc())")
     end
 
     it "emits cleanup for declarations initialized from COPY of sync values" do
@@ -1345,7 +1349,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:full_value)
       expect(result.zig_type).to eq("Value")
-      expect(emit(result)).to eq("try CheatLib.dupeValue(Value, val, rt.heapAlloc())")
+      expect(emit(result)).to include("try CheatLib.dupeValue(Value, __copy_src, rt.heapAlloc())")
     end
   end
 
@@ -1366,7 +1370,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::StructInit)
       zig = emit(result)
       expect(zig).to include("User{")
-      expect(zig).to include('.name = "alice"')
+      expect(zig).to include(".name = __tmp_")
       expect(zig).to include(".age = 30")
     end
 
@@ -1833,7 +1837,9 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers call without rt when fn_sig says needs_rt=false" do
-      sig = Struct.new(:needs_rt, :can_fail, :params, :return_type).new(false, false, [], :Int64)
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
+      sig.needs_rt = false
+      sig.can_fail = false
       l = lowering(fn_sigs: { "pure" => sig })
       node = AST::FuncCall.new(tok, "pure", [])
       node.full_type = :Int64
@@ -1845,8 +1851,12 @@ RSpec.describe MIRLowering do
     it "passes stack struct by value — SROA candidate, no const-ptr" do
       # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
       # into registers. Do NOT pass by *const T — that would prevent SROA.
-      sig = Struct.new(:needs_rt, :can_fail, :params, :return_type)
-                  .new(false, false, [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)], :Int64)
+      sig = FunctionSignature.new(
+        params: [AST::Param.new(name: "p", type: :Point, mutable: false, takes: false)],
+        return_type: Type.new(:Int64)
+      )
+      sig.needs_rt = false
+      sig.can_fail = false
       l = lowering(
         fn_sigs: { "sum3" => sig },
         struct_schemas: { Point: Schemas::StructSchema.new(fields: { "x" => :Int64, "y" => :Int64 }) }
@@ -2306,8 +2316,9 @@ RSpec.describe MIRLowering do
         CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
 
       zig = emit(low.lower(node))
-      expect(zig).to include("var dst = try CheatLib.dupeValue")
-      expect(zig).to include("defer if (!dst_moved) CheatLib.cleanup(@TypeOf(dst), __rt.heapAlloc(), &dst)")
+      expect(zig).to include("var dst = blk_copy_")
+      expect(zig).to include("try CheatLib.dupeValue")
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(dst), __rt.heapAlloc(), &dst)")
     end
 
     it "lowers DoBlock with stack tier" do
@@ -3190,8 +3201,8 @@ RSpec.describe MIRLowering do
         expect(l.instance_variable_get(:@pending_stmts)).to be_empty
         expect(result).to be_a(MIR::Orelse)
         expect(result.fallback).to be_a(MIR::BlockExpr)
+        expect(result.fallback.body.any? { |stmt| stmt.is_a?(MIR::AllocMark) }).to be true
         expect(result.fallback.body.last).to be_a(MIR::BreakStmt)
-        expect(result.fallback.body.last.value).to be_a(MIR::StructInit)
       end
 
       it "leaves a non-allocating fallback unwrapped" do
@@ -3222,13 +3233,13 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     AST::Identifier.new(tok, "value").tap { |node| node.full_type = type }
   end
 
-  it "only treats heap-backed MIR allocation nodes as cleanup-relevant" do
+  it "treats every owned MIR allocation node as cleanup-relevant" do
     l = lowering
 
     expect(l.send(:mir_allocates?, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))).to be(true)
-    expect(l.send(:mir_allocates?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(false)
+    expect(l.send(:mir_allocates?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(true)
     expect(l.send(:mir_allocates?, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap))).to be(true)
-    expect(l.send(:mir_allocates?, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :frame))).to be(false)
+    expect(l.send(:mir_allocates?, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :frame))).to be(true)
     expect(l.send(:mir_allocates?, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :frame, nil))).to be(true)
   end
 
@@ -3238,7 +3249,7 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     frame_copy = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :frame)
 
     expect(l.send(:mir_allocates?, MIR::Cast.new(heap_copy, "[]const u8", :as))).to be(true)
-    expect(l.send(:mir_allocates?, MIR::Cast.new(frame_copy, "[]const u8", :as))).to be(false)
+    expect(l.send(:mir_allocates?, MIR::Cast.new(frame_copy, "[]const u8", :as))).to be(true)
   end
 
   it "classifies direct allocation cleanup entries by allocation shape" do

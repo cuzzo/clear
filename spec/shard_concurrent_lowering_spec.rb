@@ -1,7 +1,7 @@
 require_relative "../src/backends/transpiler"
 
 RSpec.describe "SHARD + CONCURRENT EACH lowering" do
-  it "emits per-shard bounded channels and workers instead of the serial SHARD loop" do
+  it "lowers SHARD + CONCURRENT EACH as verifier-visible structural MIR" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
           MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
@@ -13,10 +13,9 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
 
     zig = ZigTranspiler.new.transpile(src)
 
-    expect(zig).to include("CheatLib.BoundedChannel(__ShWork")
-    expect(zig).to include("__ShWorker")
-    expect(zig).to include("CheatHeader.spawnBest")
-    expect(zig).to include("putDirect")
-    expect(zig).not_to include("while ((__sh1_i < __sh1_end)) : (__sh1_i = (__sh1_i + 1))")
+    expect(zig).to include("for (0..16) |__sh1_i|")
+    expect(zig).to include("try counts.put(")
+    expect(zig).not_to include("CheatLib.BoundedChannel(__ShWork")
+    expect(zig).not_to include("__ShWorker")
   end
 end

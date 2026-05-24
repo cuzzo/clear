@@ -39,7 +39,7 @@ FuzzGenerator.register(:cross_fiber_consumer, cells: CROSS_FIBER_CELLS) do |p|
     ]
   when :observable_reduce_int
     [
-      "gen: ~Int64[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };\n    acc: ~Int64@observable = gen |> SUM;",
+      "gen: ~Int64[] = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO YIELD k; k = k + 1_i64; END\n    };\n    acc: ~Int64@observable = gen |> SUM _;",
       "acc", "Int64",
       'final >= 0_i64',
     ]

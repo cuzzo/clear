@@ -804,7 +804,7 @@ class BcEmitter
     # pair 1:1 with AST stmts.
     synthetic_only = ->(n) {
       n.is_a?(MIR::MoveMark) ||
-      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp)_\d+\z/) ||
+      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp|hoist)_\d+\z/) ||
       # Lowering inserts `MIR::Let name=X init=Ident("_m_X")` at the top of
       # any helper fn body that has a MUTABLE param: it renames the param to
       # `_m_X` and then re-binds `X = _m_X` so the user-visible name is the
@@ -860,7 +860,8 @@ class BcEmitter
 
   def skip_mir?(n)
     n.is_a?(MIR::AllocMark)       || n.is_a?(MIR::ReturnMark)      ||
-    n.is_a?(MIR::ReassignMark)    || n.is_a?(MIR::FieldCleanupMark) ||
+    n.is_a?(MIR::ReassignMark)    || n.is_a?(MIR::TransferMark)     ||
+    n.is_a?(MIR::FieldCleanupMark) ||
     n.is_a?(MIR::Cleanup)         || n.is_a?(MIR::ErrCleanup)       ||
     # MIR::MoveMark is NOT skipped — it emits MARK_MOVED to release the
     # slot's ownership so the subsequent slot-restore in BC_RET (and any
@@ -888,6 +889,7 @@ class BcEmitter
       n.is_a?(MIR::SuppressCleanup) ||
       n.is_a?(MIR::Return) || n.is_a?(MIR::ReassignCleanup) ||
       n.is_a?(MIR::FieldCleanup) ||
+      (n.is_a?(AST::VarDecl) && n.name.to_s =~ /\A__hoist_\d+\z/) ||
       # Bare returns with no value
       (n.is_a?(AST::ReturnNode) && n.value.nil?)
     }

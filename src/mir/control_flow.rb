@@ -21,6 +21,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
+require_relative "../annotator-helpers/function_signature"
 require_relative "cleanup_entry"
 
 # ==========================================
@@ -94,8 +95,12 @@ class FunctionCFG
 
   private
 
-  sig { params(stmts: T::Array[T.untyped], current_block: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG).returns(T.nilable(BasicBlock)) }
-  def self.build_body(stmts, current_block, exit_target, cfg)
+  sig do
+    params(stmts: T::Array[T.untyped], current_block: BasicBlock, exit_target: BasicBlock,
+           cfg: FunctionCFG, break_target: T.nilable(BasicBlock),
+           continue_target: T.nilable(BasicBlock)).returns(T.nilable(BasicBlock))
+  end
+  def self.build_body(stmts, current_block, exit_target, cfg, break_target: nil, continue_target: nil)
     stmts = [stmts] unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
@@ -108,11 +113,13 @@ class FunctionCFG
         current_block.add_successor(then_block)
         current_block.add_successor(else_block || join_block)
 
-        then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg)
+        then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg,
+                               break_target: break_target, continue_target: continue_target)
         then_exit.add_successor(join_block) if then_exit
 
         if stmt.else_branch
-          else_exit = build_body(stmt.else_branch, T.must(else_block), exit_target, cfg)
+          else_exit = build_body(stmt.else_branch, T.must(else_block), exit_target, cfg,
+                                 break_target: break_target, continue_target: continue_target)
           else_exit.add_successor(join_block) if else_exit
         end
 
@@ -126,9 +133,9 @@ class FunctionCFG
         current_block.add_successor(body_block)   # enter loop
         current_block.add_successor(after_block)   # skip loop
 
-        body_exit = build_body(stmt.do_branch || [], body_block, exit_target, cfg)
+        body_exit = build_body(stmt.do_branch || [], body_block, exit_target, cfg,
+                               break_target: after_block, continue_target: current_block)
         body_exit&.add_successor(current_block)    # loop back
-        body_exit&.add_successor(after_block)      # break
 
         current_block = after_block
 
@@ -140,9 +147,9 @@ class FunctionCFG
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
 
-        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg,
+                               break_target: after_block, continue_target: current_block)
         body_exit&.add_successor(current_block)    # loop back
-        body_exit&.add_successor(after_block)      # done
 
         current_block = after_block
 
@@ -153,13 +160,15 @@ class FunctionCFG
         stmt.cases.each do |c|
           case_block = cfg.new_block
           current_block.add_successor(case_block)
-          case_exit = build_body(c.body, case_block, exit_target, cfg)
+          case_exit = build_body(c.body, case_block, exit_target, cfg,
+                                 break_target: break_target, continue_target: continue_target)
           case_exit.add_successor(join_block) if case_exit
         end
         if stmt.default_case
           default_block = cfg.new_block
           current_block.add_successor(default_block)
-          default_exit = build_body(stmt.default_case, default_block, exit_target, cfg)
+          default_exit = build_body(stmt.default_case, default_block, exit_target, cfg,
+                                    break_target: break_target, continue_target: continue_target)
           default_exit.add_successor(join_block) if default_exit
         end
 
@@ -171,7 +180,8 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)  # WITH can fail to acquire
-        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg,
+                               break_target: break_target, continue_target: continue_target)
         body_exit.add_successor(after_block) if body_exit
         current_block = after_block
 
@@ -181,7 +191,8 @@ class FunctionCFG
         stmt.branches.each do |b|
           branch_block = cfg.new_block
           current_block.add_successor(branch_block)
-          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg)
+          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg,
+                                   break_target: break_target, continue_target: continue_target)
           branch_exit.add_successor(join_block) if branch_exit
         end
         current_block.add_successor(join_block)  # fallthrough if no branches
@@ -193,7 +204,8 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
-        build_body(stmt.body, body_block, exit_target, cfg)
+        build_body(stmt.body, body_block, exit_target, cfg,
+                   break_target: break_target, continue_target: continue_target)
         # BG body runs in separate fiber -- no fall-through back to parent
         current_block = after_block
 
@@ -209,7 +221,13 @@ class FunctionCFG
 
       when AST::BreakNode
         current_block.stmts << stmt
-        return nil  # break exits the loop - handled by loop structure
+        current_block.add_successor(break_target) if break_target
+        return nil
+
+      when AST::ContinueNode
+        current_block.stmts << stmt
+        current_block.add_successor(continue_target) if continue_target
+        return nil
 
       else
         # Error edge: if this statement can fail (contains a try call),
@@ -464,13 +482,20 @@ class OwnershipDataflow
 
     bindings.each do |var, entry|
       next unless entry.needs_cleanup?
-      df_entry = summary[var]
+      block_entry = block_exit_cleanup_summary(var)
+      df_entry = if block_entry && !block_entry[:needs_cleanup]
+        block_entry
+      else
+        summary[var] || block_entry
+      end
       next unless df_entry # variable not tracked by dataflow - keep plan
 
       if !df_entry[:needs_cleanup]
         # Moved on ALL paths -> normally no cleanup needed.
         # Exception: MATCH TAKES unions need the defer with a moved guard.
         if entry.kind == :takes_union || match_takes_var?(fn_node, var)
+          entry[:has_moved_guard] = true
+        elsif declared_inside_loop?(fn_node.body || [], var)
           entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
@@ -487,7 +512,89 @@ class OwnershipDataflow
     end
   end
 
+  sig { params(stmts: T::Array[T.untyped], var: String).returns(T::Boolean) }
+  def linear_scope_decl_always_moves?(stmts, var)
+    stmts.each_with_index do |stmt, idx|
+      if declares_name?(stmt, var)
+        return stmts[(idx + 1)..].to_a.any? { |s| stmt_moves_name?(s, var) }
+      end
+
+      nested = case stmt
+               when AST::WhileLoop
+                 stmt.do_branch
+               when AST::ForRange, AST::ForEach
+                 stmt.body
+               when AST::IfStatement
+                 [stmt.then_branch, stmt.else_branch].compact.flatten
+               when AST::MatchStatement
+                 bodies = stmt.cases.flat_map { |c| c.respond_to?(:body) ? c.body : [] }
+                 stmt.default_case ? bodies + stmt.default_case : bodies
+               else
+                 []
+               end
+      return true if !nested.empty? && linear_scope_decl_always_moves?(nested, var)
+    end
+    false
+  end
+
+  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  def declares_name?(stmt, var)
+    (stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)) &&
+      stmt.name.to_s == var
+  end
+
+  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  def stmt_moves_name?(stmt, var)
+    return false if stmt.is_a?(AST::ReturnNode)
+    state = { var => OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: true) }
+    collect_binding_moves(stmt, state).include?(var) ||
+      collect_explicit_moves(stmt, state).include?(var) ||
+      (AST.call?(stmt) && collect_bg_captures_in_args(stmt, state).include?(var))
+  end
+
+  sig { params(var: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+  def block_exit_cleanup_summary(var)
+    states = @block_out.values.filter_map do |state|
+      entry = state[var]
+      entry if entry.is_a?(OwnerEntry)
+    end
+    return nil if states.empty?
+
+    moved = states.any? { |entry| entry.state == MOVED } &&
+            states.none? { |entry| entry.state == MAYBE_MOVED }
+    maybe = states.any? { |entry| entry.state == MAYBE_MOVED }
+    {
+      needs_cleanup: !moved,
+      has_moved_guard: maybe || (!moved && states.any? { |entry| entry.state == MOVED }),
+    }
+  end
+
   private
+
+  sig { params(stmts: T::Array[T.untyped], var_name: String, loop_depth: Integer).returns(T::Boolean) }
+  def declared_inside_loop?(stmts, var_name, loop_depth: 0)
+    stmts.any? do |stmt|
+      return true if loop_depth.positive? && declares_name?(stmt, var_name)
+      case stmt
+      when AST::WhileLoop, AST::WhileBindLoop
+        declared_inside_loop?(stmt.do_branch || [], var_name, loop_depth: loop_depth + 1)
+      when AST::ForRange, AST::ForEach
+        declared_inside_loop?(stmt.body || [], var_name, loop_depth: loop_depth + 1)
+      when AST::IfStatement
+        declared_inside_loop?(stmt.then_branch || [], var_name, loop_depth: loop_depth) ||
+          declared_inside_loop?(stmt.else_branch || [], var_name, loop_depth: loop_depth)
+      when AST::MatchStatement
+        stmt.cases.any? { |c| declared_inside_loop?(c.body || [], var_name, loop_depth: loop_depth) } ||
+          declared_inside_loop?(stmt.default_case || [], var_name, loop_depth: loop_depth)
+      when AST::WithBlock
+        declared_inside_loop?(stmt.body || [], var_name, loop_depth: loop_depth)
+      when AST::DoBlock
+        stmt.branches.any? { |b| declared_inside_loop?(b[:body] || [], var_name, loop_depth: loop_depth) }
+      else
+        false
+      end
+    end
+  end
 
   # Returns true if the given variable is the subject of a MATCH TAKES statement.
   sig { params(fn_node: AST::FunctionDef, var_name: String).returns(T::Boolean) }
@@ -1335,9 +1442,31 @@ module LoopFrameAnalysis
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
     local_names = collect_local_names(body)
-    has_frame_locals = local_iteration_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
-    loop_node.mark_per_iter = has_frame_locals
+    has_iteration_frame_locals = local_iteration_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    has_extended_frame_locals = local_frame_decls(body, local_names).any? do |decl|
+      entry = decl.respond_to?(:mir_binding_entry) ? decl.mir_binding_entry : nil
+      entry&.present? && entry.alloc == :frame && entry.scope != :iteration
+    end || outer_frame_receiver_alloc?(body, local_names)
+    loop_node.mark_per_iter = has_iteration_frame_locals && !has_extended_frame_locals
     nil
+  end
+
+  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
+  def self.outer_frame_receiver_alloc?(body, local_names)
+    found = T.let(false, T::Boolean)
+    scan_direct(body) do |node|
+      next unless node.is_a?(AST::MethodCall)
+      sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
+      emit = sig&.emit
+      next unless emit&.allocates && emit&.mutates_receiver
+      root = AST.root_identifier(node.object)
+      next unless root&.symbol
+      next if local_names.include?(root.name.to_s)
+      decl = root.symbol.respond_to?(:reg) ? root.symbol.reg : nil
+      sym = (decl && decl.respond_to?(:symbol) && decl.symbol) || root.symbol
+      found = true unless sym.heap_storage?
+    end
+    found
   end
 
   sig { params(loop_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }

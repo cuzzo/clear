@@ -47,7 +47,13 @@ module MIRLoweringCapabilities
       return [live.sync, live.storage]
     end
     sym = var_node.symbol
-    [sym&.sync, sym&.storage]
+    ti = Type.from_node(var_node)
+    [sym&.sync || ti&.sync, sym&.storage]
+  end
+
+  sig { params(capability: T.any(AST::Capability, T::Hash[Symbol, T.untyped])).returns(T::Array[T.untyped]) }
+  def with_alias_ownership_marks(capability)
+    []
   end
 
   # Zig expression naming the locked-inner. Identifier → its Zig name (or
@@ -86,6 +92,22 @@ module MIRLoweringCapabilities
     "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
   end
 
+  sig { params(lock_expr: String, var_sync: T.nilable(Symbol), fallible: T::Boolean).returns(String) }
+  def lock_acquire_call_expr(lock_expr, var_sync, fallible)
+    T.bind(self, MIRLowering) rescue nil
+    if var_sync == :write_locked
+      return "#{lock_expr}.#{fallible ? "writeOrErr" : "write"}()"
+    end
+    if var_sync == :locked
+      return "#{lock_expr}.#{fallible ? "acquireOrErr" : "acquire"}()"
+    end
+
+    write_method = fallible ? "writeOrErr" : "write"
+    acquire_method = fallible ? "acquireOrErr" : "acquire"
+    "(if (comptime @hasDecl(@TypeOf(#{lock_expr}), \"#{write_method}\")) " \
+      "#{lock_expr}.#{write_method}() else #{lock_expr}.#{acquire_method}())"
+  end
+
   # Recursively build the Zig string for a (possibly nested) field path.
   # Stops at the root Identifier; intermediate GetFields chain via `.`.
   sig { params(node: T.untyped).returns(String) }
@@ -111,6 +133,7 @@ module MIRLoweringCapabilities
     @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
     @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
+    @with_alias_alloc_map = T.let(@with_alias_alloc_map, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     return lower_with_match_block(node) if node.arms
 
@@ -196,18 +219,17 @@ module MIRLoweringCapabilities
         # comptime-dispatched lock_expr so the SAME function body works
         # for both `Locked(T)` and `Arc(Locked(T))` callers.
         is_param = with_cap_is_param?(var_node)
+        lock_sync = node.polymorphic && is_param ? nil : var_sync
         lock_expr = if is_param && !is_arc
           comptime_arc_unwrap_expr(zig_var)
         else
           is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         end
-        panic_method = var_sync == :write_locked ? "write" : "acquire"
-        err_method   = var_sync == :write_locked ? "writeOrErr" : "acquireOrErr"
         if clause
-          bindings << emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, node)
+          bindings << emit_fallible_lock_binding(lock_acquire_call_expr(lock_expr, lock_sync, true), guard_var, alias_name, clause, with_label, node)
           fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
-          bindings << "var #{guard_var} = #{lock_expr}.#{panic_method}();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+          bindings << "var #{guard_var} = #{lock_acquire_call_expr(lock_expr, lock_sync, false)};\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
       when :write_locked_read
         next if needs_sort
@@ -218,7 +240,7 @@ module MIRLoweringCapabilities
         is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
         lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
-          bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)
+          bindings << emit_fallible_lock_binding("#{lock_expr}.readOrErr()", guard_var, alias_name, clause, with_label, node)
           fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
           bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
@@ -373,12 +395,15 @@ module MIRLoweringCapabilities
     # Set up unwrap maps so lower_get_field uses aliases inside the WITH body
     prev_locked = @locked_unwrap_map
     prev_rc = @rc_unwrap_map
+    prev_alias_alloc = @with_alias_alloc_map
     @locked_unwrap_map = (prev_locked || {}).dup
     @rc_unwrap_map = (prev_rc || {}).dup
+    @with_alias_alloc_map = (prev_alias_alloc || {}).dup
 
     (node.capabilities || []).each do |cap|
       var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
       alias_name = cap[:alias] || var_name
+      @with_alias_alloc_map[alias_name.to_s] = placement_for_node(cap[:var_node]) if cap[:alias]
       case cap[:capability]
       when :EXCLUSIVE, :write_locked_read
         @locked_unwrap_map[alias_name] = true
@@ -404,6 +429,7 @@ module MIRLoweringCapabilities
     end
     @locked_unwrap_map = prev_locked
     @rc_unwrap_map = prev_rc
+    @with_alias_alloc_map = prev_alias_alloc
 
     # Bindings is mixed: legacy WITH paths (EXCLUSIVE / BORROWED /
     # RESTRICT / multiowned / shared) push String entries that get
@@ -421,6 +447,9 @@ module MIRLoweringCapabilities
       vn.respond_to?(:name) ? vn.name.to_s : nil
     }
     stmts = []
+    (node.capabilities || []).each do |cap|
+      stmts.concat(with_alias_ownership_marks(cap))
+    end
     unless all_bindings.empty?
       bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
       sd = { allocates: false, borrows: borrows }
@@ -623,8 +652,8 @@ module MIRLoweringCapabilities
   #                                         error.CheatError.
   # Deadlock is always in bubble_types unless the user explicitly selected
   # it (e.g. `ON :Deadlock -> { ... }`), in which case its action runs.
-  sig { params(lock_expr: String, err_method: String, guard_var: String, alias_name: String, clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
-  def emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, with_node)
+  sig { params(acquire_call: String, guard_var: String, alias_name: String, clause: T::Hash[Symbol, T.untyped], with_label: T.nilable(String), with_node: AST::WithBlock).returns(String) }
+  def emit_fallible_lock_binding(acquire_call, guard_var, alias_name, clause, with_label, with_node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @rt_name = T.let(@rt_name, T.untyped)
@@ -656,7 +685,7 @@ module MIRLoweringCapabilities
         #{acquire_blk}: {
           var __retry: usize = 0;
           while (true) : (__retry += 1) {
-            if (#{lock_expr}.#{err_method}()) |__g| {
+            if (#{acquire_call}) |__g| {
               break :#{acquire_blk} __g;
             } else |__err| {
               #{handler}
@@ -667,7 +696,7 @@ module MIRLoweringCapabilities
     else
       acquire_expr = <<~ZIG.rstrip
         #{acquire_blk}: {
-          if (#{lock_expr}.#{err_method}()) |__g| {
+          if (#{acquire_call}) |__g| {
             break :#{acquire_blk} __g;
           } else |__err| {
             #{handler}

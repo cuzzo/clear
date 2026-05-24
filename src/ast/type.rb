@@ -788,6 +788,7 @@ class Type
   # outlive its allocator region.
   sig { returns(T::Boolean) }
   def heap_ptr?
+    return !!(wrapped_type&.heap_ptr?) if optional?
     string? || indirect? || collection? || (array? && !fixed? && !string?)
   end
 
@@ -809,7 +810,7 @@ class Type
 
   sig { returns(T::Boolean) }
   def direct_indexable_collection?
-    list_collection? || (array? && !string?)
+    list_collection? || (array? && !string? && !collection?)
   end
 
   sig { returns(T::Boolean) }
@@ -906,7 +907,7 @@ class Type
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   sig { returns(T::Boolean) }
   def needs_heap_backing?
-    pool? || sharded? || heap? || map? || tense_observable?
+    pool? || sharded? || heap? || tense_observable?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.
@@ -1527,6 +1528,7 @@ class Type
     seen.add(key)
 
     return false if provenance == :borrow
+    return wrapped_type&.recursive_cleanup_shape?(schema_lookup, seen) || false if optional?
     return true if string? || any_rc? || link? || collection?
 
     if array?
@@ -2178,6 +2180,14 @@ class Type
         if respond_to?(:layout) && layout && pt.respond_to?(:layout) && pt.layout.nil? &&
            pt.respond_to?(:layout=)
           pt.layout = layout
+        end
+        if collection? && pt.respond_to?(:collection) && !pt.collection &&
+           pt.respond_to?(:collection=)
+          pt.collection = collection
+        end
+        if shard_count && pt.respond_to?(:shard_count) && !pt.shard_count &&
+           pt.respond_to?(:shard_count=)
+          pt.shard_count = shard_count
         end
       end
       inner_zig = pt.zig_type(is_param: is_param, is_field: is_field)

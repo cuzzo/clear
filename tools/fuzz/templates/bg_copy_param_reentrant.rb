@@ -22,7 +22,7 @@ FuzzGenerator.register(:bg_copy_param_reentrant, cells: BG_COPY_PARAM_REENTRANT_
   <<~CHT
     FN consume(xs: #{lt}) RETURNS Int64 -> RETURN xs.length(); END
 
-    FN worker!(sl: #{lt}, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
+    FN worker!(TAKES sl: #{lt}, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
         IF depth <= 0_i64 THEN RETURN consume(sl); END
         f: ~Int64 = BG { @service ->
             worker!(COPY sl, depth - 1_i64) OR RAISE;

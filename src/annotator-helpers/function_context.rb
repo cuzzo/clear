@@ -9,9 +9,11 @@ class FunctionContext
 
   attr_accessor :name, :type_params,
                 :frame_count, :heap_count, :alloc_count,
-                :needs_rt,  # explicit "fn body references rt" flag (independent of allocation counters)
                 :loop_depth, :conditional_depth, :returns,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
+
+  sig { returns(T::Boolean) }
+  attr_accessor :uses_rt
 
   # Seam: the enclosing function's expected return is ALWAYS a Type
   # (Void for "no value"). Coerced here so the producer may pass
@@ -38,7 +40,7 @@ class FunctionContext
     @frame_count = T.let(0, Integer)
     @heap_count = T.let(0, Integer)
     @alloc_count = T.let(0, Integer)
-    @needs_rt = T.let(false, T::Boolean)
+    @uses_rt = T.let(false, T::Boolean)
     @loop_depth = T.let(0, Integer)
     @conditional_depth = T.let(0, Integer)
     @returns = T.let([], T::Array[T.untyped])

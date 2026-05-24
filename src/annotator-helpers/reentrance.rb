@@ -245,7 +245,7 @@ module ReentranceBridge
 
   # F4: EFFECTS REENTRANT:MAX_DEPTH(N) on a function whose name
   # appears in a @call_graph cycle silently demotes the cycle to
-  # `:unbounded` stack tier (2 MB :service OS thread per fiber) --
+  # `:unbounded` stack tier (4 MB :service OS thread per fiber) --
   # the user picked `:MAX_DEPTH` precisely to avoid that cost; the
   # silent demotion defeats the choice. Computing a precise SCC
   # product bound is Phase 5+ work; until then, emit a fixable
@@ -269,7 +269,7 @@ module ReentranceBridge
       cycle_members = thunk_cycle_members(name).sort
 
       msg = "EFFECTS REENTRANT:MAX_DEPTH(#{fn_node.max_depth_n}) on '#{name}' " \
-            "is silently demoted to ':unbounded' stack tier (2 MB :service " \
+            "is silently demoted to ':unbounded' stack tier (4 MB :service " \
             "OS thread per fiber) because the function is part of a mutual " \
             "cycle (#{cycle_members.join(', ')}) and the compiler can't " \
             "bound the SCC's interleaved-counter product (Phase 5+ work). " \

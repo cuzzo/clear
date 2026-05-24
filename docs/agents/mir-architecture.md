@@ -10,6 +10,12 @@ This file is the contract for escape, placement, cleanup, lowering, and MIR veri
 - `CleanupEntry#scope` is frame-lifetime metadata. `src/mir/cleanup_classifier.rb` is the only writer. Valid values are `:iteration`, `:scope`, `:function`, and `:heap`.
 - MIR lowering does not decide heap versus frame. It reads `SymbolEntry#storage` and `CleanupEntry#alloc`, emits `MIR::AllocMark`, `MIR::Cleanup`, `MIR::ErrCleanup`, and `MIR::TransferMark`, and leaves verification to `MIRChecker`.
 - `MIR::Call#owned_return` is a structural ownership fact from lowering. If true, the call result must be bound with an `AllocMark` and cleanup/transfer, or the checker reports a leak.
+- `MIR::CallableContract` is the only representation for structural call ownership effects. It carries the typed `FunctionSignature`, the checked user-level argument count, and a typed `MIR::OwnershipContract` with concrete consumed binding names for this callsite. `covers_consuming_params` must be true whenever a TAKES slot was examined, even if the actual argument is a value type and no owned binding is consumed. A structural call without it is invalid MIR.
+- `MIR::OwnershipContract` is the only representation for opaque Zig ownership effects. It is a strongly typed, non-nil contract with frozen `consumes`, `produces`, and `borrows` arrays plus `covers_consuming_params`. Hashes, nils, and ad-hoc side channels are invalid MIR.
+- `MIR::ErrCleanup` is legal only with a matching `MIR::TransferMark`. `ErrCleanup` means ownership transfers on success and cleanup runs only on failure; the transfer may never be implicit.
+- `MIR::TransferMark` is a linear ownership event. After it fires, the binding may not be read again unless a new `AllocMark` for the same binding appears first.
+- `MIR::MoveMark` may only follow an explicit `MIR::TransferMark` for the same binding. It is a runtime cleanup guard write, not an ownership decision.
+- Aggregate construction is recursively placement-checked. A `MakeList`, `StructInit`, `ArrayInit`, or union payload may not contain an owned child whose allocator disagrees with the aggregate owner. Lowering must flow the destination allocator inward or mark the aggregate owner heap before MIR.
 
 ## Required Pass Order
 
@@ -39,8 +45,10 @@ Escape analysis is an AST-bound sink walker. It does not build a value-flow grap
 
 Every callable source must present the same typed signature contract before MIR:
 `FunctionSignature` plus `AST::Param` entries for receiver mutability and argument
-ownership. Escape analysis reads only that contract. MIR phases may not branch on
-where a callable came from.
+ownership. Escape analysis reads only that contract. MIR lowering copies that fact
+into `MIR::CallableContract`, records how many user arguments the contract covers,
+and adds the concrete consumed binding names for the callsite. MIR phases may not
+branch on where a callable came from.
 
 Hoist exists so escape analysis can mark bindings instead of recursively special-casing anonymous expressions. It must hoist anonymous allocating values in escape positions and in call arguments before escape analysis runs, preserving the existing ownership-consumption stamp (`was_moved`) on the replacement identifier.
 
@@ -72,12 +80,26 @@ This makes every lifetime extension flow through the same upstream sink facts th
 
 - an allocation has no cleanup, errcleanup, destroy, or transfer marker;
 - a cleanup or transfer has no allocation marker;
+- an errcleanup has no explicit transfer marker;
+- an aggregate contains an owned child whose allocation disagrees with the aggregate owner;
 - an allocator-bearing operation has no target binding;
 - an allocator-bearing operation targets a binding with no `AllocMark`;
 - an owned-return function call is discarded, nested anonymously, or bound without a matching heap `AllocMark`;
 - allocators disagree between operation, allocation, and cleanup;
 - an allocating expression survives outside a direct `MIR::Let` init;
-- opaque Zig calls hide ownership effects.
+- opaque Zig calls hide ownership effects;
+- any `MIR::RawZig` exists in compiler MIR;
+- any `MIR::InlineZig` exists without a typed callable/effect contract (`stdlib_def` / `FunctionSignature`);
+- any `MIR::InlineZig` performs allocator ownership (`alloc`, `dupe`, `create`, `destroy`, `free`, `deinit`) inside opaque code instead of exposing structural MIR ownership markers;
+- any `MIR::Call`, `MIR::TailCall`, or `MIR::MethodCall` exists without a typed `MIR::CallableContract`;
+- a `MIR::CallableContract` does not cover every user-level callsite argument;
+- a `MIR::CallableContract` says the callee has `TAKES` params but does not name the concrete consumed bindings in `ownership_contract.consumes`;
+- an opaque Zig node has a nil/hash/malformed ownership contract;
+- a consuming opaque Zig node has no concrete `ownership_contract.consumes` entry and matching `MIR::TransferMark`;
+- a binding is read after ownership transfer;
+- a binding has multiple success-path releases or cleanup finalizers;
+- a cleanup is suppressed by `MoveMark` without an explicit transfer;
+- control-flow rejoins with different ownership states across branches or loops;
 - a loop restore contains frame allocations not proven iteration-local;
 - an iteration-local frame allocation appears in a loop with no restore.
 

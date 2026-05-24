@@ -35,7 +35,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(GIVE c0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(c0) OR RAISE; }"
     end
   else # :struct_field -- struct with a nested @list field
     consume = "STRUCT Bag { items: #{list_t} }\n    FN consume(b: Bag) RETURNS Int64 -> RETURN b.items.length(); END"
@@ -56,7 +56,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
             RETURN NEXT f;
         END
       CHT
-      call = "{ #{ctor}\n        n = runit(GIVE bg0) OR RAISE; }"
+      call = "{ #{ctor}\n        n = runit(bg0) OR RAISE; }"
     end
   end
 

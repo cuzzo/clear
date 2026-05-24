@@ -65,7 +65,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
     end
 
-    it "passes for heap-returning call bound to Let" do
+    it "rejects heap-returning call bound to Let when the callee contract is absent" do
       call = owned_call
       body = [
         alloc_mark("x", :heap),
@@ -73,7 +73,7 @@ RSpec.describe MIRChecker do
         MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
       ]
       errors = checker.check_fn!(fn_def("hpt_ok", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("makeList") }).to be true
     end
 
     it "detects bound heap-returning call with no AllocMark" do
@@ -85,7 +85,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("OWNED_RETURN_WITHOUT_ALLOC") && e.include?("x") }).to be true
     end
 
-    it "passes for bound heap-returning call transferred out of scope" do
+    it "rejects bound heap-returning call transferred out of scope when the callee contract is absent" do
       call = owned_call
       body = [
         alloc_mark("x", :heap),
@@ -93,7 +93,7 @@ RSpec.describe MIRChecker do
         MIR::TransferMark.new("x", :moved),
       ]
       errors = checker.check_fn!(fn_def("hpt_bound_transfer", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("makeList") }).to be true
     end
 
     it "detects bound heap-returning call marked allocated but neither cleaned nor transferred" do
@@ -125,13 +125,13 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("TRANSFER_WITHOUT_ALLOC") && e.include?("x") }).to be true
     end
 
-    it "passes for ExprStmt with non-heap call" do
+    it "rejects ExprStmt with non-heap call when the callee contract is absent" do
       call = MIR::Call.new("doWork", [MIR::Ident.new("rt")], false)
       body = [
         MIR::ExprStmt.new(call, true),
       ]
       errors = checker.check_fn!(fn_def("no_heap", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("doWork") }).to be true
     end
 
     it "detects heap call nested as argument" do
@@ -145,7 +145,7 @@ RSpec.describe MIRChecker do
     end
 
     it "detects discarded InlineZig stdlib call with allocates:true" do
-      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone", nil, { allocates: true, return: :String, return_alloc: :heap })
+      iz = MIR::InlineZig.new("CheatLib.clone({0})", "clone", MIR::OwnershipContract.empty, { allocates: true, return: :String, return_alloc: :heap })
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -154,7 +154,7 @@ RSpec.describe MIRChecker do
     end
 
     it "passes for InlineZig stdlib call with allocates:true returning Void" do
-      iz = MIR::InlineZig.new("CheatLib.sort({0})", "sort", nil, { allocates: true, return: :Void })
+      iz = MIR::InlineZig.new("CheatLib.sort({0})", "sort", MIR::OwnershipContract.empty, { allocates: true, return: :Void })
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
@@ -176,6 +176,88 @@ RSpec.describe MIRChecker do
     end
   end
 
+  describe "linear ownership hard errors" do
+    it "rejects a read after ownership transfer" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :owned_sink),
+        MIR::ExprStmt.new(MIR::Ident.new("x"), false),
+      ]
+      errors = checker.check_fn!(fn_def("uaf_after_transfer", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_USE_AFTER_TRANSFER") && e.include?("x") }).to be true
+    end
+
+    it "rejects multiple success-path ownership transfers" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :owned_sink),
+        MIR::TransferMark.new("x", :return),
+        MIR::ReturnStmt.new(MIR::Ident.new("x")),
+      ]
+      errors = checker.check_fn!(fn_def("double_transfer", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_DOUBLE_RELEASE") && e.include?("x") }).to be true
+    end
+
+    it "rejects transfer with an unguarded cleanup finalizer" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+        MIR::TransferMark.new("x", :owned_sink),
+      ]
+      errors = checker.check_fn!(fn_def("cleanup_and_transfer", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_DOUBLE_RELEASE") && e.include?("x") }).to be true
+    end
+
+    it "rejects MoveMark without an explicit transfer" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: true })),
+        MIR::MoveMark.new("x"),
+      ]
+      errors = checker.check_fn!(fn_def("implicit_move", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_IMPLICIT_MOVE") && e.include?("x") }).to be true
+    end
+
+    it "rejects branch joins with different ownership state" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::IfStmt.new(
+          MIR::Lit.new("cond"),
+          [MIR::TransferMark.new("x", :owned_sink)],
+          [],
+        ),
+      ]
+      errors = checker.check_fn!(fn_def("branch_owner_split", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("if") }).to be true
+    end
+
+    it "rejects return transfer with no ReturnStmt" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :return),
+      ]
+      errors = checker.check_fn!(fn_def("return_transfer_no_return", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("x") }).to be true
+    end
+
+    it "rejects return transfer that does not match returned expression" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :return),
+        MIR::ReturnStmt.new(MIR::Ident.new("y")),
+      ]
+      errors = checker.check_fn!(fn_def("return_transfer_wrong_expr", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("x") }).to be true
+    end
+  end
+
   # ===========================================================================
   # INLINE_ALLOC_MISMATCH -- operation allocator vs container AllocMark
   # ===========================================================================
@@ -193,7 +275,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("parts") }).to be true
     end
 
-    it "passes for frame append on frame list" do
+    it "rejects frame append on frame list without a callable/effect contract" do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :frame }
       iz.target_var = "parts"
@@ -203,7 +285,8 @@ RSpec.describe MIRChecker do
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("ok_inline", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("intrinsic") }).to be true
+      expect(errors.none? { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be true
     end
 
     it "catches frame val_alloc stored in heap container" do
@@ -219,7 +302,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("val_alloc") }).to be true
     end
 
-    it "passes for heap key_alloc/val_alloc in heap container" do
+    it "rejects heap key_alloc/val_alloc in heap container without a callable/effect contract" do
       iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
       iz.allocs = { key_alloc: :heap, val_alloc: :heap }
       iz.target_var = "map"
@@ -231,7 +314,8 @@ RSpec.describe MIRChecker do
         cleanup,
       ]
       errors = checker.check_fn!(fn_def("heap_map_ok", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("index_set") }).to be true
+      expect(errors.none? { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be true
     end
 
     it "rejects operations on non-local containers without an AllocMark" do
@@ -285,7 +369,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") && e.include?("items") }).to be true
     end
 
-    it "passes when the allocator on a pointer-passed param is :heap" do
+    it "rejects pointer-passed param mutation without a callable/effect contract even when allocator is :heap" do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :heap }
       iz.target_var = "items"
@@ -295,7 +379,8 @@ RSpec.describe MIRChecker do
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_with_ptr_param(body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("intrinsic") }).to be true
+      expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
     end
 
     it "ignores :frame allocator on a NON-pointer-passed local binding" do
@@ -513,7 +598,7 @@ RSpec.describe MIRChecker do
       body = [MIR::ExprStmt.new(iz, false)]
       errors = checker.check_fn!(fn_def("f", body))
       expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
-      expect(errors.any? { |e| e.include?("CheatLib.makeList") }).to be true
+      expect(errors.any? { |e| e.include?("bad_call") }).to be true
     end
 
     it "passes when stdlib_def is set" do
@@ -524,11 +609,19 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("INLINE_NO_CONTRACT") }).to be_empty
     end
 
-    it "passes for exempt CheatLib calls (pure reads/arithmetic)" do
+    it "rejects opaque allocator ownership even when stdlib_def is set" do
+      iz = MIR::InlineZig.new("const p = try rt.heapAlloc().create(Node); rt.heapAlloc().destroy(p);", "opaque_alloc")
+      iz.stdlib_def = FunctionSignature.new(params: [], return_type: Type.new(:Void), intrinsic: true)
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("OPAQUE_ZIG_OWNERSHIP") && e.include?("opaque_alloc") }).to be true
+    end
+
+    it "rejects formerly exempt CheatLib calls without a callable/effect contract" do
       iz = MIR::InlineZig.new("CheatLib.intAdd(a, b)", "math")
       body = [MIR::ExprStmt.new(iz, false)]
       errors = checker.check_fn!(fn_def("f", body))
-      expect(errors.select { |e| e.include?("INLINE_NO_CONTRACT") }).to be_empty
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("math") }).to be true
     end
 
     it "detects unaudited CheatLib call in Let init" do
@@ -536,6 +629,62 @@ RSpec.describe MIRChecker do
       body = [MIR::Let.new("x", iz, false, nil, nil)]
       errors = checker.check_fn!(fn_def("f", body))
       expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
+    end
+
+    it "detects unaudited InlineZig nested inside another expression" do
+      iz = MIR::InlineZig.new("opaqueValue()", "nested_opaque")
+      body = [MIR::ExprStmt.new(MIR::Call.new("use", [iz], false), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") && e.include?("nested_opaque") }).to be true
+    end
+  end
+
+  describe "MIR_CALL_NO_CONTRACT" do
+    it "rejects plain MIR::Call without a callable/effect contract" do
+      body = [MIR::ExprStmt.new(MIR::Call.new("callee", [MIR::Ident.new("x")], false), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("callee") }).to be true
+    end
+
+    it "accepts MIR::Call with a typed callable/effect contract" do
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+      contract = MIR::CallableContract.new(sig, MIR::OwnershipContract.empty, 0)
+      body = [MIR::ExprStmt.new(MIR::Call.new("callee", [], false, false, contract), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.none? { |e| e.include?("MIR_CALL_NO_CONTRACT") }).to be true
+    end
+
+    it "rejects TAKES callable contracts without concrete consumed binding names" do
+      param = AST::Param.new(name: "x", type: Type.new(:String), takes: true)
+      sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+      contract = MIR::CallableContract.new(sig, MIR::OwnershipContract.empty, 1)
+      body = [MIR::ExprStmt.new(MIR::Call.new("takeIt", [MIR::Ident.new("x")], false, false, contract), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("IMPLICIT_OWNERSHIP_TRANSFER") && e.include?("takeIt") }).to be true
+    end
+
+    it "accepts TAKES callable contracts that explicitly examined consuming params but found no owned binding" do
+      param = AST::Param.new(name: "x", type: Type.new(:Int64), takes: true)
+      sig = FunctionSignature.new(params: [param], return_type: Type.new(:Void))
+      ownership = MIR::OwnershipContract.new(covers_consuming_params: true)
+      contract = MIR::CallableContract.new(sig, ownership, 1)
+      body = [MIR::ExprStmt.new(MIR::Call.new("takeInt", [MIR::Lit.new("1")], false, false, contract), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.none? { |e| e.include?("IMPLICIT_OWNERSHIP_TRANSFER") }).to be true
+    end
+
+    it "rejects callable contracts that do not cover the callsite arguments" do
+      sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+      contract = MIR::CallableContract.new(sig, MIR::OwnershipContract.empty, 1)
+      body = [MIR::ExprStmt.new(MIR::Call.new("callee", [MIR::Ident.new("x")], false, false, contract), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("callsite has 1 args") }).to be true
+    end
+
+    it "rejects MIR::MethodCall without a callable/effect contract" do
+      body = [MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("items"), "append", [MIR::Ident.new("x")], true), false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("MIR_CALL_NO_CONTRACT") && e.include?("append") }).to be true
     end
   end
 
@@ -803,6 +952,71 @@ RSpec.describe MIRChecker do
     end
   end
 
+  describe "IMPLICIT_OWNERSHIP_TRANSFER" do
+    def takes_signature
+      FunctionSignature.new(
+        params: [
+          AST::Param.new(name: "value", type: Type.new(:Any), required: true, takes: true)
+        ],
+        return_type: Type.new(:Void),
+        intrinsic: true
+      )
+    end
+
+    it "rejects a TAKES stdlib call with no concrete consumed binding contract" do
+      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
+      body = [
+        alloc_mark("items", :heap),
+        MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+        iz,
+      ]
+      errors = checker.check_fn!(fn_def("implicit_take", body))
+      expect(errors.any? { |e| e.include?("IMPLICIT_OWNERSHIP_TRANSFER") && e.include?("items") }).to be true
+    end
+
+    it "rejects malformed ownership contracts at the MIR node boundary" do
+      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", MIR::OwnershipContract.empty, takes_signature, { alloc: :heap }, "items")
+      rz = MIR::RawZig.new("try items.append(rt.heapAlloc(), m);", "intrinsic", MIR::OwnershipContract.empty, takes_signature)
+
+      expect { iz[:ownership_contract] = { consumes: ["m"] } }.to raise_error(TypeError, /MIR::OwnershipContract/)
+      expect { rz[:ownership_contract] = nil }.to raise_error(TypeError, /MIR::OwnershipContract/)
+      expect { iz.ownership_contract.consumes << "late" }.to raise_error(FrozenError)
+    end
+
+    it "rejects a consumed binding that has no TransferMark" do
+      contract = MIR::OwnershipContract.consumes(["m"])
+      iz = MIR::InlineZig.new("try items.append({alloc}, m)", "intrinsic", contract, takes_signature, { alloc: :heap }, "items")
+      body = [
+        alloc_mark("items", :heap),
+        MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+        iz,
+      ]
+      errors = checker.check_fn!(fn_def("take_without_transfer", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_CONTRACT_WITHOUT_TRANSFER") && e.include?("m") }).to be true
+    end
+
+    it "rejects a transfer contract whose emitted Zig deep-copies the consumed source" do
+      contract = MIR::OwnershipContract.consumes(["m"])
+      iz = MIR::InlineZig.new(
+        "try items.append({alloc}, try CheatLib.dupeValue(CheatLib.StringMap(i64), m, rt.heapAlloc()))",
+        "intrinsic",
+        contract,
+        takes_signature,
+        { alloc: :heap },
+        "items"
+      )
+      body = [
+        alloc_mark("m", :heap),
+        MIR::TransferMark.new("m", :owned_sink),
+        alloc_mark("items", :heap),
+        MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+        iz,
+      ]
+      errors = checker.check_fn!(fn_def("take_copy_mismatch", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_TRANSFER_COPIED") && e.include?("m") }).to be true
+    end
+  end
+
   # ===========================================================================
   # check_program! -- verifies all functions
   # ===========================================================================
@@ -823,9 +1037,9 @@ RSpec.describe MIRChecker do
 
       program = MIR::Program.new([fn1, fn2])
       errors = checker.check_program!(program)
-      expect(errors.length).to eq(1)
-      expect(errors.first).to include("bad")
-      expect(errors.first).to include("HPT_LEAK")
+      expect(errors.any? { |e| e.include?("good::makeList") && e.include?("MIR_CALL_NO_CONTRACT") }).to be true
+      expect(errors.any? { |e| e.include?("bad::makeList") && e.include?("HPT_LEAK") }).to be true
+      expect(errors.any? { |e| e.include?("bad::makeList") && e.include?("MIR_CALL_NO_CONTRACT") }).to be true
     end
 
     it "returns empty for clean program" do

@@ -68,10 +68,10 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
       STRUCT Counter { value: Int64 }
       FN main() RETURNS Void ->
           MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
-          WITH EXCLUSIVE c AS x {
-              x.value = 2_i64;
-              ASSERT x.value == 2_i64, "atomic-ptr exclusive mutate";
-          }
+        WITH SNAPSHOT c AS MUTABLE x {
+            x.value = 2_i64;
+            ASSERT x.value == 2_i64, "atomic-ptr exclusive mutate";
+        }
           RETURN;
       END
     CHT

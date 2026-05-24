@@ -125,6 +125,14 @@ module FiberCtxBuilder
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
         CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
+      elsif strat.is_a?(CaptureStrategy::MoveInto)
+        source_ref = source_overrides[name] || name
+        cleanup = if needs_move_capture_cleanup?(_type_obj)
+                    "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
+                    "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
+                  end
+        CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
+                        MIR::Ident.new(source_ref), nil, cleanup)
       elsif pointer_captures.include?(name)
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
         # Capture by pointer so writes inside the fiber body land on the
@@ -158,5 +166,14 @@ module FiberCtxBuilder
     end
     map = captured.keys.to_h { |n| [n, "#{body_access_prefix}.#{n}"] }
     Result.new(specs, map, analysis&.capture_symbols || {})
+  end
+
+  sig { params(type_obj: T.untyped).returns(T::Boolean) }
+  def self.needs_move_capture_cleanup?(type_obj)
+    ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
+    return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(nil)
+  rescue StandardError
+    false
   end
 end

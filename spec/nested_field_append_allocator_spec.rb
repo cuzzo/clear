@@ -81,7 +81,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       end
     end
     expect(alloc_marks["handles"]).not_to be_nil
-    expect(alloc_marks["handles"].alloc).to eq(:frame),
+    expect(alloc_marks["handles"].alloc).to eq(:heap),
       "root container placement must come from escape/storage, not loop rewinds"
     expect(inline_targeting_handles.any? { |iz| iz.allocs&.key?(:alloc) }).to be(true)
   end

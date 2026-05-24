@@ -86,7 +86,7 @@ pub const MICRO_STACK_SIZE:    usize =   4 * 1024;   //   4 KB
 pub const STANDARD_STACK_SIZE: usize =  16 * 1024;   //  16 KB  (default)
 pub const LARGE_STACK_SIZE:    usize =  64 * 1024;   //  64 KB
 pub const XL_STACK_SIZE:       usize = 256 * 1024;   // 256 KB
-pub const HUGE_STACK_SIZE:     usize =   2 * 1024 * 1024; // 2 MB (tests only)
+pub const HUGE_STACK_SIZE:     usize =   4 * 1024 * 1024; // 4 MB service stack
 
 // Typed array aliases — each SlabAllocator is parameterized by a fixed-size type.
 const MicroArray    = [MICRO_STACK_SIZE]u8;

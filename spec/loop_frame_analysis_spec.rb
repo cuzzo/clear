@@ -23,6 +23,7 @@ RSpec.describe LoopFrameAnalysis do
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
     StringConcatRewriter.new.rewrite!(ast)
+    Hoist.apply!(ast, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
@@ -44,13 +45,13 @@ RSpec.describe LoopFrameAnalysis do
   # ===========================================================================
   describe "Group A: mark_per_iter = true for loop-local frame collections" do
 
-    it "WhileLoop: local @list → mark_per_iter = true" do
+    it "WhileLoop: local primitive @list → mark_per_iter = true" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -60,12 +61,12 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.mark_per_iter).to be true
     end
 
-    it "ForRange: local @list → mark_per_iter = true" do
+    it "ForRange: local primitive @list → mark_per_iter = true" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
           END
           RETURN;
         END
@@ -74,13 +75,13 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.mark_per_iter).to be true
     end
 
-    it "ForEach: local @list → mark_per_iter = true" do
+    it "ForEach: local primitive @list → mark_per_iter = true" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [1_i64, 2_i64];
           FOR x IN xs DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(x.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(x);
           END
           RETURN;
         END
@@ -89,9 +90,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.mark_per_iter).to be true
     end
 
-    it "WhileLoop: local @list (not HashMap) → mark_per_iter = true, HashMap alone → false" do
-      # HashMaps are always heap-allocated; they are not frame collections.
-      # mark_per_iter requires a loop-local FRAME collection (@list or similar).
+    it "WhileLoop: local HashMap owns heap allocator and does not need a loop frame mark" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -114,8 +113,8 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 3 DO
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(j.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(j);
               j = j + 1_i64;
             END
             i = i + 1_i64;
@@ -216,8 +215,8 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE resp = "";
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE part: String[]@list = [];
-            part.append(i.toString());
+            MUTABLE part: Int64[]@list = [];
+            part.append(i);
             resp = resp + i.toString();
             i = i + 1_i64;
           END
@@ -236,8 +235,8 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -253,8 +252,8 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE resp = "";
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
             resp = resp + i.toString();
             i = i + 1_i64;
           END
@@ -359,7 +358,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("saveLoopMark")
     end
 
-    it "loop with local frame list AND outer append rewinds the loop without promoting the outer list" do
+    it "loop with local frame list AND outer append rewinds the loop with heap-backed outer storage" do
       # A loop with BOTH a loop-local frame list AND an outer container that gets
       # its backing-store extended (append of a non-local value).
       # The outer must be heap-promoted so the rewind doesn't corrupt its backing.
@@ -368,8 +367,8 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE log: String[]@list = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
             log.append("done");
             i = i + 1_i64;
           END
@@ -378,10 +377,10 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to include("log.append(rt.frameAlloc()")
+      expect(zig).to include("log.append(rt.heapAlloc()")
     end
 
-    it "outer @list mutated inside a nested loop keeps its authoritative frame placement" do
+    it "outer @list mutated inside a nested loop uses heap-backed outer storage" do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
@@ -403,10 +402,10 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to match(/outer\.append\(rt\.frameAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
     end
 
-    it "outer @list mutated inside a MATCH branch keeps its authoritative frame placement" do
+    it "outer @list mutated inside a MATCH branch uses heap-backed outer storage" do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
@@ -425,7 +424,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to match(/outer\.append\(rt\.frameAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
     end
 
   end
@@ -483,8 +482,8 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -495,7 +494,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "WhileLoop stores a loop-local string into a frame-owned outer list without heap promotion" do
+    it "WhileLoop stores a loop-local string into a frame-owned outer list by moving heap-owned escaped data" do
       src = <<~CLEAR
         FN isCommand(ch: String) RETURNS Bool ->
           RETURN ch == ">" || ch == "<";
@@ -517,11 +516,12 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("try parts.append(rt.frameAlloc(), try rt.frameAlloc().dupe(u8, ch))")
-      expect(zig).not_to include("rt.heapAlloc().dupe(u8, try CheatLib.charAtCodepoint")
+      expect(zig).to include("const ch: []const u8 = try CheatLib.charAtCodepoint(rt.heapAlloc()")
+      expect(zig).to include("try parts.append(rt.heapAlloc(), ch)")
+      expect(zig).to include("ch_moved = true")
     end
 
-    it "WhileLoop keeps a moved loop-local list frame-owned when the outer list is frame-owned" do
+    it "WhileLoop moves a loop-local list to heap when stored in an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -538,12 +538,12 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("try inner.append(rt.frameAlloc(), i)")
-      expect(zig).to include("try outer.append(rt.frameAlloc(), inner)")
+      expect(zig).to include("try inner.append(rt.heapAlloc(), i)")
+      expect(zig).to include("try outer.append(rt.heapAlloc(), inner)")
       expect(zig).to include("inner_moved = true")
     end
 
-    it "WhileLoop keeps a loop-local dynamic array frame-owned when the outer list is frame-owned" do
+    it "WhileLoop moves a loop-local dynamic array to heap when stored in an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
@@ -559,8 +559,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("try CheatLib.makeList(i64, rt.frameAlloc()")
-      expect(zig).to include("try outer.append(rt.frameAlloc(), inner)")
+      expect(zig).to include("try CheatLib.makeList(i64, rt.heapAlloc()")
+      expect(zig).to include("try outer.append(rt.heapAlloc(), inner)")
     end
 
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
@@ -589,8 +589,8 @@ RSpec.describe LoopFrameAnalysis do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
           END
           RETURN;
         END
@@ -605,8 +605,8 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [1_i64, 2_i64, 3_i64];
           FOR x IN xs DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(x.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(x);
           END
           RETURN;
         END
@@ -653,8 +653,8 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 3 DO
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(j.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(j);
               j = j + 1_i64;
             END
             i = i + 1_i64;
@@ -683,8 +683,8 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE resp = "";
             MUTABLE i = 0_i64;
             WHILE i < 5 DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(i.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(i);
               resp = resp + i.toString() + ";" + prefix.length().toString();
               i = i + 1_i64;
             END
@@ -719,8 +719,8 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include('var resp: []const u8 = try rt.heapAlloc().dupe(u8, "")')
-      expect(zig).to include("defer if (!resp_moved) CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
+      expect(zig).to include('var resp: []const u8 = @as([]const u8, try rt.heapAlloc().dupe(u8, ""))')
+      expect(zig).to include("defer CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
     end
 
     it "nested loop-carried string reassignment uses heap allocation because it survives inner loop restore" do

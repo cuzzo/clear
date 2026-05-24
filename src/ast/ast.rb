@@ -1003,6 +1003,7 @@ module AST
     # parameters. Hash mapping param name (String) to constraint symbol (e.g. :non_reentrant).
     attr_accessor :requires_clauses
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
+    attr_accessor :fn_value_ref  # true when referenced as a function value; MIRPass finalizes needs_rt from it
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :alloc_fault   # computed by compute_can_fail! post-pass: fn allocates (direct or via a non-OR-absorbed callee) -> can OOM. A FAULT (panics by default, catchable by OR/CATCH), NOT an ERROR (never forces RETURNS !T). #3/#12
     attr_accessor :error_fallible # computed by compute_can_fail! post-pass: GENUINE error fallibility only (RAISE/PRE/declared !T/transitive ERROR callee). can_fail = error_fallible || alloc_fault; only error_fallible forces RETURNS !T (step 4). #3

@@ -1606,8 +1606,8 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN foo() RETURNS !Void ->
             FOR i IN (0_i64 ..< 5) DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(i.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(i);
             END
             RETURN;
           END
@@ -1641,8 +1641,8 @@ RSpec.describe SemanticAnnotator do
           FN foo() RETURNS !Void ->
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             FOR item IN items DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(item.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(item);
             END
             RETURN;
           END
@@ -3660,7 +3660,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m.inner)")
+        expect(out).to include("CheatLib.mapKeys(i64, rt.heapAlloc(), m.inner)")
       end
 
       it "raises when keys receives arguments" do

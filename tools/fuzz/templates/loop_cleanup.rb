@@ -48,7 +48,9 @@ def loop_cleanup_body(p)
   when :none         then nil
   when :break        then "IF i == 3_i64 THEN BREAK; END"
   when :continue     then "IF i == 2_i64 THEN CONTINUE; END"
-  when :early_return then "IF i == 2_i64 THEN RETURN; END"
+  when :early_return
+    return_expr = p[:dest] == :appended_to_outer ? "RETURN outer;" : "RETURN;"
+    "IF i == 2_i64 THEN #{return_expr} END"
   when :raise        then "IF i == 2_i64 THEN RAISE; END"
   end
 
@@ -75,7 +77,7 @@ def loop_cleanup_fn_wrap(p, body)
   # handles via `OR RAISE`. Avoids per-cell guessing about which bodies are
   # fallible.
   ret_t = if needs_outer
-    "!#{CleanupDims.value_type(p[:alloc])}[]@list"
+    "!#{CleanupDims.outer_list_type(p[:alloc])}"
   else
     "!Void"
   end

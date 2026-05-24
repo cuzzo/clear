@@ -465,7 +465,6 @@ private
     @fn_nodes.each do |name, fn|
       sig = FunctionSignature.unwrap(fn.full_type)
       next unless sig
-      sig.needs_rt = fn.needs_rt
       sig.can_fail = fn.can_fail
       sig.effects = fn.effects
       sig.stack_tier = fn.stack_tier
@@ -707,6 +706,7 @@ private
     # that actually carries the error channel. (puck-clear-bugs.md #11)
     @fn_propagating_callees[node.name] = (unabsorbed_calls || called_names) - [node.name]
     @fn_has_fnptr[node.name] = has_fnptr
+    current_fn_ctx.uses_rt = true if has_fnptr && current_fn_ctx
 
     if directly_recursive
       record_effect(EffectTracker::REENTRANT)
@@ -777,7 +777,7 @@ private
     node.uses_frame = (ctx.frame_count > 0)
     node.uses_heap  = (ctx.heap_count > 0)
     node.uses_alloc = (ctx.alloc_count > 0)
-    node.uses_rt    = ctx.needs_rt
+    node.uses_rt    = ctx.uses_rt
     node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: GENUINE failure sources only.
     # A function is fallible iff a failure can propagate to its caller:
@@ -797,6 +797,11 @@ private
       (node.reentrant == :non_reentrant) ||
       (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
       scan_for_raises(node.body)
+    if current_fn_ctx && ((node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
+                          (node.catch_clauses.is_a?(Array) && node.catch_clauses.any?) ||
+                          (node.default_catch.is_a?(Array) && node.default_catch.any?))
+      current_fn_ctx.uses_rt = true
+    end
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
     if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
@@ -1339,6 +1344,9 @@ private
           if src_root && src_root.symbol&.non_escaping
             entry.non_escaping = true
           end
+          if src_root && (find_container_source(b.expr) rescue nil)
+            entry.lifetime = SymbolEntry.tied_lifetime([src_root.symbol]) if src_root.symbol
+          end
           classify_ownership!(entry)
           og_declare(b.name.to_s, nil, unwrapped)
         end
@@ -1443,82 +1451,9 @@ private
       schema.type_params.zip(expr_t.generic_args).each { |p, a| union_subst[p] = a.resolved }
     end
 
-    # MATCH TAKES: if the source is explicitly consumed (MATCH TAKES expr START),
-    # mark the source as moved BEFORE branch analysis. Without TAKES, the source
-    # is implicitly borrowed and AS bindings are borrowed views into it.
-    #
-    # Auto-consume: when an AS binding extracts a non-Copy variant (one with heap
-    # data), auto-promote to TAKES semantics. Without this, source and binding
-    # share heap data leading to double-free or leak.
-    # Auto-TAKES: when ALL cases have AS bindings and the DEFAULT doesn't use
-    # the source, the source can be consumed. This prevents heap data sharing
-    # between source and extracted binding (double-free/leak).
-    auto_takes = T.let(false, T::Boolean)
-    if !node.takes && is_union && node.expr.is_a?(AST::Identifier)
-      # Check if any AS case extracts a non-Copy payload that would share
-      # heap ownership with the source. Strings are Copy in CLEAR, so
-      # extracting a string variant doesn't require consuming the source.
-      has_non_copy_as = node.cases&.any? { |c|
-        next false unless c.binding
-        vn = case c.value
-             when AST::GetField then c.value.field
-             when AST::MethodCall then c.value.name
-             end
-        next false unless vn
-        vt = (schema.variants || {})[vn]
-        next false unless vt
-        # Inline struct with heap fields: non-Copy (strings/collections/indirect)
-        if Schemas.inline_struct?(vt)
-          Type.variant_has_heap?(vt)
-        else
-          # Simple payload: non-Copy if @indirect or a collection/array (not string)
-          t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-          t&.heap_ptr?
-        end
-      }
-      if has_non_copy_as
-        source_name = node.expr.name
-        # Check no case lacks a binding (all cases extract payloads).
-        all_cases_bind = node.cases&.all? { |c| c.binding }
-        # Check DEFAULT doesn't reference the source value.
-        # walk_body only visits statement-level nodes; we need to check
-        # expression sub-trees too (e.g. RETURN input; has input inside).
-        default_refs_source = T.let(false, T::Boolean)
-        if node.default_case
-          check_refs = T.let(nil, T.untyped)
-          check_refs = lambda { |n|
-            next unless n
-            if n.is_a?(AST::Identifier) && n.name == source_name
-              default_refs_source = true
-              next
-            end
-            # Recurse into common expression wrappers
-            check_refs.call(n.value) if n.respond_to?(:value)
-            check_refs.call(n.left) if n.respond_to?(:left)
-            check_refs.call(n.right) if n.respond_to?(:right)
-            check_refs.call(n.condition) if n.respond_to?(:condition) && !n.is_a?(AST::IfStatement)
-            n.args&.each { |a| check_refs.call(a) } if n.respond_to?(:args)
-          }
-          node.default_case.each { |stmt| check_refs.call(stmt) }
-        end
-        auto_takes = all_cases_bind && !default_refs_source
-        auto_takes = false if @og[source_name]&.kind == :borrowed
-        # Don't auto-consume if the source is referenced after the MATCH.
-        if auto_takes && @stmts_after&.any?
-          @stmts_after.each do |s|
-            walk_ast(s) do |n|
-              if n.is_a?(AST::Identifier) && n.name == source_name
-                auto_takes = false
-                break
-              end
-            end
-            break unless auto_takes
-          end
-        end
-      end
-    end
-    if (node.takes || auto_takes) && is_union && node.expr.is_a?(AST::Identifier)
-      node.takes = true if auto_takes
+    # MATCH TAKES is the only ownership-consuming match form. Plain MATCH and
+    # PARTIAL MATCH borrow their subjects; they never infer ownership transfer.
+    if node.takes && is_union && node.expr.is_a?(AST::Identifier)
       source_name = node.expr.name
       if @og[source_name] && @og[source_name].kind != :borrowed
         node.expr.was_moved = true
@@ -2073,6 +2008,7 @@ private
   def visit_Raise(node)
     visit(node.message_expr) if node.message_expr
     resolve_error_registration!(node, node.kind, node.error_name, node.token)
+    current_fn_ctx.uses_rt = true if current_fn_ctx
     node.full_type = :NoReturn # Raises propagate up or are caught
     @branch_terminated = true
   end
@@ -3565,9 +3501,7 @@ private
     #    Assumption: Maps are homogeneous for now (e.g. all Int64)
     if node.pairs.empty?
       node.full_type = :"HashMap<Any>"
-      node.storage = :heap
-      current_fn_ctx.heap_count += 1 if current_fn_ctx
-      record_effect(EffectTracker::HEAP)
+      node.storage = :stack
       return
     end
 
@@ -3586,9 +3520,7 @@ private
     end
 
     node.full_type = Type.new(:"HashMap<#{first_val_type}>")
-    node.storage = :heap
-    current_fn_ctx.heap_count += 1 if current_fn_ctx
-    record_effect(EffectTracker::HEAP)
+    node.storage = :stack
   end
 
   sig { params(node: AST::StructLit).returns(T.nilable(Symbol)) }
@@ -4181,6 +4113,7 @@ private
   def visit_OrExit(node)
     visit(node.message) if node.message
     resolve_error_registration!(node, node.kind, node.error_name, node.token)
+    current_fn_ctx.uses_rt = true if current_fn_ctx
     node.full_type = :Void
   end
 
@@ -4537,7 +4470,7 @@ private
 
     node.full_type = node.value.full_type
     node.storage = node.value.storage
-    current_fn_ctx.needs_rt = true if current_fn_ctx && type&.any_rc?
+    current_fn_ctx.uses_rt = true if current_fn_ctx && type&.any_rc?
   end
 
   sig { params(node: AST::ShareNode).void }
@@ -4806,7 +4739,7 @@ private
       # need rt threaded through the enclosing fn. Plus a WITH MATCH with
       # a VERSIONED arm uses Versioned.read(rt) inside the arm's prelude.
       if node.snapshot_mode == :read || node.snapshot_mode == :transaction || versioned_arm
-        current_fn_ctx.needs_rt = true
+        current_fn_ctx.uses_rt = true
       end
       # Universal-polymorphic mutation can route through Versioned/AtomicPtr
       # update helpers, so mark rt/fail here before compute_needs_rt! runs.
@@ -4819,7 +4752,7 @@ private
         has_req    = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
                      fn_node.requires.key?(bound_name)
         if is_param && !has_req && fn_node
-          current_fn_ctx.needs_rt = true
+          current_fn_ctx.uses_rt = true
           fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
         end
       end

@@ -354,6 +354,10 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
   sig { returns(T.untyped) }
+  def fn_value_ref; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def fn_value_ref=(value); end
+  sig { returns(T.untyped) }
   def post_clauses; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def post_clauses=(value); end
@@ -2084,4 +2088,3 @@ class ZigTranspiler
   sig { returns(T.untyped) }
   def union_schemas; end
 end
-

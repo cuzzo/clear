@@ -2761,6 +2761,34 @@ pub const CheatLib = struct {
                @hasField(T, "free_top") and @hasField(T, "capacity");
     }
 
+    /// Returns true if T is a SoaPool(U) — same ownership contract as Pool(U),
+    /// with field-column storage instead of Slot{value}.
+    fn isSoaPool(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "data") and @hasField(T, "generations") and
+               @hasField(T, "alive") and @hasField(T, "free_stack") and
+               @hasField(T, "free_top") and @hasField(T, "capacity");
+    }
+
+    /// Returns true if T is a ShardedPool(U, N): an array of Pool(U) shards.
+    fn isShardedPool(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct" or !@hasField(T, "shards")) return false;
+        const shards_info = @typeInfo(@FieldType(T, "shards"));
+        return shards_info == .array and isPool(shards_info.array.child);
+    }
+
+    /// Returns true if T is a SoaList(U) — a list wrapper backed by
+    /// MultiArrayList column storage.
+    fn isSoaList(comptime T: type) bool {
+        const info = @typeInfo(T);
+        if (info != .@"struct") return false;
+        return @hasField(T, "data") and !@hasField(T, "alive") and
+               @hasDecl(T, "append") and @hasDecl(T, "get") and
+               @hasDecl(T, "length");
+    }
+
     /// Returns true if T is a Set(U) — has inner field and is not a StringMap.
     fn isSetType(comptime T: type) bool {
         const info = @typeInfo(T);
@@ -2936,7 +2964,7 @@ pub const CheatLib = struct {
         // 0. Strings: free with the provided allocator. Frame-arena free is
         // a no-op, so frame strings are safe. Heap strings are freed.
         if (T == []const u8 or T == []u8) {
-            if (ptr.len > 0) alloc.free(ptr.*);
+            if (ptr.*.len > 0) alloc.free(ptr.*);
             return;
         }
 
@@ -2950,11 +2978,9 @@ pub const CheatLib = struct {
         }
 
         // Heap-allocated sync wrappers (Locked / RwLocked / Versioned) +
-        // RefCell-like single-field cells: destroy the wrapper. CLEAR's
-        // lowering owns inner-field cleanup via per-reassignment paths
-        // (no recursion into .data here; would over-free static
-        // assignments). Versioned needs deinitSync to release its
-        // current EBR-retired ptr before destroy.
+        // RefCell-like single-field cells own their data. Lowering must
+        // materialize constructor input into owned storage before wrapping.
+        // Cleanup therefore drops .data before destroying the wrapper.
         if (comptime blk: {
             const ti = @typeInfo(T);
             if (ti != .pointer or ti.pointer.size != .one) break :blk false;
@@ -2970,6 +2996,8 @@ pub const CheatLib = struct {
             const ChildT = @typeInfo(T).pointer.child;
             if (comptime isVersionedWrapper(ChildT)) {
                 ptr.*.deinitSync(alloc);
+            } else if (comptime @hasField(ChildT, "data")) {
+                cleanup(@TypeOf(ptr.*.data), alloc, &ptr.*.data);
             }
             alloc.destroy(ptr.*);
             return;
@@ -3056,6 +3084,17 @@ pub const CheatLib = struct {
             return;
         }
 
+        if (comptime shardedListElemType(T) != null) {
+            const ElemT = comptime shardedListElemType(T).?;
+            if (comptime needsCleanup(ElemT)) {
+                for (&ptr.shards) |*shard| {
+                    for (shard.items) |*item| cleanup(ElemT, alloc, item);
+                }
+            }
+            ptr.deinit(alloc);
+            return;
+        }
+
         // 2b. Slices: recursively cleanup elements then free the buffer.
         // The compiler guarantees cleanup is only called on owned slices
         // (COPY results, TAKES params) via _moved guards.
@@ -3127,10 +3166,12 @@ pub const CheatLib = struct {
 
         // 7. Locked(U) / RwLocked(U)
         if (comptime isLocked(T)) {
+            cleanup(@TypeOf(ptr.data), alloc, &ptr.data);
             alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
             return;
         }
         if (comptime isRwLocked(T)) {
+            cleanup(@TypeOf(ptr.data), alloc, &ptr.data);
             alloc.destroy(@as(*align(@alignOf(T)) T, @alignCast(ptr)));
             return;
         }
@@ -3169,6 +3210,15 @@ pub const CheatLib = struct {
                 cleanup(ChildT, alloc, ptr.*);
             }
             alloc.destroy(ptr.*);
+            return;
+        }
+
+        if (info == .array and comptime needsCleanup(info.array.child)) {
+            // Fixed arrays own each element inline; only cleanup-bearing
+            // element types take this necessary per-element destruction path.
+            for (ptr) |*elem| {
+                cleanup(info.array.child, alloc, elem);
+            }
             return;
         }
 
@@ -3261,6 +3311,11 @@ pub const CheatLib = struct {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
         }
 
+        if (info == .optional) {
+            const ChildT = info.optional.child;
+            return if (value) |payload| try dupeValue(ChildT, payload, alloc) else null;
+        }
+
         if (info == .@"union" and info.@"union".tag_type != null) {
             return dupeUnionValue(T, value, alloc);
         }
@@ -3342,6 +3397,41 @@ pub const CheatLib = struct {
             return result;
         }
 
+        if (comptime shardedListElemType(T) != null) {
+            const ElemT = comptime shardedListElemType(T).?;
+            var result: T = .{};
+            errdefer result.deinit(alloc);
+            inline for (0..@typeInfo(@TypeOf(value.shards)).array.len) |idx| {
+                const shard = value.shards[idx];
+                for (shard.items) |elem| {
+                    const duped = if (comptime needsCleanup(ElemT))
+                        try dupeValue(ElemT, elem, alloc)
+                    else
+                        elem;
+                    try result.shards[idx].append(alloc, duped);
+                }
+            }
+            result.round_robin = value.round_robin;
+            return result;
+        }
+
+        // SoaList(T): allocate independent column storage and recursively copy
+        // each reconstructed element.
+        if (comptime isSoaList(T)) {
+            var result = try T.initCapacity(alloc, @intCast(value.length()));
+            errdefer result.deinit(alloc);
+            const ElemT = @TypeOf(value.get(0));
+            for (0..@intCast(value.length())) |idx| {
+                const elem = value.get(idx);
+                const copied = if (comptime needsCleanup(ElemT))
+                    try dupeValue(ElemT, elem, alloc)
+                else
+                    elem;
+                try result.append(alloc, copied);
+            }
+            return result;
+        }
+
         // Set(T): allocate fresh and re-insert each element. Set.insert dupes
         // string keys internally, so this is correct for both string and
         // non-string element shapes. (#42 -- COPY of @set into TAKES.)
@@ -3372,6 +3462,49 @@ pub const CheatLib = struct {
                     slot.value;
                 _ = try result.insert(alloc, v);
             }
+            return result;
+        }
+
+        // SoaPool(T): same ownership as Pool(T), but live values are
+        // reconstructed from column storage before recursive duplication.
+        if (comptime isSoaPool(T)) {
+            var result = try T.initCapacity(alloc, value.capacity);
+            errdefer result.deinit(alloc);
+            const ElemT = @typeInfo(@TypeOf(value.get(0))).optional.child;
+            for (0..value.capacity) |idx_usize| {
+                const idx: u32 = @intCast(idx_usize);
+                if (!value.alive[idx]) continue;
+                const id = (@as(u64, value.generations[idx]) << 32) | @as(u64, idx);
+                const elem = value.get(id).?;
+                const copied = if (comptime needsCleanup(ElemT))
+                    try dupeValue(ElemT, elem, alloc)
+                else
+                    elem;
+                _ = try result.insert(alloc, copied);
+            }
+            return result;
+        }
+
+        // ShardedPool(T, N): copy each shard into independent Pool storage.
+        if (comptime isShardedPool(T)) {
+            var total_cap: u32 = 0;
+            for (value.shards) |shard| total_cap += shard.capacity;
+            var result = try T.initCapacity(alloc, total_cap);
+            errdefer result.deinit(alloc);
+            inline for (0..@typeInfo(@TypeOf(value.shards)).array.len) |idx| {
+                const shard = value.shards[idx];
+                const max_used = shard.capacity - shard.free_top;
+                for (shard.slots[0..max_used]) |slot| {
+                    if (!slot.alive) continue;
+                    const ElemT = @TypeOf(slot.value);
+                    const copied = if (comptime needsCleanup(ElemT))
+                        try dupeValue(ElemT, slot.value, alloc)
+                    else
+                        slot.value;
+                    _ = try result.shards[idx].insert(alloc, copied);
+                }
+            }
+            result.round_robin = value.round_robin;
             return result;
         }
 
@@ -3452,6 +3585,7 @@ pub const CheatLib = struct {
         // Check BEFORE recursing to avoid exponential blowup on recursive types.
         if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
         if (ft_info == .pointer and ft_info.pointer.size == .slice) return true;
+        if (ft_info == .array) return needsCleanup(ft_info.array.child);
         // Types with deinit manage their own lifecycle — don't recurse into fields.
         if (ft_info == .@"struct" and @hasDecl(FT, "deinit")) return true;
         if (ft_info == .@"struct") {
@@ -3594,6 +3728,14 @@ pub const CheatLib = struct {
         }
         if (has_items and has_capacity) return elem_type;
         return null;
+    }
+
+    fn shardedListElemType(comptime T: type) ?type {
+        const info = @typeInfo(T);
+        if (info != .@"struct" or !@hasField(T, "shards")) return null;
+        const shards_info = @typeInfo(@FieldType(T, "shards"));
+        if (shards_info != .array) return null;
+        return arrayListElemType(shards_info.array.child);
     }
 
     pub fn assert(condition: bool, msg: []const u8) void {

@@ -25,6 +25,7 @@ class StackVerifier
     standard: 16384 - 4096,  # 12 KB usable
     large:    65536 - 4096,  # 60 KB usable
     xl:       262144 - 4096, # 252 KB usable
+    service:  4 * 1024 * 1024,
   }.freeze
 
   attr_reader :binary_path, :module_prefix
@@ -432,8 +433,10 @@ class StackVerifier
       :standard
     elsif bytes <= TIER_BUDGET[:large]
       :large
-    else
+    elsif bytes <= TIER_BUDGET[:xl]
       :xl
+    else
+      :service
     end
   end
 

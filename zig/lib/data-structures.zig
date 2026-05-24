@@ -107,7 +107,7 @@ pub fn bind(comptime deps: type) type {
                 }
             }
 
-            pub fn count(self: *Self) i64 {
+            pub fn count(self: *const Self) i64 {
                 return @intCast(self.inner.count());
             }
 
@@ -187,6 +187,7 @@ pub fn bind(comptime deps: type) type {
     pub fn mapKeys(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged([]const u8) {
         var list: std.ArrayListUnmanaged([]const u8) = .empty;
         errdefer {
+            // Error-only rollback for keys already copied into the owned result.
             for (list.items) |key| {
                 if (key.len > 0) allocator.free(key);
             }
@@ -204,6 +205,7 @@ pub fn bind(comptime deps: type) type {
     pub fn mapValues(comptime V: type, allocator: std.mem.Allocator, map: std.StringHashMapUnmanaged(V)) !std.ArrayListUnmanaged(V) {
         var list: std.ArrayListUnmanaged(V) = .empty;
         errdefer {
+            // Error-only rollback for values already copied into the owned result.
             if (comptime needsCleanup(V)) {
                 for (list.items) |*item| cleanup(V, allocator, item);
             }
@@ -326,6 +328,7 @@ pub fn bind(comptime deps: type) type {
     pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(V) {
         var list: std.ArrayListUnmanaged(V) = .empty;
         errdefer {
+            // Error-only rollback for values already copied into the owned result.
             if (comptime needsCleanup(V)) {
                 for (list.items) |*item| cleanup(V, allocator, item);
             }
@@ -1798,6 +1801,12 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                if (comptime needsCleanup(T)) {
+                    for (0..self.data.len) |idx| {
+                        var value = self.data.get(idx);
+                        cleanup(T, allocator, &value);
+                    }
+                }
                 self.data.deinit(allocator);
             }
 
@@ -1875,6 +1884,13 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                if (comptime needsCleanup(T)) {
+                    for (0..self.capacity) |idx| {
+                        if (!self.alive[idx]) continue;
+                        var value = self.data.get(idx);
+                        cleanup(T, allocator, &value);
+                    }
+                }
                 self.data.deinit(allocator);
                 allocator.free(self.generations);
                 allocator.free(self.alive);

@@ -279,7 +279,7 @@ module MIRLoweringConcurrency
           ""
         end
       else
-        result_alloc = inner_t.string? ? :heap : nil
+        result_alloc = escaping_value_alloc(inner_t)
         last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
         last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, inner_t)
         last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
@@ -550,7 +550,9 @@ module MIRLoweringConcurrency
                                        rt_override: "__rt") do
       body_mir = node.body.flat_map { |expr|
         mir = lower(expr)
-        mir.is_a?(Array) ? mir.compact : [mir]
+        pending = flush_pending
+        mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+        pending + mir_nodes
       }
       stream_run_body = body_mir
       body_mir.filter_map { |mir|
@@ -601,7 +603,7 @@ module MIRLoweringConcurrency
     MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
   end
 
-  sig { params(node: AST::YieldExpr).returns(T.any(MIR::MethodCall, MIR::StreamYield)) }
+  sig { params(node: AST::YieldExpr).returns(T.untyped) }
   def lower_yield(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -609,7 +611,11 @@ module MIRLoweringConcurrency
     @current_stream_local = T.let(@current_stream_local, T.untyped)
     @target = T.let(@target, T.untyped)
     stream_local = @current_stream_local || "__stream_local"
-    lowered = lower(node.expr)
+    lowered = with_decl_alloc(:heap) do
+      value = lower(node.expr)
+      place_value_for_destination(value, node.expr, :heap, node.expr.full_type)
+    end
+    lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if lowered && mir_allocates?(lowered)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
     # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
     # never reaches this branch (it sets @current_stream_is_inf only for
@@ -621,7 +627,12 @@ module MIRLoweringConcurrency
     # anonymous YIELD operands; escape analysis marks it heap because it
     # escapes the fiber). The stream owns it; the consumer frees it. No
     # dupe -- one allocation, placed by escape analysis.
-    MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
+    push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
+    transfer_marks = ownership_marks_for_transferred_temp(lowered)
+    # YIELD transfers ownership to the stream at the push boundary. InfStream
+    # owns and cleans the value even if push returns StreamClosed, so the local
+    # error cleanup must be disarmed before the fallible call.
+    transfer_marks.empty? ? push : MIR::ScopeBlock.new([*transfer_marks, MIR::ExprStmt.new(push, false)])
   end
 
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
@@ -645,7 +656,7 @@ module MIRLoweringConcurrency
       # through MethodCall("next") so the bc_emitter emits AWAIT, which
       # the runner extends to walk Value.List (await each item, build
       # result list).
-      return MIR::MethodCall.new(inner, "next", [], true) if @target == :bc
+      return MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0)) if @target == :bc
 
       inner_str = emit_expr(inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
@@ -678,7 +689,7 @@ module MIRLoweringConcurrency
       # alloc_sym is the
       # fallback when NEXT is lowered outside a binding.
       return MIR::MethodCall.new(inner, "materializeNext",
-        [MIR::AllocatorRef.new(alloc_sym)], true)
+        [MIR::AllocatorRef.new(alloc_sym)], true, MIR::CallableContract.no_ownership(1))
     end
 
     if promise_type.observable?
@@ -694,7 +705,7 @@ module MIRLoweringConcurrency
     end
 
     inner = lower(node.expr)
-    MIR::MethodCall.new(inner, "next", [], true)
+    MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0))
   end
 
 

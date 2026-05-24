@@ -378,6 +378,8 @@ module FsmTransform
       end
 
       arena_init_zig = arena_init_flag ? "#{bg_rt}.arena_mode = true;" : ""
+      fsm_promoted_names = ((liveness && liveness.cross_segment_vars || {}).keys +
+                            (ctx[:recursive_promoted_names] || [])).compact.uniq
 
       # FSM destroy pipeline: ONE source of truth for cleanups that
       # must fire when the FSM task ends, regardless of whether the
@@ -487,8 +489,7 @@ module FsmTransform
           # conservative + suspend result vars) we rewrite those
           # decl forms into ctx-field assignments after rendering.
           # Mirrors the legacy promote_fsm_decls_to_fields path.
-          all_promoted = (liveness && liveness.cross_segment_vars || {}).keys +
-                         conservative_promoted
+              all_promoted = fsm_promoted_names
           if all_promoted.any?
             promoted_names = all_promoted.uniq
             lowered = lowering.promote_fsm_decls_to_fields(

@@ -174,6 +174,15 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/backends/transpiler.rb")).to include("MIR ownership verification failed")
     expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
   end
+
+  it "requires structural calls to carry typed callable contracts" do
+    expect(source("src/mir/mir.rb")).to include("class CallableContract")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :signature")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :ownership_contract")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :checked_arg_count")
+    expect(source("src/mir/mir_checker.rb")).to include("verify_callable_contract!")
+    expect(source("src/mir/mir_checker.rb")).to include("MIR::CallableContract")
+  end
 end
 
 RSpec.describe "architecture invariants: closed placement pipeline" do

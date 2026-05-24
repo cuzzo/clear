@@ -42,11 +42,13 @@ module MIRLoweringControlFlow
       mir_expr = mir_bindings[i][:expr]
       next unless mir_expr.is_a?(MIR::WeakUpgrade)
       release_func = mir_expr.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
-      alloc_expr = MIR::MethodCall.new(MIR::Ident.new(@rt_name), "heapAlloc", [], false)
+      alloc_expr = MIR::MethodCall.new(MIR::Ident.new(@rt_name), "heapAlloc", [], false, MIR::CallableContract.no_ownership(0))
       release_call = MIR::Call.new(
         "CheatLib.#{release_func}",
         [MIR::Ident.new(mir_expr.zig_base), alloc_expr, MIR::Ident.new(b.name)],
-        false
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3)
       )
       then_body = [MIR::DeferStmt.new(release_call)] + T.must(then_body)
     end
@@ -71,23 +73,59 @@ module MIRLoweringControlFlow
     @loop_mark_counter = T.let(@loop_mark_counter, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     suffix = after_mark + body
-    return suffix unless !tight && mark_per_iter && @current_fn_has_rt
+    needs_mark = mark_per_iter || lowered_loop_body_needs_mark?(suffix)
+    return suffix unless !tight && needs_mark && @current_fn_has_rt
     rt = MIR::Ident.new(@rt_name)
     @loop_mark_counter = (@loop_mark_counter || 0) + 1
     mark_var = "__loop_mark_#{@loop_mark_counter}"
-    save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-    restore = MIR::DeferStmt.new(MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false))
+    save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false, MIR::CallableContract.no_ownership(0)), false, nil, nil)
+    restore = MIR::DeferStmt.new(MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false, MIR::CallableContract.no_ownership(1)))
     [save, restore] + suffix
   end
 
-  sig { params(node: AST::WhileLoop).returns(MIR::WhileStmt) }
+  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  def lowered_loop_body_needs_mark?(body)
+    lowered_loop_body_has_frame_scope?(body) { |scope| scope == :iteration } &&
+      !lowered_loop_body_has_frame_scope?(body) { |scope| scope != :iteration }
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
+  def lowered_loop_body_has_frame_scope?(stmts, &block)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |s|
+      case s
+      when MIR::AllocMark
+        next false unless s.alloc == :frame
+        scope = T.unsafe(s).scope
+        block.call(scope.is_a?(Symbol) ? scope : :unknown)
+      when MIR::IfStmt
+        lowered_loop_body_has_frame_scope?(s.then_body, &block) || lowered_loop_body_has_frame_scope?(s.else_body, &block)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        lowered_loop_body_has_frame_scope?(s.body, &block)
+      when MIR::SwitchStmt
+        s.arms.any? { |a| lowered_loop_body_has_frame_scope?(a[:body], &block) } ||
+          lowered_loop_body_has_frame_scope?(s.default_body, &block)
+      when MIR::IfChain
+        s.branches.any? { |b| lowered_loop_body_has_frame_scope?(b[:body], &block) } ||
+          lowered_loop_body_has_frame_scope?(s.default_body, &block)
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        lowered_loop_body_has_frame_scope?(s.body, &block)
+      when MIR::WithMatchDispatch
+        s.arms.any? { |a| lowered_loop_body_has_frame_scope?(a[:body], &block) }
+      else
+        false
+      end
+    end
+  end
+
+  sig { params(node: AST::WhileLoop).returns(T.untyped) }
   def lower_while(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
-    cond = lower(node.condition)
+    cond, cond_pending = lower_head { lower(node.condition) }
     b = node.do_branch
     body = b.is_a?(Array) ? lower_body(b) : []
 
@@ -95,30 +133,32 @@ module MIRLoweringControlFlow
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
     if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
-      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight)
+    with_pending(cond_pending, MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight))
   end
 
-  sig { params(node: AST::WhileBindLoop).returns(MIR::WhileStmt) }
+  sig { params(node: AST::WhileBindLoop).returns(T.untyped) }
   def lower_while_bind(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
-    cond = lower(node.condition)
+    cond, cond_pending = lower_head { lower(node.condition) }
     body = lower_body(node.do_branch)
 
     # RESOLVE captures acquire a strong ref each iteration — release at end of body.
     if cond.is_a?(MIR::WeakUpgrade)
       release_func = cond.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
-      alloc_expr = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      alloc_expr = MIR::MethodCall.new(rt, "heapAlloc", [], false, MIR::CallableContract.no_ownership(0))
       release_call = MIR::Call.new(
         "CheatLib.#{release_func}",
         [MIR::Ident.new(cond.zig_base), alloc_expr, MIR::Ident.new(node.binding_name)],
-        false
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3)
       )
       body = [MIR::DeferStmt.new(release_call)] + T.must(body)
     end
@@ -126,10 +166,10 @@ module MIRLoweringControlFlow
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
     if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
-      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    MIR::WhileStmt.new(cond, body, node.binding_name, nil, node.mark_per_iter, false)
+    with_pending(cond_pending, MIR::WhileStmt.new(cond, body, node.binding_name, nil, node.mark_per_iter, false))
   end
 
   # Returns true when the last reachable statement in a loop body is an
@@ -180,7 +220,7 @@ module MIRLoweringControlFlow
 
     # Yield check at end of body
     if @current_fn_has_rt
-      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
     loop_stmt = T.let(nil, T.untyped)
@@ -188,9 +228,9 @@ module MIRLoweringControlFlow
       @for_counter = (@for_counter || 0) + 1
       iter_var = "__kit_#{@for_counter}"
       # { var iter = coll.keyIterator(); while (iter.next()) |var| { body } }
-      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
+      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false, MIR::CallableContract.no_ownership(0)), true, nil, nil)
       while_stmt = MIR::WhileStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
+        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false, MIR::CallableContract.no_ownership(0)),
         body, var, nil, mark_per_iter, tight
       )
       loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
@@ -212,17 +252,17 @@ module MIRLoweringControlFlow
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
       loop_stmt = MIR::WhileStmt.new(
-        MIR::MethodCall.new(coll, "next", [], true),
+        MIR::MethodCall.new(coll, "next", [], true, MIR::CallableContract.no_ownership(0)),
         body, var, nil, mark_per_iter, tight)
     elsif ct.bounded_stream?
       # Bounded stream (~T[N]): next() returns T (panics when exhausted).
       # Use nextOrNull() so the while-loop optional-capture pattern works.
       # defer deinit drains any unconsumed promises on early exit.
-      defer_deinit = MIR::DeferStmt.new(MIR::MethodCall.new(coll, "deinit", [], false))
+      defer_deinit = MIR::DeferStmt.new(MIR::MethodCall.new(coll, "deinit", [], false, MIR::CallableContract.no_ownership(0)))
       loop_stmt = MIR::ScopeBlock.new([
         defer_deinit,
         MIR::WhileStmt.new(
-          MIR::MethodCall.new(coll, "nextOrNull", [], true),
+          MIR::MethodCall.new(coll, "nextOrNull", [], true, MIR::CallableContract.no_ownership(0)),
           body, var, nil, mark_per_iter, tight)
       ])
     elsif ct.inf_stream?
@@ -231,18 +271,18 @@ module MIRLoweringControlFlow
       # No extra defer needed: the variable-scope `defer name.deinit()` (emitted by
       # the variable's cleanup entry) signals the generator to stop at function exit.
       loop_stmt = MIR::WhileStmt.new(
-        MIR::MethodCall.new(coll, "nextOrNull", [], true),
+        MIR::MethodCall.new(coll, "nextOrNull", [], true, MIR::CallableContract.no_ownership(0)),
         body, var, nil, mark_per_iter, tight)
     elsif ct.set_collection?
       # Set: iterate via keyIterator(). next() returns ?*T so we deref in the body.
       @for_counter = (@for_counter || 0) + 1
       iter_var  = "__kit_#{@for_counter}"
       ptr_var   = "__kptr_#{@for_counter}"
-      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
+      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false, MIR::CallableContract.no_ownership(0)), true, nil, nil)
       deref     = MIR::Let.new(var, MIR::FieldGet.new(MIR::Ident.new(ptr_var), "*"), false, nil, nil)
       full_body = [deref, MIR::Suppress.new(var)] + body
       while_stmt = MIR::WhileStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
+        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false, MIR::CallableContract.no_ownership(0)),
         full_body, ptr_var, nil, mark_per_iter, tight
       )
       loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
@@ -322,7 +362,7 @@ module MIRLoweringControlFlow
 
     # Yield check
     if !node.tight && @current_fn_has_rt
-      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
     # Update: iter += 1
@@ -536,6 +576,7 @@ module MIRLoweringControlFlow
         MIR::Let.new(name, stmt.value, false, nil, nil)
       ], T::Array[T.untyped])
       out << MIR::ErrCleanup.new(name, entry) if entry
+      out << MIR::TransferMark.new(name, :return) if entry
       out << MIR::ReturnStmt.new(MIR::Ident.new(name))
       out
     end
@@ -568,25 +609,14 @@ module MIRLoweringControlFlow
     # Borrow-position temps (intermediates, not the return value) keep regular
     # Cleanup (defer) -- they are freed normally when the function exits.
     returned_names = returned_binding_names(node.value)
+    returned_names.merge(collect_moved_arg_roots(node))
+    returned_names.merge(collect_stdlib_consumed_roots(node))
+    converted_return_cleanup_names = T.let(Set.new, T::Set[String])
     if value.is_a?(MIR::Ident)
       returned_names << value.name
     end
-    unless returned_names.empty?
-      @pending_stmts.each_with_index do |s, i|
-        if s.is_a?(MIR::Cleanup) && returned_names.include?(s.name)
-          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry)
-        end
-      end
-    end
-
     if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
       returned_names.merge(mir_ident_names(value))
-      @pending_stmts.each_with_index do |s, i|
-        next if i < pending_start
-        if s.is_a?(MIR::Cleanup) && returned_names.include?(s.name)
-          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry)
-        end
-      end
     end
 
     if @current_fn_return_payload_zig&.start_with?("*") &&
@@ -602,7 +632,7 @@ module MIRLoweringControlFlow
        !mir_allocates?(value) && !(value.is_a?(MIR::Call) && value.owned_return?)
       ret_type = Type.from_node(node.value)
       ret_type = ret_type.payload_type if ret_type&.error_union?
-      value = MIR::DupeSlice.new(value, :heap) if ret_type&.string?
+      value = place_value_for_destination(value, node.value, :heap, ret_type) if escaping_value_alloc(ret_type) == :heap
     end
 
     if @current_fn_heap_carry_return && node.value && value.is_a?(MIR::Ident) &&
@@ -618,13 +648,14 @@ module MIRLoweringControlFlow
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
     if @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
-      return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args))
+      return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args, value.callable_contract))
     end
 
-    # Rc/Arc return: retain before returning (increment refcount)
-    if node.value && rc_retain_needed?(node.value)
+    # Rc/Arc return of a local cleanup binding transfers that binding's
+    # existing strong ref. Borrowed/non-local identifiers still retain.
+    if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
       ret = MIR::ReturnStmt.new(make_rc_retain(node.value))
-      marks = returned_transfer_marks(value, returned_names)
+      marks = returned_transfer_marks(value, returned_names, converted_return_cleanup_names)
       return marks + [ret] unless marks.empty?
       ret
     else
@@ -633,9 +664,9 @@ module MIRLoweringControlFlow
       # ErrCleanup: the caller takes ownership on success.
       # Skip Call nodes: they are not flagged by UNHOISTED_ALLOC and the test
       # contract requires heap-returning calls to remain inline (no __tmp wrap).
-      value = hoist_alloc(value, node.value, err_cleanup: true) if value && !value.is_a?(MIR::Call)
+      value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value && !value.is_a?(MIR::Call)
       ret = MIR::ReturnStmt.new(value)
-      marks = returned_transfer_marks(value, returned_names)
+      marks = returned_transfer_marks(value, returned_names, converted_return_cleanup_names)
       return marks + [ret] unless marks.empty?
       ret
     end
@@ -647,8 +678,14 @@ module MIRLoweringControlFlow
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def return_transfers_heap_binding?(ast_node)
-    root = AST.root_identifier(ast_node) rescue nil
-    root&.symbol&.storage == :heap
+    node = T.let(ast_node, T.untyped)
+    node = node.value while node.is_a?(AST::Cast) || node.is_a?(AST::MoveNode)
+    root = AST.root_identifier(node) rescue nil
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    entry = root ? @current_bindings[root.name] : nil
+    return entry.needs_cleanup? && entry.alloc == :heap if entry&.present?
+
+    !!(root && @current_fn_takes_param_names&.include?(root.name.to_s) && root.symbol&.storage == :heap)
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }

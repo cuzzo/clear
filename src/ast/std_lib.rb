@@ -1310,7 +1310,7 @@ INDEX_OPS = T.let({
       zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})",
       takes_value: true,
       allocates: true,
-      key_alloc: :heap,
+      key_alloc: :receiver_storage,
       val_alloc: :receiver_storage,
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
       shard_alloc: :heap,
@@ -1345,7 +1345,8 @@ INDEX_OPS = T.let({
     },
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
-      takes_value: false,
+      takes_value: true,
+      val_alloc: :receiver_storage,
     },
   },
   list: {
@@ -1356,7 +1357,8 @@ INDEX_OPS = T.let({
     },
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
-      takes_value: false,
+      takes_value: true,
+      val_alloc: :receiver_storage,
     },
   },
   pool: {

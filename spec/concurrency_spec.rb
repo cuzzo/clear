@@ -1908,9 +1908,11 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      # Capture owns the per-iteration resource; the outer binding has no
-      # cleanup path because ownership transfers into the BG context.
-      expect(out).not_to include("client_moved")
+      # The per-iteration binding owns the resource until the BG context is
+      # successfully populated; after transfer the moved guard suppresses the
+      # outer cleanup and the fiber closes its captured client.
+      expect(out).to include("client_moved")
+      expect(out).to include("defer if (!client_moved) CheatLib.socketClose(client)")
       expect(out).to include("defer CheatLib.socketClose(__ctx_0.client)")
     end
   end

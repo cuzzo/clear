@@ -20,6 +20,87 @@ require "sorbet-runtime"
 require_relative "../annotator-helpers/intrinsic_registry"
 
 module MIR
+  class OwnershipContract
+    extend T::Sig
+
+    sig { returns(T::Array[String]) }
+    attr_reader :consumes
+    sig { returns(T::Array[String]) }
+    attr_reader :produces
+    sig { returns(T::Array[String]) }
+    attr_reader :borrows
+    sig { returns(T::Boolean) }
+    attr_reader :covers_consuming_params
+
+    sig do
+      params(
+        consumes: T::Array[String],
+        produces: T::Array[String],
+        borrows: T::Array[String],
+        covers_consuming_params: T::Boolean,
+      ).void
+    end
+    def initialize(consumes: [], produces: [], borrows: [], covers_consuming_params: false)
+      @consumes = T.let(normalize_names(consumes).freeze, T::Array[String])
+      @produces = T.let(normalize_names(produces).freeze, T::Array[String])
+      @borrows = T.let(normalize_names(borrows).freeze, T::Array[String])
+      @covers_consuming_params = T.let(covers_consuming_params, T::Boolean)
+    end
+
+    sig { returns(OwnershipContract) }
+    def self.empty
+      new
+    end
+
+    sig { params(consumes: T::Array[String]).returns(OwnershipContract) }
+    def self.consumes(consumes)
+      new(consumes: consumes, covers_consuming_params: true)
+    end
+
+    sig { returns(T::Boolean) }
+    def empty?
+      @consumes.empty? && @produces.empty? && @borrows.empty? && !@covers_consuming_params
+    end
+
+    private
+
+    sig { params(names: T::Array[String]).returns(T::Array[String]) }
+    def normalize_names(names)
+      names.map(&:to_s).reject(&:empty?).uniq
+    end
+  end
+
+  class CallableContract
+    extend T::Sig
+
+    sig { returns(FunctionSignature) }
+    attr_reader :signature
+    sig { returns(OwnershipContract) }
+    attr_reader :ownership_contract
+    sig { returns(Integer) }
+    attr_reader :checked_arg_count
+
+    sig { params(signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Integer).void }
+    def initialize(signature, ownership_contract, checked_arg_count)
+      @signature = signature
+      @ownership_contract = ownership_contract
+      @checked_arg_count = checked_arg_count
+    end
+
+    sig { params(checked_arg_count: Integer).returns(CallableContract) }
+    def self.no_ownership(checked_arg_count)
+      params = T.let([], T::Array[AST::Param])
+      checked_arg_count.times do |idx|
+        params << AST::Param.new(name: "__arg#{idx}", type: Type.new(:Any))
+      end
+      new(
+        FunctionSignature.new(params: params, return_type: Type.new(:Void)),
+        OwnershipContract.new(covers_consuming_params: true),
+        checked_arg_count,
+      )
+    end
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -86,6 +167,12 @@ module MIR
                     ) do
     extend T::Sig
     include Stmt
+
+    sig { returns(T::Array[MIR::Param]) }
+    def params
+      self[:params]
+    end
+
     sig { returns(TrueClass) }
     def has_own_frame? = true
   end
@@ -358,16 +445,41 @@ module MIR
   #     MIR::EscapePromote outside it (use-after-free).
   #   - ALWAYS declare ownership_contract so the checker can cross-reference.
   #
-  # ownership_contract: { consumes: [name, ...], produces: [name, ...], borrows: [name, ...] }
+  # ownership_contract: MIR::OwnershipContract
   #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
   #   produces: bindings the raw block creates (must have MIR::Alloc + MIR::Drop)
   #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
-  #   nil = unaudited (legacy; to be eliminated)
   RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
     extend T::Sig
     include Stmt
+
+    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped).void }
+    def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil)
+      super(code, reason, ownership_contract, stdlib_def)
+    end
+
+    sig { params(contract: OwnershipContract).returns(OwnershipContract) }
+    def ownership_contract=(contract)
+      self[:ownership_contract] = contract
+    end
+
+    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
+    def []=(key, value)
+      validate_ownership_contract!(value) if key == :ownership_contract || key == 2
+      super
+    end
+
     sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in expression position too
+
+    private
+
+    sig { params(value: T.untyped).void }
+    def validate_ownership_contract!(value)
+      return if value.is_a?(OwnershipContract)
+
+      raise TypeError, "ownership_contract must be MIR::OwnershipContract"
+    end
   end
 
   # Non-mutual THUNK trampoline body. This is still emitted as a local
@@ -1412,22 +1524,40 @@ module MIR
   # `owned_return` is a checker-visible structural fact from lowering:
   # this call returns an owning value that must be bound/cleaned or
   # transferred. The emitter ignores it.
-  Call = Struct.new(:callee, :args, :try_wrap, :owned_return) do
+  Call = Struct.new(:callee, :args, :try_wrap, :owned_return, :callable_contract) do
     extend T::Sig
     include Expr
+
+    sig { params(callee: String, args: T::Array[T.untyped], try_wrap: T::Boolean, owned_return: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
+    def initialize(callee, args, try_wrap, owned_return = false, callable_contract = nil)
+      super(callee, args, try_wrap, owned_return, callable_contract)
+    end
+
     sig { returns(T::Boolean) }
     def owned_return? = owned_return == true
   end
 
   # Tail call (emits @call(.always_tail, callee, .{args})).
-  TailCall = Struct.new(:callee, :args) do
+  TailCall = Struct.new(:callee, :args, :callable_contract) do
+    extend T::Sig
     include Expr
+
+    sig { params(callee: String, args: T::Array[T.untyped], callable_contract: T.nilable(CallableContract)).void }
+    def initialize(callee, args, callable_contract = nil)
+      super(callee, args, callable_contract)
+    end
   end
 
   # Method call.
   # Zig: receiver.method(args)
-  MethodCall = Struct.new(:receiver, :method, :args, :try_wrap) do
+  MethodCall = Struct.new(:receiver, :method, :args, :try_wrap, :callable_contract) do
+    extend T::Sig
     include Expr
+
+    sig { params(receiver: T.untyped, method: String, args: T::Array[T.untyped], try_wrap: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
+    def initialize(receiver, method, args, try_wrap, callable_contract = nil)
+      super(receiver, method, args, try_wrap, callable_contract)
+    end
   end
 
   # Field access.
@@ -1651,6 +1781,12 @@ module MIR
     # safe: true -> emit @hasField guard, false -> direct .items
   end
 
+  # Transfer an ArrayList-backed value into an owned slice.
+  # Zig: try expr.toOwnedSlice(alloc)
+  OwnedSlice = Struct.new(:expr, :alloc) do
+    include Expr
+  end
+
   # Lambda expression (anonymous function pointer via struct trick).
   # Zig: &(struct { fn name(params) ret { body } }).name
   LambdaExpr = Struct.new(:fn_def, :captures) do
@@ -1703,7 +1839,8 @@ module MIR
   #   { allocates: true }  -- call allocates; checker uses for HPT_LEAK
   #   { borrows: :all }    -- call borrows all args; no ownership transfer
   #   nil = unaudited or pure expression (safe if no allocation/deallocation)
-  # ownership_contract: same as RawZig (for RawZig-converted nodes).
+  # ownership_contract: MIR::OwnershipContract. Empty means this node has no
+  # ownership effects; consuming stdlib calls must use a non-empty contract.
   #
   # allocs: resolved allocator symbols for placeholders left in code.
   #   { key_alloc: :heap, val_alloc: :frame, alloc: :heap }
@@ -1715,7 +1852,33 @@ module MIR
   #   Used by the checker to cross-reference with AllocMark for consistency.
   #   nil = no target (intrinsic call, not a container operation).
   InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def, :allocs, :target_var) do
+    extend T::Sig
     include Expr
+
+    sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
+    def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
+      super(code, reason, ownership_contract, stdlib_def, allocs, target_var)
+    end
+
+    sig { params(contract: OwnershipContract).returns(OwnershipContract) }
+    def ownership_contract=(contract)
+      self[:ownership_contract] = contract
+    end
+
+    sig { params(key: T.any(Symbol, Integer), value: T.untyped).returns(T.untyped) }
+    def []=(key, value)
+      validate_ownership_contract!(value) if key == :ownership_contract || key == 2
+      super
+    end
+
+    private
+
+    sig { params(value: T.untyped).void }
+    def validate_ownership_contract!(value)
+      return if value.is_a?(OwnershipContract)
+
+      raise TypeError, "ownership_contract must be MIR::OwnershipContract"
+    end
   end
 
   # Inline bytecode. Sibling to InlineZig, consumed only by bc_emitter (the
