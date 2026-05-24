@@ -498,7 +498,9 @@ class MIRChecker
 
   sig { params(name: String, state: LinearOwnershipState).void }
   def linear_move_mark!(name, state)
-    return if state.released.include?(name) || state.pending_return_transfers.include?(name)
+    return if state.released.include?(name) ||
+              state.pending_return_transfers.include?(name) ||
+              state.pending_block_transfers.include?(name)
 
     @errors << error(:OWNERSHIP_IMPLICIT_MOVE, name,
       "MoveMark suppresses cleanup but no matching TransferMark was seen first")

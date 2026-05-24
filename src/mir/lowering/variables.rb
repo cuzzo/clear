@@ -268,7 +268,9 @@ module MIRLoweringVariables
       (node.var_used || has_mir_drop) ? nil : "_ = #{safe_name};"
     end
 
-    if init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
+    if mir_allocates?(init)
+      stamp_allocating_result_target!(init, T.must(safe_name), alloc: binding_entry[:alloc])
+    elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
       emits = init.stdlib_def&.emit
       if !init.target_var || (emits&.allocates && !emits&.mutates_receiver)
         init.target_var = safe_name

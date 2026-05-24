@@ -698,10 +698,15 @@ module MIRLoweringConcurrency
       wt = tt&.optional? ? tt.wrapped_type : tt
       if wt&.string?
         inner = lower(node.expr)
-        inner_str = emit_expr(inner)
         @tmp_counter += 1
         blk_label = "__obs_next_string_#{@tmp_counter}"
-        return MIR::InlineZig.new("#{blk_label}: {\n    #{inner_str}.wait();\n    break :#{blk_label} try #{inner_str}.materialize(#{@rt_name}.heapAlloc());\n}", "obs_next_string")
+        return MIR::BlockExpr.new(blk_label, [
+          MIR::ExprStmt.new(MIR::MethodCall.new(inner, "wait", [], false,
+            MIR::CallableContract.no_ownership(0)), nil),
+          MIR::BreakStmt.new(blk_label,
+            MIR::MethodCall.new(inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
+              MIR::CallableContract.no_ownership(1))),
+        ])
       end
     end
 

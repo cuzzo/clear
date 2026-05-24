@@ -1236,7 +1236,8 @@ class PipelineHost
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("lim_result"), "append",
               [MIR::AllocatorRef.new(alloc),
-               borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true), nil)
+               borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true,
+              MIR::CallableContract.no_ownership(2)), nil)
           ],
           nil
         ),
@@ -1737,7 +1738,7 @@ class PipelineHost
           MIR::AllocatorRef.new(alloc),
           MIR::Cast.new(size_mir, "usize", :intCast),
           MIR::Lit.new(timeout_ns)
-        ], false),
+        ], false, false, MIR::CallableContract.no_ownership(3)),
         true, nil, nil),
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("__bw"), "deinit", [], false, MIR::CallableContract.no_ownership(0)))
     ]
@@ -1769,7 +1770,8 @@ class PipelineHost
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("ord_result"), "append",
             [MIR::AllocatorRef.new(alloc),
-             borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true), nil)
+             borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true,
+            MIR::CallableContract.no_ownership(2)), nil)
         ], nil),
         MIR::Sort.new(elem_zig,
           MIR::FieldGet.new(MIR::Ident.new("ord_result"), "items"),
@@ -3067,7 +3069,11 @@ class PipelineHost
     elem_t = src_t.tense_type&.element_type
     return nil unless elem_t&.string?
     [MIR::ExprStmt.new(
-      MIR::FreeSlice.new(MIR::Ident.new(p[:item_var]), MIR::AllocatorRef.new(:heap)),
+      MIR::Call.new("CheatLib.cleanup", [
+        MIR::Ident.new("@TypeOf(#{p[:item_var]})"),
+        MIR::AllocatorRef.new(:heap),
+        MIR::AddressOf.new(MIR::Ident.new(p[:item_var])),
+      ], false, false, MIR::CallableContract.no_ownership(3)),
       nil,
     )]
   end
@@ -4440,35 +4446,43 @@ class PipelineHost
   # that binds `pipe_src_list` and `pipe_items` (a slice). The shape
   # adaptation (sharded pool / SoA / etc.) lives in build_pipe_items_block;
   # only the worker-pool wiring is migrated to structural MIR.
-  sig { params(lhs: T.untyped).returns(MIR::InlineZig) }
-  def list_concurrent_source_setup_iz(lhs)
+  sig { params(lhs: T.untyped).returns(T::Array[T.untyped]) }
+  def list_concurrent_source_setup_stmts(lhs)
     if lhs.is_a?(AST::RangeLit)
-      range_zig = visit(lhs)
-      setup = <<~ZIG
-        var pipe_src_list = #{range_zig};
-        _ = &pipe_src_list;
-        var pipe_mat = try pipe_src_list.toList(rt.heapAlloc());
-        defer pipe_mat.deinit(rt.heapAlloc());
-        const pipe_items = pipe_mat.items;
-      ZIG
-      iz = MIR::InlineZig.new(setup, "range_concurrent_src_setup")
-      iz.stdlib_def = MIR::CallableContract.no_ownership(0).signature
-      return iz
+      source_mir = visit_mir(lhs)
+      to_list = MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "toList",
+        [MIR::AllocatorRef.new(:heap)], true, MIR::CallableContract.no_ownership(1))
+      return [
+        MIR::Let.new("pipe_src_list", source_mir, true, nil, "_ = &pipe_src_list;"),
+        MIR::Let.new("pipe_mat", to_list, true, nil, nil),
+        MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
+          [MIR::AllocatorRef.new(:heap)], false, MIR::CallableContract.no_ownership(1))),
+        MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_mat"), true), false, nil, nil),
+      ]
     end
 
     lhs_type = lhs.full_type
-    list_zig = visit(lhs)
+    source_mir = visit_mir(lhs)
+    source_prefix = T.let([], T::Array[T.untyped])
+    if @lowering.send(:mir_allocates?, source_mir)
+      owned_alloc = @lowering.send(:mir_owned_alloc, source_mir)
+      alloc = owned_alloc || :heap
+      @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
+      mark = MIR::AllocMark.new("pipe_src_list", alloc, lhs.full_type)
+      mark.scope = alloc == :heap ? :heap : :iteration
+      source_prefix << mark
+    end
     src_needs_cleanup = lhs.is_a?(AST::MethodCall) &&
                         %w[values keys].include?(lhs.name.to_s) &&
                         lhs.object.full_type.sharded?
-    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(rt.heapAlloc());\n" : ""
-    src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
-    items_block  = build_pipe_items_block(lhs_type, "rt.heapAlloc()")
-
-    setup = "#{src_decl} = #{list_zig};\n#{cleanup_line}_ = &pipe_src_list;\n#{items_block}"
-    iz = MIR::InlineZig.new(setup, "list_concurrent_src_setup")
-    iz.stdlib_def = MIR::CallableContract.no_ownership(0).signature
-    iz
+    mat_stmts, = build_pipe_items_mir(lhs_type)
+    [
+      *source_prefix,
+      MIR::Let.new("pipe_src_list", source_mir, src_needs_cleanup, nil, "_ = &pipe_src_list;"),
+      *(src_needs_cleanup ? [MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "deinit",
+        [MIR::AllocatorRef.new(:heap)], false, MIR::CallableContract.no_ownership(1)))] : []),
+      *mat_stmts,
+    ]
   end
 
   sig { params(lhs: T.untyped).returns(Type) }
@@ -4489,7 +4503,7 @@ class PipelineHost
     item_t  = concurrent_list_item_type(lhs)
     result_t = Type.new(inner.expression.full_type)
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListSelect, [
       MIR::Ident.new(item_t.zig_type),
@@ -4507,7 +4521,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::BreakStmt.new(label, call),
@@ -4518,7 +4532,7 @@ class PipelineHost
   def lower_concurrent_list_where(lhs, conc_op, inner)
     item_t  = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListWhere, [
       MIR::Ident.new(item_t.zig_type),
@@ -4535,7 +4549,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::BreakStmt.new(label, call),
@@ -4546,7 +4560,7 @@ class PipelineHost
   def lower_concurrent_list_count(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListCount, [
       MIR::Ident.new(item_t.zig_type),
@@ -4562,7 +4576,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::BreakStmt.new(label, call),
@@ -4592,7 +4606,7 @@ class PipelineHost
               end
 
     cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListReduce, [
       MIR::Ident.new(item_t.zig_type),
@@ -4611,7 +4625,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::BreakStmt.new(label, call),
@@ -4622,7 +4636,7 @@ class PipelineHost
   def lower_concurrent_list_each(lhs, conc_op, inner)
     item_t  = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback(conc_op, item_t, :Void, :each)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListEach, [
       MIR::Ident.new(item_t.zig_type),
@@ -4637,7 +4651,7 @@ class PipelineHost
     ])
 
     MIR::ScopeBlock.new([
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::ExprStmt.new(call, false),
@@ -4686,7 +4700,7 @@ class PipelineHost
   def lower_concurrent_list_each_in_place(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
     cb = build_bounded_concurrent_callback_pointer(conc_op, item_t)
-    setup_iz = list_concurrent_source_setup_iz(lhs)
+    setup_stmts = list_concurrent_source_setup_stmts(lhs)
 
     call = @lowering.send(:emit_builtin, :concurrentListEachInPlace, [
       MIR::Ident.new(item_t.zig_type),
@@ -4703,7 +4717,7 @@ class PipelineHost
     ])
 
     MIR::ScopeBlock.new([
-      setup_iz,
+      *setup_stmts,
       cb[:ctx_def],
       cb[:ctx_let],
       MIR::ExprStmt.new(call, false),

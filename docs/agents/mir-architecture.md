@@ -2,6 +2,34 @@
 
 This file is the contract for escape, placement, cleanup, lowering, and MIR verification. If code disagrees with this order, the code is wrong.
 
+## Major MIR Stages
+
+MIR compilation is a sequence of authority handoffs. A later stage may verify or consume facts from an earlier stage, but it may not rediscover or silently repair them.
+
+1. **AST Hoist**
+   Runs before escape analysis. It turns anonymous allocating AST expressions in escape-relevant positions into named bindings so escape analysis can mark symbols, not expression nodes. It preserves annotation facts and does not choose heap versus frame.
+
+2. **Escape Analysis**
+   Runs on the annotated/hoisted AST. It is a simple sink walker and the only writer of `symbol.storage`. It marks a binding heap when the binding reaches a language escape sink: owning return, enclosing/heap store, closure/fiber/background capture, or `TAKES`/mutable parameter flow.
+
+3. **Cleanup Classification**
+   Runs after escape placement. It is the only writer of cleanup entries and cleanup lifetime scope. It reads placement and type facts, then records how a binding must be cleaned and how long its frame allocation must live.
+
+4. **Loop Frame Analysis**
+   Runs after cleanup classification. It reads cleanup lifetime facts and marks loop frame save/restore requirements. It does not inspect container kinds, method names, or storage destinations to infer lifetime.
+
+5. **MIR Lowering**
+   Converts finalized AST facts into MIR. It emits structural calls, `AllocMark`, `Cleanup` / `ErrCleanup`, `TransferMark`, and `MoveMark` from already-finalized placement and cleanup data. It does not decide heap versus frame.
+
+6. **MIR Allocation Normalization**
+   Runs inside lowering before ownership finalization for each lowered statement body. It recursively removes allocation-producing expressions from non-owning expression positions by hoisting them to named MIR bindings. Allocation-producing result chains are allowed only where a binding owns the result, such as a `Let` init that must preserve `try` / `catch` semantics. This is the only MIR stage allowed to walk expression trees to rewrite ownership shape.
+
+7. **MIR Ownership Finalization**
+   Emits ownership transfer events from normalized MIR. At this point decisions are mechanical: named owned values are either cleaned, transferred, or rejected later by the checker. This phase must not compensate for missing placement, missing cleanup entries, or unnormalized allocation shape.
+
+8. **MIR Checker**
+   Verifies the finalized MIR and aborts compilation on any fact it cannot prove memory safe. It never decides placement, invents cleanup, infers implicit ownership transfer, or accepts opaque allocator effects.
+
 ## Single Writers
 
 - `node.storage` is expression-shape metadata. Annotation owns it. Rewriters and lowering adapters may only copy already-known storage onto synthetic nodes.

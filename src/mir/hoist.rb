@@ -412,6 +412,7 @@ module MIRHoistLowering
     @pending_stmts << mark
     @lowered_alloc_names&.add(name)
     @lowered_alloc_names&.add(name)
+    stamp_allocating_result_target!(expr, name, alloc: alloc)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
@@ -424,15 +425,6 @@ module MIRHoistLowering
     case node
     when MIR::Call
       false
-    when MIR::TryExpr
-      mir_allocates?(node.expr) || (node.expr.is_a?(MIR::Call) && node.expr.owned_return?)
-    when MIR::TryCatch
-      mir_allocates?(node.expr) ||
-        (node.expr.is_a?(MIR::Call) && node.expr.owned_return?) ||
-        mir_allocates?(node.catch_body) ||
-        (node.catch_body.is_a?(MIR::Call) && node.catch_body.owned_return?)
-    when MIR::Cast
-      mir_allocates?(node.expr)
     when MIR::InlineZig
       return false unless node.stdlib_def&.emit&.allocates
       return true unless node.allocs
@@ -440,8 +432,59 @@ module MIRHoistLowering
     when MIR::BgBlock
       true
     else
-      false
+      mir_result_child_exprs(node).any? do |child|
+        mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+      end
     end
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def each_mir_expr_child(node, &blk)
+    return unless node.respond_to?(:mir?) && node.mir?
+    return unless node.class.respond_to?(:members)
+
+    node.class.members.each do |member|
+      value = node[member]
+      if value.is_a?(Array)
+        value.each { |child| yield child if mir_expr_child?(child) }
+      elsif value.is_a?(Hash)
+        value.each_value { |child| yield child if mir_expr_child?(child) }
+      else
+        yield value if mir_expr_child?(value)
+      end
+    end
+    nil
+  end
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  def mir_expr_child?(value)
+    value.respond_to?(:expr?) && value.expr?
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def ownership_borrow_boundary?(node)
+    node.is_a?(MIR::Call) ||
+      node.is_a?(MIR::TailCall) ||
+      node.is_a?(MIR::MethodCall) ||
+      node.is_a?(MIR::FieldGet) ||
+      node.is_a?(MIR::IndexGet) ||
+      node.is_a?(MIR::BinOp) ||
+      node.is_a?(MIR::UnaryOp) ||
+      node.is_a?(MIR::AddressOf) ||
+      node.is_a?(MIR::Deref) ||
+      node.is_a?(MIR::SliceExpr) ||
+      node.is_a?(MIR::ListItems) ||
+      node.is_a?(MIR::ListLength) ||
+      node.is_a?(MIR::HasField) ||
+      node.is_a?(MIR::ItemsAccess) ||
+      node.is_a?(MIR::OwnedSlice) ||
+      node.is_a?(MIR::RangeLit) ||
+      node.is_a?(MIR::LambdaExpr) ||
+      node.is_a?(MIR::Pipeline) ||
+      node.is_a?(MIR::InlineZig) ||
+      node.is_a?(MIR::RawZig) ||
+      node.is_a?(MIR::InlineBc) ||
+      node.is_a?(MIR::RawBc)
   end
 
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
@@ -477,10 +520,7 @@ module MIRHoistLowering
     mark.scope = alloc == :heap ? :heap : :iteration
     @pending_stmts << mark
     @lowered_alloc_names&.add(name)
-    if expr.is_a?(MIR::InlineZig) && expr.allocs && !expr.allocs.empty?
-      emits = expr.stdlib_def&.emit
-      expr.target_var = name unless emits&.mutates_receiver
-    end
+    stamp_allocating_result_target!(expr, name, alloc: alloc)
     @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
@@ -491,6 +531,203 @@ module MIRHoistLowering
       @lowered_guarded_cleanup_names&.add(name) if entry.has_moved_guard?
     end
     MIR::Ident.new(name)
+  end
+
+  sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }
+  def hoist_normalized_alloc_expr(expr)
+    @tmp_counter += 1
+    name = "__tmp_#{@tmp_counter}"
+    alloc = mir_owned_alloc(expr) || :heap
+    mark = MIR::AllocMark.new(name, alloc, Type.new(:Untyped))
+    mark.scope = alloc == :heap ? :heap : :iteration
+    stamp_allocating_result_target!(expr, name, alloc: alloc)
+    entry = hoist_cleanup_entry(expr, nil)
+    stmts = T.let([mark, MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped])
+    if entry
+      entry[:has_moved_guard] = true
+      stmts << MIR::ErrCleanup.new(name, entry)
+      (@guarded_cleanup_names ||= {})[name] = true
+      @lowered_guarded_cleanup_names&.add(name)
+    end
+    @lowered_alloc_names&.add(name)
+    [stmts, MIR::Ident.new(name)]
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  def normalize_allocating_mir_body(body)
+    out = T.let([], T::Array[T.untyped])
+    body.each do |stmt|
+      normalize_nested_mir_bodies!(stmt)
+      prefix = normalize_allocating_mir_stmt!(stmt)
+      out.concat(prefix)
+      out << stmt
+    end
+    out
+  end
+
+  sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
+  def normalize_allocating_mir_stmt!(stmt)
+    prefix = T.let([], T::Array[T.untyped])
+    case stmt
+    when MIR::Let
+      prefix.concat(normalize_allocating_result_expr!(stmt.init))
+    when MIR::Set
+      target_prefix, target = normalize_allocating_used_expr(stmt.target)
+      stmt.target = target
+      prefix.concat(target_prefix)
+      prefix.concat(normalize_allocating_result_expr!(stmt.value))
+    when MIR::ReassignWithCleanup
+      prefix.concat(normalize_allocating_result_expr!(stmt.value))
+    when MIR::ExprStmt
+      expr_prefix, expr = normalize_allocating_used_expr(stmt.expr)
+      stmt.expr = expr
+      prefix.concat(expr_prefix)
+    when MIR::ReturnStmt, MIR::BreakStmt
+      value_prefix, value = normalize_allocating_used_expr(stmt.value)
+      stmt.value = value
+      prefix.concat(value_prefix)
+    when MIR::DeferStmt, MIR::ErrDeferStmt
+      prefix.concat(normalize_allocating_mir_stmt!(stmt.body))
+    when MIR::BatchWindowPush
+      item_prefix, item = normalize_allocating_used_expr(stmt.item_expr)
+      value_prefix, value = normalize_allocating_used_expr(stmt.value_expr)
+      stmt.item_expr = item
+      stmt.value_expr = value
+      prefix.concat(item_prefix)
+      prefix.concat(value_prefix)
+    when MIR::BatchWindowFlush
+      value_prefix, value = normalize_allocating_used_expr(stmt.value_expr)
+      stmt.value_expr = value
+      prefix.concat(value_prefix)
+    end
+    prefix
+  end
+
+  sig { params(node: T.untyped).void }
+  def normalize_nested_mir_bodies!(node)
+    case node
+    when MIR::WhileStmt, MIR::ForStmt
+      node.body = normalize_allocating_mir_body(node.body || [])
+    when MIR::ScopeBlock, MIR::BlockExpr
+      node.body = normalize_allocating_mir_body(node.body || [])
+    when MIR::IfStmt, MIR::IfBindStmt
+      node.then_body = normalize_allocating_mir_body(node.then_body || [])
+      node.else_body = normalize_allocating_mir_body(node.else_body || []) if node.else_body
+    when MIR::IfChain
+      node.branches&.each { |branch| branch[:body] = normalize_allocating_mir_body(branch[:body] || []) }
+      node.default_body = normalize_allocating_mir_body(node.default_body || []) if node.default_body
+    when MIR::SwitchStmt
+      node.arms&.each { |arm| arm[:body] = normalize_allocating_mir_body(arm[:body] || []) }
+      node.default_body = normalize_allocating_mir_body(node.default_body || []) if node.default_body
+    end
+    nil
+  end
+
+  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  def normalize_allocating_result_expr!(expr)
+    prefix = T.let([], T::Array[T.untyped])
+    return prefix unless expr.respond_to?(:expr?) && expr.expr?
+
+    mir_result_child_exprs(expr).each do |child|
+      if mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+      child_prefix = normalize_allocating_result_expr!(child)
+      prefix.concat(child_prefix)
+      next
+    end
+      used_prefix, normalized = normalize_allocating_used_expr(child)
+      replace_mir_expr_child!(expr, child, normalized)
+      prefix.concat(used_prefix)
+    end
+    prefix
+  end
+
+  sig { params(expr: T.untyped).returns([T::Array[T.untyped], T.untyped]) }
+  def normalize_allocating_used_expr(expr)
+    prefix = T.let([], T::Array[T.untyped])
+    return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
+
+    if mir_allocates?(expr) || (expr.is_a?(MIR::Call) && expr.owned_return?)
+      nested = normalize_allocating_result_expr!(expr)
+      prefix.concat(nested)
+      hoisted, ident = hoist_normalized_alloc_expr(expr)
+      prefix.concat(hoisted)
+      return [prefix, ident]
+    end
+
+    each_mir_expr_child(expr) do |child|
+      child_prefix, normalized = normalize_allocating_used_expr(child)
+      replace_mir_expr_child!(expr, child, normalized)
+      prefix.concat(child_prefix)
+    end
+    [prefix, expr]
+  end
+
+  sig { params(parent: T.untyped, old_child: T.untyped, new_child: T.untyped).void }
+  def replace_mir_expr_child!(parent, old_child, new_child)
+    return if old_child.equal?(new_child)
+    return unless parent.respond_to?(:mir?) && parent.mir?
+    return unless parent.class.respond_to?(:members)
+
+    parent.class.members.each do |member|
+      value = parent[member]
+      if value.equal?(old_child)
+        parent[member] = new_child
+        return
+      elsif value.is_a?(Array)
+        idx = value.index { |item| item.equal?(old_child) }
+        if idx
+          value[idx] = new_child
+          return
+        end
+      elsif value.is_a?(Hash)
+        key = value.keys.find { |k| value[k].equal?(old_child) }
+        if key
+          value[key] = new_child
+          return
+        end
+      end
+    end
+    nil
+  end
+
+  sig { params(expr: T.untyped, name: String, alloc: T.nilable(Symbol)).void }
+  def stamp_allocating_result_target!(expr, name, alloc: nil)
+    return if name.empty?
+
+    case expr
+    when MIR::InlineZig
+      return unless expr.allocs && !expr.allocs.empty?
+      emits = expr.stdlib_def&.emit
+      return if emits&.mutates_receiver
+
+      expr.target_var = name if !expr.target_var || expr.target_var.to_s.empty?
+      expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc
+    else
+      mir_result_child_exprs(expr).each do |child|
+        stamp_allocating_result_target!(child, name, alloc: alloc) if mir_allocates?(child)
+      end
+    end
+    nil
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  def mir_result_child_exprs(node)
+    case node
+    when MIR::Cast, MIR::TryExpr, MIR::OptionalUnwrap
+      [node.expr]
+    when MIR::TryCatch
+      [node.expr, node.catch_body]
+    when MIR::Orelse
+      [node.expr, node.fallback]
+    when MIR::Conditional
+      [node.then_val, node.else_val]
+    when MIR::IfOptional
+      [node.then_expr, node.else_expr]
+    when MIR::Comptime
+      [node.expr]
+    else
+      []
+    end.compact
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
@@ -623,16 +860,6 @@ module MIRHoistLowering
     case node
     when MIR::Ident
       [node.name.to_s]
-    when MIR::StructInit
-      node.fields.flat_map { |f| mir_ident_names(f[:value]) }
-    when MIR::ItemsAccess
-      mir_ident_names(node.expr)
-    when MIR::CapWrap
-      mir_ident_names(node.inner)
-    when MIR::Cast
-      mir_ident_names(node.expr)
-    when MIR::HeapCreate
-      mir_ident_names(node.init)
     when MIR::BlockExpr
       local_names = node.body.each_with_object(Set.new) do |stmt, names|
         names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
@@ -640,7 +867,12 @@ module MIRHoistLowering
       last = node.body.reverse.find { |s| s.is_a?(MIR::BreakStmt) }
       last ? mir_ident_names(last.value).reject { |name| local_names.include?(name.to_s) } : []
     else
-      []
+      return [] if ownership_borrow_boundary?(node)
+      names = T.let([], T::Array[String])
+      each_mir_expr_child(node) do |child|
+        mir_ident_names(child).each { |name| names << name.to_s }
+      end
+      names.uniq
     end
   end
 
@@ -658,7 +890,7 @@ module MIRHoistLowering
                    returned_takes_param?(n) }
       .flat_map do |n|
         nodes = T.let([MIR::TransferMark.new(n, :return)], T::Array[T.untyped])
-        if cleanup_transfer_names&.include?(n) || @guarded_cleanup_names&.[](n)
+        if cleanup_transfer_names&.include?(n) || @lowered_guarded_cleanup_names&.include?(n)
           nodes << MIR::MoveMark.new(n)
         end
         nodes

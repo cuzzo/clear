@@ -373,21 +373,22 @@ module MIRLoweringCapabilities
         safe_alias = zig_safe_name(alias_name)
         rt = resolved.is_a?(Type) ? resolved : Type.new(resolved)
         is_collection = rt.future? && rt.tense_type&.array?
-        bindings << "var #{safe_alias} = try #{source_zig}.materialize(#{@rt_name}.heapAlloc());\n_ = &#{safe_alias};"
+        materialize = MIR::MethodCall.new(
+          MIR::Ident.new(source_zig),
+          "materialize",
+          [MIR::AllocatorRef.new(:heap)],
+          true,
+          MIR::CallableContract.no_ownership(1)
+        )
         if is_collection
-          # Owned slice: free the backing at end-of-WITH. The element
-          # type is whatever materialize returned ([]const u8 for
-          # string keys, []T otherwise). For string-key DISTINCT the
-          # deep-dupe in materialize gives us per-element ownership;
-          # iterate and free each, then free the outer slice.
-          elem_t = rt.tense_type.element_type
-          elem_zig = elem_t.zig_type
-          if elem_t.string?
-            bindings << "defer { for (#{safe_alias}) |__s| #{@rt_name}.heapAlloc().free(__s); #{@rt_name}.heapAlloc().free(#{safe_alias}); }"
-          else
-            bindings << "defer #{@rt_name}.heapAlloc().free(#{safe_alias});"
-          end
-          _ = elem_zig
+          mark = MIR::AllocMark.new(safe_alias, :heap, rt.tense_type)
+          mark.scope = :heap
+          entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+          bindings << mark
+          bindings << MIR::Let.new(safe_alias, materialize, true, nil, "_ = &#{safe_alias};")
+          bindings << MIR::Cleanup.new(safe_alias, entry)
+        else
+          bindings << MIR::Let.new(safe_alias, materialize, true, nil, "_ = &#{safe_alias};")
         end
       end
     end
