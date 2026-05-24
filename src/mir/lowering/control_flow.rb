@@ -728,7 +728,7 @@ module MIRLoweringControlFlow
     entry = root ? @current_bindings[root.name] : nil
     return entry.needs_cleanup? && entry.alloc == :heap if entry&.present?
 
-    !!(root && @current_fn_takes_param_names&.include?(root.name.to_s) && root.symbol&.storage == :heap)
+    !!(root && @current_fn_takes_param_names&.include?(root.name.to_s) && root.symbol&.heap_storage?)
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
@@ -847,7 +847,7 @@ module MIRLoweringControlFlow
     # Skip if the binding is already pointer-shaped or sync-wrapped --
     # the helper handles those via comptime dispatch.
     return false if sym.sync || sym.rc_stored? ||
-                    sym.storage == :local || sym.storage == :heap
+                    sym.local_storage? || sym.heap_storage?
     # Only auto-borrow MUTABLE plain T: an immutable plain T can't be
     # mutated through any path so & buys us nothing (and would be a
     # pessimization).

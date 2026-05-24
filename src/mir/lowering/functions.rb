@@ -685,9 +685,10 @@ module MIRLoweringFunctions
   def infer_catch_value_allocator(expr)
     T.bind(self, MIRLowering) rescue nil
     return nil unless expr
-    return :heap if expr.respond_to?(:symbol) && expr.symbol&.storage == :heap
+    return :heap if expr.respond_to?(:symbol) && expr.symbol&.heap_storage? == true
     storage = expr.respond_to?(:storage) ? expr.storage : nil
-    return storage if storage == :heap || storage == :frame
+    return :heap if SymbolEntry.heap_storage_value?(storage)
+    return :frame if SymbolEntry.frame_storage_value?(storage)
     nil
   end
 
@@ -1469,7 +1470,7 @@ module MIRLoweringFunctions
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
-    is_heap = (ast_node.respond_to?(:symbol) && ast_node.symbol&.storage == :heap) || !!pt&.heap?
+    is_heap = (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) || !!pt&.heap?
     iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
     iz
   end

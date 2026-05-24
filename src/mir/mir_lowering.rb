@@ -242,7 +242,7 @@ class MIRLowering
     if node.is_a?(AST::Identifier) && ast_node.respond_to?(:was_moved) && ast_node.was_moved == true
       return placement_for_node(node) == :heap
     end
-    node.is_a?(AST::Identifier) && node.symbol&.storage == :heap
+    node.is_a?(AST::Identifier) && node.symbol&.heap_storage? == true
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -1136,7 +1136,7 @@ class MIRLowering
     decl = sym.respond_to?(:reg) ? sym.reg : nil
     auth = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
     storage = auth.storage
-    storage == :heap ? :heap : :frame
+    auth.heap_storage? ? :heap : :frame
   end
 
   sig { params(node: T.untyped).returns(Symbol) }
@@ -1154,7 +1154,7 @@ class MIRLowering
       sym = root.symbol
       lifetime_sources = sym&.lifetime_sources || []
       if !lifetime_sources.empty?
-        return :heap if lifetime_sources.any? { |source| source.storage == :heap }
+        return :heap if lifetime_sources.any?(&:heap_storage?)
         return :frame
       end
     end
@@ -1335,7 +1335,7 @@ class MIRLowering
     case mdef[:alloc]
     when :heap, :frame then mdef[:alloc]
     when :node_storage
-      val.respond_to?(:storage) && val.storage == :heap ? :heap : :frame
+      val.respond_to?(:heap_storage?) && val.heap_storage? ? :heap : :frame
     end
   end
 
@@ -1562,7 +1562,7 @@ class MIRLowering
     end
 
     if ti.respond_to?(:fixed?) && ti.fixed? &&
-       (node.storage == :stack || node.storage == :frame)
+       node.stack_or_frame_storage?
       # Raw fixed-size array (`T[N] = [...]`). Always lowers to a Zig
       # `[N]T{...}` literal regardless of CLEAR's storage classification:
       # the size > 128 slot threshold in finalize_storage promotes large

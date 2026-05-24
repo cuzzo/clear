@@ -269,7 +269,6 @@ module Hoist
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
     decl.full_type = ti
-    decl.container_borrow = true if storage == :borrow && decl.respond_to?(:container_borrow=)
     # The temp is always consumed by the statement it was lifted from
     # (return / yield / element store), so it is used by construction --
     # var-use analysis ran before this pass and cannot know that.
@@ -278,6 +277,7 @@ module Hoist
     # analysis records the definitive placement on sym.storage below.
     sym = SymbolEntry.new(reg: decl, type: ti, mutable: false, storage: storage)
     decl.symbol = sym
+    decl.container_borrow = true if sym.borrow_provenance? && decl.respond_to?(:container_borrow=)
     hoists << decl
 
     ident = AST::Identifier.new(tok, name)
@@ -595,36 +595,31 @@ module MIRHoistLowering
     when MIR::Let
       prefix.concat(normalize_allocating_result_expr!(stmt.init))
     when MIR::Set
-      target_prefix, target = normalize_allocating_used_expr(stmt.target)
-      stmt.target = target
-      prefix.concat(target_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
     when MIR::ReassignWithCleanup
-      value_prefix, value = normalize_allocating_used_expr(stmt.value)
-      stmt.value = value
-      prefix.concat(value_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :value))
     when MIR::ExprStmt
-      expr_prefix, expr = normalize_allocating_used_expr(stmt.expr)
-      stmt.expr = expr
-      prefix.concat(expr_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :expr))
     when MIR::ReturnStmt, MIR::BreakStmt
-      value_prefix, value = normalize_allocating_used_expr(stmt.value)
-      stmt.value = value
-      prefix.concat(value_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :value))
     when MIR::DeferStmt, MIR::ErrDeferStmt
       prefix.concat(normalize_allocating_mir_stmt!(stmt.body))
     when MIR::BatchWindowPush
-      item_prefix, item = normalize_allocating_used_expr(stmt.item_expr)
-      value_prefix, value = normalize_allocating_used_expr(stmt.value_expr)
-      stmt.item_expr = item
-      stmt.value_expr = value
-      prefix.concat(item_prefix)
-      prefix.concat(value_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :item_expr))
+      prefix.concat(normalize_used_expr_attr!(stmt, :value_expr))
     when MIR::BatchWindowFlush
-      value_prefix, value = normalize_allocating_used_expr(stmt.value_expr)
-      stmt.value_expr = value
-      prefix.concat(value_prefix)
+      prefix.concat(normalize_used_expr_attr!(stmt, :value_expr))
     end
+    prefix
+  end
+
+  sig { params(stmt: T.untyped, attr: Symbol).returns(T::Array[T.untyped]) }
+  def normalize_used_expr_attr!(stmt, attr)
+    value = stmt.public_send(attr)
+    prefix, normalized = normalize_allocating_used_expr(value)
+    setter = :"#{attr}="
+    stmt.public_send(setter, normalized)
     prefix
   end
 

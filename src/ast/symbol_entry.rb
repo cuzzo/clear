@@ -127,7 +127,12 @@ class SymbolEntry
   # across the annotator seam (decomplex #1 Reification-Miss).
   sig { returns(T::Boolean) }
   def atomic?
-    @sync == :atomic
+    self.class.atomic_sync?(@sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.atomic_sync?(sync)
+    sync == :atomic
   end
 
   # Mirror of Type#indirect? / Type#atomic_ptr?. The AtomicPtr pair
@@ -146,7 +151,7 @@ class SymbolEntry
   # `sym.sync == :local` reinvented inline (decomplex Reification-Miss).
   sig { returns(T::Boolean) }
   def locked?
-    @sync == :locked
+    self.class.locked_sync?(@sync)
   end
 
   sig { returns(T::Boolean) }
@@ -156,7 +161,32 @@ class SymbolEntry
 
   sig { returns(T::Boolean) }
   def write_locked?
-    @sync == :write_locked
+    self.class.write_locked_sync?(@sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.locked_sync?(sync)
+    sync == :locked
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.write_locked_sync?(sync)
+    sync == :write_locked
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.versioned_sync?(sync)
+    sync == :versioned
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.always_mutable_sync?(sync)
+    sync == :always_mutable
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.cleanup_sync?(sync)
+    locked_sync?(sync) || write_locked_sync?(sync) || always_mutable_sync?(sync) || versioned_sync?(sync)
   end
 
   # Binding is Rc/Arc-stored. `storage == :shared || storage == :multiowned`
@@ -165,7 +195,12 @@ class SymbolEntry
   # (ownership axis).
   sig { returns(T::Boolean) }
   def rc_stored?
-    @storage == :shared || @storage == :multiowned
+    self.class.rc_storage?(@storage)
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.rc_storage?(storage)
+    storage == :shared || storage == :multiowned
   end
 
   # Canonical "where does this binding's data live?" accessor — SIMP-13b.
@@ -187,12 +222,12 @@ class SymbolEntry
   # Provenance predicates — SIMP-13f. Symbol#storage is the canonical source.
   sig { returns(T::Boolean) }
   def heap_storage?
-    @storage == :heap
+    self.class.heap_storage_value?(@storage)
   end
 
   sig { returns(T::Boolean) }
   def frame_provenance?
-    @storage == :frame
+    self.class.frame_storage_value?(@storage)
   end
 
   sig { returns(T::Boolean) }
@@ -203,6 +238,26 @@ class SymbolEntry
   sig { returns(T::Boolean) }
   def borrow_provenance?
     @storage == :borrow
+  end
+
+  sig { returns(T::Boolean) }
+  def local_storage?
+    self.class.local_storage_value?(@storage)
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.heap_storage_value?(storage)
+    storage == :heap
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.frame_storage_value?(storage)
+    storage == :frame
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.local_storage_value?(storage)
+    storage == :local
   end
 
   sig { returns(T::Boolean) }

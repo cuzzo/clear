@@ -7,6 +7,28 @@ module MIRLoweringCapabilities
 
   requires_ancestor { MIRLowering }
 
+  sig { params(sync: T.nilable(Symbol), atomic_ptr: T::Boolean).returns(T.nilable(String)) }
+  def sync_wrap_constructor(sync, atomic_ptr:)
+    case sync
+    when :locked         then "lockedCreate"
+    when :write_locked   then "rwLockedCreate"
+    when :always_mutable then "refCellCreate"
+    when :versioned      then "versionedCreate"
+    when :atomic         then atomic_ptr ? "atomicPtrCreate" : "atomicCreate"
+    end
+  end
+
+  sig { params(sync: T.nilable(Symbol), bare_zig_t: String, atomic_ptr: T::Boolean).returns(T.nilable(String)) }
+  def sync_wrap_type(sync, bare_zig_t, atomic_ptr:)
+    case sync
+    when :locked         then "CheatLib.Locked(#{bare_zig_t})"
+    when :write_locked   then "CheatLib.RwLocked(#{bare_zig_t})"
+    when :always_mutable then "CheatLib.RefCell(#{bare_zig_t})"
+    when :versioned      then "CheatLib.Versioned(#{bare_zig_t})"
+    when :atomic         then atomic_ptr ? "CheatLib.AtomicPtr(#{bare_zig_t})" : "CheatLib.Atomic(#{bare_zig_t})"
+    end
+  end
+
   sig { params(var_node: AST::Identifier).returns(String) }
   def with_cap_var_name(var_node)
     T.bind(self, MIRLowering) rescue nil
@@ -213,7 +235,7 @@ module MIRLoweringCapabilities
         # and across refactors that shift Ruby object IDs. Two WITHs at the
         # same source position can't exist (they'd be the same WITH).
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
-        is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+        is_arc = SymbolEntry.rc_storage?(var_storage) || resolved&.any_rc?
         # For function parameters, the caller's wrapper is unknown at
         # this fn's standalone codegen time (cross-module case). Emit
         # comptime-dispatched lock_expr so the SAME function body works
@@ -237,7 +259,7 @@ module MIRLoweringCapabilities
         # and across refactors that shift Ruby object IDs. Two WITHs at the
         # same source position can't exist (they'd be the same WITH).
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
-        is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+        is_arc = SymbolEntry.rc_storage?(var_storage) || resolved&.any_rc?
         lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
           bindings << emit_fallible_lock_binding("#{lock_expr}.readOrErr()", guard_var, alias_name, clause, with_label, node)
@@ -1063,7 +1085,7 @@ module MIRLoweringCapabilities
       resolved   = cap[:resolved_type]
       zig_var    = @do_capture_map&.dig(var_name) || var_name
       var_storage = cap[:var_node].symbol&.storage
-      is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+      is_arc = SymbolEntry.rc_storage?(var_storage) || resolved&.any_rc?
       lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
       addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
       var_sync   = cap[:var_node].symbol&.sync

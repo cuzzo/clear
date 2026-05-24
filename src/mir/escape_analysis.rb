@@ -107,7 +107,7 @@ module EscapeAnalysis
           # @shared:locked + collection to :heap, so the wrapping fact
           # lives on entry.type.ownership instead. Check both axes.
           unified_storage = unify_caller_attr(sites, idx) do |s|
-            next s.storage if s&.storage == :shared || s&.storage == :multiowned
+            next s.storage if s&.rc_stored?
             t = s&.type
             if t.is_a?(Type)
               next :shared     if t.respond_to?(:shared?)     && t.shared?
@@ -176,7 +176,7 @@ module EscapeAnalysis
     return true if t.is_a?(Type) && (t.shared? || t.any_sync?)
     # Sync axes other than :atomic were already accepted above (via shared?
     # / any_sync?) -- only :atomic needs the REQUIRES family check.
-    return true unless sync == :atomic
+    return true unless SymbolEntry.atomic_sync?(sync)
 
     requires = fn_node.respond_to?(:requires) ? fn_node.requires : nil
     families = requires && requires[param.name.to_s]
@@ -187,10 +187,10 @@ module EscapeAnalysis
   sig { params(fn: AST::FunctionDef).returns(Integer) }
   private_class_method def self.heap_symbol_count(fn)
     count = T.let(0, Integer)
-    fn.params.each { |param| count += 1 if param.symbol&.storage == :heap }
+    fn.params.each { |param| count += 1 if symbol_heap?(param.symbol) }
     walk_body(fn.body) do |node|
       sym = symbol_for_binding_node(node)
-      count += 1 if sym&.storage == :heap
+      count += 1 if symbol_heap?(sym)
     end
     count
   end
@@ -481,7 +481,7 @@ module EscapeAnalysis
     params.each_with_index do |param, idx|
       arg = args[idx]
       next unless arg
-      next unless param.takes || param.symbol&.storage == :heap
+      next unless param.takes || symbol_heap?(param.symbol)
       next unless ownership_bearing_transfer_expr?(arg, nil)
       mark_expr_roots_heap!(arg)
     end
@@ -490,7 +490,7 @@ module EscapeAnalysis
   sig { params(call: AST::MethodCall, params: T::Array[AST::Param], fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).void }
   private_class_method def self.mark_method_takes_heap!(call, params, fn_nodes, schema_lookup)
     receiver_param = params.first
-    if receiver_is_param?(call.object) && receiver_param&.symbol&.storage == :heap
+    if receiver_is_param?(call.object) && symbol_heap?(receiver_param&.symbol)
       mark_expr_roots_heap!(call.object)
     end
 
@@ -534,7 +534,7 @@ module EscapeAnalysis
     return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
     root = AST.root_identifier(unwrap_value(arg))
     sym = root&.symbol
-    sym&.storage == :heap
+    symbol_heap?(sym)
   rescue StandardError
     false
   end
@@ -569,7 +569,7 @@ module EscapeAnalysis
       changed = false
       bindings.each do |name, value|
         sym = symbol_for_name(fn, name)
-        next unless sym&.storage == :heap
+        next unless symbol_heap?(sym)
         next unless heap_binding_carries_sources?(value)
         before = heap_symbol_count(fn)
         mark_expr_identifiers_heap!(value)
@@ -716,7 +716,7 @@ module EscapeAnalysis
       node = unwrap_value(stack.pop)
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::Identifier)
-        found = true if node.symbol&.storage == :heap
+        found = true if symbol_heap?(node.symbol)
         next
       end
       AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
@@ -842,12 +842,12 @@ module EscapeAnalysis
     return false unless ti
     return false if ti.primitive? || ti.void? || ti.any?
     if expr.is_a?(AST::Identifier) && expr.symbol
-      storage = expr.symbol.storage
-      decl = expr.symbol.respond_to?(:reg) ? expr.symbol.reg : nil
+      symbol = expr.symbol
+      decl = symbol.respond_to?(:reg) ? symbol.reg : nil
       mutated = decl.respond_to?(:var_mutated) && decl.var_mutated == true
-      return false if (storage == :rodata && !mutated) || storage == :borrow
+      return false if (symbol&.rodata_provenance? && !mutated) || symbol&.borrow_provenance?
     end
-    if expr.is_a?(AST::Identifier) && expr.symbol&.storage == :heap
+    if expr.is_a?(AST::Identifier) && symbol_heap?(expr.symbol)
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
     end
     expr_t = Type.from_node(expr)
@@ -924,9 +924,9 @@ module EscapeAnalysis
   private_class_method def self.heap_destination?(fn, target)
     root = AST.root_identifier(target)
     return false unless root
-    return true if root.symbol&.storage == :heap
+    return true if symbol_heap?(root.symbol)
     sym = symbol_for_name(fn, root.name.to_s)
-    sym&.storage == :heap
+    symbol_heap?(sym)
   end
 
   sig { params(value: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
@@ -1032,7 +1032,7 @@ module EscapeAnalysis
       until stack.empty?
         child = unwrap_value(stack.pop)
         next unless child.is_a?(AST::Locatable)
-        if child.is_a?(AST::Identifier) && child.symbol&.storage == :heap
+        if child.is_a?(AST::Identifier) && symbol_heap?(child.symbol)
           found = true
           break
         end
@@ -1067,11 +1067,9 @@ module EscapeAnalysis
 
   sig { params(sym: T.nilable(SymbolEntry), names: T.nilable(T::Set[String]), name: T.nilable(String)).returns(T::Boolean) }
   private_class_method def self.mark_symbol_heap!(sym, names = nil, name = nil)
-    return false unless sym
-    decl = sym.respond_to?(:reg) ? sym.reg : nil
-    sym_entry = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
-    return false if sym_entry.storage == :heap
-    return false if sym_entry.storage == :borrow
+    sym_entry = canonical_symbol(sym)
+    return false unless sym_entry
+    return false if sym_entry.heap_storage? || sym_entry.borrow_provenance?
     sym_entry.storage = :heap
     names << name if names && name
     true
@@ -1079,23 +1077,31 @@ module EscapeAnalysis
 
   sig { params(sym: T.nilable(SymbolEntry)).returns(T::Boolean) }
   private_class_method def self.mark_symbol_borrow!(sym)
-    return false unless sym
-    decl = sym.respond_to?(:reg) ? sym.reg : nil
-    sym_entry = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
-    return false if sym_entry.storage == :heap
-    return false if sym_entry.storage == :borrow
+    sym_entry = canonical_symbol(sym)
+    return false unless sym_entry
+    return false if sym_entry.heap_storage? || sym_entry.borrow_provenance?
     sym_entry.storage = :borrow
     true
   end
 
   sig { params(sym: T.nilable(SymbolEntry)).returns(T::Boolean) }
   private_class_method def self.mark_reassigned_symbol_heap!(sym)
-    return false unless sym
-    decl = sym.respond_to?(:reg) ? sym.reg : nil
-    sym_entry = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
-    return false if sym_entry.storage == :heap
-    return false if sym_entry.storage == :borrow
+    sym_entry = canonical_symbol(sym)
+    return false unless sym_entry
+    return false if sym_entry.heap_storage? || sym_entry.borrow_provenance?
     sym_entry.storage = :heap
     true
+  end
+
+  sig { params(sym: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
+  private_class_method def self.canonical_symbol(sym)
+    return nil unless sym
+    decl = sym.respond_to?(:reg) ? sym.reg : nil
+    (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
+  end
+
+  sig { params(sym: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  private_class_method def self.symbol_heap?(sym)
+    canonical_symbol(sym)&.heap_storage? == true
   end
 end

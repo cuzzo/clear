@@ -7,6 +7,21 @@ module MIRLoweringExpressions
 
   requires_ancestor { MIRLowering }
 
+  class OrExitFacts < T::Struct
+    const :kind, T.nilable(String)
+    const :error_name, T.nilable(String)
+    const :name_id, T.nilable(Integer)
+    const :clear_type, T::Boolean
+    const :has_message, T::Boolean
+    const :line, Integer
+  end
+
+  class BinaryIntArithmeticFacts < T::Struct
+    const :both_int, T::Boolean
+    const :has_comptime_number_literal, T::Boolean
+    const :has_float_coercion, T::Boolean
+  end
+
   sig { params(node: AST::Literal).returns(T.untyped) }
   def lower_literal(node)
     T.bind(self, MIRLowering) rescue nil
@@ -231,15 +246,8 @@ module MIRLoweringExpressions
 
     # Default integer arithmetic: checked in debug
     if %i[ADD SUB MUL].include?(node.op)
-      left_ti = node.left.full_type
-      right_ti = node.right.full_type
-      left_is_comptime = node.left.is_a?(AST::Literal) && node.left.type == :NUMBER && !left_ti&.integer?
-      right_is_comptime = node.right.is_a?(AST::Literal) && node.right.type == :NUMBER && !right_ti&.integer?
-      both_int = left_ti&.integer? && right_ti&.integer?
-      no_lits = !left_is_comptime && !right_is_comptime
-      no_float_coerce = !node.left.respond_to?(:coerced_type) || node.left.coerced_type.nil? || Type.new(node.left.coerced_type).integer?
-      no_float_coerce &&= !node.right.respond_to?(:coerced_type) || node.right.coerced_type.nil? || Type.new(node.right.coerced_type).integer?
-      if both_int && no_lits && no_float_coerce
+      int_facts = binary_int_arithmetic_facts(node)
+      if int_facts.both_int && !int_facts.has_comptime_number_literal && !int_facts.has_float_coercion
         fn = { ADD: :intAdd, SUB: :intSub, MUL: :intMul }[node.op]
         return emit_builtin(fn, [left, right])
       end
@@ -432,7 +440,6 @@ module MIRLoweringExpressions
 
     # Simple pipe: x |> f -> f(x) or x |> f(y) -> f(x, y)
     left = lower(node.left)
-    left_zig = emit_expr(left)
 
     # Capture snapshot for CATCH blocks: store LHS before the failable call
     snapshot_stmts = nil
@@ -527,25 +534,12 @@ module MIRLoweringExpressions
         # carries the reassignment; RETURN error.CheatError propagates
         # via the bc error-union (EGUARD / inline-exit).
         ex = node.right
-        bc_kind = nil
-        bc_name_id = nil
-        bc_clear_type = false
-        if ex.kind
-          bc_kind = ex.kind.to_s
-          if ex.error_name
-            bc_name_id = AST.id_of_type(ex.error_name.to_sym)
-          else
-            bc_clear_type = true
-          end
-        elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
-          bc_kind = AST.kind_of_type(ex.error_name.to_sym).to_s
-          bc_name_id = AST.id_of_type(ex.error_name.to_sym)
-        end
+        facts = or_exit_facts(ex, node.token&.line || 0)
         msg_mir = ex.message ? lower(ex.message) : nil
         reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-          kind: bc_kind, name_id: bc_name_id,
-          clear_type: bc_clear_type, has_message: !ex.message.nil?,
-          line: (node.token&.line || 0).to_i
+          kind: facts.kind, name_id: facts.name_id,
+          clear_type: facts.clear_type, has_message: facts.has_message,
+          line: facts.line
         })
         catch_block = MIR::ScopeBlock.new([
           MIR::ExprStmt.new(reassign, false),
@@ -555,31 +549,16 @@ module MIRLoweringExpressions
       end
 
       if is_error
-        rt_name = @rt_name
         ex = node.right
-        line = node.token&.line || 0
-        stmts = []
-
-        if ex.kind
-          stmts << MIR::InlineZig.new("#{rt_name}.__error.kind = .#{ex.kind}", "or_exit_kind")
-          if ex.error_name
-            stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type")
-          else
-            stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type")
-          end
-        elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
-          # Type-only: the annotator seeded the registry; look up the kind.
-          registered_kind = AST.kind_of_type(ex.error_name.to_sym)
-          stmts << MIR::InlineZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type")
-          stmts << MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type")
-        end
+        facts = or_exit_facts(ex, node.token&.line || 0)
+        stmts = or_exit_error_update_stmts(facts)
 
         if ex.message
           msg_zig = emit_expr(lower(ex.message))
-          stmts << MIR::InlineZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg")
+          stmts << MIR::InlineZig.new("#{@rt_name}.__error.message = #{msg_zig}", "or_exit_msg")
         end
 
-        stmts << MIR::InlineZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line")
+        stmts << MIR::InlineZig.new("#{@rt_name}.__error.clear_line = #{facts.line}", "or_exit_line")
         stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
         catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
         return try_catch_with_provenance(left, catch_block, "__exit_err")
@@ -720,6 +699,78 @@ module MIRLoweringExpressions
     return MIR::Deref.new(result) if node.is_a?(AST::GetField) && node.indirect_field
 
     result
+  end
+
+  sig { params(ex: AST::OrExit, line: T.untyped).returns(OrExitFacts) }
+  def or_exit_facts(ex, line)
+    kind = T.let(nil, T.nilable(String))
+    error_name = T.let(nil, T.nilable(String))
+    name_id = T.let(nil, T.nilable(Integer))
+    clear_type = T.let(false, T::Boolean)
+
+    if ex.kind
+      kind = ex.kind.to_s
+      if ex.error_name
+        error_name = ex.error_name.to_s
+        name_id = AST.id_of_type(ex.error_name.to_sym)
+      else
+        clear_type = true
+      end
+    elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
+      kind = AST.kind_of_type(ex.error_name.to_sym).to_s
+      error_name = ex.error_name.to_s
+      name_id = AST.id_of_type(ex.error_name.to_sym)
+    end
+
+    OrExitFacts.new(
+      kind: kind,
+      error_name: error_name,
+      name_id: name_id,
+      clear_type: clear_type,
+      has_message: !ex.message.nil?,
+      line: line.to_i
+    )
+  end
+
+  sig { params(facts: OrExitFacts).returns(T::Array[T.untyped]) }
+  def or_exit_error_update_stmts(facts)
+    stmts = T.let([], T::Array[T.untyped])
+    if facts.kind
+      stmts << MIR::InlineZig.new("#{@rt_name}.__error.kind = .#{facts.kind}", "or_exit_kind")
+      if facts.error_name
+        stmts << MIR::InlineZig.new("#{@rt_name}.__error.error_name = @intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+      elsif facts.clear_type
+        stmts << MIR::InlineZig.new("#{@rt_name}.__error.error_name = 0", "or_exit_clear_type")
+      end
+    end
+    stmts
+  end
+
+  sig { params(node: AST::BinaryOp).returns(BinaryIntArithmeticFacts) }
+  def binary_int_arithmetic_facts(node)
+    left_ti = Type.from_node(node.left.full_type)
+    right_ti = Type.from_node(node.right.full_type)
+    BinaryIntArithmeticFacts.new(
+      both_int: left_ti&.integer? == true && right_ti&.integer? == true,
+      has_comptime_number_literal: comptime_number_literal?(node.left, left_ti) ||
+        comptime_number_literal?(node.right, right_ti),
+      has_float_coercion: float_coercion?(node.left) || float_coercion?(node.right)
+    )
+  end
+
+  sig { params(node: T.untyped, ti: T.nilable(Type)).returns(T::Boolean) }
+  def comptime_number_literal?(node, ti)
+    return false unless node.is_a?(AST::Literal)
+    return false unless node.type == :NUMBER
+    ti.nil? || !ti.integer?
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def float_coercion?(node)
+    return false unless node.respond_to?(:coerced_type)
+    coerced = node.coerced_type
+    return false if coerced.nil?
+    Type.new(coerced).integer? != true
   end
 
   sig { params(node: AST::GetIndex).returns(T.untyped) }
@@ -1534,20 +1585,8 @@ module MIRLoweringExpressions
     # AtomicPtr and primitive Atomic use different constructors but both use
     # bare-pointer ownership without an outer Arc/Rc wrapper.
     is_atomic_ptr = node.atomic_ptr?
-    sync_fn = case node.sync
-              when :locked then "lockedCreate"
-              when :write_locked then "rwLockedCreate"
-              when :always_mutable then "refCellCreate"
-              when :versioned then "versionedCreate"
-              when :atomic then (is_atomic_ptr ? "atomicPtrCreate" : "atomicCreate")
-              end
-    sync_type = case node.sync
-                when :locked then "CheatLib.Locked(#{zig_base})"
-                when :write_locked then "CheatLib.RwLocked(#{zig_base})"
-                when :always_mutable then "CheatLib.RefCell(#{zig_base})"
-                when :versioned then "CheatLib.Versioned(#{zig_base})"
-                when :atomic then (is_atomic_ptr ? "CheatLib.AtomicPtr(#{zig_base})" : "CheatLib.Atomic(#{zig_base})")
-                end
+    sync_fn = sync_wrap_constructor(node.sync, atomic_ptr: is_atomic_ptr)
+    sync_type = sync_wrap_type(node.sync, zig_base, atomic_ptr: is_atomic_ptr)
     # Atomic cells are already thread-safe; AtomicPtr also owns an
     # Arc-managed payload internally, so an outer Arc/Rc would double-wrap.
     own_fn = case node.ownership

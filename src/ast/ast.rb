@@ -854,6 +854,23 @@ module AST
     end
 
     sig { returns(T::Boolean) }
+    def frame_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.frame_provenance?
+      @storage_override == :frame
+    end
+
+    sig { returns(T::Boolean) }
+    def stack_storage?
+      @storage_override == :stack
+    end
+
+    sig { returns(T::Boolean) }
+    def stack_or_frame_storage?
+      storage == :stack || storage == :frame
+    end
+
+    sig { returns(T::Boolean) }
     def rodata_provenance?
       sym = respond_to?(:symbol) ? symbol : nil
       return true if sym&.rodata_provenance?

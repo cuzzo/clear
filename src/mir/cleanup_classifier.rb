@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require_relative "cleanup_entry"
 require_relative "../ast/type"
+require_relative "../ast/symbol_entry"
 require_relative "../annotator-helpers/function_signature"
 
 # =========================================================================
@@ -700,9 +701,7 @@ module CleanupClassifier
       entry = entry(:uniform)
     end
     entry ||= classify_rc_or_link(ti, schema_lookup)
-    entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? ||
-                                                          sync == :locked || sync == :write_locked ||
-                                                          sync == :always_mutable || sync == :versioned
+    entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? || SymbolEntry.cleanup_sync?(sync)
     entry ||= classify_optional(ti, schema_lookup, node: node)
     entry ||= classify_owned_string(ti, node, promoted_fns, schema_lookup)
     entry ||= classify_heap_storage(ti, node, schema_lookup, sync)
@@ -958,9 +957,10 @@ module CleanupClassifier
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_heap_storage(ti, node, schema_lookup, sync = nil)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    is_heap = node_sym&.storage == :heap
+    is_heap = node_sym&.heap_storage?
     return nil unless is_heap
-    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
+    return nil if ti.any_rc? || ti.link? || SymbolEntry.cleanup_sync?(sync)
+    return nil if ti.implicitly_copyable?(schema_lookup)
     return nil if ti.collection?
 
     return entry(:heap_string) if ti.string?
@@ -994,9 +994,9 @@ module CleanupClassifier
   #     all-primitive struct collapses to a no-op via inline-for)
   sig { params(ti: Type, node: T.untyped, schema_lookup: Proc, sync: T.nilable(Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_heap_composite(ti, node, schema_lookup, sync = nil)
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    return nil unless storage == :heap
-    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
+    return nil unless node.respond_to?(:heap_storage?) && node.heap_storage?
+    return nil if ti.any_rc? || ti.link? || SymbolEntry.cleanup_sync?(sync)
+    return nil if ti.implicitly_copyable?(schema_lookup)
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?
