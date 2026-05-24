@@ -5,6 +5,7 @@ require_relative "cleanup_entry"
 require_relative "../ast/type"
 require_relative "../ast/symbol_entry"
 require_relative "../annotator-helpers/function_signature"
+require_relative "local_binding_facts"
 
 # =========================================================================
 # Pass C (caller side): Cleanup Classification
@@ -141,9 +142,10 @@ module CleanupClassifier
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.stamp_loop_extensions!(body, bindings)
-    local_names = cleanup_local_names(body)
-    local_entries = cleanup_local_entries(body)
-    scan_loop_scope(body) do |node|
+    local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
+    local_names = local_facts.names
+    local_entries = local_facts.entries
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       case node
       when AST::BindExpr
         next unless node.mode == :assign
@@ -220,54 +222,6 @@ module CleanupClassifier
       end
     end
     found
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
-  private_class_method def self.cleanup_local_names(body)
-    names = T.let(Set.new, T::Set[String])
-    scan_loop_scope(body) do |node|
-      case node
-      when AST::VarDecl
-        names << node.name.to_s if node.name.is_a?(String)
-      when AST::BindExpr
-        names << node.name.to_s if node.name.is_a?(String) && node.mode == :decl
-      end
-    end
-    names
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Hash[String, CleanupEntry]) }
-  private_class_method def self.cleanup_local_entries(body)
-    entries = T.let({}, T::Hash[String, CleanupEntry])
-    scan_loop_scope(body) do |node|
-      next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-      next if node.is_a?(AST::BindExpr) && node.mode != :decl
-      name = node.name.to_s
-      entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
-      entries[name] = entry if entry&.present?
-    end
-    entries
-  end
-
-  sig { params(body: T::Array[T.untyped], block: T.untyped).void }
-  private_class_method def self.scan_loop_scope(body, &block)
-    body.each do |node|
-      yield node
-      case node
-      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef, AST::LambdaLit
-        next
-      when AST::IfStatement
-        scan_loop_scope(node.then_branch, &block)
-        scan_loop_scope(node.else_branch, &block)
-      when AST::MatchStatement
-        node.cases.each { |c| scan_loop_scope(c.body, &block) }
-        scan_loop_scope(node.default_case, &block) if node.default_case
-      when AST::WithBlock
-        scan_loop_scope(node.body, &block)
-      when AST::DoBlock
-        node.branches.each { |b| scan_loop_scope(T.cast(b.fetch(:body), T::Array[T.untyped]), &block) }
-      end
-    end
   end
 
   sig { params(call: AST::FuncCall).returns(T::Array[AST::Param]) }

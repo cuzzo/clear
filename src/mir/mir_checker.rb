@@ -995,15 +995,8 @@ class MIRChecker
 
   sig { params(init: T.untyped).returns(T.nilable(Symbol)) }
   def expr_owned_result_alloc(init)
-    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::Cast)
-    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::TryExpr)
-    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::TryCatch)
-    return init.owned_result_alloc if init.is_a?(MIR::MethodCall) && init.owned_result_alloc.is_a?(Symbol)
-    if init.is_a?(MIR::BlockExpr)
-      break_stmt = init.body&.reverse&.find { |stmt| stmt.is_a?(MIR::BreakStmt) }
-      return expr_owned_result_alloc(break_stmt.value) if break_stmt.is_a?(MIR::BreakStmt)
-    end
-    nil
+    return nil unless init && init.respond_to?(:ownership_effect)
+    init.ownership_effect.alloc
   end
 
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
@@ -1311,12 +1304,10 @@ class MIRChecker
   sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
-    if node.is_a?(MIR::Call) && node.owned_return?
-      leaks << error(:HPT_LEAK, node.callee,
-        "owned-return call result not bound to variable (leak)")
-    elsif node.is_a?(MIR::MethodCall) && node.owned_result_alloc.is_a?(Symbol)
-      leaks << error(:HPT_LEAK, node.method,
-        "owned-result method call not bound to variable (leak)")
+    effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
+    if effect.produces_owned
+      leaks << error(:HPT_LEAK, ownership_effect_label(node),
+        "owned-result expression not bound to variable (leak)")
     elsif (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
        node.stdlib_def.fixed_return?
       ret = node.stdlib_def.return_type
@@ -1331,6 +1322,20 @@ class MIRChecker
     elsif node.is_a?(MIR::MethodCall)
       scan_expr_for_hpt_leak!(node.receiver, leaks)
       node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
+    end
+  end
+
+  sig { params(node: T.untyped).returns(String) }
+  def ownership_effect_label(node)
+    case node
+    when MIR::Call
+      node.callee.to_s
+    when MIR::MethodCall
+      node.method.to_s
+    when MIR::InlineZig, MIR::RawZig
+      node.reason.to_s
+    else
+      node.class.name.to_s
     end
   end
 
@@ -2004,16 +2009,9 @@ class MIRChecker
   ].freeze
 
   def allocating_expr?(expr)
-    return true if MIR::HeapCreate === expr  # always heap by definition
-    return true if expr.is_a?(MIR::Call) && expr.owned_return?
-    return true if expr.is_a?(MIR::MethodCall) && expr.owned_result_alloc.is_a?(Symbol)
-    if expr.is_a?(MIR::InlineZig)
-      return false if expr.stdlib_def&.mutates_receiver?
-      return !!(expr.stdlib_def&.emits_allocating? && expr.allocs&.values&.any? { |v| VALID_ALLOCATORS.include?(v) })
-    end
-    return expr.alloc.is_a?(Symbol) if ALLOC_PLACED_MIR_CLASSES.any? { |c| c === expr }
-    return expr.strategy != :passthrough && expr.alloc.is_a?(Symbol) if MIR::DeepCopy === expr
-    false
+    return false unless expr && expr.respond_to?(:ownership_effect)
+    effect = expr.ownership_effect
+    effect.produces_owned && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
   end
 
   # Yield each immediate sub-expression of expr.

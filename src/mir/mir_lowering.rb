@@ -16,6 +16,7 @@ require "set"
 require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "pass_state"
+require_relative "placement"
 require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
@@ -58,9 +59,14 @@ class MIRLowering
     extend T::Sig
 
     const :name, String
-    const :alloc, Symbol
+    const :ownership_effect, MIR::OwnershipEffect
     const :type_info, Type
     const :scope, Symbol
+
+    sig { returns(Symbol) }
+    def alloc
+      ownership_effect.alloc || :heap
+    end
 
     sig { returns(MIR::AllocMark) }
     def alloc_mark
@@ -235,7 +241,7 @@ class MIRLowering
   def place_string_value_for_heap_destination(mir, ast_node)
     return mir if heap_owned_result?(mir, ast_node)
 
-    mir = MIR::TryExpr.new(mir) if Type.from_node(ast_node)&.error_union?
+    mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "heap destination placement").error_union?
     MIR::DupeSlice.new(mir, :heap)
   end
 
@@ -280,18 +286,8 @@ class MIRLowering
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
   def heap_owned_result?(mir, ast_node)
-    return heap_owned_result?(mir.expr, ast_node) if mir.is_a?(MIR::Cast)
-    return heap_owned_result?(mir.expr, ast_node) if mir.is_a?(MIR::TryExpr)
-    return true if mir.is_a?(MIR::DupeSlice) && mir.alloc == :heap
-    return true if mir.is_a?(MIR::ConcatStr) && mir.alloc == :heap
-    return true if mir.is_a?(MIR::CapWrap) && mir.alloc == :heap
-    return true if mir.is_a?(MIR::DeepCopy) && mir.strategy == :full_value && mir.alloc == :heap
-    return true if mir.is_a?(MIR::Call) && mir.owned_return?
-    return true if ast_node.is_a?(AST::NextExpr)
-    if mir.is_a?(MIR::InlineZig)
-      return true if mir.stdlib_def&.heap_return_alloc?
-      return true if mir.allocs.is_a?(Hash) && mir.allocs.values.any? { |a| a == :heap }
-    end
+    effect = mir.respond_to?(:ownership_effect) ? mir.ownership_effect : MIR::OwnershipEffect.none
+    return true if effect.produces_owned && effect.alloc == :heap
 
     node = ast_node
     node = node.value if node.is_a?(AST::MoveNode)
@@ -678,11 +674,12 @@ class MIRLowering
       return nil
     end
 
-    alloc = mir_owned_alloc(init) || :heap
+    effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    alloc = effect.alloc || mir_owned_alloc(init) || :heap
     stamp_allocating_result_target!(init, name, alloc: alloc)
     AllocatingResultFact.new(
       name: name,
-      alloc: alloc,
+      ownership_effect: effect.produces_owned ? effect.with_target(name) : MIR::OwnershipEffect.owned(alloc: alloc, target_var: name),
       type_info: Type.new(:Untyped),
       scope: alloc == :heap ? :heap : :iteration,
     )
@@ -977,7 +974,8 @@ class MIRLowering
     pending = flush_pending
     suffix_lowered = T.must(stmts[(last_user_idx + 1)..]).empty? ? [] : lower_body(stmts[(last_user_idx + 1)..])
 
-    T.must(prefix_lowered) + pending + T.must(suffix_lowered) + [MIR::BreakStmt.new(label, result_mir)]
+    tail = pending + T.must(suffix_lowered) + [MIR::BreakStmt.new(label, result_mir)]
+    T.must(prefix_lowered) + normalize_allocating_mir_body(tail)
   end
 
   # Lower a full program into MIR::Program with standard imports + footer.
@@ -1149,16 +1147,12 @@ class MIRLowering
 
   sig { params(kind: Symbol, _rt_name: T.untyped).returns(Symbol) }
   def alloc_expr(kind, _rt_name = nil)
-    kind == :heap ? :heap : :frame
+    MIR::Placement.alloc(kind, :frame)
   end
 
   sig { params(sym: Symbol).returns(Symbol) }
   def alloc_from_sym(sym)
-    case sym
-    when :heap  then :heap
-    when :frame then :frame
-    else :heap
-    end
+    MIR::Placement.alloc(sym, :heap)
   end
 
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
@@ -1200,11 +1194,7 @@ class MIRLowering
   # Resolve allocator symbol to Zig string (for InlineZig/RawZig patterns only).
   sig { params(kind: Symbol).returns(String) }
   def alloc_zig_str(kind)
-    case kind
-    when :heap    then "#{@rt_name}.heapAlloc()"
-    when :frame   then "#{@rt_name}.frameAlloc()"
-    else "#{@rt_name}.heapAlloc()"
-    end
+    MIR::Placement.zig_allocator(kind, @rt_name)
   end
 
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.

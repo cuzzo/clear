@@ -102,6 +102,49 @@ module MIR
     end
   end
 
+  class OwnershipEffect < T::Struct
+    extend T::Sig
+
+    const :produces_owned, T::Boolean
+    const :alloc, T.nilable(Symbol)
+    const :cleanup_kind, T.nilable(Symbol)
+    const :requires_hoist, T::Boolean
+    const :target_var, T.nilable(String)
+
+    sig { returns(OwnershipEffect) }
+    def self.none
+      new(
+        produces_owned: false,
+        alloc: nil,
+        cleanup_kind: nil,
+        requires_hoist: false,
+        target_var: nil,
+      )
+    end
+
+    sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol, requires_hoist: T::Boolean, target_var: T.nilable(String)).returns(OwnershipEffect) }
+    def self.owned(alloc:, cleanup_kind: :uniform, requires_hoist: true, target_var: nil)
+      new(
+        produces_owned: true,
+        alloc: alloc,
+        cleanup_kind: cleanup_kind,
+        requires_hoist: requires_hoist,
+        target_var: target_var,
+      )
+    end
+
+    sig { params(name: String).returns(OwnershipEffect) }
+    def with_target(name)
+      OwnershipEffect.new(
+        produces_owned: produces_owned,
+        alloc: alloc,
+        cleanup_kind: cleanup_kind,
+        requires_hoist: requires_hoist,
+        target_var: name,
+      )
+    end
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -113,6 +156,8 @@ module MIR
     def stmt?; false; end
     sig { returns(T::Boolean) }
     def expr?; false; end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect; OwnershipEffect.none; end
   end
 
   module Stmt
@@ -1164,7 +1209,12 @@ module MIR
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # Byte slice duplication.
@@ -1173,7 +1223,12 @@ module MIR
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DupeSlice = Struct.new(:source, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
+    end
   end
 
   # Typed slice allocation (uninitialized).
@@ -1182,7 +1237,12 @@ module MIR
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # Free a slice.
@@ -1253,7 +1313,13 @@ module MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
                         :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none if strategy == :passthrough
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # --- Collection Initialization ---
@@ -1269,7 +1335,12 @@ module MIR
   # alloc: symbol (:heap, :frame, nil) -- resolved to Zig by emitter.
   ContainerInit = Struct.new(:zig_type, :strategy, :alloc,
                              :capacity) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # --- Capability Wrapping ---
@@ -1286,13 +1357,24 @@ module MIR
                        :sync_type, # "CheatLib.Locked(T)", nil
                        :own_fn,    # "arcCreate", "rcCreate", nil
                        :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      kind = own_fn ? :rc : :uniform
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: kind)
+    end
   end
 
   # Promote a consumed Rc(T) handle into a fresh Arc(T).
   # Zig: copy rc.ctrl.data.* into a new Arc, then release the consumed Rc.
   SharePromote = Struct.new(:source, :zig_base, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :rc)
+    end
   end
 
   # Rc/Arc retain (reference count increment).
@@ -1326,7 +1408,12 @@ module MIR
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   MakeList = Struct.new(:elem_type, :items, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # Frame mark save.
@@ -1559,6 +1646,13 @@ module MIR
 
     sig { returns(T::Boolean) }
     def owned_return? = owned_return == true
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless owned_return?
+      alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
+      OwnershipEffect.owned(alloc: alloc_arg&.kind)
+    end
   end
 
   # Tail call (emits @call(.always_tail, callee, .{args})).
@@ -1590,6 +1684,12 @@ module MIR
     end
     def initialize(receiver, method, args, try_wrap, callable_contract = nil, owned_result_alloc = nil)
       super(receiver, method, args, try_wrap, callable_contract, owned_result_alloc)
+    end
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless owned_result_alloc.is_a?(Symbol)
+      OwnershipEffect.owned(alloc: owned_result_alloc)
     end
   end
 
@@ -1659,8 +1759,15 @@ module MIR
   # Labeled block expression.
   # Zig: label: { body; break :label result; }
   BlockExpr = Struct.new(:label, :body) do
+    extend T::Sig
     include Expr
     # body: [MIR stmt] -- last stmt should be BreakStmt with matching label
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      break_stmt = body&.reverse&.find { |stmt| stmt.is_a?(BreakStmt) }
+      return OwnershipEffect.none unless break_stmt.is_a?(BreakStmt)
+      break_stmt.value.ownership_effect
+    end
   end
 
   # String concatenation.
@@ -1668,29 +1775,53 @@ module MIR
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   # rt_expr: Zig expression for runtime (e.g. "rt") -- used for rt-dependent calls.
   ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
+    end
   end
 
   # Type cast.
   # Zig: @as(target_type, expr)  or  @intCast(expr)  etc.
   Cast = Struct.new(:expr, :target_type, :method) do
+    extend T::Sig
     include Expr
     # method: :as, :intCast, :floatCast, :ptrCast, :intFromFloat,
     #         :floatFromInt, :truncate, :enumFromInt
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      expr.ownership_effect
+    end
   end
 
   # Try expression (wraps a failable expression).
   # Zig: try expr
   TryExpr = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      expr.ownership_effect
+    end
   end
 
   # Try-catch expression.
   # Zig: expr catch |err| fallback
   # or   (expr catch fallback)
   TryCatch = Struct.new(:expr, :catch_body, :capture) do
+    extend T::Sig
     include Expr
     # capture: error variable name or nil
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      left = expr.ownership_effect
+      right = catch_body.ownership_effect
+      return OwnershipEffect.none unless left.produces_owned && right.produces_owned
+      return OwnershipEffect.none unless left.alloc == right.alloc
+      left
+    end
   end
 
   # Optional orelse expression.
@@ -1904,6 +2035,23 @@ module MIR
     def []=(key, value)
       validate_ownership_contract!(value) if key == :ownership_contract || key == 2
       super
+    end
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless stdlib_def&.emits_allocating?
+      return OwnershipEffect.none if stdlib_def&.mutates_receiver?
+      return OwnershipEffect.none if stdlib_def&.fixed_return? && stdlib_def.return_type.void?
+      alloc = if stdlib_def&.heap_return_alloc?
+        :heap
+      elsif allocs.is_a?(Hash)
+        values = allocs.values.select { |value| value.is_a?(Symbol) }.uniq
+        values.one? ? values.first : nil
+      else
+        nil
+      end
+      return OwnershipEffect.none unless alloc || stdlib_def&.heap_return_alloc?
+      OwnershipEffect.owned(alloc: alloc, target_var: target_var)
     end
 
     private

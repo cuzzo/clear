@@ -9,6 +9,7 @@ require "sorbet-runtime"
 require_relative "../ast/type"
 require_relative "../ast/ast"
 require_relative "../annotator-helpers/function_signature"
+require_relative "local_binding_facts"
 
 module EscapeAnalysis
     extend T::Sig
@@ -310,8 +311,8 @@ module EscapeAnalysis
 
   sig { params(body: T::Array[T.untyped]).void }
   private_class_method def self.mark_receiver_allocations_in_loop!(body)
-    local_names = loop_local_names(body)
-    scan_loop_body(body) do |node|
+    local_names = MIR::LocalBindingAnalysis.direct_loop_body_facts(body).names
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       case node
       when AST::MethodCall
         sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
@@ -337,41 +338,6 @@ module EscapeAnalysis
           arg = node.args[idx]
           mark_expr_identifiers_heap!(arg) if arg
         end
-      end
-    end
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
-  private_class_method def self.loop_local_names(body)
-    names = T.let(Set.new, T::Set[String])
-    scan_loop_body(body) do |node|
-      case node
-      when AST::VarDecl
-        names << node.name.to_s if node.name.is_a?(String)
-      when AST::BindExpr
-        names << node.name.to_s if node.name.is_a?(String) && node.mode == :decl
-      end
-    end
-    names
-  end
-
-  sig { params(body: T::Array[T.untyped], block: T.proc.params(arg0: T.untyped).void).void }
-  private_class_method def self.scan_loop_body(body, &block)
-    body.each do |node|
-      yield node
-      case node
-      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
-        next
-      when AST::IfStatement
-        scan_loop_body(node.then_branch, &block)
-        scan_loop_body(node.else_branch, &block)
-      when AST::MatchStatement
-        node.cases.each { |c| scan_loop_body(c.body, &block) }
-        scan_loop_body(node.default_case, &block) if node.default_case
-      when AST::WithBlock
-        scan_loop_body(node.body, &block)
-      when AST::DoBlock
-        node.branches.each { |b| scan_loop_body(T.cast(b.fetch(:body), T::Array[T.untyped]), &block) }
       end
     end
   end

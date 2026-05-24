@@ -23,6 +23,7 @@ require "sorbet-runtime"
 require_relative "../ast/ast"
 require_relative "../annotator-helpers/function_signature"
 require_relative "cleanup_entry"
+require_relative "local_binding_facts"
 
 # ==========================================
 # CFG - Control Flow Graph (analysis only)
@@ -495,7 +496,7 @@ class OwnershipDataflow
         # Exception: MATCH TAKES unions need the defer with a moved guard.
         if entry.kind == :takes_union || match_takes_var?(fn_node, var)
           entry[:has_moved_guard] = true
-        elsif declared_inside_loop?(fn_node.body || [], var)
+        elsif MIR::LocalBindingAnalysis.declared_inside_loop?(fn_node.body || [], var)
           entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
@@ -539,8 +540,9 @@ class OwnershipDataflow
 
   sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
   def declares_name?(stmt, var)
-    (stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)) &&
-      stmt.name.to_s == var
+    return false unless stmt.is_a?(AST::Locatable)
+
+    MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
   sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
@@ -570,31 +572,6 @@ class OwnershipDataflow
   end
 
   private
-
-  sig { params(stmts: T::Array[T.untyped], var_name: String, loop_depth: Integer).returns(T::Boolean) }
-  def declared_inside_loop?(stmts, var_name, loop_depth: 0)
-    stmts.any? do |stmt|
-      return true if loop_depth.positive? && declares_name?(stmt, var_name)
-      case stmt
-      when AST::WhileLoop, AST::WhileBindLoop
-        declared_inside_loop?(stmt.do_branch || [], var_name, loop_depth: loop_depth + 1)
-      when AST::ForRange, AST::ForEach
-        declared_inside_loop?(stmt.body || [], var_name, loop_depth: loop_depth + 1)
-      when AST::IfStatement
-        declared_inside_loop?(stmt.then_branch || [], var_name, loop_depth: loop_depth) ||
-          declared_inside_loop?(stmt.else_branch || [], var_name, loop_depth: loop_depth)
-      when AST::MatchStatement
-        stmt.cases.any? { |c| declared_inside_loop?(c.body || [], var_name, loop_depth: loop_depth) } ||
-          declared_inside_loop?(stmt.default_case || [], var_name, loop_depth: loop_depth)
-      when AST::WithBlock
-        declared_inside_loop?(stmt.body || [], var_name, loop_depth: loop_depth)
-      when AST::DoBlock
-        stmt.branches.any? { |b| declared_inside_loop?(b[:body] || [], var_name, loop_depth: loop_depth) }
-      else
-        false
-      end
-    end
-  end
 
   # Returns true if the given variable is the subject of a MATCH TAKES statement.
   sig { params(fn_node: AST::FunctionDef, var_name: String).returns(T::Boolean) }
@@ -1441,10 +1418,11 @@ module LoopFrameAnalysis
   sig { params(loop_node: T.untyped, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
-    local_names = collect_local_names(body)
-    has_iteration_frame_locals = local_iteration_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
-    has_extended_frame_locals = local_frame_decls(body, local_names).any? do |decl|
-      entry = decl.respond_to?(:mir_binding_entry) ? decl.mir_binding_entry : nil
+    local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
+    local_names = local_facts.names
+    has_iteration_frame_locals = local_facts.iteration_frame_decls.any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    has_extended_frame_locals = local_facts.frame_decls.any? do |decl|
+      entry = MIR::LocalBindingAnalysis.binding_entry(decl)
       entry&.present? && entry.alloc == :frame && entry.scope != :iteration
     end || outer_frame_receiver_alloc?(body, local_names)
     loop_node.mark_per_iter = has_iteration_frame_locals && !has_extended_frame_locals
@@ -1454,7 +1432,7 @@ module LoopFrameAnalysis
   sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
   def self.outer_frame_receiver_alloc?(body, local_names)
     found = T.let(false, T::Boolean)
-    scan_direct(body) do |node|
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
       next unless node.is_a?(AST::MethodCall)
       sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
       emit = sig&.emit
@@ -1478,87 +1456,6 @@ module LoopFrameAnalysis
     inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
   rescue
     false
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
-  def self.collect_local_names(body)
-    names = Set.new
-    scan_direct(body) do |s|
-      case s
-      when AST::VarDecl
-        names << s.name.to_s if s.name.is_a?(String)
-      when AST::BindExpr
-        names << s.name.to_s if s.name.is_a?(String) && s.mode == :decl
-      end
-    end
-    names
-  end
-
-  sig { params(body: T::Array[T.untyped], _local_names: T::Set[String]).returns(T::Array[T.untyped]) }
-  def self.local_frame_decls(body, _local_names)
-    decls = []
-    scan_direct(body) do |s|
-      case s
-      when AST::VarDecl
-        next unless s.name.is_a?(String)
-        entry = s.respond_to?(:mir_binding_entry) ? s.mir_binding_entry : nil
-        decls << s if binding_frame_allocates?(s, entry)
-      when AST::BindExpr
-        next unless s.mode == :decl && s.name.is_a?(String)
-        entry = s.respond_to?(:mir_binding_entry) ? s.mir_binding_entry : nil
-        decls << s if binding_frame_allocates?(s, entry)
-      end
-    end
-    decls
-  end
-
-  sig { params(node: T.untyped, entry: T.nilable(CleanupEntry)).returns(T::Boolean) }
-  def self.binding_frame_allocates?(node, entry)
-    return false unless entry&.present? && entry.alloc == :frame
-    return true if entry.needs_cleanup?
-    value = node.respond_to?(:value) ? node.value : nil
-    return false if value.nil?
-    return false if value.is_a?(AST::Literal) || value.is_a?(AST::Identifier)
-    true
-  end
-
-  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Array[T.untyped]) }
-  def self.local_iteration_frame_decls(body, local_names)
-    local_frame_decls(body, local_names).select do |decl|
-      entry = decl.respond_to?(:mir_binding_entry) ? decl.mir_binding_entry : nil
-      entry&.present? && entry.alloc == :frame && entry.scope == :iteration
-    end
-  end
-
-  # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
-  # nested loops and function definitions.
-  #
-  # `body` is always an Array (non-nil): a statement body. then_branch /
-  # else_branch / WithBlock#body / DoBlock branch bodies are array
-  # invariants (the parser uses `[]` for an absent else, never nil).
-  # Only MatchStatement#default_case is `[ASTNode] or nil` by AST design
-  # (ast.rb:1171) -- so that ONE recurse site is guarded here (mirrors
-  # `bodies << default_case if default_case` in ast.rb). No nil ever
-  # reaches scan_direct, so the contract sig is strictly non-nil.
-  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-  def self.scan_direct(body, &block)
-    body.each do |s|
-      yield s
-      case s
-      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
-        next  # boundary -- do not enter nested loop / fn body
-      when AST::IfStatement
-        scan_direct(s.then_branch, &block)
-        scan_direct(s.else_branch, &block)
-      when AST::MatchStatement
-        s.cases.each { |c| scan_direct(c.body, &block) }
-        scan_direct(s.default_case, &block) if s.default_case
-      when AST::WithBlock
-        scan_direct(s.body, &block)
-      when AST::DoBlock
-        s.branches.each { |b| scan_direct(b[:body], &block) }
-      end
-    end
   end
 
   # ── SHARD context frame-alloc flags ──────────────────────────────────────
@@ -1605,8 +1502,7 @@ module LoopFrameAnalysis
       # body_allocates_frame: does the EACH body contain local frame allocs?
       each_body = node.respond_to?(:op) && node.op.respond_to?(:body) ? node.op.body : nil
       if each_body
-        local_names = collect_local_names(each_body)
-        ctx[:body_allocates_frame] = local_frame_decls(each_body, local_names).any?
+        ctx[:body_allocates_frame] = MIR::LocalBindingAnalysis.direct_loop_body_facts(each_body).frame_decls.any?
       end
     end
   end

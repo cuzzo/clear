@@ -5,6 +5,7 @@ require "set"
 require_relative "./pipeline_generator"
 require_relative "./zig_type_mapper"
 require_relative "../mir/fiber_ctx_builder"
+require_relative "../mir/placement"
 
 # Lightweight host for PipelineGenerator that routes sub-expression
 # transpilation through MIRLowering + MIREmitter instead of the old
@@ -559,13 +560,9 @@ class PipelineHost
   end
 
   # Convert allocator symbol to Zig string (for InlineZig content only).
-  sig { params(sym: T.anything).returns(String) }
+  sig { params(sym: T.untyped).returns(String) }
   def alloc_zig_str(sym)
-    case sym
-    when :heap  then "rt.heapAlloc()"
-    when :frame then "rt.frameAlloc()"
-    else "rt.heapAlloc()"
-    end
+    MIR::Placement.zig_allocator(sym.is_a?(Symbol) ? sym : nil, "rt")
   end
 
   sig { returns(T.nilable(Proc)) }

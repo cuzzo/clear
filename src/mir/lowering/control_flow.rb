@@ -49,6 +49,8 @@ module MIRLoweringControlFlow
     const :consumed_root_names, T::Set[String]
     const :direct_value_names, T::Set[String]
     const :converted_cleanup_names, T::Set[String]
+    const :transfer_required_names, T::Set[String]
+    const :move_required_names, T::Set[String]
 
     sig { returns(T::Set[String]) }
     def returned_names
@@ -58,6 +60,26 @@ module MIRLoweringControlFlow
       consumed_root_names.each { |name| out << name }
       direct_value_names.each { |name| out << name }
       out
+    end
+
+    sig { params(value_names: T::Set[String]).returns(T::Array[T.untyped]) }
+    def transfer_marks_for(value_names)
+      names = T.let(Set.new, T::Set[String])
+      returned_names.each { |name| names << name }
+      value_names.each { |name| names << name }
+      converted_cleanup_names.each { |name| names << name }
+
+      names
+        .select do |name|
+          transfer_required_names.include?(name) ||
+            converted_cleanup_names.include?(name) ||
+            value_names.include?(name) && name.start_with?("__tmp_")
+        end
+        .flat_map do |name|
+          nodes = T.let([MIR::TransferMark.new(name, :return)], T::Array[T.untyped])
+          nodes << MIR::MoveMark.new(name) if move_required_names.include?(name)
+          nodes
+        end
     end
   end
 
@@ -764,17 +786,17 @@ module MIRLoweringControlFlow
        !value.is_a?(MIR::Ident) &&
        !return_transfers_heap_binding?(node.value) &&
        !mir_allocates?(value) && !(value.is_a?(MIR::Call) && value.owned_return?)
-      ret_type = Type.from_node(node.value)
-      ret_type = ret_type.payload_type if ret_type&.error_union?
+      ret_type = Type.from_node!(node.value, context: "heap carry return placement")
+      ret_type = ret_type.payload_type if ret_type.error_union?
       value = place_value_for_destination(value, node.value, :heap, ret_type) if escaping_value_alloc(ret_type) == :heap
     end
 
     if @current_fn_heap_carry_return && node.value && value.is_a?(MIR::Ident) &&
        @current_fn_param_names&.include?(value.name) &&
        !@current_fn_takes_param_names&.include?(value.name)
-      ret_type = Type.from_node(node.value)
-      ret_type = ret_type.payload_type if ret_type&.error_union?
-      if ret_type&.recursive_cleanup_shape?(@schema_lookup)
+      ret_type = Type.from_node!(node.value, context: "heap carry recursive return")
+      ret_type = ret_type.payload_type if ret_type.error_union?
+      if ret_type.recursive_cleanup_shape?(@schema_lookup)
         value = MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap)
       end
     end
@@ -789,18 +811,16 @@ module MIRLoweringControlFlow
     # existing strong ref. Borrowed/non-local identifiers still retain.
     if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
       ret = MIR::ReturnStmt.new(make_rc_retain(node.value))
-      marks = returned_transfer_marks(value, plan.returned_names, plan.converted_cleanup_names)
+      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set)
       return marks + [ret] unless marks.empty?
       ret
     else
-      # Hoist allocating expressions (DeepCopy, ConcatStr, Cast wrapping these,
-      # etc.) to a named Let so the checker sees it in Let-init position.
+      # Hoist allocating expressions to a named Let so the checker sees the
+      # allocation in the only verifier-visible ownership position.
       # ErrCleanup: the caller takes ownership on success.
-      # Skip Call nodes: they are not flagged by UNHOISTED_ALLOC and the test
-      # contract requires heap-returning calls to remain inline (no __tmp wrap).
-      value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value && !value.is_a?(MIR::Call)
+      value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value
       ret = MIR::ReturnStmt.new(value)
-      marks = returned_transfer_marks(value, plan.returned_names, plan.converted_cleanup_names)
+      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set)
       return marks + [ret] unless marks.empty?
       ret
     end
@@ -827,6 +847,12 @@ module MIRLoweringControlFlow
     if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
       mir_ident_names(value).each { |name| direct_value_names << name.to_s }
     end
+    returned_names = T.let(Set.new, T::Set[String])
+    [explicit_return_names, moved_root_names, consumed_root_names, direct_value_names].each do |set|
+      set.each { |name| returned_names << name }
+    end
+    transfer_required_names = return_transfer_required_names(returned_names)
+    move_required_names = T.let(Set.new, T::Set[String])
 
     ReturnOwnershipPlan.new(
       value: value,
@@ -835,6 +861,8 @@ module MIRLoweringControlFlow
       consumed_root_names: consumed_root_names,
       direct_value_names: direct_value_names,
       converted_cleanup_names: Set.new,
+      transfer_required_names: transfer_required_names,
+      move_required_names: move_required_names,
     )
   end
 
@@ -872,6 +900,44 @@ module MIRLoweringControlFlow
     names = T.let(Set.new, T::Set[String])
     collect_returned_binding_names(expr, names)
     names
+  end
+
+  sig { params(names: T::Set[String]).returns(T::Set[String]) }
+  def return_transfer_required_names(names)
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
+    out = T.let(Set.new, T::Set[String])
+    names.each do |name|
+      if @guarded_cleanup_names&.[](name) ||
+         returned_hoist_binding?(name) ||
+         returned_no_cleanup_binding?(name) ||
+         returned_takes_param?(name)
+        out << name
+      end
+    end
+    out
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_takes_param?(name)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    entry = @current_bindings[name] if @current_bindings.respond_to?(:[])
+    entry.respond_to?(:[]) && entry[:source_kind] == :takes_param
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_hoist_binding?(name)
+    return false unless name.start_with?("__hoist_")
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    entry = @current_bindings[name] if @current_bindings.respond_to?(:[])
+    entry.respond_to?(:present?) && entry.present?
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_no_cleanup_binding?(name)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    entry = @current_bindings[name] if @current_bindings.respond_to?(:[])
+    entry.respond_to?(:present?) && entry.present? &&
+      entry.respond_to?(:needs_cleanup?) && !entry.needs_cleanup?
   end
 
   sig { params(body: T.nilable(T::Array[T.untyped])).returns(T::Set[String]) }

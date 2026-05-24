@@ -780,7 +780,7 @@ RSpec.describe LoopFrameAnalysis do
         "#{offenders.size} IfStatement(s) violated the AST invariant"
     end
 
-    it "collect_local_names runs on IF without ELSE (no nil reaches scan_direct)" do
+    it "local binding facts run on IF without ELSE" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE a = 1_i64;
@@ -791,12 +791,13 @@ RSpec.describe LoopFrameAnalysis do
           RETURN;
         END
       CLEAR
-      names = nil
-      expect { names = LoopFrameAnalysis.collect_local_names(main_fn(ast).body) }.not_to raise_error
+      facts = nil
+      expect { facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(main_fn(ast).body) }.not_to raise_error
+      names = T.must(facts).names
       expect(names).to include("a")
     end
 
-    it "collect_local_names runs on PARTIAL MATCH without DEFAULT (default_case nil guarded at recurse site)" do
+    it "local binding facts run on PARTIAL MATCH without DEFAULT" do
       ast = run_mir(<<~CLEAR)
         UNION V { Nil, IntV: Int64 }
         FN main() RETURNS Void ->
@@ -808,14 +809,14 @@ RSpec.describe LoopFrameAnalysis do
           RETURN;
         END
       CLEAR
-      expect { LoopFrameAnalysis.collect_local_names(main_fn(ast).body) }.not_to raise_error
+      expect { MIR::LocalBindingAnalysis.direct_loop_body_facts(main_fn(ast).body) }.not_to raise_error
     end
 
-    it "scan_direct's contract is strictly non-nil (passing nil is a type error, not a no-op)" do
-      # Encodes the CORRECT contract: scan_direct walks a statement body,
+    it "local binding fact traversal contract is strictly non-nil" do
+      # Encodes the CORRECT contract: traversal walks a statement body,
       # which is always an Array. nil must NOT be silently accepted --
       # that was the band-aid. Callers must never pass nil.
-      expect { LoopFrameAnalysis.scan_direct(nil) { |_| } }.to raise_error(TypeError)
+      expect { MIR::LocalBindingAnalysis.each_direct_loop_node(nil) { |_| } }.to raise_error(TypeError)
     end
   end
 

@@ -24,6 +24,7 @@ require "sorbet-runtime"
 
 require_relative "mir"
 require_relative "cleanup_entry"
+require_relative "placement"
 
 class MIREmitter
     extend T::Sig
@@ -1382,12 +1383,7 @@ class MIREmitter
     # rewrites `rt` to the consumer fiber's `__rt_obs_N` — produce
     # consistent allocator strings across both AllocatorRef and
     # alloc_zig-emitted call sites.
-    rt = @rt_name || "rt"
-    case node.kind
-    when :heap    then "#{rt}.heapAlloc()"
-    when :frame   then "#{rt}.frameAlloc()"
-    else               "#{rt}.heapAlloc()"
-    end
+    MIR::Placement.zig_allocator(node.kind, @rt_name)
   end
 
   sig { params(node: MIR::TypeSentinel).returns(T.nilable(String)) }
@@ -1500,12 +1496,9 @@ class MIREmitter
   # Single source of truth: symbol -> Zig allocator expression.
   sig { params(sym: Symbol).returns(String) }
   def alloc_zig(sym)
-    rt = @rt_name || "rt"
-    case sym
-    when :heap    then "#{rt}.heapAlloc()"
-    when :frame   then "#{rt}.frameAlloc()"
-    else raise "alloc_zig: unknown allocator symbol :#{sym.inspect}"
-    end
+    raise "alloc_zig: unknown allocator symbol :#{sym.inspect}" unless sym == :heap || sym == :frame
+
+    MIR::Placement.zig_allocator(sym, @rt_name)
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean, errdefer: T::Boolean).returns(String) }

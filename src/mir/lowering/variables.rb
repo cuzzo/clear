@@ -39,7 +39,7 @@ module MIRLoweringVariables
     const :annotation, T.nilable(String)
     const :heap_return_var, T::Boolean
     const :decl_alloc, Symbol
-    const :init_alloc_override, T.nilable(Symbol)
+    const :init_ownership_effect, MIR::OwnershipEffect
     const :has_caps, T::Boolean
     const :bare_zig, String
     const :generic_id, T::Boolean
@@ -204,8 +204,14 @@ module MIRLoweringVariables
     end
     next_owned_alloc = node.value.is_a?(AST::NextExpr) ? next_result_owned_alloc(node.value, ft, base_decl_alloc) : nil
     source_owned_alloc = owned_binding_source_alloc(node.value)
-    init_alloc_override = next_owned_alloc || source_owned_alloc
-    decl_alloc = init_alloc_override || base_decl_alloc
+    init_ownership_effect = if next_owned_alloc
+      MIR::OwnershipEffect.owned(alloc: next_owned_alloc)
+    elsif source_owned_alloc
+      MIR::OwnershipEffect.owned(alloc: source_owned_alloc)
+    else
+      MIR::OwnershipEffect.none
+    end
+    decl_alloc = init_ownership_effect.alloc || base_decl_alloc
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
     # compose_capability_wrap once the inner is built. This separation is
@@ -225,7 +231,7 @@ module MIRLoweringVariables
       annotation: annotation,
       heap_return_var: heap_return_var == true,
       decl_alloc: decl_alloc,
-      init_alloc_override: init_alloc_override,
+      init_ownership_effect: init_ownership_effect,
       has_caps: has_caps,
       bare_zig: bare_zig,
       generic_id: ft.generic_instance? && ft.generic_base == :Id
@@ -332,8 +338,7 @@ module MIRLoweringVariables
       drop_entry[:has_moved_guard] = true if ft.bounded_stream?
       # One allocator per binding: AllocMark, Cleanup, and the init
       # expression all read the classifier's definitive placement.
-      node_alloc = facts.init_alloc_override || drop_entry.alloc || decl_alloc
-      drop_entry[:alloc] = node_alloc
+      node_alloc = drop_entry.alloc || facts.init_ownership_effect.alloc || decl_alloc
       @current_bindings[node.name.to_s] = drop_entry if @current_bindings
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = node_alloc

@@ -7,6 +7,40 @@ lowering responsibility that already exists as a concept.
 
 ## Work Items
 
+- [x] `material-owned-result-fact`: unify allocating / owned-result provenance
+  into one typed fact path. The fact owns whether the expression produces owned
+  storage, its allocator, target binding, cleanup shape, and whether the result
+  must be hoisted. Var-decl lowering, hoist, and MIRChecker must read this fact
+  instead of re-asking pieces of the question.
+  Progress: added `MIR::OwnershipEffect`; allocation result facts, var-decl
+  placement, hoist, and MIRChecker now consume the same effect object.
+- [x] `material-placement-provenance`: make placement provenance a first-class
+  MIR ownership fact for every owned-storage producer. This must cover calls,
+  method calls, InlineZig, BlockExpr result producers, NEXT/COLLECT, DeepCopy,
+  DupeSlice, aggregate constructors, and future producers through one
+  verifier-visible path.
+  Progress: owned-storage producers expose placement through
+  `ownership_effect`; wrapper expressions forward it through Cast/Try/Block
+  result shapes.
+- [x] `material-node-ownership-effects`: replace the central
+  `mir_allocates?` / `mir_owned_alloc` class-probing protocol with node/fact
+  driven ownership effects. Adding a new ownership-significant MIR node should
+  require declaring its fact, not updating parallel case statements.
+  Progress: `mir_allocates?`, `mir_owned_alloc`, and MIRChecker
+  `allocating_expr?` are compatibility readers over `ownership_effect`, not
+  independent node-class ownership protocols.
+- [x] `material-hard-type-invariants`: remove defensive nil/type probes on the
+  touched MIR ownership paths by making post-annotation / post-lowering inputs
+  non-nil typed facts. Incorrect missing data must fail at the boundary.
+  Progress: return placement now uses `Type.from_node!` at post-annotation
+  boundaries, and var-decl/result placement reads typed `OwnershipEffect`
+  facts instead of soft-probing node classes.
+- [x] `material-return-ownership-plan`: finish `ReturnOwnershipPlan` as the
+  sole source for returned roots, moved roots, consumed roots, cleanup
+  conversion, transfer marks, and final return emission.
+  Progress: return lowering now emits transfer/move marks through
+  `ReturnOwnershipPlan`; the old free-floating `returned_transfer_marks`
+  helper was deleted.
 - [ ] `slopcop-type-norm-burn-down`: audit expanded MIR SlopCop `type_norm`
   dark arms and remove defensive nil/type guards only when the upstream fact can
   be made non-nil / strongly typed. Do not replace them with equivalent guards
@@ -39,11 +73,12 @@ lowering responsibility that already exists as a concept.
   Progress: `MIRLowering::OwnershipTransferPlan` now owns paired
   `TransferMark`/`MoveMark` emission for pre-terminator transfers,
   BG-capture transfers, and MIR consumed-root transfers.
-- [ ] `AllocatingResultFact`: reify `mir_allocates?`, target-var stamping,
+- [x] `AllocatingResultFact`: reify `mir_allocates?`, target-var stamping,
   allocator choice, and alloc-target mutation into one typed result fact so
   hoist/lowering/checker paths cannot forget half the allocation protocol.
   Progress: implicit allocating `Let` handling now produces an
-  `AllocatingResultFact` before emitting `AllocMark`.
+  `AllocatingResultFact` before emitting `AllocMark`; the fact now carries the
+  same `MIR::OwnershipEffect` consumed by hoist and MIRChecker.
 - [x] `CallOwnershipFacts`: expand the existing call-argument facts so stdlib,
   intrinsic, UFCS, and normal calls share the same typed ownership contract
   path. No stdlib-specific ownership side channel.
@@ -53,12 +88,12 @@ lowering responsibility that already exists as a concept.
   The registry conversion now treats method `takes_args` as user-argument
   indexes, so receiver mutation is not mistaken for receiver ownership
   consumption.
-- [ ] `ReturnOwnershipPlan`: make return lowering consume one typed plan for
+- [x] `ReturnOwnershipPlan`: make return lowering consume one typed plan for
   returned names, moved roots, consumed roots, converted cleanup names, and
   final transfer marks.
   Progress: `ReturnOwnershipPlan` now carries explicit returned roots, moved
   roots, consumed roots, and direct MIR value roots separately, with a single
-  derived `returned_names` set for consumers.
+  derived `returned_names` set and authoritative transfer mark emission.
 - [x] `stdlib-arg-fact-boundary`: complete the stdlib/intrinsic argument
   boundary so intrinsic lowering consumes typed argument facts, not raw
   `arg_spec` Array/Hash shape checks. `CallOwnershipFacts` is only complete
@@ -114,6 +149,35 @@ lowering responsibility that already exists as a concept.
   typed plan objects so loop emission reads one authoritative shape.
 - [x] `lower_return`: split return value placement and returned-binding
   collection into a typed return plan before final MIR emission.
+- [x] `decomplex-loop-scope-facts`: replace duplicated loop/scope local
+  binding scanners in cleanup classification, escape placement, and MIR
+  control-flow analysis with one typed `MIR::LocalBindingFacts` boundary.
+  The fact owns direct loop-body traversal, binding names, binding cleanup
+  entries, and frame-allocation binding lists.
+  Progress: added `MIR::LocalBindingAnalysis`; cleanup classifier, escape
+  placement, loop-frame analysis, and loop-frame specs now consume this shared
+  fact instead of owning parallel scanners.
+- [x] `decomplex-placement-fact`: finish centralizing `:frame | :heap`
+  placement reads behind typed placement / ownership facts. MIR lowering and
+  emission may read finalized placement; they must not make fresh heap/frame
+  decisions locally.
+  Progress: added `MIR::Placement` as the allocator normalization/rendering
+  boundary for MIR lowering, MIR emission, and pipeline-host inline Zig.
+- [ ] `decomplex-return-function-plans`: continue shrinking
+  `lower_return` and `lower_function_def` by reifying implicit ownership,
+  cleanup, catch/default, and result protocols into typed plans that delete
+  local protocol reconstruction.
+  Progress: return ownership planning is in place from the prior ownership
+  work; the remaining hotspot is `lower_function_def` prologue/catch/default
+  protocol construction.
+- [ ] `decomplex-mir-hotspots`: audit the current convergence hotspots
+  (`lower_next_expr`, `lower_do_block`, `lower_smooth`, hoist, escape analysis,
+  cleanup classifier) and only change code where a typed fact/plan deletes a
+  real duplicated decision.
+  Progress: current metrics show the loop-scope and placement changes reduced
+  Missing Abstractions, Neglected Conditions, Broken Protocols, and SlopCop
+  genuine gaps. The remaining high-confidence targets are listed in the latest
+  report notes.
 
 ## Acceptance Criteria
 

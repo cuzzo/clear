@@ -422,27 +422,13 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mir_allocates?(node)
-    return true if MIR::HeapCreate === node
-    return false if node.is_a?(MIR::DeepCopy) && node.strategy == :passthrough
-    return true if ALLOC_MIR_CLASSES.any? { |c| c === node }
-    case node
-    when MIR::Call
-      false
-    when MIR::MethodCall
-      return true if node.owned_result_alloc.is_a?(Symbol)
-      mir_result_child_exprs(node).any? do |child|
-        mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-      end
-    when MIR::InlineZig
-      return false unless node.stdlib_def&.emits_allocating?
-      return true unless node.allocs
-      node.allocs.any? { |_k, v| v.is_a?(Symbol) }
-    when MIR::BgBlock
-      true
-    else
-      mir_result_child_exprs(node).any? do |child|
-        mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-      end
+    return false unless node
+    effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
+    return true if effect.produces_owned
+    return true if node.is_a?(MIR::BgBlock)
+
+    mir_result_child_exprs(node).any? do |child|
+      mir_allocates?(child)
     end
   end
 
@@ -659,12 +645,20 @@ module MIRHoistLowering
     prefix = T.let([], T::Array[T.untyped])
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
 
-    mir_result_child_exprs(expr).each do |child|
+    result_children = T.let(mir_result_child_exprs(expr), T::Array[T.untyped])
+    result_children.each do |child|
       if mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-      child_prefix = normalize_allocating_result_expr!(child)
-      prefix.concat(child_prefix)
-      next
+        child_prefix = normalize_allocating_result_expr!(child)
+        prefix.concat(child_prefix)
+        next
+      end
+      used_prefix, normalized = normalize_allocating_used_expr(child)
+      replace_mir_expr_child!(expr, child, normalized)
+      prefix.concat(used_prefix)
     end
+    each_mir_expr_child(expr) do |child|
+      next if result_children.any? { |result_child| result_child.equal?(child) }
+
       used_prefix, normalized = normalize_allocating_used_expr(child)
       replace_mir_expr_child!(expr, child, normalized)
       prefix.concat(used_prefix)
@@ -807,29 +801,8 @@ module MIRHoistLowering
 
   sig { params(mir: T.untyped).returns(T.nilable(Symbol)) }
   def mir_owned_alloc(mir)
-    case mir
-    when MIR::HeapCreate
-      :heap
-    when MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
-         MIR::SharePromote, MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit
-      mir.alloc if mir.respond_to?(:alloc) && mir.alloc.is_a?(Symbol)
-    when MIR::Call
-      alloc_arg = mir.args.find { |arg| arg.is_a?(MIR::AllocatorRef) }
-      alloc_arg&.kind if alloc_arg&.kind.is_a?(Symbol)
-    when MIR::MethodCall
-      mir.owned_result_alloc if mir.owned_result_alloc.is_a?(Symbol)
-    when MIR::Cast
-      mir_owned_alloc(mir.expr)
-    when MIR::TryExpr
-      mir_owned_alloc(mir.expr)
-    when MIR::TryCatch
-      left = mir_owned_alloc(mir.expr)
-      right = mir_owned_alloc(mir.catch_body)
-      left == right ? left : nil
-    when MIR::InlineZig
-      allocs = mir.allocs&.values&.select { |value| value.is_a?(Symbol) }
-      allocs&.uniq&.one? ? allocs.first : nil
-    end
+    return nil unless mir && mir.respond_to?(:ownership_effect)
+    mir.ownership_effect.alloc
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.nilable(CleanupEntry)) }
@@ -910,47 +883,4 @@ module MIRHoistLowering
     end
   end
 
-  sig { params(value: T.untyped, returned_names: T.untyped, cleanup_transfer_names: T.untyped).returns(T::Array[T.untyped]) }
-  def returned_transfer_marks(value, returned_names, cleanup_transfer_names = nil)
-    names = {}
-    returned_names.to_a.each { |n| names[n.to_s] = true } if returned_names
-    cleanup_transfer_names.to_a.each { |n| names[n.to_s] = true } if cleanup_transfer_names
-    value_names = T.let(mir_ident_names(value).map(&:to_s).to_set, T::Set[String])
-    value_names.each { |n| names[n.to_s] = true }
-    names.keys
-      .select { |n| cleanup_transfer_names&.include?(n) || @guarded_cleanup_names&.[](n) ||
-                   n.start_with?("__tmp_") || returned_hoist_binding?(n) ||
-                   (value_names.include?(n) && returned_no_cleanup_binding?(n)) ||
-                   returned_takes_param?(n) }
-      .flat_map do |n|
-        nodes = T.let([MIR::TransferMark.new(n, :return)], T::Array[T.untyped])
-        if cleanup_transfer_names&.include?(n) || @lowered_guarded_cleanup_names&.include?(n)
-          nodes << MIR::MoveMark.new(n)
-        end
-        nodes
-      end
-  end
-
-  sig { params(name: String).returns(T::Boolean) }
-  def returned_takes_param?(name)
-    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
-    entry = bindings[name] if bindings.respond_to?(:[])
-    entry.respond_to?(:[]) && entry[:source_kind] == :takes_param
-  end
-
-  sig { params(name: String).returns(T::Boolean) }
-  def returned_hoist_binding?(name)
-    return false unless name.start_with?("__hoist_")
-    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
-    entry = bindings[name] if bindings.respond_to?(:[])
-    entry.respond_to?(:present?) && entry.present?
-  end
-
-  sig { params(name: String).returns(T::Boolean) }
-  def returned_no_cleanup_binding?(name)
-    bindings = T.unsafe(self).instance_variable_get(:@current_bindings)
-    entry = bindings[name] if bindings.respond_to?(:[])
-    entry.respond_to?(:present?) && entry.present? &&
-      entry.respond_to?(:needs_cleanup?) && !entry.needs_cleanup?
-  end
 end
