@@ -640,9 +640,10 @@ module MIRLoweringControlFlow
     # The return expression's allocating sub-nodes inherit the function's
     # finalized return placement -- the return slot is their "binding".
     pending_start = @pending_stmts.length
-    value = node.value ? with_decl_alloc(nil) do
+    ret_alloc = return_destination_alloc(node)
+    value = node.value ? with_decl_alloc(ret_alloc) do
       lowered = lower(node.value)
-      place_value_for_destination(lowered, node.value, nil, node.value.full_type)
+      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
     end : nil
     rt_name = @rt_name
 

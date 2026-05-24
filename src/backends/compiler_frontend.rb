@@ -16,6 +16,7 @@ require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
 require_relative "../mir/hoist"
+require_relative "../mir/pass_state"
 require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
 
@@ -46,7 +47,9 @@ class CompilerFrontend
     annotator.annotate!(T.must(ast))
 
     PipelineRewriter.new(annotator).rewrite!(ast)
+    MIRPassState.for!(T.must(ast)).mark!(:pipeline_rewritten)
     StringConcatRewriter.new.rewrite!(T.must(ast))
+    MIRPassState.for!(T.must(ast)).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
 
     # Hoist after all annotation-preserving rewrites so escape analysis

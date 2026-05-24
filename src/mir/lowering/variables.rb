@@ -138,7 +138,7 @@ module MIRLoweringVariables
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
     heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
     heap_return_binding_allocates = heap_return_var && escaping_value_alloc(ft) == :heap
-    decl_alloc = if heap_return_binding_allocates || (!heap_return_var && node.symbol&.heap_storage?)
+    decl_alloc = if node.symbol&.heap_storage? || heap_return_binding_allocates
       :heap
     elsif heap_return_var
       :frame
@@ -285,7 +285,7 @@ module MIRLoweringVariables
 
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
-    if has_mir_drop
+    nodes = if has_mir_drop
       # has_mir_drop implies binding_entry.needs_cleanup?, so the entry is
       # always present (NONE.needs_cleanup? is false). The cleanup recipe is
       # inherited from the classifier, never synthesized here (INV-14).
@@ -362,6 +362,35 @@ module MIRLoweringVariables
     else
       let_node
     end
+
+    owner_marks = field_owner_move_marks(node)
+    return nodes if owner_marks.empty?
+    return nodes + owner_marks if nodes.is_a?(Array)
+
+    [nodes, *owner_marks]
+  end
+
+  sig { params(node: AST::VarDecl).returns(T::Array[MIR::Stmt]) }
+  def field_owner_move_marks(node)
+    T.bind(self, MIRLowering) rescue nil
+
+    value = node.value
+    return [] unless value.is_a?(AST::GetField)
+    return [] unless ownership_bearing_type?(Type.from_node(node.full_type))
+
+    root = AST.root_identifier(value)
+    return [] unless root
+
+    source_name = root.name.to_s
+    safe = zig_safe_name(source_name)
+    rename_map = @fn_name_rename_map
+    safe = rename_map[safe].to_s if rename_map&.key?(safe)
+    entry = @current_bindings[source_name] || CleanupEntry::NONE
+    guarded_names = @guarded_cleanup_names
+    guarded = entry.has_moved_guard? || guarded_names&.[](safe) == true
+    return [] unless guarded
+
+    [MIR::TransferMark.new(safe, :owned_sink), MIR::MoveMark.new(safe)]
   end
 
   sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }

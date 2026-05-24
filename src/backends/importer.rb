@@ -172,13 +172,16 @@ class ModuleImporter
     require_relative "../mir/mir_lowering"
     require_relative "../mir/mir_emitter"
     require_relative "../mir/hoist"
+    require_relative "../mir/pass_state"
     require_relative "../mir/pre_mir_type_check"
     require_relative "pipeline_rewriter"
     require_relative "string_concat_rewriter"
     require_relative "compiler_frontend"
 
     PipelineRewriter.new(annotator).rewrite!(ast)
+    MIRPassState.for!(ast).mark!(:pipeline_rewritten)
     StringConcatRewriter.new.rewrite!(ast)
+    MIRPassState.for!(ast).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     Hoist.apply!(ast, schema_lookup: schema_lookup)
 

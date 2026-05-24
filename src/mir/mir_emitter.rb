@@ -516,7 +516,7 @@ class MIREmitter
     parts.each_with_index do |part, i|
       if i == 0
         out << part
-      elsif parts[i - 1].start_with?("// CLR:")
+      elsif T.must(parts[i - 1]).start_with?("// CLR:")
         out << "\n#{part}"
       else
         out << "\n\n#{part}"

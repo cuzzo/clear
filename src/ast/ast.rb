@@ -901,6 +901,7 @@ module AST
     # Resolved program-level SYNC POLICY, either user-written or the baked-in
     # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
+    attr_accessor :mir_pass_state
   end
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }

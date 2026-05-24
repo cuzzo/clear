@@ -13,6 +13,7 @@ require_relative "annotator-helpers/pipe_analysis"
 require_relative "mir/ownership_graph"
 require_relative "mir/escape_analysis"
 require_relative "mir/escape_graph"
+require_relative "mir/pass_state"
 require_relative "mir/bg_capture_classifier"
 require_relative "mir/effect_inference"
 require_relative "mir/concurrency_checks"
@@ -192,6 +193,8 @@ class SemanticAnnotator
     # nil after propagation, e.g., a function called from no callsite).
     flush_deferred_with_validations!
     finalize_capability_audit!
+    MIRPassState.for!(node).mark!(:annotated)
+    nil
   end
 
 private

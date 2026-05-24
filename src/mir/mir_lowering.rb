@@ -15,6 +15,7 @@ require "set"
 
 require_relative "mir"
 require_relative "cleanup_entry"
+require_relative "pass_state"
 require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
@@ -188,6 +189,14 @@ class MIRLowering
     ti = ti.payload_type if ti&.error_union?
     return :heap if ti&.heap_ptr? || ti&.recursive_cleanup_shape?(@schema_lookup)
     nil
+  end
+
+  sig { params(node: AST::ReturnNode).returns(T.nilable(Symbol)) }
+  def return_destination_alloc(node)
+    return nil unless @current_fn_heap_carry_return
+    return nil unless node.value
+
+    escaping_value_alloc(Type.from_node(node.value))
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(MIR::BlockExpr) }
@@ -989,6 +998,7 @@ class MIRLowering
   # Lower a full program into MIR::Program with standard imports + footer.
   sig { params(node: AST::Program, use_c_allocator: T::Boolean, needs_safety: T::Boolean, use_debug_allocator: T::Boolean).returns(T.nilable(MIR::Program)) }
   def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
+    MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering")
     @use_debug_allocator = T.let(use_debug_allocator, T.nilable(T::Boolean))
     items = []
 
@@ -1023,7 +1033,9 @@ class MIRLowering
       end
     end
 
-    MIR::Program.new(items)
+    state = MIRPassState.for!(node).copy
+    state.mark!(:mir_lowered)
+    MIR::Program.new(items, state)
   end
 
   # Lower a module AST into MIR items for inlining via REQUIRE.
@@ -1033,6 +1045,7 @@ class MIRLowering
   # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
   sig { params(node: AST::Program).returns(T::Hash[Symbol, T::Array[T.untyped]]) }
   def lower_module(node)
+    MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering.lower_module")
     type_items = []
     fn_items = []
 

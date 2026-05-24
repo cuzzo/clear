@@ -19,6 +19,15 @@ RSpec.describe MIRChecker do
     MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
   end
 
+  def checked_program(items)
+    state = MIRPassState.new
+    MIRPassState::ORDER.each do |stage|
+      state.mark!(stage)
+      break if stage == :mir_lowered
+    end
+    MIR::Program.new(items, state)
+  end
+
   def alloc_mark(name, alloc, type_info = nil, scope: nil)
     MIR::AllocMark.new(name, alloc, type_info, scope || (alloc == :heap ? :heap : :function))
   end
@@ -1035,7 +1044,7 @@ RSpec.describe MIRChecker do
         MIR::ExprStmt.new(call2, true),
       ])
 
-      program = MIR::Program.new([fn1, fn2])
+      program = checked_program([fn1, fn2])
       errors = checker.check_program!(program)
       expect(errors.any? { |e| e.include?("good::makeList") && e.include?("MIR_CALL_NO_CONTRACT") }).to be true
       expect(errors.any? { |e| e.include?("bad::makeList") && e.include?("HPT_LEAK") }).to be true
@@ -1046,7 +1055,7 @@ RSpec.describe MIRChecker do
       fn1 = fn_def("ok", [
         MIR::Let.new("x", MIR::Lit.new("42"), false, nil, nil),
       ])
-      program = MIR::Program.new([fn1])
+      program = checked_program([fn1])
       errors = checker.check_program!(program)
       expect(errors).to be_empty
     end

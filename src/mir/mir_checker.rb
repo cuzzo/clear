@@ -80,9 +80,15 @@ require "set"
 
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
+require_relative "pass_state"
 
 class MIRChecker
     extend T::Sig
+
+  OWNERSHIP_FIELD_NAMES = T.let(
+    Set[:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :callable_contract, :target_var],
+    T::Set[Symbol],
+  )
 
   class LinearOwnershipState
     extend T::Sig
@@ -160,6 +166,10 @@ class MIRChecker
 
   attr_reader :errors
 
+  AllocMarksByName = T.type_alias { T::Hash[String, T::Array[MIR::AllocMark]] }
+  CleanupMarksByName = T.type_alias { T::Hash[String, T::Array[T.any(MIR::Cleanup, MIR::ErrCleanup)]] }
+  NameSet = T.type_alias { T::Set[String] }
+
   sig { params(fn_name: T.untyped).void }
   def initialize(fn_name: nil)
     @fn_name = fn_name
@@ -174,11 +184,12 @@ class MIRChecker
     @fn_name = fn_def.name
     @errors = []
 
-    allocs = {}
-    cleanups = {}
-    err_cleanups = {}
-    transfers = Set.new
-    errdefer_destroy_names = Set.new
+    allocs = T.let({}, AllocMarksByName)
+    cleanups = T.let({}, CleanupMarksByName)
+    err_cleanups = T.let({}, CleanupMarksByName)
+    transfers = T.let(Set.new, NameSet)
+    return_transfers = T.let(Set.new, NameSet)
+    errdefer_destroy_names = T.let(Set.new, NameSet)
     hpt_leaks = []
     owned_return_lets = []
     inline_alloc_nodes = []
@@ -193,7 +204,9 @@ class MIRChecker
         (cleanups[node.name] ||= []) << node
         (err_cleanups[node.name] ||= []) << node if node.is_a?(MIR::ErrCleanup)
       when MIR::TransferMark
-        transfers << node.name
+        name = node.name.to_s
+        transfers << name
+        return_transfers << name if node.target == :return
       when MIR::ErrDeferStmt
         # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
@@ -240,6 +253,7 @@ class MIRChecker
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, fn_def)
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
     verify_err_cleanup_transfers!(err_cleanups, transfers)
+    verify_return_transfers_heap!(return_transfers, allocs)
     verify_allocating_lets_marked!(fn_def.body, allocs)
     verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
@@ -255,6 +269,22 @@ class MIRChecker
     verify_linear_ownership!(fn_def.body)
 
     @errors
+  end
+
+  sig { params(return_transfers: NameSet, allocs: AllocMarksByName).void }
+  def verify_return_transfers_heap!(return_transfers, allocs)
+    return_transfers.each do |name|
+      marks = allocs[name]
+      unless marks && !marks.empty?
+        @errors << error(:RETURN_TRANSFER_WITHOUT_ALLOC, name,
+          "return ownership transfer has no MIR::AllocMark")
+        next
+      end
+      next if marks.all? { |mark| mark.alloc == :heap }
+
+      @errors << error(:RETURN_TRANSFER_FRAME_ALLOC, name,
+        "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")
+    end
   end
 
   sig { params(nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
@@ -879,12 +909,39 @@ class MIRChecker
 
   sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }
   def check_program!(program, strict: false)
-    all_errors = []
+    MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")
+    all_errors = T.let(ownership_registry_errors, T::Array[String])
     program.items.each do |item|
       next unless item.is_a?(MIR::FnDef)
       all_errors.concat(check_fn!(item, strict: strict))
     end
+    MIRPassState.for!(program).mark!(:mir_checked) if all_errors.empty?
     all_errors
+  end
+
+  sig { returns(T::Array[String]) }
+  def ownership_registry_errors
+    missing = T.let([], T::Array[String])
+    MIR.constants.each do |const_name|
+      value = MIR.const_get(const_name)
+      next unless value.is_a?(Class)
+      next unless value < Struct
+
+      klass = value
+      next if MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES.include?(klass)
+      next if MIR::OWNERSHIP_SIGNIFICANT_NODE_NAMES.include?(T.must(klass.name))
+
+      members = T.cast(T.unsafe(klass).members, T::Array[Symbol])
+      next if (members & OWNERSHIP_FIELD_NAMES.to_a).empty?
+
+      missing << T.must(klass.name)
+    end
+    return [] if missing.empty?
+
+    missing.sort.map do |name|
+      "[OWNERSHIP_NODE_NOT_REGISTERED] #{name} -- MIR node has ownership-significant fields " \
+        "but is absent from MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES"
+    end
   end
 
   sig { params(init: T.untyped).returns(T::Boolean) }

@@ -5,6 +5,7 @@ This file is the contract for escape, placement, cleanup, lowering, and MIR veri
 ## Major MIR Stages
 
 MIR compilation is a sequence of authority handoffs. A later stage may verify or consume facts from an earlier stage, but it may not rediscover or silently repair them.
+Every AST and MIR program carries a typed `MIRPassState`. Each pass asserts the exact prior stage it consumes and stamps its own stage only after it has completed. A missing, skipped, or reordered stage is a compiler error, not a best-effort fallback.
 
 1. **AST Hoist**
    Runs before escape analysis. It turns anonymous allocating AST expressions in escape-relevant positions into named bindings so escape analysis can mark symbols, not expression nodes. It preserves annotation facts and does not choose heap versus frame.
@@ -29,6 +30,20 @@ MIR compilation is a sequence of authority handoffs. A later stage may verify or
 
 8. **MIR Checker**
    Verifies the finalized MIR and aborts compilation on any fact it cannot prove memory safe. It never decides placement, invents cleanup, infers implicit ownership transfer, or accepts opaque allocator effects.
+
+## Pass-Order Enforcement
+
+`MIRPassState` is the runtime enforcement mechanism for this document:
+
+- `SemanticAnnotator` stamps `:annotated`.
+- Rewriters stamp `:pipeline_rewritten` and `:string_concat_rewritten`.
+- `Hoist` requires `:string_concat_rewritten` and stamps `:hoisted`.
+- `PreMirTypeCheck` requires `:hoisted` and stamps `:premir_type_checked`.
+- `MIRPass` requires `:premir_type_checked`, then stamps escape, cleanup, loop-frame, needs-rt, and pass-complete stages in order.
+- `MIRLowering` requires `:mir_pass_complete` and emits a MIR program stamped `:mir_lowered`.
+- `MIRChecker` requires `:mir_lowered` and stamps `:mir_checked` only if no MIR errors exist.
+
+Any new pass that reads or writes MIR-relevant facts must add itself to this chain before it can be used.
 
 ## Single Writers
 
@@ -113,6 +128,7 @@ This makes every lifetime extension flow through the same upstream sink facts th
 - an allocator-bearing operation has no target binding;
 - an allocator-bearing operation targets a binding with no `AllocMark`;
 - an owned-return function call is discarded, nested anonymously, or bound without a matching heap `AllocMark`;
+- a return ownership transfer is backed by a frame allocation;
 - allocators disagree between operation, allocation, and cleanup;
 - an allocating expression survives outside a direct `MIR::Let` init;
 - opaque Zig calls hide ownership effects;

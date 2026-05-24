@@ -1924,6 +1924,20 @@ module DiagnosticRegistry
       cause: "A call whose return value owns heap data was paired with an AllocMark that says the value is frame-allocated. That lets AllocMark and Cleanup agree with each other while still freeing heap-owned data through the wrong allocator.",
       fix_hint: "Lowering bug — the AllocMark for a heap-provenance return must use :heap or :cleanup, never :frame.",
     },
+    RETURN_TRANSFER_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Return ownership transfer exists without a matching AllocMark.",
+      cause: "A MIR::TransferMark(:return) says the caller owns a binding after return, but the callee has no checker-visible allocation event for that binding.",
+      fix_hint: "Lowering bug — return transfers must be attached to a named binding with an AllocMark.",
+    },
+    RETURN_TRANSFER_FRAME_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Return ownership transfer is backed by frame allocation.",
+      cause: "A value whose ownership leaves the function cannot be allocated in the callee's frame arena. The frame rewinds before the caller's cleanup runs, producing a dangling buffer or allocator mismatch.",
+      fix_hint: "Escape analysis/lowering bug — escaping owned returns must set the binding storage to heap before MIR lowering emits AllocMark.",
+    },
     TRANSFER_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",

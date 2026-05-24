@@ -13,6 +13,7 @@ require_relative "../annotator-helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "escape_analysis"
 require_relative "control_flow"
+require_relative "pass_state"
 
 class MIRPass
     extend T::Sig
@@ -62,10 +63,14 @@ class MIRPass
   # Escape analysis writes final binding storage; this pass inserts MIR markers.
   sig { params(ast: AST::Program).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def transform!(ast)
+    pass_state = MIRPassState.for!(ast)
+    pass_state.require!(:premir_type_checked, consumer: "MIRPass")
+
     # Dead-simple escape analysis: mark SymbolEntry#storage = :heap for the
     # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
     heap_fns, @bg_heap_upgraded = EscapeAnalysis.apply!(@fn_nodes, @schema_lookup)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
+    pass_state.mark!(:escape_analyzed)
 
     # SYNC propagation ran inside EscapeAnalysis.apply! above (single-pass
     # escape principle). Nothing to do here.
@@ -77,14 +82,17 @@ class MIRPass
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
     end
+    pass_state.mark!(:cleanup_classified)
 
     LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup)
+    pass_state.mark!(:loop_frame_analyzed)
 
     # needs_rt finalization must run after placement and cleanup
     # classification. That is the point where the compiler knows whether a
     # function actually needs an allocator for a heap/frame binding or cleanup.
     # Propagate to callers so runtime threading is decided once from final data.
     finalize_needs_rt!
+    pass_state.mark!(:needs_rt_finalized)
 
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
@@ -111,6 +119,8 @@ class MIRPass
       sig = sig.raw if sig.is_a?(Type) && sig.raw.is_a?(FunctionSignature)
       FunctionSignature.sync_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
     end
+    pass_state.mark!(:mir_pass_complete)
+    nil
   end
 
   private

@@ -22,24 +22,16 @@ require_relative "../src/mir/mir"
 
 RSpec.describe CleanupClassifier do
   def cleanup_for(src, fn_name)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
+    result = compile_mir_frontend(src)
+    ast = result.ast
 
     fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
     raise "Function '#{fn_name}' not found" unless fn_node
 
     CleanupClassifier.classify(
       fn_node,
-      fn_nodes: fn_nodes,
-      schema_lookup: schema_lookup,
+      fn_nodes: result.fn_nodes,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
   end
 
@@ -692,16 +684,9 @@ RSpec.describe CleanupClassifier do
 
   # Run the full MIRPass pipeline and return the cleanup plan for a function.
   def mir_plan_for(src, fn_name)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-    mir.cleanup_bindings[fn_name]
+    result = compile_mir_frontend(src)
+    fn = result.fn_nodes[fn_name]
+    fn&.cleanup_bindings || {}
   end
 
   # ===========================================================================

@@ -853,8 +853,9 @@ module EscapeAnalysis
     expr_t = Type.from_node(expr)
     return false if !expr.is_a?(AST::Identifier) && (expr_t&.rodata? || expr_t&.provenance == :borrow)
     return false if ti.rodata? || ti.provenance == :borrow
-    ti.string? || top_heap_ptr || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup) ||
-      type_contains_cleanup_payload?(ti, schema_lookup)
+    ti.string? || top_heap_ptr || ti.heap_ptr? || ti.resource? || ti.ownership != :affine ||
+      ti.recursive_cleanup_shape?(schema_lookup) ||
+      ti.needs_cleanup?(schema_lookup) || type_contains_cleanup_payload?(ti, schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }

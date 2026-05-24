@@ -137,7 +137,9 @@ RSpec.describe "architecture invariants: MIR pass order" do
       "src/backends/compiler_frontend.rb",
       "annotator.annotate!",
       "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "MIRPassState.for!(T.must(ast)).mark!(:pipeline_rewritten)",
       "StringConcatRewriter.new.rewrite!(T.must(ast))",
+      "MIRPassState.for!(T.must(ast)).mark!(:string_concat_rewritten)",
       "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
       "Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)",
       "PreMirTypeCheck.verify!(T.must(ast))",
@@ -151,7 +153,9 @@ RSpec.describe "architecture invariants: MIR pass order" do
       "src/backends/importer.rb",
       "annotator.annotate!",
       "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "MIRPassState.for!(ast).mark!(:pipeline_rewritten)",
       "StringConcatRewriter.new.rewrite!(ast)",
+      "MIRPassState.for!(ast).mark!(:string_concat_rewritten)",
       "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
       "Hoist.apply!(ast, schema_lookup: schema_lookup)",
       "PreMirTypeCheck.verify!(ast)",
@@ -163,11 +167,25 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "runs MIR placement before cleanup classification, loop analysis, and lowering stamps" do
     expect_order(
       "src/mir/mir_pass.rb",
+      "pass_state.require!(:premir_type_checked",
       "EscapeAnalysis.apply!",
+      "pass_state.mark!(:escape_analyzed)",
       "CleanupClassifier.classify",
+      "pass_state.mark!(:cleanup_classified)",
       "LoopFrameAnalysis.analyze!",
+      "pass_state.mark!(:loop_frame_analyzed)",
+      "finalize_needs_rt!",
+      "pass_state.mark!(:needs_rt_finalized)",
       "transform_function!",
+      "pass_state.mark!(:mir_pass_complete)",
     )
+  end
+
+  it "requires each MIR consumer to assert the pass-state stage it consumes" do
+    expect(source("src/mir/hoist.rb")).to include('MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")')
+    expect(source("src/mir/pre_mir_type_check.rb")).to include('MIRPassState.require!(program, :hoisted, consumer: "PreMirTypeCheck")')
+    expect(source("src/mir/mir_lowering.rb")).to include('MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering")')
+    expect(source("src/mir/mir_checker.rb")).to include('MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")')
   end
 
   it "aborts compilation on MIRChecker errors in emitted program paths" do
@@ -182,6 +200,13 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/mir/mir.rb")).to include("attr_reader :checked_arg_count")
     expect(source("src/mir/mir_checker.rb")).to include("verify_callable_contract!")
     expect(source("src/mir/mir_checker.rb")).to include("MIR::CallableContract")
+  end
+
+  it "keeps ownership-significant MIR node classes in an explicit registry" do
+    expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
+    expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
+    expect(source("src/mir/mir.rb")).to include("RawZig, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
   end
 end
 

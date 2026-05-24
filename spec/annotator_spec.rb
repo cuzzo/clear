@@ -1436,17 +1436,7 @@ RSpec.describe SemanticAnnotator do
   describe "Control Flow Validation" do
     # Run full MIRPass pipeline -- LoopFrameAnalysis runs in Phase 2.5 of MIRPass.
     def run_mir(src)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-      mir.transform!(ast)
-      ast
+      run_mir_frontend(src)
     end
 
     context "While Loops (visit_WhileLoop)" do
@@ -1688,7 +1678,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "returned struct/union with implicit COPY fields" do
-      it "marks implicit-copied @list field binding heap" do
+      it "marks the hoisted implicit-copy aggregate heap without promoting the source" do
         src = <<~CLEAR
           UNION Value { Nil, List: Value[] }
           FN makeList() RETURNS !Value ->
@@ -1701,7 +1691,9 @@ RSpec.describe SemanticAnnotator do
         annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
         decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "items" }
-        expect(decl.symbol.storage).to eq(:heap)
+        hoist = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name.to_s.start_with?("__hoist_") }
+        expect(decl.symbol.storage).to eq(:frame)
+        expect(hoist.symbol.storage).to eq(:heap)
       end
     end
 
@@ -2161,18 +2153,10 @@ RSpec.describe SemanticAnnotator do
   describe "Escape Analysis (Heap Promotion)" do
     # Run annotation + MIRPass; sets @_mir_ast so after-block checks SymbolEntry storage.
     def run_mir_escape(src)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      @annotator = SemanticAnnotator.new
-      @annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { @annotator.lookup_type_schema(n) })
-      mir.transform!(ast)
-      @_mir_ast = ast
-      ast
+      result = compile_mir_frontend(src)
+      @annotator = result.annotator
+      @_mir_ast = result.ast
+      result.ast
     end
 
     # Walk direct struct-member children of each statement in every function body;

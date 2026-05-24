@@ -18,6 +18,7 @@
 
 require "sorbet-runtime"
 require_relative "../annotator-helpers/intrinsic_registry"
+require_relative "pass_state"
 
 module MIR
   class OwnershipContract
@@ -149,8 +150,28 @@ module MIR
 
   # Program: root container. items is a flat array of top-level nodes.
   # Zig: sequence of const/fn/test declarations separated by blank lines.
-  Program = Struct.new(:items) do
+  class Program
+    extend T::Sig
     include Emittable
+
+    sig { returns(T::Array[Object]) }
+    attr_reader :items
+
+    sig { params(items: T::Array[Object], pass_state: T.nilable(MIRPassState)).void }
+    def initialize(items, pass_state = nil)
+      @items = items
+      @pass_state = T.let(pass_state, T.nilable(MIRPassState))
+    end
+
+    sig { returns(T.nilable(MIRPassState)) }
+    def mir_pass_state
+      @pass_state
+    end
+
+    sig { params(state: T.nilable(MIRPassState)).void }
+    def mir_pass_state=(state)
+      @pass_state = state
+    end
   end
 
   # Function definition.
@@ -1998,4 +2019,35 @@ module MIR
   [RawZig, InlineZig, InlineBc, RawBc, ShardedMapPut, ShardedMapGet].each do |k|
     k.prepend(StdlibDefFsCoercion)
   end
+
+  LEGACY_OWNERSHIP_NODE_TYPES = T.let(
+    [:Alloc, :ReassignCleanup, :FieldCleanup, :ReassignPlan].filter_map do |name|
+      value = const_defined?(name, false) ? const_get(name, false) : nil
+      value if value.is_a?(Class)
+    end.freeze,
+    T::Array[T::Class[T.anything]],
+  )
+  LEGACY_OWNERSHIP_NODE_NAMES = T.let(
+    ["MIR::Alloc", "MIR::ReassignCleanup", "MIR::FieldCleanup", "MIR::ReassignPlan"].freeze,
+    T::Array[String],
+  )
+
+  OWNERSHIP_SIGNIFICANT_NODE_TYPES = T.let([
+    AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
+    ReassignMark, FieldCleanupMark, ReassignWithCleanup,
+    *LEGACY_OWNERSHIP_NODE_TYPES,
+    ReturnMark, DiscardOwned, RawZig, InlineZig,
+    Call, TailCall, MethodCall,
+    HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
+    DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain,
+    RcDowngrade, WeakUpgrade, MakeList, ConcatStr, OwnedSlice,
+    IndexInsert, BatchWindowPush, BatchWindowFlush,
+    SnapshotTransaction, SnapshotMultiTxn,
+    ShardedMapPut, ShardedMapGet,
+  ].freeze, T::Array[T::Class[T.anything]])
+
+  OWNERSHIP_SIGNIFICANT_NODE_NAMES = T.let(
+    (OWNERSHIP_SIGNIFICANT_NODE_TYPES.map { |klass| T.must(klass.name) } + LEGACY_OWNERSHIP_NODE_NAMES).uniq.freeze,
+    T::Array[String],
+  )
 end

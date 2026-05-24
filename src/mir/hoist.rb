@@ -17,6 +17,7 @@ require "sorbet-runtime"
 require "set"
 require_relative "mir"
 require_relative "cleanup_entry"
+require_relative "pass_state"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
@@ -28,12 +29,14 @@ module Hoist
 
   sig { params(ast: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def apply!(ast, schema_lookup: nil)
+    MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
     ctr = T.let([0], T::Array[Integer])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       next if synthesized_body?(stmt)
       hoist_body!(stmt.body, ctr, schema_lookup)
     end
+    MIRPassState.for!(ast).mark!(:hoisted)
   end
 
   # THUNK bodies are not lowered as normal statement lists. They are consumed

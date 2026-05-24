@@ -17,18 +17,7 @@ RSpec.describe LoopFrameAnalysis do
   # --- helpers ----------------------------------------------------------------
 
   def run_mir(src)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    PipelineRewriter.new.rewrite!(ast)
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-    Hoist.apply!(ast, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-    mir.transform!(ast)
-    ast
+    run_mir_frontend(src)
   end
 
   def transpile(src)

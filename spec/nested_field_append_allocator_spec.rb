@@ -64,6 +64,10 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       node.each { |c| each_mir(c, seen, &blk) }
       return
     end
+    if node.is_a?(MIR::Program)
+      each_mir(node.items, seen, &blk)
+      return
+    end
     return unless node.is_a?(Struct) && node.class.name.to_s.start_with?("MIR::")
     blk.call(node)
     node.members.each { |m| each_mir(node[m], seen, &blk) }

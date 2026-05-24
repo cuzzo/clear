@@ -2823,7 +2823,7 @@ RSpec.describe MIRLowering do
 
   describe "Program lowering" do
     it "lowers empty program with standard imports" do
-      prog = AST::Program.new(tok, [])
+      prog = run_mir_frontend("")
       result = lowering.lower(prog)
       expect(result).to be_a(MIR::Program)
       zig = emit(result)
@@ -2835,9 +2835,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers program with statements and source line comments" do
-      enum_node = AST::EnumDef.new(tok, "Color", ["Red", "Blue"], nil)
-      enum_node.full_type = :Void
-      prog = AST::Program.new(tok, [enum_node])
+      prog = run_mir_frontend("ENUM Color { Red, Blue }")
       result = lowering.lower(prog)
       zig = emit(result)
       expect(zig).to include("// CLR:1")
@@ -2845,14 +2843,14 @@ RSpec.describe MIRLowering do
     end
 
     it "includes safety import when requested" do
-      prog = AST::Program.new(tok, [])
+      prog = run_mir_frontend("")
       result = lowering.lower_program(prog, needs_safety: true)
       zig = emit(result)
       expect(zig).to include('@import("runtime/../lib/safety.zig")')
     end
 
     it "includes USE_C_ALLOCATOR when requested" do
-      prog = AST::Program.new(tok, [])
+      prog = run_mir_frontend("")
       result = lowering.lower_program(prog, use_c_allocator: true)
       zig = emit(result)
       expect(zig).to include("USE_C_ALLOCATOR")

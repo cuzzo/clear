@@ -22,48 +22,14 @@ RSpec.describe "MIR pipeline comparison" do
   # Run old pipeline up to MIRPass, then lower each statement via MIR pipeline.
   # Returns array of { old: String, new: String } per top-level statement.
   def compare_statements(src)
-    t = ZigTranspiler.new
-
-    # Run through annotation + MIRPass (same as transpile)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
-    annotator.annotate!(ast)
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-
-    # Collect schemas from annotator for MIRLowering
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
-    ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
-      when AST::EnumDef then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef then union_schemas[stmt.name.to_sym] = stmt.variants
-      end
-    end
-
-    fn_sigs = {}
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      sig = stmt.full_type
-      if sig.is_a?(FunctionSignature)
-        fn_sigs[stmt.name] = sig
-      end
-    end
+    result = compile_mir_frontend(src)
+    ast = result.ast
 
     lowering = MIRLowering.new(
-      struct_schemas: struct_schemas,
-      enum_schemas: enum_schemas,
-      union_schemas: union_schemas,
-      fn_sigs: fn_sigs
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs
     )
     emitter = MIREmitter.new
 
@@ -163,35 +129,14 @@ RSpec.describe "MIR pipeline comparison" do
   # For function body comparison, we need a different approach:
   # extract the function body statements after MIRPass and lower each one.
   def compare_fn_body(src)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
-    annotator.annotate!(ast)
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-
-    # Collect schemas
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
-    ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
-      when AST::EnumDef then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef then union_schemas[stmt.name.to_sym] = stmt.variants
-      end
-    end
+    result = compile_mir_frontend(src)
+    ast = result.ast
 
     lowering = MIRLowering.new(
-      struct_schemas: struct_schemas,
-      enum_schemas: enum_schemas,
-      union_schemas: union_schemas
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs
     )
     emitter = MIREmitter.new
 
@@ -347,39 +292,14 @@ RSpec.describe "MIR pipeline comparison" do
   # =========================================================================
 
   def compare_top_level(src)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
-    annotator.annotate!(ast)
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
-    fn_sigs = {}
-    ast.statements.each do |stmt|
-      case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
-      when AST::EnumDef then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef then union_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::FunctionDef
-        sig = stmt.full_type
-        fn_sigs[stmt.name] = sig if sig.is_a?(FunctionSignature)
-      end
-    end
+    result = compile_mir_frontend(src)
+    ast = result.ast
 
     lowering = MIRLowering.new(
-      struct_schemas: struct_schemas,
-      enum_schemas: enum_schemas,
-      union_schemas: union_schemas,
-      fn_sigs: fn_sigs
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs
     )
     emitter = MIREmitter.new
 
@@ -488,30 +408,11 @@ RSpec.describe "MIR pipeline comparison" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
 
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      annotator = SemanticAnnotator.new(importer: nil, source_dir: ".", strict_test: false)
-      annotator.annotate!(ast)
-      PipelineRewriter.new(annotator).rewrite!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-      mir.transform!(ast)
-
-      fn_sigs = {}
-      ast.statements.each do |stmt|
-        next unless stmt.is_a?(AST::FunctionDef)
-        sig = stmt.full_type
-        fn_sigs[stmt.name] = sig if sig.is_a?(FunctionSignature)
-      end
-
-      lowering = MIRLowering.new(fn_sigs: fn_sigs)
+      result = compile_mir_frontend(src)
+      lowering = MIRLowering.new(fn_sigs: result.fn_sigs)
       emitter = MIREmitter.new
 
-      program = lowering.lower(ast)
+      program = lowering.lower(result.ast)
       expect(program).to be_a(MIR::Program)
 
       zig = emitter.emit(program)
