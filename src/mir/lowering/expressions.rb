@@ -16,6 +16,12 @@ module MIRLoweringExpressions
     const :line, Integer
   end
 
+  class OrRescueFacts < T::Struct
+    const :left_is_error, T::Boolean
+    const :line, Integer
+    const :target, Symbol
+  end
+
   class BinaryIntArithmeticFacts < T::Struct
     const :both_int, T::Boolean
     const :has_comptime_number_literal, T::Boolean
@@ -497,20 +503,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def lower_or_rescue(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @pending_stmts = T.let(@pending_stmts, T.untyped)
-    @rt_name = T.let(@rt_name, T.untyped)
-    @target = T.let(@target, T.untyped)
-    t_left = Type.new(node.left.full_type)
-    # CLEAR's auto-propagate strips `!T` from a fallible call's
-    # full_type (so `x = call()` is x: T at the binding level). The
-    # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
-    # to honor that to keep emitting `catch fallback` (error union)
-    # rather than `orelse fallback` (optional).
-    has_eu = node.left.respond_to?(:error_union_type) && node.left.error_union_type
-    is_error = (t_left&.error_union?) ||
-               (node.left.respond_to?(:can_fail) && node.left.can_fail) ||
-               has_eu
+    facts = or_rescue_facts(node)
 
     left = lower(node.left)
 
@@ -519,7 +512,7 @@ module MIRLoweringExpressions
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
       return left if left.is_a?(MIR::InlineZig) && left.reason == "extern_trampoline"
-      return MIR::TryExpr.new(strip_try(left)) if is_error
+      return MIR::TryExpr.new(strip_try(left)) if facts.left_is_error
       return left
     end
 
@@ -529,17 +522,17 @@ module MIRLoweringExpressions
     # clears the type explicitly (to avoid carrying a stale type
     # from the prior context that no longer matches the new kind).
     if node.right.is_a?(AST::OrExit)
-      if is_error && @target == :bc
+      if facts.left_is_error && facts.target == :bc
         # Register VM: structured sibling (no Zig text). One InlineBc
         # carries the reassignment; RETURN error.CheatError propagates
         # via the bc error-union (EGUARD / inline-exit).
         ex = node.right
-        facts = or_exit_facts(ex, node.token&.line || 0)
+        exit_facts = or_exit_facts(ex, facts.line)
         msg_mir = ex.message ? lower(ex.message) : nil
         reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-          kind: facts.kind, name_id: facts.name_id,
-          clear_type: facts.clear_type, has_message: facts.has_message,
-          line: facts.line
+          kind: exit_facts.kind, name_id: exit_facts.name_id,
+          clear_type: exit_facts.clear_type, has_message: exit_facts.has_message,
+          line: exit_facts.line
         })
         catch_block = MIR::ScopeBlock.new([
           MIR::ExprStmt.new(reassign, false),
@@ -548,17 +541,17 @@ module MIRLoweringExpressions
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
 
-      if is_error
+      if facts.left_is_error
         ex = node.right
-        facts = or_exit_facts(ex, node.token&.line || 0)
-        stmts = or_exit_error_update_stmts(facts)
+        exit_facts = or_exit_facts(ex, facts.line)
+        stmts = or_exit_error_update_stmts(exit_facts)
 
         if ex.message
           msg_zig = emit_expr(lower(ex.message))
-          stmts << MIR::InlineZig.new("#{@rt_name}.__error.message = #{msg_zig}", "or_exit_msg")
+          stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.message = #{msg_zig}", "or_exit_msg")
         end
 
-        stmts << MIR::InlineZig.new("#{@rt_name}.__error.clear_line = #{facts.line}", "or_exit_line")
+        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.clear_line = #{exit_facts.line}", "or_exit_line")
         stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
         catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
         return try_catch_with_provenance(left, catch_block, "__exit_err")
@@ -568,19 +561,19 @@ module MIRLoweringExpressions
 
     # OR PASS: ignore error (Zig's catch undefined)
     if node.right.is_a?(AST::OrPass)
-      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if is_error
+      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if facts.left_is_error
       return left
     end
 
     # OR BREAK: error-to-break (Zig's catch break)
     if node.right.is_a?(AST::OrBreak)
-      return try_catch_with_provenance(left, MIR::Ident.new("break"), nil) if is_error
+      return try_catch_with_provenance(left, MIR::Ident.new("break"), nil) if facts.left_is_error
       return left
     end
 
     # OR PRUNE: same as OR PASS for now
     if node.right.is_a?(AST::OrPrune)
-      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if is_error
+      return try_catch_with_provenance(left, or_pass_fallback(node.left), nil) if facts.left_is_error
       return left
     end
 
@@ -594,12 +587,30 @@ module MIRLoweringExpressions
     # block, only when actually entered.
     right = descend(node, :right)
 
-    if is_error
+    if facts.left_is_error
       return try_catch_with_provenance(left, right, nil, fallback: right)
     end
 
     # Optional orelse
     MIR::Orelse.new(left, right)
+  end
+
+  sig { params(node: AST::BinaryOp).returns(OrRescueFacts) }
+  def or_rescue_facts(node)
+    T.bind(self, MIRLowering) rescue nil
+    left_type = Type.from_node!(node.left, context: "OR/OR_RESCUE left")
+    # CLEAR's auto-propagate strips `!T` from a fallible call's
+    # full_type (so `x = call()` is x: T at the binding level). The
+    # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
+    # to honor that to keep emitting `catch fallback` (error union)
+    # rather than `orelse fallback` (optional).
+    has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
+    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
+    OrRescueFacts.new(
+      left_is_error: left_type.error_union? || can_fail || !!has_error_union,
+      line: node.token&.line || 0,
+      target: lowering_target
+    )
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }
@@ -734,13 +745,14 @@ module MIRLoweringExpressions
 
   sig { params(facts: OrExitFacts).returns(T::Array[T.untyped]) }
   def or_exit_error_update_stmts(facts)
+    T.bind(self, MIRLowering) rescue nil
     stmts = T.let([], T::Array[T.untyped])
     if facts.kind
-      stmts << MIR::InlineZig.new("#{@rt_name}.__error.kind = .#{facts.kind}", "or_exit_kind")
+      stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.kind = .#{facts.kind}", "or_exit_kind")
       if facts.error_name
-        stmts << MIR::InlineZig.new("#{@rt_name}.__error.error_name = @intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.error_name = @intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
       elsif facts.clear_type
-        stmts << MIR::InlineZig.new("#{@rt_name}.__error.error_name = 0", "or_exit_clear_type")
+        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.error_name = 0", "or_exit_clear_type")
       end
     end
     stmts

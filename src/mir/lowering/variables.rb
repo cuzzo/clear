@@ -29,6 +29,20 @@ module MIRLoweringVariables
     const :alloc_sym, Symbol
   end
 
+  class VarDeclFacts < T::Struct
+    const :ft, Type
+    const :binding_entry, CleanupEntry
+    const :has_mir_drop, T::Boolean
+    const :actually_mutated, T::Boolean
+    const :forced_var, T::Boolean
+    const :keyword_mutable, T::Boolean
+    const :annotation, T.nilable(String)
+    const :heap_return_var, T::Boolean
+    const :decl_alloc, Symbol
+    const :has_caps, T::Boolean
+    const :bare_zig, String
+  end
+
   sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[String]).returns(T.nilable(String)) }
   def tied_shared_family_return_param(node, mutable_scalar_params)
     T.bind(self, MIRLowering) rescue nil
@@ -92,12 +106,40 @@ module MIRLoweringVariables
   sig { params(node: AST::VarDecl).returns(T.untyped) }
   def lower_var_decl(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
+    facts = var_decl_facts(node)
+
+    # Every allocating sub-expression of the value -- collection init,
+    # pipeline, COLLECT, toList, concat -- inherits this binding's
+    # finalized placement. ONE allocator per binding, read off the
+    # decl's symbol; no per-branch threading.
+    init = with_decl_alloc(facts.decl_alloc) do
+      lower_var_decl_init(node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)
+    end
+
+    safe_name = var_decl_safe_name(node, facts.has_mir_drop)
+    stamp_var_decl_init_target!(init, safe_name, facts.binding_entry)
+
+    let_node = MIR::Let.new(
+      safe_name,
+      init,
+      facts.keyword_mutable,
+      facts.annotation,
+      var_decl_suppression(safe_name, node, facts)
+    )
+
+    nodes = build_var_decl_nodes(node, facts, safe_name, init, let_node)
+
+    owner_marks = field_owner_move_marks(node)
+    return nodes if owner_marks.empty?
+    return nodes + owner_marks if nodes.is_a?(Array)
+
+    [nodes, *owner_marks]
+  end
+
+  sig { params(node: AST::VarDecl).returns(VarDeclFacts) }
+  def var_decl_facts(node)
+    T.bind(self, MIRLowering) rescue nil
     @current_bindings = T.let(@current_bindings, T.untyped)
-    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
-    @fn_alloc_marked_names = T.let(@fn_alloc_marked_names, T.untyped)
-    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
-    @tmp_counter = T.let(@tmp_counter, T.untyped)
     is_mutable = node.respond_to?(:mutable) && node.mutable
     ft = Type.new(node.full_type)
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
@@ -112,17 +154,20 @@ module MIRLoweringVariables
     # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
     # For same-name vars in different scopes, alloc is overridden per-declaration
     # via alloc_for_node(node) which reads the storage set by escape analysis.
-    decl_name = node.name.to_s
+    is_mutable = is_mutable == true
     node_entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
+    decl_name = node.name.to_s
     binding_entry = node_entry || @current_bindings[decl_name] || CleanupEntry::NONE
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
+    actually_mutated = actually_mutated == true
     is_heap = !!node.symbol&.heap_storage?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           is_heap || ft.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
+    forced_var = forced_var == true
     # Borrowed-by-reference bindings force Zig `var` even when local mutation
     # analysis only sees field mutation through the callee.
     by_ref_borrow = node.symbol&.mutable_ref_target == true || node.symbol&.poly_borrow_target == true
@@ -160,18 +205,32 @@ module MIRLoweringVariables
     # compose_capability_wrap once the inner is built. This separation is
     # what makes "@<shape>:<sync>:<ownership>" combinations compose without
     # per-shape × per-cap glue.
-    has_caps = ft.any_sync? || ft.ownership != :affine
+    has_caps = (ft.any_sync? || ft.ownership != :affine) == true
     bare_ft = has_caps ? ft.bare_data_type : ft
     bare_zig = transpile_type(bare_ft)
 
-    # Every allocating sub-expression of the value -- collection init,
-    # pipeline, COLLECT, toList, concat -- inherits this binding's
-    # finalized placement. ONE allocator per binding, read off the
-    # decl's symbol; no per-branch threading.
-    init = with_decl_alloc(decl_alloc) do
-      lower_var_decl_init(node, ft, bare_zig, has_caps, decl_alloc)
-    end
+    VarDeclFacts.new(
+      ft: ft,
+      binding_entry: binding_entry,
+      has_mir_drop: has_mir_drop,
+      actually_mutated: actually_mutated,
+      forced_var: forced_var,
+      keyword_mutable: keyword_mutable,
+      annotation: annotation,
+      heap_return_var: heap_return_var == true,
+      decl_alloc: decl_alloc,
+      has_caps: has_caps,
+      bare_zig: bare_zig
+    )
+  end
 
+  sig { params(node: AST::VarDecl, has_mir_drop: T::Boolean).returns(String) }
+  def var_decl_safe_name(node, has_mir_drop)
+    T.bind(self, MIRLowering) rescue nil
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+    @fn_alloc_marked_names = T.let(@fn_alloc_marked_names, T.untyped)
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
     # `_` is not a valid Zig binding identifier; a discarded value that
     # still needs cleanup must bind to a unique temp. binding_entry
     # stays keyed by `_` so its cleanup recipe is preserved.
@@ -201,18 +260,27 @@ module MIRLoweringVariables
       @fn_name_rename_map[original_safe] = safe_name if @fn_name_rename_map
     end
 
-    suppression = if keyword_mutable
-      if actually_mutated && node.var_used && !forced_var
+    T.must(safe_name)
+  end
+
+  sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts).returns(T.nilable(String)) }
+  def var_decl_suppression(safe_name, node, facts)
+    if facts.keyword_mutable
+      if facts.actually_mutated && node.var_used && !facts.forced_var
         nil
       else
         "_ = &#{safe_name};"
       end
     else
-      (node.var_used || has_mir_drop) ? nil : "_ = #{safe_name};"
+      (node.var_used || facts.has_mir_drop) ? nil : "_ = #{safe_name};"
     end
+  end
 
+  sig { params(init: T.untyped, safe_name: String, binding_entry: CleanupEntry).void }
+  def stamp_var_decl_init_target!(init, safe_name, binding_entry)
+    T.bind(self, MIRLowering) rescue nil
     if mir_allocates?(init)
-      stamp_allocating_result_target!(init, T.must(safe_name), alloc: binding_entry[:alloc])
+      stamp_allocating_result_target!(init, safe_name, alloc: binding_entry[:alloc])
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
       emits = init.stdlib_def&.emit
       if !init.target_var || (emits&.allocates && !emits&.mutates_receiver)
@@ -223,12 +291,20 @@ module MIRLoweringVariables
         init.allocs = init.allocs.transform_values { |_alloc| binding_alloc }
       end
     end
+  end
 
-    let_node = MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression)
-
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, init: T.untyped, let_node: MIR::Let).returns(T.untyped) }
+  def build_var_decl_nodes(node, facts, safe_name, init, let_node)
+    T.bind(self, MIRLowering) rescue nil
+    ft = facts.ft
+    binding_entry = facts.binding_entry
+    has_mir_drop = facts.has_mir_drop
+    heap_return_var = facts.heap_return_var
+    decl_alloc = facts.decl_alloc
+    actually_mutated = facts.actually_mutated
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
-    nodes = if has_mir_drop
+    if has_mir_drop
       # has_mir_drop implies binding_entry.needs_cleanup?, so the entry is
       # always present (NONE.needs_cleanup? is false). The cleanup recipe is
       # inherited from the classifier, never synthesized here (INV-14).
@@ -305,12 +381,6 @@ module MIRLoweringVariables
     else
       let_node
     end
-
-    owner_marks = field_owner_move_marks(node)
-    return nodes if owner_marks.empty?
-    return nodes + owner_marks if nodes.is_a?(Array)
-
-    [nodes, *owner_marks]
   end
 
   sig do
@@ -620,31 +690,18 @@ module MIRLoweringVariables
   def lower_indexed_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
-    @rt_name = T.let(@rt_name, T.untyped)
-    @schema_lookup = T.let(@schema_lookup, T.untyped)
-    @shard_context = T.let(@shard_context, T.untyped)
     @target = T.let(@target, T.untyped)
     target_node = node.name.target
     ti = target_node.full_type
 
     # Raw slice index (synthetic nodes from SOA rewrite have no type info:
     # full_type defaults to the :Untyped sentinel, never nil)
-    if ti.untyped?
-      target = lower(target_node)
-      idx = lower(node.name.index)
-      val = lower(node.value)
-      return MIR::Set.new(MIR::IndexGet.new(target, idx), val)
-    end
+    return lower_direct_indexed_set(node, cast_index: false) if ti.untyped?
 
     # VM path: the bc_emitter has native MAP_PUT / NATIVE_CALL list-set!
     # dispatch on MIR::Set(IndexGet, val); avoid the Zig-templated InlineZig
     # that the Zig backend needs.
-    if @target == :bc
-      target = lower(target_node)
-      idx = lower(node.name.index)
-      val = lower(node.value)
-      return MIR::Set.new(MIR::IndexGet.new(target, idx), val)
-    end
+    return lower_direct_indexed_set(node, cast_index: false) if @target == :bc
 
     receiver_type = Type.new(ti)
 
@@ -658,14 +715,8 @@ module MIRLoweringVariables
     # shape) but use registry-driven indexed access. Only raw `T[N]`
     # without a collection annotation falls through to native assignment.
     if receiver_type.fixed? && !receiver_type.string? && !receiver_type.collection?
-      target = lower(target_node)
-      idx = lower(node.name.index)
-      val = lower(node.value)
-      cast_idx = MIR::Cast.new(idx, "usize", :intCast)
-      return MIR::Set.new(MIR::IndexGet.new(target, cast_idx), val)
+      return lower_direct_indexed_set(node, cast_index: true)
     end
-
-    rt_name = @rt_name
 
     # Resolve INDEX_OPS :set entry via dispatch_key
     kind = ti.dispatch_key
@@ -685,36 +736,7 @@ module MIRLoweringVariables
     # directly, so the checker has visibility into key dupe / value
     # transforms / shard-direct vs routed dispatch from the node fields.
     if kind == :string_map || kind == :numeric_map
-      dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: false)
-      val = with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
-
-      # Map keys are duped internally by put -- always frame-allocate the
-      # key expression so it's cleaned by arena rewind (no orphaned heap
-      # temporary).
-      if kind == :string_map && idx.is_a?(MIR::ConcatStr)
-        idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
-      end
-      idx = hoist_alloc(idx, node.name.index) if kind == :string_map
-      # Map put takes ownership of the stored value on success. If the value
-      # expression produces owned children, expose that temporary to MIRChecker
-      # with error-only cleanup: normal cleanup would double-free after the map owns it.
-      val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
-      val = hoist_alloc(val, node.value, err_cleanup: true)
-
-      if @target != :bc
-        # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
-        # .ctrl.data wrapping and a single MapRef cell holds the data).
-        if ti.map? && (ti.shared? || ti.multiowned?)
-          target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
-        end
-      end
-      if dispatch.shard_direct
-        return MIR::ShardedMapPut.new(target, idx, val,
-          MIR::Ident.new(@shard_context[:idx]),
-          MIR::Ident.new(@shard_context[:key]),
-          kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind)
-      end
-      return MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind)
+      return lower_map_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
     end
 
     # Non-HashMap kinds (array, list, pool, set_collection) keep their
@@ -727,6 +749,79 @@ module MIRLoweringVariables
         MIR::InlineBc.new(op[:bc_op], [target, idx, val], op), false)
     end
 
+    lower_template_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
+  end
+
+  sig { params(node: AST::Assignment, cast_index: T::Boolean).returns(MIR::Set) }
+  def lower_direct_indexed_set(node, cast_index:)
+    T.bind(self, MIRLowering) rescue nil
+    target = lower(node.name.target)
+    idx = lower(node.name.index)
+    idx = MIR::Cast.new(idx, "usize", :intCast) if cast_index
+    val = lower(node.value)
+    MIR::Set.new(MIR::IndexGet.new(target, idx), val)
+  end
+
+  sig do
+    params(
+      node: AST::Assignment,
+      target_node: T.untyped,
+      receiver_type: Type,
+      target: T.untyped,
+      idx: T.untyped,
+      kind: Symbol,
+      op: T.untyped
+    ).returns(MIR::ShardedMapPut)
+  end
+  def lower_map_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
+    T.bind(self, MIRLowering) rescue nil
+    @shard_context = T.let(@shard_context, T.untyped)
+    @target = T.let(@target, T.untyped)
+    dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: false)
+    val = with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
+
+    # Map keys are duped internally by put -- always frame-allocate the
+    # key expression so it's cleaned by arena rewind (no orphaned heap
+    # temporary).
+    if kind == :string_map && idx.is_a?(MIR::ConcatStr)
+      idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
+    end
+    idx = hoist_alloc(idx, node.name.index) if kind == :string_map
+    # Map put takes ownership of the stored value on success. If the value
+    # expression produces owned children, expose that temporary to MIRChecker
+    # with error-only cleanup: normal cleanup would double-free after the map owns it.
+    val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct
+    val = hoist_alloc(val, node.value, err_cleanup: true)
+
+    if @target != :bc && receiver_type.map? && (receiver_type.shared? || receiver_type.multiowned?)
+      # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
+      # .ctrl.data wrapping and a single MapRef cell holds the data).
+      target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
+    end
+    if dispatch.shard_direct
+      return MIR::ShardedMapPut.new(target, idx, val,
+        MIR::Ident.new(@shard_context[:idx]),
+        MIR::Ident.new(@shard_context[:key]),
+        kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind)
+    end
+    MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind)
+  end
+
+  sig do
+    params(
+      node: AST::Assignment,
+      target_node: T.untyped,
+      receiver_type: Type,
+      target: T.untyped,
+      idx: T.untyped,
+      kind: Symbol,
+      op: T.untyped
+    ).returns(T.untyped)
+  end
+  def lower_template_indexed_assignment(node, target_node, receiver_type, target, idx, kind, op)
+    T.bind(self, MIRLowering) rescue nil
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
+    @shard_context = T.let(@shard_context, T.untyped)
     dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: true)
 
     val_node = node.value

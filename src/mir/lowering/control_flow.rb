@@ -7,6 +7,15 @@ module MIRLoweringControlFlow
 
   requires_ancestor { MIRLowering }
 
+  class MatchLoweringFacts < T::Struct
+    const :expr_label, T.nilable(String)
+    const :subject, T.untyped
+    const :is_union, T::Boolean
+    const :is_int_match, T::Boolean
+    const :is_enum_match, T::Boolean
+    const :expr_type_sym, T.untyped
+  end
+
   sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
   def loop_condition_expr(cond, pending)
     return cond if pending.empty?
@@ -423,76 +432,13 @@ module MIRLoweringControlFlow
   sig { params(node: AST::MatchStatement).returns(T.untyped) }
   def lower_match(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    if node.expr_mode
-      @block_expr_counter += 1
-      expr_label = "__match_#{@block_expr_counter}"
-    else
-      expr_label = nil
-    end
+    facts = match_lowering_facts(node)
+    expr_label = facts.expr_label
+    subject = facts.subject
+    is_union = facts.is_union
 
-    subject = lower(node.expr)
-
-    # Determine if union MATCH
-    union_lookup = begin
-      t = Type.new(node.expr.resolved_type || :Any)
-      t.generic_instance? ? t.generic_base : t.resolved
-    end
-    is_union = @union_schemas&.key?(union_lookup)
-
-    # For simple int/enum matches, emit SwitchStmt
-    expr_type = node.expr.resolved_type
-    expr_type_sym = expr_type.is_a?(Type) ? expr_type.resolved : expr_type
-
-    is_int_match = !is_union && !node.string_match &&
-      (expr_type == :Int64 || expr_type == :Int32 || expr_type == :Int16 || expr_type == :Int8 ||
-       (expr_type.is_a?(Type) && expr_type.integer?)) &&
-      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
-                            [c.value, *(c.extra_values || [])].all? { |p|
-                              p.is_a?(AST::Literal) && (p.type == :INT64 || p.type == :NUMBER)
-                            } }
-
-    is_enum_match = !is_union && !node.string_match && @enum_schemas&.key?(expr_type_sym) &&
-      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
-                            [c.value, *(c.extra_values || [])].all? { |p| p.is_a?(AST::GetField) } }
-
-    lower_branch = ->(stmts) {
-      expr_label ? lower_body_with_break(stmts, expr_label) : lower_body(stmts)
-    }
-
-    if is_int_match || is_enum_match
-      arms = node.cases.map { |c|
-        body = lower_branch.call(c.body)
-        # Multi-pattern arm: emit `.A, .B, .C` (Zig switch supports
-        # comma-separated prongs natively; the body is shared).
-        head_pat = if is_enum_match
-          ".#{c.value.field}"
-        else
-          emit_expr(lower(c.value))
-        end
-        extras_pats = (c.extra_values || []).map { |ev|
-          if is_enum_match
-            ".#{ev.field}"
-          else
-            emit_expr(lower(ev))
-          end
-        }
-        pattern = ([head_pat] + extras_pats).join(", ")
-        { pattern: pattern, body: body }
-      }
-      default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
-      # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
-      default ||= [] if is_int_match
-      # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig
-      if is_enum_match && !default
-        all_variants = @enum_schemas[expr_type_sym]&.map(&:to_s)&.sort || []
-        covered = node.cases.flat_map { |c|
-          [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
-        }.sort
-        default = [] unless covered == all_variants
-      end
-      result = MIR::SwitchStmt.new(subject, arms, default)
+    if facts.is_int_match || facts.is_enum_match
+      result = lower_switch_match(node, facts)
     else
       # If-chain for unions, strings, and complex patterns
       tag_eq = ->(v) { MIR::BinOp.new("==", MIR::Call.new("std.meta.activeTag", [subject], false), MIR::Ident.new(".#{v}")) }
@@ -513,7 +459,7 @@ module MIRLoweringControlFlow
         end
       }
       branches = node.cases.flat_map { |c|
-        body = lower_branch.call(c.body)
+        body = lower_match_branch(c.body, expr_label)
         body = hoist_unhoisted_return_allocs(body, c.body)
         # WHEN-arms are subject-independent guard expressions, even on
         # union subjects. Dispatch them BEFORE the union/string/eq
@@ -582,12 +528,93 @@ module MIRLoweringControlFlow
           [{ cond: cond, body: body }]
         end
       }
-      default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
+      default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, expr_label) : nil
       default = hoist_unhoisted_return_allocs(default, node.default_case) if default
       result = MIR::IfChain.new(branches, default)
     end
 
     expr_label ? MIR::BlockExpr.new(expr_label, [result]) : result
+  end
+
+  sig { params(node: AST::MatchStatement).returns(MatchLoweringFacts) }
+  def match_lowering_facts(node)
+    T.bind(self, MIRLowering) rescue nil
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
+    @enum_schemas = T.let(@enum_schemas, T.untyped)
+    @union_schemas = T.let(@union_schemas, T.untyped)
+    expr_label = if node.expr_mode
+      @block_expr_counter += 1
+      "__match_#{@block_expr_counter}"
+    end
+    subject = lower(node.expr)
+    union_lookup = begin
+      t = Type.new(node.expr.resolved_type || :Any)
+      t.generic_instance? ? t.generic_base : t.resolved
+    end
+    is_union = !!@union_schemas&.key?(union_lookup)
+    expr_type = node.expr.resolved_type
+    expr_type_sym = expr_type.is_a?(Type) ? expr_type.resolved : expr_type
+    is_int_match = !!(!is_union && !node.string_match &&
+      (expr_type == :Int64 || expr_type == :Int32 || expr_type == :Int16 || expr_type == :Int8 ||
+       (expr_type.is_a?(Type) && expr_type.integer?)) &&
+      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
+                            [c.value, *(c.extra_values || [])].all? { |p|
+                              p.is_a?(AST::Literal) && (p.type == :INT64 || p.type == :NUMBER)
+                            } })
+    is_enum_match = !!(!is_union && !node.string_match && @enum_schemas&.key?(expr_type_sym) &&
+      node.cases.all? { |c| c.kind != :when && c.kind != :struct_pattern &&
+                            [c.value, *(c.extra_values || [])].all? { |p| p.is_a?(AST::GetField) } })
+    MatchLoweringFacts.new(
+      expr_label: expr_label,
+      subject: subject,
+      is_union: is_union,
+      is_int_match: is_int_match,
+      is_enum_match: is_enum_match,
+      expr_type_sym: expr_type_sym
+    )
+  end
+
+  sig { params(stmts: T::Array[T.untyped], expr_label: T.nilable(String)).returns(T::Array[T.untyped]) }
+  def lower_match_branch(stmts, expr_label)
+    T.bind(self, MIRLowering) rescue nil
+    T.must(expr_label ? lower_body_with_break(stmts, expr_label) : lower_body(stmts))
+  end
+
+  sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts).returns(MIR::SwitchStmt) }
+  def lower_switch_match(node, facts)
+    T.bind(self, MIRLowering) rescue nil
+    @enum_schemas = T.let(@enum_schemas, T.untyped)
+    arms = node.cases.map { |c|
+      body = lower_match_branch(c.body, facts.expr_label)
+      # Multi-pattern arm: emit `.A, .B, .C` (Zig switch supports
+      # comma-separated prongs natively; the body is shared).
+      head_pat = if facts.is_enum_match
+        ".#{c.value.field}"
+      else
+        emit_expr(lower(c.value))
+      end
+      extras_pats = (c.extra_values || []).map { |ev|
+        if facts.is_enum_match
+          ".#{ev.field}"
+        else
+          emit_expr(lower(ev))
+        end
+      }
+      pattern = ([head_pat] + extras_pats).join(", ")
+      { pattern: pattern, body: body }
+    }
+    default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : nil
+    # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
+    default ||= [] if facts.is_int_match
+    # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig
+    if facts.is_enum_match && !default
+      all_variants = @enum_schemas[facts.expr_type_sym]&.map(&:to_s)&.sort || []
+      covered = node.cases.flat_map { |c|
+        [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
+      }.sort
+      default = [] unless covered == all_variants
+    end
+    MIR::SwitchStmt.new(facts.subject, arms, default)
   end
 
   sig { params(body: T.nilable(T::Array[T.untyped]), ast_stmts: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
