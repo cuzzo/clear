@@ -217,6 +217,212 @@ lowering responsibility that already exists as a concept.
   passes lowered Missing Abstractions to 213, SlopCop `type_norm` to 194, and
   SlopCop genuine gaps to 77 without adding behavior exceptions.
 
+## Current Report Backlog
+
+Snapshot: `/tmp/decomplex-decomplex3-obvious6.md` and
+`/tmp/slopcop-decomplex3-obvious6.md` after commit `90c4bb918`.
+These are the obvious material cleanup targets. The list is grouped by the
+state/protocol that should be reified, not by every individual metric line.
+
+### Tier 1: MIR / Memory / Lowering
+
+- [ ] `report-mir-lower-function-plan`: continue shrinking
+  `lower_function_def` by moving parameter typing, return typing, post/catch
+  wrapper choice, and inner/outer function emission into typed plans. Current
+  convergence still reports `lower_function_def` with 111 findings.
+- [ ] `report-mir-return-plan-followup`: finish reducing `lower_return` by
+  making every returned-value path read `ReturnOwnershipPlan`; no local
+  reconstruction of returned roots, moved roots, cleanup conversion, or final
+  MIR emission.
+- [ ] `report-mir-smooth-plan`: reify `lower_smooth` pipeline facts so source,
+  fallback, ownership, optional/error handling, and cleanup decisions are
+  computed once and read by emission.
+- [ ] `report-mir-hash-literal-plan`: reify `lower_hash_lit` element/key/value
+  type, allocator, ownership effect, and cleanup facts. Current report flags
+  stale derived state and path-condition pressure in that method.
+- [ ] `report-mir-stdlib-def-effect`: make `stdlib_def`, `zig_pattern`,
+  callable ownership, allocation effect, and mutation target one typed call
+  effect object. Current root-cause clusters still show these as separately
+  read/written facts across hoist, var lowering, and intrinsic lowering.
+- [ ] `report-mir-next-shape-fact`: unify observable/promise NEXT shape logic
+  behind one predicate/fact. The remaining repeated tuple is
+  `promise_type.observable? | promise_type.tense_type&.array?`.
+- [ ] `report-mir-id-transfer-predicate`: replace repeated
+  `ti.generic_instance? && ti.generic_base == :Id` with one authoritative
+  Type predicate used by annotator, MIRPass, lowering, and MIRChecker.
+- [ ] `report-mir-local-binding-completeness`: resolve the neglected
+  `AST::Assignment | AST::BindExpr | AST::VarDecl` differences in
+  `MIR::LocalBindingFacts`, MIRPass consumed-name collection, FSM liveness,
+  and migration helpers. If assignments are intentionally excluded in a reader,
+  encode that as a separate typed fact.
+- [ ] `report-mir-control-flow-node-kind`: reify control-flow/splitting node
+  families used by FSM transform, cleanup classifier, escape analysis, and
+  control-flow walkers. Current repeated dispatch sets disagree on
+  `CatchBlock`, `DoBlock`, `MatchStatement`, and loop/with nodes.
+- [ ] `report-mir-capture-analysis-fact`: make capture analysis a non-nil typed
+  fact for BG/DO/FSM/control-flow paths. Current root-cause cluster shows
+  `capture_analysis` read defensively across control-flow and lowering.
+- [ ] `report-mir-call-owned-result-fact`: collapse `call_owned_return?`,
+  `call_owned_return_from_args?`, `heap_carry_return_vars`, lifetime reads, and
+  return type cleanup checks into a typed `CallResultOwnership` fact.
+- [ ] `report-mir-place-value-plan`: tighten
+  `place_value_for_destination` / `place_or_branch_value_for_destination` so
+  allocation, destination type, and ownership effect are a single fact.
+- [ ] `report-mir-implicit-alloc-mark-fact`: finish the
+  `AllocatingResultFact` migration for `implicit_alloc_mark_for_mir_node` and
+  remove remaining local probes of allocating MIR shapes.
+- [ ] `report-mir-discard-owned-type`: reify discard/owned-zig type
+  classification so `discard_owned_zig_type` is not rechecking type shape
+  locally.
+- [ ] `report-mir-collect-stdlib-consumed-roots`: delete the remaining
+  stdlib-specific consumed-root collection path by making all stdlib,
+  intrinsic, UFCS, and normal calls emit the same typed ownership contract.
+- [ ] `report-mir-reentrant-kind`: replace repeated
+  `:reentrant | :reentrant_max_depth | :reentrant_tail_call` dispatch with one
+  effect/reentrance predicate shared by annotator, MIRPass, and lowering.
+- [ ] `report-mir-sync-family-kind`: replace repeated
+  `:ATOMIC | :LOCKED | :VERSIONED` and
+  `:always_mutable | :atomic | :local | :locked | :versioned | :write_locked`
+  dispatch with a typed sync-family classifier. This should also decide whether
+  missing `:local` is real or intentional in lowering capability wrappers.
+- [ ] `report-mir-rc-emit-helper`: unify identical
+  `emit_rc_retain` / `emit_rc_downgrade` / `emit_weak_upgrade` emission behind
+  one retained/weak handle operation fact, not three copied emitter methods.
+- [ ] `report-mir-empty-marker-plan`: remove copied empty-array defaults
+  (`child_bodies`, `marker_plan`, `with_alias_ownership_marks`) by giving
+  capability/capture strategies explicit empty objects.
+
+### Tier 1: Annotation / Type State
+
+- [ ] `report-type-finalize-storage`: fix `AST::Locatable#finalize_storage!`
+  stale derived state (`value_sync`, `t`) by splitting value/type/symbol
+  normalization into typed immutable facts.
+- [ ] `report-type-zig-compute-plan`: fix `Type#compute_zig_type` stale
+  derived state (`inner_zig` from `base_zig`) and repeated ownership/layout
+  dispatch by reifying a typed `ZigTypePlan`.
+- [ ] `report-type-capability-predicates`: replace inline `sync == :atomic`,
+  `sync == :local`, `sync == :locked`, `sync == :write_locked`, and
+  `sync == :versioned` checks with existing predicates or add missing
+  predicates where the receiver is not a `Type`.
+- [ ] `report-type-ownership-predicates`: replace inline
+  `ownership == :shared` and `ownership == :multiowned` in `Type` storage logic
+  with existing `shared?` / `multiowned?` predicates.
+- [ ] `report-type-layout-predicates`: replace inline `layout == :indirect`
+  with the existing `indirect?` predicate or a typed annotation-layout fact.
+- [ ] `report-annotator-full-type-storage-contract`: audit the high-volume
+  `.full_type` / `.storage` co-update cluster. The expected architecture is:
+  annotation writes type, escape writes storage, and any co-write exception
+  must be deleted or represented as a typed phase fact.
+- [ ] `report-annotator-resolve-call-fact`: reify `resolve_call` output into a
+  typed call-resolution object carrying signature, return type, lifetime,
+  ownership/sync/layout/provenance, coerced type, and stdlib/intrinsic emit
+  facts. This is the largest root-cause cluster by volume.
+- [ ] `report-annotator-params-fact`: reify
+  `declare_and_verify_params` output so param defaults, full type,
+  storage/provenance, ownership, and callable contracts are one typed object.
+- [ ] `report-annotator-generic-propagation-fact`: reify
+  `propagate_declared_type_to_value!` and
+  `propagate_collection_metadata!`; current report shows stale `coll_src` from
+  `decl_t` and repeated full_type/storage/provenance writes.
+- [ ] `report-annotator-capability-var-fact`: replace defensive
+  `cap_var_sync`, `cap_var_layout`, `cap_var_storage`, and `cap_var_name`
+  probes with one typed capability target fact.
+- [ ] `report-annotator-validate-capability-plan`: fix stale
+  `atomic_ptr_ok` derived from `syn` and move capability validation inputs into
+  one immutable plan.
+- [ ] `report-annotator-control-flow-state`: replace inline `state == :moved`
+  in `analyze_control_flow_branches` and ownership graph state handling with a
+  typed ownership-state predicate/object.
+- [ ] `report-annotator-return-expected-fact`: fix `visit_ReturnNode` stale
+  `expected_void_compatible` after `expected` changes by deriving return
+  expectation once from a typed return context.
+- [ ] `report-annotator-assignment-target-fact`: fix `visit_Assignment` stale
+  `tname` after `target` changes by using one typed assignment target fact.
+- [ ] `report-annotator-struct-literal-plan`: reify `visit_StructLit` field,
+  storage, move/copy, and cleanup facts. It remains a high convergence hotspot.
+- [ ] `report-annotator-get-field-plan`: reify `visit_GetField` target,
+  schema, optional/error, and ownership facts. It remains a high convergence
+  hotspot.
+- [ ] `report-annotator-next-expr-plan`: align `visit_NextExpr` annotation
+  facts with MIR `NextExprPlan`; no duplicated observable/promise shape logic.
+- [ ] `report-annotator-match-plan`: split `visit_MatchStatement` into typed
+  scrutinee/arm/pattern/result facts. Current report still shows the largest
+  Missing Abstraction around `AST::GetField | AST::MethodCall` arms.
+- [ ] `report-annotator-while-loop-plan`: reify loop condition/body/scope
+  facts for `visit_WhileLoop` and `visit_WhileBindLoop`; they remain top
+  convergence hotspots.
+- [ ] `report-annotator-with-block-plan`: reify capability/sync/resource facts
+  for `visit_WithBlock`; current report flags it as a top convergence hotspot.
+- [ ] `report-annotator-auto-shape-fact`: replace `slot.respond_to?(:shape) &&
+  slot.shape` guards with a typed auto-inference slot shape object.
+- [ ] `report-annotator-auto-predicate`: unify `auto?` / `auto_type?` into one
+  predicate consumed by auto inference and importer.
+- [ ] `report-annotator-void-statement-visitors`: replace identical
+  `visit_PassStmt`, `visit_OrRaise`, `visit_OrBreak`, `visit_OrPass`, and
+  `visit_OrPrune` bodies with one typed void-statement annotation path.
+
+### Tier 1: Pipeline / Formatter / Tooling
+
+- [ ] `report-pipeline-smooth-chain-fact`: replace repeated
+  `BinaryOp && op == :SMOOTH` checks in annotator, pipeline host, and pipeline
+  rewriter with one `smooth_chain?` / chain decomposition fact.
+- [ ] `report-pipeline-concurrent-op-plan`: reify concurrent op analysis in
+  `analyze_concurrent_op`; it remains a top convergence hotspot with fat-union
+  pressure.
+- [ ] `report-pipeline-concurrent-select-each-options`: centralize
+  `parallel=true` option parsing for bounded/stream select/each concurrent
+  paths.
+- [ ] `report-pipeline-select-family`: centralize `AST::SelectOp |
+  AST::WhereOp` family handling across concurrent and non-concurrent pipeline
+  analysis.
+- [ ] `report-pipeline-substitute-placeholders`: fix stale `new_mc` derived
+  from `new_target` after target rewrite in `PipelineHost#substitute_placeholders`.
+- [ ] `report-pipeline-rewriter-recursive-body`: fix stale `skip_if` after
+  `cond` changes in recursive pipeline rewriter.
+- [ ] `report-formatter-block-token-set`: reify the formatter block-boundary
+  token set (`END/FN/FOR/IF/START/TEST/WHEN/WHILE`) so every scanner consumes
+  the same constant and neglected `START` cases cannot recur.
+- [ ] `report-formatter-depth-zero-predicate`: centralize
+  `bdepth.zero? && kdepth.zero?` style arm-boundary predicates.
+- [ ] `report-formatter-match-body-clones`: resolve the Type-3 clone cluster
+  around `emit_match_body` / `emit_fn_block` / wrapping helpers where `+` and
+  `-` are drifted.
+- [ ] `report-formatter-stale-index-derived-state`: audit and fix formatter
+  stale-index findings (`needs_space?`, `find_s_chains`,
+  `branch_end_for_inline_expansion`, `expand_concurrent_drops`,
+  `capability_chain_colon?`, `find_fn_arrow`).
+- [ ] `report-tools-doctor-heap-section`: fix `doctor#section_heap` stale
+  `addrs` after `sites` changes and decide whether `line` metadata should be a
+  typed task-site object.
+- [ ] `report-tools-diagnostic-scan`: fix stale `j` after `i` changes in
+  diagnostic example scanning.
+
+### Tier 2: SlopCop Coverage / Audit Backlog
+
+- [ ] `report-slopcop-type-norm-194`: burn down the remaining 194 `type_norm`
+  dark arms by tightening source contracts; do not replace them with equivalent
+  guards elsewhere.
+- [ ] `report-slopcop-dead-74`: audit the remaining 74 dead arms and delete
+  genuinely unreachable code or convert impossible paths to hard invariants.
+- [ ] `report-slopcop-genuine-77`: after structural cleanup, add fuzz/unit
+  coverage for the remaining 77 genuine gaps, prioritizing MIR lowering,
+  `mir_lowering`, and `control_flow` entries in the SlopCop top table.
+- [ ] `report-slopcop-ffi-21`: classify the 21 FFI dark arms as real external
+  integration cases or dead/invariant cases; add integration coverage only for
+  the real boundary behavior.
+- [ ] `report-slopcop-diagnostic-243`: add negative tests only for diagnostic
+  branches that correspond to user-facing compiler errors; otherwise mark as
+  invariant or delete.
+
+### Lower Priority / Probably Noisy
+
+- [ ] `report-schema-kind-predicate-noise`: inspect schema predicates reported
+  as exact aliases (`enum?`, `resource?`, `union?`, `struct?`). These may be
+  legitimate sum-type query methods; only change if a typed schema kind object
+  deletes real duplicated dispatch.
+- [ ] `report-mir-stmt-expr-predicate-noise`: inspect `stmt?` / `expr?` exact
+  alias noise. Do not refactor unless it removes a real MIR protocol burden.
+
 ## Acceptance Criteria
 
 - New helper data is `T::Struct` or concrete typed methods, not hashes or
