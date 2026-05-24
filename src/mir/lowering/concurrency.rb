@@ -673,7 +673,7 @@ module MIRLoweringConcurrency
              "    break :#{blk_label} #{results_var};\n" \
              "}"
       iz = MIR::InlineZig.new(code, "next_promise_list")
-      iz.stdlib_def = { allocates: true }
+      iz.stdlib_def = FunctionSignature.allocating_intrinsic
       iz.allocs = { results_var => alloc_sym }
       return iz
     end

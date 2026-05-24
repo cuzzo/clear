@@ -19,6 +19,17 @@ lowering responsibility that already exists as a concept.
   emission, and init lowering into typed helper records. This remains the
   largest hotspot and must be handled last enough that the smaller patterns are
   established first.
+- [x] `needs_rt`: make MIR lowering consume only finalized runtime metadata.
+  User functions without a post-MIRPass `needs_rt` value now fail hard instead
+  of defaulting to "probably true"; intrinsic/runtime calls read their typed
+  registry contract.
+- [x] `stdlib_def` / ownership effect reads: synthetic MIR InlineZig producers
+  now attach typed `FunctionSignature` contracts instead of raw Hash literals,
+  and MIR consumers use typed allocation / mutation / ownership predicates.
+- [x] `lower_for_each` and `lower_for_range`: split loop fact collection into
+  typed plan objects so loop emission reads one authoritative shape.
+- [x] `lower_return`: split return value placement and returned-binding
+  collection into a typed return plan before final MIR emission.
 
 ## Acceptance Criteria
 

@@ -258,7 +258,7 @@ class MIRLowering
     return true if mir.is_a?(MIR::Call) && mir.owned_return?
     return true if ast_node.is_a?(AST::NextExpr)
     if mir.is_a?(MIR::InlineZig)
-      return true if mir.stdlib_def&.emit&.return_alloc == :heap
+      return true if mir.stdlib_def&.heap_return_alloc?
       return true if mir.allocs.is_a?(Hash) && mir.allocs.values.any? { |a| a == :heap }
     end
 
@@ -769,8 +769,7 @@ class MIRLowering
     when MIR::ReassignWithCleanup
       mir_ident_names(node.value)
     when MIR::ShardedMapPut
-      emit = node.stdlib_def&.emit
-      return [] unless emit&.takes_value
+      return [] unless node.stdlib_def&.takes_ownership?
       mir_ident_names(node.value)
     when MIR::StructInit
       node.fields.flat_map { |field| mir_ident_names(field[:value]) }

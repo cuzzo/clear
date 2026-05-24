@@ -90,7 +90,7 @@ module MIRLoweringFunctions
     end
     final_type = transpile_type(ret_type)
 
-    fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
+    fn_needs_rt = finalized_needs_rt!(node)
     # Synthesized trampolines allocate child frames, so they need rt even
     # when the user body does not otherwise mention it.
     fn_needs_rt = true if node.thunk_plan
@@ -456,6 +456,14 @@ module MIRLoweringFunctions
     end
   end
 
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def finalized_needs_rt!(node)
+    return true if node.thunk_plan || node.mutual_thunk_plan
+    return node.needs_rt if node.needs_rt == true || node.needs_rt == false
+
+    Kernel.raise "function #{node.name} missing finalized needs_rt metadata before MIR lowering"
+  end
+
   # Build the inner function for a POST-having FunctionDef. Holds the
   # original body verbatim. Marked :private so callers go through the
   # outer wrapper (which validates).
@@ -551,7 +559,7 @@ module MIRLoweringFunctions
     end
 
     iz = MIR::InlineZig.new(body_zig, "post_outer_body")
-    iz.stdlib_def = { allocates: false, borrows: [] }
+    iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
 
     MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
                    [iz], vis, false, comptime_params)
@@ -978,7 +986,7 @@ module MIRLoweringFunctions
     if ti.string?
       return false if ti.symbol? || ti.raw?
       return true if sig&.heap_carry_return == true
-      return true if sig&.emit&.return_alloc == :heap
+      return true if sig&.heap_return_alloc?
       return false if sig
       return ti.heap?
     end
@@ -1471,7 +1479,7 @@ module MIRLoweringFunctions
     iz = MIR::InlineZig.new(code, "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
     is_heap = (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) || !!pt&.heap?
-    iz.stdlib_def = is_heap ? { allocates: true } : { allocates: false, borrows: :all }
+    iz.stdlib_def = is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
     iz
   end
 

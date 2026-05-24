@@ -1902,6 +1902,7 @@ RSpec.describe MIRLowering do
         params: [AST::Param.new(name: "count", type: Type.new(:Int64), mutable: true)],
         return_type: Type.new(:Void)
       )
+      sig.needs_rt = false
 
       result = lowering(fn_sigs: { "bump" => sig }).lower(node)
 

@@ -623,9 +623,8 @@ module CleanupClassifier
     return false unless sig
     return false if sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
     return true if sig.respond_to?(:heap_carry_return) && sig.heap_carry_return == true
-    emit = sig.respond_to?(:emit) ? sig.emit : nil
-    return true if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :heap
-    return false if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :frame
+    return true if sig.heap_return_alloc?
+    return false if sig.frame_return_alloc?
     return false unless sig.respond_to?(:return_type)
     ret = Type.new(sig.return_type)
     ret = ret.payload_type || ret if ret.error_union?

@@ -57,7 +57,7 @@ def extract_clear_blocks(md_path)
 end
 
 def wrap_if_needed(code)
-  return code if code.include?("FN main") || code.include?("FN f(")
+  return code if code.include?("FN ")
 
   lines = code.strip.lines.map(&:strip).reject { |l| l.start_with?("#") || l.empty? }
   return code if lines.all? { |l| l.start_with?("STRUCT", "ENUM", "UNION", "EXTERN", "FN ", "PUB ") }

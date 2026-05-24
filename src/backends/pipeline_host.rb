@@ -603,9 +603,9 @@ class PipelineHost
   end
 
   # stdlib_def for InlineZig nodes that pass an allocator (borrows only).
-  ALLOC_REF_DEF = T.let({ borrows: :all }.freeze, T::Hash[T.untyped, T.untyped])
+  ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)
   # stdlib_def for InlineZig nodes that allocate via the passed allocator.
-  ALLOCATING_DEF = T.let({ allocates: true }.freeze, T::Hash[T.untyped, T.untyped])
+  ALLOCATING_DEF = T.let(FunctionSignature.allocating_intrinsic, FunctionSignature)
 
   # Common: var pipe_mat = ArrayListUnmanaged(T){}; defer pipe_mat.deinit(alloc);
   sig { params(elem_zig: String).returns(T::Array[T.untyped]) }

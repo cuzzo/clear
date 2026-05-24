@@ -282,8 +282,7 @@ module MIRLoweringVariables
     if mir_allocates?(init)
       stamp_allocating_result_target!(init, safe_name, alloc: binding_entry[:alloc])
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
-      emits = init.stdlib_def&.emit
-      if !init.target_var || (emits&.allocates && !emits&.mutates_receiver)
+      if !init.target_var || (init.stdlib_def&.emits_allocating? && !init.stdlib_def&.mutates_receiver?)
         init.target_var = safe_name
       end
       binding_alloc = binding_entry[:alloc]
@@ -479,8 +478,8 @@ module MIRLoweringVariables
     return false if init.is_a?(MIR::Call)
 
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
-      return false unless init.stdlib_def&.emit&.allocates
-      return true if init.stdlib_def.emit&.return_alloc == :heap
+      return false unless init.stdlib_def&.emits_allocating?
+      return true if init.stdlib_def&.heap_return_alloc?
       return false unless init.is_a?(MIR::InlineZig)
 
       allocs = init.allocs

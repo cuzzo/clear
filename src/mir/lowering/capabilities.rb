@@ -889,7 +889,7 @@ module MIRLoweringCapabilities
 
       fail_zig = %Q(#{@rt_name}.setError(.Input, @intFromEnum(ErrorName.PreconditionFail), #{msg_zig}, #{line});\nreturn error.CheatError;)
       iz = MIR::InlineZig.new(fail_zig, "pre_fail")
-      iz.stdlib_def = { allocates: false, borrows: [] }
+      iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
       MIR::IfStmt.new(MIR::UnaryOp.new("!", cond), [iz], nil)
     end
   end
@@ -950,7 +950,7 @@ module MIRLoweringCapabilities
 
     action = emit_error_action_zig(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
     iz = MIR::InlineZig.new(action, "with_guard_fail")
-    iz.stdlib_def = { allocates: false, borrows: [] }
+    iz.stdlib_def = FunctionSignature.empty_borrow_intrinsic
     [iz]
   end
 

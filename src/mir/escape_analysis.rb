@@ -944,9 +944,8 @@ module EscapeAnalysis
     dep = signature_heap_return_from_args?(call, sig)
     return dep unless dep.nil?
 
-    emit = sig.respond_to?(:emit) ? sig.emit : nil
     return true if sig.respond_to?(:heap_carry_return) && sig.heap_carry_return == true
-    return true if emit && emit.respond_to?(:return_alloc) && emit.return_alloc == :heap
+    return true if sig.heap_return_alloc?
     false
   end
 

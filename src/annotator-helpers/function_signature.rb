@@ -99,6 +99,42 @@ class FunctionSignature
     sync_from_function_def!(sig, fn)
   end
 
+  sig do
+    params(
+      return_type: Type,
+      allocates: T::Boolean,
+      borrows: T.nilable(T.any(Symbol, T::Array[T.untyped])),
+      can_fail: T.nilable(T::Boolean),
+      return_alloc: T.nilable(Symbol),
+    ).returns(FunctionSignature)
+  end
+  def self.intrinsic_contract(return_type: Type.new(:Void), allocates: false, borrows: nil,
+                              can_fail: nil, return_alloc: nil)
+    sig = FunctionSignature.new(params: [], return_type: return_type, intrinsic: true)
+    sig.can_fail = can_fail
+    sig.emit = IntrinsicEmit.new(
+      allocates: allocates,
+      borrows: borrows,
+      return_alloc: return_alloc,
+    )
+    sig
+  end
+
+  sig { returns(FunctionSignature) }
+  def self.allocating_intrinsic
+    intrinsic_contract(allocates: true)
+  end
+
+  sig { returns(FunctionSignature) }
+  def self.borrowing_intrinsic
+    intrinsic_contract(borrows: :all)
+  end
+
+  sig { returns(FunctionSignature) }
+  def self.empty_borrow_intrinsic
+    intrinsic_contract(borrows: [])
+  end
+
   sig { params(sig: FunctionSignature, fn: T.untyped).returns(FunctionSignature) }
   def self.sync_from_function_def!(sig, fn)
     sig.needs_rt = fn.needs_rt if fn.respond_to?(:needs_rt)
@@ -160,6 +196,40 @@ class FunctionSignature
   # owned return (e.g. the MIR HPT_LEAK check) gate on this.
   sig { returns(T::Boolean) }
   def fixed_return? = @return_def.fixed?
+
+  sig { returns(T::Boolean) }
+  def emits_allocating?
+    @emit&.allocates == true
+  end
+
+  sig { returns(T::Boolean) }
+  def mutates_receiver?
+    @emit&.mutates_receiver == true
+  end
+
+  sig { returns(T::Boolean) }
+  def takes_ownership?
+    emit = @emit
+    return false unless emit
+
+    takes_args = emit.takes_args
+    emit.takes_value == true || (takes_args ? !takes_args.empty? : false)
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def return_alloc
+    @emit&.return_alloc
+  end
+
+  sig { returns(T::Boolean) }
+  def heap_return_alloc?
+    return_alloc == :heap
+  end
+
+  sig { returns(T::Boolean) }
+  def frame_return_alloc?
+    return_alloc == :frame
+  end
 
   sig { returns(T.untyped) }
   def heap_carry_return = @heap_carry_return

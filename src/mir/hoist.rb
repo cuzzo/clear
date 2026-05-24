@@ -429,7 +429,7 @@ module MIRHoistLowering
     when MIR::Call
       false
     when MIR::InlineZig
-      return false unless node.stdlib_def&.emit&.allocates
+      return false unless node.stdlib_def&.emits_allocating?
       return true unless node.allocs
       node.allocs.any? { |_k, v| v.is_a?(Symbol) }
     when MIR::BgBlock
@@ -445,7 +445,7 @@ module MIRHoistLowering
   def mutating_receiver_allocator_op?(node)
     !!(node.is_a?(MIR::InlineZig) &&
       node.allocs && !node.allocs.empty? &&
-      node.stdlib_def&.emit&.mutates_receiver)
+      node.stdlib_def&.mutates_receiver?)
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
@@ -718,8 +718,7 @@ module MIRHoistLowering
     case expr
     when MIR::InlineZig
       return unless expr.allocs && !expr.allocs.empty?
-      emits = expr.stdlib_def&.emit
-      return if emits&.mutates_receiver
+      return if expr.stdlib_def&.mutates_receiver?
 
       expr.target_var = name
       expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc

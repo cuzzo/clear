@@ -1359,7 +1359,7 @@ module MIRLoweringExpressions
 
     code = "try std.testing.#{helper}(#{args.join(', ')});"
     iz = MIR::InlineZig.new(code, "assert_eq_#{helper}")
-    iz.stdlib_def = { allocates: false, borrows: :all, can_fail: true }
+    iz.stdlib_def = FunctionSignature.intrinsic_contract(borrows: :all, can_fail: true)
     iz
   end
 

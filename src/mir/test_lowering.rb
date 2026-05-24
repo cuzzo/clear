@@ -132,7 +132,7 @@ module TestLowering
 
     if test_that.pending
       skip_iz = MIR::InlineZig.new("return error.SkipZigTest;", "pending_skip")
-      skip_iz.stdlib_def = { allocates: false, borrows: :all }
+      skip_iz.stdlib_def = FunctionSignature.borrowing_intrinsic
       return MIR::TestDef.new(full_name, [env.ctx.fresh_preamble, skip_iz])
     end
 
@@ -223,7 +223,7 @@ module TestLowering
     sig { returns(MIR::InlineZig) }
     def fresh_preamble
       iz = MIR::InlineZig.new(TEST_PREAMBLE, "test_preamble")
-      iz.stdlib_def = { allocates: false, borrows: :all }
+      iz.stdlib_def = FunctionSignature.borrowing_intrinsic
       iz
     end
 
@@ -351,7 +351,7 @@ module TestLowering
       "}",
     ].join("\n")
     iz = MIR::InlineZig.new(ar_code, "assert_raises")
-    iz.stdlib_def = { allocates: false, borrows: :all }
+    iz.stdlib_def = FunctionSignature.borrowing_intrinsic
     iz
   end
 

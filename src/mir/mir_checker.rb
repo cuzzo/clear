@@ -965,8 +965,8 @@ class MIRChecker
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
-    return false unless node.stdlib_def&.emit&.allocates
-    return true if node.stdlib_def.emit&.return_alloc == :heap
+    return false unless node.stdlib_def&.emits_allocating?
+    return true if node.stdlib_def&.heap_return_alloc?
     return false unless node.is_a?(MIR::InlineZig)
 
     allocs = node.allocs
@@ -1607,10 +1607,7 @@ class MIRChecker
     params = sig.respond_to?(:params) ? sig.params : nil
     return true if params.respond_to?(:any?) && params.any? { |p| p.respond_to?(:takes) && p.takes }
 
-    emit = sig.respond_to?(:emit) ? sig.emit : nil
-    takes_args = emit.respond_to?(:takes_args) ? emit.takes_args : nil
-    takes_value = emit.respond_to?(:takes_value) ? emit.takes_value : nil
-    (takes_args.respond_to?(:any?) && takes_args.any?) || takes_value == true
+    sig.takes_ownership?
   end
 
   sig { params(contract: MIR::OwnershipContract).returns(T::Array[String]) }
@@ -1788,7 +1785,7 @@ class MIRChecker
     return false unless expr
     case expr
     when MIR::InlineZig
-      return false if expr.stdlib_def&.emit&.mutates_receiver
+      return false if expr.stdlib_def&.mutates_receiver?
       expr.allocs&.any? { |_k, v| v == :frame }
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
@@ -1966,8 +1963,8 @@ class MIRChecker
     return true if MIR::HeapCreate === expr  # always heap by definition
     return true if expr.is_a?(MIR::Call) && expr.owned_return?
     if expr.is_a?(MIR::InlineZig)
-      return false if expr.stdlib_def&.emit&.mutates_receiver
-      return !!(expr.stdlib_def&.emit&.allocates && expr.allocs&.values&.any? { |v| VALID_ALLOCATORS.include?(v) })
+      return false if expr.stdlib_def&.mutates_receiver?
+      return !!(expr.stdlib_def&.emits_allocating? && expr.allocs&.values&.any? { |v| VALID_ALLOCATORS.include?(v) })
     end
     return expr.alloc.is_a?(Symbol) if ALLOC_PLACED_MIR_CLASSES.any? { |c| c === expr }
     return expr.strategy != :passthrough && expr.alloc.is_a?(Symbol) if MIR::DeepCopy === expr

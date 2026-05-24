@@ -16,6 +16,36 @@ module MIRLoweringControlFlow
     const :expr_type_sym, T.untyped
   end
 
+  class ForEachPlan < T::Struct
+    const :var, String
+    const :body, T::Array[T.untyped]
+    const :rt, MIR::Ident
+    const :collection, T.untyped
+    const :collection_type, Type
+    const :collection_setup, T::Array[T.untyped]
+    const :mutable, T::Boolean
+    const :mark_per_iter, T.nilable(T::Boolean)
+    const :tight, T::Boolean
+  end
+
+  class ForRangePlan < T::Struct
+    const :var, String
+    const :start_value, T.untyped
+    const :end_value, T.untyped
+    const :body, T::Array[T.untyped]
+    const :rt, MIR::Ident
+    const :comparison, String
+    const :iter_var, String
+    const :mark_per_iter, T.nilable(T::Boolean)
+    const :tight, T::Boolean
+  end
+
+  class ReturnLoweringPlan < T::Struct
+    prop :value, T.untyped
+    const :returned_names, T::Set[String]
+    const :converted_cleanup_names, T::Set[String]
+  end
+
   sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
   def loop_condition_expr(cond, pending)
     return cond if pending.empty?
@@ -239,7 +269,17 @@ module MIRLoweringControlFlow
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     @struct_schemas = T.let(@struct_schemas, T.untyped)
     @tmp_counter = T.let(@tmp_counter, T.untyped)
-    var = zig_safe_name(node.var_name)
+    plan = for_each_plan(node)
+
+    loop_stmt = for_each_loop_stmt(node, plan)
+    plan.collection_setup.empty? ? loop_stmt : MIR::ScopeBlock.new(plan.collection_setup + [loop_stmt])
+  end
+
+  sig { params(node: AST::ForEach).returns(ForEachPlan) }
+  def for_each_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
+    var = T.must(zig_safe_name(node.var_name))
     body = lower_body(node.body)
     stamp_loop_frame_allocs_iteration!(body)
     rt = MIR::Ident.new(@rt_name)
@@ -262,8 +302,8 @@ module MIRLoweringControlFlow
       coll = MIR::Ident.new(source_name)
     end
     is_mutable = node.is_mutable == true
-    mark_per_iter = node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil
-    tight = node.respond_to?(:tight) && node.tight
+    mark_per_iter = node.mark_per_iter == true ? true : nil
+    tight = node.tight == true
 
     body = prepend_loop_mark(body, mark_per_iter: mark_per_iter, tight: tight)
 
@@ -271,7 +311,31 @@ module MIRLoweringControlFlow
     if @current_fn_has_rt
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
+    ForEachPlan.new(
+      var: var,
+      body: body,
+      rt: rt,
+      collection: coll,
+      collection_type: ct,
+      collection_setup: collection_setup,
+      mutable: is_mutable,
+      mark_per_iter: mark_per_iter,
+      tight: tight,
+    )
+  end
 
+  sig { params(node: AST::ForEach, plan: ForEachPlan).returns(T.untyped) }
+  def for_each_loop_stmt(node, plan)
+    T.bind(self, MIRLowering) rescue nil
+    @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
+    @for_counter = T.let(@for_counter, T.untyped)
+    @struct_schemas = T.let(@struct_schemas, T.untyped)
+    var = plan.var
+    body = plan.body
+    coll = plan.collection
+    ct = plan.collection_type
+    mark_per_iter = plan.mark_per_iter
+    tight = plan.tight
     loop_stmt = T.let(nil, T.untyped)
     if ct.map?
       @for_counter = (@for_counter || 0) + 1
@@ -360,7 +424,7 @@ module MIRLoweringControlFlow
       # Pointer capture (|*var|) is only needed when iterating structs with mutable field
       # access. For primitive/enum/union element types, value capture (|var|) is correct
       # because primitives are Copy types and can't be meaningfully mutated in-place.
-      capture = if is_mutable
+      capture = if plan.mutable
         elem = ct.element_type
         elem_sym = elem.is_a?(Type) ? elem.resolved : elem
         (elem_sym && @struct_schemas.key?(elem_sym)) ? "*#{var}" : var
@@ -369,7 +433,7 @@ module MIRLoweringControlFlow
       end
       loop_stmt = MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
     end
-    collection_setup.empty? ? loop_stmt : MIR::ScopeBlock.new(collection_setup + [loop_stmt])
+    loop_stmt
   end
 
   sig { params(mir: T.untyped).returns(T::Boolean) }
@@ -396,37 +460,45 @@ module MIRLoweringControlFlow
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @for_counter = T.let(@for_counter, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
+    plan = for_range_plan(node)
+
+    var_decl = MIR::Let.new(plan.var, MIR::Ident.new(plan.iter_var), false, "i64", "_ = &#{plan.var};")
+    body = prepend_loop_mark(plan.body, mark_per_iter: plan.mark_per_iter, tight: plan.tight, after_mark: [var_decl])
+    if !plan.tight && @current_fn_has_rt
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(plan.rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
+    end
+
+    update = MIR::Set.new(MIR::Ident.new(plan.iter_var), MIR::BinOp.new("+", MIR::Ident.new(plan.iter_var), MIR::Lit.new("1")))
+    cond = MIR::BinOp.new(plan.comparison, MIR::Ident.new(plan.iter_var), plan.end_value)
+    iter_init = MIR::Let.new(plan.iter_var, plan.start_value, true, "i64", nil)
+    while_stmt = MIR::WhileStmt.new(cond, body, nil, update, plan.mark_per_iter, plan.tight)
+    MIR::ScopeBlock.new([iter_init, while_stmt])
+  end
+
+  sig { params(node: AST::ForRange).returns(ForRangePlan) }
+  def for_range_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    @for_counter = T.let(@for_counter, T.untyped)
     start_val = lower(node.start_expr)
     end_val = lower(node.end_expr)
-    var = zig_safe_name(node.var_name)
+    var = T.must(zig_safe_name(node.var_name))
     body = lower_body(node.body)
     stamp_loop_frame_allocs_iteration!(body)
     rt = MIR::Ident.new(@rt_name)
     cmp = node.inclusive ? "<=" : "<"
     @for_counter = (@for_counter || 0) + 1
     iter_var = "__for_#{@for_counter}"
-
-    # Prologue: const var: i64 = iter; _ = &var;
-    var_decl = MIR::Let.new(var, MIR::Ident.new(iter_var), false, "i64", "_ = &#{var};")
-
-    body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight, after_mark: [var_decl])
-
-    # Yield check
-    if !node.tight && @current_fn_has_rt
-      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
-    end
-
-    # Update: iter += 1
-    update = MIR::Set.new(MIR::Ident.new(iter_var), MIR::BinOp.new("+", MIR::Ident.new(iter_var), MIR::Lit.new("1")))
-
-    # Condition: iter cmp end
-    cond = MIR::BinOp.new(cmp, MIR::Ident.new(iter_var), end_val)
-
-    # Wrapping block: { var __for: i64 = start; while (...) : (...) { body } }
-    iter_init = MIR::Let.new(iter_var, start_val, true, "i64", nil)
-    tight = node.respond_to?(:tight) && node.tight
-    while_stmt = MIR::WhileStmt.new(cond, body, nil, update, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight)
-    MIR::ScopeBlock.new([iter_init, while_stmt])
+    ForRangePlan.new(
+      var: var,
+      start_value: start_val,
+      end_value: end_val,
+      body: T.must(body),
+      rt: rt,
+      comparison: cmp,
+      iter_var: iter_var,
+      mark_per_iter: node.mark_per_iter == true ? true : nil,
+      tight: node.tight == true,
+    )
   end
 
   sig { params(node: AST::MatchStatement).returns(T.untyped) }
@@ -659,35 +731,12 @@ module MIRLoweringControlFlow
     @current_fn_zig_name = T.let(@current_fn_zig_name, T.untyped)
     @debug_mode = T.let(@debug_mode, T.untyped)
     @pending_stmts = T.let(@pending_stmts, T.untyped)
-    @rt_name = T.let(@rt_name, T.untyped)
     @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
     @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
     @schema_lookup = T.let(@schema_lookup, T.untyped)
-    # The return expression's allocating sub-nodes inherit the function's
-    # finalized return placement -- the return slot is their "binding".
-    pending_start = @pending_stmts.length
-    ret_alloc = return_destination_alloc(node)
-    value = node.value ? with_decl_alloc(ret_alloc) do
-      lowered = lower(node.value)
-      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
-    end : nil
-    rt_name = @rt_name
-
-    # If the return value is a hoisted temp, convert its Cleanup to ErrCleanup:
-    # the caller takes ownership on success, so we only clean up on error.
-    # Borrow-position temps (intermediates, not the return value) keep regular
-    # Cleanup (defer) -- they are freed normally when the function exits.
-    returned_names = returned_binding_names(node.value)
-    returned_names.merge(collect_moved_arg_roots(node))
-    returned_names.merge(collect_stdlib_consumed_roots(node))
-    converted_return_cleanup_names = T.let(Set.new, T::Set[String])
-    if value.is_a?(MIR::Ident)
-      returned_names << value.name
-    end
-    if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
-      returned_names.merge(mir_ident_names(value))
-    end
+    plan = return_lowering_plan(node)
+    value = plan.value
 
     if @current_fn_return_payload_zig&.start_with?("*") &&
        value && !value.is_a?(MIR::HeapCreate) && !value.is_a?(MIR::Call) &&
@@ -725,7 +774,7 @@ module MIRLoweringControlFlow
     # existing strong ref. Borrowed/non-local identifiers still retain.
     if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
       ret = MIR::ReturnStmt.new(make_rc_retain(node.value))
-      marks = returned_transfer_marks(value, returned_names, converted_return_cleanup_names)
+      marks = returned_transfer_marks(value, plan.returned_names, plan.converted_cleanup_names)
       return marks + [ret] unless marks.empty?
       ret
     else
@@ -736,10 +785,36 @@ module MIRLoweringControlFlow
       # contract requires heap-returning calls to remain inline (no __tmp wrap).
       value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value && !value.is_a?(MIR::Call)
       ret = MIR::ReturnStmt.new(value)
-      marks = returned_transfer_marks(value, returned_names, converted_return_cleanup_names)
+      marks = returned_transfer_marks(value, plan.returned_names, plan.converted_cleanup_names)
       return marks + [ret] unless marks.empty?
       ret
     end
+  end
+
+  sig { params(node: AST::ReturnNode).returns(ReturnLoweringPlan) }
+  def return_lowering_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    ret_alloc = return_destination_alloc(node)
+    value = node.value ? with_decl_alloc(ret_alloc) do
+      lowered = lower(node.value)
+      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
+    end : nil
+
+    returned_names = returned_binding_names(node.value)
+    returned_names.merge(collect_moved_arg_roots(node))
+    returned_names.merge(collect_stdlib_consumed_roots(node))
+    if value.is_a?(MIR::Ident)
+      returned_names << value.name
+    end
+    if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
+      returned_names.merge(mir_ident_names(value))
+    end
+
+    ReturnLoweringPlan.new(
+      value: value,
+      returned_names: returned_names,
+      converted_cleanup_names: Set.new,
+    )
   end
 
   # ================================================================
@@ -889,7 +964,12 @@ module MIRLoweringControlFlow
     @fn_sigs = T.let(@fn_sigs, T.untyped)
     return true if false || name.to_s.empty?
     sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
-    sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
+    return true unless sig
+    return sig.needs_rt == true || sig.emits_allocating? if sig.intrinsic
+    unless sig.needs_rt == true || sig.needs_rt == false
+      raise "callee #{name} missing finalized needs_rt metadata before MIR lowering"
+    end
+    sig.needs_rt
   end
 
   # Lower a StructPattern into (conditions, binding_stmts).
