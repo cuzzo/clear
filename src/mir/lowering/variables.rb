@@ -291,6 +291,7 @@ module MIRLoweringVariables
       # inherited from the classifier, never synthesized here (INV-14).
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.full_type, node)
+      drop_entry[:has_moved_guard] = true if ft.bounded_stream?
       # One allocator per binding: AllocMark, Cleanup, and the init
       # expression all read the classifier's definitive placement.
       node_alloc = drop_entry.alloc || decl_alloc
@@ -573,10 +574,10 @@ module MIRLoweringVariables
     return [] unless value.is_a?(MIR::Ident)
     name = value.name.to_s
     entry = @current_bindings[name] || CleanupEntry::NONE
-    guarded = entry.needs_cleanup? && @guarded_cleanup_names && @guarded_cleanup_names[name]
+    guarded = !!(@guarded_cleanup_names && @guarded_cleanup_names[name])
     return [] unless guarded || entry.present?
     marks = T.let([MIR::TransferMark.new(name, :owned_sink)], T::Array[MIR::Stmt])
-    marks << MIR::MoveMark.new(name) if entry.present? && @guarded_cleanup_names&.[](name)
+    marks << MIR::MoveMark.new(name) if guarded
     marks
   end
 

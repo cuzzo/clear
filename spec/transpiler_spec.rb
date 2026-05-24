@@ -376,7 +376,8 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("(counts.get(__sh1_key) orelse 0)")
-      expect(zig).to include("for (0..100) |__sh1_i|")
+      expect(zig).to include("for (0..100) |____sh1_i_usize|")
+      expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
     end
 
     it "structural SHARD put owns the value through explicit transfer markers" do

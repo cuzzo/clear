@@ -438,6 +438,13 @@ module MIRHoistLowering
     end
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def mutating_receiver_allocator_op?(node)
+    !!(node.is_a?(MIR::InlineZig) &&
+      node.allocs && !node.allocs.empty? &&
+      node.stdlib_def&.emit&.mutates_receiver)
+  end
+
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def each_mir_expr_child(node, &blk)
     return unless node.respond_to?(:mir?) && node.mir?
@@ -445,13 +452,19 @@ module MIRHoistLowering
 
     node.class.members.each do |member|
       value = node[member]
-      if value.is_a?(Array)
-        value.each { |child| yield child if mir_expr_child?(child) }
-      elsif value.is_a?(Hash)
-        value.each_value { |child| yield child if mir_expr_child?(child) }
-      else
-        yield value if mir_expr_child?(value)
-      end
+      each_mir_expr_in_value(value, &blk)
+    end
+    nil
+  end
+
+  sig { params(value: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
+  def each_mir_expr_in_value(value, &blk)
+    if mir_expr_child?(value)
+      yield value
+    elsif value.is_a?(Array)
+      value.each { |child| each_mir_expr_in_value(child, &blk) }
+    elsif value.is_a?(Hash)
+      value.each_value { |child| each_mir_expr_in_value(child, &blk) }
     end
     nil
   end
@@ -473,18 +486,25 @@ module MIRHoistLowering
       node.is_a?(MIR::AddressOf) ||
       node.is_a?(MIR::Deref) ||
       node.is_a?(MIR::SliceExpr) ||
+      node.is_a?(MIR::IfOptional) ||
       node.is_a?(MIR::ListItems) ||
       node.is_a?(MIR::ListLength) ||
       node.is_a?(MIR::HasField) ||
-      node.is_a?(MIR::ItemsAccess) ||
       node.is_a?(MIR::OwnedSlice) ||
+      node.is_a?(MIR::ConcatStr) ||
       node.is_a?(MIR::RangeLit) ||
+      node.is_a?(MIR::DeepCopy) ||
+      node.is_a?(MIR::RcRetain) ||
+      node.is_a?(MIR::RcDowngrade) ||
+      node.is_a?(MIR::WeakUpgrade) ||
       node.is_a?(MIR::LambdaExpr) ||
       node.is_a?(MIR::Pipeline) ||
       node.is_a?(MIR::InlineZig) ||
       node.is_a?(MIR::RawZig) ||
       node.is_a?(MIR::InlineBc) ||
-      node.is_a?(MIR::RawBc)
+      node.is_a?(MIR::RawBc) ||
+      node.is_a?(MIR::ShardedMapGet) ||
+      node.is_a?(MIR::ShardedMapPut)
   end
 
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
@@ -577,7 +597,9 @@ module MIRHoistLowering
       prefix.concat(target_prefix)
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
     when MIR::ReassignWithCleanup
-      prefix.concat(normalize_allocating_result_expr!(stmt.value))
+      value_prefix, value = normalize_allocating_used_expr(stmt.value)
+      stmt.value = value
+      prefix.concat(value_prefix)
     when MIR::ExprStmt
       expr_prefix, expr = normalize_allocating_used_expr(stmt.expr)
       stmt.expr = expr
@@ -607,18 +629,18 @@ module MIRHoistLowering
   def normalize_nested_mir_bodies!(node)
     case node
     when MIR::WhileStmt, MIR::ForStmt
-      node.body = normalize_allocating_mir_body(node.body || [])
+      node.body = normalize_allocating_mir_body(node.body ? node.body : [])
     when MIR::ScopeBlock, MIR::BlockExpr
-      node.body = normalize_allocating_mir_body(node.body || [])
+      node.body = normalize_allocating_mir_body(node.body ? node.body : [])
     when MIR::IfStmt, MIR::IfBindStmt
-      node.then_body = normalize_allocating_mir_body(node.then_body || [])
-      node.else_body = normalize_allocating_mir_body(node.else_body || []) if node.else_body
+      node.then_body = normalize_allocating_mir_body(node.then_body ? node.then_body : [])
+      node.else_body = normalize_allocating_mir_body(node.else_body ? node.else_body : []) if node.else_body
     when MIR::IfChain
-      node.branches&.each { |branch| branch[:body] = normalize_allocating_mir_body(branch[:body] || []) }
-      node.default_body = normalize_allocating_mir_body(node.default_body || []) if node.default_body
+      node.branches&.each { |branch| branch[:body] = normalize_allocating_mir_body(branch[:body] ? branch[:body] : []) }
+      node.default_body = normalize_allocating_mir_body(node.default_body ? node.default_body : []) if node.default_body
     when MIR::SwitchStmt
-      node.arms&.each { |arm| arm[:body] = normalize_allocating_mir_body(arm[:body] || []) }
-      node.default_body = normalize_allocating_mir_body(node.default_body || []) if node.default_body
+      node.arms&.each { |arm| arm[:body] = normalize_allocating_mir_body(arm[:body] ? arm[:body] : []) }
+      node.default_body = normalize_allocating_mir_body(node.default_body ? node.default_body : []) if node.default_body
     end
     nil
   end
@@ -646,7 +668,8 @@ module MIRHoistLowering
     prefix = T.let([], T::Array[T.untyped])
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
 
-    if mir_allocates?(expr) || (expr.is_a?(MIR::Call) && expr.owned_return?)
+    if !mutating_receiver_allocator_op?(expr) &&
+       (mir_allocates?(expr) || (expr.is_a?(MIR::Call) && expr.owned_return?))
       nested = normalize_allocating_result_expr!(expr)
       prefix.concat(nested)
       hoisted, ident = hoist_normalized_alloc_expr(expr)
@@ -700,7 +723,7 @@ module MIRHoistLowering
       emits = expr.stdlib_def&.emit
       return if emits&.mutates_receiver
 
-      expr.target_var = name if !expr.target_var || expr.target_var.to_s.empty?
+      expr.target_var = name
       expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc
     else
       mir_result_child_exprs(expr).each do |child|

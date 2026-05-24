@@ -7,6 +7,16 @@ module MIRLoweringControlFlow
 
   requires_ancestor { MIRLowering }
 
+  sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
+  def loop_condition_expr(cond, pending)
+    return cond if pending.empty?
+
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
+    @block_expr_counter += 1
+    label = "__while_cond_#{@block_expr_counter}"
+    MIR::BlockExpr.new(label, pending + [MIR::BreakStmt.new(label, cond)])
+  end
+
   sig { params(node: AST::IfStatement).returns(T.untyped) }
   def lower_if(node)
     T.bind(self, MIRLowering) rescue nil
@@ -117,6 +127,33 @@ module MIRLoweringControlFlow
     end
   end
 
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).void }
+  def stamp_loop_frame_allocs_iteration!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |s|
+      case s
+      when MIR::AllocMark
+        s.scope = :iteration if s.alloc == :frame
+      when MIR::IfStmt
+        stamp_loop_frame_allocs_iteration!(s.then_body)
+        stamp_loop_frame_allocs_iteration!(s.else_body)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        stamp_loop_frame_allocs_iteration!(s.body)
+      when MIR::SwitchStmt
+        s.arms&.each { |a| stamp_loop_frame_allocs_iteration!(a[:body]) }
+        stamp_loop_frame_allocs_iteration!(s.default_body)
+      when MIR::IfChain
+        s.branches&.each { |b| stamp_loop_frame_allocs_iteration!(b[:body]) }
+        stamp_loop_frame_allocs_iteration!(s.default_body)
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        stamp_loop_frame_allocs_iteration!(s.body)
+      when MIR::WithMatchDispatch
+        s.arms&.each { |a| stamp_loop_frame_allocs_iteration!(a[:body]) }
+      end
+    end
+    nil
+  end
+
   sig { params(node: AST::WhileLoop).returns(T.untyped) }
   def lower_while(node)
     T.bind(self, MIRLowering) rescue nil
@@ -127,6 +164,7 @@ module MIRLoweringControlFlow
     cond, cond_pending = lower_head { lower(node.condition) }
     b = node.do_branch
     body = b.is_a?(Array) ? lower_body(b) : []
+    stamp_loop_frame_allocs_iteration!(body)
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
@@ -135,7 +173,7 @@ module MIRLoweringControlFlow
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    with_pending(cond_pending, MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight))
+    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, nil, nil, node.mark_per_iter, !!node.tight)
   end
 
   sig { params(node: AST::WhileBindLoop).returns(T.untyped) }
@@ -147,6 +185,7 @@ module MIRLoweringControlFlow
     rt = MIR::Ident.new(@rt_name)
     cond, cond_pending = lower_head { lower(node.condition) }
     body = lower_body(node.do_branch)
+    stamp_loop_frame_allocs_iteration!(body)
 
     # RESOLVE captures acquire a strong ref each iteration — release at end of body.
     if cond.is_a?(MIR::WeakUpgrade)
@@ -168,7 +207,7 @@ module MIRLoweringControlFlow
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
-    with_pending(cond_pending, MIR::WhileStmt.new(cond, body, node.binding_name, nil, node.mark_per_iter, false))
+    MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, false)
   end
 
   # Returns true when the last reachable statement in a loop body is an
@@ -193,6 +232,7 @@ module MIRLoweringControlFlow
     @tmp_counter = T.let(@tmp_counter, T.untyped)
     var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
+    stamp_loop_frame_allocs_iteration!(body)
     rt = MIR::Ident.new(@rt_name)
     coll = lower(node.collection)
     coll_type = node.collection.full_type
@@ -351,6 +391,7 @@ module MIRLoweringControlFlow
     end_val = lower(node.end_expr)
     var = zig_safe_name(node.var_name)
     body = lower_body(node.body)
+    stamp_loop_frame_allocs_iteration!(body)
     rt = MIR::Ident.new(@rt_name)
     cmp = node.inclusive ? "<=" : "<"
     @for_counter = (@for_counter || 0) + 1

@@ -386,7 +386,7 @@ class MIRLowering
       hoisted_discard = false
       if needs_discard &&
          s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void &&
-        mir_allocates?(mir)
+        mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
         entry = hoist_cleanup_entry(mir, s)
         if entry
           @tmp_counter += 1
@@ -432,6 +432,7 @@ class MIRLowering
         return_transfer_marks = returned_transfer_marks(nil, [], converted) unless converted.empty?
       end
       mir_nodes = normalize_allocating_mir_body(mir.is_a?(Array) ? mir.compact : [mir])
+      mir_nodes.each { |m| finalize_nested_mir_bodies!(m) }
 
       # Inject source map comment for this user-visible statement.
       # Placed after pending (hoisted synthetic temps have no user source line).
@@ -440,6 +441,10 @@ class MIRLowering
       result << MIR::Comment.new("CLR:#{line}") if line
       mir_nodes.each do |m|
         stamp_source_line!(m, line, col)
+        pre_terminator_transfer_marks(m, result, mir_nodes).each do |mark|
+          stamp_source_line!(mark, line, col)
+          result << mark
+        end
         if m.is_a?(MIR::ReturnStmt) && !return_transfer_marks.empty?
           return_transfer_marks.each do |mark|
             stamp_source_line!(mark, line, col)
@@ -508,44 +513,97 @@ class MIRLowering
         out << alloc_mark
         register_visible_alloc_names!(alloc_mark)
       end
-      out << node
-      register_visible_alloc_names!(node)
       visible_alloc_names = visible_alloc_names_for_transfer(out, node)
       visible_guarded_names = visible_guarded_cleanup_names_for_transfer(out, node)
       if node.is_a?(MIR::BreakStmt) && node.value
         mir_ident_names(node.value).each do |name|
           next unless visible_alloc_names.include?(name.to_s)
+          next if transfer_mark_present?(out, name.to_s) || transfer_mark_present?(body, name.to_s)
           out << MIR::TransferMark.new(name.to_s, :block_result)
         end
       end
-      ownership_transfers_for_mir(node, visible_alloc_names, visible_guarded_names).each do |mark|
+      pre_terminator_transfer_marks(node, out, body).each do |mark|
+        out << mark
+      end
+      out << node
+      register_visible_alloc_names!(node)
+      ownership_transfers_for_mir(node, visible_alloc_names, visible_guarded_names, out + body).each do |mark|
         out << mark
       end
     end
     out
   end
 
+  sig { params(nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
+  def transfer_mark_present?(nodes, name)
+    nodes.any? { |node| node.is_a?(MIR::TransferMark) && node.name.to_s == name.to_s }
+  end
+
+  sig { params(node: T.untyped, emitted: T::Array[T.untyped], remaining: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  def pre_terminator_transfer_marks(node, emitted, remaining)
+    return [] unless (node.is_a?(MIR::ReturnStmt) || node.is_a?(MIR::BreakStmt)) && node.value
+
+    visible_alloc_names = visible_alloc_names_for_transfer(emitted, node)
+    visible_guarded_names = visible_guarded_cleanup_names_for_transfer(emitted, node)
+    consumed = T.let(collect_mir_consumed_roots(node.value), T::Array[String])
+    if node.is_a?(MIR::ReturnStmt)
+      mir_ident_names(node.value).each { |name| consumed << name.to_s }
+    end
+    consumed.uniq.filter_map do |name|
+      safe = name.to_s
+      next unless visible_alloc_names.include?(safe)
+      next if transfer_mark_present?(emitted, safe) || transfer_mark_present?(remaining, safe)
+
+      target = node.is_a?(MIR::ReturnStmt) && mir_ident_names(node.value).map(&:to_s).include?(safe) ? :return : :owned_sink
+      marks = T.let([MIR::TransferMark.new(safe, target)], T::Array[T.untyped])
+      marks << MIR::MoveMark.new(safe) if visible_guarded_names.include?(safe)
+      marks
+    end.flatten
+  end
+
   sig { params(node: T.untyped).void }
   def finalize_nested_mir_bodies!(node)
     case node
+    when MIR::Let
+      finalize_nested_mir_expr_bodies!(node.init)
+    when MIR::Set
+      finalize_nested_mir_expr_bodies!(node.target)
+      finalize_nested_mir_expr_bodies!(node.value)
+    when MIR::ReassignWithCleanup
+      finalize_nested_mir_expr_bodies!(node.value)
+    when MIR::ExprStmt
+      finalize_nested_mir_expr_bodies!(node.expr)
+    when MIR::ReturnStmt, MIR::BreakStmt
+      finalize_nested_mir_expr_bodies!(node.value)
     when MIR::WhileStmt, MIR::ForStmt
-      node.body = append_ownership_transfers_for_mir_body(node.body || [])
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
     when MIR::ScopeBlock, MIR::BlockExpr
-      node.body = append_ownership_transfers_for_mir_body(node.body || [])
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
     when MIR::IfStmt, MIR::IfBindStmt
-      node.then_body = append_ownership_transfers_for_mir_body(node.then_body || [])
-      node.else_body = append_ownership_transfers_for_mir_body(node.else_body || []) if node.else_body
+      node.then_body = append_ownership_transfers_for_mir_body(node.then_body ? node.then_body : [])
+      node.else_body = append_ownership_transfers_for_mir_body(node.else_body ? node.else_body : []) if node.else_body
     when MIR::IfChain
       node.branches&.each do |branch|
-        branch[:body] = append_ownership_transfers_for_mir_body(branch[:body] || [])
+        branch[:body] = append_ownership_transfers_for_mir_body(branch[:body] ? branch[:body] : [])
       end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body || []) if node.default_body
+      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : []) if node.default_body
     when MIR::SwitchStmt
       node.arms&.each do |arm|
-        arm[:body] = append_ownership_transfers_for_mir_body(arm[:body] || [])
+        arm[:body] = append_ownership_transfers_for_mir_body(arm[:body] ? arm[:body] : [])
       end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body || []) if node.default_body
+      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : []) if node.default_body
     end
+    nil
+  end
+
+  sig { params(expr: T.untyped).void }
+  def finalize_nested_mir_expr_bodies!(expr)
+    return unless expr.respond_to?(:expr?) && expr.expr?
+    if expr.is_a?(MIR::BlockExpr)
+      expr.body = append_ownership_transfers_for_mir_body(expr.body ? expr.body : [])
+      return
+    end
+    each_mir_expr_child(expr) { |child| finalize_nested_mir_expr_bodies!(child) }
     nil
   end
 
@@ -553,6 +611,7 @@ class MIRLowering
   def implicit_alloc_mark_for_mir_node(node, out)
     return nil unless node.is_a?(MIR::Let)
     return nil unless mir_allocates?(node.init)
+    return nil if mutating_receiver_allocator_op?(node.init)
     name = node.name.to_s
     stamp_allocating_result_target!(node.init, name, alloc: mir_owned_alloc(node.init))
     already_marked = T.let(false, T::Boolean)
@@ -592,8 +651,8 @@ class MIRLowering
     marks
   end
 
-  sig { params(mir: T.untyped, visible_alloc_names: T::Set[String], visible_guarded_names: T::Set[String]).returns(T::Array[T.untyped]) }
-  def ownership_transfers_for_mir(mir, visible_alloc_names, visible_guarded_names)
+  sig { params(mir: T.untyped, visible_alloc_names: T::Set[String], visible_guarded_names: T::Set[String], existing: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  def ownership_transfers_for_mir(mir, visible_alloc_names, visible_guarded_names, existing = [])
     return [] if mir.is_a?(MIR::BreakStmt) || mir.is_a?(MIR::ReturnStmt)
 
     names = T.let([], T::Array[String])
@@ -604,6 +663,7 @@ class MIRLowering
     marks = T.let([], T::Array[T.untyped])
     names.uniq.each do |name|
       next unless visible_alloc_names.include?(name.to_s)
+      next if transfer_mark_present?(existing + marks, name.to_s)
       marks << MIR::TransferMark.new(name, :owned_sink)
       marks << MIR::MoveMark.new(name) if visible_guarded_names.include?(name.to_s)
     end
@@ -668,6 +728,7 @@ class MIRLowering
   def structural_ownership_consumes(node)
     case node
     when MIR::Let
+      return [] if node.init.is_a?(MIR::BlockExpr)
       mir_ident_names(node.init)
     when MIR::Set
       mir_ident_names(node.value)
@@ -743,7 +804,8 @@ class MIRLowering
     if (stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)) &&
        stmt.respond_to?(:value) && stmt.value.is_a?(AST::Identifier)
       ti = Type.from_node(stmt.value) rescue nil
-      names << stmt.value.name.to_s if ownership_tracked_transfer_type?(ti) && stmt.value.symbol&.heap_storage?
+      entry = @current_bindings[stmt.value.name.to_s] || CleanupEntry::NONE
+      names << stmt.value.name.to_s if ownership_tracked_transfer_type?(ti) && entry.present?
     end
     walk_ast_for_moved_args(stmt) do |arg|
       next if arg_is_call_argument?(stmt, arg)

@@ -684,6 +684,11 @@ class MIREmitter
     iter = emit(node.iter)
     captures = [node.capture, node.index_capture].compact.join(", ")
     body = emit_body(node.body)
+    if node.iter.is_a?(MIR::IterRange) && node.iter.capture_type == :i64 && node.index_capture.nil? &&
+       node.capture.is_a?(String) && !node.capture.start_with?("*")
+      raw_capture = "__#{node.capture}_usize"
+      return "for (#{iter}) |#{raw_capture}| {\nconst #{node.capture}: i64 = @intCast(#{raw_capture});\n#{body}\n}"
+    end
     "for (#{iter}) |#{captures}| {\n#{body}\n}"
   end
 

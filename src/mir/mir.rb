@@ -1752,7 +1752,9 @@ module MIR
   # Bare integer range for Zig `for (0..N) |i| { ... }` loops. Distinct from
   # RangeLit which wraps as CheatLib.IntRange{...}. IterRange emits literal
   # `start..end` and is legal only inside ForStmt iterables.
-  IterRange = Struct.new(:start, :end_val) do
+  # capture_type is :usize for runtime index loops and :i64 for Clear integer
+  # range iteration; nil preserves Zig's native range capture type.
+  IterRange = Struct.new(:start, :end_val, :capture_type) do
     include Expr
   end
 

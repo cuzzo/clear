@@ -390,16 +390,16 @@ class MIRChecker
     when MIR::SwitchStmt
       check_linear_expr_uses!(stmt.subject, state)
       states = T.let([], T::Array[LinearOwnershipState])
-      stmt.arms&.each { |arm| states << check_linear_stmts!(arm[:body], state.copy) }
-      states << check_linear_stmts!(stmt.default_body, state.copy)
+      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "switch") }
+      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "switch")
       linear_merge_branch_states!(states, state, "switch")
     when MIR::IfChain
       states = T.let([], T::Array[LinearOwnershipState])
       stmt.branches&.each do |branch|
         check_linear_expr_uses!(branch[:cond], state)
-        states << check_linear_stmts!(branch[:body], state.copy)
+        states << linear_project_branch_state(check_linear_stmts!(branch[:body], state.copy), state, "if-chain")
       end
-      states << check_linear_stmts!(stmt.default_body, state.copy)
+      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "if-chain")
       linear_merge_branch_states!(states, state, "if-chain")
     when MIR::DeferStmt
       check_linear_stmt!(stmt.body, state)
@@ -415,7 +415,7 @@ class MIRChecker
       linear_exit_scope!(state, inner, stmt.class.name.to_s)
     when MIR::WithMatchDispatch
       states = T.let([], T::Array[LinearOwnershipState])
-      stmt.arms&.each { |arm| states << check_linear_stmts!(arm[:body], state.copy) }
+      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "with-match") }
       linear_merge_branch_states!(states, state, "with-match")
     when MIR::BgBlock
       check_linear_stmts!(stmt.run_body, LinearOwnershipState.new)
@@ -528,12 +528,17 @@ class MIRChecker
   def check_linear_branch_join!(then_body, else_body, state, label)
     then_state = check_linear_stmts!(then_body, state.copy)
     else_state = check_linear_stmts!(else_body, state.copy)
-    projected_then = state.copy
-    projected_else = state.copy
-    linear_exit_scope!(projected_then, then_state, label)
-    linear_exit_scope!(projected_else, else_state, label)
+    projected_then = linear_project_branch_state(then_state, state, label)
+    projected_else = linear_project_branch_state(else_state, state, label)
     linear_merge_branch_states!([projected_then, projected_else], state, label)
     nil
+  end
+
+  sig { params(branch_state: LinearOwnershipState, outer_state: LinearOwnershipState, label: String).returns(LinearOwnershipState) }
+  def linear_project_branch_state(branch_state, outer_state, label)
+    projected = outer_state.copy
+    linear_exit_scope!(projected, branch_state, label)
+    projected
   end
 
   sig { params(states: T::Array[LinearOwnershipState], into: LinearOwnershipState, label: String).void }
@@ -819,6 +824,14 @@ class MIRChecker
     when MIR::DeepCopy
       # DeepCopy reads its source and produces a fresh owned value in its own
       # allocator; the source is not inserted into the destination aggregate.
+      return
+    when MIR::RcRetain
+      # Retain reads an Arc/Rc source and produces a new owned handle; the
+      # source binding itself is not inserted into the aggregate.
+      return
+    when MIR::RcDowngrade, MIR::WeakUpgrade
+      # Weak-link operations read their source handles and produce a distinct
+      # handle; they do not insert the source binding into the aggregate.
       return
     when MIR::Ident
       child_alloc = alloc_by_name[expr.name]
@@ -1164,6 +1177,13 @@ class MIRChecker
       walk_mir_node(node.value_expr, &block)
     when MIR::BatchWindowFlush
       walk_mir_node(node.value_expr, &block)
+    when MIR::ShardedMapPut
+      walk_mir_expr(node.target, &block)
+      walk_mir_expr(node.key, &block)
+      walk_mir_expr(node.value, &block)
+    when MIR::ShardedMapGet
+      walk_mir_expr(node.target, &block)
+      walk_mir_expr(node.key, &block)
     when MIR::BgBlock      then walk_mir(node.run_body, &block)
     when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
     when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
@@ -1748,13 +1768,11 @@ class MIRChecker
   # AllocMark, so the checker cannot verify its lifetime, allocator
   # consistency, or cleanup.
   #
-  # Allocating types:
+  # Allocating result types:
+  #   HeapCreate, owned-return Call, non-mutating allocator-bearing InlineZig,
   #   DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap,
   #   SharePromote,
   #   DeepCopy (strategy != :passthrough), ContainerInit (alloc != nil)
-  #
-  # Called only when strict: true because the codebase still has open
-  # violations that are fixed progressively in Phase 1-3 tasks.
 
   sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def verify_unhoisted_allocs!(body)
@@ -1878,18 +1896,24 @@ class MIRChecker
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
-  # MIR nodes whose `allocates?` decision is just `alloc == :heap`.
-  ALLOC_HEAP_MIR_CLASSES = [
+  # MIR result nodes whose `allocates?` decision is just "has finalized
+  # allocator placement". Heap allocations need cleanup/transfer; frame
+  # allocations need loop-rewind proof. Either way, unnamed nested allocation is
+  # unverifiable.
+  ALLOC_PLACED_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::ConcatStr,
     MIR::CapWrap, MIR::SharePromote, MIR::ContainerInit,
   ].freeze
 
   def allocating_expr?(expr)
-    # Only flag HEAP allocations. Frame allocations are managed by the frame
-    # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.
     return true if MIR::HeapCreate === expr  # always heap by definition
-    return expr.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === expr }
-    return expr.strategy != :passthrough && expr.alloc == :heap if MIR::DeepCopy === expr
+    return true if expr.is_a?(MIR::Call) && expr.owned_return?
+    if expr.is_a?(MIR::InlineZig)
+      return false if expr.stdlib_def&.emit&.mutates_receiver
+      return !!(expr.stdlib_def&.emit&.allocates && expr.allocs&.values&.any? { |v| VALID_ALLOCATORS.include?(v) })
+    end
+    return expr.alloc.is_a?(Symbol) if ALLOC_PLACED_MIR_CLASSES.any? { |c| c === expr }
+    return expr.strategy != :passthrough && expr.alloc.is_a?(Symbol) if MIR::DeepCopy === expr
     false
   end
 

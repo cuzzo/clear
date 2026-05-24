@@ -37,6 +37,7 @@ module EscapeAnalysis
       before = heap_symbol_count(fn)
       mark_body_escapes!(fn, fn_nodes, bg_heap, schema_lookup)
       mark_loop_receiver_allocations_heap!(fn.body)
+      propagate_assignment_ownership!(fn, fn_nodes, schema_lookup)
       propagate_hoist_dependencies!(fn, schema_lookup)
       heap_fns << name if heap_symbol_count(fn) > before
     end
@@ -624,7 +625,9 @@ module EscapeAnalysis
     return true if ownership_transferring_expr?(value, include_allocating_expr: false)
     return false if string_concat_expr?(unwrap_value(value))
     return true if expr_has_owned_inline_value?(value)
-    return true if call_result_is_heap?(value, fn_nodes, schema_lookup)
+    target_type = Type.from_node(node.name) rescue Type.from_node(node) rescue nil
+    return true if type_requires_owned_storage?(target_type, schema_lookup) &&
+                   call_result_is_heap?(value, fn_nodes, schema_lookup)
     false
   end
 
@@ -840,7 +843,9 @@ module EscapeAnalysis
     return false if ti.primitive? || ti.void? || ti.any?
     if expr.is_a?(AST::Identifier) && expr.symbol
       storage = expr.symbol.storage
-      return false if storage == :rodata || storage == :borrow
+      decl = expr.symbol.respond_to?(:reg) ? expr.symbol.reg : nil
+      mutated = decl.respond_to?(:var_mutated) && decl.var_mutated == true
+      return false if (storage == :rodata && !mutated) || storage == :borrow
     end
     if expr.is_a?(AST::Identifier) && expr.symbol&.storage == :heap
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)

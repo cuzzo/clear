@@ -13,7 +13,8 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
 
     zig = ZigTranspiler.new.transpile(src)
 
-    expect(zig).to include("for (0..16) |__sh1_i|")
+    expect(zig).to include("for (0..16) |____sh1_i_usize|")
+    expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
     expect(zig).to include("try counts.put(")
     expect(zig).not_to include("CheatLib.BoundedChannel(__ShWork")
     expect(zig).not_to include("__ShWorker")
