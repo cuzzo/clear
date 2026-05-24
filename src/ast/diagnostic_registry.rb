@@ -1924,6 +1924,20 @@ module DiagnosticRegistry
       cause: "A call whose return value owns heap data was paired with an AllocMark that says the value is frame-allocated. That lets AllocMark and Cleanup agree with each other while still freeing heap-owned data through the wrong allocator.",
       fix_hint: "Lowering bug — the AllocMark for a heap-provenance return must use :heap or :cleanup, never :frame.",
     },
+    OWNED_RESULT_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-result expression is bound without a checker-visible AllocMark.",
+      cause: "A MIR expression declared that it produces owned storage, but the receiving binding has no AllocMark. Without the marker, MIRChecker cannot verify cleanup or transfer.",
+      fix_hint: "Lowering bug — propagate the expression's owned_result_alloc fact into the binding's allocation and cleanup plan.",
+    },
+    OWNED_RESULT_ALLOC_MISMATCH: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-result expression allocator disagrees with its binding AllocMark.",
+      cause: "The producer declared that its result is owned by one allocator, while the receiving binding was stamped with another. AllocMark and Cleanup may match each other while still freeing through the wrong allocator.",
+      fix_hint: "Lowering bug — the receiving binding must use the producer's owned_result_alloc as the authoritative allocator.",
+    },
     RETURN_TRANSFER_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",

@@ -40,10 +40,25 @@ module MIRLoweringControlFlow
     const :tight, T::Boolean
   end
 
-  class ReturnLoweringPlan < T::Struct
+  class ReturnOwnershipPlan < T::Struct
+    extend T::Sig
+
     prop :value, T.untyped
-    const :returned_names, T::Set[String]
+    const :explicit_return_names, T::Set[String]
+    const :moved_root_names, T::Set[String]
+    const :consumed_root_names, T::Set[String]
+    const :direct_value_names, T::Set[String]
     const :converted_cleanup_names, T::Set[String]
+
+    sig { returns(T::Set[String]) }
+    def returned_names
+      out = T.let(Set.new, T::Set[String])
+      explicit_return_names.each { |name| out << name }
+      moved_root_names.each { |name| out << name }
+      consumed_root_names.each { |name| out << name }
+      direct_value_names.each { |name| out << name }
+      out
+    end
   end
 
   sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
@@ -791,7 +806,7 @@ module MIRLoweringControlFlow
     end
   end
 
-  sig { params(node: AST::ReturnNode).returns(ReturnLoweringPlan) }
+  sig { params(node: AST::ReturnNode).returns(ReturnOwnershipPlan) }
   def return_lowering_plan(node)
     T.bind(self, MIRLowering) rescue nil
     ret_alloc = return_destination_alloc(node)
@@ -800,19 +815,25 @@ module MIRLoweringControlFlow
       place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
     end : nil
 
-    returned_names = returned_binding_names(node.value)
-    returned_names.merge(collect_moved_arg_roots(node))
-    returned_names.merge(collect_stdlib_consumed_roots(node))
+    explicit_return_names = returned_binding_names(node.value)
+    moved_root_names = T.let(Set.new, T::Set[String])
+    collect_moved_arg_roots(node).each { |name| moved_root_names << name.to_s }
+    consumed_root_names = T.let(Set.new, T::Set[String])
+    collect_stdlib_consumed_roots(node).each { |name| consumed_root_names << name.to_s }
+    direct_value_names = T.let(Set.new, T::Set[String])
     if value.is_a?(MIR::Ident)
-      returned_names << value.name
+      direct_value_names << value.name
     end
     if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
-      returned_names.merge(mir_ident_names(value))
+      mir_ident_names(value).each { |name| direct_value_names << name.to_s }
     end
 
-    ReturnLoweringPlan.new(
+    ReturnOwnershipPlan.new(
       value: value,
-      returned_names: returned_names,
+      explicit_return_names: explicit_return_names,
+      moved_root_names: moved_root_names,
+      consumed_root_names: consumed_root_names,
+      direct_value_names: direct_value_names,
       converted_cleanup_names: Set.new,
     )
   end
@@ -886,25 +907,6 @@ module MIRLoweringControlFlow
       collect_returned_binding_names(expr.target, names)
     end
     nil
-  end
-
-  # Check if an AST FuncCall/MethodCall returns a heap-allocated value.
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def call_heap_storage?(node)
-    T.bind(self, MIRLowering) rescue nil
-    !!(node.is_a?(AST::Locatable) && node.heap_storage?)
-  end
-
-  sig { params(sig_obj: T.untyped).returns(T::Boolean) }
-  def callee_returns_heap_string?(sig_obj)
-    T.bind(self, MIRLowering) rescue nil
-    return false unless sig_obj && sig_obj.respond_to?(:return_type)
-    return false if sig_obj.respond_to?(:return_lifetime) && !sig_obj.return_lifetime.empty?
-    ti = Type.new(sig_obj.return_type)
-    ti = ti.payload_type || ti if ti.error_union?
-    ti.string? && !ti.symbol? && !ti.raw?
-  rescue StandardError
-    false
   end
 
   # Returns true if a MIR::Call node returns a non-Copy union type that needs

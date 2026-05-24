@@ -618,10 +618,36 @@ class MIREmitter
 
   sig { params(node: MIR::ReassignWithCleanup).returns(String) }
   def emit_reassign_cleanup(node)
+    if (try_expr = reassign_success_only_expr(node))
+      opt = "__new_#{node.name}_opt"
+      val = "__new_#{node.name}_val"
+      alloc = alloc_zig(node.alloc)
+      return [
+        "{",
+        "const #{opt}: ?#{node.zig_type} = (#{emit(try_expr)} catch null);",
+        "if (#{opt}) |#{val}| {",
+        "    CheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});",
+        "    #{node.name} = #{val};",
+        "}",
+        "}",
+      ].join("\n")
+    end
+
     tmp = "__new_#{node.name}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
     "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+  end
+
+  sig { params(node: MIR::ReassignWithCleanup).returns(T.untyped) }
+  def reassign_success_only_expr(node)
+    value = node.value
+    value = value.expr if value.is_a?(MIR::Cast)
+    return nil unless value.is_a?(MIR::TryCatch)
+    return nil unless value.capture.nil?
+    return nil unless value.catch_body.is_a?(MIR::Ident)
+    return nil unless value.catch_body.name.to_s == node.name.to_s
+    value.expr
   end
 
   sig { params(node: MIR::IfStmt).returns(String) }

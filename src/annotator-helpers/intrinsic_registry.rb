@@ -151,13 +151,15 @@ module IntrinsicRegistry
     takes_args = Array(h[:takes_args])
     mutates_receiver = h[:mutates_receiver] == true
     spec.each_with_index.map do |arg_def, i|
+      takes_index = (h[:is_method] || mutates_receiver) ? i - 1 : i
+      takes_by_index = takes_index >= 0 && takes_args.include?(takes_index)
       if arg_def.is_a?(Hash)
         AST::Param.new(
           name: arg_def[:name] || "arg#{i}",
           type: arg_def[:type],
           required: true,
           mutable: arg_def[:mutable] || (i == 0 && mutates_receiver),
-          takes: arg_def[:takes] || takes_args.include?(i) || (mutates_receiver && takes_args.include?(i - 1))
+          takes: arg_def[:takes] || takes_by_index
         )
       else
         AST::Param.new(
@@ -165,7 +167,7 @@ module IntrinsicRegistry
           type: arg_def,
           required: true,
           mutable: (i == 0 && mutates_receiver),
-          takes: takes_args.include?(i) || (mutates_receiver && takes_args.include?(i - 1))
+          takes: takes_by_index
         )
       end
     end

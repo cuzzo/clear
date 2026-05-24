@@ -218,7 +218,7 @@ module EscapeAnalysis
       when AST::LambdaLit
         mark_lambda_captures_heap!(node, bg_heap)
       when AST::FuncCall
-        mark_takes_args_heap!(node.args, params_for_call(node, fn_nodes))
+        mark_takes_args_heap!(node.args, params_for_call(node, fn_nodes), schema_lookup)
       when AST::MethodCall
         mark_method_takes_heap!(node, params_for_method_call(node), fn_nodes, schema_lookup)
       end
@@ -476,15 +476,15 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param]).void }
-  private_class_method def self.mark_takes_args_heap!(args, params)
+  sig { params(args: T::Array[T.untyped], params: T::Array[AST::Param], schema_lookup: T.nilable(Proc)).void }
+  private_class_method def self.mark_takes_args_heap!(args, params, schema_lookup)
     params.each_with_index do |param, idx|
       arg = args[idx]
       next unless arg
       next unless param.takes || symbol_heap?(param.symbol)
       arg_type = Type.from_node(arg)
-      next unless ownership_bearing_transfer_expr?(arg, nil) ||
-                  type_requires_owned_storage?(arg_type, nil)
+      next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||
+                  type_requires_owned_storage?(arg_type, schema_lookup)
       mark_expr_roots_heap!(arg)
     end
   end
@@ -497,7 +497,7 @@ module EscapeAnalysis
     end
 
     value_params = params.drop(1)
-    mark_takes_args_heap!(call.args, value_params)
+    mark_takes_args_heap!(call.args, value_params, schema_lookup)
     mark_receiver_for_owned_sink!(call.object, call.args, value_params, fn_nodes, schema_lookup)
     mark_receiver_scope_escapes!(call.object, call.args, value_params)
   end
@@ -661,16 +661,6 @@ module EscapeAnalysis
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
     t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup) || type_contains_cleanup_payload?(t, schema_lookup)
-  rescue StandardError
-    false
-  end
-
-  sig { params(sym: T.nilable(SymbolEntry), value: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.heap_bearing_binding?(sym, value, schema_lookup)
-    ti = sym&.type
-    ti = Type.from_node(value) unless ti.is_a?(Type)
-    return false unless ti.is_a?(Type)
-    ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup) || type_contains_cleanup_payload?(ti, schema_lookup)
   rescue StandardError
     false
   end
@@ -1004,18 +994,6 @@ module EscapeAnalysis
     ti.heap_ptr? || ti.recursive_cleanup_shape?(nil)
   end
 
-  sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
-  private_class_method def self.return_type_requires_heap?(ti, schema_lookup)
-    return false unless ti
-    top_heap_ptr = ti.heap_ptr?
-    t = ti.error_union? ? ti.payload_type : ti
-    return false unless t
-    return false if t.primitive? || t.void? || t.any?
-    return false if t.rodata? || t.provenance == :borrow
-    t.string? || top_heap_ptr || t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup) ||
-      type_contains_cleanup_payload?(t, schema_lookup)
-  end
-
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
   private_class_method def self.function_def_has_return_lifetime?(fn)
     rl = fn.return_lifetime
@@ -1051,13 +1029,6 @@ module EscapeAnalysis
       end
     end
     found
-  end
-
-  sig { params(ti: T.nilable(Type)).returns(T::Boolean) }
-  private_class_method def self.type_heap_result?(ti)
-    return false unless ti
-    t = ti.error_union? ? ti.payload_type : ti
-    !!(t&.heap_ptr?)
   end
 
   sig { params(node: T.untyped).returns(T.nilable(SymbolEntry)) }

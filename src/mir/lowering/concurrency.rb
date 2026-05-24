@@ -636,6 +636,18 @@ module MIRLoweringConcurrency
     transfer_marks.empty? ? push : MIR::ScopeBlock.new([*transfer_marks, MIR::ExprStmt.new(push, false)])
   end
 
+  sig { params(node: AST::NextExpr, result_type: Type, fallback_alloc: Symbol).returns(T.nilable(Symbol)) }
+  def next_result_owned_alloc(node, result_type, fallback_alloc)
+    T.bind(self, MIRLowering) rescue nil
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
+    promise_type = Type.new(node.expr.full_type)
+    return fallback_alloc if promise_type.promise_list?
+    return fallback_alloc if promise_type.observable? && promise_type.tense_type&.array?
+    return :heap if promise_type.observable? && ownership_bearing_type?(result_type)
+    return :heap if ownership_bearing_type?(result_type)
+    nil
+  end
+
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
   def lower_next_expr(node, alloc_sym = :frame)
     T.bind(self, MIRLowering) rescue nil
@@ -657,7 +669,7 @@ module MIRLoweringConcurrency
       # through MethodCall("next") so the bc_emitter emits AWAIT, which
       # the runner extends to walk Value.List (await each item, build
       # result list).
-      return MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0)) if @target == :bc
+      return MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0), alloc_sym) if @target == :bc
 
       inner_str = emit_expr(inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
@@ -690,7 +702,7 @@ module MIRLoweringConcurrency
       # alloc_sym is the
       # fallback when NEXT is lowered outside a binding.
       return MIR::MethodCall.new(inner, "materializeNext",
-        [MIR::AllocatorRef.new(alloc_sym)], true, MIR::CallableContract.no_ownership(1))
+        [MIR::AllocatorRef.new(alloc_sym)], true, MIR::CallableContract.no_ownership(1), alloc_sym)
     end
 
     if promise_type.observable?
@@ -705,13 +717,15 @@ module MIRLoweringConcurrency
             MIR::CallableContract.no_ownership(0)), nil),
           MIR::BreakStmt.new(blk_label,
             MIR::MethodCall.new(inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
-              MIR::CallableContract.no_ownership(1))),
+              MIR::CallableContract.no_ownership(1), :heap)),
         ])
       end
     end
 
     inner = lower(node.expr)
-    MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0))
+    result_type = Type.from_node(node) || Type.new(:Untyped)
+    MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0),
+      next_result_owned_alloc(node, result_type, alloc_sym))
   end
 
 

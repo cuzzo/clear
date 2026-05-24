@@ -106,6 +106,7 @@ module MIR
   module Emittable
       extend T::Sig
 
+    include Kernel
     sig { returns(TrueClass) }
     def mir?; true; end
     sig { returns(T::Boolean) }
@@ -143,6 +144,8 @@ module MIR
     sig { returns(T::Boolean) }
     def expr?; true; end
   end
+
+  Node = T.type_alias { Emittable }
 
   # ================================================================
   # Top-Level Definitions
@@ -1571,13 +1574,22 @@ module MIR
 
   # Method call.
   # Zig: receiver.method(args)
-  MethodCall = Struct.new(:receiver, :method, :args, :try_wrap, :callable_contract) do
+  MethodCall = Struct.new(:receiver, :method, :args, :try_wrap, :callable_contract, :owned_result_alloc) do
     extend T::Sig
     include Expr
 
-    sig { params(receiver: T.untyped, method: String, args: T::Array[T.untyped], try_wrap: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
-    def initialize(receiver, method, args, try_wrap, callable_contract = nil)
-      super(receiver, method, args, try_wrap, callable_contract)
+    sig do
+      params(
+        receiver: T.untyped,
+        method: String,
+        args: T::Array[T.untyped],
+        try_wrap: T::Boolean,
+        callable_contract: T.nilable(CallableContract),
+        owned_result_alloc: T.nilable(Symbol),
+      ).void
+    end
+    def initialize(receiver, method, args, try_wrap, callable_contract = nil, owned_result_alloc = nil)
+      super(receiver, method, args, try_wrap, callable_contract, owned_result_alloc)
     end
   end
 

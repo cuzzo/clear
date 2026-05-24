@@ -428,6 +428,11 @@ module MIRHoistLowering
     case node
     when MIR::Call
       false
+    when MIR::MethodCall
+      return true if node.owned_result_alloc.is_a?(Symbol)
+      mir_result_child_exprs(node).any? do |child|
+        mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+      end
     when MIR::InlineZig
       return false unless node.stdlib_def&.emits_allocating?
       return true unless node.allocs
@@ -490,6 +495,10 @@ module MIRHoistLowering
       node.is_a?(MIR::Deref) ||
       node.is_a?(MIR::SliceExpr) ||
       node.is_a?(MIR::IfOptional) ||
+      node.is_a?(MIR::TryCatch) ||
+      node.is_a?(MIR::TryExpr) ||
+      node.is_a?(MIR::Orelse) ||
+      node.is_a?(MIR::Conditional) ||
       node.is_a?(MIR::ListItems) ||
       node.is_a?(MIR::ListLength) ||
       node.is_a?(MIR::HasField) ||
@@ -598,7 +607,9 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
     when MIR::ReassignWithCleanup
-      prefix.concat(normalize_used_expr_attr!(stmt, :value))
+      unless T.unsafe(self).fallible_self_fallback_reassign?(stmt.name.to_s, stmt.value)
+        prefix.concat(normalize_used_expr_attr!(stmt, :value))
+      end
     when MIR::ExprStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :expr))
     when MIR::ReturnStmt, MIR::BreakStmt
@@ -724,7 +735,8 @@ module MIRHoistLowering
       expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc
     else
       mir_result_child_exprs(expr).each do |child|
-        stamp_allocating_result_target!(child, name, alloc: alloc) if mir_allocates?(child)
+        has_alloc_metadata = child.respond_to?(:allocs) && child.allocs && !child.allocs.empty?
+        stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)
       end
     end
     nil
@@ -804,6 +816,8 @@ module MIRHoistLowering
     when MIR::Call
       alloc_arg = mir.args.find { |arg| arg.is_a?(MIR::AllocatorRef) }
       alloc_arg&.kind if alloc_arg&.kind.is_a?(Symbol)
+    when MIR::MethodCall
+      mir.owned_result_alloc if mir.owned_result_alloc.is_a?(Symbol)
     when MIR::Cast
       mir_owned_alloc(mir.expr)
     when MIR::TryExpr
@@ -845,7 +859,7 @@ module MIRHoistLowering
       rc_cleanup_entry(ast_node, source: "MIR::SharePromote")
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::TryCatch, MIR::InlineZig, MIR::BgBlock
+    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::InlineZig, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc)
     else
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \

@@ -695,6 +695,7 @@ module CleanupClassifier
     entry ||= classify_owned_return_call(ti, node, schema_lookup)
     entry ||= classify_collection(ti, schema_lookup, node: node)
     entry ||= entry(:uniform, has_moved_guard: true) if ti.direct_indexable_collection?
+    entry ||= entry(:uniform, has_moved_guard: true) if ti.heap_ptr? || ti.indirect?
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
     if !entry && ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
       entry = entry(:uniform)

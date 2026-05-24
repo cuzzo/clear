@@ -86,7 +86,7 @@ class MIRChecker
     extend T::Sig
 
   OWNERSHIP_FIELD_NAMES = T.let(
-    Set[:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :callable_contract, :target_var],
+    Set[:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :owned_result_alloc, :callable_contract, :target_var],
     T::Set[Symbol],
   )
 
@@ -192,6 +192,7 @@ class MIRChecker
     errdefer_destroy_names = T.let(Set.new, NameSet)
     hpt_leaks = []
     owned_return_lets = []
+    owned_result_lets = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
     structural_ownership_nodes = []
@@ -215,6 +216,7 @@ class MIRChecker
         end
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
+        owned_result_lets << node if expr_owned_result_alloc(node.init)
         if node.init.is_a?(MIR::InlineZig) && node.init.allocs
           inline_alloc_nodes << node.init
         end
@@ -250,6 +252,7 @@ class MIRChecker
     hpt_leaks.each { |e| @errors << e }
     verify_allocator_closed_set!(allocs, cleanups, inline_alloc_nodes)
     verify_owned_return_alloc_marks!(owned_return_lets, allocs)
+    verify_owned_result_alloc_marks!(owned_result_lets, allocs)
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, fn_def)
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
     verify_err_cleanup_transfers!(err_cleanups, transfers)
@@ -990,6 +993,41 @@ class MIRChecker
     end
   end
 
+  sig { params(init: T.untyped).returns(T.nilable(Symbol)) }
+  def expr_owned_result_alloc(init)
+    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::Cast)
+    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::TryExpr)
+    return expr_owned_result_alloc(init.expr) if init.is_a?(MIR::TryCatch)
+    return init.owned_result_alloc if init.is_a?(MIR::MethodCall) && init.owned_result_alloc.is_a?(Symbol)
+    if init.is_a?(MIR::BlockExpr)
+      break_stmt = init.body&.reverse&.find { |stmt| stmt.is_a?(MIR::BreakStmt) }
+      return expr_owned_result_alloc(break_stmt.value) if break_stmt.is_a?(MIR::BreakStmt)
+    end
+    nil
+  end
+
+  sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_owned_result_alloc_marks!(lets, allocs)
+    lets.each do |let|
+      expected_alloc = expr_owned_result_alloc(let.init)
+      next unless expected_alloc
+
+      marks = allocs[let.name]
+      unless marks && !marks.empty?
+        @errors << error(:OWNED_RESULT_WITHOUT_ALLOC, let.name,
+          "owned-result initializer has no MIR::AllocMark; ownership is implicit")
+        next
+      end
+
+      bad_mark = marks.find { |mark| mark.alloc != expected_alloc }
+      next unless bad_mark
+
+      @errors << error(:OWNED_RESULT_ALLOC_MISMATCH, let.name,
+        "owned-result initializer produces :#{expected_alloc} storage but MIR::AllocMark uses :#{bad_mark.alloc}")
+    end
+    nil
+  end
+
   # ===================================================================
   # FSM structural validation
   # ===================================================================
@@ -1276,6 +1314,9 @@ class MIRChecker
     if node.is_a?(MIR::Call) && node.owned_return?
       leaks << error(:HPT_LEAK, node.callee,
         "owned-return call result not bound to variable (leak)")
+    elsif node.is_a?(MIR::MethodCall) && node.owned_result_alloc.is_a?(Symbol)
+      leaks << error(:HPT_LEAK, node.method,
+        "owned-result method call not bound to variable (leak)")
     elsif (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
        node.stdlib_def.fixed_return?
       ret = node.stdlib_def.return_type
@@ -1286,6 +1327,9 @@ class MIRChecker
       end
     end
     if node.is_a?(MIR::Call) && node.args
+      node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
+    elsif node.is_a?(MIR::MethodCall)
+      scan_expr_for_hpt_leak!(node.receiver, leaks)
       node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
     end
   end
@@ -1962,6 +2006,7 @@ class MIRChecker
   def allocating_expr?(expr)
     return true if MIR::HeapCreate === expr  # always heap by definition
     return true if expr.is_a?(MIR::Call) && expr.owned_return?
+    return true if expr.is_a?(MIR::MethodCall) && expr.owned_result_alloc.is_a?(Symbol)
     if expr.is_a?(MIR::InlineZig)
       return false if expr.stdlib_def&.mutates_receiver?
       return !!(expr.stdlib_def&.emits_allocating? && expr.allocs&.values&.any? { |v| VALID_ALLOCATORS.include?(v) })

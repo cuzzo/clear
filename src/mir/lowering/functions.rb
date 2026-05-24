@@ -19,6 +19,76 @@ module MIRLoweringFunctions
     const :param_index, Integer
   end
 
+  class CallOwnershipFacts < T::Struct
+    extend T::Sig
+
+    const :takes_indices, T::Set[Integer]
+    const :consumed_names, T::Array[String]
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def takes?(index)
+      takes_indices.include?(index)
+    end
+
+    sig { returns(T::Boolean) }
+    def takes_any?
+      !takes_indices.empty?
+    end
+
+    sig { returns(MIR::OwnershipContract) }
+    def ownership_contract
+      MIR::OwnershipContract.consumes(consumed_names)
+    end
+  end
+
+  class StdlibCallArgFact < T::Struct
+    extend T::Sig
+
+    COERCIBLE_PRIMITIVES = T.let(
+      Set[:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8, :Bool].freeze,
+      T::Set[Symbol],
+    )
+
+    const :index, Integer
+    const :ast_arg, T.untyped
+    const :takes, T::Boolean
+    const :coerce_type, T.nilable(Symbol)
+
+    sig { params(arg_zig: String).returns(String) }
+    def coerce_zig(arg_zig)
+      type_sym = coerce_type
+      return arg_zig unless type_sym
+      return arg_zig unless COERCIBLE_PRIMITIVES.include?(type_sym)
+
+      zig_t = Type.new(type_sym).zig_type
+      "@as(#{zig_t}, #{arg_zig})"
+    end
+  end
+
+  class StdlibCallFacts < T::Struct
+    extend T::Sig
+
+    const :args, T::Array[StdlibCallArgFact]
+    const :ownership, CallOwnershipFacts
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def takes?(index)
+      fact = args[index]
+      !!(fact && fact.takes)
+    end
+
+    sig { params(index: Integer).returns(T.untyped) }
+    def ast_arg(index)
+      args.fetch(index).ast_arg
+    end
+
+    sig { params(arg_zig: String, index: Integer).returns(String) }
+    def coerce_zig(arg_zig, index)
+      fact = args[index]
+      fact ? fact.coerce_zig(arg_zig) : arg_zig
+    end
+  end
+
   sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
   def lower_extern_fn(node)
     T.bind(self, MIRLowering) rescue nil
@@ -770,20 +840,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return nil unless sig
 
-    consumed = T.let([], T::Array[String])
-    ast_args.each_with_index do |arg, idx|
-      callee_param = sig.params[idx]
-      next unless T.unsafe(self).send(:call_arg_consumes_ownership?, arg, callee_param)
-      ti = Type.from_node(arg) rescue nil
-      next unless T.unsafe(self).send(:ownership_tracked_transfer_type?, ti)
-      root = T.unsafe(self).send(:moved_arg_root, arg)
-      next unless root
-      entry = @current_bindings[root] || CleanupEntry::NONE
-      next unless entry.present?
-      consumed << T.unsafe(self).send(:transfer_binding_name, root)
-    end
-
-    MIR::CallableContract.new(sig, MIR::OwnershipContract.consumes(consumed.uniq), ast_args.length)
+    facts = call_ownership_facts_for_signature(sig, ast_args)
+    MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
   sig { params(ast_arg: T.untyped, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
@@ -807,6 +865,66 @@ module MIRLoweringFunctions
       arg_alloc: takes ? allocator_for_takes_param!(callee_param) : :heap,
       param_index: param_index,
     )
+  end
+
+  sig { params(sig: FunctionSignature, ast_args: T::Array[T.untyped]).returns(CallOwnershipFacts) }
+  def call_ownership_facts_for_signature(sig, ast_args)
+    T.bind(self, MIRLowering) rescue nil
+    takes_indices = T.let(Set.new, T::Set[Integer])
+    consumed = T.let([], T::Array[String])
+    ast_args.each_with_index do |arg, idx|
+      callee_param = sig.params[idx]
+      next unless call_arg_consumes_ownership?(arg, callee_param)
+      takes_indices << idx
+      next unless ownership_tracked_transfer_type?(Type.from_node!(arg, context: "call ownership argument"))
+      root = moved_arg_root(arg)
+      next unless root
+      entry = @current_bindings[root] || CleanupEntry::NONE
+      next unless entry.present?
+      consumed << transfer_binding_name(root)
+    end
+    CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq)
+  end
+
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(StdlibCallFacts) }
+  def stdlib_call_facts(node)
+    sig = FunctionSignature.unwrap(node.matched_stdlib_def) if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
+    return empty_stdlib_call_facts unless sig
+
+    ast_args = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
+    if sig.arg_spec && sig.params.length != ast_args.length
+      Kernel.raise "stdlib call #{node.name}: signature has #{sig.params.length} params for #{ast_args.length} args"
+    end
+    ownership = call_ownership_facts_for_signature(sig, ast_args)
+    facts = T.let([], T::Array[StdlibCallArgFact])
+    ast_args.each_with_index do |ast_arg, index|
+      param = sig.params[index]
+      next unless param
+      facts << StdlibCallArgFact.new(
+        index: index,
+        ast_arg: ast_arg,
+        takes: ownership.takes?(index),
+        coerce_type: stdlib_coerce_type(param.type),
+      )
+    end
+    StdlibCallFacts.new(args: facts, ownership: ownership)
+  end
+
+  sig { returns(StdlibCallFacts) }
+  def empty_stdlib_call_facts
+    StdlibCallFacts.new(
+      args: [],
+      ownership: CallOwnershipFacts.new(takes_indices: Set.new, consumed_names: []),
+    )
+  end
+
+  sig { params(type_info: T.untyped).returns(T.nilable(Symbol)) }
+  def stdlib_coerce_type(type_info)
+    ti = Type.from_node(type_info)
+    return nil unless ti
+
+    resolved = ti.resolved
+    resolved.is_a?(Symbol) ? resolved : nil
   end
 
   sig { params(facts: CallArgFacts).returns(T.untyped) }
@@ -1104,7 +1222,8 @@ module MIRLoweringFunctions
       alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
       pre_resolved_alloc = resolve_alloc_sym(alloc_sym, nil, node)
     end
-    stdlib_args_for_lower = node.matched_stdlib_def&.arg_spec
+    stdlib_facts = stdlib_call_facts(node)
+    ownership_facts = stdlib_facts.ownership
 
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
@@ -1121,15 +1240,13 @@ module MIRLoweringFunctions
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
       lowered_args = node.args.each_with_index.map do |a, ai|
-        spec = stdlib_args_for_lower.is_a?(Array) ? stdlib_args_for_lower[ai + 1] : nil
-        takes = spec.is_a?(Hash) && spec[:takes]
+        takes = ownership_facts.takes?(ai + 1)
         takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
       end
       [obj_mir] + lowered_args
     else
       node.args.each_with_index.map do |a, ai|
-        spec = stdlib_args_for_lower.is_a?(Array) ? stdlib_args_for_lower[ai] : nil
-        takes = spec.is_a?(Hash) && spec[:takes]
+        takes = ownership_facts.takes?(ai)
         takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
       end
     end
@@ -1166,15 +1283,12 @@ module MIRLoweringFunctions
       resolved_allocs[:alloc] = resolved
     end
 
-    stdlib_args = node.matched_stdlib_def&.arg_spec
-    if stdlib_args.is_a?(Array)
-      ast_args = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
+    if stdlib_facts.args.any?
       sink_alloc = resolved_allocs[:alloc] || pre_resolved_alloc || :heap
-      ast_args.each_with_index do |arg_node, i|
-        next if node.is_a?(AST::MethodCall) && i == 0
-        param_def = stdlib_args[i]
-        next unless param_def.is_a?(Hash) && param_def[:takes]
-        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_node, sink_alloc)
+      stdlib_facts.args.each do |arg_fact|
+        i = arg_fact.index
+        next unless ownership_facts.takes?(i)
+        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_fact.ast_arg, sink_alloc)
       end
     end
 
@@ -1182,26 +1296,19 @@ module MIRLoweringFunctions
     # argument expressions still need the same hoist/cleanup treatment as normal
     # calls: borrowed sinks clean them after the call, TAKES sinks clean only on
     # error because ownership transfers on success.
-    stdlib_args_for_hoist = node.matched_stdlib_def&.arg_spec
-    if stdlib_args_for_hoist.is_a?(Array)
-      ast_args_for_hoist = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
+    if stdlib_facts.args.any?
       mir_args = mir_args.each_with_index.map do |arg_mir, i|
-        ast_arg = ast_args_for_hoist[i]
-        spec = stdlib_args_for_hoist[i]
-        takes = spec.is_a?(Hash) && spec[:takes]
-        hoist_alloc(arg_mir, ast_arg, err_cleanup: takes)
+        hoist_alloc(arg_mir, stdlib_facts.ast_arg(i), err_cleanup: ownership_facts.takes?(i))
       end
     end
-    consumed_names = T.let([], T::Array[String])
-    if stdlib_arg_spec_takes?(stdlib_args)
+    consumed_names = ownership_facts.consumed_names.dup
+    if ownership_facts.takes_any?
       @pending_stmts = T.let(@pending_stmts, T.untyped)
-      ast_args_for_consumes = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
-      stdlib_args.each_with_index do |spec, i|
-        next unless spec.is_a?(Hash) && spec[:takes]
+      mir_args.each_with_index do |arg_mir, i|
+        next unless ownership_facts.takes?(i)
         arg_mir = mir_args[i]
         if arg_mir.is_a?(MIR::Ident)
-          if @guarded_cleanup_names&.[](arg_mir.name.to_s) ||
-             ownership_tracked_transfer_type?(Type.from_node(ast_args_for_consumes[i]))
+          if @guarded_cleanup_names&.[](arg_mir.name.to_s)
             consumed_names << arg_mir.name
           end
         else
@@ -1234,10 +1341,9 @@ module MIRLoweringFunctions
     # non-literal args pay nothing. We skip it for `:Any` (anytype) and
     # for arg specs without a concrete declared type (Hash forms whose
     # `:type` is missing or :Any).
-    stdlib_args = node.matched_stdlib_def&.arg_spec
-    if stdlib_args.is_a?(Array)
+    if stdlib_facts.args.any?
       args_zig = args_zig.each_with_index.map do |arg_zig, i|
-        coerce_stdlib_arg(arg_zig, stdlib_args[i])
+        stdlib_facts.coerce_zig(arg_zig, i)
       end
     end
 
@@ -1266,7 +1372,7 @@ module MIRLoweringFunctions
     # (src/annotator.rb). Both are always present together.
     iz.stdlib_def = node.matched_stdlib_def
     iz.allocs = resolved_allocs unless resolved_allocs.empty?
-    if stdlib_arg_spec_takes?(stdlib_args)
+    if ownership_facts.takes_any?
       iz.ownership_contract = MIR::OwnershipContract.consumes(consumed_names)
     end
     # Store target variable name for checker cross-reference with AllocMark.

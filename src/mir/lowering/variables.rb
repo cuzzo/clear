@@ -39,6 +39,7 @@ module MIRLoweringVariables
     const :annotation, T.nilable(String)
     const :heap_return_var, T::Boolean
     const :decl_alloc, Symbol
+    const :init_alloc_override, T.nilable(Symbol)
     const :has_caps, T::Boolean
     const :bare_zig, String
     const :generic_id, T::Boolean
@@ -118,7 +119,7 @@ module MIRLoweringVariables
     end
 
     safe_name = var_decl_safe_name(node, facts.has_mir_drop)
-    stamp_var_decl_init_target!(init, safe_name, facts.binding_entry)
+    stamp_var_decl_init_target!(init, safe_name, facts.decl_alloc)
 
     let_node = MIR::Let.new(
       safe_name,
@@ -194,13 +195,17 @@ module MIRLoweringVariables
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
     heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
     heap_return_binding_allocates = heap_return_var && escaping_value_alloc(ft) == :heap
-    decl_alloc = if node.symbol&.heap_storage? || heap_return_binding_allocates
+    base_decl_alloc = if node.symbol&.heap_storage? || heap_return_binding_allocates
       :heap
     elsif heap_return_var
       :frame
     else
       (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
     end
+    next_owned_alloc = node.value.is_a?(AST::NextExpr) ? next_result_owned_alloc(node.value, ft, base_decl_alloc) : nil
+    source_owned_alloc = owned_binding_source_alloc(node.value)
+    init_alloc_override = next_owned_alloc || source_owned_alloc
+    decl_alloc = init_alloc_override || base_decl_alloc
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
     # compose_capability_wrap once the inner is built. This separation is
@@ -220,10 +225,25 @@ module MIRLoweringVariables
       annotation: annotation,
       heap_return_var: heap_return_var == true,
       decl_alloc: decl_alloc,
+      init_alloc_override: init_alloc_override,
       has_caps: has_caps,
       bare_zig: bare_zig,
       generic_id: ft.generic_instance? && ft.generic_base == :Id
     )
+  end
+
+  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
+  def owned_binding_source_alloc(value)
+    T.bind(self, MIRLowering) rescue nil
+    return nil if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
+    node = value.is_a?(AST::MoveNode) ? value.value : value
+    return nil unless node.is_a?(AST::Identifier)
+
+    entry = @current_bindings[node.name.to_s] if @current_bindings
+    return nil unless entry&.needs_cleanup?
+
+    alloc = entry.alloc
+    alloc if alloc.is_a?(Symbol)
   end
 
   sig { params(node: AST::VarDecl, has_mir_drop: T::Boolean).returns(String) }
@@ -278,19 +298,16 @@ module MIRLoweringVariables
     end
   end
 
-  sig { params(init: T.untyped, safe_name: String, binding_entry: CleanupEntry).void }
-  def stamp_var_decl_init_target!(init, safe_name, binding_entry)
+  sig { params(init: T.untyped, safe_name: String, decl_alloc: Symbol).void }
+  def stamp_var_decl_init_target!(init, safe_name, decl_alloc)
     T.bind(self, MIRLowering) rescue nil
     if mir_allocates?(init)
-      stamp_allocating_result_target!(init, safe_name, alloc: binding_entry[:alloc])
+      stamp_allocating_result_target!(init, safe_name, alloc: decl_alloc)
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
       if !init.target_var || (init.stdlib_def&.emits_allocating? && !init.stdlib_def&.mutates_receiver?)
         init.target_var = safe_name
       end
-      binding_alloc = binding_entry[:alloc]
-      if init.target_var == safe_name && binding_alloc
-        init.allocs = init.allocs.transform_values { |_alloc| binding_alloc }
-      end
+      init.allocs = init.allocs.transform_values { |_alloc| decl_alloc } if init.target_var == safe_name
     end
   end
 
@@ -315,7 +332,9 @@ module MIRLoweringVariables
       drop_entry[:has_moved_guard] = true if ft.bounded_stream?
       # One allocator per binding: AllocMark, Cleanup, and the init
       # expression all read the classifier's definitive placement.
-      node_alloc = drop_entry.alloc || decl_alloc
+      node_alloc = facts.init_alloc_override || drop_entry.alloc || decl_alloc
+      drop_entry[:alloc] = node_alloc
+      @current_bindings[node.name.to_s] = drop_entry if @current_bindings
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = node_alloc
       cleanup = MIR::Cleanup.new(safe_name, drop_entry)
@@ -454,7 +473,7 @@ module MIRLoweringVariables
 
     value = node.value
     return [] unless value.is_a?(AST::GetField)
-    return [] unless ownership_bearing_type?(Type.from_node(node.full_type))
+    return [] unless ownership_bearing_type?(Type.from_node!(node.full_type, context: "field owner move"))
 
     root = AST.root_identifier(value)
     return [] unless root
@@ -558,7 +577,8 @@ module MIRLoweringVariables
         place_value_for_destination(lowered, node.value, assign_alloc, node.full_type)
       end
       value = copy_container_borrow_if_needed(value, node.value)
-      value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value)
+      value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
+        !fallible_self_fallback_reassign?(mapped || safe, value)
       result = if rp
         MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
       elsif heap_return_var && (target_type = Type.from_node(node.name))&.needs_explicit_cleanup?(:heap, @schema_lookup)
@@ -568,6 +588,16 @@ module MIRLoweringVariables
       end
       result
     end
+  end
+
+  sig { params(name: String, value: T.untyped).returns(T::Boolean) }
+  def fallible_self_fallback_reassign?(name, value)
+    expr = value
+    expr = expr.expr if expr.is_a?(MIR::Cast)
+    expr.is_a?(MIR::TryCatch) &&
+      expr.capture.nil? &&
+      expr.catch_body.is_a?(MIR::Ident) &&
+      expr.catch_body.name.to_s == name.to_s
   end
 
   # Emit `cell.<op>(arg)` for atomic assignments. The annotator stamped
@@ -829,8 +859,8 @@ module MIRLoweringVariables
     val_node = node.value
     val = with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
     consumed_names = T.let([], T::Array[String])
-    value_type_for_transfer = Type.from_node(val_node) rescue nil
-    owns_transferred_value = ownership_tracked_transfer_type?(value_type_for_transfer || receiver_type.element_type)
+    value_type_for_transfer = Type.from_node!(val_node, context: "indexed assignment value transfer")
+    owns_transferred_value = ownership_tracked_transfer_type?(value_type_for_transfer)
     if op[:takes_value] && owns_transferred_value && !dispatch.shard_direct
       val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc)
       val = hoist_alloc(val, val_node, err_cleanup: true)
@@ -879,19 +909,17 @@ module MIRLoweringVariables
     # Emit pre-cleanup for non-Copy element types in list collections so the
     # overwritten element is freed before the new value is written in place.
     if kind == :array || kind == :list
-      elem_ti = receiver_type.element_type
-      if elem_ti
-        if ownership_tracked_transfer_type?(elem_ti)
-          elem_zig = elem_ti.zig_type
-          alloc_str = alloc_zig_str(dispatch.sink_alloc)
-          cleanup_call = emit_builtin(:cleanupAt, [
-            MIR::Ident.new(elem_zig),
-            MIR::Ident.new(target_zig),
-            MIR::Ident.new(alloc_str),
-            MIR::Ident.new(idx_zig),
-          ])
-          return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), setAt_stmt, *post_transfer_marks])
-        end
+      elem_ti = T.must(receiver_type.element_type)
+      if ownership_tracked_transfer_type?(elem_ti)
+        elem_zig = elem_ti.zig_type
+        alloc_str = alloc_zig_str(dispatch.sink_alloc)
+        cleanup_call = emit_builtin(:cleanupAt, [
+          MIR::Ident.new(elem_zig),
+          MIR::Ident.new(target_zig),
+          MIR::Ident.new(alloc_str),
+          MIR::Ident.new(idx_zig),
+        ])
+        return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), setAt_stmt, *post_transfer_marks])
       end
     end
 

@@ -915,6 +915,23 @@ module AST
     end
   end
 
+  Node = T.type_alias { Locatable }
+
+  sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
+  def self.each_child_node(node, &blk)
+    node.class.members.each do |member|
+      value = node[member]
+      if value.is_a?(Array)
+        value.each { |child| yield child if child.is_a?(Locatable) }
+      elsif value.is_a?(Hash)
+        value.each_value { |child| yield child if child.is_a?(Locatable) }
+      elsif value.is_a?(Locatable)
+        yield value
+      end
+    end
+    nil
+  end
+
   Program      = Struct.new(:token, :statements) do
     include Locatable
     # Resolved program-level SYNC POLICY, either user-written or the baked-in

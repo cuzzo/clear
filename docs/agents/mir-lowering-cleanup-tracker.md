@@ -7,6 +7,75 @@ lowering responsibility that already exists as a concept.
 
 ## Work Items
 
+- [ ] `slopcop-type-norm-burn-down`: audit expanded MIR SlopCop `type_norm`
+  dark arms and remove defensive nil/type guards only when the upstream fact can
+  be made non-nil / strongly typed. Do not replace them with equivalent guards
+  elsewhere.
+  Audit: expanded SlopCop reports 403 `type_norm` arms. Largest clusters are
+  `escape_analysis` top-level walker logic (80), `lower_or_rescue` (14),
+  `lower_binary_op` (10), `lower_match` (9), `lower_get_index` (8), catch
+  reassign walkers (16 combined), and var-decl/init/indexed assignment helpers.
+  Progress: ownership-transfer predicates no longer accept nil `Type` values;
+  callers now use `Type.from_node!` where post-annotation type information is a
+  hard invariant. Latest focused MIR snapshot is 448 `type_norm` arms because
+  the new call ownership facts and generic AST moved-arg walker are currently
+  uncovered; those arms are not acceptable as permanent defensive shape checks.
+- [ ] `slopcop-dead-arm-audit`: audit expanded MIR SlopCop `dead` dark arms.
+  Delete truly unreachable code or convert it into hard invariants when the
+  compiler state model makes the branch impossible. Keep intentional diagnostic
+  paths out of this bucket.
+  Audit: expanded SlopCop reports 154 `dead` arms. Largest clusters are
+  generated/top-level MIR dispatch arms, `linear_scope_decl_always_moves?`,
+  `lower_match`, `var_decl_suppression`, `moved_arg_expr_members`,
+  stream loop lowering, and var-decl node construction.
+  Progress: deleted unused escape-analysis heap helpers and removed
+  `moved_arg_expr_members`; the moved-arg path is now a generic AST traversal
+  with only nested ownership scopes as explicit boundaries. Latest focused MIR
+  snapshot is 145 `dead` arms.
+- [ ] `OwnershipTransferPlan`: reify ownership-transfer emission into a typed
+  fact object that owns consumed roots, transfer target, guarded-move
+  requirement, and emitted marks. Call sites must not manually remember the
+  TransferMark/MoveMark protocol.
+  Progress: `MIRLowering::OwnershipTransferPlan` now owns paired
+  `TransferMark`/`MoveMark` emission for pre-terminator transfers,
+  BG-capture transfers, and MIR consumed-root transfers.
+- [ ] `AllocatingResultFact`: reify `mir_allocates?`, target-var stamping,
+  allocator choice, and alloc-target mutation into one typed result fact so
+  hoist/lowering/checker paths cannot forget half the allocation protocol.
+  Progress: implicit allocating `Let` handling now produces an
+  `AllocatingResultFact` before emitting `AllocMark`.
+- [x] `CallOwnershipFacts`: expand the existing call-argument facts so stdlib,
+  intrinsic, UFCS, and normal calls share the same typed ownership contract
+  path. No stdlib-specific ownership side channel.
+  Progress: added `MIRLoweringFunctions::CallOwnershipFacts`; normal callable
+  contracts and stdlib/intrinsic TAKES handling now read the same typed
+  consumed-name/takes-index fact instead of repeatedly interpreting arg specs.
+  The registry conversion now treats method `takes_args` as user-argument
+  indexes, so receiver mutation is not mistaken for receiver ownership
+  consumption.
+- [ ] `ReturnOwnershipPlan`: make return lowering consume one typed plan for
+  returned names, moved roots, consumed roots, converted cleanup names, and
+  final transfer marks.
+  Progress: `ReturnOwnershipPlan` now carries explicit returned roots, moved
+  roots, consumed roots, and direct MIR value roots separately, with a single
+  derived `returned_names` set for consumers.
+- [x] `stdlib-arg-fact-boundary`: complete the stdlib/intrinsic argument
+  boundary so intrinsic lowering consumes typed argument facts, not raw
+  `arg_spec` Array/Hash shape checks. `CallOwnershipFacts` is only complete
+  when TAKES, coercion, materialization, and hoist decisions all read the same
+  typed per-argument fact.
+- [x] `canonical-ast-child-walker`: replace inline AST `members` traversal in
+  moved-arg ownership collection with one canonical child iterator. The moved
+  ownership path may define semantic stop points, but it must not own Array /
+  Hash / Locatable traversal mechanics.
+- [x] `typed-node-aliases`: define weak node aliases for the two syntax trees
+  and use them at the public helper boundary where a method actually consumes
+  AST or MIR nodes. `AST::Node` aliases the existing AST locatable marker,
+  `MIR::Node` aliases `MIR::Stmt | MIR::Expr`, and generic MIR walkers now
+  accept containers honestly while yielding only `MIR::Node` values.
+- [ ] `dead-arm-second-pass`: audit the current 145 SlopCop `dead` arms and
+  delete only code that is provably unreachable or convert impossible states to
+  hard invariants. Do not extract helpers solely to satisfy SlopCop.
 - [x] `#1` pass/fact contract enforcement: make pass ordering a typed runtime
   contract, not documentation. A pass may only mark the next registered stage,
   consumers must require their input stage, and architecture specs must fail if

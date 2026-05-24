@@ -1185,7 +1185,7 @@ module MIRLoweringExpressions
   def aggregate_field_sink_alloc(_field_type, value, aggregate_alloc)
     T.bind(self, MIRLowering) rescue nil
     if value.is_a?(AST::Identifier)
-      ti = Type.from_node(value) rescue nil
+      ti = Type.from_node!(value, context: "aggregate field sink")
       if ownership_tracked_transfer_type?(ti) &&
          (value.was_moved == true || value.symbol&.heap_storage?)
         return placement_for_node(value)
