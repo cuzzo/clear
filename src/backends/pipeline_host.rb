@@ -1872,7 +1872,7 @@ class PipelineHost
           MIR::Ident.new(elem_zig),
           MIR::Ident.new(HEAP_ALLOC),
           MIR::AddressOf.new(MIR::Ident.new(var))
-        ], false), nil)]
+        ], false, false, MIR::CallableContract.no_ownership(3)), nil)]
     }
     p = build_lazy_range_prefix(range_chain[:source], range_chain[:stages], on_skip: on_skip)
     item_var   = p[:item_var]
