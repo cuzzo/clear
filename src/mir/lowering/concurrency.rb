@@ -627,7 +627,8 @@ module MIRLoweringConcurrency
     # anonymous YIELD operands; escape analysis marks it heap because it
     # escapes the fiber). The stream owns it; the consumer frees it. No
     # dupe -- one allocation, placed by escape analysis.
-    push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
+    push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true,
+      MIR::CallableContract.no_ownership(1))
     transfer_marks = ownership_marks_for_transferred_temp(lowered)
     # YIELD transfers ownership to the stream at the push boundary. InfStream
     # owns and cleans the value even if push returns StreamClosed, so the local

@@ -50,6 +50,10 @@ module CleanupClassifier
     # 2. TAKES parameters from fn_node.params.
     walk_takes_params(fn_node, schema_lookup, bindings)
 
+    # 2b. Any binding consumed by GIVE/TAKES/NEXT/COLLECT-style analysis
+    # needs a moved guard so lowering can suppress exactly that cleanup.
+    walk_moved_source_guards(fn_node.body, bindings)
+
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
     walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
@@ -59,6 +63,16 @@ module CleanupClassifier
     stamp_cleanup_scopes!(fn_node.body, bindings)
 
     bindings
+  end
+
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.walk_moved_source_guards(body, bindings)
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::Identifier)
+      next unless node.respond_to?(:was_moved) && node.was_moved == true
+      entry = bindings[node.name.to_s]
+      entry[:has_moved_guard] = true if entry&.present?
+    end
   end
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }

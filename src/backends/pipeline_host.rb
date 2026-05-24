@@ -677,7 +677,8 @@ class PipelineHost
 
     value_expr = MIR::MethodCall.new(
       MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
-      "get", [MIR::Ident.new("__psi")], false)
+      "get", [MIR::Ident.new("__psi")], false,
+      MIR::CallableContract.no_ownership(1))
     alive_check = MIR::IndexGet.new(
       MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "alive"),
       MIR::Ident.new("__psi"))
@@ -735,7 +736,8 @@ class PipelineHost
 
     value_expr = MIR::MethodCall.new(
       MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
-      "get", [MIR::Ident.new("__psi")], false)
+      "get", [MIR::Ident.new("__psi")], false,
+      MIR::CallableContract.no_ownership(1))
 
     loop_node = MIR::ForStmt.new(
       MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data")), "usize", :intCast)),
@@ -863,7 +865,8 @@ class PipelineHost
     end
     if needs_whole_item
       loop_prefix << MIR::Let.new("it",
-        MIR::MethodCall.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data"), "get", [MIR::Ident.new("__soa_i")], false),
+        MIR::MethodCall.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data"), "get",
+          [MIR::Ident.new("__soa_i")], false, MIR::CallableContract.no_ownership(1)),
         false, nil, nil)
     end
 
@@ -1144,7 +1147,8 @@ class PipelineHost
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
               [MIR::AllocatorRef.new(alloc),
-               borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true), nil)
+               borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc)], true,
+              MIR::CallableContract.no_ownership(2)), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -1168,7 +1172,8 @@ class PipelineHost
           MIR::Let.new("val", expr_mir, false, nil, nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("res_list"), "append",
-            [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")], true), nil)
+            [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")], true,
+            MIR::CallableContract.no_ownership(2)), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -1205,7 +1210,8 @@ class PipelineHost
             [MIR::BreakStmt.new(nil, nil)], nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("__lim_res"), "append",
-            [MIR::Ident.new("__lim_it")], true), nil),
+            [MIR::Ident.new("__lim_it")], true,
+            MIR::CallableContract.no_ownership(1)), nil),
           MIR::Set.new(MIR::Ident.new("__lim_i"),
             MIR::BinOp.new("+", MIR::Ident.new("__lim_i"), MIR::Lit.new("1_i64")), nil),
         ], nil),
@@ -1342,7 +1348,8 @@ class PipelineHost
              MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
              MIR::ExprStmt.new(MIR::MethodCall.new(
                MIR::Ident.new("dist_set"), "insert",
-               [MIR::Ident.new("dist_key")], true), nil)], nil),
+               [MIR::Ident.new("dist_key")], true,
+               MIR::CallableContract.no_ownership(1)), nil)], nil),
           MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
         ])
       end
@@ -1357,7 +1364,8 @@ class PipelineHost
            MIR::ExprStmt.new(MIR::MethodCall.new(
              MIR::Ident.new("dist_set"), "insert",
              [MIR::AllocatorRef.new(alloc),
-              MIR::Ident.new("dist_key")], true), nil)],
+              MIR::Ident.new("dist_key")], true,
+             MIR::CallableContract.no_ownership(2)), nil)],
           p[:initial_capture], nil, nil, nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
       ])
@@ -1371,7 +1379,8 @@ class PipelineHost
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("dist_set"), "insert",
             [MIR::AllocatorRef.new(alloc),
-             MIR::Ident.new("dist_key")], true), nil)
+             MIR::Ident.new("dist_key")], true,
+            MIR::CallableContract.no_ownership(2)), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
       ]
@@ -1399,7 +1408,8 @@ class PipelineHost
           MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("inner_it")], true), nil)
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("inner_it")], true,
+              MIR::CallableContract.no_ownership(2)), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -1467,7 +1477,7 @@ class PipelineHost
                   MIR::ExprStmt.new(MIR::MethodCall.new(
                     MIR::Ident.new("res_list"), "append",
                     [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")],
-                    true), nil)
+                    true, MIR::CallableContract.no_ownership(2)), nil)
                 ],
                 nil,
                 MIR::Set.new(MIR::Ident.new("__wi"),
@@ -1550,7 +1560,8 @@ class PipelineHost
         MIR::ForStmt.new(source_mir, "__bw_it", [
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("__bw_drained"), "append",
-            [MIR::Ident.new("__bw_it")], true), nil)
+            [MIR::Ident.new("__bw_it")], true,
+            MIR::CallableContract.no_ownership(1)), nil)
         ], nil),
         MIR::Let.new("res_list",
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
@@ -1588,7 +1599,7 @@ class PipelineHost
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
               [MIR::Ident.new("__bw_val")],
-              true), nil),
+              true, MIR::CallableContract.no_ownership(1)), nil),
             MIR::Set.new(MIR::Ident.new("__bw_offset"),
               MIR::Ident.new("__bw_end")),
           ], nil, nil, nil, nil),
@@ -1643,7 +1654,7 @@ class PipelineHost
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
               [MIR::AllocatorRef.new(alloc), MIR::Ident.new("__bw_val")],
-              true), nil),
+              true, MIR::CallableContract.no_ownership(2)), nil),
             MIR::Set.new(MIR::Ident.new("__bw_offset"),
               MIR::Ident.new("__bw_end")),
           ], nil, nil, nil, nil),
@@ -1991,7 +2002,7 @@ class PipelineHost
            MIR::StructInit.new(nil, [
              {name: "left",  value: left_value},
              {name: "right", value: right_value}])],
-          true), nil),
+          true, MIR::CallableContract.no_ownership(2)), nil),
         *after_append
       ], nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -2828,27 +2839,29 @@ class PipelineHost
     # makes the heap touch explicit instead of slipping past INV-12.
     acc_alloc = MIR::InlineZig.new(acc_alloc_zig, "obs_alloc")
     acc_alloc.stdlib_def = ALLOCATING_DEF
-    wg_init_zig = <<~ZIG.chomp
-      blk: {
-          const __wg = #{rt_name}.heapAlloc().create(CheatHeader.WaitGroup) catch unreachable;
-          __wg.* = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
-          __wg.add(1);
-          break :blk __wg;
-      }
-    ZIG
-    wg_init = MIR::InlineZig.new(wg_init_zig, "obs_wg_alloc")
-    wg_init.stdlib_def = ALLOCATING_DEF
+    wg_init = MIR::HeapCreate.new(
+      "CheatHeader.WaitGroup",
+      MIR::InlineZig.new("CheatHeader.WaitGroup.init(#{rt_name}.getSched())", "obs_wg_init", MIR::OwnershipContract.empty, ALLOC_REF_DEF),
+      :heap,
+      "__obs_wg_alloc"
+    )
     set_completion = MIR::InlineZig.new(
       "__obs_acc.setCompletion(@as(*anyopaque, @ptrCast(__obs_wg)), CheatHeader.obsWgDone, CheatHeader.obsWgWait, CheatHeader.obsWgDestroy)",
       "obs_set_completion")
     # setCompletion mutates __obs_acc to take ownership of __obs_wg; no
     # net allocation here. Borrows both pointers.
     set_completion.stdlib_def = ALLOC_REF_DEF
+    set_completion.ownership_contract = MIR::OwnershipContract.consumes(["__obs_wg"])
+    wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap, Type.new(:Untyped))
+    wg_alloc_mark.scope = :heap
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("__obs_acc", acc_alloc, false, obs_zig, nil),
+      wg_alloc_mark,
       MIR::Let.new("__obs_wg", wg_init,
         false, "*CheatHeader.WaitGroup", nil),
+      MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("__obs_wg"), "add", [MIR::Lit.new("1")], false,
+        MIR::CallableContract.no_ownership(1)), nil),
       MIR::ExprStmt.new(set_completion, nil),
     ]
 
@@ -2927,18 +2940,15 @@ class PipelineHost
                   const #{fiber_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_obs_#{fid})));
                   #{body_zig.include?(fiber_rt) ? "" : "_ = &#{fiber_rt};"}
                   const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_obs_#{fid}.?)));
-                  defer #{fiber_rt}.heapAlloc().destroy(ctx);
                   defer ctx.acc.finish();
                   #{body_zig}
               }
           };
-          const #{ctx_var} = #{rt_name}.heapAlloc().create(#{ctx_type}) catch unreachable;
-          errdefer #{rt_name}.heapAlloc().destroy(#{ctx_var});
-          #{ctx_var}.* = .{ .acc = __obs_acc, .gen = #{p[:source_name]} };
-          try #{rt_name}.getSched().submitSpawn(
-              @intFromPtr(&Runtime.entryWrapper),
+          try CheatHeader.spawnObservableConsumerCtx(
+              #{ctx_type},
+              #{rt_name},
+              .{ .acc = __obs_acc, .gen = #{p[:source_name]} },
               @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-              #{ctx_var},
               #{task_cfg}
           )
     ZIG
@@ -2951,6 +2961,7 @@ class PipelineHost
     # within this block. From outside, it's a no-net-allocation effect:
     # mark as borrowing the allocator + ctx-init args. (H9)
     spawn_inline.stdlib_def = ALLOC_REF_DEF
+    spawn_inline.ownership_contract = MIR::OwnershipContract.consumes([p[:source_name].to_s])
 
     MIR::BlockExpr.new(label, [
       *acc_init_stmts,
@@ -3006,7 +3017,8 @@ class PipelineHost
           end
 
     call = MIR::ExprStmt.new(
-      MIR::MethodCall.new(inner_recv, spec[:method], T.must(arg), false), nil)
+      MIR::MethodCall.new(inner_recv, spec[:method], T.must(arg), false,
+        MIR::CallableContract.no_ownership(T.must(arg).length)), nil)
 
     publish = case spec[:gate]
               when :always then [call]
@@ -3945,7 +3957,8 @@ class PipelineHost
             MIR::InlineBc.new(:is_error, [MIR::Ident.new("__cv")], { bc: true })), [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("__cv")], true), nil)
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("__cv")], true,
+              MIR::CallableContract.no_ownership(2)), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -3975,7 +3988,8 @@ class PipelineHost
             MIR::Ident.new("__cv")), [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("it")], true), nil)
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("it")], true,
+              MIR::CallableContract.no_ownership(2)), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))

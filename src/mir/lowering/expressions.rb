@@ -354,6 +354,9 @@ module MIRLoweringExpressions
 
       # Try MIR path first (migrated operators return MIR node tree)
       mir_result = host.lower_pipeline(node)
+      if mir_result.is_a?(MIR::BlockExpr)
+        mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
+      end
       return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, nil) if mir_result
 
       raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
@@ -406,9 +409,16 @@ module MIRLoweringExpressions
           MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,
             MIR::CallableContract.no_ownership(collect_args.length)),
           false, nil, nil),
-        MIR::ExprStmt.new(MIR::InlineZig.new(
-          "#{collect_var}.destroy(#{@rt_name}.heapAlloc())",
-          "obs_collect_destroy"), nil),
+        MIR::ExprStmt.new(
+          MIR::MethodCall.new(
+            MIR::Ident.new(collect_var),
+            "destroy",
+            [MIR::AllocatorRef.new(:heap)],
+            false,
+            MIR::CallableContract.no_ownership(1)
+          ),
+          false
+        ),
         MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
       ])
     end

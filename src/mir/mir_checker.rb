@@ -1182,6 +1182,10 @@ class MIRChecker
       walk_mir(expr.body, &block)
       return
     end
+    if expr.is_a?(MIR::Pipeline)
+      walk_mir_node(expr.inner, &block)
+      return
+    end
     each_sub_expr(expr) { |sub| walk_mir_expr(sub, &block) }
     nil
   end

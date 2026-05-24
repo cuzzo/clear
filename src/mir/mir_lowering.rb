@@ -399,7 +399,15 @@ class MIRLowering
          !hoisted_discard
         mir = MIR::ExprStmt.new(mir, true)
       end
-      result.concat(pending)
+      pending.compact.each do |p|
+        result << p
+        register_visible_alloc_names!(p)
+        visible_alloc_names = visible_alloc_names_for_transfer(result, p)
+        visible_guarded_names = visible_guarded_cleanup_names_for_transfer(result, p)
+        ownership_transfers_for_mir(p, visible_alloc_names, visible_guarded_names).each do |mark|
+          result << mark
+        end
+      end
       if s.is_a?(AST::MoveNode)
         ownership_marks_for_transferred_temp(mir).each { |mark| result << mark }
         next
@@ -549,8 +557,11 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(T::Array[String]) }
   def collect_mir_consumed_roots(node)
-    return [] if node.is_a?(MIR::Pipeline)
     names = T.let([], T::Array[String])
+    if node.is_a?(MIR::Pipeline)
+      collect_mir_consumed_roots(node.inner).each { |name| names << name.to_s }
+      return names.uniq
+    end
     walk_mir_node(node) do |child|
       ownership_contract_consumes(child).each { |name| names << name.to_s }
       structural_ownership_consumes(child).each { |name| names << name.to_s }

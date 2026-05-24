@@ -57,6 +57,35 @@ pub fn obsWgDestroy(handle: ?*anyopaque, alloc: std.mem.Allocator) void {
     alloc.destroy(wg);
 }
 
+pub fn spawnObservableConsumerCtx(
+    comptime Ctx: type,
+    rt: *Runtime,
+    init: Ctx,
+    comptime user_fn: TaskFn,
+    config: fp.TaskConfig,
+) !void {
+    const ctx = rt.heapAlloc().create(Ctx) catch unreachable;
+    errdefer rt.heapAlloc().destroy(ctx);
+    ctx.* = init;
+
+    const Runner = struct {
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const run_rt: *Runtime = @ptrCast(@alignCast(raw_rt));
+            const run_ctx: *Ctx = @ptrCast(@alignCast(raw_args.?));
+            defer run_rt.heapAlloc().destroy(run_ctx);
+            defer run_ctx.gen.deinit();
+            try user_fn(raw_rt, raw_args);
+        }
+    };
+
+    try rt.getSched().submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(TaskFn, @ptrCast(&Runner.run)),
+        ctx,
+        config,
+    );
+}
+
 // FSM types re-exported for Phase B1 pure-compute BG lowering.
 pub const FsmTask = fp.FsmTask;
 pub const YieldReason = fp.YieldReason;

@@ -69,6 +69,11 @@ module PipeAnalysis
                   (ti.dynamic_stream? || ti.inf_stream? || ti.open_stream? || ti.bounded_stream?)
     node.observable_terminal = true
     node.observable_dest = true
+    if node.left.is_a?(AST::Identifier)
+      node.left.was_moved = true
+      og_set_moved(node.left.name, at_token: node.left.token, action: :takes)
+    end
+    true
   end
 
   # Lift a fold-pipe's result type to its `~T@observable` form when
