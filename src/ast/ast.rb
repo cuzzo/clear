@@ -535,7 +535,9 @@ module AST
     def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val)
-      @matched_stdlib_def = T.let(IntrinsicRegistry.fs(val), T.untyped)
+      fs = IntrinsicRegistry.fs(val)
+      @matched_stdlib_def = T.let(fs, T.untyped)
+      self.matched_signature = fs
     end
 
     sig { returns(T.untyped) }

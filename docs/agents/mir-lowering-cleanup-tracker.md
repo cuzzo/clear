@@ -7,6 +7,21 @@ lowering responsibility that already exists as a concept.
 
 ## Work Items
 
+- [x] `#1` pass/fact contract enforcement: make pass ordering a typed runtime
+  contract, not documentation. A pass may only mark the next registered stage,
+  consumers must require their input stage, and architecture specs must fail if
+  MIR-relevant stages are added outside the contract.
+- [x] `#3` material MIR lowering reduction: only split `mir_lowering` seams when
+  the split deletes local decisions. Priority targets are var-decl emission and
+  call/result ownership lowering; both must read finalized typed facts rather
+  than re-derive heap/frame/cleanup/ownership locally.
+  Progress: var-decl alloc marker construction now has one helper path, generic
+  `Id` exclusion is a typed fact, and declaration placement no longer reads
+  intrinsic operation allocation directives. Call argument ownership lowering
+  now has one typed `CallArgFacts` path shared by normal calls and UFCS method
+  calls, so TAKES/COPY/allocator shaping is no longer duplicated. Owned-result
+  finalization now has one helper path shared by normal calls and UFCS method
+  calls.
 - [x] `lower_or_rescue`: extract typed facts for OR / OR_RESCUE lowering so the
   lowering body reads a finalized shape instead of recomputing nullable state
   and catch behavior inline.

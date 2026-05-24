@@ -188,6 +188,15 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/mir/mir_checker.rb")).to include('MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")')
   end
 
+  it "keeps pass stages registered as typed producer/requirement specs" do
+    pass_state = source("src/mir/pass_state.rb")
+    expect(pass_state).to include("class StageSpec < T::Struct")
+    expect(pass_state).to include("const :producer, String")
+    expect(pass_state).to include("const :requires, T.nilable(Symbol)")
+    expect(pass_state).to include("STAGE_BY_NAME")
+    expect(pass_state).to include("next required stage")
+  end
+
   it "aborts compilation on MIRChecker errors in emitted program paths" do
     expect(source("src/backends/transpiler.rb")).to include("MIR ownership verification failed")
     expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)

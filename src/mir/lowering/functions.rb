@@ -2,10 +2,22 @@
 require "sorbet-runtime"
 
 module MIRLoweringFunctions
-    extend T::Sig
-    extend T::Helpers
+  extend T::Sig
+  extend T::Helpers
 
   requires_ancestor { MIRLowering }
+
+  class CallArgFacts < T::Struct
+    const :ast_arg, T.untyped
+    const :type_info, Type
+    const :callee_sig, T.nilable(FunctionSignature)
+    const :callee_param, T.nilable(AST::Param)
+    const :callee_param_type, Type
+    const :takes, T::Boolean
+    const :copy_to_owning, T::Boolean
+    const :arg_alloc, Symbol
+    const :param_index, Integer
+  end
 
   sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
   def lower_extern_fn(node)
@@ -774,6 +786,68 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, MIR::OwnershipContract.consumes(consumed.uniq), ast_args.length)
   end
 
+  sig { params(ast_arg: T.untyped, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
+  def call_arg_facts(ast_arg, callee_sig, param_index)
+    T.bind(self, MIRLowering) rescue nil
+    ti = Type.from_node!(ast_arg, context: "call argument")
+    callee_param = callee_sig ? callee_sig.params[param_index] : nil
+    takes = call_arg_consumes_ownership?(ast_arg, callee_param)
+    callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
+    copy_to_owning = (ast_arg.is_a?(AST::CopyNode) &&
+                      callee_param_type.collection? &&
+                      ti.collection_value?) == true
+    CallArgFacts.new(
+      ast_arg: ast_arg,
+      type_info: ti,
+      callee_sig: callee_sig,
+      callee_param: callee_param,
+      callee_param_type: callee_param_type,
+      takes: takes,
+      copy_to_owning: copy_to_owning,
+      arg_alloc: takes ? allocator_for_takes_param!(callee_param) : :heap,
+      param_index: param_index,
+    )
+  end
+
+  sig { params(facts: CallArgFacts).returns(T.untyped) }
+  def lower_call_arg_from_facts(facts)
+    T.bind(self, MIRLowering) rescue nil
+    raw_arg = with_decl_alloc(facts.arg_alloc) do
+      if facts.copy_to_owning
+        MIR::DeepCopy.new(lower(facts.ast_arg.value), nil, nil, :full_value, :heap)
+      else
+        lower(facts.ast_arg)
+      end
+    end
+    arg = hoist_alloc(raw_arg, facts.ast_arg, err_cleanup: facts.takes, mutable: facts.copy_to_owning)
+    cross_boundary_arg(
+      arg,
+      facts.ast_arg,
+      facts.callee_param,
+      facts.callee_param_type,
+      facts.callee_sig,
+      facts.param_index,
+    )
+  end
+
+  sig do
+    params(
+      node: T.untyped,
+      callee: String,
+      args: T::Array[T.untyped],
+      can_fail: T::Boolean,
+      owned_return: T::Boolean,
+      contract: T.nilable(MIR::CallableContract),
+    ).returns(T.untyped)
+  end
+  def finalize_call_result(node, callee, args, can_fail, owned_return, contract)
+    call = MIR::Call.new(callee, args, can_fail, owned_return, contract)
+    return call unless node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+    return call if owned_return
+
+    MIR::DupeSlice.new(call, :heap)
+  end
+
   sig do
     params(a: T.untyped, ti: T.untyped,
            callee_param: T.nilable(AST::Param),
@@ -827,35 +901,9 @@ module MIRLoweringFunctions
     # Standard call
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s) ||
                  @fn_sigs&.dig("#{node.name}!")
-    args_mir = node.args.each_with_index.map { |a, idx|
-      ti = Type.from_node!(a, context: "function call argument")
-      callee_param = callee_sig ? callee_sig.params[idx] : nil
-      takes = call_arg_consumes_ownership?(a, callee_param)
-      # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
-      callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
-      # COPY of an owning collection into a TAKES collection param: the
-      # default lower_copy produces a []T slice (right for struct/union
-      # field stores), but a TAKES collection callee expects an owning
-      # ArrayList. Produce one via CheatLib.dupeValue on the source binding
-      # (the dupeValue ArrayList arm at runtime-header.zig:3284). #37 COPY.
-      # CheatLib.dupeValue has comptime arms for ArrayList (list_collection?),
-      # Set (set_collection?), Pool (pool?), and StringMap (map?). NumericMap
-      # variants share isStringMap-shape via the inner-field heuristic.
-      copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
-                          callee_param_type.collection? &&
-                          ti.collection_value?)
-      arg_alloc = takes ? allocator_for_takes_param!(callee_param) : :heap
-      raw_arg = with_decl_alloc(arg_alloc) do
-        copy_to_owning ?
-          MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
-          lower(a)
-      end
-      # copy_to_owning: hoist into a `var` temp so &__tmp resolves to *T (not
-      # *const T); the callee's anytype binding then allows mutable methods
-      # (xs.deinit, xs.count, ...) on the duplicated owning container.
-      arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
-      cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
-    }
+    args_mir = node.args.each_with_index.map do |a, idx|
+      lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx))
+    end
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
@@ -884,15 +932,7 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    # Borrowed results may need materialization. Owned-return calls already
-    # transfer ownership to the caller; duplicating them leaks the original.
-    if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
-      inner_call = MIR::Call.new(fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, node.args))
-      return inner_call if owned_return
-      return MIR::DupeSlice.new(inner_call, :heap)
-    end
-
-    MIR::Call.new(fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, node.args))
+    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, node.args))
   end
 
   sig { params(node: AST::MethodCall).returns(T.untyped) }
@@ -920,27 +960,9 @@ module MIRLoweringFunctions
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
-    args_mir = node.args.each_with_index.map { |a, idx|
-      ti = Type.from_node!(a, context: "method call argument")
-      # UFCS: the receiver is param[0], so args[i] -> params[i+1].
-      callee_param = callee_sig&.params&.[](idx + 1)
-      takes = call_arg_consumes_ownership?(a, callee_param)
-      # Type.new(:Any) is the "no info" sentinel -- empty value, not nil.
-      callee_param_type = (callee_param && callee_param.type) || Type.new(:Any)
-      # COPY of an owning collection into a TAKES collection param (#37 COPY):
-      # produce owning ArrayList via dupeValue; see lower_func_call note.
-      copy_to_owning = !!(a.is_a?(AST::CopyNode) &&
-                          callee_param_type.collection? &&
-                          ti.collection_value?)
-      arg_alloc = takes ? allocator_for_takes_param!(callee_param) : :heap
-      raw_arg = with_decl_alloc(arg_alloc) do
-        copy_to_owning ?
-          MIR::DeepCopy.new(lower(a.value), nil, nil, :full_value, :heap) :
-          lower(a)
-      end
-      arg = hoist_alloc(raw_arg, a, err_cleanup: takes, mutable: copy_to_owning)
-      cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx + 1)
-    }
+    args_mir = node.args.each_with_index.map do |a, idx|
+      lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
+    end
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
@@ -959,15 +981,7 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    # Borrowed results may need materialization. Owned-return calls already
-    # transfer ownership to the caller; duplicating them leaks the original.
-    if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
-      inner_call = MIR::Call.new(fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, [node.object] + node.args))
-      return inner_call if owned_return
-      return MIR::DupeSlice.new(inner_call, :heap)
-    end
-
-    MIR::Call.new(fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, [node.object] + node.args))
+    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, [node.object] + node.args))
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

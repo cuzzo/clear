@@ -482,7 +482,9 @@ module EscapeAnalysis
       arg = args[idx]
       next unless arg
       next unless param.takes || symbol_heap?(param.symbol)
-      next unless ownership_bearing_transfer_expr?(arg, nil)
+      arg_type = Type.from_node(arg)
+      next unless ownership_bearing_transfer_expr?(arg, nil) ||
+                  type_requires_owned_storage?(arg_type, nil)
       mark_expr_roots_heap!(arg)
     end
   end

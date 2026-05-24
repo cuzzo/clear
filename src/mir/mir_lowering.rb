@@ -1348,21 +1348,6 @@ class MIRLowering
     nil
   end
 
-  # Resolve the stdlib alloc: symbol for an AllocMark from the FuncCall node's
-  # matched_stdlib_def. Returns nil when not available (falls back to entry alloc).
-  sig { params(node: AST::VarDecl).returns(T.nilable(Symbol)) }
-  def resolve_decl_stdlib_alloc(node)
-    val = node.value
-    return nil unless val
-    mdef = val.matched_stdlib_def
-    return nil unless mdef.is_a?(Hash)
-    case mdef[:alloc]
-    when :heap, :frame then mdef[:alloc]
-    when :node_storage
-      val.respond_to?(:heap_storage?) && val.heap_storage? ? :heap : :frame
-    end
-  end
-
   # ================================================================
   # Old MIR translation (MATCH AS bindings still use Drop/Alloc)
   # ================================================================

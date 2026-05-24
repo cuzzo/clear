@@ -41,6 +41,7 @@ module MIRLoweringVariables
     const :decl_alloc, Symbol
     const :has_caps, T::Boolean
     const :bare_zig, String
+    const :generic_id, T::Boolean
   end
 
   sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[String]).returns(T.nilable(String)) }
@@ -220,7 +221,8 @@ module MIRLoweringVariables
       heap_return_var: heap_return_var == true,
       decl_alloc: decl_alloc,
       has_caps: has_caps,
-      bare_zig: bare_zig
+      bare_zig: bare_zig,
+      generic_id: ft.generic_instance? && ft.generic_base == :Id
     )
   end
 
@@ -301,6 +303,7 @@ module MIRLoweringVariables
     heap_return_var = facts.heap_return_var
     decl_alloc = facts.decl_alloc
     actually_mutated = facts.actually_mutated
+    generic_id = facts.generic_id
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
     # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
     if has_mir_drop
@@ -314,50 +317,43 @@ module MIRLoweringVariables
       # expression all read the classifier's definitive placement.
       node_alloc = drop_entry.alloc || decl_alloc
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
-      mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
+      mir_alloc = node_alloc
       cleanup = MIR::Cleanup.new(safe_name, drop_entry)
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = drop_entry.scope
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, drop_entry)
       [alloc_mark, let_node, cleanup]
-    elsif owned_return_call_init?(init) && !(ft.generic_instance? && ft.generic_base == :Id)
+    elsif owned_return_call_init?(init) && !generic_id
       mir_alloc = binding_entry[:alloc] || :heap
       cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
       build_drop_entry!(cleanup_entry, node.full_type, node)
       cleanup_entry[:has_moved_guard] = true
       (@guarded_cleanup_names ||= {})[safe_name] = true
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
-    elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !(ft.generic_instance? && ft.generic_base == :Id)
-      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry.alloc || :heap
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+    elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !generic_id
+      mir_alloc = binding_entry.alloc || :heap
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node]
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty? && init.target_var == safe_name &&
-          !(ft.generic_instance? && ft.generic_base == :Id)
+          !generic_id
       alloc_values = init.allocs.values
-      mir_alloc = resolve_decl_stdlib_alloc(node) || (alloc_values.include?(:heap) ? :heap : :frame)
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+      mir_alloc = alloc_values.include?(:heap) ? :heap : :frame
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node]
     elsif binding_entry.present? && !binding_entry.needs_cleanup? && actually_mutated && ownership_bearing_type?(ft) &&
           (!ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
-      mir_alloc = mir_owned_alloc(init) || resolve_decl_stdlib_alloc(node) || binding_entry.alloc || decl_alloc
+      mir_alloc = mir_owned_alloc(init) || binding_entry.alloc || decl_alloc
       cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
       build_drop_entry!(cleanup_entry, node.full_type, node)
       (@guarded_cleanup_names ||= {})[safe_name] = true
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.scope || :iteration)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif binding_entry.present? && !binding_entry.needs_cleanup?
-      mir_alloc = resolve_decl_stdlib_alloc(node) || (heap_return_var ? decl_alloc : binding_entry.alloc) || decl_alloc
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.scope || :iteration)
+      mir_alloc = (heap_return_var ? decl_alloc : binding_entry.alloc) || decl_alloc
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node]
-    elsif mir_allocates?(init) && !(ft.generic_instance? && ft.generic_base == :Id)
-      mir_alloc = resolve_decl_stdlib_alloc(node) || decl_alloc
-      alloc_mark = MIR::AllocMark.new(safe_name, mir_alloc, node.full_type)
-      alloc_mark.scope = mir_alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+    elsif mir_allocates?(init) && !generic_id
+      mir_alloc = decl_alloc
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       if binding_entry.present? && !binding_entry.needs_cleanup?
         next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
         next_nodes
@@ -380,6 +376,13 @@ module MIRLoweringVariables
     else
       let_node
     end
+  end
+
+  sig { params(name: String, alloc: Symbol, type_info: T.untyped, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
+  def var_decl_alloc_mark(name, alloc, type_info, binding_entry)
+    mark = MIR::AllocMark.new(name, alloc, type_info)
+    mark.scope = alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+    mark
   end
 
   sig do

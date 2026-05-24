@@ -10,20 +10,29 @@ class MIRPassOrderError < StandardError; end
 class MIRPassState
   extend T::Sig
 
-  ORDER = T.let([
-    :annotated,
-    :pipeline_rewritten,
-    :string_concat_rewritten,
-    :hoisted,
-    :premir_type_checked,
-    :escape_analyzed,
-    :cleanup_classified,
-    :loop_frame_analyzed,
-    :needs_rt_finalized,
-    :mir_pass_complete,
-    :mir_lowered,
-    :mir_checked,
-  ].freeze, T::Array[Symbol])
+  class StageSpec < T::Struct
+    const :name, Symbol
+    const :producer, String
+    const :requires, T.nilable(Symbol)
+  end
+
+  STAGES = T.let([
+    StageSpec.new(name: :annotated, producer: "SemanticAnnotator", requires: nil),
+    StageSpec.new(name: :pipeline_rewritten, producer: "PipelineRewriter", requires: :annotated),
+    StageSpec.new(name: :string_concat_rewritten, producer: "StringConcatRewriter", requires: :pipeline_rewritten),
+    StageSpec.new(name: :hoisted, producer: "Hoist", requires: :string_concat_rewritten),
+    StageSpec.new(name: :premir_type_checked, producer: "PreMirTypeCheck", requires: :hoisted),
+    StageSpec.new(name: :escape_analyzed, producer: "MIRPass/EscapeAnalysis", requires: :premir_type_checked),
+    StageSpec.new(name: :cleanup_classified, producer: "MIRPass/CleanupClassifier", requires: :escape_analyzed),
+    StageSpec.new(name: :loop_frame_analyzed, producer: "MIRPass/LoopFrameAnalysis", requires: :cleanup_classified),
+    StageSpec.new(name: :needs_rt_finalized, producer: "MIRPass#finalize_needs_rt!", requires: :loop_frame_analyzed),
+    StageSpec.new(name: :mir_pass_complete, producer: "MIRPass", requires: :needs_rt_finalized),
+    StageSpec.new(name: :mir_lowered, producer: "MIRLowering", requires: :mir_pass_complete),
+    StageSpec.new(name: :mir_checked, producer: "MIRChecker", requires: :mir_lowered),
+  ].freeze, T::Array[StageSpec])
+
+  ORDER = T.let(STAGES.map(&:name).freeze, T::Array[Symbol])
+  STAGE_BY_NAME = T.let(STAGES.to_h { |spec| [spec.name, spec] }.freeze, T::Hash[Symbol, StageSpec])
 
   sig { returns(T::Set[Symbol]) }
   attr_reader :completed
@@ -35,18 +44,23 @@ class MIRPassState
 
   sig { params(stage: Symbol).void }
   def mark!(stage)
-    validate_stage!(stage)
-    idx = T.must(ORDER.index(stage))
-    missing = T.must(ORDER[0...idx]).reject { |dep| @completed.include?(dep) }
-    unless missing.empty?
-      raise MIRPassOrderError, "cannot mark #{stage}; missing earlier stage(s): #{missing.join(", ")}"
+    spec = stage_spec!(stage)
+    if @completed.include?(stage)
+      raise MIRPassOrderError, "#{spec.producer} attempted to mark #{stage} twice"
+    end
+
+    expected = next_unmarked_stage
+    unless stage == expected
+      raise MIRPassOrderError,
+        "#{spec.producer} cannot mark #{stage}; next required stage is #{expected.inspect}; " \
+        "completed stages: #{completed_stages.join(", ")}"
     end
     @completed.add(stage)
   end
 
   sig { params(stage: Symbol, consumer: String).void }
   def require!(stage, consumer:)
-    validate_stage!(stage)
+    stage_spec!(stage)
     return if @completed.include?(stage)
 
     raise MIRPassOrderError,
@@ -86,8 +100,21 @@ class MIRPassState
 
   sig { params(stage: Symbol).void }
   def validate_stage!(stage)
-    return if ORDER.include?(stage)
+    return if STAGE_BY_NAME.key?(stage)
 
     raise MIRPassOrderError, "unknown MIR pass stage #{stage.inspect}"
+  end
+
+  sig { params(stage: Symbol).returns(StageSpec) }
+  def stage_spec!(stage)
+    spec = STAGE_BY_NAME[stage]
+    return spec if spec
+
+    raise MIRPassOrderError, "unknown MIR pass stage #{stage.inspect}"
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def next_unmarked_stage
+    ORDER.find { |candidate| !@completed.include?(candidate) }
   end
 end
