@@ -1151,9 +1151,21 @@ module MIR
     :profile_site_comment, # CLEAR_PROFILE_TASK_SITE metadata comment
   )
 
+  class CatchReassign < T::Struct
+    const :name, String
+    const :alloc, Symbol
+    const :line, Integer
+  end
+
+  class CatchClauseMeta < T::Struct
+    const :kinds, T::Array[String]
+    const :types, T::Array[String]
+    const :filter_types, T::Array[String]
+    const :filter_messages, T::Array[MIR::Node]
+  end
+
   # Catch wrapper. Wraps raw Zig code for try/catch but exposes
-  # error-path reassignment metadata for allocator consistency (INV-9).
-  # error_reassigns: [{ name: String, alloc: :heap/:frame, line: int }]
+  # typed error-path reassignment metadata for allocator consistency (INV-9).
   # clause_bodies: Array<Array<MIR::Stmt>> — one per catch clause + default.
   #   Carries the lowered MIR so the checker can see allocations inside each
   #   catch body. Emission still uses code (raw Zig). nil for legacy callers.

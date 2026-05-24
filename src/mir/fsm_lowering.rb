@@ -120,8 +120,7 @@ module FsmLowering
         result_mir.concat(last_pending)
 
         last_is_assign = last_step[:expr].is_a?(AST::Assignment)
-        is_step_void = expr_type.nil? || expr_type == :Void ||
-          (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+        is_step_void = ast_void_type?(expr_type)
 
         if last_is_assign || is_step_void
           stmt_mir = wrap_step_as_stmt({ expr: last_step[:expr], binding: nil }, last_mir)
@@ -191,8 +190,7 @@ module FsmLowering
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
     expr_type = step[:expr].full_type
-    is_void_step = expr_type.nil? || expr_type == :Void ||
-      (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+    is_void_step = ast_void_type?(expr_type)
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 

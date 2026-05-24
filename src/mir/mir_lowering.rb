@@ -93,6 +93,13 @@ class MIRLowering
   attr_reader :fn_sigs
   attr_accessor :shard_context
 
+  sig { params(type_info: T.untyped).returns(T::Boolean) }
+  def ast_void_type?(type_info)
+    return true if type_info.nil? || type_info == :Void
+    ti = Type.from_node(type_info)
+    ti ? ti.void? : false
+  end
+
   sig { params(struct_schemas: T::Hash[Symbol, Schemas::StructSchema], enum_schemas: T::Hash[Symbol, T::Array[String]], union_schemas: T::Hash[Symbol, Schemas::UnionSchema], fn_sigs: T::Hash[String, FunctionSignature], moved_guard_info: T::Hash[String, T::Hash[String, TrueClass]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},

@@ -7,6 +7,31 @@ module MIRLoweringConcurrency
 
   requires_ancestor { MIRLowering }
 
+  class NextExprPlan < T::Struct
+    extend T::Sig
+
+    const :source_kind, Symbol
+    const :promise_type, Type
+    const :result_type, Type
+    const :result_alloc, T.nilable(Symbol)
+    const :inner, MIR::Node
+
+    sig { returns(T::Boolean) }
+    def promise_list?
+      source_kind == :promise_list
+    end
+
+    sig { returns(T::Boolean) }
+    def observable_list?
+      source_kind == :observable_list
+    end
+
+    sig { returns(T::Boolean) }
+    def observable_string?
+      source_kind == :observable_string
+    end
+  end
+
   sig { params(node: AST::DoBlock).returns(MIR::DoBlock) }
   def lower_do_block(node)
     T.bind(self, MIRLowering) rescue nil
@@ -73,8 +98,7 @@ module MIRLoweringConcurrency
             code
           elsif code.strip.end_with?("}")
             expr_type = expr.full_type
-            is_void_expr = expr_type.nil? || expr_type == :Void ||
-              (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+            is_void_expr = ast_void_type?(expr_type)
             is_void_expr = false if mir.is_a?(MIR::BgBlock)
             is_void_expr = false if code.strip.match?(/\A__bg\d+:/)
             is_void_expr ? code : "_ = #{code};"
@@ -257,7 +281,7 @@ module MIRLoweringConcurrency
             code
           else
             expr_type = step[:expr].full_type
-            is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+            is_void_step = ast_void_type?(expr_type)
             is_void_step ? "#{code};" : "_ = #{code};"
           end
         end
@@ -636,16 +660,45 @@ module MIRLoweringConcurrency
     transfer_marks.empty? ? push : MIR::ScopeBlock.new([*transfer_marks, MIR::ExprStmt.new(push, false)])
   end
 
-  sig { params(node: AST::NextExpr, result_type: Type, fallback_alloc: Symbol).returns(T.nilable(Symbol)) }
-  def next_result_owned_alloc(node, result_type, fallback_alloc)
+  sig { params(promise_type: Type, result_type: Type, fallback_alloc: Symbol).returns(T.nilable(Symbol)) }
+  def next_result_owned_alloc(promise_type, result_type, fallback_alloc)
     T.bind(self, MIRLowering) rescue nil
     @schema_lookup = T.let(@schema_lookup, T.untyped)
-    promise_type = Type.new(node.expr.full_type)
     return fallback_alloc if promise_type.promise_list?
     return fallback_alloc if promise_type.observable? && promise_type.tense_type&.array?
     return :heap if promise_type.observable? && ownership_bearing_type?(result_type)
     return :heap if ownership_bearing_type?(result_type)
     nil
+  end
+
+  sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(NextExprPlan) }
+  def next_expr_plan(node, alloc_sym)
+    T.bind(self, MIRLowering) rescue nil
+    promise_type = Type.new(node.expr.full_type)
+    result_type = Type.from_node(node) || Type.new(:Untyped)
+    source_kind = if promise_type.promise_list?
+      :promise_list
+    elsif promise_type.observable? && promise_type.tense_type&.array?
+      :observable_list
+    elsif promise_type.observable? && observable_next_string?(promise_type)
+      :observable_string
+    else
+      :plain
+    end
+    NextExprPlan.new(
+      source_kind: source_kind,
+      promise_type: promise_type,
+      result_type: result_type,
+      result_alloc: next_result_owned_alloc(promise_type, result_type, alloc_sym),
+      inner: T.cast(lower(node.expr), MIR::Node),
+    )
+  end
+
+  sig { params(promise_type: Type).returns(T::Boolean) }
+  def observable_next_string?(promise_type)
+    tt = promise_type.tense_type
+    wt = tt&.optional? ? tt.wrapped_type : tt
+    !!wt&.string?
   end
 
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
@@ -655,13 +708,14 @@ module MIRLoweringConcurrency
     @rt_name = T.let(@rt_name, T.untyped)
     @target = T.let(@target, T.untyped)
     @tmp_counter = T.let(@tmp_counter, T.untyped)
-    promise_type = Type.new(node.expr.full_type)
+    plan = next_expr_plan(node, alloc_sym)
+    promise_type = plan.promise_type
 
-    if promise_type.promise_list?
+    if plan.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
       # alloc_sym determines whether results are heap- or frame-allocated (caller passes
       # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
-      inner = lower(node.expr)
+      promise_list_inner = plan.inner
 
       # In BC the BG runtime spawns real fibers via BG_SPAWN and stashes
       # their futures in `futureTable`; the list elements are
@@ -669,20 +723,20 @@ module MIRLoweringConcurrency
       # through MethodCall("next") so the bc_emitter emits AWAIT, which
       # the runner extends to walk Value.List (await each item, build
       # result list).
-      return MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0), alloc_sym) if @target == :bc
+      return MIR::MethodCall.new(promise_list_inner, "next", [], true, MIR::CallableContract.no_ownership(0), alloc_sym) if @target == :bc
 
-      inner_str = emit_expr(inner)
+      promise_list_inner_str = emit_expr(promise_list_inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
       @tmp_counter += 1
-      blk_label = "__next_all_#{@tmp_counter}"
+      promise_list_label = "__next_all_#{@tmp_counter}"
       results_var = "__next_results_#{@tmp_counter}"
-      alloc_fn = alloc_sym == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
-      code = "#{blk_label}: {\n" \
+      alloc_fn = MIR::Placement.zig_allocator(alloc_sym, @rt_name)
+      code = "#{promise_list_label}: {\n" \
              "    var #{results_var} = std.ArrayListUnmanaged(#{elem_zig}).empty;\n" \
-             "    for (#{inner_str}.items) |__p| {\n" \
+             "    for (#{promise_list_inner_str}.items) |__p| {\n" \
              "        try #{results_var}.append(#{alloc_fn}, try __p.next());\n" \
              "    }\n" \
-             "    break :#{blk_label} #{results_var};\n" \
+             "    break :#{promise_list_label} #{results_var};\n" \
              "}"
       iz = MIR::InlineZig.new(code, "next_promise_list")
       iz.stdlib_def = FunctionSignature.allocating_intrinsic
@@ -696,36 +750,30 @@ module MIRLoweringConcurrency
     # something it can iterate without explicit `.release()`. The
     # materialized list is placed by the receiving binding's allocator
     # (alloc_sym) -- one allocator per binding, like every other value.
-    if promise_type.observable? && promise_type.tense_type&.array?
-      inner = lower(node.expr)
+    if plan.observable_list?
+      observable_list_inner = plan.inner
       # The materialized list inherits the receiving binding's placement
       # alloc_sym is the
       # fallback when NEXT is lowered outside a binding.
-      return MIR::MethodCall.new(inner, "materializeNext",
+      return MIR::MethodCall.new(observable_list_inner, "materializeNext",
         [MIR::AllocatorRef.new(alloc_sym)], true, MIR::CallableContract.no_ownership(1), alloc_sym)
     end
 
-    if promise_type.observable?
-      tt = promise_type.tense_type
-      wt = tt&.optional? ? tt.wrapped_type : tt
-      if wt&.string?
-        inner = lower(node.expr)
-        @tmp_counter += 1
-        blk_label = "__obs_next_string_#{@tmp_counter}"
-        return MIR::BlockExpr.new(blk_label, [
-          MIR::ExprStmt.new(MIR::MethodCall.new(inner, "wait", [], false,
-            MIR::CallableContract.no_ownership(0)), nil),
-          MIR::BreakStmt.new(blk_label,
-            MIR::MethodCall.new(inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
-              MIR::CallableContract.no_ownership(1), :heap)),
-        ])
-      end
+    if plan.observable_string?
+      observable_string_inner = plan.inner
+      @tmp_counter += 1
+      observable_string_label = "__obs_next_string_#{@tmp_counter}"
+      return MIR::BlockExpr.new(observable_string_label, [
+        MIR::ExprStmt.new(MIR::MethodCall.new(observable_string_inner, "wait", [], false,
+          MIR::CallableContract.no_ownership(0)), nil),
+        MIR::BreakStmt.new(observable_string_label,
+          MIR::MethodCall.new(observable_string_inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
+            MIR::CallableContract.no_ownership(1), :heap)),
+      ])
     end
 
-    inner = lower(node.expr)
-    result_type = Type.from_node(node) || Type.new(:Untyped)
-    MIR::MethodCall.new(inner, "next", [], true, MIR::CallableContract.no_ownership(0),
-      next_result_owned_alloc(node, result_type, alloc_sym))
+    MIR::MethodCall.new(plan.inner, "next", [], true, MIR::CallableContract.no_ownership(0),
+      plan.result_alloc)
   end
 
 

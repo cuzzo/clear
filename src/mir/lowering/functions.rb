@@ -8,7 +8,8 @@ module MIRLoweringFunctions
   requires_ancestor { MIRLowering }
 
   class CallArgFacts < T::Struct
-    const :ast_arg, T.untyped
+    const :ast_arg, AST::Node
+    const :copy_source, T.nilable(AST::Node)
     const :type_info, Type
     const :callee_sig, T.nilable(FunctionSignature)
     const :callee_param, T.nilable(AST::Param)
@@ -50,7 +51,7 @@ module MIRLoweringFunctions
     )
 
     const :index, Integer
-    const :ast_arg, T.untyped
+    const :ast_arg, AST::Node
     const :takes, T::Boolean
     const :coerce_type, T.nilable(Symbol)
 
@@ -77,7 +78,7 @@ module MIRLoweringFunctions
       !!(fact && fact.takes)
     end
 
-    sig { params(index: Integer).returns(T.untyped) }
+    sig { params(index: Integer).returns(AST::Node) }
     def ast_arg(index)
       args.fetch(index).ast_arg
     end
@@ -87,6 +88,16 @@ module MIRLoweringFunctions
       fact = args[index]
       fact ? fact.coerce_zig(arg_zig) : arg_zig
     end
+  end
+
+  class FunctionEntryPlan < T::Struct
+    const :prologue, T::Array[MIR::Node]
+    const :takes_mir, T::Array[MIR::Node]
+  end
+
+  class CatchLoweringPlan < T::Struct
+    const :code, String
+    const :clause_bodies, T::Array[T::Array[MIR::Node]]
   end
 
   sig { params(node: AST::ExternFnDecl).returns(T.untyped) }
@@ -318,154 +329,15 @@ module MIRLoweringFunctions
     # Determine used names for param suppression
     used_names = collect_identifier_names(node.body)
 
-    # Build prologue statements
-    prologue = []
-
-    # Frame mark save/restore.
-    # uses_frame from annotation is stale after escape analysis marks locals heap.
-    # When cleanup_bindings is set (post-MIRPass), derive from it: it reflects the
-    # final allocators. Fall back to uses_frame when cleanup_bindings is absent
-    # (synthetic functions, specs). Generic allocator use is not a frame
-    # lifetime fact; heap-only stdlib calls must not force frame save/restore.
-    has_frame_bindings = if node.cleanup_bindings
-                           node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
-                         else
-                           node.uses_frame
-                         end
-    uses_frame_or_alloc = has_frame_bindings
-    ret_type_obj = node.return_type || Type.new(:Void)
-    # Unwrap `!T` so value-type and string-return classification sees the
-    # payload; otherwise frame save/restore is skipped for error-union returns.
-    bare_ret = if ret_type_obj.respond_to?(:error_union?) && ret_type_obj.error_union? &&
-                  ret_type_obj.respond_to?(:payload_type)
-                 ret_type_obj.payload_type || ret_type_obj
-               else
-                 ret_type_obj
-               end
-    returns_value_type = bare_ret.void? || bare_ret.primitive? || bare_ret.resource? ||
-                         @enum_schemas&.key?(bare_ret.resolved) ||
-                         @union_schemas&.key?(bare_ret.resolved)
-    returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
-    heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
-    if fn_needs_rt
-      prologue << MIR::ExprStmt.new(
-        MIR::Call.new("@setEvalBranchQuota", [MIR::Lit.new("100000")], false, false, MIR::CallableContract.no_ownership(1)),
-        false,
-      )
-      # FrameRestore is safe only when the return value is NOT frame-allocated:
-      #   - value types (primitives, enums): no frame pointer returned
-      #   - heap carry return strings: result is on heap, frame rewind is safe
-      # For frame-string returns (no heap_carry_return), we skip the mark/restore
-      # entirely: the returned string lives in the caller's frame region.
-      if uses_frame_or_alloc && (returns_value_type || (returns_string && heap_carry_return))
-        prologue << MIR::FrameSave.new(@rt_name)
-        prologue << MIR::FrameRestore.new(@rt_name)
-      else
-        prologue << MIR::Suppress.new("rt")
-      end
-    end
-
-    # NonReentrant guard. Two prologue shapes:
-    #   :NOT_LOGICAL (max_depth_n nil) -> StackGuard linked-list
-    #     (raises System UnexpectedRecursion on re-entry)
-    #   :MAX_DEPTH(N) (max_depth_n set) -> per-fn depth counter
-    #     (raises System MaxDepthExceeded above N).
-    if node.reentrant == :non_reentrant
-      if node.max_depth_n
-        # try safety.enterDepth(@src(), N);
-        # defer safety.exitDepth(@src());
-        enter_call = MIR::Call.new(
-          "safety.enterDepth",
-          [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0)), MIR::Lit.new(node.max_depth_n.to_s)],
-          false,
-          false,
-          MIR::CallableContract.no_ownership(2),
-        )
-        prologue.unshift(MIR::DeferStmt.new(MIR::Call.new(
-          "safety.exitDepth",
-          [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0))],
-          false,
-          false,
-          MIR::CallableContract.no_ownership(1),
-        )))
-        prologue.unshift(MIR::ExprStmt.new(MIR::TryExpr.new(enter_call), false))
-      else
-        guard_init = MIR::Let.new("_guard",
-          MIR::TryExpr.new(MIR::Call.new(
-            "safety.StackGuard.enter",
-            [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0))],
-            false,
-            false,
-            MIR::CallableContract.no_ownership(1),
-          )),
-          true, nil, nil)
-        guard_push = MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "push", [], false, MIR::CallableContract.no_ownership(0)), false)
-        guard_defer = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "pop", [], false, MIR::CallableContract.no_ownership(0)))
-        prologue.unshift(guard_defer)
-        prologue.unshift(guard_push)
-        prologue.unshift(guard_init)
-      end
-    end
-
-    # Recursion co-op yield: emit `rt.checkYield();` at fn entry for
-    # every recursive fn that isn't TIGHT. Same opt-out + same budget
-    # (4096 inline counter ticks before scheduler hand-off) as
-    # `WHILE`. The :THUNK trampoline body has its own checkYield;
-    # for the user's TIGHT request we strip that one in
-    # ThunkTransform::Emit (driven by node.tight_reentrance).
-    if fn_needs_rt && needs_recursion_yield?(node)
-      prologue.unshift(MIR::ExprStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new(@rt_name), "checkYield", [], false, MIR::CallableContract.no_ownership(0)),
-        false
-      ))
-    end
-
-    # Param suppressions for unused params
-    node.params.each do |p|
-      next if used_names.include?(p.name)
-      suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : p.name
-      prologue << MIR::Suppress.new(suppress_name)
-    end
-
-    # Mutable scalar param shadows
-    mutable_scalar_params.each do |name|
-      next unless used_names.include?(name)
-      ptr_name = "_m_#{name}"
-      prologue << MIR::Let.new(name, MIR::Deref.new(MIR::Ident.new(ptr_name)), true, nil, "_ = &#{name};")
-      prologue << MIR::DeferStmt.new(MIR::ScopeBlock.new([
-        MIR::Set.new(MIR::Deref.new(MIR::Ident.new(ptr_name)), MIR::Ident.new(name))
-      ]))
-    end
-
-    # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
-    # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
-    takes_mir = []
-    node.params.select { |p| p.takes }.each do |p|
-      entry = @current_bindings[p.name.to_s] || CleanupEntry::NONE
-      ti = p.type || Type.new(:Any)
-      next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.alloc == :heap)
-
-      drop_entry = entry.dup
-      alloc = entry.present? ? entry.alloc : :heap
-      scope = entry.present? ? entry.scope : :heap
-      mark = MIR::AllocMark.new(p.name.to_s, alloc, ti)
-      mark.scope = scope
-      takes_mir << mark
-      if entry.needs_cleanup?
-        build_drop_entry!(drop_entry, ti, nil)
-        (@guarded_cleanup_names ||= {})[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
-        takes_mir << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
-      end
-    end
-    takes_mir.each do |node|
-      T.must(@lowered_alloc_names) << node.name.to_s if node.is_a?(MIR::AllocMark)
-      T.must(@lowered_guarded_cleanup_names) << node.name.to_s if (node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)) && node.cleanup_entry.has_moved_guard?
-    end
+    entry_plan = function_entry_plan(node, fn_needs_rt, mutable_scalar_params, used_names)
+    prologue = entry_plan.prologue
+    takes_mir = entry_plan.takes_mir
 
     pointer_param_mir = []
 
     # Lower body (track snapshot types for catch blocks)
-    has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+    catch_clauses = function_catch_clauses(node)
+    has_catch = catch_clauses.any?
     @current_fn_has_catch = has_catch
     @current_fn_snapshot_types = Set.new if has_catch
     # Trampoline bodies are synthesized directly while preserving the
@@ -512,19 +384,19 @@ module MIRLoweringFunctions
       call_args = fn_needs_rt ? ["rt"] + node.params.map { |p| p.name } : node.params.map { |p| p.name }
       inner_call = "#{inner_name}(#{call_args.join(', ')})"
 
-      catch_zig, catch_clause_bodies = build_catch_clauses(node, fn_can_fail)
+      catch_plan = build_catch_clauses(node, fn_can_fail)
       error_reassigns = collect_catch_reassigns(node)
-      catch_meta = (node.catch_clauses || []).map { |clause|
-        {
+      catch_meta = catch_clauses.map { |clause|
+        MIR::CatchClauseMeta.new(
           kinds: clause.kinds.map(&:to_s),
           types: clause.types.map(&:to_s),
           filter_types: clause.filter_types.map(&:to_s),
-          filter_messages: clause.filter_messages.map { |m| lower(m) },
-        }
+          filter_messages: clause.filter_messages.map { |m| T.cast(lower(m), MIR::Node) },
+        )
       }
-      has_default = node.default_catch.is_a?(Array) && node.default_catch.any?
+      has_default = has_default_catch?(node)
       outer_body = [
-        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns, catch_clause_bodies, catch_meta, has_default)
+        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_plan.code}\n};", error_reassigns, catch_plan.clause_bodies, catch_meta, has_default)
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
@@ -544,6 +416,184 @@ module MIRLoweringFunctions
     return node.needs_rt if node.needs_rt == true || node.needs_rt == false
 
     Kernel.raise "function #{node.name} missing finalized needs_rt metadata before MIR lowering"
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
+  def default_catch_body(node)
+    body = node.default_catch
+    body.is_a?(Array) ? body : []
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Array[AST::CatchClause]) }
+  def function_catch_clauses(node)
+    clauses = node.catch_clauses
+    clauses.is_a?(Array) ? clauses : []
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def has_default_catch?(node)
+    !default_catch_body(node).empty?
+  end
+
+  sig {
+    params(
+      node: AST::FunctionDef,
+      fn_needs_rt: T::Boolean,
+      mutable_scalar_params: T::Set[T.untyped],
+      used_names: T::Set[String],
+    ).returns(FunctionEntryPlan)
+  }
+  def function_entry_plan(node, fn_needs_rt, mutable_scalar_params, used_names)
+    T.bind(self, MIRLowering) rescue nil
+    prologue = T.let([], T::Array[MIR::Node])
+    prologue.concat(recursion_yield_prologue(node, fn_needs_rt))
+    prologue.concat(reentrance_guard_prologue(node))
+    prologue.concat(runtime_frame_prologue(node, fn_needs_rt))
+    prologue.concat(unused_param_suppressions(node, mutable_scalar_params, used_names))
+    prologue.concat(mutable_scalar_param_shadows(mutable_scalar_params, used_names))
+    takes_mir = takes_param_ownership_mir(node)
+    record_lowered_entry_markers!(takes_mir)
+    FunctionEntryPlan.new(prologue: prologue, takes_mir: takes_mir)
+  end
+
+  sig { params(node: AST::FunctionDef, fn_needs_rt: T::Boolean).returns(T::Array[MIR::Node]) }
+  def runtime_frame_prologue(node, fn_needs_rt)
+    T.bind(self, MIRLowering) rescue nil
+    return [] unless fn_needs_rt
+
+    ret_type_obj = node.return_type || Type.new(:Void)
+    bare_ret = ret_type_obj.error_union? ? (ret_type_obj.payload_type || ret_type_obj) : ret_type_obj
+    returns_value_type = bare_ret.void? || bare_ret.primitive? || bare_ret.resource? ||
+                         @enum_schemas&.key?(bare_ret.resolved) ||
+                         @union_schemas&.key?(bare_ret.resolved)
+    returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && !!ret_type_obj.payload_type&.string?)
+    heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
+    has_frame_bindings = if node.cleanup_bindings
+      node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
+    else
+      node.uses_frame
+    end
+
+    out = T.let([
+      MIR::ExprStmt.new(
+        MIR::Call.new("@setEvalBranchQuota", [MIR::Lit.new("100000")], false, false, MIR::CallableContract.no_ownership(1)),
+        false,
+      ),
+    ], T::Array[MIR::Node])
+
+    if has_frame_bindings && (returns_value_type || (returns_string && heap_carry_return))
+      out << MIR::FrameSave.new(@rt_name)
+      out << MIR::FrameRestore.new(@rt_name)
+    else
+      out << MIR::Suppress.new("rt")
+    end
+    out
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
+  def reentrance_guard_prologue(node)
+    return [] unless node.reentrant == :non_reentrant
+
+    if node.max_depth_n
+      enter_call = MIR::Call.new(
+        "safety.enterDepth",
+        [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0)), MIR::Lit.new(node.max_depth_n.to_s)],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(2),
+      )
+      [
+        MIR::ExprStmt.new(MIR::TryExpr.new(enter_call), false),
+        MIR::DeferStmt.new(MIR::Call.new(
+          "safety.exitDepth",
+          [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0))],
+          false,
+          false,
+          MIR::CallableContract.no_ownership(1),
+        )),
+      ]
+    else
+      guard_init = MIR::Let.new("_guard",
+        MIR::TryExpr.new(MIR::Call.new(
+          "safety.StackGuard.enter",
+          [MIR::Call.new("@src", [], false, false, MIR::CallableContract.no_ownership(0))],
+          false,
+          false,
+          MIR::CallableContract.no_ownership(1),
+        )),
+        true, nil, nil)
+      guard_push = MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "push", [], false, MIR::CallableContract.no_ownership(0)), false)
+      guard_defer = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "pop", [], false, MIR::CallableContract.no_ownership(0)))
+      [guard_init, guard_push, guard_defer]
+    end
+  end
+
+  sig { params(node: AST::FunctionDef, fn_needs_rt: T::Boolean).returns(T::Array[MIR::Node]) }
+  def recursion_yield_prologue(node, fn_needs_rt)
+    T.bind(self, MIRLowering) rescue nil
+    return [] unless fn_needs_rt && needs_recursion_yield?(node)
+
+    [MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new(@rt_name), "checkYield", [], false, MIR::CallableContract.no_ownership(0)),
+      false
+    )]
+  end
+
+  sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[T.untyped], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
+  def unused_param_suppressions(node, mutable_scalar_params, used_names)
+    out = T.let([], T::Array[MIR::Node])
+    node.params.each do |p|
+      next if used_names.include?(p.name)
+      suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : p.name
+      out << MIR::Suppress.new(suppress_name)
+    end
+    out
+  end
+
+  sig { params(mutable_scalar_params: T::Set[T.untyped], used_names: T::Set[String]).returns(T::Array[MIR::Node]) }
+  def mutable_scalar_param_shadows(mutable_scalar_params, used_names)
+    out = T.let([], T::Array[MIR::Node])
+    mutable_scalar_params.each do |name|
+      next unless used_names.include?(name)
+      ptr_name = "_m_#{name}"
+      out << MIR::Let.new(name, MIR::Deref.new(MIR::Ident.new(ptr_name)), true, nil, "_ = &#{name};")
+      out << MIR::DeferStmt.new(MIR::ScopeBlock.new([
+        MIR::Set.new(MIR::Deref.new(MIR::Ident.new(ptr_name)), MIR::Ident.new(name))
+      ]))
+    end
+    out
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
+  def takes_param_ownership_mir(node)
+    T.bind(self, MIRLowering) rescue nil
+    out = T.let([], T::Array[MIR::Node])
+    node.params.select(&:takes).each do |p|
+      entry = @current_bindings[p.name.to_s] || CleanupEntry::NONE
+      ti = p.type || Type.new(:Any)
+      next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.alloc == :heap)
+
+      drop_entry = entry.dup
+      alloc = entry.present? ? entry.alloc : :heap
+      scope = entry.present? ? entry.scope : :heap
+      mark = MIR::AllocMark.new(p.name.to_s, alloc, ti)
+      mark.scope = scope
+      out << mark
+      next unless entry.needs_cleanup?
+
+      build_drop_entry!(drop_entry, ti, nil)
+      (@guarded_cleanup_names ||= {})[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
+      out << MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)
+    end
+    out
+  end
+
+  sig { params(nodes: T::Array[MIR::Node]).void }
+  def record_lowered_entry_markers!(nodes)
+    nodes.each do |node|
+      T.must(@lowered_alloc_names) << node.name.to_s if node.is_a?(MIR::AllocMark)
+      T.must(@lowered_guarded_cleanup_names) << node.name.to_s if (node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)) && node.cleanup_entry.has_moved_guard?
+    end
   end
 
   # Build the inner function for a POST-having FunctionDef. Holds the
@@ -647,16 +697,16 @@ module MIRLoweringFunctions
                    [iz], vis, false, comptime_params)
   end
 
-  # Returns [zig_string, clause_bodies] where clause_bodies is an array of
-  # MIR stmt arrays (one per clause + optional default). Using lower_body
-  # ensures flush_pending is called per statement so hoisted Lets stay in scope.
-  sig { params(node: AST::FunctionDef, fn_can_fail: T::Boolean).returns(T::Array[T.untyped]) }
+  # Returns the catch Zig plus checker-visible MIR bodies (one per clause,
+  # plus optional default). Using lower_body ensures flush_pending is called
+  # per statement so hoisted Lets stay in scope.
+  sig { params(node: AST::FunctionDef, fn_can_fail: T::Boolean).returns(CatchLoweringPlan) }
   def build_catch_clauses(node, fn_can_fail)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @rt_name = T.let(@rt_name, T.untyped)
     rt_name = @rt_name
-    clause_bodies = []
+    clause_bodies = T.let([], T::Array[T::Array[MIR::Node]])
 
     # Build snapshot declaration if function has exactly one snapshot type
     snap_types = node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
@@ -669,7 +719,7 @@ module MIRLoweringFunctions
                       "            _ = &snapshot; _ = &__has_snapshot;\n            "
     end
 
-    parts = (node.catch_clauses || []).map { |clause|
+    parts = function_catch_clauses(node).map { |clause|
       # The annotator produces four lowering-ready fields:
       #   kinds, types, filter_types, filter_messages.
       # Match semantics:
@@ -682,7 +732,8 @@ module MIRLoweringFunctions
       filter_messages  = clause.filter_messages
 
       clause_mir = lower_body(clause.body)
-      clause_bodies << clause_mir
+      clause_body = T.let(T.must(clause_mir), T::Array[MIR::Node])
+      clause_bodies << clause_body
       clause_body_zig = T.must(clause_mir).map { |m| emit_expr(m) }.join("\n            ")
 
       # Item side — kinds ORed with types.
@@ -713,11 +764,12 @@ module MIRLoweringFunctions
       "if (#{cond}) {\n            #{snapshot_decl}const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"
     }.join(" else ")
 
-    default_code = if node.default_catch.is_a?(Array) && node.default_catch.any?
+    default_code = if has_default_catch?(node)
       # Use lower_body for the same reason as above.
-      default_mir = lower_body(node.default_catch)
-      clause_bodies << default_mir
-      default_body = T.must(default_mir).map { |m| emit_expr(m) }.join("\n            ")
+      default_mir = lower_body(default_catch_body(node))
+      default_body_mir = T.let(T.must(default_mir), T::Array[MIR::Node])
+      clause_bodies << default_body_mir
+      default_body = default_body_mir.map { |m| emit_expr(m) }.join("\n            ")
       " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
     elsif fn_can_fail
       " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
@@ -725,19 +777,20 @@ module MIRLoweringFunctions
       " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
     end
 
-    ["#{parts}#{default_code}", clause_bodies]
+    CatchLoweringPlan.new(code: "#{parts}#{default_code}", clause_bodies: clause_bodies)
   end
 
   # Extract error-path reassignment metadata from catch clauses (INV-9).
-  # Returns [{ name:, alloc:, line: }] for each reassignment to an existing
-  # binding inside a catch body. Used by MIRChecker to verify allocator consistency.
-  sig { params(node: AST::FunctionDef).returns(T::Array[T.untyped]) }
+  # Returns one typed fact for each reassignment to an existing binding inside
+  # a catch body. Used by MIRChecker to verify allocator consistency.
+  sig { params(node: AST::FunctionDef).returns(T::Array[MIR::CatchReassign]) }
   def collect_catch_reassigns(node)
     T.bind(self, MIRLowering) rescue nil
-    reassigns = []
-    catch_bodies = []
-    (node.catch_clauses || []).each { |c| catch_bodies << c.body if c.body }
-    catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
+    reassigns = T.let([], T::Array[MIR::CatchReassign])
+    catch_bodies = T.let([], T::Array[T::Array[AST::Node]])
+    function_catch_clauses(node).each { |c| catch_bodies << c.body if c.body }
+    default_body = default_catch_body(node)
+    catch_bodies << default_body unless default_body.empty?
 
     catch_bodies.each do |body|
       walk_catch_body_for_reassigns(body, reassigns)
@@ -745,21 +798,20 @@ module MIRLoweringFunctions
     reassigns
   end
 
-  sig { params(stmts: T::Array[T.untyped], reassigns: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmts: T::Array[AST::Node], reassigns: T::Array[MIR::CatchReassign]).void }
   def walk_catch_body_for_reassigns(stmts, reassigns)
     T.bind(self, MIRLowering) rescue nil
-    return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
       when AST::BindExpr
         if stmt.mode == :assign
           alloc = infer_catch_value_allocator(stmt.value)
-          reassigns << { name: stmt.name.to_s, alloc: alloc, line: stmt.token.line } if alloc
+          reassigns << MIR::CatchReassign.new(name: stmt.name.to_s, alloc: alloc, line: stmt.token.line) if alloc
         end
       when AST::Assignment
         if stmt.name.is_a?(AST::Identifier)
           alloc = infer_catch_value_allocator(stmt.value)
-          reassigns << { name: stmt.name.name.to_s, alloc: alloc, line: stmt.token.line } if alloc
+          reassigns << MIR::CatchReassign.new(name: stmt.name.name.to_s, alloc: alloc, line: stmt.token.line) if alloc
         end
       when AST::IfStatement
         walk_catch_body_for_reassigns(stmt.then_branch, reassigns)
@@ -844,7 +896,7 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
-  sig { params(ast_arg: T.untyped, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
+  sig { params(ast_arg: AST::Node, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
   def call_arg_facts(ast_arg, callee_sig, param_index)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(ast_arg, context: "call argument")
@@ -854,8 +906,10 @@ module MIRLoweringFunctions
     copy_to_owning = (ast_arg.is_a?(AST::CopyNode) &&
                       callee_param_type.collection? &&
                       ti.collection_value?) == true
+    copy_source = copy_to_owning ? T.cast(ast_arg, AST::CopyNode).value : nil
     CallArgFacts.new(
       ast_arg: ast_arg,
+      copy_source: copy_source,
       type_info: ti,
       callee_sig: callee_sig,
       callee_param: callee_param,
@@ -931,8 +985,8 @@ module MIRLoweringFunctions
   def lower_call_arg_from_facts(facts)
     T.bind(self, MIRLowering) rescue nil
     raw_arg = with_decl_alloc(facts.arg_alloc) do
-      if facts.copy_to_owning
-        MIR::DeepCopy.new(lower(facts.ast_arg.value), nil, nil, :full_value, :heap)
+      if facts.copy_source
+        MIR::DeepCopy.new(lower(T.must(facts.copy_source)), nil, nil, :full_value, :heap)
       else
         lower(facts.ast_arg)
       end
@@ -1196,7 +1250,7 @@ module MIRLoweringFunctions
     MIR::IfOptional.new(inner_mir, snav_var, call_mir, MIR::Lit.new("null"))
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.untyped) }
   def lower_intrinsic(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1205,6 +1259,7 @@ module MIRLoweringFunctions
     if node.zig_pattern.is_a?(Symbol)
       case node.zig_pattern
       when :macro_print
+        Kernel.raise "macro_print intrinsic must be a function call" unless node.is_a?(AST::FuncCall)
         return lower_macro_print(node)
       when :macro_map
         raise "BUG: macro_map should have been rewritten by PipelineRewriter"
@@ -1222,6 +1277,7 @@ module MIRLoweringFunctions
       alloc_sym = node.matched_stdlib_def&.emit&.alloc || :node_storage
       pre_resolved_alloc = resolve_alloc_sym(alloc_sym, nil, node)
     end
+    receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
     ownership_facts = stdlib_facts.ownership
 
@@ -1233,10 +1289,9 @@ module MIRLoweringFunctions
       # shared collections (e.g. map.contains?, map.count) get rewritten
       # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
       # resolve to the underlying MapRef.
-      obj_ti = node.object.full_type
-      if (obj_ti&.shared? || obj_ti&.multiowned?) && @target != :bc
+      if receiver_type && (receiver_type.shared? || receiver_type.multiowned?) && @target != :bc
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
-      elsif obj_ti&.frozen?
+      elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
       lowered_args = node.args.each_with_index.map do |a, ai|
@@ -1343,7 +1398,7 @@ module MIRLoweringFunctions
     # `:type` is missing or :Any).
     if stdlib_facts.args.any?
       args_zig = args_zig.each_with_index.map do |arg_zig, i|
-        stdlib_facts.coerce_zig(arg_zig, i)
+        stdlib_facts.coerce_zig(T.must(arg_zig), i)
       end
     end
 
@@ -1355,10 +1410,8 @@ module MIRLoweringFunctions
 
     # Resolve {key_zig} and {val_zig} from receiver type (numeric/sharded maps)
     if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
-      obj_ti = node.is_a?(AST::MethodCall) ? node.object.full_type : nil
-      map_ft = obj_ti ? Type.new(obj_ti) : nil
-      pattern = pattern.gsub("{key_zig}", map_ft&.key_type&.zig_type || "i64")
-      pattern = pattern.gsub("{val_zig}", map_ft&.value_type&.zig_type || "f64")
+      pattern = pattern.gsub("{key_zig}", receiver_type&.key_type&.zig_type || "i64")
+      pattern = pattern.gsub("{val_zig}", receiver_type&.value_type&.zig_type || "f64")
     end
 
     # Resolve &{N} as address-of for positional args
@@ -1384,6 +1437,13 @@ module MIRLoweringFunctions
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
+  end
+
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(Type)) }
+  def intrinsic_receiver_type(node)
+    return nil unless node.is_a?(AST::MethodCall)
+
+    Type.from_node!(node.object, context: "intrinsic receiver")
   end
 
   sig { params(node: AST::FuncCall).returns(T.untyped) }

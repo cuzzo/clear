@@ -163,13 +163,43 @@ lowering responsibility that already exists as a concept.
   decisions locally.
   Progress: added `MIR::Placement` as the allocator normalization/rendering
   boundary for MIR lowering, MIR emission, and pipeline-host inline Zig.
-- [ ] `decomplex-return-function-plans`: continue shrinking
+- [x] `decomplex-return-function-plans`: continue shrinking
   `lower_return` and `lower_function_def` by reifying implicit ownership,
   cleanup, catch/default, and result protocols into typed plans that delete
   local protocol reconstruction.
   Progress: return ownership planning is in place from the prior ownership
-  work; the remaining hotspot is `lower_function_def` prologue/catch/default
-  protocol construction.
+  work; function-entry prologue construction now reads one typed
+  `FunctionEntryPlan` instead of interleaving runtime frame setup,
+  reentrance/recursion guards, unused-param suppressions, mutable scalar
+  shadows, and TAKES ownership markers inside `lower_function_def`. Catch
+  lowering now returns `CatchLoweringPlan`, and `MIR::CatchWrapper` receives
+  typed `CatchReassign` / `CatchClauseMeta` facts instead of positional arrays
+  and raw Hash metadata.
+- [x] `decomplex-function-prologue-plan`: reify function-entry MIR construction
+  into typed facts/plans. Frame save/restore, non-reentrant guards,
+  recursion-yield checks, unused-param suppressions, mutable scalar shadows,
+  and TAKES parameter ownership markers must be built from one plan instead of
+  interleaved inside `lower_function_def`.
+  Progress: added `FunctionEntryPlan`; `lower_function_def` consumes finalized
+  prologue and TAKES marker arrays instead of assembling independent entry
+  protocols inline.
+- [x] `decomplex-next-expr-plan`: reify NEXT lowering into a typed result plan
+  that owns source kind, result type, allocator, method name, and whether inline
+  Zig is required. `lower_next_expr` should emit the plan, not rediscover
+  promise-list/observable/string/owned-result placement branch by branch.
+  Progress: added `NextExprPlan`; var-decl facts and NEXT emission now share
+  the same typed promise/result/allocator facts, and pipeline-host allocator
+  rendering goes through `MIR::Placement`. The plan carries a typed
+  `MIR::Node` inner expression, and branch-local NEXT state now uses
+  shape-specific names so the method no longer presents false stale-state
+  coupling between promise-list and observable-string branches.
+- [x] `decomplex-typed-catch-and-void-facts`: replace repeated catch/default
+  tuple guards and repeated AST-void-type checks with typed lowering facts.
+  Progress: added `CatchLoweringPlan`, `MIR::CatchReassign`,
+  `MIR::CatchClauseMeta`, `function_catch_clauses`, `default_catch_body`, and
+  one `ast_void_type?` predicate consumed by FSM and concurrency lowering.
+  Decomplex Missing Abstractions moved 216 -> 213 across the obvious-win
+  passes; SlopCop `type_norm` moved 199 -> 194 and genuine gaps 80 -> 77.
 - [ ] `decomplex-mir-hotspots`: audit the current convergence hotspots
   (`lower_next_expr`, `lower_do_block`, `lower_smooth`, hoist, escape analysis,
   cleanup classifier) and only change code where a typed fact/plan deletes a
@@ -177,7 +207,15 @@ lowering responsibility that already exists as a concept.
   Progress: current metrics show the loop-scope and placement changes reduced
   Missing Abstractions, Neglected Conditions, Broken Protocols, and SlopCop
   genuine gaps. The remaining high-confidence targets are listed in the latest
-  report notes.
+  report notes. Latest obvious-win pass reduced Decomplex Derived-State
+  Staleness from 152 to 150 by deleting misleading cross-branch local state
+  reuse in NEXT lowering; no SlopCop denominator change. A follow-up
+  intrinsic pass made receiver type a single typed fact at the top of
+  `lower_intrinsic`, tightened the intrinsic node boundary to function/method
+  calls, and removed the remaining intrinsic stale-state report entry,
+  bringing Derived-State Staleness to 149. The catch/default and void-type
+  passes lowered Missing Abstractions to 213, SlopCop `type_norm` to 194, and
+  SlopCop genuine gaps to 77 without adding behavior exceptions.
 
 ## Acceptance Criteria
 

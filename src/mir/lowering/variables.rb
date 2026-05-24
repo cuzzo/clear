@@ -202,7 +202,7 @@ module MIRLoweringVariables
     else
       (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
     end
-    next_owned_alloc = node.value.is_a?(AST::NextExpr) ? next_result_owned_alloc(node.value, ft, base_decl_alloc) : nil
+    next_owned_alloc = node.value.is_a?(AST::NextExpr) ? next_result_owned_alloc(Type.new(node.value.expr.full_type), ft, base_decl_alloc) : nil
     source_owned_alloc = owned_binding_source_alloc(node.value)
     init_ownership_effect = if next_owned_alloc
       MIR::OwnershipEffect.owned(alloc: next_owned_alloc)
