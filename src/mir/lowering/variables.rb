@@ -234,7 +234,7 @@ module MIRLoweringVariables
       init_ownership_effect: init_ownership_effect,
       has_caps: has_caps,
       bare_zig: bare_zig,
-      generic_id: ft.generic_instance? && ft.generic_base == :Id
+      generic_id: ft.id_handle?
     )
   end
 
@@ -383,7 +383,7 @@ module MIRLoweringVariables
         next_nodes
       else
       cleanup_required = !ft.primitive? && !ft.void? && !ft.any? &&
-                         !(ft.generic_instance? && ft.generic_base == :Id) &&
+                         !ft.id_handle? &&
                          (ft.needs_explicit_cleanup?(mir_alloc, @schema_lookup) ||
                           (mir_alloc == :heap && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
                             ft.any_sync? || ft.indirect? || ft.recursive_cleanup_shape?(@schema_lookup))))

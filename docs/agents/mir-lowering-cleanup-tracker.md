@@ -247,7 +247,7 @@ state/protocol that should be reified, not by every individual metric line.
 - [ ] `report-mir-next-shape-fact`: unify observable/promise NEXT shape logic
   behind one predicate/fact. The remaining repeated tuple is
   `promise_type.observable? | promise_type.tense_type&.array?`.
-- [ ] `report-mir-id-transfer-predicate`: replace repeated
+- [x] `report-mir-id-transfer-predicate`: replace repeated
   `ti.generic_instance? && ti.generic_base == :Id` with one authoritative
   Type predicate used by annotator, MIRPass, lowering, and MIRChecker.
 - [ ] `report-mir-local-binding-completeness`: resolve the neglected

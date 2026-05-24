@@ -877,7 +877,7 @@ class MIRLowering
 
   sig { params(ti: Type).returns(T::Boolean) }
   def ownership_tracked_transfer_type?(ti)
-    return false if ti.primitive? || ti.void? || ti.any? || (ti.generic_instance? && ti.generic_base == :Id)
+    return false if ti.primitive? || ti.void? || ti.any? || ti.id_handle?
     ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
   end
 

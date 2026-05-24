@@ -352,15 +352,7 @@ module MIRLoweringExpressions
     # Complex pipeline ops that survived PipelineRewriter (pool/sharded/SOA
     # sources, OrderByOp, IndexOp, WindowOp, JoinOp, ConcurrentOp).
     # All decisions are made here in lowering.
-    complex_ops = [
-      AST::SelectOp, AST::WhereOp, AST::IndexOp, AST::ReduceOp,
-      AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
-      AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
-      AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
-      AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp,
-      AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
-    ]
-    if complex_ops.any? { |t| rhs.is_a?(t) }
+    if AST.pipeline_complex_op?(rhs)
       host = pipeline_host
 
       # Detect source type for pipeline IR metadata.

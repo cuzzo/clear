@@ -36,6 +36,32 @@ class Type
   STRING_TYPE = :String
   HEAP_STRING_TYPE = :String
 
+  OWNERSHIP_SURFACE_NAMES = T.let({
+    multiowned: "@multiowned",
+    shared: "@shared",
+    split: "@split",
+    link: "@link",
+    frozen: "@frozen",
+  }.freeze, T::Hash[Symbol, String])
+
+  SYNC_SURFACE_NAMES = T.let({
+    locked: "@locked",
+    write_locked: "@writeLocked",
+    versioned: "@versioned",
+    atomic: "@atomic",
+    always_mutable: "@alwaysMutable",
+    local: "@local",
+  }.freeze, T::Hash[Symbol, String])
+
+  SYNC_FAMILY_NAMES = T.let({
+    locked: "locked",
+    write_locked: "writeLocked",
+    versioned: "versioned",
+    atomic: "atomic",
+    always_mutable: "alwaysMutable",
+    local: "local",
+  }.freeze, T::Hash[Symbol, String])
+
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
@@ -334,7 +360,7 @@ class Type
   sig { returns(Symbol) }
   def escape_class
     return :value          if primitive?
-    return :value          if generic_instance? && generic_base == :Id
+    return :value          if id_handle?
     return :refcounted     if any_rc?
     return :sync_wrapped   if any_sync?
     return (rodata? ? :slice_rodata : :slice_managed) if string?
@@ -804,7 +830,7 @@ class Type
 
   sig { returns(T.nilable(Symbol)) }
   def ownership_storage
-    return ownership if ownership == :shared || ownership == :multiowned
+    return ownership if shared? || multiowned?
     nil
   end
 
@@ -1056,6 +1082,26 @@ class Type
   sig { returns(Symbol) }
   def generic_base
     @generic_base_raw
+  end
+
+  sig { returns(T::Boolean) }
+  def id_handle?
+    generic_instance? && @generic_base_raw == :Id
+  end
+
+  sig { returns(T.nilable(String)) }
+  def ownership_surface_name
+    OWNERSHIP_SURFACE_NAMES[@ownership]
+  end
+
+  sig { returns(T.nilable(String)) }
+  def sync_surface_name
+    SYNC_SURFACE_NAMES[@sync]
+  end
+
+  sig { returns(T.nilable(String)) }
+  def sync_family_name
+    SYNC_FAMILY_NAMES[@sync]
   end
 
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
@@ -1488,7 +1534,7 @@ class Type
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     # Pool Id<T> handles are u64 indices — always Copy.
-    return true if generic_instance? && generic_base == :Id
+    return true if id_handle?
     # String literals (rodata) are Copy - static data, never freed.
     return true if string? && rodata?
     # Non-literal strings are NOT Copy - they reference frame/heap data.
@@ -2378,7 +2424,7 @@ class Type
     #    Pair<Number> -> Pair(f64),  Map<String,Number> -> Map([]const u8, f64)
     #    Id<User>     -> u64        (compiler-intrinsic handle, type param is for CLEAR safety only)
     if generic_instance?
-      return "u64" if @generic_base_raw == :Id
+      return "u64" if id_handle?
       args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
       return "#{@generic_base_raw}(#{args_zig})"
     end

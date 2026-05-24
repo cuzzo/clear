@@ -132,7 +132,7 @@ class SymbolEntry
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.atomic_sync?(sync)
-    sync == :atomic
+    sync_matches?(sync, :atomic)
   end
 
   # Mirror of Type#indirect? / Type#atomic_ptr?. The AtomicPtr pair
@@ -156,7 +156,7 @@ class SymbolEntry
 
   sig { returns(T::Boolean) }
   def local?
-    @sync == :local
+    self.class.local_sync?(@sync)
   end
 
   sig { returns(T::Boolean) }
@@ -166,27 +166,42 @@ class SymbolEntry
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.locked_sync?(sync)
-    sync == :locked
+    sync_matches?(sync, :locked)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.write_locked_sync?(sync)
-    sync == :write_locked
+    sync_matches?(sync, :write_locked)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.versioned_sync?(sync)
-    sync == :versioned
+    sync_matches?(sync, :versioned)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.local_sync?(sync)
+    sync_matches?(sync, :local)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.always_mutable_sync?(sync)
-    sync == :always_mutable
+    sync_matches?(sync, :always_mutable)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.locked_family_sync?(sync)
+    locked_sync?(sync) || write_locked_sync?(sync)
   end
 
   sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
   def self.cleanup_sync?(sync)
     locked_sync?(sync) || write_locked_sync?(sync) || always_mutable_sync?(sync) || versioned_sync?(sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol), expected: Symbol).returns(T::Boolean) }
+  def self.sync_matches?(sync, expected)
+    sync == expected
   end
 
   # Binding is Rc/Arc-stored. `storage == :shared || storage == :multiowned`

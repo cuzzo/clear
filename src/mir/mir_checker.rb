@@ -1455,7 +1455,7 @@ class MIRChecker
       # or visit_CopyNode missed the gate.
       if (ti = alloc_marks.first.full_type)
         no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
-        if no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+        if no_caps && (ti.primitive? || ti.id_handle?)
           @errors << error(:COPY_CLEANUP, name,
             "cleanup emitted for value type #{ti} (primitive or Id<T>) that can never " \
             "own heap memory -- needs_explicit_cleanup? or visit_CopyNode missed the gate")

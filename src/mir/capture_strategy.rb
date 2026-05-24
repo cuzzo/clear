@@ -207,8 +207,7 @@ module CaptureStrategy
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
     # Id<T> handles are opaque u64 indices into a pool — the pool owns the
     # data; the Id is just a key. Byte-copy is always safe.
-    if type.respond_to?(:generic_instance?) && type.generic_instance? &&
-       type.respond_to?(:generic_base) && type.generic_base == :Id
+    if type.respond_to?(:id_handle?) && type.id_handle?
       return true
     end
     # Plain structs / enums / unions whose fields are all

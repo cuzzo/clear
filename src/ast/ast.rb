@@ -1622,6 +1622,69 @@ module AST
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
 
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_fusible_stage?(node)
+    case node
+    when AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp,
+         AST::LimitOp, AST::SkipOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_select_filter_op?(node)
+    node.is_a?(AST::SelectOp) || node.is_a?(AST::WhereOp)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_stream_value_op?(node)
+    pipeline_select_filter_op?(node) || node.is_a?(AST::EachOp)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_terminal_fold?(node)
+    case node
+    when AST::SumOp, AST::AverageOp, AST::CountOp, AST::ReduceOp,
+         AST::MinOp, AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_range_fold?(node)
+    case node
+    when AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
+         AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_list_terminal?(node)
+    node.is_a?(AST::UnnestOp) || node.is_a?(AST::DistinctOp)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def self.pipeline_complex_op?(node)
+    case node
+    when AST::SelectOp, AST::WhereOp, AST::IndexOp, AST::ReduceOp,
+         AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
+         AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
+         AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+         AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp,
+         AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
+      true
+    else
+      false
+    end
+  end
+
   # BlockExpr: sequence of statements that produces a value.
   # Used by pipeline rewriter to express loops-that-return-a-value.
   # Transpiles to Zig labeled block: blk: { stmts; break :blk result; }

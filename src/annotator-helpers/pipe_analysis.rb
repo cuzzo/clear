@@ -276,11 +276,10 @@ module PipeAnalysis
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
   def analyze_select_family_op(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    is_inf    = node.left.full_type.inf_stream? &&
-                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
+    is_filter = AST.pipeline_select_filter_op?(node.right)
+    is_inf    = node.left.full_type.inf_stream? && is_filter
     is_stream = (finite_stream_source?(node.left) || is_inf) &&
-                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) ||
-                 node.right.is_a?(AST::IndexOp))
+                (is_filter || node.right.is_a?(AST::IndexOp))
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
     item_type = if is_inf
       inf_stream_element_type(node.left)
@@ -1618,7 +1617,7 @@ module PipeAnalysis
 
     # SELECT/WHERE/EACH on stream sources set node.full_type directly in their analyze
     # methods. REDUCE ops (SUM/COUNT/etc.) and array sources still use the proxy.
-    stream_op_analyzed = (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp) || conc.op.is_a?(AST::EachOp)) &&
+    stream_op_analyzed = AST.pipeline_stream_value_op?(conc.op) &&
                          (bounded_stream_source?(node.left) ||
                           node.left.full_type.inf_stream? ||
                           node.left.full_type.dynamic_stream? ||

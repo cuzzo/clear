@@ -1391,7 +1391,7 @@ module CapabilityAudit
       sync = info[:sync]
       own  = info[:ownership]
 
-      if (sync == :locked || sync == :write_locked) && !info[:mutated] && !info[:sharded]
+      if SymbolEntry.locked_family_sync?(sync) && !info[:mutated] && !info[:sharded]
         $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
                      "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
       end
@@ -1401,7 +1401,7 @@ module CapabilityAudit
                      "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
       end
 
-      if sync == :local && !info[:captured_bg]
+      if SymbolEntry.local_sync?(sync) && !info[:captured_bg]
         emit_local_never_shared_finding!(info)
       end
     end

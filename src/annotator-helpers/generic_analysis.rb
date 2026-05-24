@@ -462,23 +462,9 @@ module GenericAnalysis
     t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
-    ownership = case t.ownership
-    when :shared then "@shared"
-    when :multiowned then "@multiowned"
-    when :link then "@link"
-    when :split then "@split"
-    when :frozen then "@frozen"
-    end
+    ownership = t.ownership_surface_name
+    sync = t.sync_surface_name
     parts << ownership if ownership
-
-    sync = case t.sync
-    when :locked then "@locked"
-    when :write_locked then "@writeLocked"
-    when :versioned then "@versioned"
-    when :atomic then "@atomic"
-    when :local then "@local"
-    when :always_mutable then "@alwaysMutable"
-    end
     parts << sync if sync
 
     parts.join("")
@@ -490,14 +476,7 @@ module GenericAnalysis
     t = type.is_a?(Type) ? type : Type.new(type)
     caps = ["@shared"]
     caps << "indirect" if t.indirect?
-    caps << T.must(case t.sync
-            when :locked then "locked"
-            when :write_locked then "writeLocked"
-            when :versioned then "versioned"
-            when :atomic then "atomic"
-            when :local then "local"
-            when :always_mutable then "alwaysMutable"
-            end)
+    caps << T.must(t.sync_family_name)
     caps.compact.join(":")
   end
 

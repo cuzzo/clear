@@ -202,7 +202,7 @@ class MIRPass
       next false unless param.takes
       ti = param.type || Type.new(:Any)
       next true if ti.any?
-      next false if ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id)
+      next false if ti.primitive? || ti.id_handle?
       true
     end
   end

@@ -373,9 +373,7 @@ module EffectTracker
       has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
         ti = Type.new(p.type || :Any)
-        is_pure_copy = ti.primitive? ||
-                       (ti.respond_to?(:generic_instance?) && ti.generic_instance? &&
-                        ti.generic_base == :Id)
+        is_pure_copy = ti.primitive? || ti.id_handle?
         !is_pure_copy
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?

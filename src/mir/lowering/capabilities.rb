@@ -7,26 +7,37 @@ module MIRLoweringCapabilities
 
   requires_ancestor { MIRLowering }
 
+  SYNC_WRAP_CONSTRUCTORS = T.let({
+    locked: "lockedCreate",
+    write_locked: "rwLockedCreate",
+    always_mutable: "refCellCreate",
+    versioned: "versionedCreate",
+    atomic: "atomicCreate",
+    atomic_ptr: "atomicPtrCreate",
+    local: nil,
+  }.freeze, T::Hash[Symbol, T.nilable(String)])
+
+  SYNC_WRAP_TYPES = T.let({
+    locked: "CheatLib.Locked",
+    write_locked: "CheatLib.RwLocked",
+    always_mutable: "CheatLib.RefCell",
+    versioned: "CheatLib.Versioned",
+    atomic: "CheatLib.Atomic",
+    atomic_ptr: "CheatLib.AtomicPtr",
+    local: nil,
+  }.freeze, T::Hash[Symbol, T.nilable(String)])
+
   sig { params(sync: T.nilable(Symbol), atomic_ptr: T::Boolean).returns(T.nilable(String)) }
   def sync_wrap_constructor(sync, atomic_ptr:)
-    case sync
-    when :locked         then "lockedCreate"
-    when :write_locked   then "rwLockedCreate"
-    when :always_mutable then "refCellCreate"
-    when :versioned      then "versionedCreate"
-    when :atomic         then atomic_ptr ? "atomicPtrCreate" : "atomicCreate"
-    end
+    return nil unless sync
+    SYNC_WRAP_CONSTRUCTORS[atomic_ptr ? :atomic_ptr : sync]
   end
 
   sig { params(sync: T.nilable(Symbol), bare_zig_t: String, atomic_ptr: T::Boolean).returns(T.nilable(String)) }
   def sync_wrap_type(sync, bare_zig_t, atomic_ptr:)
-    case sync
-    when :locked         then "CheatLib.Locked(#{bare_zig_t})"
-    when :write_locked   then "CheatLib.RwLocked(#{bare_zig_t})"
-    when :always_mutable then "CheatLib.RefCell(#{bare_zig_t})"
-    when :versioned      then "CheatLib.Versioned(#{bare_zig_t})"
-    when :atomic         then atomic_ptr ? "CheatLib.AtomicPtr(#{bare_zig_t})" : "CheatLib.Atomic(#{bare_zig_t})"
-    end
+    return nil unless sync
+    wrapper = SYNC_WRAP_TYPES[atomic_ptr ? :atomic_ptr : sync]
+    wrapper ? "#{wrapper}(#{bare_zig_t})" : nil
   end
 
   sig { params(var_node: AST::Identifier).returns(String) }

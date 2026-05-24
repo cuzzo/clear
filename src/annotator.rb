@@ -2242,23 +2242,9 @@ private
     t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
-    ownership = case t.ownership
-    when :multiowned then "@multiOwned"
-    when :shared then "@shared"
-    when :split then "@split"
-    when :link then "@link"
-    when :frozen then "@frozen"
-    end
+    ownership = t.ownership_surface_name
+    sync = t.sync_surface_name
     parts << ownership if ownership
-
-    sync = case t.sync
-    when :locked then "@locked"
-    when :write_locked then "@writeLocked"
-    when :versioned then "@versioned"
-    when :atomic then "@atomic"
-    when :always_mutable then "@alwaysMutable"
-    when :local then "@local"
-    end
     parts << sync if sync
 
     parts.join(" ")
@@ -4308,7 +4294,7 @@ private
     source_sync = node.value.respond_to?(:symbol) ? node.value.symbol&.sync : nil
     is_value_copy = ti.is_a?(Type) &&
       source_sync.nil? && !ti.multiowned? && !ti.shared? &&
-      (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+      (ti.primitive? || ti.id_handle?)
     if is_value_copy
       node.storage = :stack
     else

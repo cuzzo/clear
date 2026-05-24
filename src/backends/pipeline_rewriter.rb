@@ -15,14 +15,9 @@ require_relative "../ast/std_lib"
 class PipelineRewriter
     extend T::Sig
 
-  FUSIBLE_STAGES = [AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp,
-                    AST::SkipOp, AST::LimitOp].freeze
-  TERMINAL_FOLDS = [AST::SumOp, AST::AverageOp, AST::CountOp, AST::ReduceOp,
-                    AST::AnyOp, AST::AllOp, AST::FindOp, AST::MinOp, AST::MaxOp].freeze
   # OrderByOp, IndexOp, WindowOp, JoinOp: require Zig-specific constructs
   # (comparator structs, HashMap ops, dual-source joins). These fall through
   # to the pipeline_generator path.
-  LIST_TERMINALS = [AST::UnnestOp, AST::DistinctOp].freeze
 
   sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
@@ -138,7 +133,7 @@ class PipelineRewriter
     # lower_range_fold intact; those methods unwrap the chain and emit a
     # single fused while loop.
     is_range_fold_terminal = terminal.is_a?(AST::EachOp) ||
-                             TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
+                             AST.pipeline_terminal_fold?(terminal)
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
     inf_with_limit = real_source.full_type.inf_stream? &&
@@ -146,7 +141,7 @@ class PipelineRewriter
     if (real_source.is_a?(AST::RangeLit) || real_source.full_type.dynamic_stream? ||
         real_source.full_type.open_stream? ||
         real_source.full_type.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
-       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
+       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
     end
@@ -157,7 +152,7 @@ class PipelineRewriter
     # short-circuits on set_collection? and emits an empty set, discarding the
     # BlockExpr produced by fuse_pipeline.
     if terminal.is_a?(AST::DistinctOp) &&
-       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
+       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
     end
@@ -168,7 +163,7 @@ class PipelineRewriter
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
                       (real_source.full_type.dynamic_stream? || real_source.full_type.open_stream? ||
                        real_source.full_type.bounded_stream? || inf_with_limit) &&
-                      stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
+                      stages.all? { |s| AST.pipeline_fusible_stage?(s) }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
@@ -176,8 +171,8 @@ class PipelineRewriter
 
     # CASE 1: Fusion candidate (chained fusible stages or ending in a fold/EachOp)
     is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) ||
-              TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) } ||
-              LIST_TERMINALS.any? { |t| terminal.is_a?(t) }
+              AST.pipeline_terminal_fold?(terminal) ||
+              AST.pipeline_list_terminal?(terminal)
 
     if stages.any? || (is_fold && terminal)
       if is_fold
@@ -255,7 +250,7 @@ class PipelineRewriter
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def is_fusible?(node)
-    FUSIBLE_STAGES.any? { |t| node.is_a?(t) }
+    AST.pipeline_fusible_stage?(node)
   end
 
   # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
@@ -278,7 +273,7 @@ class PipelineRewriter
 
     # Identify the terminal operation.
     right = node.right
-    if TERMINAL_FOLDS.any? { |t| right.is_a?(t) } || right.is_a?(AST::EachOp) || LIST_TERMINALS.any? { |t| right.is_a?(t) }
+    if AST.pipeline_terminal_fold?(right) || right.is_a?(AST::EachOp) || AST.pipeline_list_terminal?(right)
       terminal = right
       cursor = node.left
     elsif is_fusible?(right)

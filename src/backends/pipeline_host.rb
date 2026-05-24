@@ -415,9 +415,6 @@ class PipelineHost
 
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
   # Returns nil for non-migrated operators (caller falls back to string path).
-  RANGE_FOLD_OPS = [AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
-                    AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
-
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def lower_pipeline(node)
     rhs = node.right
@@ -429,13 +426,13 @@ class PipelineHost
     # The VM has no SoA layout (Value.List is uniform), so BC keeps using
     # the generic structural fold path.
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
-    scalar_op = RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
+    scalar_op = AST.pipeline_range_fold?(rhs)
     if is_soa && scalar_op && @lowering.instance_variable_get(:@target) != :bc
       return lower_soa_scalar_fold(PipelineSite.new(list: lhs, options: node), rhs)
     end
 
     # Range source with fold terminal: fuse into a single accumulating while loop.
-    if RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
+    if AST.pipeline_range_fold?(rhs)
       range_chain = unwrap_range_chain(lhs)
       return lower_range_fold(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
     end
@@ -2320,9 +2317,7 @@ class PipelineHost
     cursor = T.let(node, AST::BinaryOp)
     while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
       rhs = cursor.right
-      if rhs.is_a?(AST::SelectOp)   || rhs.is_a?(AST::WhereOp)     ||
-         rhs.is_a?(AST::TakeWhileOp) || rhs.is_a?(AST::LimitOp)    ||
-         rhs.is_a?(AST::SkipOp)      || rhs.is_a?(AST::TapOp)
+      if AST.pipeline_fusible_stage?(rhs)
         stages.unshift(rhs)
         cursor = cursor.left
       else
@@ -2346,7 +2341,7 @@ class PipelineHost
 
     # Terminal must be a fold op
     fold = node.right
-    return nil unless RANGE_FOLD_OPS.any? { |t| fold.is_a?(t) }
+    return nil unless AST.pipeline_range_fold?(fold)
     cursor = T.let(node.left, T.untyped)
 
     # Collect optional intermediate WHERE/SELECT stages (in chain order)
@@ -2354,7 +2349,7 @@ class PipelineHost
     rhs = T.let(nil, T.untyped)
     while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
       rhs = cursor.right
-      if rhs.is_a?(AST::WhereOp) || rhs.is_a?(AST::SelectOp)
+      if AST.pipeline_select_filter_op?(rhs)
         stages.unshift(rhs)
         cursor = cursor.left
       else

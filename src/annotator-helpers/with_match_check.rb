@@ -305,7 +305,7 @@ module WithMatchCheck
     #   - @local       -> sym.sync == :local
     #   - @multiowned  -> sym.storage == :multiowned (sync nil)
     #   - plain T      -> sym.sync nil + storage stack/heap (no shared)
-    return :LOCAL if sym.sync == :local
+    return :LOCAL if sym.local?
     return :LOCAL if sym.sync.nil? && sym.storage == :multiowned
     return :LOCAL if sym.sync.nil? && (sym.storage.nil? ||
                                        sym.storage == :stack ||
