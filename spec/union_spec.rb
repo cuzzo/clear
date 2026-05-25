@@ -321,8 +321,9 @@ RSpec.describe SemanticAnnotator do
             END
           END
         CLEAR
-        expect(out).to include("std.meta.activeTag(s) == .Circle")
-        expect(out).to include("std.meta.activeTag(s) == .Point")
+        expect(out).to include("switch (s)")
+        expect(out).to include(".Circle =>")
+        expect(out).to include(".Point =>")
       end
 
       it "includes PUB UNION in transpile_module output" do
@@ -650,8 +651,9 @@ RSpec.describe SemanticAnnotator do
               END
             END
           CLEAR
-          expect(out).to include("const ci = c.Circle;")
-          expect(out).to include("ci.radius")
+        expect(out).to include(".Circle => |__match_payload_")
+        expect(out).to include("const ci = __match_payload_")
+        expect(out).to include("ci.radius")
         end
       end
 

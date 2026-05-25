@@ -484,34 +484,13 @@ module MIRLoweringConcurrency
         inner_zig: inner_zig, arena_init_flag: !!node.arena_mode,
       }
       transform_result = FsmTransform.transform(node, transform_ctx, self)
-      if transform_result
-        bg_code, fsm_structure = transform_result
-        MIRChecker.check_fsm_structure!(fsm_structure, source: node) if fsm_structure
-        # Match legacy emit_fsm_*_bg_code call sites: pass [] for
-        # run_body. The fiber body is consumed inside the FSM
-        # state machine; exposing it again to the BgBlock-level
-        # checker double-walks ownership and triggers spurious
-        # diagnostics.
-        bg = MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
-        bg.boundary_fact = execution_boundary_fact(
-          :bg,
-          execution_boundary_dispatch(node.parallel, node.pinned),
-          analysis,
-        )
-        return bg
-      end
+      return fsm_bg_block_from_transform!(node, transform_result, captured, analysis) if transform_result
     end
 
-    # All FSM-eligible BG bodies route through FsmTransform above
-    # (CLAUDE.md Invariant 13). If the transform returned nil, the
-    # body falls outside the universal transform's coverage today
-    # (e.g. nested suspends inside a user fn call) and lowers to a
-    # stackful fiber via the standard spawn path below. The legacy
-    # use_fsm_io / use_fsm_next / use_fsm_with / use_fsm branches +
-    # find_fsm_*_split shape detectors + emit_fsm_*_bg_code emit
-    # functions are still available in fsm_lowering.rb so Stage 3
-    # delegation works; Stage 4b inlines them into Emit.build_*
-    # and deletes them.
+    # Non-FSM BG bodies and FSM shapes not yet covered by FsmTransform lower to
+    # the stackful fiber path below. This is a distinct execution model, not a
+    # verifier shortcut: run_body remains structured MIR so ownership is still
+    # visible to MIRChecker.
 
     bg_dispatch = node.parallel ? :parallel : ((pin_mode == false || pin_mode.nil?) ? :local : pin_mode)
     profiled_task_cfg = task_config_with_profile(task_cfg, bg_site_id, bg_dispatch)
@@ -591,6 +570,28 @@ module MIRLoweringConcurrency
     raise "BG block captures values that cannot safely cross the fiber boundary:\n" +
           lines.join("\n") +
           "\n(See docs/agents/vm-bugs.md for the ownership rules.)"
+  end
+
+  sig do
+    params(
+      node: AST::BgBlock,
+      transform_result: T.untyped,
+      captured: T::Hash[String, Type],
+      analysis: T.untyped,
+    ).returns(MIR::BgBlock)
+  end
+  def fsm_bg_block_from_transform!(node, transform_result, captured, analysis)
+    bg_code, fsm_structure = transform_result
+    MIRChecker.check_fsm_structure!(fsm_structure, source: node) if fsm_structure
+    # The fiber body is consumed into the FSM state machine. Exposing it again
+    # through run_body would double-walk ownership and manufacture diagnostics.
+    bg = MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
+    bg.boundary_fact = execution_boundary_fact(
+      :bg,
+      execution_boundary_dispatch(node.parallel, node.pinned),
+      analysis,
+    )
+    bg
   end
 
   sig { params(node: AST::BgStreamBlock).returns(T.any(MIR::BgBlock, MIR::BlockExpr, MIR::InlineBc, MIR::StreamSpawn)) }

@@ -855,16 +855,24 @@ module MIRLoweringCapabilities
     when :return
       [MIR::ReturnStmt.new(lower(clause[:value]))]
     when :raise
+      fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line})), "with_guard_fail_raise")
+      fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
+      flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_raise_flow")
+      flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
       [
-        MIR::ExprStmt.new(MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line})), "with_guard_fail_raise"), false),
-        MIR::ExprStmt.new(MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_raise_flow"), false),
+        MIR::ExprStmt.new(fail, false),
+        MIR::ExprStmt.new(flow, false),
         MIR::ReturnStmt.new(nil)
       ]
     when :exit
       msg_zig = emit_expr(lower(clause[:message]))
+      fail = MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line})), "with_guard_fail_exit")
+      fail.stdlib_def = FunctionSignature.empty_borrow_intrinsic
+      flow = MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_exit_flow")
+      flow.stdlib_def = FunctionSignature.empty_borrow_intrinsic
       [
-        MIR::ExprStmt.new(MIR::InlineZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line})), "with_guard_fail_exit"), false),
-        MIR::ExprStmt.new(MIR::InlineZig.new("__flow.* = .{ .kind = .raise_no_commit }", "with_guard_fail_exit_flow"), false),
+        MIR::ExprStmt.new(fail, false),
+        MIR::ExprStmt.new(flow, false),
         MIR::ReturnStmt.new(nil)
       ]
     when :block

@@ -714,9 +714,22 @@ class RegisterBcEmitter
       # `call() OR { ... };` at statement position -- run the catch
       # body if the call raised (ECLR first), else fall through.
       compile_try_catch_stmt(stmt)
+    when MIR::AssertStmt
+      compile_assert_stmt(stmt)
     else
       raise Unsupported, "register emitter does not support #{stmt.class.name} yet"
     end
+  end
+
+  def compile_assert_stmt(stmt)
+    cond = compile_bool_expr(stmt.cond)
+    emit(JF, cond, 0)
+    fail_patch = @ops.length - 1
+    emit(JMP, 0)
+    pass_patch = @ops.length - 1
+    @ops[fail_patch] = @ops.length
+    emit(HALT)
+    @ops[pass_patch] = @ops.length
   end
 
   def compile_defer_stmt(stmt)

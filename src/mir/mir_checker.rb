@@ -1644,6 +1644,12 @@ class MIRChecker
           "InlineZig performs allocator ownership operations inside opaque code; decompose into structural MIR")
       end
 
+      if !node.stdlib_def && inline_zig_requires_contract?(node)
+        @errors << error(:INLINE_NO_CONTRACT, node.reason || "inline_zig",
+          "InlineZig has no stdlib_def/FunctionSignature; ownership effects are unverifiable")
+      end
+
+      next unless inline_ownership_side_channel?(node)
       next if node.stdlib_def
       @errors << error(:INLINE_NO_CONTRACT, node.reason || "inline_zig",
         "InlineZig has no stdlib_def/FunctionSignature; ownership effects are unverifiable")
@@ -1874,6 +1880,17 @@ class MIRChecker
     return false unless node.ownership_contract.is_a?(MIR::OwnershipContract)
 
     !node.ownership_contract.consumes.empty? || !node.ownership_contract.produces.empty?
+  end
+
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def inline_zig_requires_contract?(node)
+    code = node.code.to_s
+    return true if code.match?(/\bCheat(?:Lib|Header)\./)
+    return false if code.match?(/\A\s*@(?:as|bitCast|constCast|enumFromInt|floatFromInt|intCast|intFromEnum|intFromPtr|ptrCast|alignCast)\b/)
+    return false if code.match?(/\A\s*\.?[A-Za-z_][A-Za-z0-9_]*\s*\z/)
+    return false if code.match?(/\A\s*[A-Za-z_][A-Za-z0-9_]*(?:\.\*)?\s*=/)
+
+    code.match?(/\b[A-Za-z_][A-Za-z0-9_]*\s*\(/)
   end
 
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }

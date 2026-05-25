@@ -907,7 +907,7 @@ module MIRLoweringControlFlow
 
   sig { params(value: T.untyped).returns(T::Boolean) }
   def tail_call_return?(value)
-    @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
+    !!(@current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name)
   end
 
   sig { params(plan: ReturnOwnershipPlan, value: T.untyped, ret: MIR::ReturnStmt).returns(T.untyped) }

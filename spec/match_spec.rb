@@ -610,8 +610,9 @@ RSpec.describe SemanticAnnotator do
             END
           END
         CLEAR
-        expect(out).to include("std.meta.activeTag(s) == .Circle")
-        expect(out).to include("const r = s.Circle;")
+        expect(out).to include("switch (s)")
+        expect(out).to include(".Circle => |__match_payload_")
+        expect(out).to include("const r = __match_payload_")
       end
 
       it "emits == comparison (not activeTag) for enum MATCH" do
@@ -644,8 +645,9 @@ RSpec.describe SemanticAnnotator do
             END
           END
         CLEAR
-        expect(out).to include("std.meta.activeTag(opt) == .Some")
-        expect(out).to include("const x = opt.Some;")
+        expect(out).to include("switch (opt)")
+        expect(out).to include(".Some => |__match_payload_")
+        expect(out).to include("const x = __match_payload_")
       end
 
       it "MATCH and MATCH produce identical Zig output for the same exhaustive case" do

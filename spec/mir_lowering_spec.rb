@@ -929,7 +929,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
       expect(zig).to include("CheatLib.cleanupAt(Point, items, rt.frameAlloc(), 0)")
-      expect(zig).to include("CheatLib.setAt(items, 0, __tmp_")
+      expect(zig).to include("CheatLib.setAt(items, 0, next_point)")
       expect(result.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) }).to be true
     end
   end
@@ -1061,9 +1061,9 @@ RSpec.describe MIRLowering do
 
       l = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :String }) })
       result = l.lower(node)
-      expect(result).to be_a(MIR::IfChain)
+      expect(result).to be_a(MIR::UnionMatchStmt)
       zig = emit(result)
-      expect(zig).to include("std.meta.activeTag")
+      expect(zig).to include("switch (result)")
       expect(zig).to include(".Ok")
     end
 
@@ -1163,11 +1163,14 @@ RSpec.describe MIRLowering do
 
       result = lowering(union_schemas: { Result: Schemas::UnionSchema.new(variants: { Ok: :Int64, Err: :Int64 }) }).lower(node)
 
-      expect(result).to be_a(MIR::IfChain)
-      expect(result.branches.length).to eq(2)
-      expect(result.branches[0][:body].first).to be_a(MIR::Let)
-      expect(result.branches[0][:body].first.init.field).to eq("Ok")
-      expect(result.branches[1][:body].first.init.field).to eq("Err")
+      expect(result).to be_a(MIR::UnionMatchStmt)
+      expect(result.arms.length).to eq(2)
+      expect(result.arms[0][:payload]).to start_with("__match_payload_")
+      expect(result.arms[0][:pattern]).to eq(".Ok")
+      expect(result.arms[1][:payload]).to start_with("__match_payload_")
+      expect(result.arms[1][:pattern]).to eq(".Err")
+      expect(result.arms[0][:body].grep(MIR::Let).map(&:name)).to include("payload")
+      expect(result.arms[1][:body].grep(MIR::Let).map(&:name)).to include("payload")
     end
 
     it "lowers WHEN guard arms before subject equality dispatch" do
@@ -1466,8 +1469,7 @@ RSpec.describe MIRLowering do
       node = AST::Assert.new(tok, cond, "should be true")
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def.emit.borrows).to eq(:all)
+      expect(result).to be_a(MIR::AssertStmt)
       expect(emit(result)).to include("CheatLib.assert(true,")
     end
 
