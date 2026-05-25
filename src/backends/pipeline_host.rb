@@ -436,18 +436,17 @@ class PipelineHost
     node
   end
 
-  sig { params(src: T.untyped, dst: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
   def copy_type_info(src, dst)
-    dst.full_type = src.full_type if src.typed? && dst.respond_to?(:full_type=)
-    dst.full_type = src.full_type if src.respond_to?(:full_type) && src.full_type && dst.respond_to?(:full_type=)
-    dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
-    dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)
-    dst.var_used = src.var_used if src.respond_to?(:var_used) && dst.respond_to?(:var_used=)
+    dst.full_type = src.full_type!(context: "pipeline rewrite type copy")
+    dst.coerced_type = src.coerced_type if src.coerced_type
+    dst.storage = src.storage if src.storage
+    dst.var_used = src.var_used
   end
 
   sig { params(field_node: AST::GetField).returns(Type) }
   def soa_field_slice_type(field_node)
-    field_type = Type.from_node!(field_node, context: "SOA field slice")
+    field_type = field_node.full_type!(context: "SOA field slice")
     Type.new(:"#{field_type.resolved}[]")
   end
 
@@ -612,20 +611,17 @@ class PipelineHost
     MIR::DeepCopy.new(value, zig_type, nil, :full_value, alloc)
   end
 
-  sig { params(type_info: T.untyped).returns(T::Boolean) }
+  sig { params(type_info: Type).returns(T::Boolean) }
   def cleanup_bearing_type?(type_info)
-    ti = Type.from_node(type_info)
-    return false unless ti
-    ti.recursive_cleanup_shape?(pipeline_schema_lookup)
+    type_info.recursive_cleanup_shape?(pipeline_schema_lookup)
   end
 
   sig do
-    params(name: String, source: T.untyped, type_info: T.untyped,
+    params(name: String, source: T.untyped, type_info: Type,
            zig_type: String, alloc: Symbol).returns(T::Array[T.untyped])
   end
   def owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
-    ti = Type.from_node!(type_info, context: "pipeline ownership boundary")
-    mark = MIR::AllocMark.new(name, alloc, ti)
+    mark = MIR::AllocMark.new(name, alloc, type_info)
     mark.scope = alloc == :heap ? :heap : :iteration
     entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
     [
@@ -3131,9 +3127,7 @@ class PipelineHost
   sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier, terminal: Symbol, spec: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def string_source_else_free(p, source_node, terminal, spec)
     return nil unless terminal == :find
-    src_ti = source_node.respond_to?(:full_type) ? source_node.full_type : nil
-    return nil unless src_ti
-    src_t = src_ti.is_a?(Type) ? src_ti : Type.new(src_ti)
+    src_t = source_node.full_type!(context: "pipeline source cleanup")
     elem_t = src_t.tense_type&.element_type
     return nil unless elem_t&.string?
     [MIR::ExprStmt.new(

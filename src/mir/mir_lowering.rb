@@ -343,7 +343,7 @@ class MIRLowering
 
   sig { params(ast_node: T.untyped, dest_type: T.untyped).returns(T.nilable(Type)) }
   def destination_type(ast_node, dest_type)
-    ti = dest_type || Type.from_node(ast_node)
+    ti = dest_type || Type.from_node!(ast_node, context: "destination placement type")
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
     ti.is_a?(Type) ? ti : nil
   end
@@ -363,8 +363,7 @@ class MIRLowering
     return false unless ti.indirect? && !ti.any_sync? && ti.ownership == :affine
     return false if mir.is_a?(MIR::HeapCreate)
 
-    source_t = Type.from_node(ast_node)
-    source_t = Type.new(source_t) if source_t && !source_t.is_a?(Type)
+    source_t = Type.from_node!(ast_node, context: "heap indirect destination source")
     !Type.indirect_type?(source_t)
   end
 
@@ -401,7 +400,7 @@ class MIRLowering
 
   sig { params(mir: T.untyped, ast_node: AST::BinaryOp).returns(T.untyped) }
   def place_string_or_for_heap_destination(mir, ast_node)
-    left_t = Type.from_node(ast_node.left)
+    left_t = Type.from_node!(ast_node.left, context: "string OR destination left")
     return place_string_value_for_heap_destination(mir, ast_node) if left_t&.optional?
 
     case mir
@@ -449,9 +448,9 @@ class MIRLowering
     MIR::DupeSlice.new(mir, :heap)
   end
 
-  sig { params(type_info: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(type_info: T.nilable(Type)).returns(T.nilable(Symbol)) }
   def escaping_value_alloc(type_info)
-    ti = Type.from_node(type_info)
+    ti = type_info
     ti = ti.success_type if ti
     return :heap if ti&.heap_ptr? || ti&.recursive_cleanup_shape?(@schema_lookup)
     nil
@@ -476,7 +475,7 @@ class MIRLowering
     return nil unless @current_fn_heap_carry_return
     return nil unless node.value
 
-    escaping_value_alloc(Type.from_node(node.value))
+    escaping_value_alloc(Type.from_node!(node.value, context: "return destination allocation"))
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(MIR::BlockExpr) }
@@ -769,7 +768,7 @@ class MIRLowering
     @tmp_counter += 1
     discard_name = "__discard_#{@tmp_counter}"
     alloc = entry.alloc || mir_owned_alloc(mir) || :heap
-    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node(stmt))
+    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node!(stmt, context: "discard allocation mark"))
     mark.scope = alloc == :heap ? :heap : :iteration
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
     [
@@ -2622,7 +2621,7 @@ class MIRLowering
   sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(OwnedSinkPlan) }
   def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
     ti = Type.from_node!(ast_node, context: "owned sink materialization")
-    dst_ti = Type.from_node(sink_type) || ti
+    dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     keep = OwnedSinkPlan.new(action: :keep, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
 
     if ti.string?

@@ -755,10 +755,9 @@ class PipelineRewriter
 
   # Check if the RHS callee returns an error union (even if the SMOOTH
   # node's full_type was already unwrapped by a CATCH block).
-  sig { params(rhs: T.untyped).returns(T::Boolean) }
+  sig { params(rhs: AST::Locatable).returns(T::Boolean) }
   def callee_returns_error?(rhs)
-    ti = rhs.respond_to?(:full_type) ? rhs.full_type : nil
-    return false unless ti
+    ti = rhs.full_type!(context: "pipeline callee")
     raw = ti.raw
     return false unless raw.is_a?(FunctionSignature)
     ret_type = raw.return_type
@@ -767,10 +766,9 @@ class PipelineRewriter
 
   # Returns true if the source requires the transpiler's pipeline_generator
   # (pool, sharded, or SOA collections need special iteration patterns).
-  sig { params(source: T.untyped).returns(T::Boolean) }
+  sig { params(source: AST::Locatable).returns(T::Boolean) }
   def needs_transpiler_pipeline?(source)
-    ti = source.respond_to?(:full_type) ? source.full_type : nil
-    return false unless ti
+    ti = source.full_type!(context: "pipeline source")
     ti.pool? || ti.soa? || ti.sharded?
   end
 

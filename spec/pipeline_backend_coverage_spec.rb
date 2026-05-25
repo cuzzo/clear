@@ -72,17 +72,19 @@ RSpec.describe "pipeline backend coverage" do
     OpenStruct.new(defaults.merge(opts))
   end
 
-  def id(name, type: nil)
+  def id(name, type: Type.new(:Int64))
     node = AST::Identifier.new(tok, name)
-    if type
-      node.define_singleton_method(:full_type) { type }
-      node.define_singleton_method(:type_info) { type }
-    end
+    node.full_type = type
     node
   end
 
   def lit(value, type = :Int64)
     node = AST::Literal.new(tok, :NUMBER, value, nil)
+    node.full_type = type
+    node
+  end
+
+  def typed(node, type = Type.new(:Int64))
     node.full_type = type
     node
   end
@@ -203,16 +205,16 @@ RSpec.describe "pipeline backend coverage" do
       pipeline_host.instance_variable_set(:@join_param_map, { "r" => "__jr" })
       pipeline_host.instance_variable_set(:@named_bindings, { "$u" => "__pipe_u" })
 
-      expect(pipeline_host.send(:substitute_placeholders, AST::FuncCall.new(tok, "f", [id("_")])).args.first.name).to eq("__it")
-      expect(pipeline_host.send(:substitute_placeholders, AST::MethodCall.new(tok, id("_"), "m", [id("acc")])).object.name).to eq("__it")
-      expect(pipeline_host.send(:substitute_placeholders, AST::BinaryOp.new(tok, id("_"), :ADD, id("acc"))).right.name).to eq("__acc")
-      expect(pipeline_host.send(:substitute_placeholders, AST::GetIndex.new(tok, id("$u"), id("r"))).target.name).to eq("__pipe_u")
-      expect(pipeline_host.send(:substitute_placeholders, AST::UnaryOp.new(tok, :NOT, id("_"))).right.name).to eq("__it")
-      expect(pipeline_host.send(:substitute_placeholders, AST::StructLit.new(tok, "Box", { "x" => id("_") })).fields["x"].name).to eq("__it")
-      expect(pipeline_host.send(:substitute_placeholders, AST::HashLit.new(tok, { "k" => id("_") })).pairs["k"].name).to eq("__it")
-      expect(pipeline_host.send(:substitute_placeholders, AST::Assert.new(tok, id("_"), nil)).condition.name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::FuncCall.new(tok, "f", [id("_")]))).args.first.name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::MethodCall.new(tok, id("_"), "m", [id("acc")]))).object.name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::BinaryOp.new(tok, id("_"), :ADD, id("acc")))).right.name).to eq("__acc")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::GetIndex.new(tok, id("$u"), id("r")))).target.name).to eq("__pipe_u")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::UnaryOp.new(tok, :NOT, id("_")))).right.name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::StructLit.new(tok, "Box", { "x" => id("_") }))).fields["x"].name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::HashLit.new(tok, { "k" => id("_") }))).pairs["k"].name).to eq("__it")
+      expect(pipeline_host.send(:substitute_placeholders, typed(AST::Assert.new(tok, id("_"), nil))).condition.name).to eq("__it")
 
-      if_stmt = AST::IfStatement.new(tok, id("_"), [AST::FuncCall.new(tok, "t", [id("_")])], [AST::FuncCall.new(tok, "e", [id("acc")])])
+      if_stmt = typed(AST::IfStatement.new(tok, id("_"), [typed(AST::FuncCall.new(tok, "t", [id("_")]))], [typed(AST::FuncCall.new(tok, "e", [id("acc")]))]))
       replaced = pipeline_host.send(:substitute_placeholders, if_stmt)
       expect(replaced.condition.name).to eq("__it")
       expect(replaced.then_branch.first.args.first.name).to eq("__it")
@@ -222,13 +224,13 @@ RSpec.describe "pipeline backend coverage" do
     it "substitutes assignment and bind targets plus SOA EACH fields" do
       pipeline_host.instance_variable_set(:@placeholder_name, "__it")
       pipeline_host.instance_variable_set(:@soa_each_mode, true)
-      gf = AST::GetField.new(tok, id("_"), :x)
+      gf = typed(AST::GetField.new(tok, id("_"), :x))
       expect(pipeline_host.send(:substitute_placeholders, gf).name).to eq("__soa_x[__soa_i]")
 
-      bind = AST::BindExpr.new(tok, AST::GetField.new(tok, id("_"), :x), nil, id("_"))
+      bind = typed(AST::BindExpr.new(tok, typed(AST::GetField.new(tok, id("_"), :x)), nil, id("_")))
       expect(pipeline_host.send(:substitute_placeholders, bind).name.name).to eq("__soa_x[__soa_i]")
 
-      assign = AST::Assignment.new(tok, AST::GetField.new(tok, id("_"), :x), id("_"))
+      assign = typed(AST::Assignment.new(tok, typed(AST::GetField.new(tok, id("_"), :x)), id("_")))
       expect(pipeline_host.send(:substitute_placeholders, assign).name.name).to eq("__soa_x[__soa_i]")
     end
 

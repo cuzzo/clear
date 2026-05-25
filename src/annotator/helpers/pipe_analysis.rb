@@ -380,7 +380,7 @@ module PipeAnalysis
     end
 
     # Result is a list of whatever the expression produces
-    expr_type = node.right.expression.full_type_or(node.right.expression.resolved_type)
+    expr_type = node.right.expression.full_type!(context: "WINDOW expression")
     node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :frame
     current_fn_ctx.frame_count += 1 if current_fn_ctx
@@ -457,7 +457,7 @@ module PipeAnalysis
       visit(bw.expression)
     end
 
-    expr_type = bw.expression.full_type_or(bw.expression.resolved_type)
+    expr_type = bw.expression.full_type!(context: "BATCH WINDOW expression")
     node.full_type = Type.new(:"#{expr_type}[]")
     node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
@@ -1634,7 +1634,7 @@ module PipeAnalysis
     # type just computed here — stamp it (and its WHERE/SELECT
     # expression sub-node) so no wrapped op reaches MIR untyped.
     inner = conc.op
-    inner.full_type = node.full_type_or(proxy.full_type)
+    inner.full_type = node.full_type!(context: "CONCURRENT inner op result")
     nil # sig: returns(T.nilable(Symbol)) — don't leak the Type assignment
   end
 
@@ -1799,7 +1799,7 @@ module PipeAnalysis
   sig { params(range_node: AST::RangeLit).returns(Type) }
   def range_element_type(range_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    range_node.start.full_type_or(:Number)
+    range_node.start.full_type!(context: "range element")
   end
 
   # =========================================================

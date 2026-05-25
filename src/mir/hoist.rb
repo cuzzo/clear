@@ -140,8 +140,8 @@ module Hoist
     return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
     return true if concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
 
-    ti = Type.from_node(node)
-    return false unless ti
+    return false unless node.is_a?(AST::Locatable)
+    ti = node.full_type!(context: "hoist allocation candidate")
     ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, schema_lookup)
   end
 
@@ -310,8 +310,7 @@ module Hoist
     return false unless ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
     return false unless ast_container_borrow_expr?(ast_node.left)
 
-    ti = Type.from_node(ast_node)
-    return false unless ti
+    ti = Type.from_node!(ast_node, context: "owned fallback temp")
 
     ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
   end
@@ -938,8 +937,7 @@ module MIRHoistLowering
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(String) }
   def deep_copy_zig_type(mir, ast_node)
     return mir.zig_type if mir.zig_type
-    ti = Type.from_node(ast_node)
-    raise "hoist_cleanup_entry: MIR::DeepCopy :full_value has no zig_type" unless ti
+    ti = Type.from_node!(ast_node, context: "deep-copy zig type")
     bare = Type.new(ti)
     bare.provenance = :stack if bare.respond_to?(:provenance=)
     bare.zig_type
@@ -947,8 +945,8 @@ module MIRHoistLowering
 
   sig { params(ast_node: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
   def cleanup_entry_for_owned_result(ast_node, alloc: :heap)
-    ti = Type.from_node(ast_node)
-    return nil unless ti
+    return nil unless ast_node
+    ti = Type.from_node!(ast_node, context: "owned result cleanup entry")
     ti = ti.success_type || ti
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?

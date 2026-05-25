@@ -269,11 +269,7 @@ module GenericAnalysis
       arg = actual_args[i]
       next unless arg
       param_type = param.type || Type.new(:Any)
-      actual_type = if arg.respond_to?(:full_type) && arg.full_type
-        arg.full_type
-      else
-        Type.new(arg.resolved_type || :Any)
-      end
+      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "generic call argument")
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
     enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
@@ -294,11 +290,7 @@ module GenericAnalysis
       next unless arg
       param_type = param.type || Type.new(:Any)
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
-      actual_type = if arg.respond_to?(:full_type) && arg.full_type
-        arg.full_type
-      else
-        Type.new(arg.resolved_type || :Any)
-      end
+      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "shared generic call argument")
       next unless actual_type.shared?
       shared_args << {
         name: param.name,
@@ -615,8 +607,8 @@ module GenericAnalysis
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
-    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:full_type)
-      ti = Type.from_node!(expr.target, context: "container source")
+    if expr.is_a?(AST::GetIndex)
+      ti = expr.target.full_type!(context: "container source")
       if ti.collection_value?
         return root_variable_name(expr.target)
       end
@@ -626,12 +618,12 @@ module GenericAnalysis
     # the parent's cleanup also frees the field -- double-free.
     # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
     # values, not borrows from an existing variable.
-    if expr.is_a?(AST::GetField) && expr.respond_to?(:full_type)
+    if expr.is_a?(AST::GetField)
       if expr.target.is_a?(AST::Identifier)
         target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
         return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
       end
-      field_ti = expr.full_type
+      field_ti = expr.full_type!(context: "field container source")
       if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         return root_variable_name(expr.target)
       end

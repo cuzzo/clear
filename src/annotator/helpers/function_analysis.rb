@@ -437,7 +437,7 @@ module FunctionAnalysis
       end
 
       # Weak refs must be RESOLVE'd before passing to concrete params.
-      arg_ti = arg_node.respond_to?(:full_type) ? arg_node.full_type : nil
+      arg_ti = T.cast(arg_node, AST::Locatable).full_type!(context: "call argument")
       expected_raw = param.type
       if arg_ti&.link? && expected_raw != :Any
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
@@ -456,11 +456,11 @@ module FunctionAnalysis
       # resolved_type only returns the return-type symbol for fn_types, so we
       # must compare the full Type objects to validate signature compatibility.
       expected_type_obj = expected.is_a?(Type) ? expected : Type.new(expected || :Any)
-      if expected_type_obj.fn_type? && arg_node.respond_to?(:full_type)
-        actual_type_obj = arg_node.full_type
-        if actual_type_obj.is_a?(Type) && expected_type_obj.accepts?(actual_type_obj)
+      if expected_type_obj.fn_type?
+        actual_type_obj = T.cast(arg_node, AST::Locatable).full_type!(context: "fn-typed argument")
+        if expected_type_obj.accepts?(actual_type_obj)
           match = true
-        elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
+        elsif actual_type_obj.fn_type? &&
               actual_type_obj.raw.reentrant && !expected_type_obj.raw.reentrant
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
           error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)

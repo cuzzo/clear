@@ -713,6 +713,13 @@ module AST
       @type_object ||= Type.new(:Untyped)
     end
 
+    sig { params(context: String).returns(Type) }
+    def full_type!(context: "post-annotation AST")
+      ft = full_type
+      raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
+      ft
+    end
+
     sig do
       params(default: T.nilable(T.any(Type, Symbol, String)),
              blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))

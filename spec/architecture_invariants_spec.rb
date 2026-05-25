@@ -235,6 +235,65 @@ RSpec.describe "architecture invariants: MIR pass order" do
   end
 end
 
+RSpec.describe "architecture invariants: post-annotation type access" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  TYPE_CONTRACT_BURNDOWN_FILES = [
+    "src/annotator/annotator.rb",
+    "src/annotator/helpers/function_analysis.rb",
+    "src/annotator/helpers/generic_analysis.rb",
+    "src/annotator/helpers/pipe_analysis.rb",
+    "src/backends/pipeline_host.rb",
+    "src/backends/pipeline_rewriter.rb",
+    "src/mir/escape_analysis.rb",
+    "src/mir/lowering/expressions.rb",
+    "src/mir/lowering/variables.rb",
+  ].freeze
+
+  it "does not re-derive whether AST nodes have full_type in burned-down consumers" do
+    offenders = TYPE_CONTRACT_BURNDOWN_FILES.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("respond_to?(:full_type)") || line.include?('respond_to?("full_type")')
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "post-annotation consumers must use Locatable#full_type!, not defensive full_type probes:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not use optional Type.from_node on post-annotation AST values in burned-down consumers" do
+    offenders = TYPE_CONTRACT_BURNDOWN_FILES.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/Type\.from_node\((?![^\)]*,\s*context:)/)
+        # Schema metadata is not an annotated AST value; it may still be
+        # normalized from raw schema payloads.
+        next if rel == "src/mir/lowering/expressions.rb" && line.include?("variant_data")
+        # Function declarations carry raw signature type fields; the
+        # forbidden path here is re-normalizing annotated AST values.
+        next if rel == "src/mir/escape_analysis.rb" && line.include?("return_type")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "post-annotation AST values must use Locatable#full_type! or Type.from_node!, not optional Type.from_node:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps required AST type access as a hard contract" do
+    ast = source("src/ast/ast.rb")
+    expect(ast).to include("def full_type!(context: \"post-annotation AST\")")
+    expect(ast).to include('raise "#{context}: unresolved type info')
+    expect(source("src/mir/pre_mir_type_check.rb")).to include("full_type is the :Untyped")
+  end
+end
+
 RSpec.describe "architecture invariants: closed placement pipeline" do
   ForbiddenPattern = Struct.new(:name, :glob, :pattern, :allowed, keyword_init: true)
 

@@ -570,8 +570,7 @@ module MIRLoweringExpressions
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
-    fallback_type = Type.from_node(node.left)
-    fallback_type = fallback_type&.value_payload_type
+    fallback_type = node.left.full_type!(context: "OR fallback expected type").value_payload_type
     right = with_expected_type(fallback_type) do
       materialize_or_fallback_value(descend(node, :right), node.right)
     end
@@ -589,9 +588,8 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     return value unless or_fallback_access_path?(ast_node)
 
-    ti = Type.from_node(ast_node)
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    return value unless ti.is_a?(Type)
+    return value unless ast_node.is_a?(AST::Locatable)
+    ti = ast_node.full_type!(context: "OR fallback materialization")
     return value unless ti.string? || ti.recursive_cleanup_shape?(@schema_lookup) || ti.needs_cleanup?(@schema_lookup)
 
     alloc = @current_decl_alloc || :heap
@@ -789,8 +787,8 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::BinaryOp).returns(BinaryIntArithmeticFacts) }
   def binary_int_arithmetic_facts(node)
-    left_ti = Type.from_node(node.left.full_type)
-    right_ti = Type.from_node(node.right.full_type)
+    left_ti = node.left.full_type!(context: "binary left operand")
+    right_ti = node.right.full_type!(context: "binary right operand")
     BinaryIntArithmeticFacts.new(
       both_int: left_ti&.integer? == true && right_ti&.integer? == true,
       has_comptime_number_literal: comptime_number_literal?(node.left, left_ti) ||
@@ -1586,7 +1584,7 @@ module MIRLoweringExpressions
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     @pending_stmts = T.let(@pending_stmts, T.untyped)
     return unless v.is_a?(AST::Identifier)
-    ti = Type.from_node(v) rescue nil
+    ti = v.full_type!(context: "field move mark")
     tracked = ti && !ti.primitive? && !ti.void? && !ti.any? &&
               (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup))
     return unless AST.moved?(v) || (tracked && v.symbol&.heap_storage?)

@@ -1076,11 +1076,8 @@ private
     body.each do |stmt|
       walk_ast(stmt) do |node|
         if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
-          lhs_type = node.left.respond_to?(:full_type) ? node.left.full_type : nil
-          if lhs_type
-            t = Type.new(lhs_type)
-            types << t.resolved.to_s unless t.void? || t.error_union?
-          end
+          t = node.left.full_type!(context: "pipe input type")
+          types << t.resolved.to_s unless t.void? || t.error_union?
         end
       end
     end
@@ -1425,7 +1422,7 @@ private
 
     # A destructuring pattern's type IS the subject it destructures
     # (the MATCH expr) — not a guess.
-    pat.full_type = match_node.expr.full_type_or { Type.new(match_node.expr.resolved_type || :Any) }
+    pat.full_type = match_node.expr.full_type!(context: "match destructure subject")
     nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
   end
 
@@ -1593,7 +1590,7 @@ private
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
             c.destructure.full_type =
-              node.expr.full_type_or { Type.new(node.expr.resolved_type || :Any) }
+              node.expr.full_type!(context: "union destructure subject")
             variant_name = case c.value
                            when AST::GetField   then c.value.field
                            when AST::MethodCall then c.value.name
@@ -2092,7 +2089,7 @@ private
     if inline_bg_sources.any?
       source_names = inline_bg_sources.map { |s| lookup_source_name(s) || "(unnamed)" }.uniq.join(", ")
       error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME,
-             type: node.value.full_type_or("BG handle"),
+             type: node.value.full_type!(context: "inline BG return").to_s,
              hint: "BG handle captures '#{source_names}' (declared in this function's scope) — the handle cannot outlive its captures. Restructure so the captures are owned by the caller, or use COPY-eligible payloads.")
     end
 
@@ -2198,11 +2195,9 @@ private
     @branch_terminated = true
   end
 
-  sig { params(value: T.untyped).returns(Type) }
+  sig { params(value: AST::Locatable).returns(Type) }
   def return_value_type(value)
-    ti = value.respond_to?(:full_type) ? value.full_type : nil
-    return ti if ti.is_a?(Type)
-    Type.new(value.resolved_type || :Any)
+    value.full_type!(context: "return value")
   end
 
   sig { params(actual_type: Type, expected_type: Type).returns(T::Boolean) }
@@ -2819,7 +2814,7 @@ private
       end
     end
     classify_ownership!(node.symbol)
-    og_declare(node.name, node, node.full_type_or(final_type))
+    og_declare(node.name, node, node.full_type!(context: "var declaration"))
     register_container_borrow!(node)
     # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
     ti = node.full_type
@@ -5200,7 +5195,7 @@ private
       error!(node, :YIELD_OUTSIDE_BG_STREAM)
     end
     visit(node.expr)
-    node.full_type = Type.new(node.expr.full_type_or(:Void))
+    node.full_type = node.expr.full_type!(context: "yield expression")
     T.must(@stream_yield_types) << Type.new(node.full_type)
     record_effect(EffectTracker::SUSPENDS)
   end
@@ -5215,10 +5210,10 @@ private
     prev_bg_pinned = @current_bg_pinned
     @current_bg_pinned = node.pinned
 
-    last_type = T.let(:Void, Symbol)
+    last_type = T.let(Type.new(:Void), Type)
     node.body.each do |expr|
       visit(expr)
-      last_type = expr.respond_to?(:full_type) ? expr.full_type_or(:Void) : :Void
+      last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
       # Track names declared inside the body so we don't treat them as outer captures.
       if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
         locally_bound << expr.name
@@ -5233,7 +5228,7 @@ private
     # is the success type.
     last_type_str = last_type.to_s
     if last_type_str.start_with?('!')
-      last_type = T.must(last_type_str[1..]).to_sym
+      last_type = Type.new(T.must(last_type_str[1..]).to_sym)
     end
     node.full_type = Type.new(:"~#{last_type}")
 
@@ -5303,16 +5298,15 @@ private
     # Error propagation: if a step returns !T and has an AS binding, the
     # binding type is T (unwrapped). The error propagates to the BG result
     # via try/errdefer in the generated Zig code.
-    last_type = T.let(:Void, Symbol)
+    last_type = T.let(Type.new(:Void), Type)
     node.steps.each do |step|
       visit(step[:expr])
-      step_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type_or(:Void) : :Void
+      step_type = T.cast(step[:expr], AST::Locatable).full_type!(context: "THEN step")
 
       if step[:binding]
         # Unwrap error union for the binding: !T -> T
         bind_type = step_type
-        t = Type.new(step_type)
-        bind_type = t.payload_type if t.error_union?
+        bind_type = step_type.payload_type if step_type.error_union?
 
         current_scope.declare(
           step[:binding],
@@ -5334,7 +5328,7 @@ private
   def visit_NextExpr(node)
     record_effect(EffectTracker::YIELD)
     visit(node.expr)
-    promise_type = Type.new(node.expr.full_type_or(:Void))
+    promise_type = node.expr.full_type!(context: "NEXT expression")
 
     unless promise_type.future?
       error!(node, :NEXT_NEEDS_FUTURE, got: node.expr.full_type)
@@ -5608,13 +5602,12 @@ private
   def expr_result_type(branch)
     return nil if branch.nil? || branch.empty?
     last = branch.last
-    return nil unless last.respond_to?(:full_type)
     # ELSE_IF chain: the last element is a nested IfStatement — use its result type
     if last.is_a?(AST::IfStatement)
       return last.then_result_type
     end
-    ti = last.full_type
-    return nil unless ti
+    return nil unless last.is_a?(AST::Locatable)
+    ti = last.full_type!(context: "branch result")
     return nil if ti.void? || ti.resolved == :NoReturn
     # These are statement-level constructs, not value-producing expressions
     return nil if last.is_a?(AST::ReturnNode)   || last.is_a?(AST::VarDecl)   ||
@@ -6555,11 +6548,11 @@ private
     ti.provenance ||= val_ti&.provenance || alloc
   end
 
-  sig { params(name: String, node: T.untyped, type_info: T.untyped).returns(T.untyped) }
+  sig { params(name: String, node: T.untyped, type_info: T.any(Type, Symbol, String)).returns(T.untyped) }
   def og_declare(name, node, type_info)
     entry = current_scope.locals[name] rescue nil
     kind = classify_og_kind(type_info, sync: entry&.sync)
-    ti = Type.from_node(type_info) || Type.new(:Untyped)
+    ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
     @og.declare(name, kind: kind, type_info: ti,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
@@ -6652,9 +6645,8 @@ private
     @og_scope_depth -= 1
   end
 
-  sig { params(type_info: T.untyped, sync: T.nilable(Symbol)).returns(Symbol) }
+  sig { params(type_info: T.any(Type, Symbol, String), sync: T.nilable(Symbol)).returns(Symbol) }
   def classify_og_kind(type_info, sync: nil)
-    return :affine unless type_info
     t = type_info.is_a?(Type) ? type_info : Type.new(type_info)
     if t.multiowned? || t.shared?
       :rc
@@ -6665,8 +6657,6 @@ private
     else
       :affine
     end
-  rescue
-    :affine
   end
 
 end

@@ -265,14 +265,13 @@ module EscapeAnalysis
   sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
   private_class_method def self.mark_recursive_aggregate_owners_heap!(fn, schema_lookup)
     fn.params.each do |param|
-      next unless aggregate_owner_requires_heap?(Type.from_node(param.type), schema_lookup)
+      next unless aggregate_owner_requires_heap?(Type.new(param.type), schema_lookup)
       mark_symbol_heap!(param.symbol)
     end
 
     walk_body(fn.body) do |node|
       next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
-      ti = Type.from_node(node.full_type)
-      ti = Type.from_node(node.value) unless ti
+      ti = node.full_type!(context: "recursive aggregate owner")
       next unless aggregate_owner_requires_heap?(ti, schema_lookup)
       mark_symbol_heap!(node.symbol)
     end
@@ -413,8 +412,7 @@ module EscapeAnalysis
     return unless node.spawn_form == :fsm
     walk_body(node.body) do |child|
       next unless child.is_a?(AST::VarDecl) || (child.is_a?(AST::BindExpr) && child.mode == :decl)
-      ti = Type.from_node(child.full_type)
-      ti = ti.success_type if ti
+      ti = child.full_type!(context: "FSM context local").success_type
       next unless ti&.heap_ptr? || ti&.recursive_cleanup_shape?(schema_lookup)
       mark_symbol_heap!(child.symbol)
     end
@@ -426,7 +424,7 @@ module EscapeAnalysis
       arg = args[idx]
       next unless arg
       next unless param.takes || symbol_heap?(param.symbol)
-      arg_type = Type.from_node(arg)
+      arg_type = arg.is_a?(AST::Locatable) ? arg.full_type!(context: "TAKES argument") : nil
       next unless ownership_bearing_transfer_expr?(arg, schema_lookup) ||
                   type_requires_owned_storage?(arg_type, schema_lookup)
       mark_expr_roots_heap!(arg)
@@ -465,11 +463,12 @@ module EscapeAnalysis
   sig { params(arg: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.ownership_bearing_transfer_expr?(arg, schema_lookup)
     if arg.is_a?(AST::MoveNode)
-      return type_requires_owned_storage?(Type.from_node(arg.value), schema_lookup)
+      return type_requires_owned_storage?(arg.value.full_type!(context: "moved transfer value"), schema_lookup)
     end
     return true if heap_owned_transfer_source?(arg)
     return true if ownership_transferring_expr?(arg, include_allocating_expr: true) &&
-                   type_requires_owned_storage?(Type.from_node(arg), schema_lookup)
+                   arg.is_a?(AST::Locatable) &&
+                   type_requires_owned_storage?(arg.full_type!(context: "ownership transfer expression"), schema_lookup)
     false
   rescue StandardError
     false
@@ -571,10 +570,7 @@ module EscapeAnalysis
     return true if ownership_transferring_expr?(value, include_allocating_expr: false)
     return false if string_concat_expr?(unwrap_value(value))
     return true if expr_has_owned_inline_value?(value)
-    target_type = Type.from_node(node.name) rescue Type.from_node(node) rescue nil
-    return true if type_requires_owned_storage?(target_type, schema_lookup) &&
-                   call_result_is_heap?(value, fn_nodes, schema_lookup)
-    false
+    call_result_is_heap?(value, fn_nodes, schema_lookup)
   end
 
   sig { params(expr: T.untyped, include_allocating_expr: T::Boolean).returns(T::Boolean) }
@@ -586,8 +582,9 @@ module EscapeAnalysis
     return true if include_allocating_expr && string_concat_expr?(value)
     return true if value.respond_to?(:heap_storage?) && value.heap_storage?
     return true if value.respond_to?(:symbol) && value.symbol&.heap_storage?
-    ti = Type.from_node(value)
-    !!(ti && !ti.string? && !ti.rodata? && ti.provenance != :borrow && ti.heap_ptr?)
+    return false unless value.is_a?(AST::Locatable)
+    ti = value.full_type!(context: "ownership transferring expression")
+    !!(!ti.string? && !ti.rodata? && ti.provenance != :borrow && ti.heap_ptr?)
   rescue StandardError
     false
   end
@@ -601,9 +598,10 @@ module EscapeAnalysis
   sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.type_requires_owned_storage?(ti, schema_lookup)
     return false unless ti
-    t = ti.success_type
+    t = ti.value_payload_type
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
+    return true if t.string?
     t.heap_ptr? ||
       t.recursive_cleanup_shape?(schema_lookup) ||
       t.needs_explicit_cleanup?(:heap, schema_lookup) ||
@@ -669,9 +667,8 @@ module EscapeAnalysis
       is_root = node.equal?(root)
       unless is_root || node.is_a?(AST::Identifier)
         return true if node.is_a?(AST::Literal) && node.value.is_a?(String)
-        ti = Type.from_node(node)
-        return true if ti && !ti.rodata? && ti.provenance != :borrow &&
-                       ti.heap_ptr?
+        ti = node.full_type!(context: "owned inline value")
+        return true if !ti.rodata? && ti.provenance != :borrow && ti.heap_ptr?
       end
     end
     false
@@ -763,7 +760,7 @@ module EscapeAnalysis
     if expr.is_a?(AST::Identifier) && symbol_heap?(expr.symbol)
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
     end
-    expr_t = Type.from_node(expr)
+    expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && (expr_t&.rodata? || expr_t&.provenance == :borrow)
     return false if ti.rodata? || ti.provenance == :borrow
     ti.string? || top_heap_ptr || ti.heap_ptr? || ti.resource? || ti.ownership != :affine ||
@@ -776,7 +773,7 @@ module EscapeAnalysis
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
   private_class_method def self.owning_return_type(fn, expr)
     declared = Type.from_node(fn.return_type)
-    declared || Type.from_node(expr)
+    declared || (expr.is_a?(AST::Locatable) ? expr.full_type!(context: "owning return expression") : nil)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).void }
@@ -868,7 +865,9 @@ module EscapeAnalysis
     dep = heap_return_from_args?(call.args, callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup)
     return dep unless dep.nil?
 
-    callee.heap_carry_return == true || body_has_heap_return_binding?(callee.body)
+    callee.heap_carry_return == true ||
+      function_has_owned_return_value?(callee, schema_lookup) ||
+      body_has_heap_return_binding?(callee.body)
   end
 
   sig { params(call: T.untyped, sig_obj: FunctionSignature).returns(T.nilable(T::Boolean)) }
@@ -911,8 +910,8 @@ module EscapeAnalysis
     return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
     return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
-    ti = Type.from_node(node)
-    return false unless ti
+    return false unless node.is_a?(AST::Locatable)
+    ti = node.full_type!(context: "heap-producing expression")
     ti.heap_ptr? || ti.recursive_cleanup_shape?(nil)
   end
 
@@ -930,6 +929,16 @@ module EscapeAnalysis
     walk_body(body) do |node|
       next unless node.is_a?(AST::ReturnNode)
       found = true if expr_has_heap_identifier?(node.value)
+    end
+    found
+  end
+
+  sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.function_has_owned_return_value?(fn, schema_lookup)
+    found = T.let(false, T::Boolean)
+    walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::ReturnNode) && node.value
+      found = true if owning_return_needs_heap_placement?(fn, node.value, schema_lookup)
     end
     found
   end

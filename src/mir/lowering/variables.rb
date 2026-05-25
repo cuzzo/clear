@@ -494,8 +494,7 @@ module MIRLoweringVariables
   sig { params(rhs: T.untyped).returns(T::Boolean) }
   def list_collection_copy?(rhs)
     (rhs.is_a?(AST::CopyNode) || rhs.is_a?(AST::CloneNode)) &&
-      rhs.value.respond_to?(:full_type) &&
-      rhs.value.full_type.list_collection?
+      rhs.value.full_type!(context: "collection copy source").list_collection?
   end
 
   sig { params(node: AST::VarDecl).returns(T::Array[MIR::Stmt]) }
@@ -528,8 +527,7 @@ module MIRLoweringVariables
     return true if AST.moved?(value)
     return true if value.respond_to?(:indirect_field) && value.indirect_field == true
 
-    ti = Type.from_node(value) rescue nil
-    Type.indirect_type?(ti)
+    Type.indirect_type?(value.full_type!(context: "field owner move"))
   end
 
   sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }
@@ -624,7 +622,8 @@ module MIRLoweringVariables
         !fallible_self_fallback_reassign?(mapped || safe, value)
       result = if rp
         MIR::ReassignWithCleanup.new(mapped || safe, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
-      elsif heap_return_var && (target_type = Type.from_node(node.name))&.needs_explicit_cleanup?(:heap, @schema_lookup)
+      elsif heap_return_var && node.name.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, @schema_lookup)
+        target_type = node.name.full_type!(context: "reassign target")
         MIR::ReassignWithCleanup.new(mapped || safe, value, transpile_type(target_type), :heap)
       else
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
