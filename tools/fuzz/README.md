@@ -122,13 +122,13 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `cond_or_fallback`          | 8               | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
 | `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
 | `bind_capture_cleanup`      | 2               | Bind-expression capture cleanup for optional/list payloads. |
-| `cleanup_classifier_shapes` | 12              | Cleanup-classifier shape coverage for struct/union/option payloads. |
+| `cleanup_classifier_shapes` | 20              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads. |
 | `cross_fiber_consumer`      | 6               | BG STREAM / observable producer values consumed across fiber boundaries. |
 | `loop_local_cleanup_alloc`  | 4               | Loop-local allocation forms that must be cleaned or promoted consistently. |
 | `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
 | `thunk_recursion_matrix`    | 34              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes. |
 | `fsm_suspension_matrix`     | 28              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, and BG STREAM YIELD. |
-| `pipeline_source_shape_matrix` | 27           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and INDEX/DISTINCT/FIND. |
+| `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `call_ownership_contract_matrix` | 28         | Normal calls, TAKES, owned returns, receiver mutation, BG calls, and pipeline call contracts. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 

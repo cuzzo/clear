@@ -21,6 +21,10 @@ end
   [:bg_stream_bound].each { |source| PIPELINE_SOURCE_CELLS << { source: source, op: op } }
 end
 
+[:max_int, :min_int, :average_int, :any_int, :all_int, :collect_sum].each do |op|
+  PIPELINE_SOURCE_CELLS << { source: :bg_stream_bound, op: op }
+end
+
 FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CELLS) do |p|
   observable_source = %i[range_bound range_inline bg_stream_bound bg_stream_inline bounded_promises string_stream].include?(p[:source])
 
@@ -185,6 +189,67 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
         grouped = s |> INDEX _.category;
         ASSERT grouped["a"].length() == 2_i64, "pipeline index a";
         ASSERT grouped["b"].length() == 1_i64, "pipeline index b";
+        RETURN;
+      END
+    CHT
+
+  when :max_int
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        running: ~Int64@observable = s |> MAX _;
+        ASSERT (NEXT running) == 4_i64, "pipeline max";
+        RETURN;
+      END
+    CHT
+
+  when :min_int
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 5_i64; WHILE i > 0_i64 DO YIELD i; i = i - 1_i64; END };
+        running: ~Int64@observable = s |> MIN _;
+        ASSERT (NEXT running) == 1_i64, "pipeline min";
+        RETURN;
+      END
+    CHT
+
+  when :average_int
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END };
+        running: ~Float64@observable = s |> AVERAGE _;
+        ASSERT (NEXT running) == 4.5, "pipeline average";
+        RETURN;
+      END
+    CHT
+
+  when :any_int
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        running: ~Bool@observable = s |> ANY _ == 3_i64;
+        ASSERT (NEXT running) == TRUE, "pipeline any";
+        RETURN;
+      END
+    CHT
+
+  when :all_int
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        running: ~Bool@observable = s |> ALL _ < 5_i64;
+        ASSERT (NEXT running) == TRUE, "pipeline all";
+        RETURN;
+      END
+    CHT
+
+  when :collect_sum
+    <<~CHT
+      FN main() RETURNS Void ->
+        s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        running: ~Int64@observable = s |> SUM _;
+        total = running |> COLLECT;
+        ASSERT total == 10_i64, "pipeline collect";
         RETURN;
       END
     CHT

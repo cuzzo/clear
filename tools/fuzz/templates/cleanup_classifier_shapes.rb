@@ -24,9 +24,17 @@ CLEANUP_CLASSIFIER_SHAPE_CELLS = %i[
   struct_string_field
   struct_list_field
   struct_map_field
+  optional_nil_string
   multiowned_struct
   shared_struct
+  locked_struct
+  write_locked_struct
+  versioned_struct
+  always_mutable_struct
+  atomic_indirect_struct
   indirect_struct
+  split_stream_handle
+  observable_sum_handle
 ].map { |shape| { shape: shape } }
 
 FuzzGenerator.register(:cleanup_classifier_shapes,
@@ -155,6 +163,19 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
       END
     CHT
 
+  when :optional_nil_string
+    <<~CHT
+      FN main() RETURNS Void ->
+          maybe: ?String = NIL;
+          IF maybe AS s THEN
+              ASSERT s == "impossible", "optional nil should not bind";
+          ELSE
+              ASSERT TRUE, "optional nil fallback";
+          END
+          RETURN;
+      END
+    CHT
+
   when :multiowned_struct
     <<~CHT
       STRUCT Node { val: Int64 }
@@ -177,6 +198,70 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
       END
     CHT
 
+  when :locked_struct
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 10_i64 } @locked;
+          WITH EXCLUSIVE c AS r {
+              ASSERT r.value == 10_i64, "locked struct cleanup";
+          }
+          RETURN;
+      END
+    CHT
+
+  when :write_locked_struct
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 11_i64 } @writeLocked;
+          WITH EXCLUSIVE c AS r {
+              ASSERT r.value == 11_i64, "writeLocked struct cleanup";
+          }
+          RETURN;
+      END
+    CHT
+
+  when :versioned_struct
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN main() RETURNS Void ->
+          c = Counter{ value: 12_i64 } @versioned;
+          WITH SNAPSHOT c AS r {
+              ASSERT r.value == 12_i64, "versioned struct cleanup";
+          }
+          RETURN;
+      END
+    CHT
+
+  when :always_mutable_struct
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN main() RETURNS Void ->
+          c = Counter{ value: 13_i64 } @alwaysMutable;
+          c.value = 14_i64;
+          ASSERT c.value == 14_i64, "alwaysMutable struct cleanup";
+          RETURN;
+      END
+    CHT
+
+  when :atomic_indirect_struct
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+
+      FN main() RETURNS Void ->
+          c = Counter{ value: 15_i64 } @indirect:atomic;
+          WITH SNAPSHOT c AS r {
+              ASSERT r.value == 15_i64, "atomic indirect struct cleanup";
+          }
+          RETURN;
+      END
+    CHT
+
   when :indirect_struct
     <<~CHT
       STRUCT Cfg { setting: Int64 }
@@ -189,6 +274,34 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
       FN main() RETURNS Void ->
           c = make();
           ASSERT c.setting == 99_i64, "indirect struct return";
+          RETURN;
+      END
+    CHT
+
+  when :split_stream_handle
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: ~?Int64[] @split = BG STREAM {
+              YIELD 1_i64;
+              YIELD 2_i64;
+          };
+          clone: ~?Int64[] @split = CLONE s;
+          ASSERT (NEXT clone) == 1_i64, "split stream clone first";
+          ASSERT (NEXT s) == 1_i64, "split stream source first";
+          RETURN;
+      END
+    CHT
+
+  when :observable_sum_handle
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: ~?Int64[] = BG STREAM {
+              YIELD 1_i64;
+              YIELD 2_i64;
+              YIELD 3_i64;
+          };
+          running: ~Int64@observable = s |> SUM _;
+          ASSERT (NEXT running) == 6_i64, "observable sum cleanup";
           RETURN;
       END
     CHT
