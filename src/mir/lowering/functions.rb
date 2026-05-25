@@ -350,6 +350,7 @@ module MIRLoweringFunctions
       pre_checks = lower_pre_clauses(node)
       body_mir = takes_mir + pointer_param_mir + pre_checks + T.must(lower_body(node.body))
     end
+    body_mir = append_ownership_transfers_for_mir_body(body_mir)
 
     # POST + CATCH is rejected at annotation time (see
     # visit_post_clauses! in capabilities.rb) with a clean CLEAR error,
@@ -378,7 +379,8 @@ module MIRLoweringFunctions
                   end
 
       inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
-                                 prologue + body_mir, :private, false, comptime_params)
+                                 append_ownership_transfers_for_mir_body(prologue + body_mir),
+                                 :private, false, comptime_params)
 
       # Outer function: calls inner, catches errors
       call_args = fn_needs_rt ? ["rt"] + node.params.map { |p| p.name } : node.params.map { |p| p.name }
@@ -400,13 +402,15 @@ module MIRLoweringFunctions
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                                  outer_body, vis, false, comptime_params)
+                                  append_ownership_transfers_for_mir_body(outer_body),
+                                  vis, false, comptime_params)
 
       # Return both FnDefs as an array (lower_program/lower_module flatten arrays)
       [inner_fn, outer_fn]
     else
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                      prologue + body_mir, vis, false, comptime_params)
+                      append_ownership_transfers_for_mir_body(prologue + body_mir),
+                      vis, false, comptime_params)
     end
   end
 

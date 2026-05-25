@@ -6,8 +6,8 @@ BG_COPY_PARAM_REENTRANT_CELLS = []
 CALLEES = [:reentrant].freeze
 
 CALLEES.each do |callee|
-  [:int].each do |elem|
-    [3, 6].each do |depth|
+  [:int, :string].each do |elem|
+    [0, 1, 3, 6].each do |depth|
       BG_COPY_PARAM_REENTRANT_CELLS << { callee: callee, elem: elem, depth: depth }
     end
   end

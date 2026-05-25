@@ -13,8 +13,8 @@
 # expected :pass; a failing/leaking :pass cell is a SURFACED bug.
 
 CWM_CELLS = %i[
-  locked write_locked always_mutable versioned atomic
-  multiowned shared_locked
+  locked write_locked always_mutable versioned atomic_ptr
+  multiowned shared shared_locked shared_write_locked shared_versioned shared_atomic
 ].map { |m| { mode: m } }
 
 FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
@@ -63,7 +63,7 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           RETURN;
       END
     CHT
-  when :atomic
+  when :atomic_ptr
     <<~CHT
       STRUCT Counter { value: Int64 }
       FN main() RETURNS Void ->
@@ -84,6 +84,15 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           RETURN;
       END
     CHT
+  when :shared
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          t = Counter{ value: 1_i64 } @shared;
+          ASSERT t.value == 1_i64, "shared (arc) read";
+          RETURN;
+      END
+    CHT
   when :shared_locked
     <<~CHT
       STRUCT Counter { value: Int64 }
@@ -92,6 +101,36 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           WITH EXCLUSIVE t AS r {
               ASSERT r.value == 1_i64, "shared:locked (arc+lock) read";
           }
+          RETURN;
+      END
+    CHT
+  when :shared_write_locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE t = Counter{ value: 1_i64 } @shared:writeLocked;
+          WITH EXCLUSIVE t AS r {
+              ASSERT r.value == 1_i64, "shared:writeLocked (arc+rwlock) read";
+          }
+          RETURN;
+      END
+    CHT
+  when :shared_versioned
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE t = Counter{ value: 1_i64 } @shared:versioned;
+          WITH SNAPSHOT t AS r {
+              ASSERT r.value == 1_i64, "shared:versioned (arc+mvcc) read";
+          }
+          RETURN;
+      END
+    CHT
+  when :shared_atomic
+    <<~CHT
+      FN main() RETURNS Void ->
+          MUTABLE t: Int64 = 1_i64 @shared:atomic;
+          ASSERT t == 1_i64, "shared:atomic primitive read";
           RETURN;
       END
     CHT

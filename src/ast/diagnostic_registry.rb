@@ -1868,6 +1868,27 @@ module DiagnosticRegistry
       cause: "`MIR::InlineZig` text contains allocator operations such as alloc, dupe, create, destroy, free, or deinit. A callable signature can describe boundary effects, but it cannot prove that arbitrary internal heap ownership is balanced.",
       fix_hint: "Decompose the operation into structural MIR with AllocMark, Cleanup, ErrCleanup, DestroyPtr, and TransferMark nodes, or move the operation behind a runtime API whose implementation is outside compiler MIR.",
     },
+    OWNERSHIP_FACT_REQUIRED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Ownership-capable MIR must be finalized into explicit ownership facts.",
+      cause: "The MIR node can allocate, free, consume, store, capture, or return owned data, but that effect is still encoded through node-specific side channels. MIRChecker can only be a memory-safety gate when it reads a closed ownership fact stream.",
+      fix_hint: "Lowering bug — run ownership finalization before MIRChecker and emit MIR::OwnedCreate / OwnedDestroy / OwnedTransfer / OwnedStore / OwnedReturn facts for this operation. Do not hide ownership in InlineZig text or ad-hoc node fields.",
+    },
+    BOUNDARY_FACT_REQUIRED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Execution-boundary MIR must carry typed boundary/capture facts.",
+      cause: "A BG, BG STREAM, DO branch, or similar execution boundary reached MIRChecker without the closed fact object that names its dispatch mode and captured capabilities. Without that fact, the checker cannot prove scheduler/capture safety.",
+      fix_hint: "Lowering bug — copy the annotated capture analysis into MIR::ExecutionBoundaryFact before MIRChecker. Do not rely on parser flags or pre-MIR booleans as the final authority.",
+    },
+    BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A non-parallel-safe capture crosses a parallel execution boundary.",
+      cause: "The boundary dispatches work across schedulers, but one captured binding is scheduler-affine or non-atomic. That can break capability guarantees even if the emitted code happens to compile.",
+      fix_hint: "Use a parallel-safe capability such as @shared where appropriate, pin the boundary instead of using @parallel, or avoid capturing the binding.",
+    },
     RAW_NO_CONTRACT: {
       severity: :error, category: :mir,
       template: "%{message}",

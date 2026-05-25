@@ -35,6 +35,8 @@ ALIAS_PERMS = [
   [:snapshot,  :versioned],
 ]
 
+ACCESS_PAYLOADS = [:int, :string]
+
 ESCAPE_PATTERNS = [
   :baseline_use,           # use alias inside WITH, no escape — should :pass
   :baseline_copy_return,   # RETURN COPY alias — legal exception, should :pass
@@ -49,24 +51,39 @@ ESCAPE_PATTERNS = [
 ]
 
 ALIAS_PERMS.each do |alias_kind, perm|
-  ESCAPE_PATTERNS.each do |escape|
-    cell = { alias: alias_kind, perm: perm, escape: escape }
-    cell[:expected] = (escape.to_s.start_with?('baseline_')) ? :pass : :compile_error
-    ACCESS_GATE_CELLS << cell
+  ACCESS_PAYLOADS.each do |payload|
+    ESCAPE_PATTERNS.each do |escape|
+      cell = { alias: alias_kind, perm: perm, payload: payload, escape: escape }
+      cell[:expected] = escape.to_s.start_with?('baseline_') ? :pass : :compile_error
+      ACCESS_GATE_CELLS << cell
+    end
   end
 end
 
 # ── helpers ───────────────────────────────────────────────────────────
 
 # Source declaration for the locked/snapshotted/plain Counter.
-def access_gate_source_decl(perm)
+def access_gate_value(payload)
+  payload == :int ? "1_i64" : 'COPY "one"'
+end
+
+def access_gate_field_type(payload)
+  payload == :int ? "Int64" : "String"
+end
+
+def access_gate_field_assert(payload, expr)
+  payload == :int ? "ASSERT #{expr} == 1_i64, \"alias field\";" : "ASSERT #{expr}.length() == 3_i64, \"alias field\";"
+end
+
+def access_gate_source_decl(perm, payload)
   # MUTABLE so RESTRICT (which requires a mutable source) is admissible.
   # Other alias kinds tolerate MUTABLE on the source even if they don't need it.
+  value = access_gate_value(payload)
   case perm
-  when :locked       then "MUTABLE c = Counter{ value: 1_i64 } @locked;"
-  when :write_locked then "MUTABLE c = Counter{ value: 1_i64 } @writeLocked;"
-  when :versioned    then "MUTABLE c = Counter{ value: 1_i64 } @versioned;"
-  when :plain        then "MUTABLE c = Counter{ value: 1_i64 };"
+  when :locked       then "MUTABLE c = Counter{ value: #{value} } @locked;"
+  when :write_locked then "MUTABLE c = Counter{ value: #{value} } @writeLocked;"
+  when :versioned    then "MUTABLE c = Counter{ value: #{value} } @versioned;"
+  when :plain        then "MUTABLE c = Counter{ value: #{value} };"
   end
 end
 
@@ -81,19 +98,26 @@ def access_gate_with_head(alias_kind)
 end
 
 FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
-  decl = access_gate_source_decl(p[:perm])
+  decl = access_gate_source_decl(p[:perm], p[:payload])
   head = access_gate_with_head(p[:alias])
+  field_type = access_gate_field_type(p[:payload])
+  zero_value = p[:payload] == :int ? "0_i64" : 'COPY ""'
+  field_assert = access_gate_field_assert(p[:payload], "x")
+  field_use = p[:payload] == :int ? "ref.value" : "ref.value.length()"
+  bg_type = p[:payload] == :int ? "Int64" : "String"
+  bg_expr = p[:payload] == :int ? "ref.value" : "COPY ref.value"
+  stream_expr = bg_expr
 
   case p[:escape]
   when :baseline_use
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN main() RETURNS Void ->
           #{decl}
           #{head} {
-              x: Int64 = ref.value;
-              ASSERT x == 1_i64, "alias use baseline";
+              x: #{field_type} = ref.value;
+              #{field_assert}
           }
           RETURN;
       END
@@ -101,7 +125,7 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
 
   when :baseline_copy_return
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN extract() RETURNS !Counter ->
           #{decl}
@@ -112,14 +136,14 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
 
       FN main() RETURNS Void ->
           c2 = extract();
-          ASSERT c2.value == 1_i64, "RETURN COPY baseline";
+          #{access_gate_field_assert(p[:payload], 'c2.value')}
           RETURN;
       END
     CHT
 
   when :return_alias
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN leak() RETURNS !Counter ->
           #{decl}
@@ -146,9 +170,9 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
     # ("RETURN alias.field is rejected"); if it actually passes for Int64,
     # that's a correct UNEXPECTED-PASS and the rule should be refined.
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
-      FN leak() RETURNS !Int64 ->
+      FN leak() RETURNS !#{field_type} ->
           #{decl}
           #{head} {
               RETURN ref.value;
@@ -163,18 +187,18 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
 
   when :bg_capture
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
-      FN leak() RETURNS ~Int64 ->
+      FN leak() RETURNS ~#{bg_type} ->
           #{decl}
           #{head} {
-              RETURN BG { ref.value; };
+              RETURN BG { #{bg_expr}; };
           }
       END
 
       FN main() RETURNS Void ->
           bg = leak();
-          v: Int64 = NEXT bg;
+          v: #{bg_type} = NEXT bg;
           RETURN;
       END
     CHT
@@ -184,47 +208,47 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
     # try to leak by storing a result outside the WITH. Test the
     # capture-from-WITH-scope rule, not the DO-return.
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN main() RETURNS Void ->
           #{decl}
-          MUTABLE handles: ~Int64[]@list = [];
+          MUTABLE handles: ~#{bg_type}[]@list = [];
           #{head} {
-              append(handles, BG { ref.value; });
-              append(handles, BG { ref.value + 1_i64; });
+              append(handles, BG { #{bg_expr}; });
+              append(handles, BG { #{bg_expr}; });
           }
-          a: Int64 = NEXT handles[0_i64];
-          b: Int64 = NEXT handles[1_i64];
+          a: #{bg_type} = NEXT handles[0_i64];
+          b: #{bg_type} = NEXT handles[1_i64];
           RETURN;
       END
     CHT
 
   when :bg_stream_capture
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
-      FN leak() RETURNS ~Int64[INF] ->
+      FN leak() RETURNS ~#{bg_type}[INF] ->
           #{decl}
           #{head} {
               RETURN BG STREAM {
-                  WHILE TRUE DO YIELD ref.value; END
+                  WHILE TRUE DO YIELD #{stream_expr}; END
               };
           }
       END
 
       FN main() RETURNS Void ->
           s = leak();
-          v: Int64 = NEXT s;
+          v: #{bg_type} = NEXT s;
           RETURN;
       END
     CHT
 
   when :takes_consume
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN consume!(TAKES x: Counter) RETURNS !Int64 ->
-          RETURN x.value;
+          RETURN #{p[:payload] == :int ? 'x.value' : 'x.value.length()'};
       END
 
       FN main() RETURNS Void ->
@@ -238,12 +262,12 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
 
   when :store_field
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
       STRUCT Holder { c: Counter }
 
       FN main() RETURNS Void ->
           #{decl}
-          MUTABLE h = Holder{ c: Counter{ value: 0_i64 } };
+          MUTABLE h = Holder{ c: Counter{ value: #{zero_value} } };
           #{head} {
               h.c = ref;
           }
@@ -253,7 +277,7 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
 
   when :list_append
     <<~CHT
-      STRUCT Counter { value: Int64 }
+      STRUCT Counter { value: #{field_type} }
 
       FN main() RETURNS Void ->
           #{decl}

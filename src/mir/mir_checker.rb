@@ -113,6 +113,8 @@ class MIRChecker
     attr_reader :alloc_kinds
     sig { returns(T::Hash[String, Symbol]) }
     attr_reader :alloc_scopes
+    sig { returns(T::Set[String]) }
+    attr_reader :move_marks
     sig { returns(T::Boolean) }
     attr_accessor :terminated
 
@@ -128,6 +130,7 @@ class MIRChecker
       @pending_block_transfers = T.let(Set.new, T::Set[String])
       @alloc_kinds = T.let({}, T::Hash[String, Symbol])
       @alloc_scopes = T.let({}, T::Hash[String, Symbol])
+      @move_marks = T.let(Set.new, T::Set[String])
       @terminated = T.let(false, T::Boolean)
     end
 
@@ -144,6 +147,7 @@ class MIRChecker
       other.pending_block_transfers.merge(@pending_block_transfers)
       other.alloc_kinds.merge!(@alloc_kinds)
       other.alloc_scopes.merge!(@alloc_scopes)
+      other.move_marks.merge(@move_marks)
       other.terminated = @terminated
       other
     end
@@ -196,9 +200,12 @@ class MIRChecker
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
     structural_ownership_nodes = []
+    ownership_fact_nodes = []
 
     walk_mir(fn_def.body) do |node|
       case node
+      when MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
+        ownership_fact_nodes << node
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup, MIR::ErrCleanup
@@ -264,6 +271,8 @@ class MIRChecker
     verify_call_contracts!(fn_def.body, transfers, allocs)
     verify_structural_ownership_contracts!(structural_ownership_nodes, transfers, allocs)
     verify_explicit_ownership_contracts!(all_zig_nodes, transfers, allocs)
+    verify_ownership_surfaces_finalized!(fn_def.body, ownership_fact_nodes)
+    verify_execution_boundary_facts!(fn_def.body)
     verify_frame_rewind!(fn_def.body)
     verify_inline_alloc_targets!(inline_alloc_nodes)
     verify_unhoisted_allocs!(fn_def.body)
@@ -367,6 +376,7 @@ class MIRChecker
     when MIR::ReturnStmt
       check_linear_expr_uses!(stmt.value, state)
       returned_names = linear_expr_ident_names(stmt.value)
+      verify_guarded_transfers_moved!(state.pending_return_transfers, state, :return)
       state.pending_return_transfers.each { |name| linear_release!(name, :return, state) }
       state.pending_return_transfers.each do |name|
         next if returned_names.include?(name)
@@ -389,6 +399,7 @@ class MIRChecker
     when MIR::BreakStmt
       check_linear_expr_uses!(stmt.value, state)
       break_names = linear_expr_ident_names(stmt.value)
+      verify_guarded_transfers_moved!(state.pending_block_transfers, state, :block_result)
       state.pending_block_transfers.each { |name| linear_release!(name, :block_result, state) }
       state.pending_block_transfers.each do |name|
         next if break_names.include?(name)
@@ -537,6 +548,20 @@ class MIRChecker
 
     @errors << error(:OWNERSHIP_IMPLICIT_MOVE, name,
       "MoveMark suppresses cleanup but no matching TransferMark was seen first")
+    nil
+  ensure
+    state.move_marks.add(name)
+  end
+
+  sig { params(names: T::Set[String], state: LinearOwnershipState, target: Symbol).void }
+  def verify_guarded_transfers_moved!(names, state, target)
+    names.each do |name|
+      next unless state.guarded_finalizers.include?(name)
+      next if state.move_marks.include?(name)
+
+      @errors << error(:OWNERSHIP_IMPLICIT_MOVE, name,
+        "TransferMark(:#{target}) moves a guarded cleanup binding without MIR::MoveMark")
+    end
     nil
   end
 
@@ -1630,6 +1655,141 @@ class MIRChecker
     nil
   end
 
+  # INV-FINALIZED-OWNERSHIP-SURFACE: by the time MIRChecker runs, ownership
+  # must be represented by the closed Owned* fact surface. Node-specific fields
+  # like InlineZig#allocs, Call#owned_return, MethodCall#owned_result_alloc, or
+  # callable/stdlib TAKES side channels are lowering inputs only. If they remain
+  # authoritative here, the checker is forced to infer ownership through many
+  # unrelated protocols and memory bugs can slip through opaque code.
+  sig { params(body: T::Array[T.untyped], facts: T::Array[T.untyped]).void }
+  def verify_ownership_surfaces_finalized!(body, facts)
+    facts_seen = !facts.empty?
+    walk_mir(body) do |node|
+      case node
+      when MIR::InlineZig
+        next unless inline_ownership_side_channel?(node)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "InlineZig carries allocator/ownership effects through stdlib_def, allocs, " \
+          "or ownership_contract. Finalize it into Owned* facts or decompose it into structural MIR.")
+      when MIR::Call
+        next unless node.owned_return? || callable_contract_consumes?(node.callable_contract)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, node.callee.to_s,
+          "MIR::Call carries ownership through owned_return/callable_contract. " \
+          "Finalize call ownership into OwnedCreate/OwnedTransfer/OwnedReturn facts.")
+      when MIR::MethodCall
+        next unless node.owned_result_alloc.is_a?(Symbol) || callable_contract_consumes?(node.callable_contract)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, node.method.to_s,
+          "MIR::MethodCall carries ownership through owned_result_alloc/callable_contract. " \
+          "Finalize method ownership into OwnedCreate/OwnedTransfer/OwnedStore facts.")
+      when MIR::ShardedMapPut, MIR::ReassignWithCleanup
+        next unless stdlib_takes_ownership?(node)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "#{node.class.name} consumes or replaces owned data through node-specific fields. " \
+          "Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")
+      when MIR::BgBlock
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "MIR::BgBlock creates/captures promise-owned state across an execution boundary. " \
+          "Finalize BG ownership into OwnedCreate/OwnedTransfer/OwnedReturn/OwnedDestroy facts.")
+      end
+    end
+    nil
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  def verify_execution_boundary_facts!(body)
+    walk_mir(body) do |node|
+      case node
+      when MIR::BgBlock
+        fact = node.respond_to?(:boundary_fact) ? node.boundary_fact : nil
+        verify_execution_boundary_fact!(fact, "MIR::BgBlock")
+      when MIR::StreamSpawn
+        fact = node.respond_to?(:boundary_fact) ? node.boundary_fact : nil
+        verify_execution_boundary_fact!(fact, "MIR::StreamSpawn")
+      when MIR::DoBlock
+        facts = node.respond_to?(:boundary_facts) ? node.boundary_facts : nil
+        unless facts.is_a?(Array) && facts.all? { |f| f.is_a?(MIR::ExecutionBoundaryFact) }
+          @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
+            "MIR::DoBlock has no typed ExecutionBoundaryFact array for its branches")
+          next
+        end
+        expected = node.branch_bodies&.length || 0
+        if facts.length != expected
+          @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
+            "MIR::DoBlock has #{facts.length} boundary facts for #{expected} branch bodies")
+        end
+        T.cast(facts, T::Array[MIR::ExecutionBoundaryFact]).each do |fact|
+          verify_execution_boundary_fact!(fact, "MIR::DoBlock")
+        end
+      end
+    end
+    nil
+  end
+
+  sig { params(fact: T.nilable(MIR::ExecutionBoundaryFact), label: String).void }
+  def verify_execution_boundary_fact!(fact, label)
+    unless fact
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has no typed ExecutionBoundaryFact")
+      return
+    end
+
+    unless [:bg, :bg_stream, :do_branch, :stream_spawn].include?(fact.kind)
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has invalid boundary kind #{fact.kind.inspect}")
+    end
+    unless [:local, :pinned, :parallel].include?(fact.dispatch)
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has invalid boundary dispatch #{fact.dispatch.inspect}")
+    end
+
+    fact.captures.each do |capture|
+      next unless fact.dispatch == :parallel
+      next if capture.parallel_safe
+
+      reason = capture.forbidden_reason || :not_parallel_safe
+      @errors << error(:BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, capture.name,
+        "capture '#{capture.name}' is not safe for @parallel dispatch " \
+        "(storage=#{capture.storage.inspect}, sync=#{capture.sync.inspect}, reason=#{reason.inspect})")
+    end
+    nil
+  end
+
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def inline_ownership_side_channel?(node)
+    return true if node.allocs && !node.allocs.empty?
+    return true if node.stdlib_def&.emits_allocating?
+    return true if stdlib_takes_ownership?(node)
+    return false unless node.ownership_contract.is_a?(MIR::OwnershipContract)
+
+    !node.ownership_contract.consumes.empty? || !node.ownership_contract.produces.empty?
+  end
+
+  sig { params(contract: T.untyped).returns(T::Boolean) }
+  def callable_contract_consumes?(contract)
+    return false unless contract.is_a?(MIR::CallableContract)
+    return true unless contract.ownership_contract.consumes.empty?
+
+    function_signature_takes_ownership?(contract.signature, contract.checked_arg_count)
+  end
+
+  sig { params(facts: T::Array[T.untyped], node: T.untyped).returns(T::Boolean) }
+  def ownership_fact_covers_node?(facts, node)
+    source = ownership_node_name(node)
+    facts.any? do |fact|
+      fact.respond_to?(:source) && fact.source.to_s == source
+    end
+  end
+
   sig { params(node: T.untyped, consumes: T::Array[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def check_consumed_allocators_match_sink!(node, consumes, allocs)
     return if consumes.empty?
@@ -1671,8 +1831,13 @@ class MIRChecker
 
   sig { params(node: T.untyped).returns(String) }
   def ownership_node_name(node)
+    return ownership_node_name(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr)
     target = node.respond_to?(:target_var) ? node.target_var : nil
     return target.to_s if target
+    return node.callee.to_s if node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall)
+    return node.method.to_s if node.is_a?(MIR::MethodCall)
+    return "MIR::BgBlock" if node.is_a?(MIR::BgBlock)
+    return "MIR::StreamSpawn" if node.is_a?(MIR::StreamSpawn)
     reason = node.respond_to?(:reason) ? node.reason : nil
     reason ? reason.to_s : node.class.name.to_s
   end

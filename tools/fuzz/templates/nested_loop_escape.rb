@@ -25,24 +25,18 @@
 
 NESTED_LOOP_ESCAPE_CELLS = []
 
-[:list, :array].each do |inner_kind|
+[:list, :array, :set, :map].each do |inner_kind|
   [:while, :for].each do |loop_kind|
     [1, 3].each do |outer_iters|
-      [:bare, :struct_field].each do |wrap_kind|
-        # Bare-array case is the original shape; keep it for back-compat.
-        # struct/union wrap variants are only meaningful for the @list inner
-        # because fixed `Int64[]` arrays use a different escape path.
-        # Union-payload was tried during this template's evolution but the
-        # generated Zig for `Item{ Some: inner }` slices the inner list at
-        # build time (see CLEAR-side limitation); revisit once union @list
-        # payloads have stable codegen.
-        next if inner_kind == :array && wrap_kind != :bare
-        NESTED_LOOP_ESCAPE_CELLS << {
+      [:bare, :struct_field, :union_payload].each do |wrap_kind|
+        cell = {
           inner_kind: inner_kind,
           loop_kind: loop_kind,
           iters: outer_iters,
           wrap_kind: wrap_kind,
         }
+        cell[:expected] = :compile_error if wrap_kind == :bare && [:list, :set].include?(inner_kind)
+        NESTED_LOOP_ESCAPE_CELLS << cell
       end
     end
   end
@@ -50,15 +44,24 @@ end
 
 FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do |p|
   decls = []
+  inner_type = case p[:inner_kind]
+               when :list then "Int64[]@list"
+               when :array then "Int64[]"
+               when :set then "Int64[]@set"
+               when :map then "HashMap<Int64>"
+               end
   outer_elem_type =
     case p[:wrap_kind]
-    when :bare          then "Int64[]"
+    when :bare          then inner_type
     when :struct_field  then "Item"
+    when :union_payload then "Item"
     end
 
   case p[:wrap_kind]
   when :struct_field
-    decls << "STRUCT Item { data: Int64[]@list }"
+    decls << "STRUCT Item { data: #{inner_type} }"
+  when :union_payload
+    decls << "UNION Item { None, Some: #{inner_type} }"
   end
 
   outer_decl = "MUTABLE outer: #{outer_elem_type}[]@list = [];"
@@ -68,6 +71,7 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
     case p[:wrap_kind]
     when :bare          then "inner"
     when :struct_field  then "Item{ data: inner }"
+    when :union_payload then "Item{ Some: inner }"
     end
 
   inner_block =
@@ -82,6 +86,20 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
     when :array
       <<~BODY.chomp
                 inner: Int64[] = [i, i + 1_i64];
+                outer.append(#{append_arg});
+      BODY
+    when :set
+      <<~BODY.chomp
+                MUTABLE inner: Int64[]@set = [];
+                inner.insert(i);
+                inner.insert(i + 1_i64);
+                outer.append(#{append_arg});
+      BODY
+    when :map
+      <<~BODY.chomp
+                MUTABLE inner: HashMap<Int64> = {};
+                inner["a"] = i;
+                inner["b"] = i + 1_i64;
                 outer.append(#{append_arg});
       BODY
     end
@@ -107,14 +125,20 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
   # Element reader for the assertions: walk past the wrapping shape.
   first_inner_len =
     case p[:wrap_kind]
-    when :bare          then "length(outer[0_i64])"
-    when :struct_field  then "length(outer[0_i64].data)"
+    when :bare
+      p[:inner_kind] == :map ? "outer[0_i64].count()" : "length(outer[0_i64])"
+    when :struct_field
+      p[:inner_kind] == :map ? "outer[0_i64].data.count()" : "length(outer[0_i64].data)"
+    when :union_payload then "2_i64"
     end
 
   first_inner_elem =
     case p[:wrap_kind]
-    when :bare          then "outer[0_i64][0_i64]"
-    when :struct_field  then "outer[0_i64].data[0_i64]"
+    when :bare
+      p[:inner_kind] == :map ? "0_i64" : "outer[0_i64][0_i64]"
+    when :struct_field
+      p[:inner_kind] == :map ? "0_i64" : "outer[0_i64].data[0_i64]"
+    when :union_payload then "0_i64"
     end
 
   decl_block = decls.empty? ? "" : decls.join("\n") + "\n\n"

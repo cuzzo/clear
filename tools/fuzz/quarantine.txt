@@ -20,13 +20,30 @@ or_positional                 # [GEN] emits 'Expected ; got :' / '[' -- malforme
 polymorphic_sync_admission    # [GEN] emits 'WITH MATCH' -- not a current WITH capability
 
 # ---- [BUG] real compiler bugs ----
+access_gate                  # [BUG] WITH-alias string payload baselines expose ownership/runtime failure
+bind_capture_cleanup         # [BUG] WHILE/IF-bind cleanup for list payload double-frees
+binary_op_matrix             # [BUG] OR fallback owned string result leaks
 branch_cleanup                # [BUG] frame-list literal in an IF branch: 'rt' not threaded into the fn
 bg_capture_typing             # [BUG] BG-captured COPY leaks
 catch_allocator_matrix        # [BUG] panic: Invalid free
 catch_reassign_matrix         # [BUG] segfault inside CheatLib.cleanup (frees a bad pointer)
 capability_wrap_matrix        # [BUG] no field named 'ctrl' in AtomicPtr(...)
+cond_or_fallback              # [BUG] OR fallback with owned result leaks instead of being verified/cleaned
+error_cleanup                 # [BUG] cleanup on error paths can free invalid ArrayList memory
+escape_mechanism_matrix       # [BUG] BG STREAM/NEXT string escape alloc mark remains :frame
+escape_via_return             # [BUG] @indirect owned struct return double-releases / lacks verified transfer
+execution_boundary            # [BUG] @parallel admits locked/writeLocked/versioned captures unexpectedly
+heap_ownership_transfer       # [BUG] caller-side ownership transfer can segfault in cleanup
+infallible_signature          # [BUG] some alloc/error-signature cells still fail/leak at runtime
+lifetimed_return              # [BUG] returning/storing lifetime-bound handles has incoherent frame/heap aggregate ownership
 loop_local_cleanup_alloc      # [BUG] Allocation alignment 16 != free alignment 8
 nested_loop_escape            # [BUG] memory leaked
+ownership_surface_smoke       # [BUG] broad ownership smoke still exposes runtime ownership failure
+promise_handle_capture        # [BUG] BG promise handle carrying owned payload leaks
+return_value_modality         # [BUG] returning owned values still leaks for multiple value shapes
+stream_into_boundary          # [BUG] NEXT string copied into boundary has heap result with frame alloc mark
 struct_field_store_modality   # [BUG] memory leaked
 list_append_modality          # [BUG] memory leaked (1 cell of 54)
 takes_move_modality           # [BUG] codegen: expected []T, found ArrayList(T)
+collection_iteration_storage_matrix # [BUG] valid BREAK-in-foreach cells emit unreachable rt.checkYield() in Zig
+call_ownership_contract_matrix # [BUG] owned call/return contract cells leak copied String payloads

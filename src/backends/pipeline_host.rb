@@ -53,6 +53,36 @@ class PipelineHost
     const :options, T.untyped
   end
 
+  class PipelineSourceShape < T::Struct
+    extend T::Sig
+
+    const :type, Type
+    const :bc_target, T::Boolean
+    const :named_source, T::Boolean
+
+    sig { returns(Type) }
+    def element_type
+      elem_type = type.element_type
+      raise "pipeline source shape: #{type} has no element type" unless elem_type
+      elem_type
+    end
+
+    sig { returns(T::Boolean) }
+    def infinite_stream?
+      type.inf_stream?
+    end
+
+    sig { returns(T::Boolean) }
+    def bc_infinite_stream?
+      bc_target && infinite_stream?
+    end
+
+    sig { returns(T::Boolean) }
+    def bc_named_infinite_stream?
+      bc_infinite_stream? && named_source
+    end
+  end
+
   sig { returns(T.untyped) }
   attr_reader :fn_sigs
 
@@ -1207,7 +1237,8 @@ class PipelineHost
   def lower_limit(site, limit_node)
     list_node = site.list
     smooth_node = site.options
-    elem_type = list_node.full_type.element_type.resolved.to_s
+    source_shape = pipeline_source_shape(list_node)
+    elem_type = source_shape.element_type.resolved.to_s
     elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
     count_mir = visit_mir(limit_node.count)
@@ -1217,7 +1248,7 @@ class PipelineHost
     # cases @channel_slots) and accumulates into a list. Producer fibers
     # whose body terminates early push Nil; the for-loop's nil-guard
     # ends the drain.
-    if bc_target? && list_node.full_type.inf_stream?
+    if source_shape.bc_infinite_stream?
       label = next_pipe_label
       source_mir = visit_mir(list_node)
       @current_pipe_label = label
@@ -2800,6 +2831,15 @@ class PipelineHost
   sig { returns(T::Boolean) }
   def bc_target?
     @lowering.instance_variable_get(:@target) == :bc
+  end
+
+  sig { params(source_node: AST::Node).returns(PipelineHost::PipelineSourceShape) }
+  def pipeline_source_shape(source_node)
+    PipelineSourceShape.new(
+      type: Type.from_node!(source_node, context: "pipeline source shape"),
+      bc_target: bc_target?,
+      named_source: source_node.is_a?(AST::Identifier)
+    )
   end
 
   # Generic pipeline-terminal observable lowering. SUM/COUNT/MAX/MIN/

@@ -167,7 +167,8 @@ module MIRLoweringLiterals
     items << MIR::Let.new("__hm", MIR::StructInit.new(zig_t, [{ name: "alloc", value: alloc_expr }]), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       k = lower(key_node)
-      v = lower(val_node)
+      raw_v = with_decl_alloc(map_alloc) { materialize_owned_sink_value(lower(val_node), val_node, map_alloc) }
+      v = hoist_alloc(raw_v, val_node, err_cleanup: true)
       consumed = (mir_ident_names(k) + mir_ident_names(v)).uniq
       base_contract = MIR::CallableContract.no_ownership(4)
       put_contract = MIR::CallableContract.new(

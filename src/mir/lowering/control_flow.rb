@@ -853,6 +853,9 @@ module MIRLoweringControlFlow
     end
     transfer_required_names = return_transfer_required_names(returned_names)
     move_required_names = T.let(Set.new, T::Set[String])
+    returned_names.each do |name|
+      move_required_names << name if @guarded_cleanup_names&.[](name)
+    end
 
     ReturnOwnershipPlan.new(
       value: value,

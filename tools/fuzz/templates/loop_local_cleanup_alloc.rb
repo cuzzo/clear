@@ -30,7 +30,7 @@
 #   element_shape ∈ {string_elems, int_elems}
 
 LLCA_CELLS = []
-%i[struct_with_list].each do |c|
+%i[struct_with_list struct_with_optional_string struct_with_map].each do |c|
   %i[while for_range].each do |l|
     %i[string_elems int_elems].each do |e|
       LLCA_CELLS << { carrier: c, loop_kind: l, element_shape: e }
@@ -39,8 +39,6 @@ LLCA_CELLS = []
 end
 
 FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
-  # Skip carrier/element combos that are vacuous (e.g. struct_with_map
-  # uses string-keyed map; int_elems means int values either way).
   elem_zig = p[:element_shape] == :string_elems ? "String" : "Int64"
   elem_val = p[:element_shape] == :string_elems ? 'COPY "x"' : "1_i64"
 
@@ -50,6 +48,18 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
       "STRUCT Holder { items: #{elem_zig}[], tag: String }",
       "Holder{ items: [#{elem_val}], tag: COPY \"t\" }",
       "holder.items.length()",
+    ]
+  when :struct_with_optional_string
+    [
+      "STRUCT Holder { item: ?#{elem_zig}, tag: String }",
+      "Holder{ item: #{elem_val}, tag: COPY \"t\" }",
+      "(holder.item OR #{elem_val}).#{p[:element_shape] == :string_elems ? 'length()' : 'toString().length()'}",
+    ]
+  when :struct_with_map
+    [
+      "STRUCT Holder { items: HashMap<#{elem_zig}>, tag: String }",
+      "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }",
+      "(holder.items[\"k\"] OR #{elem_val}).#{p[:element_shape] == :string_elems ? 'length()' : 'toString().length()'}",
     ]
   end
 

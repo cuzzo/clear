@@ -563,6 +563,7 @@ class MIRLowering
       alloc_mark = implicit_alloc_mark_for_mir_node(node, out)
       if alloc_mark
         out << alloc_mark
+        out << owned_create_fact_for_alloc_mark(alloc_mark, ownership_fact_source(alloc_mark))
         register_visible_alloc_names!(alloc_mark)
       end
       visible_alloc_names = visible_alloc_names_for_transfer(out, node)
@@ -576,14 +577,140 @@ class MIRLowering
       end
       pre_terminator_transfer_marks(node, out, body).each do |mark|
         out << mark
+        out.concat(ownership_facts_for_structural_node(mark))
       end
       out << node
+      out.concat(ownership_facts_for_mir_node(node))
       register_visible_alloc_names!(node)
       ownership_transfers_for_mir(node, visible_alloc_names, visible_guarded_names, out + body).each do |mark|
         out << mark
+        out.concat(ownership_facts_for_structural_node(mark))
       end
     end
     out
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
+  def ownership_facts_for_mir_node(node)
+    facts = T.let([], T::Array[T.untyped])
+    facts.concat(ownership_facts_for_structural_node(node))
+
+    case node
+    when MIR::Let
+      facts.concat(ownership_facts_for_owned_result(node.name.to_s, node.init, node.annotation))
+      facts.concat(ownership_transfer_facts_for_contract(node.init))
+    when MIR::ExprStmt
+      facts.concat(ownership_transfer_facts_for_contract(node.expr))
+      facts << MIR::OwnedReturn.new(ownership_fact_source(node.expr), ownership_fact_source(node.expr)) if node.expr.is_a?(MIR::BgBlock)
+    when MIR::Set
+      facts.concat(ownership_transfer_facts_for_contract(node.value))
+    when MIR::ReturnStmt, MIR::BreakStmt
+      if node.value
+        facts.concat(ownership_facts_for_owned_result(ownership_fact_source(node.value), node.value, nil))
+        facts.concat(ownership_transfer_facts_for_contract(node.value))
+      end
+    when MIR::ReassignWithCleanup
+      facts.concat(ownership_facts_for_owned_result(node.name.to_s, node.value, nil))
+      facts.concat(ownership_transfer_facts_for_contract(node.value))
+      names = mir_ident_names(node.value)
+      names = [ownership_fact_source(node)] if names.empty?
+      names.each do |name|
+        facts << MIR::OwnedStore.new(name.to_s, ownership_fact_source(node), nil, ownership_fact_source(node))
+      end
+    when MIR::ShardedMapPut
+      if node.stdlib_def&.takes_ownership?
+        names = mir_ident_names(node.value)
+        names = [ownership_fact_source(node)] if names.empty?
+        names.each do |name|
+          facts << MIR::OwnedStore.new(name.to_s, ownership_fact_source(node), nil, ownership_fact_source(node))
+        end
+      end
+    when MIR::BgBlock
+      facts << MIR::OwnedReturn.new(ownership_fact_source(node), ownership_fact_source(node))
+    else
+      facts.concat(ownership_facts_for_owned_result(ownership_fact_source(node), node, nil))
+      facts.concat(ownership_transfer_facts_for_contract(node))
+    end
+
+    facts
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
+  def ownership_facts_for_structural_node(node)
+    case node
+    when MIR::AllocMark
+      [owned_create_fact_for_alloc_mark(node, ownership_fact_source(node))]
+    when MIR::Cleanup, MIR::ErrCleanup
+      [MIR::OwnedDestroy.new(node.name.to_s, node.cleanup_entry.alloc, ownership_fact_source(node))]
+    when MIR::TransferMark
+      [MIR::OwnedTransfer.new(node.name.to_s, node.target, ownership_fact_source(node))]
+    else
+      []
+    end
+  end
+
+  sig { params(mark: MIR::AllocMark, source: String).returns(MIR::OwnedCreate) }
+  def owned_create_fact_for_alloc_mark(mark, source)
+    MIR::OwnedCreate.new(mark.name.to_s, mark.alloc, mark.type_info, source)
+  end
+
+  sig { params(target_name: String, expr: T.untyped, type_info: T.untyped).returns(T::Array[T.untyped]) }
+  def ownership_facts_for_owned_result(target_name, expr, type_info)
+    source_expr = ownership_contract_source_node(expr)
+    if source_expr.is_a?(MIR::BgBlock)
+      return [MIR::OwnedReturn.new(target_name, ownership_fact_source(source_expr))]
+    end
+
+    effect = source_expr.respond_to?(:ownership_effect) ? source_expr.ownership_effect : MIR::OwnershipEffect.none
+    unless effect.produces_owned
+      return [] unless source_expr.is_a?(MIR::InlineZig) && source_expr.stdlib_def&.emits_allocating?
+
+      return [MIR::OwnedCreate.new(target_name, mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))]
+    end
+
+    [MIR::OwnedCreate.new(target_name, effect.alloc || mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))]
+  end
+
+  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
+  def ownership_transfer_facts_for_contract(expr)
+    names = ownership_contract_consumes_unwrapped(expr)
+    return [] if names.empty?
+
+    source = ownership_fact_source(expr)
+    names.map { |name| MIR::OwnedTransfer.new(name.to_s, :owned_sink, source) }
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def ownership_contract_consumes_unwrapped(node)
+    unwrapped = ownership_contract_source_node(node)
+    return [] unless unwrapped.respond_to?(:mir?) && unwrapped.mir?
+
+    ownership_contract_consumes(unwrapped)
+  end
+
+  sig { params(node: T.untyped).returns(String) }
+  def ownership_fact_source(node)
+    source_node = ownership_contract_source_node(node)
+    return source_node.class.name.to_s if source_node.is_a?(MIR::ReassignWithCleanup) || source_node.is_a?(MIR::ShardedMapPut)
+    return source_node.target_var.to_s if source_node.respond_to?(:target_var) && source_node.target_var
+    return source_node.callee.to_s if source_node.is_a?(MIR::Call) || source_node.is_a?(MIR::TailCall)
+    return source_node.method.to_s if source_node.is_a?(MIR::MethodCall)
+    return "MIR::BgBlock" if source_node.is_a?(MIR::BgBlock)
+    return "MIR::StreamSpawn" if source_node.is_a?(MIR::StreamSpawn)
+    return source_node.reason.to_s if source_node.respond_to?(:reason) && source_node.reason
+    return source_node.name.to_s if source_node.respond_to?(:name)
+
+    source_node.class.name || source_node.class.to_s
+  end
+
+  sig { params(node: T.untyped).returns(T.untyped) }
+  def ownership_contract_source_node(node)
+    current = node
+    while current.respond_to?(:expr) &&
+        (current.is_a?(MIR::Cast) || current.is_a?(MIR::TryExpr) || current.is_a?(MIR::TryCatch))
+      current = current.expr
+    end
+    current
   end
 
   sig { params(nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
@@ -629,6 +756,14 @@ class MIRLowering
       node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
     when MIR::ScopeBlock, MIR::BlockExpr
       node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
+    when MIR::BgBlock
+      node.run_body = append_ownership_transfers_for_mir_body(node.run_body ? node.run_body : [])
+    when MIR::StreamSpawn
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
+    when MIR::DoBlock
+      node.branch_bodies&.map! { |branch_body| append_ownership_transfers_for_mir_body(branch_body ? branch_body : []) }
+    when MIR::CatchWrapper
+      node.clause_bodies&.map! { |clause_body| append_ownership_transfers_for_mir_body(clause_body ? clause_body : []) }
     when MIR::IfStmt, MIR::IfBindStmt
       node.then_body = append_ownership_transfers_for_mir_body(node.then_body ? node.then_body : [])
       node.else_body = append_ownership_transfers_for_mir_body(node.else_body ? node.else_body : []) if node.else_body
@@ -802,17 +937,28 @@ class MIRLowering
   def structural_ownership_consumes(node)
     case node
     when MIR::Let
-      return [] if node.init.is_a?(MIR::BlockExpr)
-      mir_ident_names(node.init)
+      node.init.is_a?(MIR::Ident) ? [node.init.name.to_s] : []
     when MIR::Set
-      mir_ident_names(node.value)
+      node.value.is_a?(MIR::Ident) ? [node.value.name.to_s] : []
     when MIR::ReassignWithCleanup
       mir_ident_names(node.value)
     when MIR::ShardedMapPut
       return [] unless node.stdlib_def&.takes_ownership?
-      mir_ident_names(node.value)
+      mir_ident_names(node.key) + mir_ident_names(node.value)
     when MIR::StructInit
-      node.fields.flat_map { |field| mir_ident_names(field[:value]) }
+      node.fields.flat_map do |field|
+        next [] unless field[:alloc].is_a?(Symbol)
+
+        mir_ident_names(field[:value])
+      end
+    when MIR::CapWrap
+      mir_ident_names(node.inner)
+    when MIR::SharePromote
+      mir_ident_names(node.source)
+    when MIR::HeapCreate
+      mir_ident_names(node.init)
+    when MIR::MakeList
+      node.items.flat_map { |item| mir_ident_names(item) }
     else
       []
     end

@@ -126,6 +126,11 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `cross_fiber_consumer`      | 6               | BG STREAM / observable producer values consumed across fiber boundaries. |
 | `loop_local_cleanup_alloc`  | 4               | Loop-local allocation forms that must be cleaned or promoted consistently. |
 | `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
+| `thunk_recursion_matrix`    | 34              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes. |
+| `fsm_suspension_matrix`     | 28              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, and BG STREAM YIELD. |
+| `pipeline_source_shape_matrix` | 27           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and INDEX/DISTINCT/FIND. |
+| `call_ownership_contract_matrix` | 28         | Normal calls, TAKES, owned returns, receiver mutation, BG calls, and pipeline call contracts. |
+| `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 
 ### `stream_into_boundary` matrix
 

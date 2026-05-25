@@ -145,6 +145,27 @@ module MIR
     end
   end
 
+  class BoundaryCaptureFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :storage, T.nilable(Symbol)
+    const :sync, T.nilable(Symbol)
+    const :ownership, T.nilable(Symbol)
+    const :parallel_safe, T::Boolean
+    const :scheduler_affine, T::Boolean
+    const :requires_pinned, T::Boolean
+    const :forbidden_reason, T.nilable(Symbol)
+  end
+
+  class ExecutionBoundaryFact < T::Struct
+    extend T::Sig
+
+    const :kind, Symbol
+    const :dispatch, Symbol
+    const :captures, T::Array[BoundaryCaptureFact]
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -600,6 +621,7 @@ module MIR
   BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
     extend T::Sig
     include Stmt
+    attr_accessor :boundary_fact
     sig { returns(T::Boolean) }
     def expr?; true; end
   end
@@ -614,6 +636,7 @@ module MIR
   StreamSpawn = Struct.new(:captures, :body) do
     extend T::Sig
     include Stmt
+    attr_accessor :boundary_fact
     sig { returns(T::Boolean) }
     def expr?; true; end
   end
@@ -1179,6 +1202,7 @@ module MIR
   #   Emission still uses code (raw Zig).
   DoBlock = Struct.new(:code, :branch_bodies) do
     include Stmt
+    attr_accessor :boundary_facts
   end
 
   # No-op. Emits nothing. Used as placeholder for verification-only nodes.
@@ -1604,6 +1628,51 @@ module MIR
     def full_type=(val); self.type_info = val; end
   end
 
+  # Finalized ownership facts. These are verification-only nodes: lowering may
+  # still build them from existing marker nodes during the transition, but MIR
+  # checking must ultimately read ownership from this closed fact surface.
+  OwnedCreate = Struct.new(:name, :alloc, :type_info, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
+  OwnedDestroy = Struct.new(:name, :alloc, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
+  OwnedTransfer = Struct.new(:name, :target, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
+  OwnedBorrow = Struct.new(:name, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
+  OwnedStore = Struct.new(:name, :target, :alloc, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
+  OwnedReturn = Struct.new(:name, :source) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Boolean) }
+    def stmt?; true; end
+  end
+
   # Marks function exit with escaped vars. Subsumes old MIR::Return.
   ReturnMark = Struct.new(:escaped_vars) do
     extend T::Sig
@@ -1663,7 +1732,7 @@ module MIR
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
-      OwnershipEffect.owned(alloc: alloc_arg&.kind)
+      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
     end
   end
 
@@ -2205,6 +2274,7 @@ module MIR
   )
 
   OWNERSHIP_SIGNIFICANT_NODE_TYPES = T.let([
+    OwnedCreate, OwnedDestroy, OwnedTransfer, OwnedBorrow, OwnedStore, OwnedReturn,
     AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark,
     ReassignMark, FieldCleanupMark, ReassignWithCleanup,
     *LEGACY_OWNERSHIP_NODE_TYPES,

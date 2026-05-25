@@ -367,6 +367,40 @@ module FuzzSurfaceRegistry
       storage_capabilities: [:plain, :local, :multiowned],
       sync_capabilities: [:locked, :write_locked, :versioned],
     },
+
+    thunk_recursion_matrix: {
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    fsm_suspension_matrix: {
+      escape_sources: [:fsm_suspend, :bg_capture, :bg_stream_capture],
+      execution_boundaries: [:bg, :bg_stream, :fsm_suspend],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind],
+    },
+
+    pipeline_source_shape_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :hash_map],
+      escape_sources: [:stream_next, :or_expression],
+      escape_sinks: [:collection_literal, :function_arg],
+      execution_boundaries: [:stream_pipeline, :future_promise],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
+    },
+
+    call_ownership_contract_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :nested_container],
+      escape_sources: [:function_param, :bg_capture, :stream_next],
+      escape_sinks: [:function_arg, :takes_arg, :give_arg, :return_value, :bg_capture],
+      execution_boundaries: [:bg, :stream_pipeline],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :promotion_on_escape, :cleanup_on_all_paths],
+    },
+
+    collection_iteration_storage_matrix: {
+      cleanup_value_shapes: [:dynamic_array, :heap_list, :set, :hash_map, :pool, :soa_list, :nested_container],
+      collection_shapes: [:dynamic_array, :list, :set, :hash_map, :pool, :soa_list, :nested_collection],
+      escape_sources: [:loop_local],
+      escape_sinks: [:list_append, :return_value],
+      mir_ownership_contracts: [:loop_frame_rewind, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
+    },
   }.freeze
 
   # Dimensions that are intentionally covered by the union of focused

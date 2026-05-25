@@ -32,6 +32,74 @@ module MIRLoweringConcurrency
     end
   end
 
+  sig { params(parallel: T.nilable(T::Boolean), pinned: T.nilable(T.any(T::Boolean, Symbol))).returns(Symbol) }
+  def execution_boundary_dispatch(parallel, pinned)
+    return :parallel if parallel
+    return :pinned if pinned
+
+    :local
+  end
+
+  sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
+  def execution_boundary_fact(kind, dispatch, analysis)
+    symbols = T.let(analysis&.capture_symbols || {}, T::Hash[String, SymbolEntry])
+    captured = T.let(
+      T.cast(analysis&.captures, T.nilable(T::Hash[String, T.any(Type, Symbol, String)])) || {},
+      T::Hash[String, T.any(Type, Symbol, String)],
+    )
+    names = T.let((symbols.keys + captured.keys).map(&:to_s).uniq.sort, T::Array[String])
+    MIR::ExecutionBoundaryFact.new(
+      kind: kind,
+      dispatch: dispatch,
+      captures: names.map { |name| boundary_capture_fact(name, symbols[name]) },
+    )
+  end
+
+  sig { params(name: String, symbol: T.nilable(SymbolEntry)).returns(MIR::BoundaryCaptureFact) }
+  def boundary_capture_fact(name, symbol)
+    storage = symbol&.storage
+    sync = symbol&.sync
+    ownership = symbol&.ownership_kind
+    forbidden = boundary_capture_forbidden_reason(symbol)
+    MIR::BoundaryCaptureFact.new(
+      name: name,
+      storage: storage,
+      sync: sync,
+      ownership: ownership,
+      parallel_safe: forbidden.nil?,
+      scheduler_affine: boundary_capture_scheduler_affine?(symbol),
+      requires_pinned: boundary_capture_requires_pinned?(symbol),
+      forbidden_reason: forbidden,
+    )
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T.nilable(Symbol)) }
+  def boundary_capture_forbidden_reason(symbol)
+    return nil unless symbol
+    return :local_scheduler_affinity if symbol.local?
+    return :non_atomic_rc if symbol.storage == :multiowned
+    return nil if symbol.storage == :shared
+    return :affine_locked if symbol.locked?
+    return :affine_write_locked if symbol.write_locked?
+    return :affine_versioned if SymbolEntry.versioned_sync?(symbol.sync)
+
+    nil
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def boundary_capture_scheduler_affine?(symbol)
+    return false unless symbol
+    return true if symbol.local?
+    return false if symbol.storage == :shared
+
+    symbol.locked? || symbol.write_locked? || SymbolEntry.versioned_sync?(symbol.sync)
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def boundary_capture_requires_pinned?(symbol)
+    boundary_capture_scheduler_affine?(symbol) || (symbol&.storage == :multiowned)
+  end
+
   sig { params(node: AST::DoBlock).returns(MIR::DoBlock) }
   def lower_do_block(node)
     T.bind(self, MIRLowering) rescue nil
@@ -43,6 +111,7 @@ module MIRLoweringConcurrency
     wg_var = "__do#{id}_wg"
 
     all_branch_bodies = []
+    boundary_facts = T.let([], T::Array[MIR::ExecutionBoundaryFact])
     branch_parts = node.branches.each_with_index.map { |branch, i|
       ctx_type = "__DoBranchCtx#{id}_#{i}"
       ctx_var = "__do#{id}_ctx#{i}"
@@ -65,6 +134,11 @@ module MIRLoweringConcurrency
           analysis.resource_captures.merge(nested.resource_captures || Set.new)
         end
       end
+      boundary_facts << execution_boundary_fact(
+        :do_branch,
+        execution_boundary_dispatch(branch[:parallel], pinned),
+        analysis,
+      )
 
       # Capture handling delegated to FiberCtxBuilder -- same builder
       # BG/BG STREAM/CONCURRENT use. DO branches use "ctx" as the body
@@ -142,10 +216,12 @@ module MIRLoweringConcurrency
           var #{wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
           errdefer #{wg_var}.wait();
           #{inner}
-          #{wg_var}.wait();
+      #{wg_var}.wait();
       }
     ZIG
-    MIR::DoBlock.new(do_code, all_branch_bodies)
+    do_block = MIR::DoBlock.new(do_code, all_branch_bodies)
+    do_block.boundary_facts = boundary_facts
+    do_block
   end
 
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }
@@ -392,7 +468,13 @@ module MIRLoweringConcurrency
         # state machine; exposing it again to the BgBlock-level
         # checker double-walks ownership and triggers spurious
         # diagnostics.
-        return MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
+        bg = MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
+        bg.boundary_fact = execution_boundary_fact(
+          :bg,
+          execution_boundary_dispatch(node.parallel, node.pinned),
+          analysis,
+        )
+        return bg
       end
     end
 
@@ -443,7 +525,13 @@ module MIRLoweringConcurrency
           break :#{blk_label} #{promise_var};
       }
     ZIG
-    MIR::BgBlock.new(bg_code, captured, run_body || [])
+    bg = MIR::BgBlock.new(bg_code, captured, run_body || [])
+    bg.boundary_fact = execution_boundary_fact(
+      :bg,
+      execution_boundary_dispatch(node.parallel, node.pinned),
+      analysis,
+    )
+    bg
   end
 
   # Raise a CLEAR-level diagnostic if any capture classifies as Refuse.
@@ -528,7 +616,9 @@ module MIRLoweringConcurrency
         # frame the channel binds to a synthetic slot consumed by
         # MIR::StreamYield via lower_yield.
         captures_map = node.capture_analysis&.captures || {}
-        return MIR::StreamSpawn.new(captures_map, run_body)
+        spawn = MIR::StreamSpawn.new(captures_map, run_body)
+        spawn.boundary_fact = execution_boundary_fact(:stream_spawn, :local, node.capture_analysis)
+        return spawn
       end
 
       block = MIR::BlockExpr.new(blk_label, [
@@ -624,7 +714,9 @@ module MIRLoweringConcurrency
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
+    bg = MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
+    bg.boundary_fact = execution_boundary_fact(:bg_stream, :local, analysis)
+    bg
   end
 
   sig { params(node: AST::YieldExpr).returns(T.untyped) }

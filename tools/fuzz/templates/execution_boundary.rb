@@ -41,7 +41,7 @@ EXECUTION_BOUNDARY_CELLS = []
 
 EB_BOUNDARIES = [:bg, :do, :bg_stream]
 EB_MODIFIERS  = [:none, :parallel, :pinned]
-EB_OWNERSHIPS = [:local, :shared_locked, :multiowned]
+EB_OWNERSHIPS = [:plain, :local, :multiowned, :shared, :shared_locked, :locked, :write_locked, :versioned, :atomic_int]
 
 EB_BOUNDARIES.each do |b|
   EB_MODIFIERS.each do |m|
@@ -50,7 +50,7 @@ EB_BOUNDARIES.each do |b|
       cell[:expected] =
         if b == :bg_stream && m != :none
           :compile_error
-        elsif m == :parallel && (o == :local || o == :multiowned)
+        elsif m == :parallel && [:local, :multiowned, :locked, :write_locked, :versioned].include?(o)
           :compile_error
         else
           :pass
@@ -64,8 +64,14 @@ end
 
 def eb_value_decl(o)
   case o
+  when :plain         then "MUTABLE c = Counter{ value: 0_i64 };"
   when :local         then "MUTABLE c = Counter{ value: 0_i64 } @local;"
+  when :shared        then "c = Counter{ value: 0_i64 } @shared;"
   when :shared_locked then "c = Counter{ value: 0_i64 } @shared:locked;"
+  when :locked        then "c = Counter{ value: 0_i64 } @locked;"
+  when :write_locked  then "c = Counter{ value: 0_i64 } @writeLocked;"
+  when :versioned     then "c = Counter{ value: 0_i64 } @versioned;"
+  when :atomic_int    then "MUTABLE c: Int64 = 0_i64 @shared:atomic;"
   when :multiowned    then "c = Counter{ value: 0_i64 } @multiowned;"
   end
 end
@@ -79,8 +85,11 @@ def eb_body_int(o)
   # Body for BG — must produce an Int64. Use inner_r to avoid shadowing
   # main's r. Returns a complete multi-statement fragment.
   case o
-  when :local         then "c.value"
+  when :plain, :local, :shared then "c.value"
   when :shared_locked then "MUTABLE inner_r: Int64 = 0_i64; WITH EXCLUSIVE c AS x { inner_r = x.value; } inner_r"
+  when :locked, :write_locked then "MUTABLE inner_r: Int64 = 0_i64; WITH EXCLUSIVE c AS x { inner_r = x.value; } inner_r"
+  when :versioned     then "MUTABLE inner_r: Int64 = 0_i64; WITH SNAPSHOT c AS x { inner_r = x.value; } inner_r"
+  when :atomic_int    then "c"
   when :multiowned    then "MUTABLE inner_r: Int64 = 0_i64; WITH c { inner_r = c.value; } inner_r"
   end
 end
@@ -90,8 +99,11 @@ end
 # local before the YIELD.
 def eb_stream_body(o)
   case o
-  when :local         then ["", "c.value"]
+  when :plain, :local, :shared then ["", "c.value"]
   when :shared_locked then ["MUTABLE inner_r: Int64 = 0_i64; WITH EXCLUSIVE c AS x { inner_r = x.value; }", "inner_r"]
+  when :locked, :write_locked then ["MUTABLE inner_r: Int64 = 0_i64; WITH EXCLUSIVE c AS x { inner_r = x.value; }", "inner_r"]
+  when :versioned     then ["MUTABLE inner_r: Int64 = 0_i64; WITH SNAPSHOT c AS x { inner_r = x.value; }", "inner_r"]
+  when :atomic_int    then ["", "c"]
   when :multiowned    then ["MUTABLE inner_r: Int64 = 0_i64; WITH c { inner_r = c.value; }", "inner_r"]
   end
 end
@@ -100,8 +112,11 @@ end
 # the access path. DO branches don't need an Int64 result.
 def eb_body_void(o)
   case o
-  when :local         then "touch(c.value)"
+  when :plain, :local, :shared then "touch(c.value)"
   when :shared_locked then "WITH EXCLUSIVE c AS x { touch(x.value); }"
+  when :locked, :write_locked then "WITH EXCLUSIVE c AS x { touch(x.value); }"
+  when :versioned     then "WITH SNAPSHOT c AS x { touch(x.value); }"
+  when :atomic_int    then "touch(c)"
   when :multiowned    then "WITH c { touch(c.value); }"
   end
 end
