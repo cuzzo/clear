@@ -17,7 +17,7 @@ module MIRLoweringLiterals
     ti = if expected_ti&.collection?
       expected_ti
     else
-      node.coerced_type_info || node.full_type
+      node.coerced_type_info || node.full_type!
     end
 
     # Bounded stream: ~T[N] - emit BoundedStream struct with Promise items
@@ -120,7 +120,7 @@ module MIRLoweringLiterals
     T.bind(self, MIRLowering) rescue nil
     @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
-    ti = node.coerced_type_info || node.full_type
+    ti = node.coerced_type_info || node.full_type!
     rt_name = runtime_binding_name
     map_alloc = @current_decl_alloc || alloc_for_node(node)
     alloc_str = "#{rt_name}.#{map_alloc == :heap ? "heapAlloc" : "frameAlloc"}()"

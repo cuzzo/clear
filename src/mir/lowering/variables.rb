@@ -156,7 +156,7 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     @current_bindings = T.let(@current_bindings, T.untyped)
     is_mutable = node.respond_to?(:mutable) && node.mutable
-    ft = Type.new(node.full_type)
+    ft = Type.new(node.full_type!)
     is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
     is_mutable ||= ft.collection?
     is_mutable ||= ft.any_sync?
@@ -194,7 +194,7 @@ module MIRLoweringVariables
       false
     end
 
-    zig_type = transpile_type(node.full_type)
+    zig_type = transpile_type(node.full_type!)
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
                        (ft.string? && is_heap)  # ""/literal infers *const [0:0]u8 without annotation
@@ -349,7 +349,7 @@ module MIRLoweringVariables
       # always present (NONE.needs_cleanup? is false). The cleanup recipe is
       # inherited from the classifier, never synthesized here (INV-14).
       drop_entry = binding_entry
-      build_drop_entry!(drop_entry, node.full_type, node)
+      build_drop_entry!(drop_entry, node.full_type!, node)
       drop_entry = drop_entry.with_moved_guard if ft.bounded_stream?
       # One allocator per binding: AllocMark, Cleanup, and the init
       # expression all read the classifier's definitive placement.
@@ -360,44 +360,44 @@ module MIRLoweringVariables
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
       mir_alloc = node_alloc
       cleanup = MIR::Cleanup.new(safe_name, drop_entry)
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, drop_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, drop_entry)
       [alloc_mark, let_node, cleanup]
     elsif owned_return_call_init?(init) && !generic_id
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
-      build_drop_entry!(cleanup_entry, node.full_type, node)
+      build_drop_entry!(cleanup_entry, node.full_type!, node)
       cleanup_entry[:has_moved_guard] = true
       (@guarded_cleanup_names ||= {})[safe_name] = true
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !generic_id
       mir_alloc = mir_owned_alloc(init) || decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node]
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty? && init.target_var == safe_name &&
           !generic_id
       alloc_values = init.allocs.values
       mir_alloc = alloc_values.include?(:heap) ? :heap : :frame
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node]
     elsif binding_entry.present? && !binding_entry.needs_cleanup? && actually_mutated && ownership_bearing_type?(ft) &&
           (!ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
       mir_alloc = mir_owned_alloc(init) || binding_entry.alloc || decl_alloc
       cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
-      build_drop_entry!(cleanup_entry, node.full_type, node)
+      build_drop_entry!(cleanup_entry, node.full_type!, node)
       (@guarded_cleanup_names ||= {})[safe_name] = true
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif binding_entry.present? && !binding_entry.needs_cleanup?
       return let_node unless mir_allocates?(init) ||
                              (binding_entry.alloc == :heap && binding_entry.kind != :none)
 
       mir_alloc = mir_owned_alloc(init) || decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node]
     elsif mir_allocates?(init) && !generic_id
       mir_alloc = decl_alloc
-      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
+      alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       if binding_entry.present? && !binding_entry.needs_cleanup?
         next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
         next_nodes
@@ -413,7 +413,7 @@ module MIRLoweringVariables
         next_nodes
       else
         cleanup_entry = T.must(hoist_cleanup_entry(init, node))
-        build_drop_entry!(cleanup_entry, node.full_type, node)
+        build_drop_entry!(cleanup_entry, node.full_type!, node)
         (@guarded_cleanup_names ||= {})[safe_name] = true if cleanup_entry.has_moved_guard?
         [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
       end
@@ -569,7 +569,7 @@ module MIRLoweringVariables
       # Proxy to VarDecl logic. Copy mir_binding_entry so lower_var_decl
       # uses node-identity lookup rather than the name-keyed dict.
       proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
-      proxy.full_type = node.full_type
+      proxy.full_type = node.full_type!(context: "bind expression proxy")
       proxy.storage = node.storage
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig
@@ -615,7 +615,7 @@ module MIRLoweringVariables
       end
       value = with_decl_alloc(assign_alloc) do
         lowered = lower(node.value)
-        place_value_for_destination(lowered, node.value, assign_alloc, node.full_type)
+        place_value_for_destination(lowered, node.value, assign_alloc, node.full_type!)
       end
       value = copy_container_borrow_if_needed(value, node.value)
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
@@ -730,7 +730,7 @@ module MIRLoweringVariables
 
     # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
     if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
-      field_ti = node.name.full_type
+      field_ti = node.name.full_type!
       sl = @schema_lookup
       if field_ti.needs_cleanup?(sl)
         result.needs_field_cleanup = true
@@ -770,11 +770,7 @@ module MIRLoweringVariables
     # mir-lowering strict ivars
     @target = T.let(@target, T.untyped)
     target_node = node.name.target
-    ti = target_node.full_type
-
-    # Raw slice index (synthetic nodes from SOA rewrite have no type info:
-    # full_type defaults to the :Untyped sentinel, never nil)
-    return lower_direct_indexed_set(node, cast_index: false) if ti.untyped?
+    ti = target_node.full_type!(context: "indexed assignment target")
 
     # VM path: the bc_emitter has native MAP_PUT / NATIVE_CALL list-set!
     # dispatch on MIR::Set(IndexGet, val); avoid the Zig-templated InlineZig
@@ -1059,7 +1055,7 @@ module MIRLoweringVariables
     alloc_sym = placement_for_node(root_receiver_node(node.name) || node.name)
     value = with_decl_alloc(alloc_sym) do
       lowered = lower(node.value)
-      place_value_for_destination(lowered, node.value, alloc_sym, node.name.full_type)
+      place_value_for_destination(lowered, node.value, alloc_sym, node.name.full_type!)
     end
     value = materialize_owned_sink_value(value, node.value, alloc_sym)
     alloc = MIR::Ident.new(alloc_zig_str(alloc_sym))
@@ -1160,8 +1156,8 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     value = with_decl_alloc(alloc_sym) do
       lowered = lower(node.value)
-      placed = place_value_for_destination(lowered, node.value, alloc_sym, node.name.full_type)
-      materialize_owned_sink_value(placed, node.value, alloc_sym, node.name.full_type)
+      placed = place_value_for_destination(lowered, node.value, alloc_sym, node.name.full_type!)
+      materialize_owned_sink_value(placed, node.value, alloc_sym, node.name.full_type!)
     end
     value && mir_allocates?(value) ? hoist_alloc(value, node.value, err_cleanup: true) : value
   end

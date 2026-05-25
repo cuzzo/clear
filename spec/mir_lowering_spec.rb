@@ -780,8 +780,9 @@ RSpec.describe MIRLowering do
   end
 
   describe "indexed assignment lowering" do
-    it "lowers synthetic index targets without type info as direct Set(IndexGet)" do
+    it "lowers typed synthetic index targets as direct Set(IndexGet)" do
       target = AST::Identifier.new(tok, "soa_items")
+      target.full_type = Type.new(:"Int64[4]")
       index = make_lit(:NUMBER, 2, full_type: :Int64)
       index.coerced_type = :Int64
       value = make_lit(:NUMBER, 9, full_type: :Int64)
@@ -793,7 +794,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::Set)
       expect(result.target).to be_a(MIR::IndexGet)
-      expect(emit(result)).to eq("soa_items[2] = 9;")
+      expect(emit(result)).to eq("soa_items[@as(usize, @intCast(2))] = 9;")
     end
 
     it "uses structural IndexGet assignment for the bytecode backend" do
@@ -929,7 +930,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
       expect(zig).to include("CheatLib.cleanupAt(Point, items, rt.frameAlloc(), 0)")
-      expect(zig).to include("CheatLib.setAt(items, 0, next_point)")
+      expect(zig).to include("CheatLib.setAt(items, 0, __tmp_")
       expect(result.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) }).to be true
     end
   end

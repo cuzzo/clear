@@ -905,6 +905,8 @@ module MIRHoistLowering
       e
     when MIR::MakeList
       uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})", alloc: alloc)
+    when MIR::OwnedSlice
+      uniform_cleanup_entry("[]", alloc: alloc)
     when MIR::HeapCreate, MIR::ContainerInit
       uniform_cleanup_entry(mir.zig_type, alloc: alloc)
     when MIR::DeepCopy

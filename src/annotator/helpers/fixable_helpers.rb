@@ -257,7 +257,7 @@ module FixableHelper
     # wrong keyword would either compile-error (CLONE on plain T) or
     # do something semantically different from what the user wants
     # (deep-COPY on an Arc handle when a refcount bump suffices).
-    type = og_node.respond_to?(:full_type) ? og_node.full_type : nil
+    type = og_node.full_type
     is_shared = type.respond_to?(:shared?)     ? type.shared?     : false
     is_multi  = type.respond_to?(:multiowned?) ? type.multiowned? : false
     is_split  = type.respond_to?(:split?)      ? type.split?      : false

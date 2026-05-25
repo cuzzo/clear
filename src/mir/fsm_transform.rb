@@ -151,10 +151,10 @@ module FsmTransform
     T.bind(self, T.untyped) rescue nil
     case node
     when AST::VarDecl
-      local_entry(node.name, node.full_type)
+      local_entry(node.name, node.full_type!)
     when AST::BindExpr
       return nil unless node.mode == :decl
-      entry = local_entry(node.name, node.full_type)
+      entry = local_entry(node.name, node.full_type!)
       if entry
         # Mark suspend-result decls so the caller can include them in the
         # capture_map but skip duplicate ctx field declarations.
@@ -172,7 +172,7 @@ module FsmTransform
   def foreach_local_entry(node)
     T.bind(self, T.untyped) rescue nil
     return nil unless node.var_name
-    ct_obj = node.collection&.full_type
+    ct_obj = node.collection&.full_type!
     ct = ct_obj.is_a?(Type) ? ct_obj : (ct_obj ? Type.new(ct_obj) : nil)
     desc = ct.is_a?(Type) ? ct.fsm_foreach_descriptor : nil
     elem_zig = (desc && desc[:var_zig_type]) || begin

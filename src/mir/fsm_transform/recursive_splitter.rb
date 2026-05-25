@@ -356,7 +356,7 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return false unless sus.is_a?(Segments::NextSuspend)
-      pt = sus.promise_ast.full_type
+      pt = Type.from_node!(sus.promise_ast, context: "FSM suspend promise")
       return true unless pt.future?
       return true if pt.respond_to?(:stream?) && pt.stream?
       return true if pt.respond_to?(:promise_list?) && pt.promise_list?
@@ -482,7 +482,7 @@ module FsmTransform
     def emit_for_each_fragment(for_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       coll_ast = for_stmt.collection
-      coll_type = coll_ast.full_type
+      coll_type = Type.from_node!(coll_ast, context: "FSM foreach collection")
       ct = coll_type.is_a?(Type) ? coll_type : (coll_type ? Type.new(coll_type) : nil)
       raise UnsupportedShape, "ForEach without resolved coll type" if ct.nil?
 

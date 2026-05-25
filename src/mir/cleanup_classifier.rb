@@ -276,12 +276,12 @@ module CleanupClassifier
 
         var_name = node.name.is_a?(String) ? node.name : node.name.to_s
         moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
-        cleanup = classify_binding(var_name, node.full_type, node, promoted_fns, schema_lookup)
-        cleanup ||= transferred_payload_entry(node.full_type, schema_lookup) if moved_alloc
+        cleanup = classify_binding(var_name, node.full_type!, node, promoted_fns, schema_lookup)
+        cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
         if cleanup
           cleanup[:alloc] = moved_alloc if moved_alloc
         else
-          cleanup = no_cleanup_alloc_entry(node.full_type, schema_lookup)
+          cleanup = no_cleanup_alloc_entry(node.full_type!, schema_lookup)
         end
         # Stamp on node for identity-based lookup in lower_var_decl (avoids
         # same-name collisions when two vars share a name in different scopes).
@@ -424,7 +424,7 @@ module CleanupClassifier
       next unless node.takes
       next unless node.expr.is_a?(AST::Identifier) && node.expr.was_moved
 
-      source_ti = node.expr.full_type
+      source_ti = node.expr.full_type!
       union_lookup = source_ti.generic_instance? ? source_ti.generic_base : source_ti.resolved
       schema = schema_lookup.call(union_lookup) rescue nil
       next unless Schemas.union?(schema)

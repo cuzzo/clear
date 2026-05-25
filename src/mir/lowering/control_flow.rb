@@ -299,7 +299,7 @@ module MIRLoweringControlFlow
     stamp_loop_frame_allocs_iteration!(body)
     rt = MIR::Ident.new(@rt_name)
     coll = lower(node.collection)
-    coll_type = node.collection.full_type
+    coll_type = node.collection.full_type!
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
     collection_setup = T.let([], T::Array[T.untyped])
     if for_each_owned_collection_source?(coll)
@@ -684,7 +684,7 @@ module MIRLoweringControlFlow
       is_union: is_union,
       is_int_match: is_int_match,
       is_enum_match: is_enum_match,
-      expr_type_sym: expr_type_sym
+      expr_type_sym: is_union ? union_lookup : expr_type_sym
     )
   end
 
@@ -697,11 +697,22 @@ module MIRLoweringControlFlow
   sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts).returns(MIR::UnionMatchStmt) }
   def lower_union_match(node, facts)
     arms = node.cases.flat_map { |c| union_match_arm_plans(c, node, facts.expr_label) }
-    default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : []
+    default = union_match_default_body(node, facts, arms)
     default = hoist_unhoisted_return_allocs(default, node.default_case) if default
     MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
       { pattern: ".#{arm.variant}", payload: arm.payload_name, body: arm.body }
     }, default)
+  end
+
+  sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan]).returns(T.nilable(T::Array[T.untyped])) }
+  def union_match_default_body(node, facts, arms)
+    schema = @union_schemas&.[](facts.expr_type_sym)
+    all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || []
+    covered = arms.map(&:variant).map(&:to_s).sort
+    return nil if covered == all_variants
+    return lower_match_branch(node.default_case, facts.expr_label) if node.default_case && !node.default_case.empty?
+
+    []
   end
 
   sig { params(c: T.untyped, node: AST::MatchStatement, expr_label: T.nilable(String)).returns(T::Array[UnionMatchArmPlan]) }
@@ -923,7 +934,7 @@ module MIRLoweringControlFlow
     ret_alloc = return_destination_alloc(node)
     value = node.value ? with_decl_alloc(ret_alloc) do
       lowered = with_expected_type(return_destination_type(node)) { lower(node.value) }
-      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
+      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type!)
     end : nil
 
     explicit_return_names = returned_binding_names(node.value)
@@ -1082,8 +1093,8 @@ module MIRLoweringControlFlow
     # mir-lowering strict ivars
     @union_schemas = T.let(@union_schemas, T.untyped)
     return false unless expr.is_a?(MIR::Call)
-    ti = Type.from_node(ast_node)
-    return false unless ti
+    return false unless ast_node.is_a?(AST::Locatable)
+    ti = ast_node.full_type!(context: "union return hoist")
     ti = ti.success_type || ti
     is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_storage?) || ti.heap?
     return false if is_heap  # already handled by mir_allocates?

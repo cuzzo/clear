@@ -863,8 +863,7 @@ module MIRLoweringFunctions
   end
   def cross_boundary_arg(arg, a, callee_param, callee_param_type, callee_sig, idx)
     T.bind(self, MIRLowering) rescue nil
-    ti = a.full_type
-    ti = Type.from_node(a) unless ti.is_a?(Type)
+    ti = Type.from_node!(a, context: "call boundary argument")
 
     moved_arg = a.is_a?(AST::MoveNode) ||
                 (AST.moved?(a) &&
@@ -873,7 +872,12 @@ module MIRLoweringFunctions
     if callee_param&.takes && moved_arg &&
        ti.is_a?(Type) && ti.direct_indexable_collection? && !callee_param_type.collection?
       sink_alloc = allocator_for_takes_param!(callee_param)
-      return MIR::OwnedSlice.new(arg, sink_alloc)
+      return T.cast(T.unsafe(self).with_ownership_consumption(
+        MIR::OwnedSlice.new(arg, sink_alloc),
+        T.unsafe(self).mir_ident_names(arg),
+        "MIR::OwnedSlice",
+        target_alloc: sink_alloc,
+      ), MIR::OwnedSlice)
     end
 
     if callee_param&.takes
@@ -1041,7 +1045,7 @@ module MIRLoweringFunctions
       end
     end
     arg = hoist_alloc(raw_arg, facts.ast_arg, err_cleanup: facts.takes, mutable: facts.copy_to_owning)
-    cross_boundary_arg(
+    boundary_arg = cross_boundary_arg(
       arg,
       facts.ast_arg,
       facts.callee_param,
@@ -1049,6 +1053,9 @@ module MIRLoweringFunctions
       facts.callee_sig,
       facts.param_index,
     )
+    return hoist_alloc(boundary_arg, facts.ast_arg, err_cleanup: facts.takes) if mir_allocates?(boundary_arg)
+
+    boundary_arg
   end
 
   sig do
@@ -1212,8 +1219,8 @@ module MIRLoweringFunctions
     sig = fn_sig_for(node.name) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
-    node_ti = Type.from_node(node)
-    if node_ti && !node_ti.untyped? && !node_ti.any?
+    node_ti = Type.from_node!(node, context: "call owned return")
+    if !node_ti.any?
       return concrete_call_type_owned_return?(node_ti, sig)
     end
 
@@ -1287,8 +1294,8 @@ module MIRLoweringFunctions
     return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
     return true if node.is_a?(AST::BinaryOp) && node.op == :ADD && node.string_concat
-    ti = Type.from_node(node)
-    return false unless ti
+    return false unless node.is_a?(AST::Locatable)
+    ti = node.full_type!(context: "heap-producing call expression")
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
     ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
   end
@@ -1306,7 +1313,7 @@ module MIRLoweringFunctions
     inner_mir = lower(node.object.target)
 
     snav_ident = AST::Identifier.new(node.object.token, snav_var)
-    snav_ident.full_type = node.object.full_type  # T (unwrapped)
+    snav_ident.full_type = node.object.full_type!(context: "safe-nav receiver")  # T (unwrapped)
 
     synthetic = node.dup
     synthetic.object = snav_ident
@@ -1537,7 +1544,7 @@ module MIRLoweringFunctions
       alloc_call = alloc_kind == :heap \
         ? MIR::MethodCall.new(rt, "heapAlloc",  [], false, MIR::CallableContract.no_ownership(0)) \
         : MIR::MethodCall.new(rt, "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
-      n_comptime = node.args.count { |a| a.full_type == :Type }
+      n_comptime = node.args.count { |a| a.full_type! == :Type }
       args = T.must(args[0, n_comptime]) + [alloc_call] + T.must(args[n_comptime..])
     end
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
@@ -1587,7 +1594,7 @@ module MIRLoweringFunctions
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields (Zig type is `type`, comptime-only).
     # They are baked directly into the call_zig string.
-    comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type == :Type }
+    comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
     comptime_codes = comptime_args.map { |a| emit_expr(lower_extern_arg(a)) }
 
     args = runtime_ast_args.map { |a| lower_extern_arg(a) }
@@ -1622,7 +1629,7 @@ module MIRLoweringFunctions
       arg_field_types: arg_field_types,
       arg_tuple: arg_tuple,
       alloc_kind: alloc_kind,
-      return_type: node.full_type,
+      return_type: node.full_type!,
       call_zig: call_zig,
       receiver_field: nil,
       ast_node: node
@@ -1650,7 +1657,7 @@ module MIRLoweringFunctions
       arg_field_types: nil,
       arg_tuple: arg_tuple,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
-      return_type: node.full_type,
+      return_type: node.full_type!,
       call_zig: "f.self_val.#{node.name}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
       receiver_field: receiver_code,
       ast_node: node
@@ -1739,7 +1746,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @lambda_counter = T.let(@lambda_counter, T.untyped)
-    sig = node.full_type
+    sig = node.full_type!
     sig = sig.raw if sig.is_a?(Type)
     @lambda_counter = (@lambda_counter || 0) + 1
     fn_name = "_lambda_#{@lambda_counter}"

@@ -70,7 +70,7 @@ module PreMirTypeCheck
     return if seen[oid]
     seen[oid] = true
 
-    if node.respond_to?(:full_type) && node.full_type.untyped?
+    if node.is_a?(AST::Locatable) && node.full_type.untyped?
       tok = node.respond_to?(:token) ? node.token : nil
       loc = tok && tok.respond_to?(:line) ? "#{tok.line}:#{tok.column}" : "?"
       violations << { cls: node.class.name.to_s.split("::").last, loc: loc }

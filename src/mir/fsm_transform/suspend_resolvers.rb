@@ -86,7 +86,7 @@ module FsmTransform
       result_needs_cleanup = false
       if finish_value_mir && result_var && result_var != "_"
         bind_stmts << MIR::Let.new(result_var, finish_value_mir, false, nil, nil)
-        ft = io_tail.call_node.full_type
+        ft = Type.from_node!(io_tail.call_node, context: "FSM IO tail result")
         result_zig_type = ft ? Type.new(ft).zig_type : nil
         result_needs_cleanup = ownership_bearing_result_type?(ft, lowering)
       elsif finish_value_mir
@@ -163,7 +163,7 @@ module FsmTransform
       tail = MIR::FsmTailRegisterYield.new(nil, register_zig, "WaitForLock")
 
       result_var = next_tail.result_var
-      promise_ft = next_tail.promise_ast.full_type
+      promise_ft = Type.from_node!(next_tail.promise_ast, context: "FSM NEXT tail promise")
       sp_zig = promise_ft ? Type.new(promise_ft).zig_type : "anyopaque"
       inner_type_info = nil
       inner_zig =

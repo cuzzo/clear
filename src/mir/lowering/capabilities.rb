@@ -69,8 +69,8 @@ module MIRLoweringCapabilities
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @current_fiber_capture_symbols = T.let(@current_fiber_capture_symbols, T.untyped)
-    if var_node.is_a?(AST::GetField) && var_node.full_type
-      ft = var_node.full_type
+    if var_node.is_a?(AST::GetField)
+      ft = var_node.full_type!(context: "WITH field capability")
       sync = ft.sync
       storage = ft.ownership_storage
       return [sync, storage]
@@ -80,7 +80,7 @@ module MIRLoweringCapabilities
       return [live.sync, live.storage]
     end
     sym = var_node.symbol
-    ti = Type.from_node(var_node)
+    ti = var_node.full_type!(context: "WITH capability variable")
     [sym&.sync || ti&.sync, sym&.storage]
   end
 
@@ -996,7 +996,7 @@ module MIRLoweringCapabilities
       # *Arc<Versioned>, and Arc<Versioned> by value (the BG-capture
       # case). Mirrors the read-mode SNAPSHOT path.
       source_unwrap = with_match_unwrap_value(T.must(source_zig))
-      # cap[:resolved_type] sole producer is var_node.full_type
+      # cap[:resolved_type] sole producer is var_node.full_type!
       # (Type|nil via the full_type seam; never a Symbol).
       st = cap[:resolved_type] || Type.new(:Any)
       bare_t_zig = st.bare_data_type.zig_type

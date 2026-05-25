@@ -136,11 +136,11 @@ class PipelineRewriter
                              AST.pipeline_terminal_fold?(terminal)
     # Infinite streams (~T[INF]) are included only when a LimitOp stage is present:
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
-    inf_with_limit = real_source.full_type.inf_stream? &&
+    inf_with_limit = real_source.full_type!.inf_stream? &&
                      stages.any? { |s| s.is_a?(AST::LimitOp) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.full_type.dynamic_stream? ||
-        real_source.full_type.open_stream? ||
-        real_source.full_type.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
+    if (real_source.is_a?(AST::RangeLit) || real_source.full_type!.dynamic_stream? ||
+        real_source.full_type!.open_stream? ||
+        real_source.full_type!.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
        stages.all? { |s| AST.pipeline_fusible_stage?(s) }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
@@ -161,8 +161,8 @@ class PipelineRewriter
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
     # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.full_type.dynamic_stream? || real_source.full_type.open_stream? ||
-                       real_source.full_type.bounded_stream? || inf_with_limit) &&
+                      (real_source.full_type!.dynamic_stream? || real_source.full_type!.open_stream? ||
+                       real_source.full_type!.bounded_stream? || inf_with_limit) &&
                       stages.all? { |s| AST.pipeline_fusible_stage?(s) }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -184,13 +184,13 @@ class PipelineRewriter
         # Use the source's collection type for the intermediate list (not
         # the terminal's scalar result type).
         list_proxy = node.dup
-        list_proxy.full_type = real_source.full_type
+        list_proxy.full_type = real_source.full_type!
         list_proxy.storage   = real_source.storage
         fused_loop = fuse_pipeline(list_proxy, real_source, stages, nil)
 
         # Create a new SMOOTH node for the terminal call
         outer_smooth = AST::BinaryOp.new(node.token, fused_loop, :SMOOTH, terminal.dup)
-        outer_smooth.full_type = node.full_type
+        outer_smooth.full_type = node.full_type!
         outer_smooth.storage   = node.storage
 
         return rewrite_pipeline(outer_smooth)
@@ -206,14 +206,14 @@ class PipelineRewriter
     # transpile_Smooth handles error propagation and snapshot semantics for CATCH.
     # The SMOOTH's full_type may already be unwrapped by CATCH, so also check
     # the callee's declared return type.
-    result_is_error = Type.new(node.full_type).error_union?
+    result_is_error = Type.new(node.full_type!).error_union?
     result_is_error ||= callee_returns_error?(rhs)
-    needs_try = Type.new(source.full_type).error_union?
+    needs_try = Type.new(source.full_type!).error_union?
 
     if rhs.is_a?(AST::FuncCall) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
-        lhs_node.full_type = Type.new(source.full_type).payload_type
+        lhs_node.full_type = Type.new(source.full_type!).payload_type
       end
 
       rhs.args.unshift(lhs_node)
@@ -223,11 +223,11 @@ class PipelineRewriter
     if rhs.is_a?(AST::Identifier) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
-        lhs_node.full_type = Type.new(source.full_type).payload_type
+        lhs_node.full_type = Type.new(source.full_type!).payload_type
       end
 
       call = AST::FuncCall.new(rhs.token, rhs.name, [lhs_node])
-      call.full_type = node.full_type
+      call.full_type = node.full_type!
       call.storage   = node.storage
       config = IntrinsicRegistry.sig(STD_LIB, T.unsafe(rhs).name)
       if config
@@ -240,7 +240,7 @@ class PipelineRewriter
     # CASE 4: x |> RECOVER(default) -> x OR default
     if rhs.is_a?(AST::RecoverOp)
       op = AST::BinaryOp.new(rhs.token, source.dup, :OR_RESCUE, rhs.default_expr.dup)
-      op.full_type = node.full_type
+      op.full_type = node.full_type!
       op.storage   = node.storage
       return op
     end
@@ -316,8 +316,8 @@ class PipelineRewriter
 
     # 2. Build loop body
     current_it = AST::Identifier.new(token, it_var)
-    if source.full_type
-      src_t = Type.new(source.full_type)
+    if source.full_type!
+      src_t = Type.new(source.full_type!)
       elem_t = if src_t.open_stream?
         src_t.open_stream_element_type
       elsif src_t.dynamic_stream? || src_t.bounded_stream?
@@ -331,7 +331,7 @@ class PipelineRewriter
     end
 
     stage_inits = []
-    res_type = smooth_node.full_type
+    res_type = smooth_node.full_type!
     # Loop-body nodes self-derive their type from structure
     # (Literal/BinaryOp/UnaryOp via AST::*#full_type; statements Void).
     loop_body = build_recursive_body(stages, terminal, current_it, res_var, token, stage_inits, res_type)
@@ -398,7 +398,7 @@ class PipelineRewriter
     end
 
     block = AST::BlockExpr.new(token, body, result)
-    block.full_type = smooth_node.full_type
+    block.full_type = smooth_node.full_type!
     block.storage   = smooth_node.storage
     block
   end
@@ -407,11 +407,11 @@ class PipelineRewriter
   def build_init(terminal, res_var, token, smooth_node)
     case terminal
     when AST::SumOp, AST::CountOp
-      is_int = Type.new(smooth_node.full_type).integer?
+      is_int = Type.new(smooth_node.full_type!).integer?
       val = AST::Literal.new(token, is_int ? :INT64 : :NUMBER, is_int ? 0 : 0.0)
-      val.full_type = smooth_node.full_type
+      val.full_type = smooth_node.full_type!
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
-      decl.full_type = smooth_node.full_type
+      decl.full_type = smooth_node.full_type!
       decl.storage   = :stack
       decl.slot_size = 1
       decl.instance_variable_set(:@var_used, true)
@@ -447,9 +447,9 @@ class PipelineRewriter
       [decl]
     when AST::ReduceOp
       decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
-      decl.full_type = terminal.full_type
+      decl.full_type = terminal.full_type!
       decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
       decl.var_mutated = true
       [decl]
@@ -457,9 +457,9 @@ class PipelineRewriter
       val = AST::Literal.new(token, :NIL, nil)
       val.full_type = Type.new(:NIL)
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
-      decl.full_type = smooth_node.full_type
+      decl.full_type = smooth_node.full_type!
       decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
       decl.var_mutated = true
       [decl]
@@ -487,11 +487,11 @@ class PipelineRewriter
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp,
          AST::UnnestOp, AST::DistinctOp
       lit = AST::ListLit.new(token, [], :stack)
-      lit.full_type = smooth_node.full_type
+      lit.full_type = smooth_node.full_type!
       decl = AST::VarDecl.new(token, res_var, nil, lit, true)
-      decl.full_type = smooth_node.full_type
+      decl.full_type = smooth_node.full_type!
       decl.storage   = smooth_node.storage
-      decl.slot_size = Type.new(decl.full_type).slot_size(schema_lookup)
+      decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
       [decl]
     else
@@ -521,12 +521,12 @@ class PipelineRewriter
       # position. Zig forbids StructType{...}.field in arithmetic/boolean contexts.
       sel_var = next_var("__sel")
       sel_decl = AST::VarDecl.new(stage.token, sel_var, nil, expr, false)
-      sel_decl.full_type = stage.expression.full_type
+      sel_decl.full_type = stage.expression.full_type!
       sel_decl.storage   = :stack
       sel_decl.slot_size = 0
       sel_decl.instance_variable_set(:@var_used, true)
       sel_ident = AST::Identifier.new(stage.token, sel_var)
-      sel_ident.full_type = stage.expression.full_type
+      sel_ident.full_type = stage.expression.full_type!
       rest = build_recursive_body(T.must(remaining), terminal, sel_ident, res_var, token, stage_inits, res_type)
       [sel_decl] + rest
     when AST::TapOp
@@ -684,8 +684,8 @@ class PipelineRewriter
       inner_it = AST::Identifier.new(token, inner_it_var)
       # inner_it iterates inner_expr's elements — its type IS that
       # element type (not a guess; derived from the flattened array).
-      if inner_expr.full_type
-        et = Type.new(inner_expr.full_type).element_type
+      if inner_expr.full_type!
+        et = Type.new(inner_expr.full_type!).element_type
         inner_it.full_type = et if et
       end
 
@@ -712,7 +712,7 @@ class PipelineRewriter
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       value = AST::CopyNode.new(token, current_val.dup)
-      value.full_type = current_val.full_type
+      value.full_type = current_val.full_type!
       call = AST::MethodCall.new(token, res_ident, "append", [value])
       call.full_type = Type.new(:Void)
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
@@ -720,7 +720,7 @@ class PipelineRewriter
       [call]
     else
       value = AST::CopyNode.new(token, current_val.dup)
-      value.full_type = current_val.full_type
+      value.full_type = current_val.full_type!
       call = AST::MethodCall.new(token, res_ident, "append", [value])
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
@@ -741,7 +741,7 @@ class PipelineRewriter
       div
     else
       res = AST::Identifier.new(token, res_var)
-      res.full_type = smooth_node.full_type
+      res.full_type = smooth_node.full_type!
       res.storage   = smooth_node.storage
       res
     end

@@ -639,15 +639,15 @@ class MIRLowering
   sig { params(mir: T.untyped, node: T.untyped).returns(T.untyped) }
   def apply_lowered_coercion(mir, node)
     return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
-    return mir unless node.typed? && node.coerced_type != node.full_type
+    return mir unless node.typed? && node.coerced_type != node.full_type!
     return mir if stack_fixed_array_coercion?(node)
-    mir_cast(mir, node.full_type, node.coerced_type) || mir
+    mir_cast(mir, node.full_type!, node.coerced_type) || mir
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stack_fixed_array_coercion?(node)
     return false unless node.is_a?(AST::ListLit) && node.storage == :stack
-    coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type
+    coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type!
     coerced_type&.fixed? == true
   end
 
@@ -726,13 +726,29 @@ class MIRLowering
 
   sig { params(state: BodyAssemblyState, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
-    marks.each do |mark|
+    marks.each_with_index do |mark, idx|
       stamp_source_line!(mark, line, col)
       state.out << mark
       state.out.concat(ownership_facts_for_structural_node(mark)) if mark.respond_to?(:mir?) && mark.mir?
       register_body_visible_names!(state, mark)
+      next unless mark.is_a?(MIR::TransferMark)
+      next if marks[idx + 1].is_a?(MIR::MoveMark) && marks[idx + 1].name.to_s == mark.name.to_s
+      next unless emitted_guarded_cleanup_for_name?(state.out, mark.name.to_s)
+
+      move = MIR::MoveMark.new(mark.name.to_s)
+      stamp_source_line!(move, line, col)
+      state.out << move
+      register_body_visible_names!(state, move)
     end
     nil
+  end
+
+  sig { params(nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
+  def emitted_guarded_cleanup_for_name?(nodes, name)
+    nodes.any? do |node|
+      next false unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+      node.name.to_s == name && node.cleanup_entry.has_moved_guard?
+    end
   end
 
   sig { params(marks: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
@@ -791,15 +807,20 @@ class MIRLowering
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
   def visible_alloc_names_for_transfer(result, mir)
     names = T.let(Set.new, T::Set[String])
-    each_mir_surface_node(result) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
-    each_mir_surface_node(mir) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
+    [result, mir].each do |root|
+      each_mir_surface_node(root) do |node|
+        name = ownership_source_name(node)
+        names << name if name
+      end
+    end
     names
   end
 
   sig { params(state: BodyAssemblyState, root: T.untyped).void }
   def register_body_visible_names!(state, root)
     each_mir_surface_node(root) do |node|
-      state.visible_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      name = ownership_source_name(node)
+      state.visible_alloc_names << name if name
       guarded_name = cleanup_node_move_guarded_name(node)
       state.visible_guarded_names << guarded_name if guarded_name
     end
@@ -813,11 +834,21 @@ class MIRLowering
     lowered_alloc_names = T.must(@lowered_alloc_names)
     lowered_guarded_cleanup_names = T.must(@lowered_guarded_cleanup_names)
     each_mir_surface_node(root) do |node|
-      lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      name = ownership_source_name(node)
+      lowered_alloc_names << name if name
       guarded_name = cleanup_node_move_guarded_name(node)
       lowered_guarded_cleanup_names << guarded_name if guarded_name
     end
     nil
+  end
+
+  sig { params(node: MIR::Node).returns(T.nilable(String)) }
+  def ownership_source_name(node)
+    return node.name.to_s if node.is_a?(MIR::AllocMark)
+    return nil unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+    return nil unless node.cleanup_entry.present?
+
+    node.name.to_s
   end
 
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
@@ -2074,8 +2105,8 @@ class MIRLowering
       ])
     end
 
-    msg_zig = node.message ? emit_expr(lower(node.message)) : nil
-    or_exit_scope(facts, msg_zig, MIR::Ident.new("error.CheatError"))
+    msg_mir = node.message ? lower(node.message) : nil
+    or_exit_scope(facts, msg_mir, MIR::Ident.new("error.CheatError"))
   end
 
   # Test-framework MIR lowering (lower_test_block, lower_assert_raises,
@@ -2359,7 +2390,7 @@ class MIRLowering
 
   sig { params(node: AST::FuncCall).returns(MIR::Call) }
   def lower_macro_print(node)
-    formats = node.args.map { |arg| zig_format_for_type(arg.full_type) }.join(" ")
+    formats = node.args.map { |arg| zig_format_for_type(arg.full_type!) }.join(" ")
     args_mir = node.args.map { |a| hoist_alloc(lower(a), a) }
     format_lit = MIR::Lit.new("\"#{formats}\\n\"")
     tuple_inner = args_mir.map { |a| emit_expr(a) }.join(", ")
@@ -2654,7 +2685,6 @@ class MIRLowering
     return true if ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create
     return true if value_alloc == sink_alloc && verifiable_owned_source?(ast_node)
     return true if value_alloc == sink_alloc && ownership_transfer_source?(ast_node)
-    return true if value_alloc == sink_alloc && existing_owned_source?(ast_node) && !verifiable_owned_source?(ast_node)
     return true if ownership_transfer_source_without_local_cleanup?(ast_node)
     owned_sink_value?(value, ast_node)
   end

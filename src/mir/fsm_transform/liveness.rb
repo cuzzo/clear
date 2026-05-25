@@ -215,10 +215,10 @@ module FsmTransform
     sig { params(stmt: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def stmt_decl_type(stmt)
       candidates = []
-      candidates << stmt.full_type
+      candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << stmt.type                if stmt.respond_to?(:type)
       candidates << stmt.declared_type       if stmt.respond_to?(:declared_type)
-      candidates << stmt.value&.full_type    if stmt.value
+      candidates << stmt.value&.full_type!(context: "FSM liveness declaration value") if stmt.value
       candidates.compact.first
     end
 

@@ -252,8 +252,20 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     "src/mir/lowering/variables.rb",
   ].freeze
 
+  TYPE_CONTRACT_SOURCE_DIRS = [
+    "src/annotator",
+    "src/backends",
+    "src/mir",
+  ].freeze
+
+  def scoped_source_files
+    TYPE_CONTRACT_SOURCE_DIRS.flat_map do |dir|
+      Dir[File.join(ARCH_ROOT, dir, "**/*.rb")]
+    end.sort.map { |path| path.sub(ARCH_ROOT + "/", "") }
+  end
+
   it "does not re-derive whether AST nodes have full_type in burned-down consumers" do
-    offenders = TYPE_CONTRACT_BURNDOWN_FILES.flat_map do |rel|
+    offenders = scoped_source_files.flat_map do |rel|
       source(rel).lines.each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
         next unless line.include?("respond_to?(:full_type)") || line.include?('respond_to?("full_type")')
@@ -266,17 +278,28 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       "#{offenders.join("\n")}"
   end
 
+  it "does not keep legacy full_type_or readers in scoped compiler code" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("full_type_or")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "scoped compiler code must use Locatable#full_type! rather than full_type_or:\n" \
+      "#{offenders.join("\n")}"
+  end
+
   it "does not use optional Type.from_node on post-annotation AST values in burned-down consumers" do
-    offenders = TYPE_CONTRACT_BURNDOWN_FILES.flat_map do |rel|
+    offenders = scoped_source_files.flat_map do |rel|
       source(rel).lines.each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
         next unless line.match?(/Type\.from_node\((?![^\)]*,\s*context:)/)
-        # Schema metadata is not an annotated AST value; it may still be
-        # normalized from raw schema payloads.
-        next if rel == "src/mir/lowering/expressions.rb" && line.include?("variant_data")
-        # Function declarations carry raw signature type fields; the
-        # forbidden path here is re-normalizing annotated AST values.
-        next if rel == "src/mir/escape_analysis.rb" && line.include?("return_type")
+        # Raw metadata is not an annotated AST value; it may still be
+        # normalized optionally because absence has semantic meaning there.
+        next if line.match?(/\b(?:variant_data|return_type|expected_type|current_expected_type|current_fn_return_type|type_info)\b/)
         "#{rel}:#{idx + 1}: #{line.strip}"
       end
     end
@@ -291,6 +314,72 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(ast).to include("def full_type!(context: \"post-annotation AST\")")
     expect(ast).to include('raise "#{context}: unresolved type info')
     expect(source("src/mir/pre_mir_type_check.rb")).to include("full_type is the :Untyped")
+  end
+
+  it "does not use optional Type.from_node on MIR AST consumers" do
+    allowed_raw_metadata = [
+      /current_expected_type/,
+      /current_fn_return_type/,
+      /return_type/,
+      /expected_type/,
+      /variant_data/,
+      /\btype_info\b/,
+    ]
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("Type.from_node(")
+        next if allowed_raw_metadata.any? { |pattern| line.match?(pattern) }
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR AST consumers must use Type.from_node! / Locatable#full_type!; optional Type.from_node is only for raw type metadata:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "uses hard AST type reads in MIR consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        # Producer writes/copies are the sanctioned place for synthetic nodes
+        # to receive already-authoritative annotation facts.
+        next if line.match?(/\.full_type\s*=/)
+        # PreMirTypeCheck is the boundary that rejects the :Untyped sentinel.
+        next if rel == "src/mir/pre_mir_type_check.rb"
+        # MIR AllocMark exposes a Type payload through #full_type; this is not
+        # an AST annotation read and has no bang accessor.
+        next if rel == "src/mir/mir_checker.rb" && line.include?("alloc_marks.first.full_type")
+        # OwnershipGraph::Node exposes its stored Type payload through
+        # #full_type; this is not an AST annotation read.
+        next if rel == "src/mir/ownership_graph.rb" && line.include?("source.full_type")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR AST consumers must use Locatable#full_type!; plain .full_type is only for producer writes or MIR Type payloads:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "uses hard AST type reads in backend consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        next if line.match?(/\.full_type\s*=/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Backend AST consumers must use Locatable#full_type!; plain .full_type is only for producer writes:\n" \
+      "#{offenders.join("\n")}"
   end
 end
 

@@ -356,7 +356,7 @@ class AutoUnifier
     # validation). The tolerant body-pass populates type_info on each
     # constraint source before this unifier runs.
     @type_of = T.let(type_of || ->(node) {
-      node.respond_to?(:full_type) ? node.full_type : nil
+      node.is_a?(AST::Locatable) ? node.full_type : nil
     }, T.untyped)
   end
 

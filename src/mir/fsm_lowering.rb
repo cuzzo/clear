@@ -112,7 +112,7 @@ module FsmLowering
 
       result_mir = []
       if last_step
-        expr_type = last_step[:expr].full_type
+        expr_type = last_step[:expr].full_type!
         expr_t = expr_type.is_a?(Type) ? expr_type : (Type.new(expr_type) rescue nil)
         result_alloc = escaping_value_alloc(expr_t)
         last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
@@ -220,8 +220,8 @@ module FsmLowering
   sig { params(node: AST::Identifier).returns(T::Boolean) }
   def fsm_owned_transfer_identifier?(node)
     @current_bindings = T.let(@current_bindings, T.untyped)
-    ti = Type.from_node(node) rescue nil
-    return false unless ti && T.unsafe(self).ownership_tracked_transfer_type?(ti)
+    ti = node.full_type!(context: "FSM owned transfer identifier")
+    return false unless T.unsafe(self).ownership_tracked_transfer_type?(ti)
     entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
     (entry.present? && entry.alloc == :heap) || node.symbol&.heap_storage? == true
   end
@@ -264,7 +264,7 @@ module FsmLowering
       return MIR::Let.new(step[:binding], mir, false, nil, nil)
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
-    expr_type = step[:expr].full_type
+    expr_type = step[:expr].full_type!
     is_void_step = ast_void_type?(expr_type)
     MIR::ExprStmt.new(mir, !is_void_step)
   end

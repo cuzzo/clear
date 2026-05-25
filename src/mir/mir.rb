@@ -2465,6 +2465,10 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+    end
   end
 
   # Lambda expression (anonymous function pointer via struct trick).

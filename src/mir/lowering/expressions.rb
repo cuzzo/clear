@@ -178,7 +178,7 @@ module MIRLoweringExpressions
 
     # Power operator
     if node.op == :POW
-      left_type = node.left.full_type
+      left_type = node.left.full_type!
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
       type_arg = resolved == :Int64 ? "i64" : "f64"
       return MIR::Call.new(
@@ -194,7 +194,7 @@ module MIRLoweringExpressions
     # target can dispatch to MOD_I64 via MIR::InlineBc instead of parsing a
     # "@mod" callee string at codegen time.
     if node.op == :MOD
-      left_type = node.left.full_type
+      left_type = node.left.full_type!
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
       if resolved == :Int64
         return emit_builtin(:intMod, [left, right])
@@ -202,9 +202,9 @@ module MIRLoweringExpressions
     end
 
     # String comparison
-    if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
-      left_ti  = Type.new(node.left.full_type)
-      right_ti = Type.new(node.right.full_type)
+    if Type.new(node.left.full_type!).string? || Type.new(node.right.full_type!).string?
+      left_ti  = Type.new(node.left.full_type!)
+      right_ti = Type.new(node.right.full_type!)
 
       # Symbol == symbol: O(1) pointer+length comparison. No allocation possible,
       # so no hoist_alloc needed. Falls through to content comparison if either
@@ -219,8 +219,8 @@ module MIRLoweringExpressions
 
       # General string comparison: hoist allocating sub-expressions so heap strings get cleanup.
       # (e.g. ASSERT f() == "x" -- f() returns a heap string that needs freeing)
-      left = place_value_for_destination(left, node.left, :heap, node.left.full_type) if node.left.is_a?(AST::BinaryOp) && node.left.op == :OR_RESCUE
-      right = place_value_for_destination(right, node.right, :heap, node.right.full_type) if node.right.is_a?(AST::BinaryOp) && node.right.op == :OR_RESCUE
+      left = place_value_for_destination(left, node.left, :heap, node.left.full_type!) if node.left.is_a?(AST::BinaryOp) && node.left.op == :OR_RESCUE
+      right = place_value_for_destination(right, node.right, :heap, node.right.full_type!) if node.right.is_a?(AST::BinaryOp) && node.right.op == :OR_RESCUE
       left = hoist_alloc(left, node.left)
       right = hoist_alloc(right, node.right)
       cmp_node = case node.op
@@ -237,8 +237,8 @@ module MIRLoweringExpressions
     # Integer division — same rationale as :MOD above (registry instead of
     # raw "@divTrunc" callee string).
     if node.op == :DIV
-      left_ti = node.left.full_type
-      right_ti = node.right.full_type
+      left_ti = node.left.full_type!
+      right_ti = node.right.full_type!
       if left_ti&.integer? && right_ti&.integer?
         return emit_builtin(:intDiv, [left, right])
       end
@@ -291,8 +291,8 @@ module MIRLoweringExpressions
     # type and pointing at MATCH (the canonical CLEAR pattern for
     # discriminating tagged values).
     if %i[EQ NEQ].include?(node.op)
-      left_ti = node.left.full_type
-      right_ti = node.right.full_type
+      left_ti = node.left.full_type!
+      right_ti = node.right.full_type!
       left_resolved = left_ti.is_a?(Type) ? left_ti.resolved : (left_ti && Type.new(left_ti.to_s).resolved)
       right_resolved = right_ti.is_a?(Type) ? right_ti.resolved : (right_ti && Type.new(right_ti.to_s).resolved)
       union_lhs = left_resolved && @union_schemas&.key?(left_resolved)
@@ -381,7 +381,7 @@ module MIRLoweringExpressions
     # COLLECT only needs to call .next() to read the final value.
     if rhs.is_a?(AST::CollectOp)
       left = lower(node.left)
-      ft = node.left.full_type
+      ft = node.left.full_type!
       # Collection observable (DISTINCT producing `~T[]@set:observable`):
       # COLLECT must yield an owned ArrayList(T), not the StreamSetSnapshot
       # that `next()` returns. Mirrors lower_next_expr's collection branch
@@ -448,7 +448,7 @@ module MIRLoweringExpressions
     # Capture snapshot for CATCH blocks: store LHS before the failable call
     snapshot_stmts = nil
     if @current_fn_has_catch
-      lhs_type = node.left.full_type
+      lhs_type = node.left.full_type!
       if lhs_type
         t = Type.new(lhs_type)
         unless t.void? || t.error_union?
@@ -470,14 +470,14 @@ module MIRLoweringExpressions
     call_mir = if rhs.is_a?(AST::Identifier)
       # x |> f -> f(x)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
-      synthetic.full_type = node.full_type
+      synthetic.full_type = node.full_type!(context: "pipeline synthetic call")
       synthetic.storage = node.storage
       synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       lower_func_call(synthetic)
     elsif rhs.is_a?(AST::FuncCall)
       # x |> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
-      synthetic.full_type = node.full_type
+      synthetic.full_type = node.full_type!(context: "pipeline synthetic call")
       synthetic.storage = node.storage
       synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type
@@ -537,8 +537,8 @@ module MIRLoweringExpressions
       if facts.left_is_error
         ex = node.right
         exit_facts = or_exit_facts(ex, facts.line)
-        msg_zig = ex.message ? emit_expr(lower(ex.message)) : nil
-        catch_block = or_exit_scope(exit_facts, msg_zig, MIR::Ident.new("__exit_err"))
+        msg_mir = ex.message ? lower(ex.message) : nil
+        catch_block = or_exit_scope(exit_facts, msg_mir, MIR::Ident.new("__exit_err"))
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
       return left
@@ -749,16 +749,23 @@ module MIRLoweringExpressions
     )
   end
 
+  sig { params(field: String).returns(MIR::FieldGet) }
+  def runtime_error_field(field)
+    T.bind(self, MIRLowering) rescue nil
+    MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new(runtime_binding_name), "__error"), field)
+  end
+
   sig { params(facts: OrExitFacts).returns(T::Array[T.untyped]) }
   def or_exit_error_update_stmts(facts)
     T.bind(self, MIRLowering) rescue nil
     stmts = T.let([], T::Array[T.untyped])
     if facts.kind
-      stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.kind = .#{facts.kind}", "or_exit_kind")
+      stmts << MIR::Set.new(runtime_error_field("kind"), MIR::Ident.new(".#{facts.kind}"))
       if facts.error_name
-        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.error_name = @intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+        name_id = MIR::InlineZig.new("@intFromEnum(ErrorName.#{facts.error_name})", "or_exit_type")
+        stmts << MIR::Set.new(runtime_error_field("error_name"), name_id)
       elsif facts.clear_type
-        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.error_name = 0", "or_exit_clear_type")
+        stmts << MIR::Set.new(runtime_error_field("error_name"), MIR::Lit.new("0"))
       end
     end
     stmts
@@ -775,14 +782,14 @@ module MIRLoweringExpressions
     })
   end
 
-  sig { params(facts: OrExitFacts, msg_zig: T.nilable(String), return_value: MIR::Node).returns(MIR::ScopeBlock) }
-  def or_exit_scope(facts, msg_zig, return_value)
+  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node), return_value: MIR::Node).returns(MIR::ScopeBlock) }
+  def or_exit_scope(facts, msg_mir, return_value)
     T.bind(self, MIRLowering) rescue nil
     stmts = or_exit_error_update_stmts(facts)
-    stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.message = #{msg_zig}", "or_exit_msg") if msg_zig
-    stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.clear_line = #{facts.line}", "or_exit_line")
+    stmts << MIR::Set.new(runtime_error_field("message"), msg_mir) if msg_mir
+    stmts << MIR::Set.new(runtime_error_field("clear_line"), MIR::Lit.new(facts.line.to_s))
     stmts << MIR::ReturnStmt.new(return_value)
-    MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
+    MIR::ScopeBlock.new(stmts.map { |s| (s.is_a?(MIR::ReturnStmt) || s.is_a?(MIR::Set)) ? s : MIR::ExprStmt.new(s, false) })
   end
 
   sig { params(node: AST::BinaryOp).returns(BinaryIntArithmeticFacts) }
@@ -834,7 +841,7 @@ module MIRLoweringExpressions
 
     if node.target.metatype == :hashmap
       target_var = node.target.is_a?(AST::Identifier) ? node.target.name : nil
-      map_ft = Type.new(node.target.full_type)
+      map_ft = Type.new(node.target.full_type!)
       kind = map_ft.numeric_map? ? :numeric_map : :string_map
       op = INDEX_OPS.dig(kind, :get)
 
@@ -1001,8 +1008,26 @@ module MIRLoweringExpressions
   def struct_field_wants_slice?(ft, k, node)
     T.bind(self, MIRLowering) rescue nil
     return true if node.borrowed_field_names&.include?(k)
+    aggregate_field_wants_dynamic_slice?(ft)
+  end
+
+  sig { params(ft: T.untyped).returns(T::Boolean) }
+  def aggregate_field_wants_dynamic_slice?(ft)
     return false unless ft.is_a?(Type)
     ft.array? && ft.dynamic? && !ft.collection? && !ft.string?
+  end
+
+  sig { params(val: T.untyped, ft: T.untyped, borrowed_field: T::Boolean, sink_alloc: Symbol).returns(T.untyped) }
+  def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc)
+    return val unless aggregate_field_wants_dynamic_slice?(ft)
+    return MIR::ItemsAccess.new(val, true) if borrowed_field
+
+    T.cast(T.unsafe(self).with_ownership_consumption(
+      MIR::OwnedSlice.new(val, sink_alloc),
+      T.unsafe(self).mir_ident_names(val),
+      "MIR::OwnedSlice",
+      target_alloc: sink_alloc,
+    ), MIR::OwnedSlice)
   end
 
   sig { params(node: AST::StructLit).returns(T.untyped) }
@@ -1016,14 +1041,14 @@ module MIRLoweringExpressions
 
     fields = node.fields.map { |k, v|
       ft = field_types[k.to_s]
-      borrowed_field = !!node.borrowed_field_names&.include?(k.to_s)
+      borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
       field_node = borrowed_field && v.is_a?(AST::CopyNode) ? v.value : v
       field_sink_alloc = aggregate_field_sink_alloc(ft, field_node, struct_alloc)
       move_mark_field!(field_node)
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(ft) do
         if borrowed_field
-          lower(field_node)
+          aggregate_dynamic_slice_field_value(lower(field_node), ft, true, field_sink_alloc)
         elsif rc_retain_needed?(field_node)
           make_rc_retain(field_node)
         elsif field_node.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
@@ -1031,6 +1056,9 @@ module MIRLoweringExpressions
             field_node, err_cleanup: true)
         else
           field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, ft)
+          if struct_field_wants_slice?(ft, k, node)
+            field_value = aggregate_dynamic_slice_field_value(field_value, ft, borrowed_field, field_sink_alloc)
+          end
           field_alloc = mir_owned_alloc(field_value)
           lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
           if ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
@@ -1043,13 +1071,10 @@ module MIRLoweringExpressions
         end
         end
       end
-      if struct_field_wants_slice?(ft, k, node)
-        val = MIR::ItemsAccess.new(val, true)
-      end
       # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
-        zig_t = transpile_type(v.full_type.resolved.to_s)
+        zig_t = transpile_type(v.full_type!.resolved.to_s)
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = T.cast(with_ownership_consumption(
@@ -1129,6 +1154,7 @@ module MIRLoweringExpressions
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(ft) do
         materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
+        materialized = aggregate_dynamic_slice_field_value(materialized, ft, false, field_sink_alloc)
         hoist_alloc(materialized, v, err_cleanup: true)
         end
       end
@@ -1295,7 +1321,7 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     s = lower(node.start)
     e = lower(node.finish)
-    elem_type = node.full_type.tense_type&.element_type&.resolved
+    elem_type = node.full_type!.tense_type&.element_type&.resolved
     if node.inclusive
       MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")), elem_type)
     else
@@ -1323,7 +1349,7 @@ module MIRLoweringExpressions
       MIR::BinOp.new("+", MIR::Cast.new(end_expr, "usize", :intCast), MIR::Lit.new("1"))
     end
 
-    elem_zig = node.target.full_type.element_type ? Type.new(node.target.full_type.element_type).zig_type : "u8"
+    elem_zig = node.target.full_type!.element_type ? Type.new(node.target.full_type!.element_type).zig_type : "u8"
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
@@ -1587,7 +1613,7 @@ module MIRLoweringExpressions
     ti = v.full_type!(context: "field move mark")
     tracked = ti && !ti.primitive? && !ti.void? && !ti.any? &&
               (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup))
-    return unless AST.moved?(v) || (tracked && v.symbol&.heap_storage?)
+    return unless tracked
     nm = zig_safe_name(v.name)
     nm = @fn_name_rename_map[nm] if @fn_name_rename_map&.key?(nm)
     entry = @current_bindings[v.name.to_s] || CleanupEntry::NONE
@@ -1616,7 +1642,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::ShareNode).returns(T.untyped) }
   def lower_share(node)
     T.bind(self, MIRLowering) rescue nil
-    source_ti = node.value.full_type
+    source_ti = node.value.full_type!
     source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
     raise "Internal: lower_share requires typed source" unless source_ti
 
@@ -1648,7 +1674,7 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     inner = with_decl_alloc(:heap) do
       value = lower(node.value)
-      place_value_for_destination(value, node.value, :heap, node.value.full_type)
+      place_value_for_destination(value, node.value, :heap, node.value.full_type!)
     end
     base_type = node.value.resolved_type.to_s
     zig_base = transpile_type(base_type)
@@ -1689,7 +1715,7 @@ module MIRLoweringExpressions
   def lower_link(node)
     T.bind(self, MIRLowering) rescue nil
     inner = lower(node.value)
-    ti = node.value.full_type
+    ti = node.value.full_type!
     base = transpile_type(ti.resolved.to_s)
     func = ti.shared? ? "arcDowngrade" : "rcDowngrade"
     MIR::RcDowngrade.new(inner, base, func)
@@ -1699,7 +1725,7 @@ module MIRLoweringExpressions
   def lower_resolve(node)
     T.bind(self, MIRLowering) rescue nil
     inner = lower(node.value)
-    ti = node.value.full_type
+    ti = node.value.full_type!
     base = transpile_type(ti.resolved.to_s)
     source = ti.link_source || :multiowned
     func = source == :shared ? "weakArcUpgrade" : "weakRcUpgrade"
@@ -1709,7 +1735,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::FreezeNode).returns(MIR::FreezeExpr) }
   def lower_freeze(node)
     T.bind(self, MIRLowering) rescue nil
-    ti = node.value.full_type
+    ti = node.value.full_type!
     base = ti.resolved.to_s.sub(/^\?/, '')
     zig_base = transpile_type(base)
     inner = lower(node.value)

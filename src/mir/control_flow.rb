@@ -677,7 +677,7 @@ class OwnershipDataflow
   # Create an OwnerEntry for a new declaration from its type info.
   sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
-    ti = Type.from_node(node)
+    ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "ownership dataflow owner") : nil
     is_heap = node.is_a?(AST::Locatable) && node.heap_storage?
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
     needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
@@ -973,8 +973,7 @@ class OwnershipDataflow
   # ownership (handled by was_moved from the annotator).
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = Type.from_node(ident)
-    return true unless ti  # unknown type, assume Copy (safe)
+    ti = ident.full_type!(context: "ownership dataflow copy type")
     # Heap-allocated strings own their backing buffer; RETURN/move
     # transfers ownership to the receiver (just like a heap-allocated
     # collection or struct). Rodata / frame / param strings are still
@@ -991,7 +990,7 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
-    ti = Type.from_node(node)
+    ti = node.full_type!(context: "ownership dataflow field move")
     Type.indirect_type?(ti)
   rescue
     false
@@ -1420,7 +1419,7 @@ module LoopFrameAnalysis
   sig { params(loop_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.loop_capture_frame_alloc?(loop_node, schema_lookup = nil)
     return false unless loop_node.is_a?(AST::WhileBindLoop)
-    cond_t = Type.from_node(loop_node.condition)
+    cond_t = loop_node.condition.full_type!(context: "loop capture condition")
     inner = cond_t&.wrapped_type
     return false unless inner.is_a?(Type)
     inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
@@ -1735,7 +1734,7 @@ class BorrowChecker
     return if source.is_a?(AST::CopyNode)
 
     if source.is_a?(AST::Identifier)
-      return if source.full_type.shared?
+      return if source.full_type!.shared?
       names << source.name.to_s
       return
     end
@@ -1781,7 +1780,7 @@ class BorrowChecker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
-    ti = Type.from_node(node)
+    ti = node.full_type!(context: "ownership dataflow field move")
     Type.indirect_type?(ti)
   rescue
     false
@@ -1789,7 +1788,7 @@ class BorrowChecker
 
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = ident.full_type
+    ti = ident.full_type!
     is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end

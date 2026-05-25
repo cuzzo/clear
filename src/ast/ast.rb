@@ -716,6 +716,8 @@ module AST
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
+      ft = Type.new(ft) unless ft.nil? || ft.is_a?(Type)
+      raise "#{context}: missing type info for #{self.class}" unless ft
       raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
       ft
     end

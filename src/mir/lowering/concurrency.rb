@@ -193,7 +193,7 @@ module MIRLoweringConcurrency
           elsif code.strip.end_with?(";")
             code
           elsif code.strip.end_with?("}")
-            expr_type = expr.full_type
+            expr_type = expr.full_type!
             is_void_expr = ast_void_type?(expr_type)
             is_void_expr = false if mir.is_a?(MIR::BgBlock)
             is_void_expr = false if code.strip.match?(/\A__bg\d+:/)
@@ -260,7 +260,7 @@ module MIRLoweringConcurrency
     @bg_block_counter = (@bg_block_counter || 0) + 1
     id = @bg_block_counter - 1
 
-    tense_t = Type.new(node.full_type)
+    tense_t = Type.new(node.full_type!)
     inner_t = Type.new(tense_t.tense_type)
     inner_zig = inner_t.zig_type
     promise_zig = tense_t.zig_type
@@ -380,7 +380,7 @@ module MIRLoweringConcurrency
           elsif code.strip.end_with?(";") || code.strip.end_with?("}")
             code
           else
-            expr_type = step[:expr].full_type
+            expr_type = step[:expr].full_type!
             is_void_step = ast_void_type?(expr_type)
             is_void_step ? "#{code};" : "_ = #{code};"
           end
@@ -608,7 +608,7 @@ module MIRLoweringConcurrency
     id = @stream_gen_counter - 1
 
     expected_t = Type.from_node(@current_expected_type)
-    tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type)
+    tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type!)
     is_inf = tense_t.inf_stream?
     stream_zig = tense_t.zig_type
 
@@ -758,7 +758,7 @@ module MIRLoweringConcurrency
     stream_local = @current_stream_local || "__stream_local"
     lowered = with_decl_alloc(:heap) do
       value = lower(node.expr)
-      place_value_for_destination(value, node.expr, :heap, node.expr.full_type)
+      place_value_for_destination(value, node.expr, :heap, node.expr.full_type!)
     end
     lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if lowered && mir_allocates?(lowered)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
@@ -795,8 +795,8 @@ module MIRLoweringConcurrency
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(NextExprPlan) }
   def next_expr_plan(node, alloc_sym)
     T.bind(self, MIRLowering) rescue nil
-    promise_type = Type.new(node.expr.full_type)
-    result_type = Type.from_node(node) || Type.new(:Untyped)
+    promise_type = Type.new(node.expr.full_type!)
+    result_type = node.full_type!(context: "NEXT result")
     source_kind = if promise_type.promise_list?
       :promise_list
     elsif promise_type.observable_array_future?

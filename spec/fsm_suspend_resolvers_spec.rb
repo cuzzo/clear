@@ -98,7 +98,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
     # via lowering.lower(); our double returns the input unchanged.
     let(:promise_ast) {
       ast = Object.new
-      def ast.full_type; nil; end
+      def ast.full_type; Type.new(:"~Int64"); end
       ast
     }
 

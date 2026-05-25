@@ -57,7 +57,7 @@ module FsmTransform
 
       sig { returns(T.untyped) }
       def result_type
-        call_node&.full_type
+        call_node ? Type.from_node!(call_node, context: "FSM IO suspend result") : nil
       end
     end
     NextSuspend  = Struct.new(:promise_ast, :result_var, :next_index) do
@@ -75,7 +75,7 @@ module FsmTransform
 
       sig { returns(T.untyped) }
       def result_type
-        promise_ft = promise_ast&.full_type
+        promise_ft = promise_ast ? Type.from_node!(promise_ast, context: "FSM NEXT suspend promise") : nil
         return nil unless promise_ft
 
         pt = Type.new(promise_ft)
@@ -398,12 +398,13 @@ module FsmTransform
           tok = stmt.left.token
           bind = AST::BindExpr.new(tok, synth_name, nil, stmt.left)
           bind.mode = :decl
-          bind.full_type = stmt.left.full_type          out << bind
+          bind.full_type = stmt.left.full_type!(context: "FSM pipeline split")
+          out << bind
 
           ident = AST::Identifier.new(tok, synth_name)
-          ident.full_type = stmt.left.full_type
+          ident.full_type = stmt.left.full_type!(context: "FSM pipeline split")
           rewritten = AST::BinaryOp.new(stmt.token, ident, stmt.op, stmt.right)
-          rewritten.full_type = stmt.full_type
+          rewritten.full_type = stmt.full_type!(context: "FSM pipeline split")
           out << rewritten
         else
           out << stmt

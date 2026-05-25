@@ -117,8 +117,7 @@ class MIRPass
     # so cross-module imports and later lowering see the same ownership facts
     # as the FunctionDef.
     @fn_nodes.each_value do |fn|
-      sig = fn.full_type
-      sig = sig.raw if sig.is_a?(Type) && sig.raw.is_a?(FunctionSignature)
+      sig = FunctionSignature.from_function_def(fn)
       FunctionSignature.sync_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
     end
     pass_state.mark!(:mir_pass_complete)
@@ -240,9 +239,8 @@ class MIRPass
   def indexed_assignment_lowers_through_runtime?(node)
     return false unless node.name.is_a?(AST::GetIndex)
     target_node = node.name.target
-    ti = Type.from_node(target_node)
-    return false unless ti
-    return false if ti.untyped?
+    return false unless target_node.is_a?(AST::Locatable)
+    ti = target_node.full_type!(context: "indexed assignment target")
     return false if ti.fixed? && !ti.string? && !ti.collection?
 
     kind = ti.dispatch_key
@@ -314,8 +312,7 @@ class MIRPass
   def return_expr_needs_allocator?(fn, expr)
     node = unwrap_return_expr(expr)
     return true if node.is_a?(AST::CopyNode)
-    ti = Type.from_node(node)
-    ti = ti.success_type if ti
+    ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "return allocator expression").success_type : nil
     return false if ti&.any_rc? || ti&.any_sync?
 
     if node.is_a?(AST::Identifier)
@@ -662,7 +659,7 @@ class MIRPass
     entry = bindings[name]
     return unless entry
 
-    ti = ident.full_type
+    ti = ident.full_type!
     owns_transferable_value = ti && ti.needs_cleanup?(@schema_lookup)
     return unless entry.needs_cleanup? || owns_transferable_value
 
@@ -687,7 +684,7 @@ class MIRPass
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
-    ti = Type.from_node(node)
+    ti = node.full_type!(context: "MIR pass field move")
     Type.indirect_type?(ti)
   rescue
     false
@@ -706,7 +703,7 @@ class MIRPass
     # otherwise leak). needs_cleanup? alone misses the moved-out case.
     return unless entry.needs_cleanup? || entry.alloc == :heap
 
-    ti = stmt.full_type
+    ti = stmt.full_type!
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
   end
