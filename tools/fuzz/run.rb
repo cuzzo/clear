@@ -81,12 +81,15 @@ if opts[:quarantine]
                     .reject(&:empty?)
                     .map(&:to_sym)
                     .to_set
+  before_quarantine = tuples.length
   tuples =
     if opts[:quarantine] == :skip
       tuples.reject { |t| quarantined.include?(t[:template]) }
     else
       tuples.select { |t| quarantined.include?(t[:template]) }
     end
+  skipped = before_quarantine - tuples.length
+  puts "[fuzz] quarantine filter=#{opts[:quarantine]} skipped=#{skipped} selected=#{tuples.length}"
 end
 if opts[:shard]
   idx, total = opts[:shard]
@@ -109,6 +112,11 @@ tuples.each do |tuple|
 end
 
 puts "[fuzz] emitted #{emitted.size} programs to #{opts[:out]} (seed=#{opts[:seed]}, mode=#{opts[:mode]}, in_dev=#{in_dev_count})"
+puts "[fuzz] skipped in_dev=#{in_dev_count}"
+if in_dev_count.positive?
+  warn "[fuzz] ERROR: :in_dev cells are not allowed in the required fuzz matrix"
+  exit 1
+end
 
 if opts[:generate_only]
   exit 0
@@ -343,9 +351,5 @@ puts "=" * 60
   end
 end
 
-ok = if opts[:quarantine] == :only
-       true
-     else
-       fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
-     end
+ok = fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
 exit ok ? 0 : 1

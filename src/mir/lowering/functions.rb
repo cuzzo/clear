@@ -987,6 +987,18 @@ module MIRLoweringFunctions
     resolved.is_a?(Symbol) ? resolved : nil
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(FunctionSignature)) }
+  def matched_call_signature(node)
+    return nil unless node.respond_to?(:matched_signature)
+
+    raw = node.matched_signature
+    unwrapped = FunctionSignature.unwrap(raw)
+    return unwrapped if unwrapped
+    return FunctionSignature.from_function_def(raw) if raw.is_a?(AST::FunctionDef)
+
+    nil
+  end
+
   sig { params(facts: CallArgFacts).returns(T.untyped) }
   def lower_call_arg_from_facts(facts)
     T.bind(self, MIRLowering) rescue nil
@@ -1078,6 +1090,7 @@ module MIRLoweringFunctions
 
     # Standard call
     callee_sig = fn_sig_for(node.name, bang_alias: true)
+    callee_sig ||= matched_call_signature(node)
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx))
     end
@@ -1137,6 +1150,7 @@ module MIRLoweringFunctions
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     callee_sig = fn_sig_for(node.name)
+    callee_sig ||= matched_call_signature(node)
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
     end

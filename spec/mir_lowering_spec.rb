@@ -1774,7 +1774,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::WhileStmt)
       expect(result.capture).to eq("node")
       body_zig = result.body.map { |stmt| emit(stmt) }.join("\n")
-      expect(body_zig).to include("CheatLib.rcRelease")
+      expect(emit(result.cond)).to include("CheatLib.weakRcUpgrade")
       expect(body_zig).to include("saveLoopMark")
       expect(body_zig).to include("restoreLoopMark")
       expect(body_zig).not_to include("checkYield")
@@ -1789,7 +1789,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::IfBindStmt)
       then_zig = result.then_body.map { |stmt| emit(stmt) }.join("\n")
-      expect(then_zig).to include("defer CheatLib.rcRelease")
+      expect(emit(result.bindings.first[:expr])).to include("CheatLib.weakRcUpgrade")
       expect(then_zig).to include("break;")
     end
 
@@ -2879,7 +2879,7 @@ RSpec.describe MIRLowering do
     fixture_expectations = {
       "transpile-tests/253_while_bind.cht" => {
         description: "WHILE bind and RESOLVE traversal",
-        required_patterns: [/while \(items\.pop\(\)\) \|v\|/, /CheatLib\.rcRelease/]
+        required_patterns: [/while \(items\.pop\(\)\) \|v\|/, /CheatLib\.weakRcUpgrade/, /CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&__tmp_/]
       },
       "transpile-tests/305_observable_collect.cht" => {
         description: "observable COLLECT wait/destroy cleanup",

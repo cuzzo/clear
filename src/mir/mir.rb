@@ -1981,7 +1981,12 @@ module MIR
         name = break_stmt.value.name.to_s
         mark = body&.find { |stmt| stmt.is_a?(AllocMark) && stmt.name.to_s == name }
         transfer = body&.find { |stmt| stmt.is_a?(TransferMark) && stmt.name.to_s == name }
-        return OwnershipEffect.owned(alloc: mark.alloc, target_var: name) if mark && transfer
+        if mark && transfer
+          let = body&.find { |stmt| stmt.is_a?(Let) && stmt.name.to_s == name }
+          init_effect = let&.init&.respond_to?(:ownership_effect) ? let.init.ownership_effect : OwnershipEffect.none
+          cleanup_kind = init_effect.produces_owned ? (init_effect.cleanup_kind || :uniform) : :uniform
+          return OwnershipEffect.owned(alloc: mark.alloc, cleanup_kind: cleanup_kind, target_var: name)
+        end
       end
       break_stmt.value.ownership_effect
     end

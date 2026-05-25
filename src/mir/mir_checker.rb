@@ -203,9 +203,18 @@ class MIRChecker
     ownership_fact_nodes = []
 
     walk_mir(fn_def.body) do |node|
+      if node.respond_to?(:ownership_consumption) &&
+         node.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+        structural_ownership_nodes << node
+      end
+
       case node
       when MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
         ownership_fact_nodes << node
+        if node.is_a?(MIR::OwnedTransfer)
+          transfers << node.name.to_s
+          return_transfers << node.name.to_s if node.target == :return
+        end
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup, MIR::ErrCleanup
@@ -246,8 +255,6 @@ class MIRChecker
         all_zig_nodes << node unless all_zig_nodes.include?(node)
       when MIR::RawZig
         all_zig_nodes << node unless all_zig_nodes.include?(node)
-      when MIR::ShardedMapPut, MIR::ReassignWithCleanup
-        structural_ownership_nodes << node
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new
@@ -301,40 +308,48 @@ class MIRChecker
 
   sig { params(nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def verify_structural_ownership_contracts!(nodes, transfers, allocs)
-    nodes.each do |node|
-      next unless stdlib_takes_ownership?(node)
+    nodes.uniq.each do |node|
+      consumed = structural_consumed_names(node)
+      next if consumed.empty?
 
-      value = node.respond_to?(:value) ? node.value : nil
-      if value.is_a?(MIR::Ident)
-        name = value.name.to_s
-        next unless allocs.key?(name)
-      elsif !allocating_expr?(value)
-        next
-      else
-        @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
-          "structural ownership sink takes a value, but the source owner is not a named MIR binding")
-        next
-      end
-
-      name = value.name.to_s
-      unless transfers.include?(name)
-        @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
-          "structural ownership sink consumes '#{name}' but no MIR::TransferMark exists for that binding")
-      end
-
-      mark = allocs[name]&.first
       sink_alloc = if node.is_a?(MIR::ReassignWithCleanup)
         node.alloc
       elsif node.respond_to?(:resolved_allocs) && node.resolved_allocs.is_a?(Hash)
         node.resolved_allocs[:val_alloc]
       end
-      next unless mark&.alloc.is_a?(Symbol) && sink_alloc.is_a?(Symbol)
-      next if mark.alloc == sink_alloc
 
-      @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
-        "structural ownership sink consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \
-        "owned transfer allocator is incoherent")
+      consumed.each do |name|
+        next unless allocs.key?(name)
+
+        unless transfers.include?(name)
+          @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
+            "structural ownership sink consumes '#{name}' but no MIR::TransferMark exists for that binding")
+        end
+
+        mark = allocs[name]&.first
+        next unless mark&.alloc.is_a?(Symbol) && sink_alloc.is_a?(Symbol)
+        next if mark.alloc == sink_alloc
+
+        @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
+          "structural ownership sink consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \
+          "owned transfer allocator is incoherent")
+      end
     end
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def structural_consumed_names(node)
+    fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+    return fact.names.map(&:to_s).uniq if fact.is_a?(MIR::OwnershipConsumptionFact)
+    return [] unless stdlib_takes_ownership?(node)
+
+    value = node.respond_to?(:value) ? node.value : nil
+    return [value.name.to_s] if value.is_a?(MIR::Ident)
+    if allocating_expr?(value)
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
+        "structural ownership sink takes a value, but the source owner is not a named MIR binding")
+    end
+    []
   end
 
   sig { params(body: T::Array[T.untyped]).void }
@@ -374,7 +389,9 @@ class MIRChecker
     when MIR::MoveMark
       linear_move_mark!(stmt.name.to_s, state)
     when MIR::ReturnStmt
-      check_linear_expr_uses!(stmt.value, state, state.pending_return_transfers)
+      return_reads = state.pending_return_transfers.dup
+      linear_expr_consumed_names(stmt.value).each { |name| return_reads.add(name) }
+      check_linear_expr_uses!(stmt.value, state, return_reads)
       returned_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_return_transfers, state, :return)
       state.pending_return_transfers.each { |name| linear_release!(name, :return, state) }
@@ -397,7 +414,9 @@ class MIRChecker
     when MIR::DiscardOwned
       check_linear_expr_uses!(stmt.expr, state)
     when MIR::BreakStmt
-      check_linear_expr_uses!(stmt.value, state, state.pending_block_transfers)
+      block_reads = state.pending_block_transfers.dup
+      linear_expr_consumed_names(stmt.value).each { |name| block_reads.add(name) }
+      check_linear_expr_uses!(stmt.value, state, block_reads)
       break_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_block_transfers, state, :block_result)
       state.pending_block_transfers.each { |name| linear_release!(name, :block_result, state) }
@@ -719,6 +738,9 @@ class MIRChecker
       contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
       if contract.is_a?(MIR::OwnershipContract)
         contract.consumes.each { |name| names.add(name.to_s) }
+      end
+      if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
+        collect_linear_expr_ident_names(node, names)
       end
       callable = node.respond_to?(:callable_contract) ? node.callable_contract : nil
       next unless callable.is_a?(MIR::CallableContract)

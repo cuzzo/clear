@@ -70,8 +70,7 @@ module MIRLoweringControlFlow
       names
         .select do |name|
           transfer_required_names.include?(name) ||
-            converted_cleanup_names.include?(name) ||
-            value_names.include?(name) && name.start_with?("__tmp_")
+            converted_cleanup_names.include?(name)
         end
         .flat_map do |name|
           nodes = T.let([MIR::TransferMark.new(name, :return)], T::Array[T.untyped])
@@ -118,30 +117,13 @@ module MIRLoweringControlFlow
     with_pending(cond_pending, MIR::IfStmt.new(cond, then_body, else_body))
   end
 
-  sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
+  sig { params(node: AST::IfBind).returns(T.untyped) }
   def lower_if_bind(node)
     T.bind(self, MIRLowering) rescue nil
     mir_bindings = node.bindings.map do |b|
       { expr: lower(b.expr), capture: b.name }
     end
     then_body = lower_body(node.then_branch)
-
-    # RESOLVE bindings acquire a new strong ref that must be released.
-    # Prepend `defer CheatLib.rc/arcRelease(T, alloc, capture)` to the then-body.
-    node.bindings.each_with_index do |b, i|
-      mir_expr = mir_bindings[i][:expr]
-      next unless mir_expr.is_a?(MIR::WeakUpgrade)
-      release_func = mir_expr.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
-      alloc_expr = MIR::MethodCall.new(MIR::Ident.new(@rt_name), "heapAlloc", [], false, MIR::CallableContract.no_ownership(0))
-      release_call = MIR::Call.new(
-        "CheatLib.#{release_func}",
-        [MIR::Ident.new(mir_expr.zig_base), alloc_expr, MIR::Ident.new(b.name)],
-        false,
-        false,
-        MIR::CallableContract.no_ownership(3)
-      )
-      then_body = [MIR::DeferStmt.new(release_call)] + T.must(then_body)
-    end
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
@@ -266,20 +248,6 @@ module MIRLoweringControlFlow
     cond, cond_pending = lower_head { lower(node.condition) }
     body = lower_body(node.do_branch)
     stamp_loop_frame_allocs_iteration!(body)
-
-    # RESOLVE captures acquire a strong ref each iteration — release at end of body.
-    if cond.is_a?(MIR::WeakUpgrade)
-      release_func = cond.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
-      alloc_expr = MIR::MethodCall.new(rt, "heapAlloc", [], false, MIR::CallableContract.no_ownership(0))
-      release_call = MIR::Call.new(
-        "CheatLib.#{release_func}",
-        [MIR::Ident.new(cond.zig_base), alloc_expr, MIR::Ident.new(node.binding_name)],
-        false,
-        false,
-        MIR::CallableContract.no_ownership(3)
-      )
-      body = [MIR::DeferStmt.new(release_call)] + T.must(body)
-    end
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 

@@ -583,7 +583,7 @@ class MIRLowering
 
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
   def visible_alloc_names_for_transfer(result, mir)
-    names = T.let(T.must(@lowered_alloc_names).dup, T::Set[String])
+    names = T.let(Set.new, T::Set[String])
     walk_mir_node(result) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
     walk_mir_node(mir) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
     names
@@ -618,25 +618,34 @@ class MIRLowering
     names
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def append_ownership_transfers_for_mir_body(body)
+  sig do
+    params(
+      body: T::Array[T.untyped],
+      inherited_alloc_names: T::Set[String],
+      inherited_guarded_names: T::Set[String]
+    ).returns(T::Array[T.untyped])
+  end
+  def append_ownership_transfers_for_mir_body(body, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     body = normalize_allocating_mir_body(body)
     out = T.let([], T::Array[T.untyped])
     body.each do |node|
-      finalize_nested_mir_bodies!(node)
+      outer_alloc_names = visible_alloc_names_for_transfer(out, node).merge(inherited_alloc_names)
+      outer_guarded_names = visible_guarded_cleanup_names_for_transfer(out, node).merge(inherited_guarded_names)
+      finalize_nested_mir_bodies!(node, outer_alloc_names, outer_guarded_names)
       alloc_mark = implicit_alloc_mark_for_mir_node(node, out)
       if alloc_mark
         out << alloc_mark
         out << owned_create_fact_for_alloc_mark(alloc_mark, ownership_fact_source(alloc_mark))
         register_visible_alloc_names!(alloc_mark)
       end
-      visible_alloc_names = visible_alloc_names_for_transfer(out, node)
-      visible_guarded_names = visible_guarded_cleanup_names_for_transfer(out, node)
-      if node.is_a?(MIR::BreakStmt) && node.value
-        mir_ident_names(node.value).each do |name|
-          next unless visible_alloc_names.include?(name.to_s)
-          next if transfer_mark_present?(out, name.to_s) || transfer_mark_present?(body, name.to_s)
-          out << MIR::TransferMark.new(name.to_s, :block_result)
+      visible_alloc_names = visible_alloc_names_for_transfer(out, node).merge(inherited_alloc_names)
+      visible_guarded_names = visible_guarded_cleanup_names_for_transfer(out, node).merge(inherited_guarded_names)
+      if node.is_a?(MIR::BreakStmt) && node.value.is_a?(MIR::Ident)
+        name = node.value.name.to_s
+        if visible_alloc_names.include?(name) &&
+           !transfer_mark_present?(out, name) &&
+           !transfer_mark_present?(body, name)
+          out << MIR::TransferMark.new(name, :block_result)
         end
       end
       pre_terminator_transfer_marks(node, out, body).each do |mark|
@@ -873,58 +882,60 @@ class MIRLowering
     end.flatten
   end
 
-  sig { params(node: MIR::Node).void }
-  def finalize_nested_mir_bodies!(node)
+  sig { params(node: MIR::Node, inherited_alloc_names: T::Set[String], inherited_guarded_names: T::Set[String]).void }
+  def finalize_nested_mir_bodies!(node, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     case node
     when MIR::Let
-      finalize_nested_mir_expr_bodies!(node.init)
+      finalize_nested_mir_expr_bodies!(node.init, inherited_alloc_names, inherited_guarded_names)
     when MIR::Set
-      finalize_nested_mir_expr_bodies!(node.target)
-      finalize_nested_mir_expr_bodies!(node.value)
+      finalize_nested_mir_expr_bodies!(node.target, inherited_alloc_names, inherited_guarded_names)
+      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
     when MIR::ReassignWithCleanup
-      finalize_nested_mir_expr_bodies!(node.value)
+      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
     when MIR::ExprStmt
-      finalize_nested_mir_expr_bodies!(node.expr)
+      finalize_nested_mir_expr_bodies!(node.expr, inherited_alloc_names, inherited_guarded_names)
     when MIR::ReturnStmt, MIR::BreakStmt
-      finalize_nested_mir_expr_bodies!(node.value)
+      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
     when MIR::WhileStmt, MIR::ForStmt
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
     when MIR::ScopeBlock, MIR::BlockExpr
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
     when MIR::BgBlock
-      node.run_body = append_ownership_transfers_for_mir_body(node.run_body ? node.run_body : [])
+      node.run_body = append_ownership_transfers_for_mir_body(node.run_body ? node.run_body : [], inherited_alloc_names, inherited_guarded_names)
     when MIR::StreamSpawn
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [])
+      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
     when MIR::DoBlock
-      node.branch_bodies&.map! { |branch_body| append_ownership_transfers_for_mir_body(branch_body ? branch_body : []) }
+      node.branch_bodies&.map! { |branch_body| append_ownership_transfers_for_mir_body(branch_body ? branch_body : [], inherited_alloc_names, inherited_guarded_names) }
     when MIR::CatchWrapper
-      node.clause_bodies&.map! { |clause_body| append_ownership_transfers_for_mir_body(clause_body ? clause_body : []) }
+      node.clause_bodies&.map! { |clause_body| append_ownership_transfers_for_mir_body(clause_body ? clause_body : [], inherited_alloc_names, inherited_guarded_names) }
     when MIR::IfStmt, MIR::IfBindStmt
-      node.then_body = append_ownership_transfers_for_mir_body(node.then_body ? node.then_body : [])
-      node.else_body = append_ownership_transfers_for_mir_body(node.else_body ? node.else_body : []) if node.else_body
+      node.then_body = append_ownership_transfers_for_mir_body(node.then_body ? node.then_body : [], inherited_alloc_names, inherited_guarded_names)
+      node.else_body = append_ownership_transfers_for_mir_body(node.else_body ? node.else_body : [], inherited_alloc_names, inherited_guarded_names) if node.else_body
     when MIR::IfChain
       node.branches&.each do |branch|
-        branch[:body] = append_ownership_transfers_for_mir_body(branch[:body] ? branch[:body] : [])
+        branch[:body] = append_ownership_transfers_for_mir_body(branch[:body] ? branch[:body] : [], inherited_alloc_names, inherited_guarded_names)
       end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : []) if node.default_body
+      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : [], inherited_alloc_names, inherited_guarded_names) if node.default_body
     when MIR::SwitchStmt
       node.arms&.each do |arm|
-        arm[:body] = append_ownership_transfers_for_mir_body(arm[:body] ? arm[:body] : [])
+        arm[:body] = append_ownership_transfers_for_mir_body(arm[:body] ? arm[:body] : [], inherited_alloc_names, inherited_guarded_names)
       end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : []) if node.default_body
+      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : [], inherited_alloc_names, inherited_guarded_names) if node.default_body
+    else
+      each_mir_expr_child(node) { |child| finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names) }
     end
     nil
   end
 
-  sig { params(expr: T.nilable(MIR::Node)).void }
-  def finalize_nested_mir_expr_bodies!(expr)
+  sig { params(expr: T.nilable(MIR::Node), inherited_alloc_names: T::Set[String], inherited_guarded_names: T::Set[String]).void }
+  def finalize_nested_mir_expr_bodies!(expr, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     return unless expr
     return unless expr.expr?
     if expr.is_a?(MIR::BlockExpr)
-      expr.body = append_ownership_transfers_for_mir_body(expr.body ? expr.body : [])
+      expr.body = append_ownership_transfers_for_mir_body(expr.body ? expr.body : [], inherited_alloc_names, inherited_guarded_names)
       return
     end
-    each_mir_expr_child(expr) { |child| finalize_nested_mir_expr_bodies!(child) }
+    each_mir_expr_child(expr) { |child| finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names) }
     nil
   end
 
@@ -1018,6 +1029,9 @@ class MIRLowering
     walk_mir_node(node) do |child|
       ownership_contract_consumes(child).each { |name| names << name.to_s }
       structural_ownership_consumes(child).each { |name| names << name.to_s }
+      if child.is_a?(MIR::StructInit) || child.is_a?(MIR::ArrayInit)
+        mir_ident_names(child).each { |name| names << name.to_s }
+      end
     end
     names.uniq
   end

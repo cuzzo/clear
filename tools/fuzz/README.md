@@ -19,21 +19,19 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
-    # CI gate: full matrix MINUS quarantine (must pass)
+    # CI gate: full matrix; quarantine must be empty
     ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/fuzz --clean
 
-    # Just the quarantined (known-broken) templates
+    # Just the quarantined templates; this must select zero templates
     ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/fuzz --clean
 
 ## Quarantine
 
-`tools/fuzz/quarantine.txt` lists templates with a known compiler bug or
-generator defect. They are excluded from the required CI gate
-(`--skip-quarantined`) and run in a separate non-blocking job
-(`--only-quarantined`). Each line carries the reason; delete a line the
-moment its bug is fixed and the template rejoins the gate. This is what
-stops templates bit-rotting unnoticed — every template either passes the
-gate or is explicitly, visibly quarantined.
+`tools/fuzz/quarantine.txt` must contain zero active template names. The
+runner prints the quarantine skipped count whenever `--skip-quarantined` or
+`--only-quarantined` is used, and quarantined failures are not converted into
+success. A nonzero quarantine count is a visible compiler work item, not a
+green state.
 
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
@@ -377,9 +375,8 @@ Each cell carries an `expected:` annotation:
 - `:compile_error` — must fail compilation (CLEAR-level or Zig-level codegen). Used for
   documented capability boundaries (e.g., `(DO + @local)` — DO branches lower to inner
   Zig fns that don't close over enclosing locals; DO is meant for @shared state).
-- `:in_dev` — emitted as a comment, NOT run. Reserves matrix space for unlanded features
-  (LEND, the @shared sync phases). The matrix count stays stable as features land — flip
-  the cell expectation, no schema churn.
+- `:in_dev` — forbidden in the required matrix. The runner reports the skipped
+  count and exits nonzero if any cell tries to hide here.
 
 The runner reports `UNEXPECTED-PASS` when a `:compile_error` cell compiles successfully —
 that's the signal a feature has landed and the cell should be flipped to `:pass`.

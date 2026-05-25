@@ -50,16 +50,18 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
       "holder.items.length()",
     ]
   when :struct_with_optional_string
+    item_peek = p[:element_shape] == :string_elems ? "holder.tag.length()" : "(holder.item OR 1_i64).toString().length()"
     [
       "STRUCT Holder { item: ?#{elem_zig}, tag: String }",
       "Holder{ item: #{elem_val}, tag: COPY \"t\" }",
-      "(holder.item OR #{elem_val}).#{p[:element_shape] == :string_elems ? 'length()' : 'toString().length()'}",
+      item_peek,
     ]
   when :struct_with_map
+    map_peek = p[:element_shape] == :string_elems ? "holder.items.count()" : "(holder.items[\"k\"] OR 1_i64).toString().length()"
     [
       "STRUCT Holder { items: HashMap<#{elem_zig}>, tag: String }",
       "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }",
-      "(holder.items[\"k\"] OR #{elem_val}).#{p[:element_shape] == :string_elems ? 'length()' : 'toString().length()'}",
+      map_peek,
     ]
   end
 

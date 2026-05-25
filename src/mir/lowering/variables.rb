@@ -363,7 +363,7 @@ module MIRLoweringVariables
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, drop_entry)
       [alloc_mark, let_node, cleanup]
     elsif owned_return_call_init?(init) && !generic_id
-      mir_alloc = binding_entry[:alloc] || :heap
+      mir_alloc = mir_owned_alloc(init) || decl_alloc
       cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
       build_drop_entry!(cleanup_entry, node.full_type, node)
       cleanup_entry[:has_moved_guard] = true
@@ -371,7 +371,7 @@ module MIRLoweringVariables
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif !heap_return_var && owned_return_transfer_binding?(binding_entry, init) && !generic_id
-      mir_alloc = binding_entry.alloc || :heap
+      mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node]
     elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty? && init.target_var == safe_name &&
@@ -389,7 +389,10 @@ module MIRLoweringVariables
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
     elsif binding_entry.present? && !binding_entry.needs_cleanup?
-      mir_alloc = (heap_return_var ? decl_alloc : binding_entry.alloc) || decl_alloc
+      return let_node unless mir_allocates?(init) ||
+                             (binding_entry.alloc == :heap && binding_entry.kind != :none)
+
+      mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type, binding_entry)
       [alloc_mark, let_node]
     elsif mir_allocates?(init) && !generic_id

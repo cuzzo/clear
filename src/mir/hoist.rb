@@ -386,7 +386,7 @@ module MIRHoistLowering
     alloc_names = scoped.each_with_object(Set.new) do |stmt, names|
       names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
-    result_names = mir_ident_names(result).map(&:to_s).to_set
+    result_names = result.is_a?(MIR::Ident) ? Set[result.name.to_s] : Set.new
     transfer_marks = alloc_names.intersection(result_names).flat_map do |name|
       marks = T.let([MIR::TransferMark.new(name, :block_result)], T::Array[T.untyped])
       marks << MIR::MoveMark.new(name) if @guarded_cleanup_names&.[](name)
@@ -629,6 +629,37 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :expr))
     when MIR::ReturnStmt, MIR::BreakStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :value))
+    when MIR::IfStmt
+      prefix.concat(normalize_used_expr_attr!(stmt, :cond))
+    when MIR::IfBindStmt
+      stmt.bindings.each do |binding|
+        expr = binding[:expr]
+        expr_prefix, normalized = normalize_allocating_used_expr(expr)
+        binding[:expr] = normalized
+        prefix.concat(expr_prefix)
+        capture = binding[:capture].to_s
+        next unless normalized.is_a?(MIR::Ident)
+        next unless stmt.then_body.any? { |child| child.is_a?(MIR::Cleanup) && child.name.to_s == capture }
+        next if if_bind_transfer_present?(stmt, normalized.name.to_s)
+
+        stmt.then_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink))
+        stmt.else_body ||= []
+        stmt.else_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink))
+      end
+    when MIR::WhileStmt
+      prefix.concat(normalize_used_expr_attr!(stmt, :cond))
+      prefix.concat(normalize_used_expr_attr!(stmt, :update)) if stmt.update
+    when MIR::ForStmt
+      prefix.concat(normalize_used_expr_attr!(stmt, :iter))
+    when MIR::SwitchStmt
+      prefix.concat(normalize_used_expr_attr!(stmt, :subject))
+    when MIR::IfChain
+      stmt.branches&.each do |branch|
+        cond = branch[:cond]
+        cond_prefix, normalized = normalize_allocating_used_expr(cond)
+        branch[:cond] = normalized
+        prefix.concat(cond_prefix)
+      end
     when MIR::DeferStmt, MIR::ErrDeferStmt
       prefix.concat(normalize_allocating_mir_stmt!(stmt.body))
     when MIR::BatchWindowPush
@@ -647,6 +678,13 @@ module MIRHoistLowering
     setter = :"#{attr}="
     stmt.public_send(setter, normalized)
     prefix
+  end
+
+  sig { params(stmt: MIR::IfBindStmt, name: String).returns(T::Boolean) }
+  def if_bind_transfer_present?(stmt, name)
+    [stmt.then_body, stmt.else_body].compact.any? do |body|
+      body.any? { |child| child.is_a?(MIR::TransferMark) && child.name.to_s == name }
+    end
   end
 
   sig { params(node: T.untyped).void }
@@ -897,7 +935,7 @@ module MIRHoistLowering
     when MIR::Cast, MIR::TryExpr
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr, MIR::InlineZig, MIR::BgBlock
-      cleanup_entry_for_owned_result(ast_node, alloc: alloc)
+      cleanup_entry_for_owned_result(ast_node, alloc: alloc) || cleanup_entry_for_ownership_effect(mir, alloc: alloc)
     else
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
@@ -924,6 +962,33 @@ module MIRHoistLowering
     zig_t = (Type.new(ti.resolved).zig_type rescue nil)
     return nil unless zig_t
     uniform_cleanup_entry(zig_t, alloc: alloc)
+  end
+
+  sig { params(mir: T.untyped, alloc: Symbol).returns(T.nilable(CleanupEntry)) }
+  def cleanup_entry_for_ownership_effect(mir, alloc: :heap)
+    return nil unless mir.respond_to?(:ownership_effect)
+
+    if mir.is_a?(MIR::BlockExpr)
+      transferred = mir_ident_names(mir).first
+      if transferred
+        let = mir.body&.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == transferred.to_s }
+        return hoist_cleanup_entry(let.init, nil) if let
+      end
+    end
+
+    effect = mir.ownership_effect
+    return nil unless effect.produces_owned
+
+    case effect.cleanup_kind
+    when :heap_string
+      heap_string_entry(alloc: alloc)
+    when :rc
+      CleanupEntry.build(:rc, alloc: alloc, has_moved_guard: false)
+    when :frozen
+      CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
+    else
+      nil
+    end
   end
 
   sig { params(node: T.untyped).returns(T::Array[String]) }

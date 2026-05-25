@@ -672,7 +672,8 @@ class MIREmitter
     if node.bindings.length == 1
       b = node.bindings[0]
       expr = emit(b[:expr])
-      result = "if (#{expr}) |#{b[:capture]}| {\n#{then_body}\n}"
+      suppress = b[:capture].to_s == "_" ? "" : "_ = &#{b[:capture]};\n"
+      result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
       result += " else {\n#{else_body}\n}" if else_body
       result
     else
@@ -704,7 +705,8 @@ class MIREmitter
       ""
     end
     body = emit_body(node.body)
-    "while (#{cond})#{upd}#{cap} {\n#{body}\n}"
+    capture_suppress = node.capture && node.capture.to_s != "_" ? "_ = &#{node.capture};\n" : ""
+    "while (#{cond})#{upd}#{cap} {\n#{capture_suppress}#{body}\n}"
   end
 
   sig { params(node: MIR::ForStmt).returns(String) }

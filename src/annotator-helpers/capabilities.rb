@@ -1075,14 +1075,9 @@ module CapabilityHelper
         nm = node.value.name.to_s
         result.site_copied << nm unless locally_bound.include?(nm)
       end
-      # Phase 3 (was_moved CopyNode wrapper produced by ensure_owned_value!):
-      # function_analysis.rb stamps was_moved=true on a CopyNode wrapper that
-      # encodes the user's GIVE intent for type adaptation. Treat as moved.
-      if node.is_a?(AST::CopyNode) && node.was_moved &&
-         node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_moved << nm unless locally_bound.include?(nm)
-      end
+      # A CopyNode can also carry `was_moved` when its copied result is
+      # consumed by a TAKES call. That consumes the copy, not the source
+      # identifier, so capture strategy remains FreshHeapCopy.
 
       if node.is_a?(AST::Identifier)
         name = node.name
