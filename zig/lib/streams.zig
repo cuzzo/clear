@@ -468,17 +468,18 @@ pub fn SplitStream(
 
         pub fn close(self: *Self) void {
             self.inner.mutex.lock() catch unreachable;
+            const already_closed = self.inner.closed.load(.acquire) != 0;
             if (self.inner.chunks_tail.load(.acquire)) |tail| {
                 _ = publishChunk(self.inner, tail);
             }
-            self.inner.closed.store(1, .release);
+            if (!already_closed) self.inner.closed.store(1, .release);
             wakeAllParkedSubscribers(self.inner);
             // Producer may have parked itself for backpressure and never
             // returned to push; close() must wake it (typically a no-op
             // since close() is called by the producer after it finishes).
             wakeParkedProducer(self.inner);
             self.inner.mutex.unlock();
-            self.inner.wg.done();
+            if (!already_closed) self.inner.wg.done();
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
@@ -623,6 +624,7 @@ pub fn SplitStream(
             if (!self.active) return;
 
             var should_destroy = false;
+            var should_signal_close = false;
             self.inner.mutex.lock() catch unreachable;
             if (self.subscriber_id != InvalidSubscriber) {
                 var record = &self.inner.subscribers.items[self.subscriber_id];
@@ -640,6 +642,7 @@ pub fn SplitStream(
             self.next_index = 0;
 
             if (self.inner.active_subscribers.load(.acquire) == 0) {
+                should_signal_close = self.inner.closed.load(.acquire) == 0;
                 self.inner.closed.store(1, .release);
                 clearAllChunks(self.inner);
                 should_destroy = true;
@@ -652,6 +655,7 @@ pub fn SplitStream(
             self.inner.mutex.unlock();
 
             if (should_destroy) {
+                if (should_signal_close) self.inner.wg.done();
                 self.inner.wg.wait();
                 destroyInner(self.inner);
             }
