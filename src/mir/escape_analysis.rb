@@ -626,7 +626,10 @@ module EscapeAnalysis
     t = ti.error_union? ? ti.payload_type : ti
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
-    t.heap_ptr? || t.recursive_cleanup_shape?(schema_lookup) || type_contains_cleanup_payload?(t, schema_lookup)
+    t.heap_ptr? ||
+      t.recursive_cleanup_shape?(schema_lookup) ||
+      t.needs_explicit_cleanup?(:heap, schema_lookup) ||
+      type_contains_cleanup_payload?(t, schema_lookup)
   rescue StandardError
     false
   end
@@ -636,6 +639,7 @@ module EscapeAnalysis
     t = ti.error_union? ? ti.payload_type : ti
     return false unless t
     return true if t.string? && !t.rodata? && t.provenance != :borrow
+    return true if t.needs_explicit_cleanup?(:heap, schema_lookup)
     if t.array? && !t.string?
       elem = t.element_type
       return false unless elem.is_a?(Type)
@@ -813,7 +817,9 @@ module EscapeAnalysis
     return false if ti.rodata? || ti.provenance == :borrow
     ti.string? || top_heap_ptr || ti.heap_ptr? || ti.resource? || ti.ownership != :affine ||
       ti.recursive_cleanup_shape?(schema_lookup) ||
-      ti.needs_cleanup?(schema_lookup) || type_contains_cleanup_payload?(ti, schema_lookup)
+      ti.needs_cleanup?(schema_lookup) ||
+      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
+      type_contains_cleanup_payload?(ti, schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }

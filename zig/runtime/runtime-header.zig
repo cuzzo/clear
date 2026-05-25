@@ -3542,6 +3542,7 @@ pub const CheatLib = struct {
         // dupeValue when they need cleanup. (#42 -- COPY of @map into TAKES.)
         if (comptime isStringMap(T)) {
             var result: T = .{};
+            result.alloc = alloc;
             errdefer result.deinit(alloc, alloc);
             var src_mut = value;
             var it = src_mut.inner.iterator();

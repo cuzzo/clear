@@ -815,7 +815,7 @@ class Type
   sig { returns(T::Boolean) }
   def heap_ptr?
     return !!(wrapped_type&.heap_ptr?) if optional?
-    string? || indirect? || collection? || (array? && !fixed? && !string?)
+    string? || indirect? || tense_observable? || collection? || (array? && !fixed? && !string?)
   end
 
   sig { returns(T::Boolean) }
@@ -1575,7 +1575,7 @@ class Type
 
     return false if provenance == :borrow
     return wrapped_type&.recursive_cleanup_shape?(schema_lookup, seen) || false if optional?
-    return true if string? || any_rc? || link? || collection?
+    return true if string? || any_rc? || link? || collection? || indirect?
 
     if array?
       return true unless fixed?

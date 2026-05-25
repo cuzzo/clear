@@ -280,14 +280,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "respects @parallel — emits spawnBest, not submitSpawn" do
-        zig = ZigTranspiler.new.transpile(code)
-        user_code = zig.split("// 3. Main Entry").first
-        # Phase B2-WITH: a BG containing exactly one WITH EXCLUSIVE
-        # lowers to an FsmTask; @parallel still routes to the
-        # least-loaded scheduler, but via spawnFsmBest.
-        expect(user_code).to match(/spawn(Best|FsmBest)\(/)
-        expect(user_code).not_to match(/submitSpawn\(/)
+      it "rejects unsafe @parallel dispatch for an affine locked capture" do
+        expect { ZigTranspiler.new.transpile(code) }
+          .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
       end
     end
 
@@ -341,10 +336,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "respects @parallel — emits spawnBest" do
-        zig = ZigTranspiler.new.transpile(code)
-        user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnBest")
+      it "rejects unsafe @parallel dispatch for an affine locked capture" do
+        expect { ZigTranspiler.new.transpile(code) }
+          .to raise_error(RuntimeError, /BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE/)
       end
     end
   end

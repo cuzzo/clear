@@ -321,10 +321,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     it "returns Set[:LOCAL] for a sync-less binding (#336)" do
       # Pre-#336 this returned an empty set; now non-sync bindings
       # are in the LOCAL family.
-      sym = Object.new
-      def sym.sync; nil; end
-      def sym.storage; nil; end
-      def sym.sync_families; nil; end
+      sym = SymbolEntry.new(reg: "x", type: :Int64, mutable: false, storage: :stack, sync: nil)
       arg = Object.new
       arg.define_singleton_method(:symbol) { sym }
       arg.define_singleton_method(:respond_to?) { |m| m == :symbol || super(m) }

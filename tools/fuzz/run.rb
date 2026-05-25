@@ -201,7 +201,23 @@ def run_pass_bundle(entries, out_dir)
 
   [entries.map { |e| e[:path] }, [], [], []]
 ensure
-  FileUtils.rm_rf(build_dir) if build_dir
+  FileUtils.rm_rf(build_dir) if build_dir && ENV['FUZZ_KEEP_BUNDLE'] != '1'
+end
+
+def print_failure_excerpt(out)
+  lines = out.each_line.to_a
+  failure_index = lines.index { |line| line.include?('FAIL') || line.include?('error:') }
+  excerpt =
+    if failure_index
+      first = [failure_index - 8, 0].max
+      lines[first, 40]
+    else
+      lines.first(40)
+    end
+  excerpt.each { |line| puts "      #{line}" }
+  return unless lines.size > excerpt.size
+
+  puts "      ... #{lines.size - excerpt.size} more lines omitted"
 end
 
 def run_negative_builds(entries, out_dir)
@@ -323,7 +339,7 @@ puts "=" * 60
   puts "#{label}:"
   list.each do |path, out|
     puts "  - #{path}"
-    out.each_line.first(10).each { |l| puts "      #{l}" }
+    print_failure_excerpt(out)
   end
 end
 

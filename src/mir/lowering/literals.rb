@@ -10,8 +10,14 @@ module MIRLoweringLiterals
   sig { params(node: AST::ListLit).returns(T.untyped) }
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
+    @current_expected_type = T.let(@current_expected_type, T.untyped)
 
-    ti = node.coerced_type_info || node.full_type
+    expected_ti = Type.from_node(@current_expected_type)
+    ti = if expected_ti&.collection?
+      expected_ti
+    else
+      node.coerced_type_info || node.full_type
+    end
 
     # Bounded stream: ~T[N] - emit BoundedStream struct with Promise items
     if ti.respond_to?(:bounded_stream?) && ti.bounded_stream?
@@ -97,7 +103,14 @@ module MIRLoweringLiterals
     end
 
     # Non-empty list literal -> makeList
-    MIR::MakeList.new(elem_zig, items_mir, list_alloc)
+    T.cast(
+      with_ownership_consumption(
+        MIR::MakeList.new(elem_zig, items_mir, list_alloc),
+        items_mir.flat_map { |item| mir_ident_names(item) },
+        "MIR::MakeList",
+      ),
+      MIR::MakeList,
+    )
   end
 
   sig { params(node: AST::HashLit).returns(T.untyped) }
@@ -132,7 +145,14 @@ module MIRLoweringLiterals
         end
 
         wrap_fn = is_arc ? "arcCreate" : "rcCreate"
-        inner = MIR::CapWrap.new(inner, zig_t, :own_only, nil, nil, wrap_fn, :heap)
+        inner = T.cast(
+          with_ownership_consumption(
+            MIR::CapWrap.new(inner, zig_t, :own_only, nil, nil, wrap_fn, :heap),
+            mir_ident_names(inner),
+            "MIR::CapWrap",
+          ),
+          MIR::CapWrap,
+        )
         return inner if node.pairs.empty?
       else
         bare_ft = ti.bare_data_type

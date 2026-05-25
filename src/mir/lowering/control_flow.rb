@@ -50,7 +50,6 @@ module MIRLoweringControlFlow
     const :direct_value_names, T::Set[String]
     const :converted_cleanup_names, T::Set[String]
     const :transfer_required_names, T::Set[String]
-    const :move_required_names, T::Set[String]
 
     sig { returns(T::Set[String]) }
     def returned_names
@@ -62,10 +61,9 @@ module MIRLoweringControlFlow
       out
     end
 
-    sig { params(value_names: T::Set[String]).returns(T::Array[T.untyped]) }
-    def transfer_marks_for(value_names)
+    sig { params(value_names: T::Set[String], visible_guarded_names: T::Set[String]).returns(T::Array[T.untyped]) }
+    def transfer_marks_for(value_names, visible_guarded_names)
       names = T.let(Set.new, T::Set[String])
-      returned_names.each { |name| names << name }
       value_names.each { |name| names << name }
       converted_cleanup_names.each { |name| names << name }
 
@@ -77,7 +75,7 @@ module MIRLoweringControlFlow
         end
         .flat_map do |name|
           nodes = T.let([MIR::TransferMark.new(name, :return)], T::Array[T.untyped])
-          nodes << MIR::MoveMark.new(name) if move_required_names.include?(name)
+          nodes << MIR::MoveMark.new(name) if visible_guarded_names.include?(name)
           nodes
         end
     end
@@ -85,12 +83,18 @@ module MIRLoweringControlFlow
 
   sig { params(cond: T.untyped, pending: T::Array[T.untyped]).returns(T.untyped) }
   def loop_condition_expr(cond, pending)
+    T.bind(self, MIRLowering) rescue nil
     return cond if pending.empty?
 
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     @block_expr_counter += 1
     label = "__while_cond_#{@block_expr_counter}"
-    MIR::BlockExpr.new(label, pending + [MIR::BreakStmt.new(label, cond)])
+    body = T.let([], T::Array[T.untyped])
+    pending.each do |stmt|
+      body << stmt
+      body.concat(ownership_facts_for_mir_surface(stmt))
+    end
+    MIR::BlockExpr.new(label, body + [MIR::BreakStmt.new(label, cond)])
   end
 
   sig { params(node: AST::IfStatement).returns(T.untyped) }
@@ -345,7 +349,7 @@ module MIRLoweringControlFlow
     body = prepend_loop_mark(body, mark_per_iter: mark_per_iter, tight: tight)
 
     # Yield check at end of body
-    if @current_fn_has_rt
+    if @current_fn_has_rt && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
     ForEachPlan.new(
@@ -377,11 +381,13 @@ module MIRLoweringControlFlow
     if ct.map?
       @for_counter = (@for_counter || 0) + 1
       iter_var = "__kit_#{@for_counter}"
+      key_ptr = "__key_ptr_#{@for_counter}"
       # { var iter = coll.keyIterator(); while (iter.next()) |var| { body } }
       iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false, MIR::CallableContract.no_ownership(0)), true, nil, nil)
+      key_bind = MIR::Let.new(var, MIR::Deref.new(MIR::Ident.new(key_ptr)), false, nil, nil)
       while_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false, MIR::CallableContract.no_ownership(0)),
-        body, var, nil, mark_per_iter, tight
+        [key_bind] + body, key_ptr, nil, mark_per_iter, tight
       )
       loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
     elsif ct.pool?
@@ -423,6 +429,23 @@ module MIRLoweringControlFlow
       loop_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "nextOrNull", [], true, MIR::CallableContract.no_ownership(0)),
         body, var, nil, mark_per_iter, tight)
+    elsif ct.soa? && (ct.list_collection? || ct.fixed_soa?)
+      @for_counter = (@for_counter || 0) + 1
+      idx_var = "__soa_idx_#{@for_counter}"
+      iter_init = MIR::Let.new(idx_var, MIR::Lit.new("0"), true, "i64", nil)
+      value_bind = MIR::Let.new(
+        var,
+        MIR::MethodCall.new(coll, "get", [MIR::Cast.new(MIR::Ident.new(idx_var), "usize", :intCast)], false, MIR::CallableContract.no_ownership(1)),
+        false,
+        nil,
+        nil
+      )
+      cond = MIR::BinOp.new("<", MIR::Ident.new(idx_var), MIR::MethodCall.new(coll, "length", [], false, MIR::CallableContract.no_ownership(0)))
+      update = MIR::Set.new(MIR::Ident.new(idx_var), MIR::BinOp.new("+", MIR::Ident.new(idx_var), MIR::Lit.new("1")))
+      loop_stmt = MIR::ScopeBlock.new([
+        iter_init,
+        MIR::WhileStmt.new(cond, [value_bind] + body, nil, update, mark_per_iter, tight)
+      ])
     elsif ct.set_collection?
       # Set: iterate via keyIterator(). next() returns ?*T so we deref in the body.
       @for_counter = (@for_counter || 0) + 1
@@ -501,7 +524,7 @@ module MIRLoweringControlFlow
 
     var_decl = MIR::Let.new(plan.var, MIR::Ident.new(plan.iter_var), false, "i64", "_ = &#{plan.var};")
     body = prepend_loop_mark(plan.body, mark_per_iter: plan.mark_per_iter, tight: plan.tight, after_mark: [var_decl])
-    if !plan.tight && @current_fn_has_rt
+    if !plan.tight && @current_fn_has_rt && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(plan.rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
     end
 
@@ -550,7 +573,7 @@ module MIRLoweringControlFlow
       result = lower_switch_match(node, facts)
     else
       # If-chain for unions, strings, and complex patterns
-      tag_eq = ->(v) { MIR::BinOp.new("==", MIR::Call.new("std.meta.activeTag", [subject], false), MIR::Ident.new(".#{v}")) }
+      tag_eq = ->(v) { MIR::BinOp.new("==", active_tag_call(subject), MIR::Ident.new(".#{v}")) }
       union_bindings = ->(c, v, is_mutable) {
         if c.binding
           payload = MIR::FieldGet.new(subject, v.to_s)
@@ -771,6 +794,7 @@ module MIRLoweringControlFlow
     @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
     @current_fn_param_names = T.let(@current_fn_param_names, T.untyped)
     @current_fn_takes_param_names = T.let(@current_fn_takes_param_names, T.untyped)
+    @lowered_guarded_cleanup_names = T.let(@lowered_guarded_cleanup_names, T.nilable(T::Set[T.untyped]))
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     plan = return_lowering_plan(node)
     value = plan.value
@@ -779,7 +803,11 @@ module MIRLoweringControlFlow
        value && !value.is_a?(MIR::HeapCreate) && !value.is_a?(MIR::Call) &&
        !return_value_already_payload_pointer?(node.value)
       bare_ret = @current_fn_return_payload_zig.sub(/\A\*/, "")
-      value = MIR::HeapCreate.new(bare_ret, value, :heap, "ret")
+      value = with_ownership_consumption(
+        MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
+        mir_ident_names(value),
+        "MIR::HeapCreate",
+      )
     end
 
     if @current_fn_heap_carry_return && node.value && value &&
@@ -811,7 +839,7 @@ module MIRLoweringControlFlow
     # existing strong ref. Borrowed/non-local identifiers still retain.
     if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
       ret = MIR::ReturnStmt.new(make_rc_retain(node.value))
-      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set)
+      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
       return marks + [ret] unless marks.empty?
       ret
     else
@@ -820,7 +848,7 @@ module MIRLoweringControlFlow
       # ErrCleanup: the caller takes ownership on success.
       value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value
       ret = MIR::ReturnStmt.new(value)
-      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set)
+      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
       return marks + [ret] unless marks.empty?
       ret
     end
@@ -831,7 +859,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     ret_alloc = return_destination_alloc(node)
     value = node.value ? with_decl_alloc(ret_alloc) do
-      lowered = lower(node.value)
+      lowered = with_expected_type(return_destination_type(node)) { lower(node.value) }
       place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type)
     end : nil
 
@@ -852,11 +880,6 @@ module MIRLoweringControlFlow
       set.each { |name| returned_names << name }
     end
     transfer_required_names = return_transfer_required_names(returned_names)
-    move_required_names = T.let(Set.new, T::Set[String])
-    returned_names.each do |name|
-      move_required_names << name if @guarded_cleanup_names&.[](name)
-    end
-
     ReturnOwnershipPlan.new(
       value: value,
       explicit_return_names: explicit_return_names,
@@ -865,7 +888,6 @@ module MIRLoweringControlFlow
       direct_value_names: direct_value_names,
       converted_cleanup_names: Set.new,
       transfer_required_names: transfer_required_names,
-      move_required_names: move_required_names,
     )
   end
 
@@ -883,6 +905,14 @@ module MIRLoweringControlFlow
     return entry.needs_cleanup? && entry.alloc == :heap if entry&.present?
 
     !!(root && @current_fn_takes_param_names&.include?(root.name.to_s) && root.symbol&.heap_storage?)
+  end
+
+  sig { params(node: AST::ReturnNode).returns(T.untyped) }
+  def return_destination_type(node)
+    T.bind(self, MIRLowering) rescue nil
+    @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
+    ti = Type.from_node(@current_fn_return_type)
+    ti&.error_union? ? ti.payload_type : ti
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }

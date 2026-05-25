@@ -1692,7 +1692,7 @@ RSpec.describe SemanticAnnotator do
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
         decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "items" }
         hoist = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name.to_s.start_with?("__hoist_") }
-        expect(decl.symbol.storage).to eq(:frame)
+        expect(decl.symbol.storage).to eq(:heap)
         expect(hoist.symbol.storage).to eq(:heap)
       end
     end

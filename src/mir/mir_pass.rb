@@ -12,6 +12,7 @@ require_relative "../ast/ast"
 require_relative "../annotator-helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "escape_analysis"
+require_relative "bg_capture_classifier"
 require_relative "control_flow"
 require_relative "pass_state"
 
@@ -70,6 +71,7 @@ class MIRPass
     # handful of AST escape mechanisms. No value-flow graph, no promotion plan.
     heap_fns, @bg_heap_upgraded = EscapeAnalysis.apply!(@fn_nodes, @schema_lookup)
     @bg_heap_upgraded = T.let(@bg_heap_upgraded, T.untyped)
+    BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
     pass_state.mark!(:escape_analyzed)
 
     # SYNC propagation ran inside EscapeAnalysis.apply! above (single-pass

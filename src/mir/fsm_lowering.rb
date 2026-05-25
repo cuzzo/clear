@@ -59,6 +59,8 @@ module FsmLowering
         "#{$1}#{$2}#{ctx_var}.#{name} = "
       end
       out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
+      out = out.gsub(/@TypeOf\(\s*#{esc}\s*\)/, "@TypeOf(#{ctx_var}.#{name})")
+      out = out.gsub(/&#{esc}\b/, "&#{ctx_var}.#{name}")
       out = out.gsub(/\s*_\s*=\s*&?#{esc}\s*;/, "")
     end
     out
@@ -144,11 +146,84 @@ module FsmLowering
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
           result_mir << MIR::Set.new(target, strip_try(last_mir), false)
+          result_mir.concat(fsm_result_transfer_marks(last_mir, last_step[:expr]))
+          if last_step[:expr].is_a?(AST::Identifier)
+            guard_map = instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
+            guard_name = guard_map&.[](last_step[:expr].name.to_s)
+            if guard_name
+              result_mir << MIR::Set.new(
+                MIR::FieldGet.new(ctx_ident, guard_name),
+                MIR::Lit.new("false"),
+                false,
+              )
+            end
+          end
         end
       end
 
       [pre_mir, result_mir]
     end
+  end
+
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[T.untyped]) }
+  def fsm_result_transfer_marks(result_mir, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
+    marks = T.let([], T::Array[T.untyped])
+    consumed = collect_mir_consumed_roots(result_mir)
+    consumed.concat(fsm_ast_result_consumed_roots(ast_node))
+    consumed.each do |name|
+      safe = zig_safe_name(name.to_s)
+      safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+      entry = @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
+      next unless entry.present?
+      marks << MIR::TransferMark.new(safe.to_s, :owned_sink)
+      if entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s)
+        marks << MIR::MoveMark.new(safe.to_s)
+      end
+    end
+    marks
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def fsm_ast_result_consumed_roots(node)
+    names = T.let([], T::Array[String])
+    case node
+    when AST::MoveNode
+      if node.value.is_a?(AST::Identifier)
+        names << node.value.name.to_s
+      else
+        names.concat(fsm_ast_result_consumed_roots(node.value))
+      end
+    when AST::Identifier
+      names << node.name.to_s if node.respond_to?(:was_moved) && node.was_moved == true
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields&.each_value do |value|
+        next if value.is_a?(AST::CopyNode)
+        if value.is_a?(AST::Identifier)
+          names << value.name.to_s if fsm_owned_transfer_identifier?(value)
+        else
+          names.concat(fsm_ast_result_consumed_roots(value))
+        end
+      end
+    when AST::ListLit
+      node.items&.each do |item|
+        next if item.is_a?(AST::CopyNode)
+        names.concat(fsm_ast_result_consumed_roots(item))
+      end
+    end
+    names.uniq
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def fsm_owned_transfer_identifier?(node)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    ti = Type.from_node(node) rescue nil
+    return false unless ti && T.unsafe(self).ownership_tracked_transfer_type?(ti)
+    entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
+    (entry.present? && entry.alloc == :heap) || node.symbol&.heap_storage? == true
   end
 
   # Lower one step expression into a list of MIR statements

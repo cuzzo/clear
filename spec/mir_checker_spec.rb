@@ -162,13 +162,13 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
     end
 
-    it "passes for InlineZig stdlib call with allocates:true returning Void" do
+    it "rejects InlineZig stdlib call with allocates:true returning Void without explicit ownership facts" do
       iz = MIR::InlineZig.new("CheatLib.sort({0})", "sort", MIR::OwnershipContract.empty, { allocates: true, return: :Void })
       body = [
         MIR::ExprStmt.new(iz, false),
       ]
       errors = checker.check_fn!(fn_def("stdlib_void", body))
-      expect(errors).to be_empty
+      expect(errors.any? { |e| e.include?("OWNERSHIP_FACT_REQUIRED") }).to be true
     end
 
     it "detects HPT_LEAK inside nested lambda" do

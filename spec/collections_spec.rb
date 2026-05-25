@@ -464,7 +464,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("s.length()")
+        expect(out).to include("CheatLib.len(s)")
       end
 
       it "raises error for .count() on set" do

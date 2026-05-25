@@ -256,7 +256,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("rt.heapAlloc()")
     end
 
-    it "outer string reassigned with user function call result stays frame-local unless it escapes" do
+    it "outer string reassigned with user function call result is heap-backed across loop iterations" do
       # Placement is decided by escape analysis, not by loop rewinds.
       ast = run_mir(<<~CLEAR)
         FN makePrefix(i: Int64) RETURNS !String ->
@@ -275,7 +275,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-      expect(last_decl.symbol.heap_storage?).to be false
+      expect(last_decl.symbol.heap_storage?).to be true
     end
 
     it "outer string reassigned with method call result stays frame-local unless it escapes" do

@@ -1261,22 +1261,21 @@ pub fn bind(comptime deps: type) type {
 
             /// Signal the generator fiber to stop, wait for it to finish, then free Inner.
             /// Sets closed flag and wakes the producer if blocked.
-            /// For string streams (T = []const u8), drains and frees unconsumed buffered items
-            /// before signaling the producer, preventing leaks on early consumer exit.
+                /// Drains unconsumed buffered items before signaling the producer.
+                /// The ring owns queued values; cleanup is O(queued) and unavoidable at drop.
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed.store(true, .release);
 
-                // Drain and free unconsumed items. Read head under the lock so we capture
-                // exactly the items committed before closed=true; producer cannot add more.
-                if (comptime (T == []const u8 or T == []u8)) {
+                    // Read head under the lock so we capture exactly the items committed
+                    // before closed=true; producer cannot add more after this point.
+                    if (comptime needsCleanup(T)) {
                     const h = inner.head.load(.acquire);
                     const t = inner.tail.load(.acquire);
                     var i: u32 = t;
                     while (i != h) : (i +%= 1) {
-                        const item = inner.buf[i & MASK];
-                        if (item.len > 0) self.alloc.free(item);
+                            cleanup(T, self.alloc, &inner.buf[i & MASK]);
                     }
                     inner.tail.store(h, .release);
                 }
@@ -1355,8 +1354,12 @@ pub fn bind(comptime deps: type) type {
 
                 prof_id: ProfId = if (rt_profile.CLEAR_PROFILE) 0 else {},
 
-                pub fn capacity(self: *Inner) usize { return self.mask + 1; }
-                pub fn used(self: *Inner) usize     { return self.head - self.tail; }
+                    pub fn capacity(self: *Inner) usize {
+                        return self.mask + 1;
+                    }
+                    pub fn used(self: *Inner) usize {
+                        return self.head - self.tail;
+                    }
 
                 fn wakeOneConsumer(self: *Inner) void {
                     for (0..MAX_CONSUMERS) |i| {
@@ -2199,9 +2202,15 @@ pub fn bind(comptime deps: type) type {
                 var sc: u32 = 0;
                 const n = fp.global_registry.len.load(.acquire);
                 for (fp.global_registry.slots[0..n]) |*slot| {
-                    if (slot.load(.acquire)) |s| { scheds[sc] = s; sc += 1; }
+                        if (slot.load(.acquire)) |s| {
+                            scheds[sc] = s;
+                            sc += 1;
+                        }
+                    }
+                    if (sc == 0) {
+                        scheds[0] = fp.active_scheduler;
+                        sc = 1;
                 }
-                if (sc == 0) { scheds[0] = fp.active_scheduler; sc = 1; }
                 for (0..N) |i| self.owners[i] = scheds[i % sc];
                 self.ownership_init.store(2, .release);
             }
@@ -2213,8 +2222,10 @@ pub fn bind(comptime deps: type) type {
             const is_slice_value = @typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .slice;
 
             const PutCtx = struct {
-                map: *Self, shard: usize,
-                key: []const u8, value: V,
+                    map: *Self,
+                    shard: usize,
+                    key: []const u8,
+                    value: V,
                 err: bool = false,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
@@ -2223,7 +2234,8 @@ pub fn bind(comptime deps: type) type {
                     // the original may point to the caller's stack.
                     const safe_val = if (comptime is_slice_value)
                         remote_alloc.dupe(@typeInfo(V).pointer.child, c.value) catch {
-                            remote_alloc.free(c.key); c.err = true;
+                                remote_alloc.free(c.key);
+                                c.err = true;
                             c.done.store(true, .release);
                             return;
                         }
@@ -2249,7 +2261,11 @@ pub fn bind(comptime deps: type) type {
                 }
             };
             const GetCtx = struct {
-                map: *Self, shard: usize, key: []const u8, op_id: u64, result: ?V = null,
+                    map: *Self,
+                    shard: usize,
+                    key: []const u8,
+                    op_id: u64,
+                    result: ?V = null,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
@@ -2260,7 +2276,10 @@ pub fn bind(comptime deps: type) type {
                 }
             };
             const RemoveCtx = struct {
-                map: *Self, shard: usize, key: []const u8, op_id: u64,
+                    map: *Self,
+                    shard: usize,
+                    key: []const u8,
+                    op_id: u64,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
@@ -2456,8 +2475,12 @@ pub fn bind(comptime deps: type) type {
                     value;
                 const PrehashedCtx = struct {
                     h: u64,
-                    pub fn hash(self_ctx: @This(), _: []const u8) u64 { return self_ctx.h; }
-                    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return std.mem.eql(u8, a, b); }
+                        pub fn hash(self_ctx: @This(), _: []const u8) u64 {
+                            return self_ctx.h;
+                        }
+                        pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
+                            return std.mem.eql(u8, a, b);
+                        }
                 };
                 const gop = self.shards[shard].map.getOrPutAdapted(remote_alloc, owned_key, PrehashedCtx{ .h = precomputed_hash }) catch |e| {
                     remote_alloc.free(owned_key);
@@ -2622,9 +2645,15 @@ pub fn bind(comptime deps: type) type {
                 var sc: u32 = 0;
                 const n = fp.global_registry.len.load(.acquire);
                 for (fp.global_registry.slots[0..n]) |*slot| {
-                    if (slot.load(.acquire)) |s| { scheds[sc] = s; sc += 1; }
+                        if (slot.load(.acquire)) |s| {
+                            scheds[sc] = s;
+                            sc += 1;
+                        }
+                    }
+                    if (sc == 0) {
+                        scheds[0] = fp.active_scheduler;
+                        sc = 1;
                 }
-                if (sc == 0) { scheds[0] = fp.active_scheduler; sc = 1; }
                 for (0..N) |i| self.owners[i] = scheds[i % sc];
                 self.ownership_init.store(2, .release);
             }
@@ -2633,20 +2662,27 @@ pub fn bind(comptime deps: type) type {
 
             // Remote op contexts. Key is K (value type) — no heap duplication needed.
             const PutCtx = struct {
-                map: *Self, shard: usize, key: K, value: V,
+                    map: *Self,
+                    shard: usize,
+                    key: K,
+                    value: V,
                 err: bool = false,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
                     const safe_val = if (comptime is_slice_value)
                         remote_alloc.dupe(@typeInfo(V).pointer.child, c.value) catch {
-                            c.err = true; c.done.store(true, .release); return;
+                                c.err = true;
+                                c.done.store(true, .release);
+                                return;
                         }
                     else
                         c.value;
                     const gop = c.map.shards[c.shard].map.getOrPut(remote_alloc, c.key) catch {
                         if (comptime is_slice_value) remote_alloc.free(safe_val);
-                        c.err = true; c.done.store(true, .release); return;
+                            c.err = true;
+                            c.done.store(true, .release);
+                            return;
                     };
                     if (gop.found_existing) {
                         if (comptime needsCleanup(V)) cleanup(V, remote_alloc, gop.value_ptr);
@@ -2657,7 +2693,11 @@ pub fn bind(comptime deps: type) type {
                 }
             };
             const GetCtx = struct {
-                map: *Self, shard: usize, key: K, op_id: u64, result: ?V = null,
+                    map: *Self,
+                    shard: usize,
+                    key: K,
+                    op_id: u64,
+                    result: ?V = null,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
@@ -2666,7 +2706,10 @@ pub fn bind(comptime deps: type) type {
                 }
             };
             const RemoveCtx = struct {
-                map: *Self, shard: usize, key: K, op_id: u64,
+                    map: *Self,
+                    shard: usize,
+                    key: K,
+                    op_id: u64,
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
@@ -3116,8 +3159,8 @@ pub fn bind(comptime deps: type) type {
                     const hot_pct = if (stats.hot_shard_locks > 0) (stats.hot_shard_contentions * 100) / stats.hot_shard_locks else 0;
                     std.debug.print("[contention] locks={d} contentions={d} ({d}%) hot_shard[{d}]: locks={d} contentions={d} ({d}%)\n", .{
                         stats.total_locks, stats.total_contentions, pct,
-                        stats.hot_shard_idx,
-                        stats.hot_shard_locks, stats.hot_shard_contentions, hot_pct,
+                            stats.hot_shard_idx, stats.hot_shard_locks,   stats.hot_shard_contentions,
+                            hot_pct,
                     });
                     self.printShardDistribution();
                 }
@@ -3255,14 +3298,30 @@ pub fn bind(comptime deps: type) type {
             const Self = @This();
             inner: Base = .{ .locks_elided = std.atomic.Value(bool).init(false) },
 
-            pub fn put(self: *Self, a: std.mem.Allocator, k: K, v: V) !void { return self.inner.put(a, k, v); }
-            pub fn get(self: *Self, k: K) ?V { return self.inner.get(k); }
-            pub fn contains(self: *Self, k: K) bool { return self.inner.contains(k); }
-            pub fn remove(self: *Self, a: std.mem.Allocator, k: K) void { self.inner.remove(a, k); }
-            pub fn count(self: *Self) i64 { return self.inner.count(); }
-            pub fn deinit(self: *Self, a: std.mem.Allocator) void { self.inner.deinit(a); }
-            pub fn getOpCounts(self: *const Self) [N]u64 { return self.inner.getOpCounts(); }
-            pub fn enableLocks(self: *Self) void { self.inner.enableLocks(); }
+                pub fn put(self: *Self, a: std.mem.Allocator, k: K, v: V) !void {
+                    return self.inner.put(a, k, v);
+                }
+                pub fn get(self: *Self, k: K) ?V {
+                    return self.inner.get(k);
+                }
+                pub fn contains(self: *Self, k: K) bool {
+                    return self.inner.contains(k);
+                }
+                pub fn remove(self: *Self, a: std.mem.Allocator, k: K) void {
+                    self.inner.remove(a, k);
+                }
+                pub fn count(self: *Self) i64 {
+                    return self.inner.count();
+                }
+                pub fn deinit(self: *Self, a: std.mem.Allocator) void {
+                    self.inner.deinit(a);
+                }
+                pub fn getOpCounts(self: *const Self) [N]u64 {
+                    return self.inner.getOpCounts();
+                }
+                pub fn enableLocks(self: *Self) void {
+                    self.inner.enableLocks();
+                }
         };
     }
     };

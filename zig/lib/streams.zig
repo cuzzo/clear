@@ -381,6 +381,7 @@ pub fn SplitStream(
                 .alloc = alloc,
                 .wg = WaitGroupType.init(sched),
             };
+            inner.wg.add(1);
             const head_seq = inner.head_seq.load(.acquire);
             // spawnNew's anchor handle is is_reader=0 — it exists to hold
             // a reference to Inner but typically does not call next().
@@ -476,15 +477,8 @@ pub fn SplitStream(
             // returned to push; close() must wake it (typically a no-op
             // since close() is called by the producer after it finishes).
             wakeParkedProducer(self.inner);
-            const should_destroy = self.inner.active_subscribers.load(.acquire) == 0;
             self.inner.mutex.unlock();
-
-            if (should_destroy) {
-                self.inner.mutex.lock() catch unreachable;
-                clearAllChunks(self.inner);
-                self.inner.mutex.unlock();
-                destroyInner(self.inner);
-            }
+            self.inner.wg.done();
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
@@ -646,8 +640,9 @@ pub fn SplitStream(
             self.next_index = 0;
 
             if (self.inner.active_subscribers.load(.acquire) == 0) {
+                self.inner.closed.store(1, .release);
                 clearAllChunks(self.inner);
-                should_destroy = self.inner.closed.load(.acquire) != 0;
+                should_destroy = true;
             } else {
                 releaseConsumedPrefix(self.inner);
             }
@@ -656,7 +651,10 @@ pub fn SplitStream(
             wakeParkedProducer(self.inner);
             self.inner.mutex.unlock();
 
-            if (should_destroy) destroyInner(self.inner);
+            if (should_destroy) {
+                self.inner.wg.wait();
+                destroyInner(self.inner);
+            }
         }
     };
 }

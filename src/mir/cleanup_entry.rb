@@ -96,6 +96,21 @@ class CleanupEntry < Hash
   sig { returns(T::Boolean) }
   def needs_release_fields? = self[:needs_release_fields] == true
 
+  sig { params(alloc: Symbol).returns(CleanupEntry) }
+  def with_alloc(alloc)
+    updated = dup
+    updated[:alloc] = alloc
+    updated[:scope] = alloc == :heap ? :heap : updated.scope
+    updated
+  end
+
+  sig { returns(CleanupEntry) }
+  def with_moved_guard
+    updated = dup
+    updated[:has_moved_guard] = true
+    updated
+  end
+
   sig { returns(T.nilable(Symbol)) }
   def rc_alloc = self[:rc_alloc]
 

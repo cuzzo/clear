@@ -246,17 +246,20 @@ module CleanupClassifier
       target_node = stmt.name.target
 
       field_ti = Type.from_node!(stmt.name, context: "field pre-cleanup")
+      field_needs_cleanup =
+        field_ti.needs_cleanup?(schema_lookup) ||
+        field_ti.recursive_cleanup_shape?(schema_lookup)
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
-      if !field_ti.needs_cleanup?(schema_lookup) && stmt.auto_lock && field_ti.string?
+      if !field_needs_cleanup && stmt.auto_lock && field_ti.string?
         stmt.field_pre_cleanup = :heap
         next
       end
 
       # Heap struct string fields: heap-allocated structs dupe their string
       # fields to heap at creation. Overwriting without freeing the old leaks.
-      if field_ti.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
+      if field_ti.string? && !field_needs_cleanup && target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         if target_entry && target_entry[:alloc] == :heap
           stmt.field_pre_cleanup = :heap
@@ -264,7 +267,7 @@ module CleanupClassifier
         end
       end
 
-      next unless field_ti.needs_cleanup?(schema_lookup)
+      next unless field_needs_cleanup
 
       stmt.field_pre_cleanup = if target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
@@ -631,6 +634,11 @@ module CleanupClassifier
 
     sync = node_sym&.sync
     entry = nil
+    schema = schema_lookup.call(ti.resolved) rescue nil
+
+    if Schemas.resource?(schema)
+      entry = entry(:resource, resource_close_zig: schema.close_zig)
+    end
 
     entry ||= entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
     if !entry && ti.frozen?

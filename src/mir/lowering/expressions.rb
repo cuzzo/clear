@@ -269,11 +269,11 @@ module MIRLoweringExpressions
       rhs_uv = unit_variant_access(node.right)
       if lhs_uv && !rhs_uv
         op_str = node.op == :EQ ? "==" : "!="
-        tag_call = MIR::Call.new("std.meta.activeTag", [right], false)
+        tag_call = active_tag_call(right)
         return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv[1]}"))
       elsif rhs_uv && !lhs_uv
         op_str = node.op == :EQ ? "==" : "!="
-        tag_call = MIR::Call.new("std.meta.activeTag", [left], false)
+        tag_call = active_tag_call(left)
         return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv[1]}"))
       end
     end
@@ -577,7 +577,11 @@ module MIRLoweringExpressions
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
-    right = descend(node, :right)
+    fallback_type = Type.from_node(node.left)
+    fallback_type = fallback_type.payload_type if fallback_type&.error_union? || fallback_type&.optional?
+    right = with_expected_type(fallback_type) do
+      materialize_or_fallback_value(descend(node, :right), node.right)
+    end
 
     if facts.left_is_error
       return try_catch_with_provenance(left, right, nil, fallback: right)
@@ -585,6 +589,25 @@ module MIRLoweringExpressions
 
     # Optional orelse
     MIR::Orelse.new(left, right)
+  end
+
+  sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  def materialize_or_fallback_value(value, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless or_fallback_access_path?(ast_node)
+
+    ti = Type.from_node(ast_node)
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    return value unless ti.is_a?(Type)
+    return value unless ti.string? || ti.recursive_cleanup_shape?(@schema_lookup) || ti.needs_cleanup?(@schema_lookup)
+
+    alloc = @current_decl_alloc || :heap
+    MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
+  end
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def or_fallback_access_path?(ast_node)
+    ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
   end
 
   sig { params(node: AST::BinaryOp).returns(OrRescueFacts) }
@@ -986,24 +1009,26 @@ module MIRLoweringExpressions
       field_sink_alloc = aggregate_field_sink_alloc(ft, field_node, struct_alloc)
       move_mark_field!(field_node)
       val = with_decl_alloc(field_sink_alloc) do
+        with_expected_type(ft) do
         if borrowed_field
           lower(field_node)
         elsif rc_retain_needed?(field_node)
           make_rc_retain(field_node)
         elsif field_node.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
           hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), nil, nil, :full_value, field_sink_alloc),
-            field_node, err_cleanup: true, transfer_on_success: false)
+            field_node, err_cleanup: true)
         else
           field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, ft)
           field_alloc = mir_owned_alloc(field_value)
-          lowered = hoist_alloc(field_value, field_node, err_cleanup: true, transfer_on_success: false)
+          lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
           if ft.is_a?(Type) && ft.recursive_cleanup_shape?(@schema_lookup) &&
              !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc
             hoist_alloc(MIR::DeepCopy.new(lowered, ft.zig_type, nil, :full_value, field_sink_alloc),
-              field_node, err_cleanup: true, transfer_on_success: false)
+              field_node, err_cleanup: true)
           else
             lowered
           end
+        end
         end
       end
       if struct_field_wants_slice?(ft, k, node)
@@ -1015,7 +1040,11 @@ module MIRLoweringExpressions
         zig_t = transpile_type(v.full_type.resolved.to_s)
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
-        hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        hc = T.cast(with_ownership_consumption(
+          MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
+          mir_ident_names(val),
+          "MIR::HeapCreate",
+        ), MIR::HeapCreate)
         mark = MIR::AllocMark.new(temp, :heap, nil)
         mark.scope = :heap
         hoisted << mark
@@ -1037,7 +1066,11 @@ module MIRLoweringExpressions
       node.name.to_s
     end
 
-    init = MIR::StructInit.new(type_name, fields)
+    init = T.cast(with_ownership_consumption(
+      MIR::StructInit.new(type_name, fields),
+      fields.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
+      "MIR::StructInit",
+    ), MIR::StructInit)
 
     # Struct literals remain value-shaped. Heap/frame placement is a storage
     # decision for the owning binding or wrapper; it must not change `T` into
@@ -1081,8 +1114,10 @@ module MIRLoweringExpressions
       # err_cleanup: union owns its payload on success; only clean up on error.
       move_mark_field!(v)
       val = with_decl_alloc(field_sink_alloc) do
+        with_expected_type(ft) do
         materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
-        hoist_alloc(materialized, v, err_cleanup: true, transfer_on_success: false)
+        hoist_alloc(materialized, v, err_cleanup: true)
+        end
       end
       # @indirect is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
@@ -1103,7 +1138,11 @@ module MIRLoweringExpressions
         end
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
-        hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        hc = T.cast(with_ownership_consumption(
+          MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
+          mir_ident_names(val),
+          "MIR::HeapCreate",
+        ), MIR::HeapCreate)
         mark = MIR::AllocMark.new(temp, :heap, nil)
         mark.scope = :heap
         hoisted << mark
@@ -1130,7 +1169,11 @@ module MIRLoweringExpressions
       { name: k.to_s, value: val, alloc: field_sink_alloc }
     }
 
-    inner = MIR::StructInit.new(variant_struct_name, field_values)
+    inner = T.cast(with_ownership_consumption(
+      MIR::StructInit.new(variant_struct_name, field_values),
+      field_values.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
+      "MIR::StructInit",
+    ), MIR::StructInit)
     result = MIR::StructInit.new(node.union_name.to_s, [
       { name: node.variant_name.to_s, value: inner }
     ])
@@ -1180,7 +1223,8 @@ module MIRLoweringExpressions
       ti = Type.from_node!(value, context: "aggregate field sink")
       if ownership_tracked_transfer_type?(ti) &&
          (value.was_moved == true || value.symbol&.heap_storage?)
-        return placement_for_node(value)
+        source_alloc = placement_for_node(value)
+        return source_alloc if source_alloc == aggregate_alloc
       end
     end
 
@@ -1569,10 +1613,20 @@ module MIRLoweringExpressions
     end
 
     if source_ti.multiowned?
-      return MIR::SharePromote.new(lower(node.value), zig_base, :heap)
+      source = lower(node.value)
+      return T.cast(with_ownership_consumption(
+        MIR::SharePromote.new(source, zig_base, :heap),
+        mir_ident_names(source),
+        "MIR::SharePromote",
+      ), MIR::SharePromote)
     end
 
-    MIR::CapWrap.new(lower(node.value), zig_base, :own_only, nil, nil, "arcCreate", :heap)
+    source = lower(node.value)
+    T.cast(with_ownership_consumption(
+      MIR::CapWrap.new(source, zig_base, :own_only, nil, nil, "arcCreate", :heap),
+      mir_ident_names(source),
+      "MIR::CapWrap",
+    ), MIR::CapWrap)
   end
 
   sig { params(node: AST::CapabilityWrap).returns(MIR::CapWrap) }
@@ -1610,7 +1664,11 @@ module MIRLoweringExpressions
       :passthrough
     end
 
-    MIR::CapWrap.new(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc)
+    T.cast(with_ownership_consumption(
+      MIR::CapWrap.new(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc),
+      mir_ident_names(inner),
+      "MIR::CapWrap",
+    ), MIR::CapWrap)
   end
 
   sig { params(node: AST::LinkNode).returns(MIR::RcDowngrade) }

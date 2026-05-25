@@ -171,16 +171,16 @@ module CaptureStrategy
       return MoveInto.new(zig_t, name, name)
     end
 
-    # 4. Value-like captures are always safe: primitives, strings
+    # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
+    #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
+    #    safely via the existing retain/release discipline.
+    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
+
+    # 5. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
     #    whose fields are all themselves value-like (resolved via
     #    schema_lookup).
     return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
-
-    # 5. @multiowned / @shared / @locked / @writeLocked / @local clone
-    #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
-    #    safely via the existing retain/release discipline.
-    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
 
     # 6. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
@@ -229,11 +229,8 @@ module CaptureStrategy
   # topologies. All of these preserve the safe-sharing guarantee.
   sig { params(type: Type).returns(T::Boolean) }
   def self.safe_shared_across_fibers?(type)
-    return true if type.multiowned? || type.shared?
-    return true if type.respond_to?(:any_sync?) && type.any_sync?
-    return true if type.respond_to?(:sharded?) && type.sharded?
-    return true if type.respond_to?(:striped?) && type.striped?
-    false
+    zig = type.zig_type
+    zig.start_with?("CheatLib.Arc(") || zig.start_with?("CheatLib.Rc(")
   end
 
   # Where the fiber's deep-copy should live when the user writes COPY.

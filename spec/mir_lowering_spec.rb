@@ -47,6 +47,22 @@ RSpec.describe MIRLowering do
     node
   end
 
+  def capture_analysis(captures: {}, capture_symbols: {}, close_patterns: {},
+                       pointer_captures: Set.new, string_captures: Set.new,
+                       resource_captures: Set.new, strategies: nil)
+    CapabilityHelper::CaptureAnalysis.new(
+      has_local: false, has_rc: false, has_shared: false,
+      has_sharded: false, has_affine_locked: false, has_outer_ref: false,
+      has_non_escaping_capture: false,
+      captures: captures, capture_symbols: capture_symbols,
+      close_patterns: close_patterns,
+      pointer_captures: pointer_captures, string_captures: string_captures,
+      resource_captures: resource_captures,
+      site_moved: Set.new, site_copied: Set.new,
+      strategies: strategies, move_mark_names: Set.new, alloc_mark_entries: {},
+    )
+  end
+
   def make_binop(left, op, right)
     node = AST::BinaryOp.new(tok, left, op, right)
     node.full_type = left.full_type
@@ -1790,8 +1806,8 @@ RSpec.describe MIRLowering do
       expect(zig).to include("var __kit_")
       expect(zig).to include("scores.keyIterator()")
       expect(zig).to include("while (__kit_")
-      expect(zig).to include(") |name|")
-      expect(zig).to include("rt.checkYield()")
+      expect(zig).to include(") |__key_ptr_")
+      expect(zig).to include("const name = __key_ptr_")
     end
 
     it "lowers FOR EACH over bounded streams with deinit and nextOrNull" do
@@ -2229,7 +2245,7 @@ RSpec.describe MIRLowering do
     it "lowers DoBlock with captures" do
       body_id = make_id("x", full_type: :Int64)
       captures_hash = { "x" => :Int64 }
-      analysis = OpenStruct.new(captures: captures_hash)
+      analysis = capture_analysis(captures: captures_hash)
       branch = {
         body: [body_id],
         capture_analysis: analysis,
@@ -2251,7 +2267,7 @@ RSpec.describe MIRLowering do
 
     it "merges nested BG capture analysis into the DoBlock context" do
       nested_body = make_id("inner", full_type: :Int64)
-      nested_analysis = OpenStruct.new(
+      nested_analysis = capture_analysis(
         captures: { "inner" => :Int64 },
         capture_symbols: {},
         close_patterns: {},
@@ -2263,7 +2279,7 @@ RSpec.describe MIRLowering do
       nested_bg.full_type = :"~Void"
       nested_bg.capture_analysis = nested_analysis
 
-      branch_analysis = OpenStruct.new(
+      branch_analysis = capture_analysis(
         captures: {},
         capture_symbols: {},
         close_patterns: {},
@@ -2366,11 +2382,12 @@ RSpec.describe MIRLowering do
     it "lowers BgBlock with captures" do
       body_id = make_id("x", full_type: :Int64)
       captures_hash = { "x" => :Int64 }
-      analysis = OpenStruct.new(
+      analysis = capture_analysis(
         captures: captures_hash,
         capture_symbols: {},
         close_patterns: {},
         pointer_captures: Set.new(["x"]),
+        string_captures: Set.new,
         resource_captures: Set.new
       )
       node = AST::BgBlock.new(tok, [body_id], nil, nil, nil, nil, nil, nil)
@@ -2467,7 +2484,7 @@ RSpec.describe MIRLowering do
     it "refuses unsafe BG STREAM captures with ownership-specific guidance" do
       node = AST::BgStreamBlock.new(tok, [], nil, nil)
       node.full_type = :"~?Int64[]"
-      node.capture_analysis = OpenStruct.new(
+      node.capture_analysis = capture_analysis(
         captures: { "items" => Type.new(:"Int64[]@list") },
         strategies: { "items" => CaptureStrategy::Refuse.new(:list_borrow_without_transfer, "items") }
       )
@@ -2497,7 +2514,7 @@ RSpec.describe MIRLowering do
       yield_node.full_type = :Void
       node = AST::BgStreamBlock.new(tok, [yield_node], nil, nil)
       node.full_type = :"~Int64[INF]"
-      node.capture_analysis = OpenStruct.new(captures: { "seed" => :Int64 })
+      node.capture_analysis = capture_analysis(captures: { "seed" => :Int64 })
 
       result = lowering(target: :bc).lower(node)
 

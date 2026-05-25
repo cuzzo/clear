@@ -407,7 +407,17 @@ module AST
     when MethodCall
       _expr_each_bg_block_recursive(expr.object, &block)
       expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+    when StructLit, UnionVariantLit
+      expr.fields.each_value { |v| _expr_each_bg_block_recursive(v, &block) }
+    when ListLit
+      expr.items.each { |v| _expr_each_bg_block_recursive(v, &block) }
+    when HashLit
+      expr.entries.each { |k, v| _expr_each_bg_block_recursive(k, &block); _expr_each_bg_block_recursive(v, &block) }
+    when BinaryOp
+      _expr_each_bg_block_recursive(expr.left, &block)
+      _expr_each_bg_block_recursive(expr.right, &block)
     end
+    nil
   end
 
   # Yield ONLY the BgBlocks directly embedded in `stmt`'s expression
@@ -446,7 +456,17 @@ module AST
     when MethodCall
       _expr_each_bg_block_shallow(expr.object, &block)
       expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+    when StructLit, UnionVariantLit
+      expr.fields.each_value { |v| _expr_each_bg_block_shallow(v, &block) }
+    when ListLit
+      expr.items.each { |v| _expr_each_bg_block_shallow(v, &block) }
+    when HashLit
+      expr.entries.each { |k, v| _expr_each_bg_block_shallow(k, &block); _expr_each_bg_block_shallow(v, &block) }
+    when BinaryOp
+      _expr_each_bg_block_shallow(expr.left, &block)
+      _expr_each_bg_block_shallow(expr.right, &block)
     end
+    nil
   end
 
   # Yield every CaptureAnalysis instance reachable from `body`. A

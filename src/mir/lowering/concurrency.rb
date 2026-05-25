@@ -77,8 +77,8 @@ module MIRLoweringConcurrency
   def boundary_capture_forbidden_reason(symbol)
     return nil unless symbol
     return :local_scheduler_affinity if symbol.local?
-    return :non_atomic_rc if symbol.storage == :multiowned
-    return nil if symbol.storage == :shared
+    return :non_atomic_rc if boundary_capture_multiowned_rc?(symbol)
+    return nil if boundary_capture_shared_arc?(symbol)
     return :affine_locked if symbol.locked?
     return :affine_write_locked if symbol.write_locked?
     return :affine_versioned if SymbolEntry.versioned_sync?(symbol.sync)
@@ -90,14 +90,34 @@ module MIRLoweringConcurrency
   def boundary_capture_scheduler_affine?(symbol)
     return false unless symbol
     return true if symbol.local?
-    return false if symbol.storage == :shared
+    return false if boundary_capture_shared_arc?(symbol)
 
     symbol.locked? || symbol.write_locked? || SymbolEntry.versioned_sync?(symbol.sync)
   end
 
   sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
   def boundary_capture_requires_pinned?(symbol)
-    boundary_capture_scheduler_affine?(symbol) || (symbol&.storage == :multiowned)
+    boundary_capture_scheduler_affine?(symbol) || boundary_capture_multiowned_rc?(symbol)
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def boundary_capture_shared_arc?(symbol)
+    return false unless symbol
+
+    type_info = symbol.type
+    return true if type_info.respond_to?(:shared?) && type_info.shared?
+
+    symbol.storage == :shared
+  end
+
+  sig { params(symbol: T.nilable(SymbolEntry)).returns(T::Boolean) }
+  def boundary_capture_multiowned_rc?(symbol)
+    return false unless symbol
+
+    type_info = symbol.type
+    return true if type_info.respond_to?(:multiowned?) && type_info.multiowned?
+
+    symbol.storage == :multiowned
   end
 
   sig { params(node: AST::DoBlock).returns(MIR::DoBlock) }
@@ -143,11 +163,13 @@ module MIRLoweringConcurrency
       # Capture handling delegated to FiberCtxBuilder -- same builder
       # BG/BG STREAM/CONCURRENT use. DO branches use "ctx" as the body
       # access prefix (no per-id suffix).
-      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
+      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx", fresh_heap_id: (id * 1000) + i)
 
       capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n    ")
       capture_inits = ([".wg = &#{wg_var}"] +
         caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
+      capture_pre_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
+      capture_body_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                ")
 
       # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
       branch_mir = T.let(nil, T.untyped)
@@ -196,9 +218,11 @@ module MIRLoweringConcurrency
                 #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
                 const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_do#{id}_#{i}.?)));
                 defer ctx.wg.done();
+                #{capture_body_cleanups}
                 #{body_code}
             }
         };
+        #{capture_pre_decls}
         var #{ctx_var} = #{ctx_type}{ #{capture_inits} };
         #{spawn_fn}(
             @intFromPtr(&Runtime.entryWrapper),
@@ -575,13 +599,15 @@ module MIRLoweringConcurrency
     # mir-lowering strict ivars
     @current_stream_is_inf = T.let(@current_stream_is_inf, T.untyped)
     @current_stream_local = T.let(@current_stream_local, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     @stream_gen_counter = T.let(@stream_gen_counter, T.untyped)
     @target = T.let(@target, T.untyped)
     @stream_gen_counter = (@stream_gen_counter || 0) + 1
     id = @stream_gen_counter - 1
 
-    tense_t = Type.new(node.full_type)
+    expected_t = Type.from_node(@current_expected_type)
+    tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type)
     is_inf = tense_t.inf_stream?
     stream_zig = tense_t.zig_type
 
@@ -645,7 +671,9 @@ module MIRLoweringConcurrency
     promoted_names = T.let({}, T::Hash[String, String])
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "ctx",
-                                 promoted_names: promoted_names)
+                                 promoted_names: promoted_names,
+                                 fresh_heap_alloc: alloc_var,
+                                 fresh_heap_id: id)
 
     capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
     capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
@@ -680,8 +708,8 @@ module MIRLoweringConcurrency
     @current_stream_local = prev_stream_local
     @current_stream_is_inf = prev_stream_is_inf
 
-    promoted_decls = ""
-    string_frees = ""
+    promoted_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
+    string_frees = caps.specs.filter_map(&:body_cleanup_zig).join("\n                  ")
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, :local)
@@ -793,6 +821,13 @@ module MIRLoweringConcurrency
     !!wt&.string?
   end
 
+  sig { params(type_info: T.nilable(Type)).returns(T::Boolean) }
+  def bg_stream_expected_type?(type_info)
+    return false unless type_info
+
+    type_info.inf_stream? || type_info.open_stream? || type_info.bounded_stream?
+  end
+
   sig { params(node: AST::NextExpr, alloc_sym: Symbol).returns(T.untyped) }
   def lower_next_expr(node, alloc_sym = :frame)
     T.bind(self, MIRLowering) rescue nil
@@ -864,7 +899,20 @@ module MIRLoweringConcurrency
       ])
     end
 
-    MIR::MethodCall.new(plan.inner, "next", [], true, MIR::CallableContract.no_ownership(0),
+    receiver = plan.inner
+    if promise_type.stream? && !receiver.is_a?(MIR::Ident)
+      @tmp_counter += 1
+      label = "__next_recv_#{@tmp_counter}"
+      temp = "__next_source_#{@tmp_counter}"
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new(temp, receiver, true, nil, nil),
+        MIR::BreakStmt.new(label,
+          MIR::MethodCall.new(MIR::Ident.new(temp), "next", [], true,
+            MIR::CallableContract.no_ownership(0), plan.result_alloc)),
+      ])
+    end
+
+    MIR::MethodCall.new(receiver, "next", [], true, MIR::CallableContract.no_ownership(0),
       plan.result_alloc)
   end
 

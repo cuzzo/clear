@@ -374,7 +374,7 @@ class MIRChecker
     when MIR::MoveMark
       linear_move_mark!(stmt.name.to_s, state)
     when MIR::ReturnStmt
-      check_linear_expr_uses!(stmt.value, state)
+      check_linear_expr_uses!(stmt.value, state, state.pending_return_transfers)
       returned_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_return_transfers, state, :return)
       state.pending_return_transfers.each { |name| linear_release!(name, :return, state) }
@@ -397,7 +397,7 @@ class MIRChecker
     when MIR::DiscardOwned
       check_linear_expr_uses!(stmt.expr, state)
     when MIR::BreakStmt
-      check_linear_expr_uses!(stmt.value, state)
+      check_linear_expr_uses!(stmt.value, state, state.pending_block_transfers)
       break_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_block_transfers, state, :block_result)
       state.pending_block_transfers.each { |name| linear_release!(name, :block_result, state) }
@@ -690,19 +690,41 @@ class MIRChecker
     nil
   end
 
-  sig { params(expr: T.untyped, state: LinearOwnershipState).void }
-  def check_linear_expr_uses!(expr, state)
+  sig { params(expr: T.untyped, state: LinearOwnershipState, transfer_reads: T::Set[String]).void }
+  def check_linear_expr_uses!(expr, state, transfer_reads = Set.new)
+    consuming_reads = T.let(transfer_reads.dup, T::Set[String])
+    linear_expr_consumed_names(expr).each { |name| consuming_reads.add(name) }
+    if expr.is_a?(MIR::Pipeline)
+      check_linear_expr_uses!(expr.inner, state, consuming_reads)
+      return
+    end
     if expr.is_a?(MIR::BlockExpr)
       inner = check_linear_stmts!(expr.body, state.copy)
       linear_exit_scope!(state, inner, "block-expr")
       return
     end
     linear_expr_ident_names(expr).each do |name|
+      next if consuming_reads.include?(name)
       next unless state.released.include?(name) || state.maybe_released.include?(name)
       @errors << error(:OWNERSHIP_USE_AFTER_TRANSFER, name,
         "binding read after ownership was transferred")
     end
     nil
+  end
+
+  sig { params(expr: T.untyped).returns(T::Set[String]) }
+  def linear_expr_consumed_names(expr)
+    names = T.let(Set.new, T::Set[String])
+    walk_mir_node(expr) do |node|
+      contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
+      if contract.is_a?(MIR::OwnershipContract)
+        contract.consumes.each { |name| names.add(name.to_s) }
+      end
+      callable = node.respond_to?(:callable_contract) ? node.callable_contract : nil
+      next unless callable.is_a?(MIR::CallableContract)
+      callable.ownership_contract.consumes.each { |name| names.add(name.to_s) }
+    end
+    names
   end
 
   sig { params(expr: T.untyped).returns(T::Set[String]) }
@@ -1253,20 +1275,33 @@ class MIRChecker
     case node
     when MIR::FnDef       then walk_mir(node.body, &block)
     when MIR::IfStmt
+      walk_mir_expr(node.cond, &block)
       walk_mir(node.then_body, &block)
       walk_mir(node.else_body, &block)
     when MIR::IfBindStmt
+      node.bindings&.each do |binding|
+        expr = binding.is_a?(Hash) ? binding[:expr] : nil
+        walk_mir_expr(expr, &block) if expr
+      end
       walk_mir(node.then_body, &block)
       walk_mir(node.else_body, &block)
-    when MIR::WhileStmt, MIR::ForStmt
+    when MIR::WhileStmt
+      walk_mir_expr(node.cond, &block)
+      walk_mir(node.body, &block)
+    when MIR::ForStmt
+      walk_mir_expr(node.iter, &block)
       walk_mir(node.body, &block)
     when MIR::ScopeBlock, MIR::BlockExpr
       walk_mir(node.body, &block)
     when MIR::SwitchStmt
+      walk_mir_expr(node.subject, &block) if node.respond_to?(:subject)
       node.arms&.each { |a| walk_mir(a[:body], &block) }
       walk_mir(node.default_body, &block)
     when MIR::IfChain
-      node.branches&.each { |b| walk_mir(b[:body], &block) }
+      node.branches&.each do |b|
+        walk_mir_expr(b[:cond], &block)
+        walk_mir(b[:body], &block)
+      end
       walk_mir(node.default_body, &block)
     when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
@@ -1479,7 +1514,7 @@ class MIRChecker
       # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
       # or visit_CopyNode missed the gate.
       if (ti = alloc_marks.first.full_type)
-        no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
+        no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared? && !ti.heap_ptr?
         if no_caps && (ti.primitive? || ti.id_handle?)
           @errors << error(:COPY_CLEANUP, name,
             "cleanup emitted for value type #{ti} (primitive or Id<T>) that can never " \
@@ -1710,13 +1745,11 @@ class MIRChecker
     walk_mir(body) do |node|
       case node
       when MIR::BgBlock
-        fact = node.respond_to?(:boundary_fact) ? node.boundary_fact : nil
-        verify_execution_boundary_fact!(fact, "MIR::BgBlock")
+        verify_execution_boundary_fact!(node.boundary_fact, "MIR::BgBlock")
       when MIR::StreamSpawn
-        fact = node.respond_to?(:boundary_fact) ? node.boundary_fact : nil
-        verify_execution_boundary_fact!(fact, "MIR::StreamSpawn")
+        verify_execution_boundary_fact!(node.boundary_fact, "MIR::StreamSpawn")
       when MIR::DoBlock
-        facts = node.respond_to?(:boundary_facts) ? node.boundary_facts : nil
+        facts = node.boundary_facts
         unless facts.is_a?(Array) && facts.all? { |f| f.is_a?(MIR::ExecutionBoundaryFact) }
           @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
             "MIR::DoBlock has no typed ExecutionBoundaryFact array for its branches")
@@ -1727,7 +1760,7 @@ class MIRChecker
           @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
             "MIR::DoBlock has #{facts.length} boundary facts for #{expected} branch bodies")
         end
-        T.cast(facts, T::Array[MIR::ExecutionBoundaryFact]).each do |fact|
+        facts.each do |fact|
           verify_execution_boundary_fact!(fact, "MIR::DoBlock")
         end
       end
@@ -1768,22 +1801,37 @@ class MIRChecker
   def inline_ownership_side_channel?(node)
     return true if node.allocs && !node.allocs.empty?
     return true if node.stdlib_def&.emits_allocating?
+    return false if stdlib_consumption_covered_without_owned_values?(node)
     return true if stdlib_takes_ownership?(node)
     return false unless node.ownership_contract.is_a?(MIR::OwnershipContract)
 
     !node.ownership_contract.consumes.empty? || !node.ownership_contract.produces.empty?
   end
 
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def stdlib_consumption_covered_without_owned_values?(node)
+    return false unless stdlib_takes_ownership?(node)
+
+    contract = node.ownership_contract
+    return false unless contract.is_a?(MIR::OwnershipContract)
+    return false unless contract.covers_consuming_params
+
+    contract.consumes.empty? && contract.produces.empty? && contract.borrows.empty?
+  end
+
   sig { params(contract: T.untyped).returns(T::Boolean) }
   def callable_contract_consumes?(contract)
     return false unless contract.is_a?(MIR::CallableContract)
-    return true unless contract.ownership_contract.consumes.empty?
-
-    function_signature_takes_ownership?(contract.signature, contract.checked_arg_count)
+    !contract.ownership_contract.consumes.empty?
   end
 
   sig { params(facts: T::Array[T.untyped], node: T.untyped).returns(T::Boolean) }
   def ownership_fact_covers_node?(facts, node)
+    if node.respond_to?(:ownership_consumption) &&
+       node.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+      return true
+    end
+
     source = ownership_node_name(node)
     facts.any? do |fact|
       fact.respond_to?(:source) && fact.source.to_s == source
@@ -2081,8 +2129,12 @@ class MIRChecker
       check_expr_for_unhoisted(node.cond, allow_top: false)
       check_stmts_for_unhoisted(node.then_body)
       check_stmts_for_unhoisted(node.else_body)
+    when MIR::IfBindStmt
+      node.bindings&.each { |binding| check_expr_for_unhoisted(binding[:expr], allow_top: true) }
+      check_stmts_for_unhoisted(node.then_body)
+      check_stmts_for_unhoisted(node.else_body)
     when MIR::WhileStmt
-      check_expr_for_unhoisted(node.cond, allow_top: false)
+      check_expr_for_unhoisted(node.cond, allow_top: node.capture ? true : false)
       check_stmts_for_unhoisted(node.body)
     when MIR::ForStmt
       check_expr_for_unhoisted(node.iter, allow_top: false)
@@ -2136,6 +2188,26 @@ class MIRChecker
     if expr.is_a?(MIR::TryCatch)
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       check_expr_for_unhoisted(expr.catch_body, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::Orelse)
+      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.fallback, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::IfOptional)
+      check_expr_for_unhoisted(expr.optional, allow_top: false)
+      check_expr_for_unhoisted(expr.then_expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.else_expr, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::Pipeline)
+      if !allow_top && allocating_expr?(expr)
+        @errors << error(:UNHOISTED_ALLOC, @fn_name,
+          "Pipeline in non-Let-init position (must be hoisted to a named variable)")
+        return
+      end
+      check_expr_for_unhoisted(expr.inner, allow_top: allow_top)
       return
     end
     # CapWrap composes a sync/ownership layer around an inner data-shape
@@ -2241,6 +2313,8 @@ class MIRChecker
     when MIR::RangeLit
       yield expr.start   if expr.start
       yield expr.end_val if expr.end_val
+    when MIR::Pipeline
+      yield expr.inner if expr.inner
     # Opaque: RawZig, InlineZig, BgBlock, CatchWrapper
     # Leaf: Lit, Ident, FnRef, RcDowngrade, WeakUpgrade, HasField
     # BlockExpr: body is statements, walked by check_stmts_for_unhoisted

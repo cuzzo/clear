@@ -135,10 +135,32 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
   first_inner_elem =
     case p[:wrap_kind]
     when :bare
-      p[:inner_kind] == :map ? "0_i64" : "outer[0_i64][0_i64]"
+      if p[:inner_kind] == :map
+        "0_i64"
+      elsif p[:inner_kind] == :set
+        "0_i64"
+      else
+        "outer[0_i64][0_i64]"
+      end
     when :struct_field
-      p[:inner_kind] == :map ? "0_i64" : "outer[0_i64].data[0_i64]"
+      if p[:inner_kind] == :map
+        "0_i64"
+      elsif p[:inner_kind] == :set
+        "0_i64"
+      else
+        "outer[0_i64].data[0_i64]"
+      end
     when :union_payload then "0_i64"
+    end
+
+  first_inner_assert =
+    case p[:wrap_kind]
+    when :bare
+      p[:inner_kind] == :set ? "ASSERT outer[0_i64].contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
+    when :struct_field
+      p[:inner_kind] == :set ? "ASSERT outer[0_i64].data.contains?(0_i64), \"first inner first element\";" : "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
+    else
+      "ASSERT #{first_inner_elem} == 0_i64, \"first inner first element\";"
     end
 
   decl_block = decls.empty? ? "" : decls.join("\n") + "\n\n"
@@ -149,7 +171,7 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
     #{loop_block}
         ASSERT length(outer) == #{p[:iters]}_i64, "outer list length";
         ASSERT #{first_inner_len} == 2_i64, "first inner length";
-        ASSERT #{first_inner_elem} == 0_i64, "first inner first element";
+        #{first_inner_assert}
         RETURN;
     END
   CHT

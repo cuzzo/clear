@@ -166,6 +166,14 @@ module MIR
     const :captures, T::Array[BoundaryCaptureFact]
   end
 
+  class OwnershipConsumptionFact < T::Struct
+    extend T::Sig
+
+    const :names, T::Array[String]
+    const :target, Symbol
+    const :source, String
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -179,6 +187,8 @@ module MIR
     def expr?; false; end
     sig { returns(OwnershipEffect) }
     def ownership_effect; OwnershipEffect.none; end
+    sig { returns(T.nilable(OwnershipConsumptionFact)) }
+    attr_accessor :ownership_consumption
   end
 
   module Stmt
@@ -621,7 +631,13 @@ module MIR
   BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
     extend T::Sig
     include Stmt
-    attr_accessor :boundary_fact
+    sig { returns(T.nilable(MIR::ExecutionBoundaryFact)) }
+    def boundary_fact
+      @boundary_fact = T.let(nil, T.nilable(MIR::ExecutionBoundaryFact)) unless defined?(@boundary_fact)
+      @boundary_fact
+    end
+    sig { params(value: T.nilable(MIR::ExecutionBoundaryFact)).returns(T.nilable(MIR::ExecutionBoundaryFact)) }
+    def boundary_fact=(value); @boundary_fact = T.let(value, T.nilable(MIR::ExecutionBoundaryFact)); end
     sig { returns(T::Boolean) }
     def expr?; true; end
   end
@@ -636,7 +652,13 @@ module MIR
   StreamSpawn = Struct.new(:captures, :body) do
     extend T::Sig
     include Stmt
-    attr_accessor :boundary_fact
+    sig { returns(T.nilable(MIR::ExecutionBoundaryFact)) }
+    def boundary_fact
+      @boundary_fact = T.let(nil, T.nilable(MIR::ExecutionBoundaryFact)) unless defined?(@boundary_fact)
+      @boundary_fact
+    end
+    sig { params(value: T.nilable(MIR::ExecutionBoundaryFact)).returns(T.nilable(MIR::ExecutionBoundaryFact)) }
+    def boundary_fact=(value); @boundary_fact = T.let(value, T.nilable(MIR::ExecutionBoundaryFact)); end
     sig { returns(T::Boolean) }
     def expr?; true; end
   end
@@ -949,10 +971,15 @@ module MIR
   #
   #   result_var: String | nil
   #   result_zig_type: String | nil
+  #   result_needs_cleanup: Bool
   #     Name + Zig type of the local the bind produces. Visible
   #     to subsequent segments as a Zig local (or, if Liveness
   #     flagged it as cross-segment, as a ctx field). nil for
   #     suspends without a bound result (Void IO, bare NEXT).
+  #     result_needs_cleanup means the ctx field owns cleanup-bearing
+  #     data after bind; the FSM emitter must track initialization
+  #     and either clean it in destroyTask or clear the guard when
+  #     the value is transferred into the promise result.
   SuspendDescriptor = Struct.new(
     :setup_stmts,
     :bind_stmts,
@@ -960,6 +987,7 @@ module MIR
     :ctx_field_decls,
     :result_var,
     :result_zig_type,
+    :result_needs_cleanup,
   )
 
   # ================================================================
@@ -1201,8 +1229,15 @@ module MIR
   #   Carries the MIR so the checker can see allocations inside DO branches.
   #   Emission still uses code (raw Zig).
   DoBlock = Struct.new(:code, :branch_bodies) do
+    extend T::Sig
     include Stmt
-    attr_accessor :boundary_facts
+    sig { returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
+    def boundary_facts
+      @boundary_facts = T.let(nil, T.nilable(T::Array[MIR::ExecutionBoundaryFact])) unless defined?(@boundary_facts)
+      @boundary_facts
+    end
+    sig { params(value: T.nilable(T::Array[MIR::ExecutionBoundaryFact])).returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
+    def boundary_facts=(value); @boundary_facts = T.let(value, T.nilable(T::Array[MIR::ExecutionBoundaryFact])); end
   end
 
   # No-op. Emits nothing. Used as placeholder for verification-only nodes.
@@ -1416,20 +1451,35 @@ module MIR
   # Rc/Arc retain (reference count increment).
   # Zig: CheatLib.arcRetain(T, name)  or  CheatLib.rcRetain(T, name)
   RcRetain = Struct.new(:source, :zig_base, :func) do
+    extend T::Sig
     include Expr
     # func: "arcRetain" or "rcRetain"
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.none
+    end
   end
 
   # Rc/Arc downgrade to weak ref.
   # Zig: CheatLib.arcDowngrade(T, source) or CheatLib.rcDowngrade(T, source)
   RcDowngrade = Struct.new(:source, :zig_base, :func) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.none
+    end
   end
 
   # Weak ref upgrade to strong ref.
   # Zig: CheatLib.weakArcUpgrade(T, source) or CheatLib.weakRcUpgrade(T, source)
   WeakUpgrade = Struct.new(:source, :zig_base, :func) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :rc)
+    end
   end
 
   # Compact an @multiowned tree into a single contiguous buffer.
@@ -1437,7 +1487,12 @@ module MIR
   # inner: MIR expr for the Rc data pointer (*const T)
   # zig_base: Zig type name for T
   FreezeExpr = Struct.new(:inner, :zig_base) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :frozen)
+    end
   end
 
   # Make a list from items.
@@ -1847,6 +1902,12 @@ module MIR
     def ownership_effect
       break_stmt = body&.reverse&.find { |stmt| stmt.is_a?(BreakStmt) }
       return OwnershipEffect.none unless break_stmt.is_a?(BreakStmt)
+      if break_stmt.value.is_a?(Ident)
+        name = break_stmt.value.name.to_s
+        mark = body&.find { |stmt| stmt.is_a?(AllocMark) && stmt.name.to_s == name }
+        transfer = body&.find { |stmt| stmt.is_a?(TransferMark) && stmt.name.to_s == name }
+        return OwnershipEffect.owned(alloc: mark.alloc, target_var: name) if mark && transfer
+      end
       break_stmt.value.ownership_effect
     end
   end
@@ -1908,7 +1969,16 @@ module MIR
   # Optional orelse expression.
   # Zig: (expr orelse fallback)
   Orelse = Struct.new(:expr, :fallback) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      left = expr.ownership_effect
+      right = fallback.ownership_effect
+      return OwnershipEffect.none unless left.produces_owned && right.produces_owned
+      return OwnershipEffect.none unless left.alloc == right.alloc
+      left
+    end
   end
 
   # Conditional expression (Zig if-expression).
@@ -1921,7 +1991,16 @@ module MIR
   # Zig: (if (optional) |capture| then_expr else else_expr)
   # capture is the name bound to the unwrapped value inside then_expr.
   IfOptional = Struct.new(:optional, :capture, :then_expr, :else_expr) do
+    extend T::Sig
     include Expr
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      left = then_expr.ownership_effect
+      right = else_expr.ownership_effect
+      return OwnershipEffect.none unless left.produces_owned && right.produces_owned
+      return OwnershipEffect.none unless left.alloc == right.alloc
+      left
+    end
   end
 
   # Comptime-qualified expression.
@@ -2061,6 +2140,13 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in both expression and statement position
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      return OwnershipEffect.none unless inner.respond_to?(:ownership_effect)
+
+      inner.ownership_effect
+    end
   end
 
   # Inline Zig expression. Tracked escape hatch for expression-level Zig code.

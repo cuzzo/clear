@@ -166,6 +166,7 @@ module MIRLoweringFunctions
     @current_fn_heap_carry_return = T.let(@current_fn_heap_carry_return, T.untyped)
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
     @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
+    @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
     @current_fn_returned_names = T.let(@current_fn_returned_names, T.untyped)
     @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
     @current_fn_tail_call = T.let(@current_fn_tail_call, T.untyped)
@@ -194,6 +195,7 @@ module MIRLoweringFunctions
     @current_fn_tail_call = node.tail_call
     @current_fn_zig_name = T.let(zig_safe_name(node.name), T.nilable(String))
     @current_fn_return_payload_zig = T.let(final_type.sub(/\Aanyerror!/, "").sub(/\A!/, ""), T.nilable(String))
+    @current_fn_return_type = ret_type
     @current_fn_returned_names = collect_fn_returned_names(node.body)
     @current_fn_heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
     @current_fn_heap_carry_return_vars = node.respond_to?(:heap_carry_return_vars) ? node.heap_carry_return_vars : nil
@@ -1166,18 +1168,33 @@ module MIRLoweringFunctions
     sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
+    node_ti = Type.from_node(node)
+    if node_ti && !node_ti.untyped? && !node_ti.any?
+      return concrete_call_type_owned_return?(node_ti, sig)
+    end
+
     dep = call_owned_return_from_args?(node, sig)
     return dep unless dep.nil?
-    ti = sig&.return_type || Type.from_node(node)
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    raw_ti = sig&.return_type
+    ti = T.let(raw_ti.is_a?(Type) ? raw_ti : (raw_ti ? Type.new(raw_ti) : nil), T.nilable(Type))
+    call_type_owned_return?(ti, sig)
+  end
+
+  sig { params(ti: Type, sig_obj: T.untyped).returns(T::Boolean) }
+  def concrete_call_type_owned_return?(ti, sig_obj)
+    call_type_owned_return?(ti, sig_obj)
+  end
+
+  sig { params(ti: T.nilable(Type), sig_obj: T.untyped).returns(T::Boolean) }
+  def call_type_owned_return?(ti, sig_obj)
     return false unless ti
     ti = ti.payload_type if ti.error_union?
     return false unless ti
     if ti.string?
       return false if ti.symbol? || ti.raw?
-      return true if sig&.heap_carry_return == true
-      return true if sig&.heap_return_alloc?
-      return false if sig
+      return true if sig_obj&.heap_carry_return == true
+      return true if sig_obj&.heap_return_alloc?
+      return false if sig_obj
       return ti.heap?
     end
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
@@ -1221,6 +1238,7 @@ module MIRLoweringFunctions
     return false if node.respond_to?(:storage) && [:rodata, :borrow].include?(node.storage)
     return false if node.respond_to?(:rodata_provenance?) && node.rodata_provenance?
     return false if node.respond_to?(:borrow_provenance?) && node.borrow_provenance?
+    return true if node.respond_to?(:needs_heap_create) && node.needs_heap_create
     return true if node.respond_to?(:heap_storage?) && node.heap_storage?
     return true if node.respond_to?(:symbol) && node.symbol&.heap_storage?
     return true if node.is_a?(AST::StringConcat)
@@ -1380,7 +1398,7 @@ module MIRLoweringFunctions
       if !consumed_names.empty? && resolved_allocs[:val_alloc].nil?
         consumed_alloc = consumed_names.filter_map do |name|
           mark = @pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
-          mark&.alloc
+          mark&.alloc || @current_bindings[name.to_s]&.alloc
         end.uniq
         resolved_allocs[:val_alloc] = consumed_alloc.first if consumed_alloc.length == 1
       end

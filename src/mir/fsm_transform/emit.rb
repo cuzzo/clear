@@ -449,6 +449,7 @@ module FsmTransform
         end
       end
       seg_result_lines = {}
+      owned_result_guards = fsm_owned_result_guards(segments, lowering)
       seg_codes = segments.map do |seg|
         ast_stmts, raw_stmts = seg.stmts.partition { |s| !s.is_a?(String) }
         if ast_stmts.empty?
@@ -467,6 +468,8 @@ module FsmTransform
           eff_capture_map = seg_overrides ?
                               capture_map.merge(seg_overrides) : capture_map
           lowered = lowering.with_fiber_capture_map(eff_capture_map, rt_override: bg_rt) do
+            prev_guard_map = lowering.instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
+            lowering.instance_variable_set(:@current_fsm_owned_result_guards, owned_result_guards)
             if want_result
               lowering.emit_step_stmts(
                 ast_stmts, no_result: false, ctx_id: id,
@@ -474,6 +477,8 @@ module FsmTransform
             else
               lowering.emit_step_stmts(ast_stmts, no_result: true)
             end
+          ensure
+            lowering.instance_variable_set(:@current_fsm_owned_result_guards, prev_guard_map)
           end
           lowering.instance_variable_set(:@pending_stmts, prev_pending)
           lowering.instance_variable_set(:@current_bg_pointer_captures, prev_ptr)
@@ -576,6 +581,8 @@ module FsmTransform
         }
       end
 
+      register_owned_suspend_result_cleanups!(segment_specs, ctx, id)
+
       # Expand any Segments::LockSuspend specs into the 5-segment
       # lock fan-out (FsmTailLockTry / FsmTailWokenCheck /
       # FsmTailRetryOrError + error arm + CS body). Lock-acquire is
@@ -624,6 +631,48 @@ module FsmTransform
           ctx
         end
       build_fsm_unified(ctx_with_extras, segment_specs, promoted_field_decls, lowering)
+    end
+
+    sig { params(segments: T.untyped, lowering: T.untyped).returns(T::Hash[String, String]) }
+    def fsm_owned_result_guards(segments, lowering)
+      T.bind(self, T.untyped) rescue nil
+      guards = {}
+      segments.each do |seg|
+        tail = seg.tail
+        next unless tail.respond_to?(:result_var)
+        result_var = tail.result_var
+        next unless result_var && result_var != "_"
+        result_type =
+          case tail
+          when Segments::NextSuspend
+            promise_ft = tail.promise_ast&.full_type
+            if promise_ft && (pt = Type.new(promise_ft)).respond_to?(:tense_type)
+              pt.tense_type
+            end
+          when Segments::IoSuspend
+            tail.call_node&.full_type if tail.respond_to?(:call_node)
+          end
+        next unless SuspendResolvers.ownership_bearing_result_type?(result_type, lowering)
+        guards[result_var.to_s] = SuspendResolvers.fsm_owned_guard_name(result_var.to_s)
+      end
+      guards
+    end
+
+    sig { params(segment_specs: T.untyped, ctx: T.untyped, id: Integer).void }
+    def register_owned_suspend_result_cleanups!(segment_specs, ctx, id)
+      T.bind(self, T.untyped) rescue nil
+      seen = Set.new
+      segment_specs.each do |spec|
+        desc = spec[:descriptor]
+        next unless desc && desc.result_needs_cleanup && desc.result_var
+        name = desc.result_var.to_s
+        next unless seen.add?(name)
+        guard = SuspendResolvers.fsm_owned_guard_name(name)
+        (ctx[:fsm_destroy_lines] ||= []) << {
+          kind: :body,
+          zig: "if (__ctx_#{id}.#{guard}) CheatLib.cleanup(@TypeOf(__ctx_#{id}.#{name}), __ctx_#{id}.rt.heapAlloc(), &__ctx_#{id}.#{name});",
+        }
+      end
     end
 
     # FSM cleanup invariant checker. Walks each segment's lowered

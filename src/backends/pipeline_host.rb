@@ -44,6 +44,16 @@ class PipelineHost
     "const #{var} = #{rt}.saveLoopMark();\n#{indent}defer #{rt}.restoreLoopMark(#{var});"
   end
 
+  sig { params(cb: T::Hash[T.untyped, T.untyped]).returns(T::Array[T.untyped]) }
+  def bounded_callback_context_stmts(cb)
+    [
+      cb[:ctx_def],
+      *T.cast(cb[:pre_ctx_stmts], T::Array[T.untyped]),
+      cb[:ctx_let],
+      *T.cast(cb[:post_ctx_stmts], T::Array[T.untyped]),
+    ].compact
+  end
+
   # Per-stage state for sequential pipeline lowering. `list` is the source
   # list AST, `options` is the smooth-node carrying alloc/error policy/etc.
   # Reek flagged the (list_node, smooth_node) clump across 13+ lower_*
@@ -622,7 +632,6 @@ class PipelineHost
       mark,
       MIR::Let.new(name, MIR::DeepCopy.new(source, zig_type, nil, :full_value, alloc), false, zig_type, nil),
       MIR::ErrCleanup.new(name, entry),
-      MIR::TransferMark.new(name, :owned_sink),
     ]
   end
 
@@ -1812,17 +1821,18 @@ class PipelineHost
     key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
     key_b = with_pipeline_context(placeholder: "b") { visit_mir(order_node.expression) }
     lower_pipeline_block(list_node) do |items, label|
+      result_name = "#{label}_ord_result"
       [
-        MIR::Let.new("ord_result",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &ord_result;"),
+        MIR::Let.new(result_name,
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &#{result_name};"),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          append_owned_value_stmt("ord_result", alloc,
+          append_owned_value_stmt(result_name, alloc,
             borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc))
         ], nil),
         MIR::Sort.new(elem_zig,
-          MIR::FieldGet.new(MIR::Ident.new("ord_result"), "items"),
+          MIR::FieldGet.new(MIR::Ident.new(result_name), "items"),
           key_a, key_b),
-        MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
+        MIR::BreakStmt.new(label, MIR::Ident.new(result_name))
       ]
     end
   end
@@ -2017,8 +2027,14 @@ class PipelineHost
     left_value = left_owns ? MIR::Ident.new("__jl_owned") : MIR::Ident.new("__jl")
     right_value = MIR::Ident.new("__match")
     after_append = []
-    after_append << MIR::MoveMark.new("__jl_owned") if left_owns
-    after_append << MIR::MoveMark.new("__match") if right_owns
+    if left_owns
+      after_append << MIR::TransferMark.new("__jl_owned", :owned_sink)
+      after_append << MIR::MoveMark.new("__jl_owned")
+    end
+    if right_owns
+      after_append << MIR::TransferMark.new("__match", :owned_sink)
+      after_append << MIR::MoveMark.new("__match")
+    end
 
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__jl_src", source_mir, false, nil, nil),
@@ -2323,8 +2339,7 @@ class PipelineHost
     ])
 
     MIR::ScopeBlock.new([
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup,
       MIR::ExprStmt.new(call, false)
     ])
@@ -4228,8 +4243,18 @@ class PipelineHost
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
+    pre_ctx_stmts = caps.specs.filter_map(&:setup_mir)
+    post_ctx_stmts = caps.specs.filter_map { |s| s.cleanup_mir_for(ctx_var) }
 
-    { id: id, ctx_name: ctx_name, ctx_def: ctx_def, ctx_var: ctx_var, ctx_let: ctx_let }
+    {
+      id: id,
+      ctx_name: ctx_name,
+      ctx_def: ctx_def,
+      ctx_var: ctx_var,
+      ctx_let: ctx_let,
+      pre_ctx_stmts: pre_ctx_stmts,
+      post_ctx_stmts: post_ctx_stmts,
+    }
   end
 
   sig { params(lhs: AST::Identifier, id: Integer).returns(T::Array[T.untyped]) }
@@ -4278,8 +4303,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       *source_move,
       MIR::BreakStmt.new(label, call),
@@ -4309,8 +4333,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       *source_move,
       MIR::BreakStmt.new(label, call),
@@ -4338,8 +4361,7 @@ class PipelineHost
     ])
 
     MIR::ScopeBlock.new([
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       *source_move,
       MIR::ExprStmt.new(call, false),
@@ -4419,8 +4441,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       MIR::BreakStmt.new(label, call),
     ])
@@ -4455,8 +4476,7 @@ class PipelineHost
 
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       MIR::BreakStmt.new(label, call),
     ])
@@ -4490,8 +4510,7 @@ class PipelineHost
     ])
 
     MIR::ScopeBlock.new([
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       *setup_stmts,
       MIR::ExprStmt.new(call, false),
     ])
@@ -4577,8 +4596,7 @@ class PipelineHost
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
     ])
   end
@@ -4605,8 +4623,7 @@ class PipelineHost
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
     ])
   end
@@ -4632,8 +4649,7 @@ class PipelineHost
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
     ])
   end
@@ -4681,8 +4697,7 @@ class PipelineHost
     label = next_pipe_label
     MIR::BlockExpr.new(label, [
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::BreakStmt.new(label, call),
     ])
   end
@@ -4707,8 +4722,7 @@ class PipelineHost
 
     MIR::ScopeBlock.new([
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::ExprStmt.new(call, false),
     ])
   end
@@ -4773,8 +4787,7 @@ class PipelineHost
 
     MIR::ScopeBlock.new([
       *setup_stmts,
-      cb[:ctx_def],
-      cb[:ctx_let],
+      *bounded_callback_context_stmts(cb),
       MIR::ExprStmt.new(call, false),
     ])
   end
@@ -4839,8 +4852,18 @@ class PipelineHost
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
+    pre_ctx_stmts = caps.specs.filter_map(&:setup_mir)
+    post_ctx_stmts = caps.specs.filter_map { |s| s.cleanup_mir_for(ctx_var) }
 
-    { id: id, ctx_name: ctx_name, ctx_def: ctx_def, ctx_var: ctx_var, ctx_let: ctx_let }
+    {
+      id: id,
+      ctx_name: ctx_name,
+      ctx_def: ctx_def,
+      ctx_var: ctx_var,
+      ctx_let: ctx_let,
+      pre_ctx_stmts: pre_ctx_stmts,
+      post_ctx_stmts: post_ctx_stmts,
+    }
   end
 
 end

@@ -1124,7 +1124,7 @@ SET_METHODS = T.let({
   },
   "length" => {
     arity: 0, tag: :set_method,
-    zig: "{0}.length()",
+    zig: "CheatLib.len({0})",
     bc: true,
     return_type: :Int64,
     borrows: :all,

@@ -83,15 +83,26 @@ module FsmTransform
       bind_stmts.concat(finish_block_mir)
       result_var = io_tail.result_var
       result_zig_type = nil
+      result_needs_cleanup = false
       if finish_value_mir && result_var && result_var != "_"
         bind_stmts << MIR::Let.new(result_var, finish_value_mir, false, nil, nil)
         ft = io_tail.call_node.full_type
         result_zig_type = ft ? Type.new(ft).zig_type : nil
+        result_needs_cleanup = ownership_bearing_result_type?(ft, lowering)
       elsif finish_value_mir
         bind_stmts << MIR::ExprStmt.new(finish_value_mir, true)
       end
 
       ctx_field_decls = state_decls.map(&:render)
+      if result_var && result_zig_type && result_needs_cleanup
+        ctx_ident = MIR::Ident.new("__ctx_#{id}")
+        ctx_field_decls << fsm_owned_guard_decl(result_var)
+        bind_stmts << MIR::Set.new(
+          MIR::FieldGet.new(ctx_ident, fsm_owned_guard_name(result_var)),
+          MIR::Lit.new("true"),
+          false,
+        )
+      end
 
       MIR::SuspendDescriptor.new(
         setup_mir,
@@ -100,6 +111,7 @@ module FsmTransform
         ctx_field_decls,
         result_var,
         result_zig_type,
+        result_needs_cleanup,
       )
     end
 
@@ -153,12 +165,15 @@ module FsmTransform
       result_var = next_tail.result_var
       promise_ft = next_tail.promise_ast.full_type
       sp_zig = promise_ft ? Type.new(promise_ft).zig_type : "anyopaque"
+      inner_type_info = nil
       inner_zig =
         if promise_ft && (pt = Type.new(promise_ft)).respond_to?(:tense_type) && pt.tense_type
-          Type.new(pt.tense_type).zig_type
+          inner_type_info = Type.new(pt.tense_type)
+          inner_type_info.zig_type
         else
           nil
         end
+      result_needs_cleanup = ownership_bearing_result_type?(inner_type_info, lowering)
 
       finish_call = MIR::MethodCall.new(
         MIR::FieldGet.new(ctx_ident, sp_field),
@@ -175,10 +190,18 @@ module FsmTransform
       bind_stmts =
         if result_var
           res_name = "__res_#{susp_idx}"
-          [
+          stmts = [
             MIR::Let.new(res_name, finish_expr, false, inner_zig, nil),
             MIR::Set.new(MIR::FieldGet.new(ctx_ident, result_var), MIR::Ident.new(res_name), false),
           ]
+          if result_needs_cleanup
+            stmts << MIR::Set.new(
+              MIR::FieldGet.new(ctx_ident, fsm_owned_guard_name(result_var)),
+              MIR::Lit.new("true"),
+              false,
+            )
+          end
+          stmts
         else
           [MIR::ExprStmt.new(finish_expr, true)]
         end
@@ -186,6 +209,7 @@ module FsmTransform
       ctx_field_decls = ["#{sp_field}: #{sp_zig} = undefined,"]
       if result_var && inner_zig
         ctx_field_decls << "#{result_var}: #{inner_zig} = undefined,"
+        ctx_field_decls << fsm_owned_guard_decl(result_var) if result_needs_cleanup
       end
 
       MIR::SuspendDescriptor.new(
@@ -195,7 +219,29 @@ module FsmTransform
         ctx_field_decls,
         result_var,
         inner_zig,
+        result_needs_cleanup,
       )
+    end
+
+    sig { params(name: String).returns(String) }
+    def fsm_owned_guard_name(name)
+      "__owned_#{name}_init"
+    end
+
+    sig { params(name: String).returns(String) }
+    def fsm_owned_guard_decl(name)
+      "#{fsm_owned_guard_name(name)}: bool = false,"
+    end
+
+    sig { params(type_info: T.untyped, lowering: T.untyped).returns(T::Boolean) }
+    def ownership_bearing_result_type?(type_info, lowering)
+      return false unless type_info
+      schema_lookup = lowering.instance_variable_get(:@schema_lookup) rescue nil
+      ti = type_info.is_a?(Type) ? type_info : Type.new(type_info)
+      ti.string? || ti.heap_ptr? || ti.collection_value? ||
+        ti.recursive_cleanup_shape?(schema_lookup)
+    rescue StandardError
+      false
     end
   end
 end
