@@ -2221,6 +2221,21 @@ module MIR
       OwnershipEffect.owned(alloc: alloc, target_var: target_var)
     end
 
+    sig { returns(T::Boolean) }
+    def has_alloc_metadata?
+      allocs.is_a?(Hash) && !allocs.empty?
+    end
+
+    sig { returns(T::Boolean) }
+    def mutating_receiver_allocator_op?
+      has_alloc_metadata? && stdlib_def&.mutates_receiver?
+    end
+
+    sig { returns(T::Boolean) }
+    def assignable_allocating_result?
+      stdlib_def&.emits_allocating? && !stdlib_def&.mutates_receiver?
+    end
+
     private
 
     sig { params(value: T.untyped).void }

@@ -198,7 +198,7 @@ module FsmLowering
         names.concat(fsm_ast_result_consumed_roots(node.value))
       end
     when AST::Identifier
-      names << node.name.to_s if node.respond_to?(:was_moved) && node.was_moved == true
+      names << node.name.to_s if AST.moved?(node)
     when AST::StructLit, AST::UnionVariantLit
       node.fields&.each_value do |value|
         next if value.is_a?(AST::CopyNode)

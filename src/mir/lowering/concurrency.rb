@@ -785,7 +785,7 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     return fallback_alloc if promise_type.promise_list?
-    return fallback_alloc if promise_type.observable? && promise_type.tense_type&.array?
+    return fallback_alloc if promise_type.observable_array_future?
     return :heap if promise_type.observable? && ownership_bearing_type?(result_type)
     return :heap if ownership_bearing_type?(result_type)
     nil
@@ -798,7 +798,7 @@ module MIRLoweringConcurrency
     result_type = Type.from_node(node) || Type.new(:Untyped)
     source_kind = if promise_type.promise_list?
       :promise_list
-    elsif promise_type.observable? && promise_type.tense_type&.array?
+    elsif promise_type.observable_array_future?
       :observable_list
     elsif promise_type.observable? && observable_next_string?(promise_type)
       :observable_string

@@ -3181,7 +3181,7 @@ private
     # Map reads return ?V, but map writes store V.
     assign_type = index_node.full_type
     if assign_type&.optional?
-      assign_type_resolved = assign_type.wrapped_type.resolved
+      assign_type_resolved = T.must(assign_type.wrapped_type).resolved
     else
       assign_type_resolved = index_node.resolved_type
     end
@@ -5352,7 +5352,7 @@ private
       end
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = Type.new(:"#{elem_sym}[]", collection: :list)
-    elsif promise_type.observable? && promise_type.tense_type&.array?
+    elsif promise_type.observable_array_future?
       # NEXT on ~T[]@set:observable: wait for the producer fiber, then
       # take an owned `T[]` snapshot via `materializeNext(alloc)`. The
       # codegen path lives in lower_next_expr; here we just stamp the

@@ -338,6 +338,38 @@ module AST
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
+  # Explicit ownership transfer marker stamped by annotation. This is a
+  # predicate over the AST contract, not an ad hoc respond_to? check.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.moved?(node)
+    node.respond_to?(:was_moved) && node.was_moved == true
+  end
+
+  # Statement-position body traversal is an AST fact. MIR passes may attach
+  # loop-specific meaning to a body, but they should not maintain parallel
+  # lists of every node shape that can contain one.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.loop_node?(node)
+    node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
+      node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  def self.child_bodies(node)
+    node.is_a?(AST::HasBodies) ? node.child_bodies : []
+  end
+
+  # Canonical recursion-yield policy: non-tight recursive functions that can
+  # run arbitrarily long must thread rt so MIR can inject checkYield().
+  sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
+  def self.recursion_yield_needed?(fn_node)
+    return false if fn_node.tight_reentrance
+
+    fn_node.reentrance_kind == :reentrant ||
+      fn_node.reentrance_kind == :reentrant_tail_call ||
+      fn_node.reentrance_kind == :reentrant_max_depth
+  end
+
   # The immediately-nested *value* children of a transparent wrapper
   # expression: struct/union-literal field values, list-literal items,
   # and the inner value of a MOVE/COPY/CLONE/SHARE/FREEZE/CapabilityWrap

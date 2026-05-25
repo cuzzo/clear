@@ -62,6 +62,13 @@ class Type
     local: "local",
   }.freeze, T::Hash[Symbol, String])
 
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  def self.indirect_type?(value)
+    return false unless value.is_a?(Type)
+
+    value.indirect? == true
+  end
+
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
@@ -434,14 +441,14 @@ class Type
     # 3. Optional coercion: ?T accepts T, NIL, or ?T
     if optional?
       return true if other_type.resolved == :NIL
-      inner = other_type.optional? ? other_type.wrapped_type : other_type
-      return wrapped_type.accepts?(inner)
+      inner = other_type.optional? ? T.must(other_type.wrapped_type) : other_type
+      return T.must(wrapped_type).accepts?(inner)
     end
 
     # 4. Error union coercion: !T accepts T or !T
     if error_union?
-      inner = other_type.error_union? ? other_type.payload_type : other_type
-      return payload_type.accepts?(inner)
+      inner = other_type.error_union? ? T.must(other_type.payload_type) : other_type
+      return T.must(payload_type).accepts?(inner)
     end
 
     # 5. Tense (Promise/Stream) coercion
@@ -1121,7 +1128,7 @@ class Type
     @is_optional
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def wrapped_type
     return nil unless optional?
     @wrapped_type_obj ||= T.let(Type.new(@wrapped_type_raw || :Any), T.nilable(Type))
@@ -1133,10 +1140,21 @@ class Type
     @is_error_union
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def payload_type
     return nil unless error_union?
     @payload_type_obj ||= T.let(Type.new(@payload_type_raw || :Any), T.nilable(Type))
+  end
+
+  sig { returns(Type) }
+  def success_type
+    error_union? ? T.must(payload_type) : self
+  end
+
+  sig { returns(Type) }
+  def value_payload_type
+    t = success_type
+    t.optional? ? T.must(t.wrapped_type) : t
   end
 
   # Tense (Promise) types: ~T — a background task that will produce T
@@ -1151,6 +1169,18 @@ class Type
   sig { returns(T::Boolean) }
   def observable?
     !!@is_observable
+  end
+
+  # NEXT on an observable array future materializes an owned array snapshot.
+  # Keep that source-shape decision with Type so annotation and MIR lowering
+  # cannot drift on the `observable? && tense_type.array?` protocol.
+  sig { returns(T::Boolean) }
+  def observable_array_future?
+    tt = tense_type
+    return false unless observable?
+    return false unless tt.is_a?(Type)
+
+    tt.array? == true
   end
 
   # True when this is a pipeline-terminal observable binding shape:
@@ -2236,13 +2266,13 @@ class Type
           pt.shard_count = shard_count
         end
       end
-      inner_zig = pt.zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = T.must(pt).zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
     end
 
     # 2. Handle Optional: ?T -> ?zig_type
     if optional?
-      inner_zig = wrapped_type.zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = T.must(wrapped_type).zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
     end
 

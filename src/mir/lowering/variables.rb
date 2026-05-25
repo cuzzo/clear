@@ -324,8 +324,8 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     if mir_allocates?(init)
       stamp_allocating_result_target!(init, safe_name, alloc: decl_alloc)
-    elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty?
-      if !init.target_var || (init.stdlib_def&.emits_allocating? && !init.stdlib_def&.mutates_receiver?)
+    elsif init.is_a?(MIR::InlineZig) && init.has_alloc_metadata?
+      if !init.target_var || init.assignable_allocating_result?
         init.target_var = safe_name
       end
       init.allocs = init.allocs.transform_values { |_alloc| decl_alloc } if init.target_var == safe_name
@@ -522,11 +522,11 @@ module MIRLoweringVariables
 
   sig { params(value: AST::GetField).returns(T::Boolean) }
   def field_access_moves_owner?(value)
-    return true if value.respond_to?(:was_moved) && value.was_moved == true
+    return true if AST.moved?(value)
     return true if value.respond_to?(:indirect_field) && value.indirect_field == true
 
     ti = Type.from_node(value) rescue nil
-    ti.is_a?(Type) && ti.indirect?
+    Type.indirect_type?(ti)
   end
 
   sig { params(binding_entry: CleanupEntry, init: T.untyped).returns(T::Boolean) }

@@ -114,25 +114,9 @@ module MIR
         node = stmt.is_a?(AST::Locatable) ? stmt : nil
         return true if node && loop_depth.positive? && binding_decl_name(node) == var_name
 
-        case stmt
-        when AST::WhileLoop, AST::WhileBindLoop
-          declared_inside_loop_body?(stmt.do_branch, var_name, loop_depth + 1)
-        when AST::ForRange, AST::ForEach
-          declared_inside_loop_body?(stmt.body, var_name, loop_depth + 1)
-        when AST::IfStatement
-          declared_inside_loop_body?(stmt.then_branch, var_name, loop_depth) ||
-            declared_inside_loop_body?(stmt.else_branch, var_name, loop_depth)
-        when AST::MatchStatement
-          stmt.cases.any? { |c| declared_inside_loop_body?(c.body, var_name, loop_depth) } ||
-            (!!stmt.default_case && declared_inside_loop_body?(stmt.default_case, var_name, loop_depth))
-        when AST::WithBlock
-          declared_inside_loop_body?(stmt.body, var_name, loop_depth)
-        when AST::DoBlock
-          stmt.branches.any? do |branch|
-            declared_inside_loop_body?(T.cast(branch.fetch(:body), T::Array[T.untyped]), var_name, loop_depth)
-          end
-        else
-          false
+        child_loop_depth = loop_depth + (AST.loop_node?(stmt) ? 1 : 0)
+        AST.child_bodies(stmt).any? do |child_body|
+          declared_inside_loop_body?(child_body, var_name, child_loop_depth)
         end
       end
     end

@@ -533,7 +533,7 @@ module PipeAnalysis
     lhs_type = node.left.full_type
     lhs_t = lhs_type ? Type.new(lhs_type) : nil
     if lhs_t&.error_union?
-      node.full_type = lhs_t.payload_type.resolved
+      node.full_type = T.must(lhs_t.payload_type).resolved
     else
       node.full_type = lhs_type
     end
@@ -741,7 +741,7 @@ module PipeAnalysis
     result_type = node.right.full_type
     if has_catch_blocks? && result_type
       t = Type.new(result_type)
-      result_type = t.payload_type.resolved if t.error_union?
+      result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     node.full_type = result_type
   end
@@ -803,7 +803,7 @@ module PipeAnalysis
     result_type = sig.return_type
     if has_catch_blocks? && result_type
       t = result_type.is_a?(Type) ? result_type : Type.new(result_type)
-      result_type = t.payload_type.resolved if t.error_union?
+      result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     node.full_type = result_type
   end

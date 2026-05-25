@@ -32,6 +32,8 @@
 #   CondBranch           (Stage 2) if/while head; selects target
 #                          segment for next state
 
+require_relative "../../ast/type"
+
 module FsmTransform
   module Segments
     extend T::Sig
@@ -44,11 +46,41 @@ module FsmTransform
       extend T::Sig
       sig { returns(Symbol) }
       def kind; :io; end
+
+      sig { returns(T::Boolean) }
+      def suspend?; true; end
+
+      sig { params(index: T.untyped).returns(IoSuspend) }
+      def with_next_index(index)
+        IoSuspend.new(call_node, stdlib_def, result_var, index)
+      end
+
+      sig { returns(T.untyped) }
+      def result_type
+        call_node&.full_type
+      end
     end
     NextSuspend  = Struct.new(:promise_ast, :result_var, :next_index) do
       extend T::Sig
       sig { returns(Symbol) }
       def kind; :next; end
+
+      sig { returns(T::Boolean) }
+      def suspend?; true; end
+
+      sig { params(index: T.untyped).returns(NextSuspend) }
+      def with_next_index(index)
+        NextSuspend.new(promise_ast, result_var, index)
+      end
+
+      sig { returns(T.untyped) }
+      def result_type
+        promise_ft = promise_ast&.full_type
+        return nil unless promise_ft
+
+        pt = Type.new(promise_ft)
+        pt.tense_type if pt.respond_to?(:tense_type)
+      end
     end
     # LockSuspend: ONE cap's lock-acquire suspend.
     #
@@ -100,6 +132,16 @@ module FsmTransform
     Segment = Struct.new(:index, :stmts, :tail)
 
     module_function
+
+    sig { params(tail: T.untyped).returns(T::Boolean) }
+    def suspend_tail?(tail)
+      tail.respond_to?(:suspend?) && tail.suspend?
+    end
+
+    sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
+    def suspend_child_bodies(stmt)
+      AST.child_bodies(stmt)
+    end
 
     # Public entry. Returns [Segment, ...] on success, nil if the
     # body contains a shape the splitter doesn't handle.
@@ -195,7 +237,7 @@ module FsmTransform
       sus_tail = T.let(nil, T.untyped)
       loop_body.each_with_index do |s, j|
         sus = classify_suspend(s)
-        if sus.is_a?(NextSuspend) || sus.is_a?(IoSuspend)
+        if suspend_tail?(sus)
           return nil if sus_idx        # multiple suspends in loop body
           sus_idx = j
           sus_tail = sus

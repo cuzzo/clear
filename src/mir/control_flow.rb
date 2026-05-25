@@ -520,19 +520,7 @@ class OwnershipDataflow
         return stmts[(idx + 1)..].to_a.any? { |s| stmt_moves_name?(s, var) }
       end
 
-      nested = case stmt
-               when AST::WhileLoop
-                 stmt.do_branch
-               when AST::ForRange, AST::ForEach
-                 stmt.body
-               when AST::IfStatement
-                 [stmt.then_branch, stmt.else_branch].compact.flatten
-               when AST::MatchStatement
-                 bodies = stmt.cases.flat_map { |c| c.respond_to?(:body) ? c.body : [] }
-                 stmt.default_case ? bodies + stmt.default_case : bodies
-               else
-                 []
-               end
+      nested = AST.child_bodies(stmt).flatten
       return true if !nested.empty? && linear_scope_decl_always_moves?(nested, var)
     end
     false
@@ -1004,7 +992,7 @@ class OwnershipDataflow
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = Type.from_node(node)
-    ti.is_a?(Type) && ti.indirect?
+    Type.indirect_type?(ti)
   rescue
     false
   end
@@ -1389,27 +1377,9 @@ module LoopFrameAnalysis
 
   sig { params(stmt: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmt!(stmt, schema_lookup = nil)
-    case stmt
-    when AST::WhileLoop, AST::WhileBindLoop
-      walk_stmts!(stmt.do_branch, schema_lookup)          # inner loops first
-      process_loop!(stmt, stmt.do_branch, schema_lookup)
-    when AST::ForRange
-      walk_stmts!(stmt.body, schema_lookup)
-      process_loop!(stmt, stmt.body, schema_lookup)
-    when AST::ForEach
-      walk_stmts!(stmt.body, schema_lookup)
-      process_loop!(stmt, stmt.body, schema_lookup)
-    when AST::IfStatement
-      walk_stmts!(stmt.then_branch, schema_lookup)
-      walk_stmts!(stmt.else_branch, schema_lookup)
-    when AST::MatchStatement
-      stmt.cases.each { |c| walk_stmts!(c.body, schema_lookup) }
-      walk_stmts!(stmt.default_case, schema_lookup)
-    when AST::WithBlock
-      walk_stmts!(stmt.body, schema_lookup)
-    when AST::DoBlock
-      stmt.branches.each { |b| walk_stmts!(b[:body], schema_lookup) }
-    end
+    child_bodies = AST.child_bodies(stmt)
+    child_bodies.each { |body| walk_stmts!(body, schema_lookup) }
+    process_loop!(stmt, child_bodies.first || [], schema_lookup) if AST.loop_node?(stmt)
     nil
   end
 
@@ -1616,29 +1586,14 @@ class BorrowChecker
     when AST::FuncCall, AST::MethodCall
       check_explicit_moves(stmt, stmt.token)
 
-    when AST::IfStatement
-      check_stmts(stmt.then_branch)
-      check_stmts(stmt.else_branch)
-
-    when AST::WhileLoop
-      check_stmts(stmt.do_branch)
-
-    when AST::ForRange, AST::ForEach
-      check_stmts(stmt.body)
-
-    when AST::MatchStatement
-      stmt.cases.each { |c| check_stmts(c.body) }
-      check_stmts(stmt.default_case)
-
-    when AST::DoBlock
-      stmt.branches.each { |b| check_stmts(b[:body]) }
-
     when AST::BgBlock, AST::BgStreamBlock
       # BG resource captures are ownership transfers
       stmt.capture_analysis&.resource_captures&.each do |name|
         check_borrowed_move(name, stmt.token)
       end
-      check_stmts(stmt.body)
+      AST.child_bodies(stmt).each { |body| check_stmts(body) }
+    else
+      AST.child_bodies(stmt).each { |body| check_stmts(body) }
     end
   end
 
@@ -1827,7 +1782,7 @@ class BorrowChecker
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = Type.from_node(node)
-    ti.is_a?(Type) && ti.indirect?
+    Type.indirect_type?(ti)
   rescue
     false
   end

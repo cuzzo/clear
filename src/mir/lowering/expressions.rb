@@ -578,7 +578,7 @@ module MIRLoweringExpressions
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
     fallback_type = Type.from_node(node.left)
-    fallback_type = fallback_type.payload_type if fallback_type&.error_union? || fallback_type&.optional?
+    fallback_type = fallback_type&.value_payload_type
     right = with_expected_type(fallback_type) do
       materialize_or_fallback_value(descend(node, :right), node.right)
     end
@@ -632,7 +632,7 @@ module MIRLoweringExpressions
   def or_pass_fallback(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node, context: "OR fallback")
-    ti = ti.payload_type || ti if ti.error_union?
+    ti = ti.success_type || ti
     return MIR::Lit.new('@as([]const u8, "")') if ti.string?
     return MIR::Lit.new("@as(#{ti.zig_type}, .empty)") if ti.list_collection?
     MIR::Ident.new("undefined")
@@ -1222,7 +1222,7 @@ module MIRLoweringExpressions
     if value.is_a?(AST::Identifier)
       ti = Type.from_node!(value, context: "aggregate field sink")
       if ownership_tracked_transfer_type?(ti) &&
-         (value.was_moved == true || value.symbol&.heap_storage?)
+         (AST.moved?(value) || value.symbol&.heap_storage?)
         source_alloc = placement_for_node(value)
         return source_alloc if source_alloc == aggregate_alloc
       end
@@ -1573,7 +1573,7 @@ module MIRLoweringExpressions
     ti = Type.from_node(v) rescue nil
     tracked = ti && !ti.primitive? && !ti.void? && !ti.any? &&
               (ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup))
-    return unless v.was_moved == true || (tracked && v.symbol&.heap_storage?)
+    return unless AST.moved?(v) || (tracked && v.symbol&.heap_storage?)
     nm = zig_safe_name(v.name)
     nm = @fn_name_rename_map[nm] if @fn_name_rename_map&.key?(nm)
     entry = @current_bindings[v.name.to_s] || CleanupEntry::NONE

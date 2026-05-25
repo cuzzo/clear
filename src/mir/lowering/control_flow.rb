@@ -812,10 +812,10 @@ module MIRLoweringControlFlow
 
     if @current_fn_heap_carry_return && node.value && value &&
        !value.is_a?(MIR::Ident) &&
-       !return_transfers_heap_binding?(node.value) &&
+      !return_transfers_heap_binding?(node.value) &&
        !mir_allocates?(value) && !(value.is_a?(MIR::Call) && value.owned_return?)
       ret_type = Type.from_node!(node.value, context: "heap carry return placement")
-      ret_type = ret_type.payload_type if ret_type.error_union?
+      ret_type = ret_type.success_type || ret_type
       value = place_value_for_destination(value, node.value, :heap, ret_type) if escaping_value_alloc(ret_type) == :heap
     end
 
@@ -823,7 +823,7 @@ module MIRLoweringControlFlow
        @current_fn_param_names&.include?(value.name) &&
        !@current_fn_takes_param_names&.include?(value.name)
       ret_type = Type.from_node!(node.value, context: "heap carry recursive return")
-      ret_type = ret_type.payload_type if ret_type.error_union?
+      ret_type = ret_type.success_type || ret_type
       if ret_type.recursive_cleanup_shape?(@schema_lookup)
         value = MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap)
       end
@@ -912,7 +912,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
     ti = Type.from_node(@current_fn_return_type)
-    ti&.error_union? ? ti.payload_type : ti
+    ti&.success_type
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
@@ -1021,7 +1021,7 @@ module MIRLoweringControlFlow
     return false unless expr.is_a?(MIR::Call)
     ti = Type.from_node(ast_node)
     return false unless ti
-    ti = ti.payload_type || ti if ti.error_union?
+    ti = ti.success_type || ti
     is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_storage?) || ti.heap?
     return false if is_heap  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
@@ -1064,7 +1064,7 @@ module MIRLoweringControlFlow
     # mir-lowering strict ivars
     @fn_sigs = T.let(@fn_sigs, T.untyped)
     return true if false || name.to_s.empty?
-    sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
+    sig = fn_sig_for(name)
     return true unless sig
     return sig.needs_rt == true || sig.emits_allocating? if sig.intrinsic
     unless sig.needs_rt == true || sig.needs_rt == false

@@ -112,7 +112,7 @@ module Hoist
     case stmt
     when AST::ReturnNode
       expected = Type.from_node(return_type)
-      expected = expected.payload_type if expected&.error_union?
+      expected = expected.success_type if expected
       stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected) if stmt.value
     when AST::YieldExpr
       stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
@@ -147,7 +147,7 @@ module Hoist
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def moved_arg?(node)
-    node.respond_to?(:was_moved) && node.was_moved == true
+    AST.moved?(node)
   end
 
   # Yield every MethodCall reachable inside one statement's OWN
@@ -454,9 +454,9 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def mutating_receiver_allocator_op?(node)
-    !!(node.is_a?(MIR::InlineZig) &&
-      node.allocs && !node.allocs.empty? &&
-      node.stdlib_def&.mutates_receiver?)
+    return false unless node.is_a?(MIR::InlineZig)
+
+    node.mutating_receiver_allocator_op? == true
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
@@ -778,8 +778,8 @@ module MIRHoistLowering
 
     case expr
     when MIR::InlineZig
-      return unless expr.allocs && !expr.allocs.empty?
-      return if expr.stdlib_def&.mutates_receiver?
+      return unless expr.has_alloc_metadata?
+      return if expr.mutating_receiver_allocator_op?
 
       expr.target_var = name
       expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc
@@ -835,7 +835,7 @@ module MIRHoistLowering
     return expr if mir_allocates?(expr)
 
     ti = Type.from_node!(ast_node, context: "container borrow copy")
-    ti = ti.payload_type || ti if ti.error_union?
+    ti = ti.success_type || ti
     return expr unless @union_schemas&.key?(ti.resolved)
     copied = MIR::DeepCopy.new(expr, ti.zig_type, nil, :full_value, :heap)
     hoist_alloc(copied, ast_node, err_cleanup: true)
@@ -920,7 +920,7 @@ module MIRHoistLowering
   def cleanup_entry_for_owned_result(ast_node, alloc: :heap)
     ti = Type.from_node(ast_node)
     return nil unless ti
-    ti = ti.payload_type || ti if ti.error_union?
+    ti = ti.success_type || ti
     return heap_string_entry(alloc: alloc) if ti.string?
     return uniform_cleanup_entry(ti.zig_type, alloc: alloc) if ti.collection?
     zig_t = (Type.new(ti.resolved).zig_type rescue nil)

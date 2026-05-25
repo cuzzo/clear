@@ -212,20 +212,10 @@ module FsmTransform
   def body_needs_conservative?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
-      case s
-      when AST::WithBlock then true
-      when AST::WhileLoop, AST::WhileBindLoop
-        contains_suspend_anywhere?(s.do_branch) ||
-          body_needs_conservative?(s.do_branch)
-      when AST::ForRange, AST::ForEach
-        contains_suspend_anywhere?(s.body) ||
-          body_needs_conservative?(s.body)
-      when AST::IfStatement
-        contains_suspend_anywhere?(s.then_branch) ||
-          contains_suspend_anywhere?(s.else_branch || []) ||
-          body_needs_conservative?(s.then_branch) ||
-          body_needs_conservative?(s.else_branch || [])
-      else false
+      next true if s.is_a?(AST::WithBlock)
+
+      Segments.suspend_child_bodies(s).any? do |body|
+        contains_suspend_anywhere?(body) || body_needs_conservative?(body)
       end
     end
   end
@@ -235,15 +225,9 @@ module FsmTransform
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       next true if Segments.classify_suspend(s)
-      case s
-      when AST::WhileLoop, AST::WhileBindLoop then contains_suspend_anywhere?(s.do_branch)
-      when AST::ForRange, AST::ForEach then contains_suspend_anywhere?(s.body)
-      when AST::WithBlock then true
-      when AST::IfStatement
-        contains_suspend_anywhere?(s.then_branch) ||
-          contains_suspend_anywhere?(s.else_branch || [])
-      else false
-      end
+      next true if s.is_a?(AST::WithBlock)
+
+      Segments.suspend_child_bodies(s).any? { |body| contains_suspend_anywhere?(body) }
     end
   end
 

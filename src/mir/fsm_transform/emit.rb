@@ -336,9 +336,7 @@ module FsmTransform
       # descriptors, so exclude them here.
       suspend_result_vars =
         segments.flat_map { |seg|
-          [
-            (seg.tail.respond_to?(:result_var) ? seg.tail.result_var : nil),
-          ]
+          [Segments.suspend_tail?(seg.tail) ? seg.tail.result_var : nil]
         }.compact
       # Conservative-promoted names are already represented in
       # ctx[:extra_ctx_fields] by FsmTransform.transform; exclude
@@ -371,8 +369,8 @@ module FsmTransform
         capture_map[name] ||= "__ctx_#{id}.#{name}"
       end
       segments.each do |seg|
-        next unless seg.tail.respond_to?(:result_var)
-        next if seg.tail.is_a?(Segments::IoSuspend)
+        next unless Segments.suspend_tail?(seg.tail)
+        next if seg.tail.kind == :io
         rv = seg.tail.result_var
         capture_map[rv] ||= "__ctx_#{id}.#{rv}" if rv && rv != "_"
       end
@@ -541,8 +539,7 @@ module FsmTransform
       segment_specs = segments.each_with_index.map do |seg, i|
         descriptor = build_segment_descriptor(seg, ctx, lowering, capture_map,
                                               sp_idx: sp_indices[seg.index])
-        return nil if seg.tail.is_a?(Segments::IoSuspend) && descriptor.nil?
-        return nil if seg.tail.is_a?(Segments::NextSuspend) && descriptor.nil?
+        return nil if Segments.suspend_tail?(seg.tail) && descriptor.nil?
 
         prologue =
           if i == 0
@@ -639,19 +636,10 @@ module FsmTransform
       guards = {}
       segments.each do |seg|
         tail = seg.tail
-        next unless tail.respond_to?(:result_var)
+        next unless Segments.suspend_tail?(tail)
         result_var = tail.result_var
         next unless result_var && result_var != "_"
-        result_type =
-          case tail
-          when Segments::NextSuspend
-            promise_ft = tail.promise_ast&.full_type
-            if promise_ft && (pt = Type.new(promise_ft)).respond_to?(:tense_type)
-              pt.tense_type
-            end
-          when Segments::IoSuspend
-            tail.call_node&.full_type if tail.respond_to?(:call_node)
-          end
+        result_type = tail.result_type
         next unless SuspendResolvers.ownership_bearing_result_type?(result_type, lowering)
         guards[result_var.to_s] = SuspendResolvers.fsm_owned_guard_name(result_var.to_s)
       end
@@ -897,8 +885,7 @@ module FsmTransform
     def build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
       T.bind(self, T.untyped) rescue nil
       tail = seg.tail
-      return nil unless tail.is_a?(Segments::IoSuspend) ||
-                        tail.is_a?(Segments::NextSuspend)
+      return nil unless Segments.suspend_tail?(tail)
 
       bg_rt = ctx[:bg_rt]
       pointer_captures = ctx[:pointer_captures]
@@ -936,8 +923,7 @@ module FsmTransform
         visited[idx] = true
         seg = segments[idx]
         next unless seg
-        if seg.tail.is_a?(Segments::IoSuspend) ||
-           seg.tail.is_a?(Segments::NextSuspend)
+        if Segments.suspend_tail?(seg.tail)
           out[seg.index] = counter
           counter += 1
         end
@@ -947,15 +933,16 @@ module FsmTransform
         when Segments::CondBranch
           stack.push(seg.tail.then_index)
           stack.push(seg.tail.else_index)
-        when Segments::IoSuspend, Segments::NextSuspend, Segments::LockSuspend
+        when Segments::LockSuspend
           stack.push(seg.tail.next_index) if seg.tail.next_index
+        else
+          stack.push(seg.tail.next_index) if Segments.suspend_tail?(seg.tail) && seg.tail.next_index
         end
       end
       # Pick up any unreachable suspends.
       segments.each do |seg|
         next if out.key?(seg.index)
-        next unless seg.tail.is_a?(Segments::IoSuspend) ||
-                    seg.tail.is_a?(Segments::NextSuspend)
+        next unless Segments.suspend_tail?(seg.tail)
         out[seg.index] = counter
         counter += 1
       end

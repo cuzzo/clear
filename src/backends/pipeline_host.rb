@@ -2603,7 +2603,7 @@ class PipelineHost
     when AST::FindOp
       # Result type is ?InnerElemType; derive from smooth_node.full_type.
       result_ft = Type.new(T.must(smooth_node).full_type)
-      find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : placeholder
+      find_zig  = result_ft.optional? ? transpile_type(T.must(result_ft.wrapped_type).resolved.to_s) : placeholder
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       init = [MIR::Let.new(result_n, MIR::Undef.new(nil), true, find_zig, nil),
               MIR::Let.new(found_n, MIR::Lit.new("false"), true, nil, nil)]
@@ -3416,7 +3416,7 @@ class PipelineHost
     when AST::FindOp
       # Element type after stages: derive from smooth_node.full_type (?ElemType)
       result_ft = Type.new(smooth_node.full_type)
-      find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : elem_zig
+      find_zig  = result_ft.optional? ? transpile_type(T.must(result_ft.wrapped_type).resolved.to_s) : elem_zig
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
       acc_init_stmts << MIR::Let.new(fold_result,
         MIR::Undef.new(nil), true, find_zig, nil)

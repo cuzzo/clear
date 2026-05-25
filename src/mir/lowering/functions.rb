@@ -468,11 +468,11 @@ module MIRLoweringFunctions
     return [] unless fn_needs_rt
 
     ret_type_obj = node.return_type || Type.new(:Void)
-    bare_ret = ret_type_obj.error_union? ? (ret_type_obj.payload_type || ret_type_obj) : ret_type_obj
+    bare_ret = ret_type_obj.success_type || ret_type_obj
     returns_value_type = bare_ret.void? || bare_ret.primitive? || bare_ret.resource? ||
                          @enum_schemas&.key?(bare_ret.resolved) ||
                          @union_schemas&.key?(bare_ret.resolved)
-    returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && !!ret_type_obj.payload_type&.string?)
+    returns_string = bare_ret.string?
     heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
     has_frame_bindings = if node.cleanup_bindings
       node.cleanup_bindings.any? { |_, e| e.alloc == :frame }
@@ -867,7 +867,7 @@ module MIRLoweringFunctions
     ti = Type.from_node(a) unless ti.is_a?(Type)
 
     moved_arg = a.is_a?(AST::MoveNode) ||
-                (a.respond_to?(:was_moved) && a.was_moved == true &&
+                (AST.moved?(a) &&
                  !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
     if callee_param&.takes && moved_arg &&
@@ -1077,8 +1077,7 @@ module MIRLoweringFunctions
     end
 
     # Standard call
-    callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s) ||
-                 @fn_sigs&.dig("#{node.name}!")
+    callee_sig = fn_sig_for(node.name, bang_alias: true)
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx))
     end
@@ -1137,7 +1136,7 @@ module MIRLoweringFunctions
 
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
-    callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
+    callee_sig = fn_sig_for(node.name)
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
     end
@@ -1165,7 +1164,7 @@ module MIRLoweringFunctions
   sig { params(node: T.untyped).returns(T::Boolean) }
   def call_owned_return?(node)
     T.bind(self, MIRLowering) rescue nil
-    sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s) if node.respond_to?(:name)
+    sig = fn_sig_for(node.name) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return false if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
     node_ti = Type.from_node(node)
@@ -1188,7 +1187,7 @@ module MIRLoweringFunctions
   sig { params(ti: T.nilable(Type), sig_obj: T.untyped).returns(T::Boolean) }
   def call_type_owned_return?(ti, sig_obj)
     return false unless ti
-    ti = ti.payload_type if ti.error_union?
+    ti = ti.success_type
     return false unless ti
     if ti.string?
       return false if ti.symbol? || ti.raw?
@@ -1222,7 +1221,7 @@ module MIRLoweringFunctions
       ret = T.let(sig_obj.respond_to?(:return_type) ? sig_obj.return_type : nil, T.untyped)
       ret = Type.new(ret) if ret && !ret.is_a?(Type)
       return false unless ret.is_a?(Type)
-      ret = ret.payload_type if ret&.error_union?
+      ret = ret.success_type
       schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
       return true if ret&.string? || ret&.recursive_cleanup_shape?(schema_lookup)
       return false
@@ -1553,8 +1552,8 @@ module MIRLoweringFunctions
     # Use declared param types for struct fields to avoid comptime_int (e.g. @TypeOf(19876)).
     # Skip extern/module functions: their CLEAR types (e.g. String -> []const u8) may differ
     # from the actual Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
-    sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_sym) || @fn_sigs&.dig(node.name.to_s)
-    sig_params = (sig&.params || sig&.dig(:params) || []).reject { |p| p.comptime }
+    sig = fn_sig_for(node.name)
+    sig_params = sig ? sig.params.reject { |p| p.comptime } : []
     arg_field_types = if sig&.module_alias
       nil
     else
@@ -1622,12 +1621,12 @@ module MIRLoweringFunctions
     parts.join(", ")
   end
 
-  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: NilClass, arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::InlineZig) }
+  sig { params(id: Integer, prefix: String, args_tuple_name: String, frame_name: String, arg_codes: T::Array[T.untyped], arg_field_types: T.nilable(T::Array[T.untyped]), arg_tuple: String, alloc_kind: T.nilable(Symbol), return_type: Type, call_zig: String, receiver_field: T.nilable(String), ast_node: T.untyped).returns(MIR::InlineZig) }
   def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:, ast_node: nil)
     T.bind(self, MIRLowering) rescue nil
     ret_t = return_type
     can_fail = ret_t.error_union?
-    payload_t = can_fail ? ret_t.payload_type : ret_t
+    payload_t = can_fail ? T.must(ret_t.payload_type) : ret_t
     returns_void = payload_t.void?
 
     fields = []

@@ -247,20 +247,9 @@ module FsmTransform
     def emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
-      tail =
-        case susp_tail
-        when Segments::IoSuspend
-          Segments::IoSuspend.new(
-            susp_tail.call_node, susp_tail.stdlib_def, susp_tail.result_var,
-            after_idx,
-          )
-        when Segments::NextSuspend
-          Segments::NextSuspend.new(
-            susp_tail.promise_ast, susp_tail.result_var, after_idx,
-          )
-        else
-          raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}"
-        end
+      raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
+
+      tail = susp_tail.with_next_index(after_idx)
       builder.fill(idx, pre, tail)
       idx
     end
@@ -273,17 +262,10 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
       case stmt
-      when AST::WhileLoop, AST::WhileBindLoop
-        contains_suspend_anywhere?(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        contains_suspend_anywhere?(stmt.body)
-      when AST::IfStatement
-        contains_suspend_anywhere?(stmt.then_branch) ||
-          contains_suspend_anywhere?(stmt.else_branch || [])
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
       else
-        false
+        Segments.suspend_child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
       end
     end
 
@@ -296,17 +278,10 @@ module FsmTransform
       Array(stmts).any? do |stmt|
         next true if Segments.classify_suspend(stmt)
         case stmt
-        when AST::WhileLoop, AST::WhileBindLoop
-          contains_suspend_anywhere?(stmt.do_branch)
-        when AST::ForRange, AST::ForEach
-          contains_suspend_anywhere?(stmt.body)
         when AST::WithBlock
           with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
-        when AST::IfStatement
-          contains_suspend_anywhere?(stmt.then_branch) ||
-            contains_suspend_anywhere?(stmt.else_branch || [])
         else
-          false
+          Segments.suspend_child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
         end
       end
     end
@@ -418,20 +393,9 @@ module FsmTransform
     def emit_suspend(susp_tail, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
-      tail =
-        case susp_tail
-        when Segments::IoSuspend
-          Segments::IoSuspend.new(
-            susp_tail.call_node, susp_tail.stdlib_def, susp_tail.result_var,
-            after_idx,
-          )
-        when Segments::NextSuspend
-          Segments::NextSuspend.new(
-            susp_tail.promise_ast, susp_tail.result_var, after_idx,
-          )
-        else
-          raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}"
-        end
+      raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
+
+      tail = susp_tail.with_next_index(after_idx)
       builder.fill(idx, [], tail)
       idx
     end
@@ -825,16 +789,8 @@ module FsmTransform
           mapping.fetch(tail.then_index),
           mapping.fetch(tail.else_index),
         )
-      when Segments::IoSuspend
-        Segments::IoSuspend.new(
-          tail.call_node, tail.stdlib_def, tail.result_var,
-          tail.next_index ? mapping.fetch(tail.next_index) : nil,
-        )
-      when Segments::NextSuspend
-        Segments::NextSuspend.new(
-          tail.promise_ast, tail.result_var,
-          tail.next_index ? mapping.fetch(tail.next_index) : nil,
-        )
+      when Segments::IoSuspend, Segments::NextSuspend
+        tail.with_next_index(tail.next_index ? mapping.fetch(tail.next_index) : nil)
       when Segments::LockSuspend
         Segments::LockSuspend.new(
           tail.with_node, tail.cap, tail.prior_caps,

@@ -264,13 +264,7 @@ class MIRPass
 
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def recursion_yield_needed?(fn_node)
-    return false if fn_node.tight_reentrance
-    case fn_node.reentrance_kind
-    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
-      true
-    else
-      false
-    end
+    AST.recursion_yield_needed?(fn_node)
   end
 
   sig { params(node: T.untyped, acc: T::Set[String]).void }
@@ -321,7 +315,7 @@ class MIRPass
     node = unwrap_return_expr(expr)
     return true if node.is_a?(AST::CopyNode)
     ti = Type.from_node(node)
-    ti = ti.payload_type if ti&.error_union?
+    ti = ti.success_type if ti
     return false if ti&.any_rc? || ti&.any_sync?
 
     if node.is_a?(AST::Identifier)
@@ -572,12 +566,12 @@ class MIRPass
       # Structural unwrap only; the move decision reads the annotator's
       # was_moved stamp, not the MoveNode node type (INV-13).
       ident = rhs.is_a?(AST::MoveNode) ? rhs.value : rhs
-      add_if_consumed(ident, names, bindings, ident.was_moved == true) if ident.is_a?(AST::Identifier)
+      add_if_consumed(ident, names, bindings, AST.moved?(ident)) if ident.is_a?(AST::Identifier)
     end
 
     # 2. Standalone GIVE: `GIVE x;` as a bare statement
     if stmt.is_a?(AST::MoveNode) && stmt.value.is_a?(AST::Identifier)
-      add_if_consumed(stmt.value, names, bindings, stmt.value.was_moved == true)
+      add_if_consumed(stmt.value, names, bindings, AST.moved?(stmt.value))
     end
 
     # 2. Nested consumption (StructLit fields, FuncCall/MethodCall TAKES args)
@@ -626,7 +620,7 @@ class MIRPass
       end
     when AST::MoveNode
       if node.value.is_a?(AST::Identifier)
-        add_if_consumed(node.value, names, bindings, node.value.was_moved == true)
+        add_if_consumed(node.value, names, bindings, AST.moved?(node.value))
       else
         walk_consumed(node.value, names, bindings)
       end
@@ -653,7 +647,7 @@ class MIRPass
       param = params[idx + param_offset]
       consumes = param&.takes == true
       if arg.is_a?(AST::Identifier) && (arg.was_moved || consumes)
-        add_if_consumed(arg, names, bindings, arg.was_moved == true || consumes)
+        add_if_consumed(arg, names, bindings, AST.moved?(arg) || consumes)
       else
         walk_consumed(arg, names, bindings)
       end
@@ -694,7 +688,7 @@ class MIRPass
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
     ti = Type.from_node(node)
-    ti.is_a?(Type) && ti.indirect?
+    Type.indirect_type?(ti)
   rescue
     false
   end
@@ -833,7 +827,7 @@ class MIRPass
         n = id.name.to_s
         (bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup)) ||
           (n.start_with?("__hoist_") &&
-            id.respond_to?(:was_moved) && id.was_moved == true &&
+            AST.moved?(id) &&
             bindings[n]&.dig(:needs_cleanup))
       }
       .map { |id| id.name.to_s }

@@ -100,6 +100,13 @@ class MIRLowering
     ti ? ti.void? : false
   end
 
+  sig { params(name: T.any(String, Symbol), bang_alias: T::Boolean).returns(T.nilable(FunctionSignature)) }
+  def fn_sig_for(name, bang_alias: false)
+    sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
+    sig ||= @fn_sigs&.dig("#{name}!") if bang_alias
+    FunctionSignature.unwrap(sig)
+  end
+
   sig { params(struct_schemas: T::Hash[Symbol, Schemas::StructSchema], enum_schemas: T::Hash[Symbol, T::Array[String]], union_schemas: T::Hash[Symbol, Schemas::UnionSchema], fn_sigs: T::Hash[String, FunctionSignature], moved_guard_info: T::Hash[String, T::Hash[String, TrueClass]], importer: T.nilable(ModuleImporter), source_dir: T.nilable(String), debug_mode: T::Boolean, target: Symbol).void }
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
@@ -208,7 +215,7 @@ class MIRLowering
       return mir if mir.is_a?(MIR::HeapCreate)
       source_t = Type.from_node(ast_node)
       source_t = Type.new(source_t) if source_t && !source_t.is_a?(Type)
-      return mir if source_t.is_a?(Type) && source_t.indirect?
+      return mir if Type.indirect_type?(source_t)
       return with_ownership_consumption(
         MIR::HeapCreate.new(transpile_type(ti.resolved.to_s), mir, :heap, "blk"),
         mir_ident_names(mir),
@@ -293,7 +300,7 @@ class MIRLowering
   sig { params(type_info: T.untyped).returns(T.nilable(Symbol)) }
   def escaping_value_alloc(type_info)
     ti = Type.from_node(type_info)
-    ti = ti.payload_type if ti&.error_union?
+    ti = ti.success_type if ti
     return :heap if ti&.heap_ptr? || ti&.recursive_cleanup_shape?(@schema_lookup)
     nil
   end
@@ -350,7 +357,7 @@ class MIRLowering
 
     node = ast_node
     node = node.value if node.is_a?(AST::MoveNode)
-    if node.is_a?(AST::Identifier) && ast_node.respond_to?(:was_moved) && ast_node.was_moved == true
+    if node.is_a?(AST::Identifier) && AST.moved?(ast_node)
       return placement_for_node(node) == :heap
     end
     node.is_a?(AST::Identifier) && node.symbol&.heap_storage? == true
@@ -1144,7 +1151,7 @@ class MIRLowering
   sig { params(node: T.untyped, blk: T.proc.params(arg0: AST::Node).void).void }
   def walk_ast_for_moved_args(node, &blk)
     return unless node.is_a?(AST::Locatable)
-    yield node if node.is_a?(AST::Identifier) && node.respond_to?(:was_moved) && node.was_moved == true
+    yield node if node.is_a?(AST::Identifier) && AST.moved?(node)
     return if nested_ownership_scope?(node)
 
     AST.each_child_node(node) { |child| walk_ast_for_moved_args(child, &blk) }
@@ -1182,8 +1189,7 @@ class MIRLowering
 
   sig { params(type_info: Type).returns(T::Boolean) }
   def ownership_bearing_type?(type_info)
-    ti = type_info
-    ti = ti.payload_type if ti.respond_to?(:error_union?) && ti.error_union?
+    ti = type_info.success_type
     return false unless ti
     ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
   end
@@ -1201,7 +1207,7 @@ class MIRLowering
   def discard_owned_zig_type(node, entry)
     return entry[:zig_type] if entry[:zig_type]
     ti = Type.from_node!(node, context: "discard owned type")
-    ti = ti.payload_type || ti if ti.error_union?
+    ti = ti.success_type || ti
     return "[]const u8" if ti.string?
     ti.zig_type || Type.new(ti.resolved).zig_type
   end
@@ -2130,7 +2136,7 @@ class MIRLowering
   sig { params(name: String).returns(T::Boolean) }
   def callee_can_fail?(name)
     return true if false || name.to_s.empty?
-    sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
+    sig = fn_sig_for(name)
     sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end
 
@@ -2338,16 +2344,7 @@ class MIRLowering
   # (depth=1 by assertion -- yield is meaningless).
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
   def needs_recursion_yield?(node)
-    return false if node.tight_reentrance
-    case node.reentrance_kind
-    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
-      true
-    else
-      # :reentrant_thunk handled in ThunkTransform::Emit (its
-      # trampoline always yields per iteration unless TIGHT).
-      # :reentrant_not_logical never yields.
-      false
-    end
+    AST.recursion_yield_needed?(node)
   end
 
   # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
@@ -2365,7 +2362,7 @@ class MIRLowering
 
     if ti.string?
       value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
-      return value if ast_node.respond_to?(:was_moved) && ast_node.was_moved == true &&
+      return value if AST.moved?(ast_node) &&
                       value_alloc == sink_alloc &&
                       !ti.rodata? &&
                       !ast_node.is_a?(AST::CopyNode) && !ast_node.is_a?(AST::CloneNode)
@@ -2378,7 +2375,7 @@ class MIRLowering
 
     if ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
       value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
-      return value if ast_node.respond_to?(:was_moved) && ast_node.was_moved == true &&
+      return value if AST.moved?(ast_node) &&
                       value_alloc == sink_alloc &&
                       !ast_node.is_a?(AST::CopyNode) && !ast_node.is_a?(AST::CloneNode)
       return value if owned_parameter_source?(ast_node)

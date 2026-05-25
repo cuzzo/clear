@@ -71,7 +71,7 @@ module CleanupClassifier
   private_class_method def self.walk_moved_source_guards(body, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::Identifier)
-      next unless node.respond_to?(:was_moved) && node.was_moved == true
+      next unless AST.moved?(node)
       entry = bindings[node.name.to_s]
       entry[:has_moved_guard] = true if entry&.present?
     end
@@ -119,23 +119,9 @@ module CleanupClassifier
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.stamp_extended_loop_lifetimes!(body, bindings)
     body.each do |node|
-      case node
-      when AST::WhileLoop, AST::WhileBindLoop
-        stamp_loop_extensions!(node.do_branch, bindings)
-        stamp_extended_loop_lifetimes!(node.do_branch, bindings)
-      when AST::ForRange, AST::ForEach
-        stamp_loop_extensions!(node.body, bindings)
-        stamp_extended_loop_lifetimes!(node.body, bindings)
-      when AST::IfStatement
-        stamp_extended_loop_lifetimes!(node.then_branch, bindings)
-        stamp_extended_loop_lifetimes!(node.else_branch, bindings)
-      when AST::MatchStatement
-        node.cases.each { |c| stamp_extended_loop_lifetimes!(c.body, bindings) }
-        stamp_extended_loop_lifetimes!(node.default_case, bindings) if node.default_case
-      when AST::WithBlock
-        stamp_extended_loop_lifetimes!(node.body, bindings)
-      when AST::DoBlock
-        node.branches.each { |b| stamp_extended_loop_lifetimes!(T.cast(b.fetch(:body), T::Array[T.untyped]), bindings) }
+      AST.child_bodies(node).each do |child_body|
+        stamp_loop_extensions!(child_body, bindings) if AST.loop_node?(node)
+        stamp_extended_loop_lifetimes!(child_body, bindings)
       end
     end
   end
@@ -371,7 +357,7 @@ module CleanupClassifier
   private_class_method def self.ownership_transfer_payload?(node)
     return false unless node
     return true if node.is_a?(AST::MoveNode)
-    return true if node.respond_to?(:was_moved) && node.was_moved == true
+    return true if AST.moved?(node)
     case node
     when AST::Cast, AST::FreezeNode, AST::CapabilityWrap
       ownership_transfer_payload?(node.value)
@@ -584,7 +570,7 @@ module CleanupClassifier
     return false if sig.frame_return_alloc?
     return false unless sig.respond_to?(:return_type)
     ret = Type.new(sig.return_type)
-    ret = ret.payload_type || ret if ret.error_union?
+    ret = ret.success_type || ret
     !!ret && ret.needs_explicit_cleanup?(:heap, schema_lookup)
   end
 
@@ -725,7 +711,7 @@ module CleanupClassifier
     return nil unless node.respond_to?(:value) && contains_call?(node.value)
     sym = node.respond_to?(:symbol) ? node.symbol : nil
     return nil unless sym&.storage == :heap
-    ret = ti.error_union? ? ti.payload_type : ti
+    ret = ti.success_type
     return nil unless ret && (
       ret.needs_explicit_cleanup?(:heap, schema_lookup) ||
         ret.heap_ptr? ||

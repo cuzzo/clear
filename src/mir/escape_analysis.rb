@@ -268,8 +268,7 @@ module EscapeAnalysis
   sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.aggregate_owner_requires_heap?(ti, schema_lookup)
     return false unless ti
-    t = ti.error_union? ? ti.payload_type : ti
-    t = t.wrapped_type if t&.optional?
+    t = ti.value_payload_type
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
 
@@ -288,23 +287,9 @@ module EscapeAnalysis
   sig { params(body: T::Array[T.untyped]).void }
   private_class_method def self.mark_loop_receiver_allocations_heap!(body)
     body.each do |stmt|
-      case stmt
-      when AST::WhileLoop, AST::WhileBindLoop
-        mark_receiver_allocations_in_loop!(stmt.do_branch)
-        mark_loop_receiver_allocations_heap!(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        mark_receiver_allocations_in_loop!(stmt.body)
-        mark_loop_receiver_allocations_heap!(stmt.body)
-      when AST::IfStatement
-        mark_loop_receiver_allocations_heap!(stmt.then_branch)
-        mark_loop_receiver_allocations_heap!(stmt.else_branch)
-      when AST::MatchStatement
-        stmt.cases.each { |c| mark_loop_receiver_allocations_heap!(c.body) }
-        mark_loop_receiver_allocations_heap!(stmt.default_case) if stmt.default_case
-      when AST::WithBlock
-        mark_loop_receiver_allocations_heap!(stmt.body)
-      when AST::DoBlock
-        stmt.branches.each { |b| mark_loop_receiver_allocations_heap!(T.cast(b.fetch(:body), T::Array[T.untyped])) }
+      AST.child_bodies(stmt).each do |child_body|
+        mark_receiver_allocations_in_loop!(child_body) if AST.loop_node?(stmt)
+        mark_loop_receiver_allocations_heap!(child_body)
       end
     end
   end
@@ -436,7 +421,7 @@ module EscapeAnalysis
     walk_body(node.body) do |child|
       next unless child.is_a?(AST::VarDecl) || (child.is_a?(AST::BindExpr) && child.mode == :decl)
       ti = Type.from_node(child.full_type)
-      ti = ti.payload_type if ti&.error_union?
+      ti = ti.success_type if ti
       next unless ti&.heap_ptr? || ti&.recursive_cleanup_shape?(schema_lookup)
       mark_symbol_heap!(child.symbol)
     end
@@ -623,7 +608,7 @@ module EscapeAnalysis
   sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.type_requires_owned_storage?(ti, schema_lookup)
     return false unless ti
-    t = ti.error_union? ? ti.payload_type : ti
+    t = ti.success_type
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
     t.heap_ptr? ||
@@ -636,7 +621,7 @@ module EscapeAnalysis
 
   sig { params(ti: Type, schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
   private_class_method def self.type_contains_cleanup_payload?(ti, schema_lookup, seen = nil)
-    t = ti.error_union? ? ti.payload_type : ti
+    t = ti.success_type
     return false unless t
     return true if t.string? && !t.rodata? && t.provenance != :borrow
     return true if t.needs_explicit_cleanup?(:heap, schema_lookup)
@@ -799,8 +784,7 @@ module EscapeAnalysis
     ti = owning_return_type(fn, expr)
     return false unless ti
     top_heap_ptr = ti.heap_ptr?
-    ti = ti.payload_type if ti.error_union?
-    ti = ti.wrapped_type if ti&.optional?
+    ti = ti.value_payload_type
     return false unless ti
     return false if ti.primitive? || ti.void? || ti.any?
     if expr.is_a?(AST::Identifier) && expr.symbol
@@ -831,8 +815,7 @@ module EscapeAnalysis
   sig { params(fn: AST::FunctionDef, expr: T.untyped).void }
   private_class_method def self.mark_heap_return!(fn, expr)
     ret = fn.return_type
-    ret = ret.payload_type if ret.respond_to?(:error_union?) && ret.error_union? && ret.respond_to?(:payload_type)
-    ret = ret.wrapped_type if ret.respond_to?(:optional?) && ret.optional? && ret.respond_to?(:wrapped_type)
+    ret = ret.value_payload_type if ret.is_a?(Type)
     ret.provenance = :heap if ret.respond_to?(:provenance=)
     fn.heap_carry_return = true if fn.respond_to?(:heap_carry_return=)
 
@@ -943,7 +926,7 @@ module EscapeAnalysis
     end
     if has_param_return
       ret = Type.from_node(return_type)
-      ret = ret.payload_type if ret&.error_union?
+      ret = ret.success_type if ret
       return true if ret&.string? || ret&.recursive_cleanup_shape?(schema_lookup)
       return false
     end

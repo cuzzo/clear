@@ -968,13 +968,7 @@ module EffectTracker
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def recursion_yield_needed?(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false if fn_node.tight_reentrance
-    case fn_node.reentrance_kind
-    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
-      true
-    else
-      false
-    end
+    AST.recursion_yield_needed?(fn_node)
   end
 
   sig { returns(NilClass) }

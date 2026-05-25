@@ -75,4 +75,30 @@ class SequenceMineTest < Minitest::Test
     RB
     assert_empty r.broken_protocol(min_support: 4)
   end
+
+  def test_declarative_ruby_and_sorbet_calls_are_not_protocol_events
+    r = scan(<<~RB)
+      extend T::Sig
+      sig { params(x: T.untyped).returns(T::Boolean) }
+      def a(x); x.nil?; end
+      sig { returns(T::Boolean) }
+      def b; true; end
+      sig { returns(T.nilable(String)) }
+      def c; nil; end
+      sig { params(x: T.any(String, Symbol)).void }
+      def d(x); nil; end
+      private_class_method def self.e; nil; end
+    RB
+
+    mids = r.co_called_pairs(min_support: 1).flat_map { |h| h[:pair] }.uniq
+    refute_includes mids, "sig"
+    refute_includes mids, "params"
+    refute_includes mids, "returns"
+    refute_includes mids, "untyped"
+    refute_includes mids, "nilable"
+    refute_includes mids, "any"
+    refute_includes mids, "void"
+    refute_includes mids, "extend"
+    refute_includes mids, "private_class_method"
+  end
 end
