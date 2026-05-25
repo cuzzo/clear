@@ -88,7 +88,7 @@ line. Still a ranked candidate, not a verdict (same discipline as the
 | category | meaning | not a test target? |
 |---|---|---|
 | `type_norm` | type/nil guard (`is_a?`/`kind_of?`/`nil?`/`respond_to?`/safe-nav) | yes — likely dead if the contract were strictly typed |
-| `dead` | no sibling arm ever taken: decision never executes | yes — audit/delete |
+| `dead` | no sibling arm ever taken in coverage: decision never executes in the measured corpus | yes — audit as missing test; delete only if static reachability agrees |
 | `defensive` | live, inert/invariant-pinned | yes — accept |
 | `spurious` | decomplex: decision is redundant/cloned/re-derived | yes — refactor or delete; resolving the decomplex finding collapses the arm |
 | `ffi` | caller-declared external/boundary method | special — integration test |

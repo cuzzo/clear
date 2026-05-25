@@ -181,7 +181,13 @@ module MIRLoweringExpressions
       left_type = node.left.full_type
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
       type_arg = resolved == :Int64 ? "i64" : "f64"
-      return MIR::Call.new("std.math.pow", [MIR::Ident.new(type_arg), left, right], false)
+      return MIR::Call.new(
+        "std.math.pow",
+        [MIR::Ident.new(type_arg), left, right],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3),
+      )
     end
 
     # Modulo on signed int — routed through the builtin registry so the :bc

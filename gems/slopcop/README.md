@@ -20,7 +20,7 @@ external/boundary method names) is caller-supplied via `--ffi`.
 | category | meaning |
 |---|---|
 | `type_norm` | type/nil guard — likely dead if the contract were strictly typed |
-| `dead` | decision never executes — audit as dead code |
+| `dead` | decision never executes in coverage — audit as missing test, or dead code only if static reachability agrees |
 | `defensive` | inert / invariant-pinned — accept, exclude from denominator |
 | `spurious` | decomplex: redundant/cloned/re-derived decision — refactor or delete, not a test target |
 | `ffi` | a caller-declared external/boundary call — needs an integration test |

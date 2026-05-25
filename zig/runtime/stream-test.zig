@@ -552,11 +552,15 @@ test "SplitStream drops producer values immediately when no owners remain" {
     var stream = try S.spawnNew(std.testing.allocator, fakeSched());
 
     var producer = makeProducer([]const u8, stream);
-    stream.deinit();
+    stream.inner.active_subscribers.store(0, .release);
+    stream.subscriber_id = std.math.maxInt(usize);
+    stream.active = false;
 
     const msg = try std.testing.allocator.dupe(u8, "orphaned");
     try producer.push(msg);
     producer.close();
+    stream.active = true;
+    stream.deinit();
 }
 
 test "SplitStream propagates terminal errors to all handles" {

@@ -130,23 +130,12 @@ module EscapeAnalysis
   # FuncCalls.
   sig { params(body: T::Array[T.untyped], callsites: T::Hash[String, T::Array[T.untyped]]).returns(NilClass) }
   private_class_method def self.collect_callsites_deep(body, callsites)
-    stack = body.is_a?(Array) ? body.dup : [body]
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
+    AST.each_locatable(body) do |node|
       if node.is_a?(AST::FuncCall)
         T.must(callsites[node.name.to_s]) << { args: node.args }
       end
-      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
-      node.class.members.each do |m|
-        v = node[m]
-        if v.is_a?(Array)
-          v.each { |c| stack.push(c) if c.is_a?(AST::Locatable) }
-        elsif v.is_a?(AST::Locatable)
-          stack.push(v)
-        end
-      end
     end
+    nil
   end
 
   # Most-general unifier: returns the single non-nil value when every
@@ -329,27 +318,7 @@ module EscapeAnalysis
 
   sig { params(body: T::Array[T.untyped], blk: T.proc.params(arg0: T.untyped).void).void }
   private_class_method def self.walk_body(body, &blk)
-    stack = T.let(body.reverse, T::Array[T.untyped])
-    until stack.empty?
-      node = stack.pop
-      next unless node
-      blk.call(node) if node.is_a?(AST::Locatable)
-      next if node.is_a?(AST::FunctionDef)
-      next unless node.is_a?(Struct)
-
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.reverse_each { |child| stack << child if child.is_a?(Struct) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(Struct) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        elsif value.is_a?(Struct)
-          stack << value
-        end
-      end
-    end
+    AST.each_locatable(body, &blk)
   end
 
   sig { params(expr: T.untyped).void }
@@ -658,24 +627,10 @@ module EscapeAnalysis
   sig { params(expr: T.untyped).returns(T::Boolean) }
   private_class_method def self.expr_has_heap_identifier?(expr)
     found = T.let(false, T::Boolean)
-    stack = T.let([expr], T::Array[T.untyped])
-    until stack.empty?
-      node = unwrap_value(stack.pop)
-      next unless node.is_a?(AST::Locatable)
+    AST.each_locatable(expr) do |raw|
+      node = unwrap_value(raw)
       if node.is_a?(AST::Identifier)
         found = true if symbol_heap?(node.symbol)
-        next
-      end
-      AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
       end
     end
     found
@@ -683,28 +638,16 @@ module EscapeAnalysis
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
   private_class_method def self.expr_has_owned_inline_value?(expr)
-    stack = T.let([[expr, true]], T::Array[[T.untyped, T::Boolean]])
-    until stack.empty?
-      item = T.must(stack.pop)
-      node = unwrap_value(item[0])
-      is_root = item[1]
+    root = unwrap_value(expr)
+    AST.each_locatable(expr) do |raw|
+      node = unwrap_value(raw)
       next unless node.is_a?(AST::Locatable)
+      is_root = node.equal?(root)
       unless is_root || node.is_a?(AST::Identifier)
         return true if node.is_a?(AST::Literal) && node.value.is_a?(String)
         ti = Type.from_node(node)
         return true if ti && !ti.rodata? && ti.provenance != :borrow &&
                        ti.heap_ptr?
-      end
-      AST.wrapped_children(node).each { |child| stack << [child, false] if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << [child, false] if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << [child, false] if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << [value, false]
-        end
       end
     end
     false
@@ -962,26 +905,7 @@ module EscapeAnalysis
     found = T.let(false, T::Boolean)
     walk_body(body) do |node|
       next unless node.is_a?(AST::ReturnNode)
-      stack = T.let([node.value], T::Array[T.untyped])
-      until stack.empty?
-        child = unwrap_value(stack.pop)
-        next unless child.is_a?(AST::Locatable)
-        if child.is_a?(AST::Identifier) && symbol_heap?(child.symbol)
-          found = true
-          break
-        end
-        AST.wrapped_children(child).each { |grandchild| stack << grandchild if grandchild.is_a?(AST::Locatable) }
-        child.class.members.each do |member|
-          value = child[member]
-          if value.is_a?(Array)
-            value.each { |grandchild| stack << grandchild if grandchild.is_a?(AST::Locatable) }
-          elsif value.is_a?(Hash)
-            value.each_value { |grandchild| stack << grandchild if grandchild.is_a?(AST::Locatable) }
-          elsif value.is_a?(AST::Locatable)
-            stack << value
-          end
-        end
-      end
+      found = true if expr_has_heap_identifier?(node.value)
     end
     found
   end

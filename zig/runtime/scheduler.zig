@@ -2666,6 +2666,15 @@ pub const WaitGroup = struct {
 
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
+        // Completed waitgroups do not need scheduler state. Still take the
+        // metadata lock so this synchronizes with done() before callers free self.
+        while (self.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+        if (self.counter.load(.seq_cst) == 0) {
+            self.lock.store(0, .release);
+            return;
+        }
+        self.lock.store(0, .release);
+
         if (self.sched.current_task == null) {
             // HAMMER-WAIT-LOOP-BEGIN: tag=waitgroup.wait-non-fiber
             // What stalls: a non-fiber caller (typically test code)

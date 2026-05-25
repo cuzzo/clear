@@ -46,6 +46,13 @@ class ClassifierTest < Minitest::Test
     assert_equal :genuine, C.categorize("m", :case, node("foo(1)"), true)
   end
 
+  def test_non_decision_coverage_artifact_is_defensive_not_dead
+    pnode = RubyVM::AbstractSyntaxTree.parse("class C; end").children.last
+    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], pnode)
+    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], nil, "end")
+    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], nil, "sig { returns(T::Boolean) }")
+  end
+
   # Real resultset via stdlib Coverage (same branch-tuple shape SimpleCov
   # uses), so classify_file runs the true path on real dark arms.
   def test_classify_file_on_real_coverage

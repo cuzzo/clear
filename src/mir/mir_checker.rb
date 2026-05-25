@@ -2254,71 +2254,10 @@ class MIRChecker
   # Yield each immediate sub-expression of expr.
   # Stops at opaque boundaries (RawZig, InlineZig, BgBlock).
   # BlockExpr bodies are walked separately by check_stmts_for_unhoisted.
-  sig { params(expr: T.anything, blk: T.untyped).void }
+  sig { params(expr: T.untyped, blk: T.untyped).void }
   def each_sub_expr(expr, &blk)
-    return unless expr
-    case expr
-    when MIR::HeapCreate    then yield expr.init    if expr.init
-    when MIR::DupeSlice     then yield expr.source  if expr.source
-    when MIR::AllocSlice    then yield expr.len     if expr.len
-    when MIR::FreeSlice     then yield expr.slice   if expr.slice
-    when MIR::DestroyPtr    then yield expr.ptr     if expr.ptr
-    when MIR::DeepCopy      then yield expr.source  if expr.source
-    when MIR::CapWrap       then yield expr.inner   if expr.inner
-    when MIR::SharePromote  then yield expr.source  if expr.source
-    when MIR::ContainerInit then yield expr.capacity if expr.capacity
-    when MIR::ConcatStr     then expr.parts&.each { |p| yield p }
-    when MIR::MakeList      then expr.items&.each  { |i| yield i }
-    when MIR::RcRetain      then yield expr.source  if expr.source
-    when MIR::Call
-      expr.args&.each { |a| yield a }
-    when MIR::TailCall
-      expr.args&.each { |a| yield a }
-    when MIR::MethodCall
-      yield expr.receiver if expr.receiver
-      expr.args&.each { |a| yield a }
-    when MIR::FieldGet      then yield expr.object if expr.object
-    when MIR::IndexGet
-      yield expr.object if expr.object
-      yield expr.index  if expr.index
-    when MIR::BinOp
-      yield expr.left  if expr.left
-      yield expr.right if expr.right
-    when MIR::UnaryOp        then yield expr.operand    if expr.operand
-    when MIR::Cast           then yield expr.expr       if expr.expr
-    when MIR::TryExpr        then yield expr.expr       if expr.expr
-    when MIR::TryCatch
-      yield expr.expr if expr.expr
-      yield expr.catch_body if expr.catch_body.is_a?(MIR::Emittable)
-    when MIR::Orelse
-      yield expr.expr     if expr.expr
-      yield expr.fallback if expr.fallback
-    when MIR::Conditional
-      yield expr.cond     if expr.cond
-      yield expr.then_val if expr.then_val
-      yield expr.else_val if expr.else_val
-    when MIR::AddressOf      then yield expr.expr if expr.expr
-    when MIR::Deref          then yield expr.expr if expr.expr
-    when MIR::OptionalUnwrap then yield expr.expr if expr.expr
-    when MIR::StructInit
-      expr.fields&.each { |f| yield f[:value] if f[:value] }
-    when MIR::ArrayInit
-      expr.items&.each { |i| yield i }
-    when MIR::SliceExpr
-      yield expr.target   if expr.target
-      yield expr.start    if expr.start
-      yield expr.end_expr if expr.end_expr
-    when MIR::ItemsAccess    then yield expr.expr if expr.expr
-    when MIR::OwnedSlice     then yield expr.expr if expr.expr
-    when MIR::RangeLit
-      yield expr.start   if expr.start
-      yield expr.end_val if expr.end_val
-    when MIR::Pipeline
-      yield expr.inner if expr.inner
-    # Opaque: RawZig, InlineZig, BgBlock, CatchWrapper
-    # Leaf: Lit, Ident, FnRef, RcDowngrade, WeakUpgrade, HasField
-    # BlockExpr: body is statements, walked by check_stmts_for_unhoisted
-    end
+    return unless expr.is_a?(MIR::Emittable)
+    expr.child_exprs.each { |child| yield child }
     nil
   end
 end

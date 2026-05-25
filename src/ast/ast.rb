@@ -312,6 +312,32 @@ module AST
     end
   end
 
+  # Walk every AST Locatable reachable from a root object. This is the
+  # structural expression+statement walker; semantic walkers should layer
+  # their own filtering on top instead of re-open-coding Struct member scans.
+  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.untyped).void }
+  def self.each_locatable(root, descend_functions: false, &visitor)
+    stack = T.let(root.is_a?(Array) ? root.reverse : [root], T::Array[T.untyped])
+    until stack.empty?
+      node = stack.pop
+      next unless node
+      yield node if node.is_a?(Locatable)
+      next if node.is_a?(FunctionDef) && !descend_functions
+      next unless node.is_a?(Struct)
+
+      node.class.members.reverse_each do |member|
+        value = node[member]
+        if value.is_a?(Array)
+          value.reverse_each { |child| stack << child if child.is_a?(Struct) }
+        elsif value.is_a?(Hash)
+          value.each_value { |child| stack << child if child.is_a?(Struct) }
+        elsif value.is_a?(Struct)
+          stack << value
+        end
+      end
+    end
+  end
+
   # Walk a GetField/GetIndex access chain down to the root Identifier it
   # is anchored at; nil if the chain does not bottom out at an Identifier.
   #
@@ -389,7 +415,8 @@ module AST
       (expr.fields&.values || []).compact
     when ListLit
       (expr.items || []).compact
-    when MoveNode, CopyNode, CloneNode, ShareNode, FreezeNode, CapabilityWrap
+    when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
+         FreezeNode, CapabilityWrap
       expr.value ? [expr.value] : []
     else
       []

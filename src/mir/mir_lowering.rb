@@ -366,7 +366,7 @@ class MIRLowering
   # Lower an AST node (or old MIR node) into a new MIR node.
   sig { params(node: T.untyped).returns(T.untyped) }
   def lower(node)
-    case node
+    mir = case node
 
     # --- Top-level ---
     when AST::Program           then lower_program(node)
@@ -481,20 +481,23 @@ class MIRLowering
 
     else
       raise "MIRLowering: unhandled node type #{node.class} at #{node.token ? "line #{node.token.line}" : 'unknown'}"
-    end.tap { |mir|
-      # Apply type coercion (int->float, float->int, etc.) when AST node has coerced_type
-      if mir && node.respond_to?(:coerced_type) && node.coerced_type &&
-         node.typed? &&
-         node.coerced_type != node.full_type
-        # Skip coercion for stack-allocated fixed-size arrays (SROA)
-        skip = node.is_a?(AST::ListLit) && node.storage == :stack &&
-               (node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type)&.fixed?
-        unless skip
-          cast_node = mir_cast(mir, node.full_type, node.coerced_type)
-          return cast_node if cast_node
-        end
-      end
-    }
+    end
+    apply_lowered_coercion(mir, node)
+  end
+
+  sig { params(mir: T.untyped, node: T.untyped).returns(T.untyped) }
+  def apply_lowered_coercion(mir, node)
+    return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
+    return mir unless node.typed? && node.coerced_type != node.full_type
+    return mir if stack_fixed_array_coercion?(node)
+    mir_cast(mir, node.full_type, node.coerced_type) || mir
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def stack_fixed_array_coercion?(node)
+    return false unless node.is_a?(AST::ListLit) && node.storage == :stack
+    coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type
+    coerced_type&.fixed? == true
   end
 
   # Lower a body (array of statements) into an array of MIR nodes.

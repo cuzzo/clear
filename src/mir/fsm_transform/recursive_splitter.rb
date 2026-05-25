@@ -265,7 +265,7 @@ module FsmTransform
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
       else
-        Segments.suspend_child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
+        AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
       end
     end
 
@@ -281,7 +281,7 @@ module FsmTransform
         when AST::WithBlock
           with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
         else
-          Segments.suspend_child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
+          AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
         end
       end
     end

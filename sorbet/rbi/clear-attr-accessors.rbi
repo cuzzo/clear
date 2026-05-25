@@ -66,10 +66,6 @@ class AST::BgBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def prefix_token=(value); end
   sig { returns(T.untyped) }
-  def return_provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_provenance=(value); end
-  sig { returns(T.untyped) }
   def spawn_form; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def spawn_form=(value); end
@@ -251,10 +247,6 @@ class AST::FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
   sig { returns(T.untyped) }
-  def matched_signature; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def matched_signature=(value); end
-  sig { returns(T.untyped) }
   def module_alias; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def module_alias=(value); end
@@ -306,6 +298,10 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def explicit_return_type=(value); end
   sig { returns(T.untyped) }
+  def fn_value_ref; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def fn_value_ref=(value); end
+  sig { returns(T.untyped) }
   def fsm_eligible; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fsm_eligible=(value); end
@@ -354,10 +350,6 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
   sig { returns(T.untyped) }
-  def fn_value_ref; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def fn_value_ref=(value); end
-  sig { returns(T.untyped) }
   def post_clauses; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def post_clauses=(value); end
@@ -385,10 +377,6 @@ class AST::FunctionDef
   def requires_clauses; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def requires_clauses=(value); end
-  sig { returns(T.untyped) }
-  def return_provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_provenance=(value); end
   sig { returns(T.untyped) }
   def return_type_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -527,6 +515,10 @@ class AST::MethodCall
 end
 
 class AST::Program
+  sig { returns(T.untyped) }
+  def mir_pass_state; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_pass_state=(value); end
   sig { returns(T.untyped) }
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -748,10 +740,6 @@ class BgBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def prefix_token=(value); end
   sig { returns(T.untyped) }
-  def return_provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_provenance=(value); end
-  sig { returns(T.untyped) }
   def spawn_form; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def spawn_form=(value); end
@@ -836,6 +824,15 @@ class Builder
   def segments; end
   sig { returns(T::Array[T.untyped]) }
   def synthetic_fields; end
+end
+
+class CallableContract
+  sig { returns(T.untyped) }
+  def checked_arg_count; end
+  sig { returns(T.untyped) }
+  def ownership_contract; end
+  sig { returns(T.untyped) }
+  def signature; end
 end
 
 class CapabilityWrap
@@ -1014,10 +1011,6 @@ class FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def heap_dupe_result=(value); end
   sig { returns(T.untyped) }
-  def matched_signature; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def matched_signature=(value); end
-  sig { returns(T.untyped) }
   def module_alias; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def module_alias=(value); end
@@ -1055,10 +1048,8 @@ class FunctionContext
   def heap_count; end
   sig { params(value: Integer).returns(Integer) }
   def heap_count=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[LifetimeSource]) }
   def lifetime; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def lifetime=(value); end
   sig { returns(Integer) }
   def loop_depth; end
   sig { params(value: Integer).returns(Integer) }
@@ -1067,10 +1058,6 @@ class FunctionContext
   def name; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def name=(value); end
-  sig { returns(T::Boolean) }
-  def needs_rt; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def needs_rt=(value); end
   sig { returns(Type) }
   def return_type; end
   sig { returns(T::Array[T.untyped]) }
@@ -1085,6 +1072,10 @@ class FunctionContext
   def type_params; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def type_params=(value); end
+  sig { returns(T::Boolean) }
+  def uses_rt; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def uses_rt=(value); end
 end
 
 class FunctionDef
@@ -1128,6 +1119,10 @@ class FunctionDef
   def explicit_return_type; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def explicit_return_type=(value); end
+  sig { returns(T.untyped) }
+  def fn_value_ref; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def fn_value_ref=(value); end
   sig { returns(T.untyped) }
   def fsm_eligible; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1204,10 +1199,6 @@ class FunctionDef
   def requires_clauses; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def requires_clauses=(value); end
-  sig { returns(T.untyped) }
-  def return_provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_provenance=(value); end
   sig { returns(T.untyped) }
   def return_type_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1331,14 +1322,8 @@ class FunctionSignature
   def return_def; end
   sig { params(value: FunctionReturn).returns(FunctionReturn) }
   def return_def=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[LifetimeSource]) }
   def return_lifetime; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_lifetime=(value); end
-  sig { returns(T.untyped) }
-  def return_provenance; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def return_provenance=(value); end
   sig { returns(T.untyped) }
   def return_strategy; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1409,6 +1394,44 @@ class InlineStructVariant
   def fields; end
 end
 
+class LinearOwnershipState
+  sig { returns(T::Hash[String, Symbol]) }
+  def alloc_kinds; end
+  sig { returns(T::Hash[String, Symbol]) }
+  def alloc_scopes; end
+  sig { returns(T::Set[String]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[String]) }
+  def err_finalizers; end
+  sig { returns(T::Set[String]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[String]) }
+  def maybe_released; end
+  sig { returns(T::Set[String]) }
+  def move_marks; end
+  sig { returns(T::Set[String]) }
+  def owned; end
+  sig { returns(T::Set[String]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[String]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[String]) }
+  def released; end
+  sig { returns(T::Boolean) }
+  def terminated; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def terminated=(value); end
+end
+
+class MIR::CallableContract
+  sig { returns(T.untyped) }
+  def checked_arg_count; end
+  sig { returns(T.untyped) }
+  def ownership_contract; end
+  sig { returns(T.untyped) }
+  def signature; end
+end
+
 class MIR::Drop
   sig { returns(T.untyped) }
   def cleanup_entry; end
@@ -1423,9 +1446,54 @@ class MIR::FieldDef
   def boxed_capture=(value); end
 end
 
+class MIR::OwnershipContract
+  sig { returns(T::Array[String]) }
+  def borrows; end
+  sig { returns(T::Array[String]) }
+  def consumes; end
+  sig { returns(T::Boolean) }
+  def covers_consuming_params; end
+  sig { returns(T::Array[String]) }
+  def produces; end
+end
+
+class MIR::Program
+  sig { returns(T.untyped) }
+  def items; end
+end
+
 class MIRChecker
   sig { returns(T::Array[T.untyped]) }
   def errors; end
+end
+
+class MIRChecker::LinearOwnershipState
+  sig { returns(T::Hash[String, Symbol]) }
+  def alloc_kinds; end
+  sig { returns(T::Hash[String, Symbol]) }
+  def alloc_scopes; end
+  sig { returns(T::Set[String]) }
+  def cleanup_finalizers; end
+  sig { returns(T::Set[String]) }
+  def err_finalizers; end
+  sig { returns(T::Set[String]) }
+  def guarded_finalizers; end
+  sig { returns(T::Set[String]) }
+  def maybe_released; end
+  sig { returns(T::Set[String]) }
+  def move_marks; end
+  sig { returns(T::Set[String]) }
+  def owned; end
+  sig { returns(T::Set[String]) }
+  def pending_block_transfers; end
+  sig { returns(T::Set[String]) }
+  def pending_return_transfers; end
+  sig { returns(T::Set[String]) }
+  def released; end
+  sig { returns(T::Boolean) }
+  def terminated; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def terminated=(value); end
 end
 
 class MIREmitter
@@ -1447,6 +1515,11 @@ end
 class MIRPass
   sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
   def cleanup_bindings; end
+end
+
+class MIRPassState
+  sig { returns(T::Set[Symbol]) }
+  def completed; end
 end
 
 class MatchStatement
@@ -1504,6 +1577,17 @@ class ModuleImporter
   def module_cache; end
 end
 
+class OwnershipContract
+  sig { returns(T::Array[String]) }
+  def borrows; end
+  sig { returns(T::Array[String]) }
+  def consumes; end
+  sig { returns(T::Boolean) }
+  def covers_consuming_params; end
+  sig { returns(T::Array[String]) }
+  def produces; end
+end
+
 class OwnershipDataflow
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def block_in; end
@@ -1542,6 +1626,12 @@ class Profile
 end
 
 class Program
+  sig { returns(T.untyped) }
+  def items; end
+  sig { returns(T.untyped) }
+  def mir_pass_state; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mir_pass_state=(value); end
   sig { returns(T.untyped) }
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1745,10 +1835,8 @@ class SymbolEntry
   def layout; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def layout=(value); end
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def lifetime=(value); end
   sig { returns(T.nilable(Symbol)) }
   def link_source; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
@@ -2088,3 +2176,4 @@ class ZigTranspiler
   sig { returns(T.untyped) }
   def union_schemas; end
 end
+

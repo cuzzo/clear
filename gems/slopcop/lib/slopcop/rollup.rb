@@ -20,7 +20,7 @@ module SlopCop
     # "negative test" / "integration test" concretely is.
     ACTION = {
       type_norm:  "type/nil guard -- likely dead if the contract were strictly typed",
-      dead:       "decision never executes -- audit as dead code, delete",
+      dead:       "decision never executes in coverage -- audit as missing test or statically-dead code",
       defensive:  "inert / invariant-pinned -- accept, exclude from denominator",
       spurious:   "span-precise redundant/cloned decision (decomplex) -- refactor or delete, NOT a test target (coarse duplication never excludes -- it stays a gap, flagged ⚠dup?)",
       ffi:        "external/boundary call -- needs an integration test",

@@ -529,12 +529,6 @@ module MIRHoistLowering
   def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
     return :heap if mir_allocates?(init)
     Kernel.raise "Hoist cannot choose heap/frame from node storage; placement must be on the binding symbol"
-    if binding_entry.present? && binding_entry.alloc == :heap &&
-       T.unsafe(self).alloc_for_node(node) != :heap && !ft.needs_heap_backing? &&
-       binding_entry.kind != :frozen
-      return :frame
-    end
-    (binding_entry.present? && binding_entry.alloc) || decl_alloc
   end
 
   sig do
@@ -784,6 +778,10 @@ module MIRHoistLowering
       expr.target_var = name
       expr.allocs = expr.allocs.transform_values { |_value| alloc } if alloc
     else
+      if alloc && expr.respond_to?(:ownership_effect) && expr.ownership_effect.produces_owned &&
+         expr.respond_to?(:alloc=)
+        expr.alloc = alloc
+      end
       mir_result_child_exprs(expr).each do |child|
         has_alloc_metadata = child.respond_to?(:allocs) && child.allocs && !child.allocs.empty?
         stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)

@@ -187,8 +187,21 @@ module MIR
     def expr?; false; end
     sig { returns(OwnershipEffect) }
     def ownership_effect; OwnershipEffect.none; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs; []; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
     attr_accessor :ownership_consumption
+
+    private
+
+    sig { params(values: T::Array[T.untyped]).returns(T::Array[Emittable]) }
+    def compact_child_exprs(values)
+      children = T.let([], T::Array[Emittable])
+      values.flatten.compact.each do |value|
+        children << value if value.is_a?(Emittable)
+      end
+      children
+    end
   end
 
   module Stmt
@@ -1282,6 +1295,8 @@ module MIR
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([init])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
@@ -1296,6 +1311,8 @@ module MIR
   DupeSlice = Struct.new(:source, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
@@ -1310,6 +1327,8 @@ module MIR
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([len])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
@@ -1322,7 +1341,10 @@ module MIR
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   FreeSlice = Struct.new(:slice, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([slice])
   end
 
   # Destroy a heap pointer.
@@ -1331,7 +1353,10 @@ module MIR
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DestroyPtr = Struct.new(:ptr, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([ptr])
   end
 
   # --- Cleanup / Lifecycle ---
@@ -1386,6 +1411,8 @@ module MIR
                         :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       return OwnershipEffect.none if strategy == :passthrough
@@ -1408,6 +1435,8 @@ module MIR
                              :capacity) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([capacity])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
@@ -1430,6 +1459,8 @@ module MIR
                        :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([inner])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       kind = own_fn ? :rc : :uniform
@@ -1442,6 +1473,8 @@ module MIR
   SharePromote = Struct.new(:source, :zig_base, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :rc)
@@ -1454,6 +1487,8 @@ module MIR
     extend T::Sig
     include Expr
     # func: "arcRetain" or "rcRetain"
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.none
@@ -1489,6 +1524,8 @@ module MIR
   FreezeExpr = Struct.new(:inner, :zig_base) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([inner])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: :heap, cleanup_kind: :frozen)
@@ -1501,6 +1538,8 @@ module MIR
   MakeList = Struct.new(:elem_type, :items, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([items])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
@@ -1783,6 +1822,9 @@ module MIR
     sig { returns(T::Boolean) }
     def owned_return? = owned_return == true
 
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([args])
+
     sig { returns(OwnershipEffect) }
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
@@ -1800,6 +1842,9 @@ module MIR
     def initialize(callee, args, callable_contract = nil)
       super(callee, args, callable_contract)
     end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([args])
   end
 
   # Method call.
@@ -1822,6 +1867,9 @@ module MIR
       super(receiver, method, args, try_wrap, callable_contract, owned_result_alloc)
     end
 
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([receiver, args])
+
     sig { returns(OwnershipEffect) }
     def ownership_effect
       return OwnershipEffect.none unless owned_result_alloc.is_a?(Symbol)
@@ -1832,26 +1880,38 @@ module MIR
   # Field access.
   # Zig: object.field
   FieldGet = Struct.new(:object, :field) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([object])
   end
 
   # Index access.
   # Zig: object[index]  or  specialized patterns (charAt, numericMapGet, etc.)
   IndexGet = Struct.new(:object, :index) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([object, index])
   end
 
   # Binary operation.
   # Zig: left op right
   # op is the Zig operator string: "+", "-", "==", "and", "or", etc.
   BinOp = Struct.new(:op, :left, :right) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([left, right])
   end
 
   # Unary operation.
   # Zig: op operand
   UnaryOp = Struct.new(:op, :operand) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([operand])
   end
 
   # Literal value. Carries pre-formatted Zig literal string.
@@ -1875,21 +1935,36 @@ module MIR
   # Struct initialization.
   # Zig: TypeName{ .a = x, .b = y }  or  .{ .a = x }
   StructInit = Struct.new(:zig_type, :fields) do
+    extend T::Sig
     include Expr
     # zig_type: String or nil (nil -> anonymous .{})
     # fields: [{ name: String, value: MIR expr }]
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      values = T.let([], T::Array[T.untyped])
+      fields&.each do |field|
+        values << field[:value] if field.respond_to?(:[])
+      end
+      compact_child_exprs(values)
+    end
   end
 
   # Fixed-size array initialization.
   # Zig: [N]T{ item1, item2, ... }
   ArrayInit = Struct.new(:elem_type, :count, :items) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([items])
   end
 
   # Slice expression.
   # Zig: @as([]const T, target[start..end])
   SliceExpr = Struct.new(:target, :start, :end_expr, :elem_type) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([target, start, end_expr])
   end
 
   # Labeled block expression.
@@ -1919,6 +1994,8 @@ module MIR
   ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([parts])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
@@ -1932,6 +2009,8 @@ module MIR
     include Expr
     # method: :as, :intCast, :floatCast, :ptrCast, :intFromFloat,
     #         :floatFromInt, :truncate, :enumFromInt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       expr.ownership_effect
@@ -1943,6 +2022,8 @@ module MIR
   TryExpr = Struct.new(:expr) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       expr.ownership_effect
@@ -1956,6 +2037,8 @@ module MIR
     extend T::Sig
     include Expr
     # capture: error variable name or nil
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr, catch_body])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = expr.ownership_effect
@@ -1971,6 +2054,8 @@ module MIR
   Orelse = Struct.new(:expr, :fallback) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr, fallback])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = expr.ownership_effect
@@ -1984,7 +2069,10 @@ module MIR
   # Conditional expression (Zig if-expression).
   # Zig: if (cond) then_val else else_val
   Conditional = Struct.new(:cond, :then_val, :else_val) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cond, then_val, else_val])
   end
 
   # Optional-unwrap conditional expression.
@@ -1993,6 +2081,8 @@ module MIR
   IfOptional = Struct.new(:optional, :capture, :then_expr, :else_expr) do
     extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([optional, then_expr, else_expr])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = then_expr.ownership_effect
@@ -2007,7 +2097,10 @@ module MIR
   # Zig: comptime expr
   # Forces expr to be evaluated at compile time.
   Comptime = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Semantic union-variant payload access.
@@ -2017,7 +2110,10 @@ module MIR
   # access so bc_emitter can route to native `cdr` (or equivalent) without
   # scanning variant name tables.
   UnionVariantGet = Struct.new(:object, :variant, :zig_type) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([object])
   end
 
   # Semantic list-backing-slice access.
@@ -2026,7 +2122,10 @@ module MIR
   # fields). The checker and bc_emitter can dispatch on node class rather
   # than name-matching "items".
   ListItems = Struct.new(:list) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([list])
   end
 
   # Semantic list length access.
@@ -2034,19 +2133,28 @@ module MIR
   # Wrap in ListItems first for ArrayList-shaped containers whose length
   # lives at list.items.len (compose as ListLength(ListItems(list))).
   ListLength = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Address-of.
   # Zig: &expr
   AddressOf = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Dereference.
   # Zig: expr.*
   Deref = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
@@ -2085,32 +2193,47 @@ module MIR
   # Optional unwrap.
   # Zig: expr.?
   OptionalUnwrap = Struct.new(:expr) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Range literal.
   # Zig: CheatLib.IntRange{ .start = s, .end = e } or CheatLib.Range{ .start = s, .end = e }
   RangeLit = Struct.new(:start, :end_val, :elem_type) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([start, end_val])
   end
 
   # Comptime has-field check.
   # Zig: @hasField(@TypeOf(expr), "field")
   HasField = Struct.new(:expr, :field) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Items accessor (ArrayList -> slice).
   # Zig: expr.items  or  (if (@hasField(...)) expr.items else expr)
   ItemsAccess = Struct.new(:expr, :safe) do
+    extend T::Sig
     include Expr
     # safe: true -> emit @hasField guard, false -> direct .items
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Transfer an ArrayList-backed value into an owned slice.
   # Zig: try expr.toOwnedSlice(alloc)
   OwnedSlice = Struct.new(:expr, :alloc) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Lambda expression (anonymous function pointer via struct trick).
@@ -2140,6 +2263,9 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in both expression and statement position
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([inner])
 
     sig { returns(OwnershipEffect) }
     def ownership_effect

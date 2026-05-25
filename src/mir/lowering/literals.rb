@@ -11,6 +11,7 @@ module MIRLoweringLiterals
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
     @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
     expected_ti = Type.from_node(@current_expected_type)
     ti = if expected_ti&.collection?
@@ -55,7 +56,7 @@ module MIRLoweringLiterals
       return MIR::BlockExpr.new(label, body)
     end
 
-    list_alloc = alloc_for_node(node)
+    list_alloc = @current_decl_alloc || alloc_for_node(node)
     elem_type = ti.element_type if ti.respond_to?(:element_type)
     elem_zig = elem_type ? transpile_type(elem_type) : "u8"
     elem_needs_owned_storage =
@@ -116,10 +117,11 @@ module MIRLoweringLiterals
   sig { params(node: AST::HashLit).returns(T.untyped) }
   def lower_hash_lit(node)
     T.bind(self, MIRLowering) rescue nil
+    @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
     ti = node.coerced_type_info || node.full_type
     rt_name = runtime_binding_name
-    map_alloc = alloc_for_node(node)
+    map_alloc = @current_decl_alloc || alloc_for_node(node)
     alloc_str = "#{rt_name}.#{map_alloc == :heap ? "heapAlloc" : "frameAlloc"}()"
 
     # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap

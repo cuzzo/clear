@@ -176,6 +176,11 @@ module CaptureStrategy
     #    safely via the existing retain/release discipline.
     return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
 
+    # 4b. Scheduler-affine synchronized collections are safe only when
+    #     the boundary analysis pins the fiber. They are not Rc/Arc values
+    #     and must fall through to FiberCtxBuilder's pointer-capture path.
+    return ByValue.new(zig_t, name) if pinned_sync_collection?(type)
+
     # 5. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
     #    whose fields are all themselves value-like (resolved via
@@ -231,6 +236,11 @@ module CaptureStrategy
   def self.safe_shared_across_fibers?(type)
     zig = type.zig_type
     zig.start_with?("CheatLib.Arc(") || zig.start_with?("CheatLib.Rc(")
+  end
+
+  sig { params(type: Type).returns(T::Boolean) }
+  def self.pinned_sync_collection?(type)
+    type.collection? && type.any_sync?
   end
 
   # Where the fiber's deep-copy should live when the user writes COPY.

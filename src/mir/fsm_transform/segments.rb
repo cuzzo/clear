@@ -138,11 +138,6 @@ module FsmTransform
       tail.respond_to?(:suspend?) && tail.suspend?
     end
 
-    sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
-    def suspend_child_bodies(stmt)
-      AST.child_bodies(stmt)
-    end
-
     # Public entry. Returns [Segment, ...] on success, nil if the
     # body contains a shape the splitter doesn't handle.
     #

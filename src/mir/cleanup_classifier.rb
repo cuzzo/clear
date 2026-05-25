@@ -86,34 +86,25 @@ module CleanupClassifier
   sig { params(body: T::Array[T.untyped], loop_depth: Integer).void }
   private_class_method def self.stamp_default_scopes!(body, loop_depth:)
     body.each do |node|
-      case node
-      when AST::VarDecl, AST::BindExpr
-        next if node.is_a?(AST::BindExpr) && node.mode == :assign
-        entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
-        next unless entry&.present?
-        entry[:scope] = if entry.alloc == :heap
-                          :heap
-                        elsif loop_depth.positive?
-                          :iteration
-                        else
-                          :function
-                        end
-      when AST::WhileLoop, AST::WhileBindLoop
-        stamp_default_scopes!(node.do_branch, loop_depth: loop_depth + 1)
-      when AST::ForRange, AST::ForEach
-        stamp_default_scopes!(node.body, loop_depth: loop_depth + 1)
-      when AST::IfStatement
-        stamp_default_scopes!(node.then_branch, loop_depth: loop_depth)
-        stamp_default_scopes!(node.else_branch, loop_depth: loop_depth)
-      when AST::MatchStatement
-        node.cases.each { |c| stamp_default_scopes!(c.body, loop_depth: loop_depth) }
-        stamp_default_scopes!(node.default_case, loop_depth: loop_depth) if node.default_case
-      when AST::WithBlock
-        stamp_default_scopes!(node.body, loop_depth: loop_depth)
-      when AST::DoBlock
-        node.branches.each { |b| stamp_default_scopes!(T.cast(b.fetch(:body), T::Array[T.untyped]), loop_depth: loop_depth) }
-      end
+      stamp_binding_default_scope!(node, loop_depth)
+      child_depth = AST.loop_node?(node) ? loop_depth + 1 : loop_depth
+      AST.child_bodies(node).each { |child_body| stamp_default_scopes!(child_body, loop_depth: child_depth) }
     end
+  end
+
+  sig { params(node: T.untyped, loop_depth: Integer).void }
+  private_class_method def self.stamp_binding_default_scope!(node, loop_depth)
+    return unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+    return if node.is_a?(AST::BindExpr) && node.mode == :assign
+    entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
+    return unless entry&.present?
+    entry[:scope] = if entry.alloc == :heap
+                      :heap
+                    elsif loop_depth.positive?
+                      :iteration
+                    else
+                      :function
+                    end
   end
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
@@ -186,28 +177,6 @@ module CleanupClassifier
     return unless entry&.present?
 
     entry[:scope] = :function if entry.alloc == :frame && entry.scope == :iteration
-  end
-
-  sig { params(expr: T.untyped).returns(T::Array[AST::Identifier]) }
-  private_class_method def self.collect_expr_identifiers(expr)
-    found = T.let([], T::Array[AST::Identifier])
-    stack = T.let([expr], T::Array[T.untyped])
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
-      found << node if node.is_a?(AST::Identifier)
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
-      end
-    end
-    found
   end
 
   sig { params(call: AST::FuncCall).returns(T::Array[AST::Param]) }
@@ -358,26 +327,16 @@ module CleanupClassifier
     return false unless node
     return true if node.is_a?(AST::MoveNode)
     return true if AST.moved?(node)
-    case node
-    when AST::Cast, AST::FreezeNode, AST::CapabilityWrap
-      ownership_transfer_payload?(node.value)
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.any? { |_k, v| ownership_transfer_payload?(v) }
-    else
-      false
-    end
+    AST.wrapped_children(node).any? { |child| ownership_transfer_payload?(child) }
   end
 
   sig { params(node: T.untyped, names: T::Array[String]).void }
   private_class_method def self.collect_payload_binding_names(node, names)
-    case node
-    when AST::Identifier
+    if node.is_a?(AST::Identifier)
       names << node.name.to_s
-    when AST::MoveNode
-      collect_payload_binding_names(node.value, names)
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.each_value { |v| collect_payload_binding_names(v, names) }
+      return
     end
+    AST.wrapped_children(node).each { |child| collect_payload_binding_names(child, names) }
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -728,23 +687,10 @@ module CleanupClassifier
   sig { params(node: T.untyped).returns(T::Boolean) }
   private_class_method def self.contains_call?(node)
     found = T.let(false, T::Boolean)
-    stack = T.let([node], T::Array[T.untyped])
-    until stack.empty?
-      cur = stack.pop
-      next unless cur.is_a?(AST::Locatable)
+    AST.each_locatable(node) do |cur|
       if AST.call?(cur)
         found = true
         break
-      end
-      cur.class.members.each do |member|
-        value = cur[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
       end
     end
     found
