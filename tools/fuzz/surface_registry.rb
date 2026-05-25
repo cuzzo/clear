@@ -401,6 +401,17 @@ module FuzzSurfaceRegistry
       escape_sinks: [:list_append, :return_value],
       mir_ownership_contracts: [:loop_frame_rewind, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
     },
+
+    mir_checker_negative_matrix: {
+      cleanup_value_shapes: [:string],
+      escape_sinks: [:return_value, :function_arg],
+      mir_ownership_contracts: [
+        :cleanup_on_all_paths,
+        :error_path_allocator_identity,
+        :move_suppresses_cleanup,
+        :non_copy_requires_explicit_move_or_copy,
+      ],
+    },
   }.freeze
 
   # Dimensions that are intentionally covered by the union of focused

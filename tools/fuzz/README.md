@@ -79,7 +79,10 @@ configured failure delta over the baseline run.
 
 Each template registers itself with `FuzzGenerator.register(name, cells:) { |params| ... }`,
 declaring its parameter cells (the matrix it owns) and a renderer that turns a
-cell into a complete .cht source string with embedded `ASSERT` oracles.
+cell into a complete `.cht` source string with embedded `ASSERT` oracles. A
+template may also return `{ kind: :mir_checker, source:, error_code: }` for
+malformed-MIR negative cells; those run the checker directly and fail if the
+expected hard error is absent.
 
 ## Current templates
 
@@ -129,6 +132,7 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `call_ownership_contract_matrix` | 28         | Normal calls, TAKES, owned returns, receiver mutation, BG calls, and pipeline call contracts. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
+| `mir_checker_negative_matrix` | 29            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig allocator contracts, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
 
 ### `stream_into_boundary` matrix
 

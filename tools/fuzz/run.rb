@@ -15,6 +15,7 @@ require 'fileutils'
 require 'digest'
 require 'etc'
 require 'open3'
+require 'rbconfig'
 require_relative 'generator'
 # Route SimpleCov to a 'fuzz' resultset key (gen.rb defaults to
 # 'transpile-tests') so fuzz cell hits stay attributable.
@@ -62,6 +63,7 @@ opts[:seed] ||= Random.new_seed
 
 if opts[:clean] && Dir.exist?(opts[:out])
   Dir.glob(File.join(opts[:out], 'fuzz_*.cht')).each { |f| File.delete(f) }
+  Dir.glob(File.join(opts[:out], 'fuzz_*.rb')).each { |f| File.delete(f) }
 end
 
 FileUtils.mkdir_p(opts[:out])
@@ -96,7 +98,7 @@ if opts[:shard]
   tuples = tuples.each_with_index.select { |_tuple, i| (i % total) == idx }.map(&:first)
 end
 
-emitted = []   # array of { path:, expected: }
+emitted = []   # array of { path:, expected:, kind:, error_code: }
 in_dev_count = 0
 tuples.each do |tuple|
   result = gen.emit(tuple)
@@ -105,10 +107,16 @@ tuples.each do |tuple|
     next
   end
   hash = Digest::SHA1.hexdigest(result[:source])[0, 10]
-  name = "fuzz_#{tuple[:template]}_#{hash}.cht"
+  ext = result[:kind] == :mir_checker ? "rb" : "cht"
+  name = "fuzz_#{tuple[:template]}_#{hash}.#{ext}"
   path = File.join(opts[:out], name)
   File.write(path, result[:source])
-  emitted << { path: path, expected: result[:expected] }
+  emitted << {
+    path: path,
+    expected: result[:expected],
+    kind: result[:kind] || :cht,
+    error_code: result[:error_code],
+  }
 end
 
 puts "[fuzz] emitted #{emitted.size} programs to #{opts[:out]} (seed=#{opts[:seed]}, mode=#{opts[:mode]}, in_dev=#{in_dev_count})"
@@ -267,14 +275,37 @@ def run_negative_builds(entries, out_dir)
   [pass, unexpected_pass]
 end
 
+def run_mir_checker_negatives(entries)
+  return [[], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  pass = []
+  unexpected_pass = []
+
+  entries.each do |entry|
+    out, status = Open3.capture2e(RbConfig.ruby, entry[:path], chdir: LITEDB_ROOT)
+    if status.success?
+      pass << entry[:path]
+    else
+      unexpected_pass << [entry[:path], out]
+    end
+  end
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] MIR checker negatives: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  [pass, unexpected_pass]
+end
+
 def hybrid_run(emitted, out_dir)
-  pass_entries = emitted.select { |e| e[:expected] == :pass }
-  negative_entries = emitted.select { |e| e[:expected] == :compile_error }
+  pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
+  negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
+  mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
   pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir)
+  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
 
-  [pass_ok + negative_ok, fails, leaks, mir_errors, unexpected_pass]
+  [pass_ok + negative_ok + mir_negative_ok, fails, leaks, mir_errors, unexpected_pass + mir_unexpected_pass]
 end
 
 def per_file_run(emitted)
