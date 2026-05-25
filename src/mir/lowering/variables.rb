@@ -518,7 +518,7 @@ module MIRLoweringVariables
 
     guarded_names = @guarded_cleanup_names
     guarded = entry.has_moved_guard? || guarded_names&.[](safe) == true
-    marks = T.let([MIR::TransferMark.new(safe, :owned_sink)], T::Array[MIR::Stmt])
+    marks = T.let([MIR::TransferMark.new(safe, :owned_sink, entry.alloc)], T::Array[MIR::Stmt])
     marks << MIR::MoveMark.new(safe) if guarded
     marks
   end
@@ -629,7 +629,8 @@ module MIRLoweringVariables
       else
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
       end
-      with_ownership_consumption(result, mir_ident_names(value), result.class.name.to_s)
+      with_ownership_consumption(result, mir_ident_names(value), result.class.name.to_s,
+        target_alloc: result.is_a?(MIR::ReassignWithCleanup) ? result.alloc : assign_alloc)
       result
     end
   end
@@ -747,8 +748,8 @@ module MIRLoweringVariables
     result
   end
 
-  sig { params(value: T.untyped).returns(T::Array[MIR::Stmt]) }
-  def ownership_marks_for_transferred_temp(value)
+  sig { params(value: T.untyped, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::Stmt]) }
+  def ownership_marks_for_transferred_temp(value, target_alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @current_bindings = T.let(@current_bindings, T.untyped)
@@ -758,7 +759,8 @@ module MIRLoweringVariables
     entry = @current_bindings[name] || CleanupEntry::NONE
     guarded = !!(@guarded_cleanup_names && @guarded_cleanup_names[name])
     return [] unless guarded || entry.present?
-    marks = T.let([MIR::TransferMark.new(name, :owned_sink)], T::Array[MIR::Stmt])
+    alloc = target_alloc || (entry.present? ? entry.alloc : :heap)
+    marks = T.let([MIR::TransferMark.new(name, :owned_sink, alloc)], T::Array[MIR::Stmt])
     marks << MIR::MoveMark.new(name) if guarded
     marks
   end
@@ -961,7 +963,7 @@ module MIRLoweringVariables
     iz.target_var = extract_root_var_name(target_node)
     setAt_stmt = MIR::ExprStmt.new(iz, false)
     post_transfer_marks = consumed_names.flat_map do |name|
-      marks = T.let([MIR::TransferMark.new(name, :owned_sink)], T::Array[MIR::Stmt])
+      marks = T.let([MIR::TransferMark.new(name, :owned_sink, dispatch.sink_alloc)], T::Array[MIR::Stmt])
       marks << MIR::MoveMark.new(name) if @guarded_cleanup_names&.[](name)
       marks
     end
@@ -1071,7 +1073,7 @@ module MIRLoweringVariables
       type_expr, alloc, MIR::AddressOf.new(field_get)
     ], false, false, MIR::CallableContract.no_ownership(3))
     assign = MIR::Set.new(field_get, value)
-    with_ownership_consumption(assign, mir_ident_names(value), "MIR::Set")
+    with_ownership_consumption(assign, mir_ident_names(value), "MIR::Set", target_alloc: alloc_sym)
     MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body([MIR::ExprStmt.new(cleanup_call, false), assign]))
   end
 

@@ -639,12 +639,14 @@ module MIRHoistLowering
         prefix.concat(expr_prefix)
         capture = binding[:capture].to_s
         next unless normalized.is_a?(MIR::Ident)
-        next unless stmt.then_body.any? { |child| child.is_a?(MIR::Cleanup) && child.name.to_s == capture }
+        capture_cleanup = stmt.then_body.find { |child| child.is_a?(MIR::Cleanup) && child.name.to_s == capture }
+        next unless capture_cleanup.is_a?(MIR::Cleanup)
         next if if_bind_transfer_present?(stmt, normalized.name.to_s)
 
-        stmt.then_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink))
+        target_alloc = capture_cleanup.cleanup_entry.alloc
+        stmt.then_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink, target_alloc))
         stmt.else_body ||= []
-        stmt.else_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink))
+        stmt.else_body.unshift(MIR::TransferMark.new(normalized.name.to_s, :owned_sink, target_alloc))
       end
     when MIR::WhileStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :cond))
@@ -799,6 +801,7 @@ module MIRHoistLowering
     parent.ownership_consumption = MIR::OwnershipConsumptionFact.new(
       names: names.map(&:to_s).reject(&:empty?).uniq,
       target: fact.target,
+      target_alloc: fact.target_alloc,
       source: fact.source,
     )
     nil

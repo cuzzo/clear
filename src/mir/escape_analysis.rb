@@ -16,9 +16,23 @@ module EscapeAnalysis
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
+  EscapeSinkHandler = T.type_alias { T::Hash[Symbol, Symbol] }
+
+  ESCAPE_SINK_HANDLERS = T.let({
+    return_value: :mark_body_escapes!,
+    enclosing_scope_store: :mark_body_escapes!,
+    execution_boundary_capture: :mark_body_escapes!,
+    takes_or_mutable_arg: :mark_body_escapes!,
+    param_receiver_allocation: :mark_param_receiver_allocations_heap!,
+    loop_receiver_allocation: :mark_loop_receiver_allocations_heap!,
+    recursive_aggregate_owner: :mark_recursive_aggregate_owners_heap!,
+    assignment_ownership: :propagate_assignment_ownership!,
+    hoist_dependency: :propagate_hoist_dependencies!,
+  }.freeze, EscapeSinkHandler)
 
   sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(HeapResult) }
   def self.apply!(fn_nodes, schema_lookup = nil)
+    validate_escape_sink_handlers!
     propagate_caller_sync!(fn_nodes)
 
     heap_fns = T.let(Set.new, T::Set[String])
@@ -45,6 +59,16 @@ module EscapeAnalysis
 
     [heap_fns, bg_heap]
   end
+
+  sig { void }
+  def self.validate_escape_sink_handlers!
+    missing = ESCAPE_SINK_HANDLERS.select { |_sink, handler| !respond_to?(handler, true) }
+    return if missing.empty?
+
+    formatted = missing.map { |sink, handler| "#{sink}=#{handler}" }.sort.join(", ")
+    raise "EscapeAnalysis sink registry is incomplete: #{formatted}"
+  end
+
 
   # E3c: Propagate caller arg sync (and Arc-storage) into callee param
   # SymbolEntry. Two axes flow with the same all-callers-agree rule:

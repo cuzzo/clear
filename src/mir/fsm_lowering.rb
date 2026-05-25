@@ -179,7 +179,7 @@ module FsmLowering
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
       entry = @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
       next unless entry.present?
-      marks << MIR::TransferMark.new(safe.to_s, :owned_sink)
+      marks << MIR::TransferMark.new(safe.to_s, :owned_sink, entry.alloc)
       if entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s)
         marks << MIR::MoveMark.new(safe.to_s)
       end

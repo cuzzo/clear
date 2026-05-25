@@ -12,6 +12,7 @@ Every AST and MIR program carries a typed `MIRPassState`. Each pass asserts the 
 
 2. **Escape Analysis**
    Runs on the annotated/hoisted AST. It is a simple sink walker and the only writer of `symbol.storage`. It marks a binding heap when the binding reaches a language escape sink: owning return, enclosing/heap store, closure/fiber/background capture, or `TAKES`/mutable parameter flow.
+   The language sink list is closed by `EscapeAnalysis::ESCAPE_SINK_HANDLERS`; adding a sink without registering the handler is a compiler error.
 
 3. **Cleanup Classification**
    Runs after escape placement. It is the only writer of cleanup entries and cleanup lifetime scope. It reads placement and type facts, then records how a binding must be cleaned and how long its frame allocation must live.
@@ -30,6 +31,7 @@ Every AST and MIR program carries a typed `MIRPassState`. Each pass asserts the 
 
 8. **MIR Checker**
    Verifies the finalized MIR and aborts compilation on any fact it cannot prove memory safe. It never decides placement, invents cleanup, infers implicit ownership transfer, or accepts opaque allocator effects.
+   Its linear ownership traversal is closed over `MIRChecker::LINEAR_STATEMENT_NODE_TYPES`; an unregistered statement node is invalid MIR. A frame allocation may not transfer to any escaping owner (`return`, heap-owned sink, capture, or external parameter).
 
 ## Pass-Order Enforcement
 
@@ -59,6 +61,7 @@ Any new pass that reads or writes MIR-relevant facts must add itself to this cha
 - `MIR::TransferMark` is a linear ownership event. After it fires, the binding may not be read again unless a new `AllocMark` for the same binding appears first.
 - `MIR::MoveMark` may only follow an explicit `MIR::TransferMark` for the same binding. It is a runtime cleanup guard write, not an ownership decision.
 - Aggregate construction is recursively placement-checked. A `MakeList`, `StructInit`, `ArrayInit`, or union payload may not contain an owned child whose allocator disagrees with the aggregate owner. Lowering must flow the destination allocator inward or mark the aggregate owner heap before MIR.
+- Frame ownership cannot pass through an escape boundary. If a binding has `AllocMark(:frame)`, `MIRChecker` rejects transfers to returns, heap-owned sinks, captures, aggregate stores, or external parameters. A `TransferMark(:owned_sink)` must carry the destination allocator; frame-to-frame aggregate ownership is local, while frame-to-heap ownership is an escape and must have been heap-stamped before lowering.
 
 ## Required Pass Order
 
@@ -85,6 +88,13 @@ Escape analysis is an AST-bound sink walker. It does not build a value-flow grap
 - stored into an enclosing-scope or heap-owned destination;
 - captured by a closure, fiber, or background block;
 - passed to a `TAKES` or mutable parameter.
+- used as a receiver whose backing storage can outlive the current function frame.
+
+The sink inventory is closed. `ESCAPE_SINK_HANDLERS` in `src/mir/escape_analysis.rb`
+is the executable registry of language escape mechanisms and their owning
+implementation methods. A new syntax or stdlib surface that can move ownership
+across a lifetime boundary must first extend that registry and then implement
+the handler; otherwise the pass fails before MIR lowering can proceed.
 
 Every callable source must present the same typed signature contract before MIR:
 `FunctionSignature` plus `AST::Param` entries for receiver mutability and argument
@@ -123,12 +133,14 @@ This makes every lifetime extension flow through the same upstream sink facts th
 
 - an allocation has no cleanup, errcleanup, destroy, or transfer marker;
 - a cleanup or transfer has no allocation marker;
+- a statement node is not registered in the closed linear ownership traversal;
 - an errcleanup has no explicit transfer marker;
 - an aggregate contains an owned child whose allocation disagrees with the aggregate owner;
 - an allocator-bearing operation has no target binding;
 - an allocator-bearing operation targets a binding with no `AllocMark`;
 - an owned-return function call is discarded, nested anonymously, or bound without a matching heap `AllocMark`;
 - a return ownership transfer is backed by a frame allocation;
+- a non-return ownership transfer moves a frame allocation to an escaping owner;
 - allocators disagree between operation, allocation, and cleanup;
 - an allocating expression survives outside a direct `MIR::Let` init;
 - opaque Zig calls hide ownership effects;

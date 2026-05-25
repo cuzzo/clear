@@ -90,6 +90,33 @@ class MIRChecker
     T::Set[Symbol],
   )
 
+  LINEAR_STATEMENT_NODE_TYPES = T.let([
+    MIR::AllocMark, MIR::BatchWindowFlush, MIR::BatchWindowPush,
+    MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
+    MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
+    MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
+    MIR::ExprStmt, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
+    MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
+    MIR::FsmIoBody, MIR::IfBindStmt, MIR::IfChain, MIR::IfStmt,
+    MIR::Import, MIR::IndexInsert, MIR::Let, MIR::MoveMark,
+    MIR::MutualThunkTrampoline, MIR::Noop, MIR::OwnedBorrow,
+    MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
+    MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
+    MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
+    MIR::RawBc, MIR::RawZig, MIR::ReassignMark, MIR::ReassignWithCleanup,
+    MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
+    MIR::ShardedMapPut, MIR::SnapshotMultiTxn, MIR::SnapshotRead,
+    MIR::SnapshotTransaction, MIR::Sort, MIR::StreamSpawn, MIR::StreamYield,
+    MIR::StructDef, MIR::Suppress, MIR::SwitchStmt, MIR::TestDef,
+    MIR::ThunkTrampoline, MIR::TransferMark, MIR::TypeAlias,
+    MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
+  ].freeze, T::Array[T::Class[T.anything]])
+
+  LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS = T.let(
+    Set[:return, :external_param, :capture, :field_store, :aggregate_store].freeze,
+    T::Set[Symbol],
+  )
+
   class LinearOwnershipState
     extend T::Sig
 
@@ -376,6 +403,15 @@ class MIRChecker
   sig { params(stmt: T.untyped, state: LinearOwnershipState).void }
   def check_linear_stmt!(stmt, state)
     return unless stmt
+    unless stmt.is_a?(MIR::Stmt)
+      check_linear_expr_uses!(stmt, state) if stmt.is_a?(MIR::Emittable)
+      return
+    end
+    unless LINEAR_STATEMENT_NODE_TYPES.include?(stmt.class)
+      @errors << error(:LINEAR_STMT_NOT_REGISTERED, stmt.class.name.to_s,
+        "MIR statement is not registered with MIRChecker linear ownership traversal")
+      return
+    end
 
     case stmt
     when MIR::AllocMark
@@ -385,16 +421,21 @@ class MIRChecker
     when MIR::ErrCleanup
       linear_register_err_cleanup!(stmt.name.to_s, state)
     when MIR::TransferMark
-      linear_transfer!(stmt.name.to_s, stmt.target, state)
+      linear_transfer!(stmt.name.to_s, stmt.target, stmt.target_alloc, state)
     when MIR::MoveMark
       linear_move_mark!(stmt.name.to_s, state)
+    when MIR::OwnedCreate, MIR::OwnedBorrow, MIR::OwnedStore,
+         MIR::OwnedTransfer, MIR::OwnedReturn, MIR::OwnedDestroy,
+         MIR::ReassignMark, MIR::FieldCleanupMark, MIR::ReturnMark
+      # Legacy and fact nodes are validated by the ownership-fact passes.
+      nil
     when MIR::ReturnStmt
       return_reads = state.pending_return_transfers.dup
       linear_expr_consumed_names(stmt.value).each { |name| return_reads.add(name) }
       check_linear_expr_uses!(stmt.value, state, return_reads)
       returned_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_return_transfers, state, :return)
-      state.pending_return_transfers.each { |name| linear_release!(name, :return, state) }
+      state.pending_return_transfers.each { |name| linear_release!(name, :return, nil, state) }
       state.pending_return_transfers.each do |name|
         next if returned_names.include?(name)
         @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
@@ -419,7 +460,7 @@ class MIRChecker
       check_linear_expr_uses!(stmt.value, state, block_reads)
       break_names = linear_expr_ident_names(stmt.value)
       verify_guarded_transfers_moved!(state.pending_block_transfers, state, :block_result)
-      state.pending_block_transfers.each { |name| linear_release!(name, :block_result, state) }
+      state.pending_block_transfers.each { |name| linear_release!(name, :block_result, nil, state) }
       state.pending_block_transfers.each do |name|
         next if break_names.include?(name)
         @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
@@ -473,9 +514,43 @@ class MIRChecker
       check_linear_expr_uses!(stmt.value_expr, state)
     when MIR::BatchWindowFlush
       check_linear_expr_uses!(stmt.value_expr, state)
+    when MIR::IndexInsert
+      check_linear_expr_uses!(stmt.map, state)
+      check_linear_expr_uses!(stmt.key_expr, state)
+      check_linear_expr_uses!(stmt.value_expr, state)
+    when MIR::ShardedMapPut
+      check_linear_expr_uses!(stmt.target, state)
+      check_linear_expr_uses!(stmt.key, state)
+      check_linear_expr_uses!(stmt.value, state)
+      check_linear_expr_uses!(stmt.shard_idx, state)
+      check_linear_expr_uses!(stmt.shard_key, state)
+    when MIR::Sort
+      check_linear_expr_uses!(stmt.items_expr, state)
+      check_linear_expr_uses!(stmt.key_a, state)
+      check_linear_expr_uses!(stmt.key_b, state)
+    when MIR::StreamYield
+      check_linear_expr_uses!(stmt.value, state)
+    when MIR::StreamSpawn
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::Pipeline
+      check_linear_expr_uses!(stmt.inner, state)
+    when MIR::RawBc
+      stmt.args&.each { |arg| check_linear_expr_uses!(arg, state) }
+      check_linear_expr_uses!(stmt, state)
+    when MIR::RawZig
+      check_linear_expr_uses!(stmt, state)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, stmt.class.name.to_s)
+    when MIR::PolymorphicMutate
+      inner = check_linear_stmts!(stmt.body, state.copy)
+      linear_exit_scope!(state, inner, "polymorphic-mutate")
+    when MIR::PolymorphicMutateFlow
+      check_linear_expr_uses!(stmt.guard_cond, state)
+      states = T.let([], T::Array[LinearOwnershipState])
+      states << linear_project_branch_state(check_linear_stmts!(stmt.body, state.copy), state, "polymorphic-mutate-flow")
+      states << linear_project_branch_state(check_linear_stmts!(stmt.guard_fail_body, state.copy), state, "polymorphic-mutate-flow")
+      linear_merge_branch_states!(states, state, "polymorphic-mutate-flow")
     when MIR::WithMatchDispatch
       states = T.let([], T::Array[LinearOwnershipState])
       stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "with-match") }
@@ -486,8 +561,22 @@ class MIRChecker
       stmt.branch_bodies&.each { |body| check_linear_stmts!(body, LinearOwnershipState.new) }
     when MIR::CatchWrapper
       stmt.clause_bodies&.each { |body| check_linear_stmts!(body, state.copy) }
-    else
-      check_linear_expr_uses!(stmt, state) if stmt.is_a?(MIR::Emittable)
+    when MIR::FnDef
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::TestDef
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::StructDef
+      stmt.methods&.each { |method| check_linear_stmt!(method, LinearOwnershipState.new) if method.is_a?(MIR::FnDef) }
+    when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
+      ctx = stmt.ctx_struct
+      check_linear_stmts!(ctx.run_body, LinearOwnershipState.new) if ctx.respond_to?(:run_body)
+    when MIR::Panic
+      state.terminated = true
+    when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
+         MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
+         MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,
+         MIR::UnionTypeDef
+      nil
     end
     nil
   end
@@ -541,8 +630,8 @@ class MIRChecker
     nil
   end
 
-  sig { params(name: String, target: T.untyped, state: LinearOwnershipState).void }
-  def linear_transfer!(name, target, state)
+  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  def linear_transfer!(name, target, target_alloc, state)
     if target == :return
       state.pending_return_transfers.add(name)
       return
@@ -555,7 +644,7 @@ class MIRChecker
       @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
         "TransferMark and unguarded Cleanup both own the success-path release")
     end
-    linear_release!(name, target, state)
+    linear_release!(name, target, target_alloc, state)
     nil
   end
 
@@ -584,12 +673,20 @@ class MIRChecker
     nil
   end
 
-  sig { params(name: String, target: T.untyped, state: LinearOwnershipState).void }
-  def linear_release!(name, target, state)
+  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  def linear_release!(name, target, target_alloc, state)
     unless state.owned.include?(name)
       @errors << error(:TRANSFER_WITHOUT_ALLOC, name,
         "ownership release to #{target.inspect} has no active AllocMark")
       return
+    end
+    if target == :owned_sink && !target_alloc.is_a?(Symbol)
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, name,
+        "TransferMark(:owned_sink) must carry target_alloc so MIRChecker can prove whether ownership escapes")
+    end
+    if state.alloc_kinds[name] == :frame && escaping_transfer_target?(target, target_alloc)
+      @errors << error(:FRAME_ALLOC_ESCAPES, name,
+        "frame-allocated ownership is transferred to #{target.inspect}; escaping owned values must be heap")
     end
     if state.released.include?(name)
       @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
@@ -599,6 +696,14 @@ class MIRChecker
     state.released.add(name)
     state.maybe_released.delete(name)
     nil
+  end
+
+  sig { params(target: T.untyped, target_alloc: T.untyped).returns(T::Boolean) }
+  def escaping_transfer_target?(target, target_alloc)
+    return false unless target.is_a?(Symbol)
+    return target_alloc == :heap if target == :owned_sink
+
+    LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS.include?(target)
   end
 
   sig { params(then_body: T.nilable(T::Array[T.untyped]), else_body: T.nilable(T::Array[T.untyped]), state: LinearOwnershipState, label: String).void }
@@ -994,12 +1099,16 @@ class MIRChecker
   sig { returns(T::Array[String]) }
   def ownership_registry_errors
     missing = T.let([], T::Array[String])
+    unhandled_stmts = T.let([], T::Array[String])
     MIR.constants.each do |const_name|
       value = MIR.const_get(const_name)
       next unless value.is_a?(Class)
       next unless value < Struct
 
       klass = value
+      if klass < MIR::Stmt && !LINEAR_STATEMENT_NODE_TYPES.include?(klass)
+        unhandled_stmts << T.must(klass.name)
+      end
       next if MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES.include?(klass)
       next if MIR::OWNERSHIP_SIGNIFICANT_NODE_NAMES.include?(T.must(klass.name))
 
@@ -1008,12 +1117,17 @@ class MIRChecker
 
       missing << T.must(klass.name)
     end
-    return [] if missing.empty?
+    errors = T.let([], T::Array[String])
+    unhandled_stmts.sort.each do |name|
+      errors << "[LINEAR_STMT_NOT_REGISTERED] #{name} -- MIR statement is absent " \
+        "from MIRChecker::LINEAR_STATEMENT_NODE_TYPES"
+    end
 
-    missing.sort.map do |name|
-      "[OWNERSHIP_NODE_NOT_REGISTERED] #{name} -- MIR node has ownership-significant fields " \
+    missing.sort.each do |name|
+      errors << "[OWNERSHIP_NODE_NOT_REGISTERED] #{name} -- MIR node has ownership-significant fields " \
         "but is absent from MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES"
     end
+    errors
   end
 
   sig { params(init: T.untyped).returns(T::Boolean) }

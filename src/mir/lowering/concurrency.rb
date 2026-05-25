@@ -773,7 +773,7 @@ module MIRLoweringConcurrency
     # dupe -- one allocation, placed by escape analysis.
     push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true,
       MIR::CallableContract.no_ownership(1))
-    transfer_marks = ownership_marks_for_transferred_temp(lowered)
+    transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # YIELD transfers ownership to the stream at the push boundary. InfStream
     # owns and cleans the value even if push returns StreamClosed, so the local
     # error cleanup must be disarmed before the fallible call.

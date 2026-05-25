@@ -45,11 +45,12 @@ class MIRLowering
 
     const :name, String
     const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
     const :move_guarded, T::Boolean
 
     sig { returns(T::Array[T.untyped]) }
     def marks
-      out = T.let([MIR::TransferMark.new(name, target)], T::Array[T.untyped])
+      out = T.let([MIR::TransferMark.new(name, target, target_alloc)], T::Array[T.untyped])
       out << MIR::MoveMark.new(name) if move_guarded
       out
     end
@@ -376,7 +377,7 @@ class MIRLowering
     when MIR::SuppressCleanup
       safe = zig_safe_name(node.name)
       if @guarded_cleanup_names&.[](safe)
-        [MIR::TransferMark.new(safe, :owned_sink), MIR::MoveMark.new(safe)]
+        [MIR::TransferMark.new(safe, :owned_sink, :heap), MIR::MoveMark.new(safe)]
       else
         []
       end
@@ -776,7 +777,7 @@ class MIRLowering
     fact = node.ownership_consumption
     return [] unless fact
 
-    fact.names.map { |name| MIR::OwnedStore.new(name.to_s, fact.source, nil, ownership_fact_source(node)) }
+    fact.names.map { |name| MIR::OwnedStore.new(name.to_s, fact.source, fact.target_alloc, ownership_fact_source(node)) }
   end
 
   sig { params(node: MIR::Node).returns(T::Array[T.untyped]) }
@@ -878,7 +879,9 @@ class MIRLowering
       next if transfer_mark_present?(emitted, safe) || transfer_mark_present?(remaining, safe)
 
       target = node.is_a?(MIR::ReturnStmt) && mir_ident_names(node.value).map(&:to_s).include?(safe) ? :return : :owned_sink
-      ownership_transfer_plan(safe, target, visible_guarded_names).marks
+      target_alloc = target == :owned_sink ? (alloc_mark_for_consumed_name(emitted + remaining, safe) ||
+        current_binding_alloc_for_name(safe)) : nil
+      ownership_transfer_plan(safe, target, visible_guarded_names, target_alloc: target_alloc).marks
     end.flatten
   end
 
@@ -987,7 +990,8 @@ class MIRLowering
       next unless visible_alloc_names.include?(safe.to_s)
       entry = @current_bindings[name] || CleanupEntry::NONE
       next unless entry.present?
-      marks.concat(ownership_transfer_plan(safe.to_s, :owned_sink, visible_guarded_names).marks)
+      marks.concat(ownership_transfer_plan(safe.to_s, :owned_sink, visible_guarded_names,
+        target_alloc: entry.alloc).marks)
     end
     marks
   end
@@ -1005,16 +1009,84 @@ class MIRLowering
     names.uniq.each do |name|
       next unless visible_alloc_names.include?(name.to_s)
       next if transfer_mark_present?(existing + marks, name.to_s)
-      marks.concat(ownership_transfer_plan(name.to_s, :owned_sink, visible_guarded_names).marks)
+      target_alloc = transfer_target_alloc_for_consumed_name(mir, name.to_s) ||
+                     alloc_mark_for_consumed_name(existing + nodes, name.to_s) ||
+                     current_binding_alloc_for_name(name.to_s) || :heap
+      marks.concat(ownership_transfer_plan(name.to_s, :owned_sink, visible_guarded_names,
+        target_alloc: target_alloc).marks)
     end
     marks
   end
 
-  sig { params(name: String, target: Symbol, visible_guarded_names: T::Set[String]).returns(OwnershipTransferPlan) }
-  def ownership_transfer_plan(name, target, visible_guarded_names)
+  sig { params(mir: T.untyped, name: String).returns(T.nilable(Symbol)) }
+  def transfer_target_alloc_for_consumed_name(mir, name)
+    nodes = mir.is_a?(Array) ? mir : [mir]
+    nodes.compact.each do |node|
+      found = T.let(nil, T.nilable(Symbol))
+      next unless node.respond_to?(:mir?) && node.mir?
+      contract_alloc = ownership_contract_sink_alloc(node, name)
+      return contract_alloc if contract_alloc
+
+      walk_mir_node(node) do |child|
+        fact = child.ownership_consumption
+        next unless fact.is_a?(MIR::OwnershipConsumptionFact)
+        next unless fact.names.map(&:to_s).include?(name)
+        found = fact.target_alloc if fact.target_alloc
+      end
+      return found if found
+    end
+    nil
+  end
+
+  sig { params(node: T.untyped, name: String).returns(T.nilable(Symbol)) }
+  def ownership_contract_sink_alloc(node, name)
+    return nil unless ownership_contract_consumes(node).map(&:to_s).include?(name)
+    allocs = node.respond_to?(:allocs) ? node.allocs : nil
+    return nil unless allocs.is_a?(Hash)
+
+    val_alloc = allocs[:val_alloc]
+    return val_alloc if val_alloc.is_a?(Symbol)
+
+    alloc = allocs[:alloc]
+    alloc.is_a?(Symbol) ? alloc : nil
+  end
+
+  sig { params(nodes: T::Array[T.untyped], name: String).returns(T.nilable(Symbol)) }
+  def alloc_mark_for_consumed_name(nodes, name)
+    nodes.compact.each do |node|
+      next unless node.respond_to?(:mir?) && node.mir?
+      found = T.let(nil, T.nilable(Symbol))
+      walk_mir_node(node) do |child|
+        next unless child.is_a?(MIR::AllocMark)
+        next unless child.name.to_s == name
+        found = child.alloc
+      end
+      return found if found
+    end
+    nil
+  end
+
+  sig { params(name: String).returns(T.nilable(Symbol)) }
+  def current_binding_alloc_for_name(name)
+    entry = @current_bindings[name] || CleanupEntry::NONE
+    return nil unless entry.present?
+
+    entry.alloc
+  end
+
+  sig do
+    params(
+      name: String,
+      target: Symbol,
+      visible_guarded_names: T::Set[String],
+      target_alloc: T.nilable(Symbol),
+    ).returns(OwnershipTransferPlan)
+  end
+  def ownership_transfer_plan(name, target, visible_guarded_names, target_alloc: nil)
     OwnershipTransferPlan.new(
       name: name,
       target: target,
+      target_alloc: target_alloc,
       move_guarded: visible_guarded_names.include?(name),
     )
   end
@@ -1090,13 +1162,22 @@ class MIRLowering
     fact.names
   end
 
-  sig { params(node: MIR::Node, names: T::Array[String], source: String, target: Symbol).returns(MIR::Node) }
-  def with_ownership_consumption(node, names, source, target = :owned_sink)
+  sig do
+    params(
+      node: MIR::Node,
+      names: T::Array[String],
+      source: String,
+      target: Symbol,
+      target_alloc: T.nilable(Symbol),
+    ).returns(MIR::Node)
+  end
+  def with_ownership_consumption(node, names, source, target = :owned_sink, target_alloc: nil)
     clean = names.map(&:to_s).reject(&:empty?).uniq
 
     node.ownership_consumption = MIR::OwnershipConsumptionFact.new(
       names: clean,
       target: target,
+      target_alloc: target_alloc,
       source: source,
     )
     node

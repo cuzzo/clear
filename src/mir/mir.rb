@@ -171,6 +171,7 @@ module MIR
 
     const :names, T::Array[String]
     const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
     const :source, String
   end
 
@@ -1777,7 +1778,9 @@ module MIR
 
   # Marks an owned binding whose local cleanup is intentionally absent because
   # ownership transfers out of the current scope (TAKES arg, return, container).
-  TransferMark = Struct.new(:name, :target) do
+  # For local owned sinks, target_alloc records the destination allocator so the
+  # checker can distinguish frame-local aggregate ownership from heap escape.
+  TransferMark = Struct.new(:name, :target, :target_alloc) do
     extend T::Sig
     include Stmt
     sig { returns(T::Boolean) }

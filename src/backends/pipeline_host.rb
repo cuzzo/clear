@@ -686,7 +686,7 @@ class PipelineHost
           MIR::MethodCall.new(MIR::Ident.new(receiver), "append",
             [MIR::AllocatorRef.new(alloc), MIR::Ident.new(temp_name)], true,
             MIR::CallableContract.no_ownership(2)), false),
-        MIR::TransferMark.new(temp_name, :owned_sink),
+        MIR::TransferMark.new(temp_name, :owned_sink, alloc),
         MIR::MoveMark.new(temp_name),
       ])
     end
@@ -2028,11 +2028,11 @@ class PipelineHost
     right_value = MIR::Ident.new("__match")
     after_append = []
     if left_owns
-      after_append << MIR::TransferMark.new("__jl_owned", :owned_sink)
+      after_append << MIR::TransferMark.new("__jl_owned", :owned_sink, pipeline_result_alloc)
       after_append << MIR::MoveMark.new("__jl_owned")
     end
     if right_owns
-      after_append << MIR::TransferMark.new("__match", :owned_sink)
+      after_append << MIR::TransferMark.new("__match", :owned_sink, pipeline_result_alloc)
       after_append << MIR::MoveMark.new("__match")
     end
 
@@ -4275,7 +4275,7 @@ class PipelineHost
     name = lhs.name.to_s
     guarded = @lowering.instance_variable_get(:@guarded_cleanup_names)&.[](name)
     return [] unless guarded
-    [MIR::TransferMark.new(name, :owned_sink), MIR::MoveMark.new(name)]
+    [MIR::TransferMark.new(name, :owned_sink, :heap), MIR::MoveMark.new(name)]
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }

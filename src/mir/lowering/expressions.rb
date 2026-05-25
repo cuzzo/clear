@@ -1076,6 +1076,7 @@ module MIRLoweringExpressions
       MIR::StructInit.new(type_name, fields),
       fields.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
       "MIR::StructInit",
+      target_alloc: struct_alloc,
     ), MIR::StructInit)
 
     # Struct literals remain value-shaped. Heap/frame placement is a storage
@@ -1179,6 +1180,7 @@ module MIRLoweringExpressions
       MIR::StructInit.new(variant_struct_name, field_values),
       field_values.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
       "MIR::StructInit",
+      target_alloc: variant_alloc,
     ), MIR::StructInit)
     result = MIR::StructInit.new(node.union_name.to_s, [
       { name: node.variant_name.to_s, value: inner }

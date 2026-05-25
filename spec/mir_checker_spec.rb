@@ -186,11 +186,42 @@ RSpec.describe MIRChecker do
   end
 
   describe "linear ownership hard errors" do
-    it "rejects a read after ownership transfer" do
+    it "rejects a MIR statement that is not registered for linear ownership traversal" do
+      unknown = Class.new(Struct.new(:expr)) do
+        include MIR::Stmt
+      end
+      stub_const("MIR::SpecUnknownStmt", unknown)
+
+      body = [MIR::SpecUnknownStmt.new(MIR::Ident.new("x"))]
+      errors = checker.check_fn!(fn_def("unknown_stmt", body))
+      expect(errors.any? { |e| e.include?("LINEAR_STMT_NOT_REGISTERED") && e.include?("SpecUnknownStmt") }).to be true
+    end
+
+    it "rejects frame ownership transferred into an escaping sink" do
+      body = [
+        alloc_mark("x", :frame),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :owned_sink, :heap),
+      ]
+      errors = checker.check_fn!(fn_def("frame_store_escape", body))
+      expect(errors.any? { |e| e.include?("FRAME_ALLOC_ESCAPES") && e.include?("x") }).to be true
+    end
+
+    it "rejects owned sink transfer without destination allocator" do
       body = [
         alloc_mark("x", :heap),
         MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
         MIR::TransferMark.new("x", :owned_sink),
+      ]
+      errors = checker.check_fn!(fn_def("implicit_sink_alloc", body))
+      expect(errors.any? { |e| e.include?("IMPLICIT_OWNERSHIP_TRANSFER") && e.include?("x") }).to be true
+    end
+
+    it "rejects a read after ownership transfer" do
+      body = [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+        MIR::TransferMark.new("x", :owned_sink, :heap),
         MIR::ExprStmt.new(MIR::Ident.new("x"), false),
       ]
       errors = checker.check_fn!(fn_def("uaf_after_transfer", body))
@@ -201,7 +232,7 @@ RSpec.describe MIRChecker do
       body = [
         alloc_mark("x", :heap),
         MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
-        MIR::TransferMark.new("x", :owned_sink),
+        MIR::TransferMark.new("x", :owned_sink, :heap),
         MIR::TransferMark.new("x", :return),
         MIR::ReturnStmt.new(MIR::Ident.new("x")),
       ]
@@ -214,7 +245,7 @@ RSpec.describe MIRChecker do
         alloc_mark("x", :heap),
         MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
         MIR::Cleanup.new("x", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
-        MIR::TransferMark.new("x", :owned_sink),
+        MIR::TransferMark.new("x", :owned_sink, :heap),
       ]
       errors = checker.check_fn!(fn_def("cleanup_and_transfer", body))
       expect(errors.any? { |e| e.include?("OWNERSHIP_DOUBLE_RELEASE") && e.include?("x") }).to be true
@@ -237,7 +268,7 @@ RSpec.describe MIRChecker do
         MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
         MIR::IfStmt.new(
           MIR::Lit.new("cond"),
-          [MIR::TransferMark.new("x", :owned_sink)],
+          [MIR::TransferMark.new("x", :owned_sink, :heap)],
           [],
         ),
       ]
@@ -1016,7 +1047,7 @@ RSpec.describe MIRChecker do
       )
       body = [
         alloc_mark("m", :heap),
-        MIR::TransferMark.new("m", :owned_sink),
+        MIR::TransferMark.new("m", :owned_sink, :heap),
         alloc_mark("items", :heap),
         MIR::Cleanup.new("items", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
         iz,

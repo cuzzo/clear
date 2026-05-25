@@ -1973,6 +1973,13 @@ module DiagnosticRegistry
       cause: "A value whose ownership leaves the function cannot be allocated in the callee's frame arena. The frame rewinds before the caller's cleanup runs, producing a dangling buffer or allocator mismatch.",
       fix_hint: "Escape analysis/lowering bug — escaping owned returns must set the binding storage to heap before MIR lowering emits AllocMark.",
     },
+    FRAME_ALLOC_ESCAPES: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Frame-allocated ownership transfers to an escaping owner.",
+      cause: "A frame allocation is only valid within the current frame lifetime. Transferring it to a return value, container, captured boundary, or external parameter lets another owner observe memory after the frame rewinds.",
+      fix_hint: "Escape analysis bug — the binding reached an escape sink but was not stamped heap before MIR lowering emitted AllocMark.",
+    },
     TRANSFER_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",
@@ -2007,6 +2014,13 @@ module DiagnosticRegistry
       summary:  "MIR control flow rejoins with different ownership state.",
       cause: "MIRChecker cannot prove memory safety when one branch owns/transfers/finalizes a binding differently from another branch.",
       fix_hint: "Lowering bug — make ownership events explicit and identical at the join, or keep ownership entirely outside the branch.",
+    },
+    LINEAR_STMT_NOT_REGISTERED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR statement is missing from linear ownership verification.",
+      cause: "A statement node reached MIRChecker without being registered in the closed linear ownership traversal. Treating it as a generic expression would let new ownership-affecting statement types bypass leak/UAF/double-free checks.",
+      fix_hint: "Register the statement in MIRChecker::LINEAR_STATEMENT_NODE_TYPES and add the structural traversal it needs. If it can affect ownership, expose that through explicit MIR ownership facts.",
     },
     OWNERSHIP_IMPLICIT_MOVE: {
       severity: :error, category: :mir,

@@ -109,6 +109,7 @@ module MIRLoweringLiterals
         MIR::MakeList.new(elem_zig, items_mir, list_alloc),
         items_mir.flat_map { |item| mir_ident_names(item) },
         "MIR::MakeList",
+        target_alloc: list_alloc,
       ),
       MIR::MakeList,
     )

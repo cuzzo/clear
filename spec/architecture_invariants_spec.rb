@@ -217,6 +217,22 @@ RSpec.describe "architecture invariants: MIR pass order" do
     expect(source("src/mir/mir.rb")).to include("RawZig, InlineZig")
     expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
   end
+
+  it "keeps linear MIR ownership traversal closed over statement node classes" do
+    checker = source("src/mir/mir_checker.rb")
+    expect(checker).to include("LINEAR_STATEMENT_NODE_TYPES")
+    expect(checker).to include("LINEAR_STMT_NOT_REGISTERED")
+    expect(checker).not_to match(/else\s*\n\s*check_linear_expr_uses!\(stmt, state\)/)
+  end
+
+  it "keeps escape analysis sinks registered with concrete handlers" do
+    escape = source("src/mir/escape_analysis.rb")
+    expect(escape).to include("ESCAPE_SINK_HANDLERS")
+    expect(escape).to include("validate_escape_sink_handlers!")
+    expect(escape).to include("return_value")
+    expect(escape).to include("takes_or_mutable_arg")
+    expect(escape).to include("execution_boundary_capture")
+  end
 end
 
 RSpec.describe "architecture invariants: closed placement pipeline" do
