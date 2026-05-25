@@ -402,6 +402,28 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:loop_frame_rewind, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
     },
 
+    mir_lowering_shape_matrix: {
+      cleanup_value_shapes: [
+        :string,
+        :dynamic_array,
+        :hash_map,
+        :struct_owned_fields,
+        :union_owned_payload,
+        :option_owned_payload,
+      ],
+      collection_shapes: [:dynamic_array, :hash_map],
+      escape_sources: [:loop_local, :or_expression],
+      escape_sinks: [:return_value, :collection_literal, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind, :error_path_allocator_identity],
+    },
+
+    match_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload],
+      collection_shapes: [:list],
+      escape_sinks: [:return_value],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
     mir_checker_negative_matrix: {
       cleanup_value_shapes: [:string],
       escape_sinks: [:return_value, :function_arg],

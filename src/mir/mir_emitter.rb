@@ -67,11 +67,13 @@ class MIREmitter
     when MIR::WhileStmt        then emit_while(node)
     when MIR::ForStmt          then emit_for(node)
     when MIR::SwitchStmt       then emit_switch(node)
+    when MIR::UnionMatchStmt   then emit_union_match(node)
     when MIR::IfChain          then emit_if_chain(node)
     when MIR::ReturnStmt       then emit_return(node)
     when MIR::BreakStmt        then emit_break(node)
     when MIR::ContinueStmt     then "continue;"
     when MIR::Panic            then "@panic(#{node.message.inspect});"
+    when MIR::AssertStmt       then emit_assert_stmt(node)
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
@@ -132,6 +134,7 @@ class MIREmitter
     when MIR::TailCall         then emit_tail_call(node)
     when MIR::MethodCall       then emit_method_call(node)
     when MIR::FieldGet         then emit_field_get(node)
+    when MIR::UnionPayloadGet  then emit_union_payload_get(node)
     when MIR::IndexGet         then emit_index_get(node)
     when MIR::BinOp            then emit_bin_op(node)
     when MIR::UnaryOp          then emit_unary_op(node)
@@ -736,6 +739,22 @@ class MIREmitter
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
   end
 
+  sig { params(node: MIR::UnionMatchStmt).returns(String) }
+  def emit_union_match(node)
+    subject = emit(node.subject)
+    arms = node.arms.map do |arm|
+      body = emit_body(arm[:body])
+      payload = arm[:payload]
+      capture = payload ? " |#{payload}|" : ""
+      "#{arm[:pattern]} =>#{capture} {\n#{body}\n}"
+    end
+    if node.default_body
+      body = node.default_body.empty? ? "" : emit_body(node.default_body)
+      arms << "else => {\n#{body}\n}"
+    end
+    "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
+  end
+
   sig { params(node: MIR::IfChain).returns(String) }
   def emit_if_chain(node)
     parts = node.branches.map { |br|
@@ -1224,6 +1243,18 @@ class MIREmitter
   sig { params(node: MIR::FieldGet).returns(String) }
   def emit_field_get(node)
     "#{paren_if_try(T.must(emit(node.object)))}.#{node.field}"
+  end
+
+  sig { params(node: MIR::UnionPayloadGet).returns(String) }
+  def emit_union_payload_get(node)
+    subject = T.must(emit(node.subject))
+    variant = node.variant.to_s
+    "(switch (#{subject}) { .#{variant} => |payload| payload, else => unreachable })"
+  end
+
+  sig { params(node: MIR::AssertStmt).returns(String) }
+  def emit_assert_stmt(node)
+    "CheatLib.assert(#{emit(node.cond)}, #{node.message});"
   end
 
   # Parenthesize try-expressions to prevent Zig precedence issues where

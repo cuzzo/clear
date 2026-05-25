@@ -175,6 +175,28 @@ module MIR
     const :source, String
   end
 
+  class BodySlot
+    extend T::Sig
+
+    sig { returns(Symbol) }
+    attr_reader :name
+    sig { returns(T::Array[T.untyped]) }
+    attr_reader :body
+
+    sig { params(name: Symbol, body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    def initialize(name, body, writer)
+      @name = name
+      @body = body
+      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+    end
+
+    sig { params(body: T::Array[T.untyped]).void }
+    def replace(body)
+      @body = body
+      @writer.call(body)
+    end
+  end
+
   # Common interface for all MIR nodes.
   module Emittable
       extend T::Sig
@@ -190,6 +212,8 @@ module MIR
     def ownership_effect; OwnershipEffect.none; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs; []; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots; []; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
     attr_accessor :ownership_consumption
 
@@ -202,6 +226,11 @@ module MIR
         children << value if value.is_a?(Emittable)
       end
       children
+    end
+
+    sig { params(name: Symbol, body: T.nilable(T::Array[T.untyped]), writer: T.proc.params(body: T::Array[T.untyped]).void).returns(BodySlot) }
+    def body_slot(name, body, writer)
+      BodySlot.new(name, body || [], writer)
     end
   end
 
@@ -289,6 +318,8 @@ module MIR
 
     sig { returns(TrueClass) }
     def has_own_frame? = true
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # Function parameter.
@@ -354,7 +385,10 @@ module MIR
   # Test block.
   # Zig: test "name" { body }
   TestDef = Struct.new(:name, :body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # ================================================================
@@ -368,7 +402,10 @@ module MIR
   # annotation: optional explicit type string (nil -> Zig infers)
   # suppression: optional "_ = &name;" or "_ = name;" for Zig warnings
   Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :alias_safe) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([init])
   end
 
   # Assignment.
@@ -377,20 +414,35 @@ module MIR
   # needs_field_cleanup: true if this is a field assignment where the old
   #   value needs cleanup but no pre-cleanup was emitted (FIELD_LEAK).
   Set = Struct.new(:target, :value, :needs_field_cleanup) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([target, value])
   end
 
   # Reassignment with old-value cleanup.
   # Zig: { const __new = value; CheatLib.cleanup(T, alloc, &old); old = __new; }
   # alloc: symbol (:heap, :frame, :cleanup) -- resolved to Zig by emitter.
   ReassignWithCleanup = Struct.new(:name, :value, :zig_type, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
   end
 
   # If statement (not expression).
   # Zig: if (cond) { then_body } [else { else_body }]
   IfStmt = Struct.new(:cond, :then_body, :else_body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cond])
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
+      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots
+    end
   end
 
   # IF x AS y [&& z AS a] THEN ... [ELSE ...] END
@@ -398,51 +450,129 @@ module MIR
   # Multi binding:  blk: { const y = expr1 orelse break :blk; ... then_body } if (!ok) { else_body }
   # bindings: Array of { expr: MIR node, capture: String }
   IfBindStmt = Struct.new(:bindings, :then_body, :else_body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      exprs = bindings&.map { |binding| binding.is_a?(Hash) ? binding[:expr] : nil } || []
+      compact_child_exprs(exprs)
+    end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
+      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots
+    end
   end
 
   # While loop.
   # Zig: while (cond) [: (update)] [|capture|] { body }
   WhileStmt = Struct.new(:cond, :body, :capture, :update, :mark_per_iter, :tight) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cond, update])
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # For loop over slice/range.
   # Zig: for (iter) |item[, idx]| { body }
   ForStmt = Struct.new(:iter, :capture, :body, :index_capture, :mark_per_iter, :tight) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([iter])
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # Scoped block.
   # Zig: { stmts }
   ScopeBlock = Struct.new(:body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # Switch statement (for int/enum MATCH).
   # Zig: switch (subject) { arms }
   SwitchStmt = Struct.new(:subject, :arms, :default_body) do
+    extend T::Sig
     include Stmt
     # arms: [{ pattern: String, body: [MIR stmt] }]
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([subject])
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      arms&.each_with_index do |arm, index|
+        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+      end
+      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots
+    end
+  end
+
+  # Union match statement.
+  # Zig: switch (subject) { .Variant => |payload| { body }, else => { ... } }
+  # Payload capture is structurally tied to the active switch arm; lowering
+  # must not synthesize subject.Variant reads for MATCH AS bindings.
+  UnionMatchStmt = Struct.new(:subject, :arms, :default_body) do
+    extend T::Sig
+    include Stmt
+    # arms: [{ pattern: String, payload: String|nil, body: [MIR stmt] }]
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([subject])
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      arms&.each_with_index do |arm, index|
+        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+      end
+      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots
+    end
   end
 
   # If-chain statement (for union/string MATCH).
   # Zig: if (cond1) { ... } else if (cond2) { ... } else { ... }
   IfChain = Struct.new(:branches, :default_body) do
+    extend T::Sig
     include Stmt
     # branches: [{ cond: MIR expr, body: [MIR stmt] }]
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs
+      compact_child_exprs(branches&.map { |branch| branch[:cond] } || [])
+    end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      branches&.each_with_index do |branch, index|
+        slots << body_slot(:"branches_#{index}", branch[:body], ->(new_body) { branch[:body] = new_body })
+      end
+      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots
+    end
   end
 
   # Return statement.
   # Zig: return [value];
   ReturnStmt = Struct.new(:value) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
   end
 
   # Break statement.
   # Zig: break [:label] [value];
   BreakStmt = Struct.new(:label, :value) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
   end
 
   # Continue statement.
@@ -458,6 +588,13 @@ module MIR
   # Zig: @panic("message");
   Panic = Struct.new(:message) do
     include Stmt
+  end
+
+  AssertStmt = Struct.new(:cond, :message) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([cond])
   end
 
   # In-place sort.
@@ -498,7 +635,10 @@ module MIR
   # initializer in the Zig backend; ignored by the VM.
   IndexInsert = Struct.new(:map, :key_expr, :value_expr,
                            :key_zig_type, :elem_zig_type, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([map, key_expr, value_expr])
   end
 
   # Batch-window runtime emission. These model the two ownership-sensitive
@@ -507,38 +647,64 @@ module MIR
   # user expression has consumed the temporary ArrayListUnmanaged view.
   BatchWindowPush = Struct.new(:window, :item_expr, :batch_var, :elem_zig,
                                :result_var, :value_expr, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([item_expr, value_expr])
   end
 
   BatchWindowFlush = Struct.new(:window, :batch_var, :elem_zig,
                                 :result_var, :value_expr, :alloc) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value_expr])
   end
 
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do
+    extend T::Sig
     include Stmt
     # body: single MIR stmt, or a RawZig for inline defer
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
+    end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = body.is_a?(Array) ? [] : compact_child_exprs([body])
   end
 
   # Errdefer statement.
   # Zig: errdefer |_| { body };
   ErrDeferStmt = Struct.new(:body) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      body.is_a?(Array) ? [body_slot(:body, body, ->(new_body) { self.body = new_body })] : []
+    end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = body.is_a?(Array) ? [] : compact_child_exprs([body])
   end
 
   # Expression used as statement.
   # Zig: expr;  or  _ = expr;
   ExprStmt = Struct.new(:expr, :discard) do
+    extend T::Sig
     include Stmt
     # discard: true -> emit `_ = expr;`
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Owning expression used as a statement.
   # Zig: evaluate into a scoped temp and clean it at the end of that scope.
   DiscardOwned = Struct.new(:expr, :cleanup_entry, :zig_type) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
   end
 
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
@@ -654,6 +820,8 @@ module MIR
     def boundary_fact=(value); @boundary_fact = T.let(value, T.nilable(MIR::ExecutionBoundaryFact)); end
     sig { returns(T::Boolean) }
     def expr?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = run_body ? [body_slot(:run_body, run_body, ->(new_body) { self.run_body = new_body })] : []
   end
 
   # BC-only: producer-fiber + rendezvous channel for ~T[INF] BG STREAM.
@@ -675,6 +843,8 @@ module MIR
     def boundary_fact=(value); @boundary_fact = T.let(value, T.nilable(MIR::ExecutionBoundaryFact)); end
     sig { returns(T::Boolean) }
     def expr?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # ================================================================
@@ -802,6 +972,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def expr?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
   end
 
   # Top-level FSM Phase B1 (pure-compute) body. Same labeled-block
@@ -1235,7 +1407,16 @@ module MIR
   #   Carries the lowered MIR so the checker can see allocations inside each
   #   catch body. Emission still uses code (raw Zig). nil for legacy callers.
   CatchWrapper = Struct.new(:code, :error_reassigns, :clause_bodies, :clause_meta, :has_default) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      clause_bodies&.each_with_index do |body, index|
+        slots << body_slot(:"clause_bodies_#{index}", body, ->(new_body) { clause_bodies[index] = new_body })
+      end
+      slots
+    end
   end
 
   # DO block. Wraps raw Zig code for fork-join parallel branches.
@@ -1252,6 +1433,14 @@ module MIR
     end
     sig { params(value: T.nilable(T::Array[MIR::ExecutionBoundaryFact])).returns(T.nilable(T::Array[MIR::ExecutionBoundaryFact])) }
     def boundary_facts=(value); @boundary_facts = T.let(value, T.nilable(T::Array[MIR::ExecutionBoundaryFact])); end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      branch_bodies&.each_with_index do |body, index|
+        slots << body_slot(:"branch_bodies_#{index}", body, ->(new_body) { branch_bodies[index] = new_body })
+      end
+      slots
+    end
   end
 
   # No-op. Emits nothing. Used as placeholder for verification-only nodes.
@@ -1599,6 +1788,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
@@ -1631,6 +1822,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # SNAPSHOT-mutable multi-cell: `WITH SNAPSHOT a AS MUTABLE va, b AS
@@ -1653,6 +1846,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC c AS x { body }`
@@ -1680,6 +1875,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
 
   PolymorphicMutateFlow = Struct.new(
@@ -1689,6 +1886,12 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([body_slot(:body, body, ->(new_body) { self.body = new_body })], T::Array[BodySlot])
+      slots << body_slot(:guard_fail_body, guard_fail_body, ->(new_body) { self.guard_fail_body = new_body }) if guard_fail_body
+      slots
+    end
   end
 
   # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
@@ -1703,6 +1906,14 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def stmt?; true; end
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      slots = T.let([], T::Array[BodySlot])
+      arms&.each_with_index do |arm, index|
+        slots << body_slot(:"arms_#{index}", arm[:body], ->(new_body) { arm[:body] = new_body })
+      end
+      slots
+    end
   end
 
   # ================================================================
@@ -1889,6 +2100,16 @@ module MIR
     def child_exprs = compact_child_exprs([object])
   end
 
+  # Safe tagged-union payload extraction. This exists only for non-switchable
+  # union MATCH shapes; pure union MATCH lowers to UnionMatchStmt payload
+  # capture so the payload is structurally tied to its active arm.
+  UnionPayloadGet = Struct.new(:subject, :variant) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([subject])
+  end
+
   # Index access.
   # Zig: object[index]  or  specialized patterns (charAt, numericMapGet, etc.)
   IndexGet = Struct.new(:object, :index) do
@@ -1976,6 +2197,8 @@ module MIR
     extend T::Sig
     include Expr
     # body: [MIR stmt] -- last stmt should be BreakStmt with matching label
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
     sig { returns(OwnershipEffect) }
     def ownership_effect
       break_stmt = body&.reverse&.find { |stmt| stmt.is_a?(BreakStmt) }
@@ -2464,12 +2687,17 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def expr?; true; end
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([target, key, value])
   end
 
   ShardedMapGet = Struct.new(:target, :key, :shard_idx, :shard_key,
                               :map_kind, :stdlib_def, :key_zig, :val_zig,
                               :resolved_allocs, :template_kind) do
+    extend T::Sig
     include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([target, key])
   end
 
   # Hard flip (EPIC #65): every stdlib_def carrier coerces its payload

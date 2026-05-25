@@ -653,7 +653,7 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :update)) if stmt.update
     when MIR::ForStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :iter))
-    when MIR::SwitchStmt
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :subject))
     when MIR::IfChain
       stmt.branches&.each do |branch|
@@ -691,20 +691,10 @@ module MIRHoistLowering
 
   sig { params(node: T.untyped).void }
   def normalize_nested_mir_bodies!(node)
-    case node
-    when MIR::WhileStmt, MIR::ForStmt
-      node.body = normalize_allocating_mir_body(node.body ? node.body : [])
-    when MIR::ScopeBlock, MIR::BlockExpr
-      node.body = normalize_allocating_mir_body(node.body ? node.body : [])
-    when MIR::IfStmt, MIR::IfBindStmt
-      node.then_body = normalize_allocating_mir_body(node.then_body ? node.then_body : [])
-      node.else_body = normalize_allocating_mir_body(node.else_body ? node.else_body : []) if node.else_body
-    when MIR::IfChain
-      node.branches&.each { |branch| branch[:body] = normalize_allocating_mir_body(branch[:body] ? branch[:body] : []) }
-      node.default_body = normalize_allocating_mir_body(node.default_body ? node.default_body : []) if node.default_body
-    when MIR::SwitchStmt
-      node.arms&.each { |arm| arm[:body] = normalize_allocating_mir_body(arm[:body] ? arm[:body] : []) }
-      node.default_body = normalize_allocating_mir_body(node.default_body ? node.default_body : []) if node.default_body
+    return unless node.respond_to?(:body_slots)
+
+    node.body_slots.each do |slot|
+      slot.replace(normalize_allocating_mir_body(slot.body))
     end
     nil
   end

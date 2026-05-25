@@ -109,7 +109,8 @@ expected hard error is absent.
 | `catch_reassign_matrix`    | 8            | Catch/fallback reassignment ownership cells. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
-| `match_matrix`             | 6            | MATCH lowering over union and scalar shapes. |
+| `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
+| `mir_lowering_shape_matrix` | 82          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, and loop locals. |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |

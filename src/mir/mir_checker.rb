@@ -91,7 +91,7 @@ class MIRChecker
   )
 
   LINEAR_STATEMENT_NODE_TYPES = T.let([
-    MIR::AllocMark, MIR::BatchWindowFlush, MIR::BatchWindowPush,
+    MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
     MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
     MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
     MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
@@ -109,7 +109,7 @@ class MIRChecker
     MIR::SnapshotTransaction, MIR::Sort, MIR::StreamSpawn, MIR::StreamYield,
     MIR::StructDef, MIR::Suppress, MIR::SwitchStmt, MIR::TestDef,
     MIR::ThunkTrampoline, MIR::TransferMark, MIR::TypeAlias,
-    MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
+    MIR::UnionMatchStmt, MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
   ].freeze, T::Array[T::Class[T.anything]])
 
   LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS = T.let(
@@ -452,6 +452,8 @@ class MIRChecker
       check_linear_expr_uses!(stmt.value, state)
     when MIR::ExprStmt
       check_linear_expr_uses!(stmt.expr, state)
+    when MIR::AssertStmt
+      check_linear_expr_uses!(stmt.cond, state)
     when MIR::DiscardOwned
       check_linear_expr_uses!(stmt.expr, state)
     when MIR::BreakStmt
@@ -491,12 +493,12 @@ class MIRChecker
     when MIR::ScopeBlock, MIR::BlockExpr
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, "scope")
-    when MIR::SwitchStmt
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
       check_linear_expr_uses!(stmt.subject, state)
       states = T.let([], T::Array[LinearOwnershipState])
-      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "switch") }
-      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "switch")
-      linear_merge_branch_states!(states, state, "switch")
+      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "match") }
+      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "match")
+      linear_merge_branch_states!(states, state, "match")
     when MIR::IfChain
       states = T.let([], T::Array[LinearOwnershipState])
       stmt.branches&.each do |branch|
@@ -902,7 +904,7 @@ class MIRChecker
         verify_move_mark_scope!(stmt.body, visible.dup)
       when MIR::ScopeBlock, MIR::BlockExpr
         verify_move_mark_scope!(stmt.body, visible.dup)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         stmt.arms&.each { |a| verify_move_mark_scope!(a[:body], visible.dup) }
         verify_move_mark_scope!(stmt.default_body, visible.dup)
       when MIR::IfChain
@@ -998,7 +1000,7 @@ class MIRChecker
         check_aggregate_stmts!(stmt.body, alloc_by_name)
       when MIR::ScopeBlock, MIR::BlockExpr
         check_aggregate_stmts!(stmt.body, alloc_by_name)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         check_aggregate_expr!(stmt.subject, nil, alloc_by_name)
         stmt.arms&.each { |a| check_aggregate_stmts!(a[:body], alloc_by_name) }
         check_aggregate_stmts!(stmt.default_body, alloc_by_name)
@@ -1405,94 +1407,24 @@ class MIRChecker
 
   sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def walk_mir_node(node, &block)
-    return unless node
-    yield node
+    if node.is_a?(Array)
+      node.each { |child| walk_mir_node(child, &block) }
+      return
+    end
+    return unless node.is_a?(MIR::Emittable)
 
-    case node
-    when MIR::FnDef       then walk_mir(node.body, &block)
-    when MIR::IfStmt
-      walk_mir_expr(node.cond, &block)
-      walk_mir(node.then_body, &block)
-      walk_mir(node.else_body, &block)
-    when MIR::IfBindStmt
-      node.bindings&.each do |binding|
-        expr = binding.is_a?(Hash) ? binding[:expr] : nil
-        walk_mir_expr(expr, &block) if expr
-      end
-      walk_mir(node.then_body, &block)
-      walk_mir(node.else_body, &block)
-    when MIR::WhileStmt
-      walk_mir_expr(node.cond, &block)
-      walk_mir(node.body, &block)
-    when MIR::ForStmt
-      walk_mir_expr(node.iter, &block)
-      walk_mir(node.body, &block)
-    when MIR::ScopeBlock, MIR::BlockExpr
-      walk_mir(node.body, &block)
-    when MIR::SwitchStmt
-      walk_mir_expr(node.subject, &block) if node.respond_to?(:subject)
-      node.arms&.each { |a| walk_mir(a[:body], &block) }
-      walk_mir(node.default_body, &block)
-    when MIR::IfChain
-      node.branches&.each do |b|
-        walk_mir_expr(b[:cond], &block)
-        walk_mir(b[:body], &block)
-      end
-      walk_mir(node.default_body, &block)
-    when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
-    when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
-    when MIR::DiscardOwned then walk_mir_node(node.expr, &block) if node.expr
-    when MIR::Let
-      walk_mir_expr(node.init, &block)
-      yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
-    when MIR::Set
-      walk_mir_expr(node.target, &block)
-      walk_mir_expr(node.value, &block)
-    when MIR::ReassignWithCleanup
-      walk_mir_expr(node.value, &block)
-    when MIR::ExprStmt
-      walk_mir_expr(node.expr, &block)
-    when MIR::ReturnStmt
-      walk_mir_expr(node.value, &block)
-    when MIR::BreakStmt
-      walk_mir_expr(node.value, &block)
-    when MIR::BatchWindowPush
-      walk_mir_node(node.item_expr, &block)
-      walk_mir_node(node.value_expr, &block)
-    when MIR::BatchWindowFlush
-      walk_mir_node(node.value_expr, &block)
-    when MIR::ShardedMapPut
-      walk_mir_expr(node.target, &block)
-      walk_mir_expr(node.key, &block)
-      walk_mir_expr(node.value, &block)
-    when MIR::ShardedMapGet
-      walk_mir_expr(node.target, &block)
-      walk_mir_expr(node.key, &block)
-    when MIR::BgBlock      then walk_mir(node.run_body, &block)
-    when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
-    when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
-    when MIR::Pipeline     then walk_mir_node(node.inner, &block)
-    when MIR::SnapshotRead         then walk_mir(node.body, &block)
-    when MIR::SnapshotTransaction  then walk_mir(node.body, &block)
-    when MIR::SnapshotMultiTxn     then walk_mir(node.body, &block)
-    when MIR::WithMatchDispatch    then node.arms&.each { |a| walk_mir(a[:body], &block) }
+    yield node
+    node.child_exprs.each { |child| walk_mir_node(child, &block) }
+    node.body_slots.each { |slot| walk_mir(slot.body, &block) }
+    if node.is_a?(MIR::Pipeline)
+      walk_mir_node(node.inner, &block)
     end
     nil
   end
 
   sig { params(expr: T.untyped, block: T.untyped).void }
   def walk_mir_expr(expr, &block)
-    return unless expr
-    yield expr
-    if expr.is_a?(MIR::BlockExpr)
-      walk_mir(expr.body, &block)
-      return
-    end
-    if expr.is_a?(MIR::Pipeline)
-      walk_mir_node(expr.inner, &block)
-      return
-    end
-    each_sub_expr(expr) { |sub| walk_mir_expr(sub, &block) }
+    walk_mir_node(expr, &block)
     nil
   end
 
@@ -2075,7 +2007,7 @@ class MIRChecker
         check_loop_rewind!(stmt.else_body)
       when MIR::ScopeBlock, MIR::BlockExpr
         check_loop_rewind!(stmt.body)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
         check_loop_rewind!(stmt.default_body)
       when MIR::IfChain
@@ -2105,7 +2037,7 @@ class MIRChecker
         body_has_loop_restore?(s.then_body) || body_has_loop_restore?(s.else_body)
       when MIR::ScopeBlock, MIR::BlockExpr
         body_has_loop_restore?(s.body)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         (s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }) ||
           body_has_loop_restore?(s.default_body)
       when MIR::IfChain
@@ -2155,7 +2087,7 @@ class MIRChecker
         body_has_frame_alloc_scope?(s.then_body, &block) || body_has_frame_alloc_scope?(s.else_body, &block)
       when MIR::ScopeBlock, MIR::BlockExpr
         body_has_frame_alloc_scope?(s.body, &block)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) } ||
           body_has_frame_alloc_scope?(s.default_body, &block)
       when MIR::IfChain
@@ -2277,7 +2209,7 @@ class MIRChecker
       check_stmts_for_unhoisted(node.body)
     when MIR::ScopeBlock, MIR::BlockExpr
       check_stmts_for_unhoisted(node.body)
-    when MIR::SwitchStmt
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
       check_expr_for_unhoisted(node.subject, allow_top: false)
       node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
       check_stmts_for_unhoisted(node.default_body)

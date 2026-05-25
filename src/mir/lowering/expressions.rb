@@ -1321,7 +1321,7 @@ module MIRLoweringExpressions
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
-  sig { params(node: AST::Assert).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
+  sig { params(node: AST::Assert).returns(T.any(MIR::AssertStmt, MIR::InlineBc, MIR::InlineZig)) }
   def lower_assert(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -1352,7 +1352,7 @@ module MIRLoweringExpressions
       raw.to_s
     end
     msg = msg_str.gsub('"', '\\"')
-    emit_builtin(:assert, [cond, MIR::Lit.new("\"#{msg}\"")])
+    MIR::AssertStmt.new(cond, "\"#{msg}\"")
   end
 
   # Detect `ASSERT a == b` and lower to the most specific Zig stdlib

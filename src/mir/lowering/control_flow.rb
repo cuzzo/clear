@@ -16,6 +16,12 @@ module MIRLoweringControlFlow
     const :expr_type_sym, T.untyped
   end
 
+  class UnionMatchArmPlan < T::Struct
+    const :variant, String
+    const :body, T::Array[T.untyped]
+    const :payload_name, T.nilable(String)
+  end
+
   class ForEachPlan < T::Struct
     const :var, String
     const :body, T::Array[T.untyped]
@@ -539,19 +545,22 @@ module MIRLoweringControlFlow
 
     if facts.is_int_match || facts.is_enum_match
       result = lower_switch_match(node, facts)
+    elsif is_union && union_match_switchable?(node)
+      result = lower_union_match(node, facts)
     else
       # If-chain for unions, strings, and complex patterns
       tag_eq = ->(v) { MIR::BinOp.new("==", active_tag_call(subject), MIR::Ident.new(".#{v}")) }
       union_bindings = ->(c, v, is_mutable) {
         if c.binding
-          payload = MIR::FieldGet.new(subject, v.to_s)
+          payload = MIR::UnionPayloadGet.new(subject, v.to_s)
           payload = MIR::Deref.new(payload) if c.indirect_payload_as
           [MIR::Let.new(c.binding, payload, is_mutable, nil, "_ = &#{c.binding};")]
         elsif c.destructure
+          payload = MIR::UnionPayloadGet.new(subject, v.to_s)
           c.destructure.fields.filter_map do |f|
             next if f.wildcard?
             next unless f.bind?
-            field = MIR::FieldGet.new(MIR::FieldGet.new(subject, v.to_s), f.name.to_s)
+            field = MIR::FieldGet.new(payload, f.name.to_s)
             MIR::Let.new(f.name.to_s, field, false, nil, "_ = &#{f.name};")
           end
         else
@@ -636,6 +645,11 @@ module MIRLoweringControlFlow
     expr_label ? MIR::BlockExpr.new(expr_label, [result]) : result
   end
 
+  sig { params(node: AST::MatchStatement).returns(T::Boolean) }
+  def union_match_switchable?(node)
+    node.cases.all? { |c| c.kind == :eq }
+  end
+
   sig { params(node: AST::MatchStatement).returns(MatchLoweringFacts) }
   def match_lowering_facts(node)
     T.bind(self, MIRLowering) rescue nil
@@ -678,6 +692,63 @@ module MIRLoweringControlFlow
   def lower_match_branch(stmts, expr_label)
     T.bind(self, MIRLowering) rescue nil
     T.must(expr_label ? lower_body_with_break(stmts, expr_label) : lower_body(stmts))
+  end
+
+  sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts).returns(MIR::UnionMatchStmt) }
+  def lower_union_match(node, facts)
+    arms = node.cases.flat_map { |c| union_match_arm_plans(c, node, facts.expr_label) }
+    default = (node.default_case && !node.default_case.empty?) ? lower_match_branch(node.default_case, facts.expr_label) : []
+    default = hoist_unhoisted_return_allocs(default, node.default_case) if default
+    MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
+      { pattern: ".#{arm.variant}", payload: arm.payload_name, body: arm.body }
+    }, default)
+  end
+
+  sig { params(c: T.untyped, node: AST::MatchStatement, expr_label: T.nilable(String)).returns(T::Array[UnionMatchArmPlan]) }
+  def union_match_arm_plans(c, node, expr_label)
+    T.bind(self, MIRLowering) rescue nil
+    @tmp_counter = T.let(@tmp_counter, T.untyped)
+    variants = union_match_case_variants(c)
+    body = lower_match_branch(c.body, expr_label)
+    body = T.must(hoist_unhoisted_return_allocs(body, c.body))
+    return variants.map { |variant| UnionMatchArmPlan.new(variant: variant, body: body, payload_name: nil) } unless c.binding || c.destructure
+
+    variants.map do |variant|
+      payload_name = "__match_payload_#{@tmp_counter += 1}"
+      arm_body = union_match_payload_bindings(c, payload_name, node) + body.dup
+      UnionMatchArmPlan.new(variant: variant, body: arm_body, payload_name: payload_name)
+    end
+  end
+
+  sig { params(c: T.untyped).returns(T::Array[String]) }
+  def union_match_case_variants(c)
+    T.bind(self, MIRLowering) rescue nil
+    [c.value, *(c.extra_values || [])].filter_map do |value|
+      case value
+      when AST::GetField
+        value.field.to_s
+      when AST::MethodCall
+        value.name.to_s
+      else
+        emit_expr(lower(value)).to_s.sub(/\A\./, "")
+      end
+    end
+  end
+
+  sig { params(c: T.untyped, payload_name: String, node: AST::MatchStatement).returns(T::Array[T.untyped]) }
+  def union_match_payload_bindings(c, payload_name, node)
+    is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved
+    payload = MIR::Ident.new(payload_name)
+    payload = MIR::Deref.new(payload) if c.indirect_payload_as
+    if c.binding
+      return [MIR::Let.new(c.binding, payload, is_mutable, nil, "_ = &#{c.binding};")]
+    end
+
+    c.destructure.fields.filter_map do |f|
+      next if f.wildcard?
+      next unless f.bind?
+      MIR::Let.new(f.name.to_s, MIR::FieldGet.new(payload, f.name.to_s), false, nil, "_ = &#{f.name};")
+    end
   end
 
   sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts).returns(MIR::SwitchStmt) }
@@ -765,61 +836,85 @@ module MIRLoweringControlFlow
     @lowered_guarded_cleanup_names = T.let(@lowered_guarded_cleanup_names, T.nilable(T::Set[T.untyped]))
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     plan = return_lowering_plan(node)
-    value = plan.value
-
-    if @current_fn_return_payload_zig&.start_with?("*") &&
-       value && !value.is_a?(MIR::HeapCreate) && !value.is_a?(MIR::Call) &&
-       !return_value_already_payload_pointer?(node.value)
-      bare_ret = @current_fn_return_payload_zig.sub(/\A\*/, "")
-      value = with_ownership_consumption(
-        MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
-        mir_ident_names(value),
-        "MIR::HeapCreate",
-      )
-    end
-
-    if @current_fn_heap_carry_return && node.value && value &&
-       !value.is_a?(MIR::Ident) &&
-      !return_transfers_heap_binding?(node.value) &&
-       !mir_allocates?(value) && !(value.is_a?(MIR::Call) && value.owned_return?)
-      ret_type = Type.from_node!(node.value, context: "heap carry return placement")
-      ret_type = ret_type.success_type || ret_type
-      value = place_value_for_destination(value, node.value, :heap, ret_type) if escaping_value_alloc(ret_type) == :heap
-    end
-
-    if @current_fn_heap_carry_return && node.value && value.is_a?(MIR::Ident) &&
-       @current_fn_param_names&.include?(value.name) &&
-       !@current_fn_takes_param_names&.include?(value.name)
-      ret_type = Type.from_node!(node.value, context: "heap carry recursive return")
-      ret_type = ret_type.success_type || ret_type
-      if ret_type.recursive_cleanup_shape?(@schema_lookup)
-        value = MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap)
-      end
-    end
+    value = finalize_return_value(node, plan.value)
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
-    if @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
+    if tail_call_return?(value)
       return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args, value.callable_contract))
     end
 
     # Rc/Arc return of a local cleanup binding transfers that binding's
     # existing strong ref. Borrowed/non-local identifiers still retain.
     if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
-      ret = MIR::ReturnStmt.new(make_rc_retain(node.value))
-      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
-      return marks + [ret] unless marks.empty?
-      ret
+      return return_with_transfer_marks(plan, value, MIR::ReturnStmt.new(make_rc_retain(node.value)))
     else
       # Hoist allocating expressions to a named Let so the checker sees the
       # allocation in the only verifier-visible ownership position.
       # ErrCleanup: the caller takes ownership on success.
       value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value
-      ret = MIR::ReturnStmt.new(value)
-      marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
-      return marks + [ret] unless marks.empty?
-      ret
+      return return_with_transfer_marks(plan, value, MIR::ReturnStmt.new(value))
     end
+  end
+
+  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  def finalize_return_value(node, value)
+    value = return_payload_pointer_value(node, value)
+    value = heap_carry_return_value(node, value)
+    heap_carry_recursive_param_value(node, value)
+  end
+
+  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  def return_payload_pointer_value(node, value)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless @current_fn_return_payload_zig&.start_with?("*")
+    return value unless value
+    return value if value.is_a?(MIR::HeapCreate) || value.is_a?(MIR::Call)
+    return value if return_value_already_payload_pointer?(node.value)
+
+    bare_ret = @current_fn_return_payload_zig.sub(/\A\*/, "")
+    with_ownership_consumption(
+      MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
+      mir_ident_names(value),
+      "MIR::HeapCreate",
+    )
+  end
+
+  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  def heap_carry_return_value(node, value)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless @current_fn_heap_carry_return && node.value && value
+    return value if value.is_a?(MIR::Ident)
+    return value if return_transfers_heap_binding?(node.value)
+    return value if mir_allocates?(value) || (value.is_a?(MIR::Call) && value.owned_return?)
+
+    ret_type = Type.from_node!(node.value, context: "heap carry return placement")
+    ret_type = ret_type.success_type || ret_type
+    escaping_value_alloc(ret_type) == :heap ? place_value_for_destination(value, node.value, :heap, ret_type) : value
+  end
+
+  sig { params(node: AST::ReturnNode, value: T.untyped).returns(T.untyped) }
+  def heap_carry_recursive_param_value(node, value)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless @current_fn_heap_carry_return && node.value && value.is_a?(MIR::Ident)
+    return value unless @current_fn_param_names&.include?(value.name)
+    return value if @current_fn_takes_param_names&.include?(value.name)
+
+    ret_type = Type.from_node!(node.value, context: "heap carry recursive return")
+    ret_type = ret_type.success_type || ret_type
+    ret_type.recursive_cleanup_shape?(@schema_lookup) ? MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap) : value
+  end
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  def tail_call_return?(value)
+    @current_fn_tail_call && !@debug_mode && value.is_a?(MIR::Call) && value.callee == @current_fn_zig_name
+  end
+
+  sig { params(plan: ReturnOwnershipPlan, value: T.untyped, ret: MIR::ReturnStmt).returns(T.untyped) }
+  def return_with_transfer_marks(plan, value, ret)
+    T.bind(self, MIRLowering) rescue nil
+    marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
+    marks.empty? ? ret : marks + [ret]
   end
 
   sig { params(node: AST::ReturnNode).returns(ReturnOwnershipPlan) }

@@ -77,6 +77,30 @@ class MIRLowering
     end
   end
 
+  class OwnedSinkPlan < T::Struct
+    extend T::Sig
+
+    const :action, Symbol
+    const :target_alloc, Symbol
+    const :zig_type, T.nilable(String)
+    const :copy_mode, T.nilable(Symbol)
+
+    sig { returns(T::Boolean) }
+    def keep?
+      action == :keep
+    end
+  end
+
+  class LoweredStmtPacket < T::Struct
+    extend T::Sig
+
+    const :ast_stmt, T.untyped
+    prop :mir, T.untyped
+    const :pending, T::Array[T.untyped]
+    const :source_line, T.nilable(Integer)
+    const :source_column, T.nilable(Integer)
+  end
+
   include ZigTypeMapper
   include FsmLowering
   include TestLowering
@@ -509,38 +533,10 @@ class MIRLowering
     return [] unless stmts
     result = []
     stmts.each { |s|
-      mir = lower(s)
-      next unless mir
-      # Non-void function-like expressions used as statements need explicit discard (_ =)
-      needs_discard = (AST.call?(s)) ||
-                      (s.is_a?(AST::BinaryOp) && (s.op == :OR_RESCUE || s.op == :PIPE_ERR))
-      hoisted_discard = false
-      if needs_discard &&
-         s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void &&
-        mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
-        entry = hoist_cleanup_entry(mir, s)
-        if entry
-          @tmp_counter += 1
-          discard_name = "__discard_#{@tmp_counter}"
-          alloc = entry.alloc || mir_owned_alloc(mir) || :heap
-          mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node(s))
-          mark.scope = alloc == :heap ? :heap : :iteration
-          stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
-          mir = MIR::ScopeBlock.new([
-            mark,
-            MIR::Let.new(discard_name, mir, true, discard_owned_zig_type(s, entry), "_ = &#{discard_name};"),
-            MIR::Cleanup.new(discard_name, entry),
-          ])
-          hoisted_discard = true
-        end
-      end
-      pending = flush_pending
-      if needs_discard &&
-         s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void &&
-         !hoisted_discard
-        mir = MIR::ExprStmt.new(mir, true)
-      end
-      pending.compact.each do |p|
+      packet = lowered_stmt_packet(s)
+      next unless packet
+
+      packet.pending.compact.each do |p|
         result << p
         result.concat(ownership_facts_for_mir_surface(p))
         register_visible_alloc_names!(p)
@@ -552,16 +548,16 @@ class MIRLowering
         end
       end
       if s.is_a?(AST::MoveNode)
-        ownership_marks_for_transferred_temp(mir).each { |mark| result << mark }
+        ownership_marks_for_transferred_temp(packet.mir).each { |mark| result << mark }
         next
       end
-      mir_nodes = normalize_allocating_mir_body(mir.is_a?(Array) ? mir.compact : [mir])
+      mir_nodes = normalize_allocating_mir_body(packet.mir.is_a?(Array) ? packet.mir.compact : [packet.mir])
       mir_nodes.each { |m| finalize_nested_mir_bodies!(m) }
 
       # Inject source map comment for this user-visible statement.
       # Placed after pending (hoisted synthetic temps have no user source line).
-      line = s.token&.line
-      col  = s.token&.column
+      line = packet.source_line
+      col  = packet.source_column
       result << MIR::Comment.new("CLR:#{line}") if line
       mir_nodes.each do |m|
         stamp_source_line!(m, line, col)
@@ -582,11 +578,59 @@ class MIRLowering
     result
   end
 
+  sig { params(stmt: T.untyped).returns(T.nilable(LoweredStmtPacket)) }
+  def lowered_stmt_packet(stmt)
+    mir = lower(stmt)
+    return nil unless mir
+
+    mir, hoisted_discard = materialize_statement_discard(stmt, mir)
+    pending = flush_pending
+    mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt) && !hoisted_discard
+    LoweredStmtPacket.new(
+      ast_stmt: stmt,
+      mir: mir,
+      pending: pending,
+      source_line: stmt.token&.line,
+      source_column: stmt.token&.column,
+    )
+  end
+
+  sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
+  def materialize_statement_discard(stmt, mir)
+    return [mir, false] unless discard_expr_stmt?(stmt)
+    return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
+
+    entry = hoist_cleanup_entry(mir, stmt)
+    return [mir, false] unless entry
+
+    @tmp_counter += 1
+    discard_name = "__discard_#{@tmp_counter}"
+    alloc = entry.alloc || mir_owned_alloc(mir) || :heap
+    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node(stmt))
+    mark.scope = alloc == :heap ? :heap : :iteration
+    stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
+    [
+      MIR::ScopeBlock.new([
+        mark,
+        MIR::Let.new(discard_name, mir, true, discard_owned_zig_type(stmt, entry), "_ = &#{discard_name};"),
+        MIR::Cleanup.new(discard_name, entry),
+      ]),
+      true,
+    ]
+  end
+
+  sig { params(stmt: T.untyped).returns(T::Boolean) }
+  def discard_expr_stmt?(stmt)
+    return false unless (AST.call?(stmt)) ||
+                        (stmt.is_a?(AST::BinaryOp) && (stmt.op == :OR_RESCUE || stmt.op == :PIPE_ERR))
+    stmt.respond_to?(:resolved_type) && stmt.resolved_type && stmt.resolved_type != :Void
+  end
+
   sig { params(result: T::Array[T.untyped], mir: T.untyped).returns(T::Set[String]) }
   def visible_alloc_names_for_transfer(result, mir)
     names = T.let(Set.new, T::Set[String])
-    walk_mir_node(result) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
-    walk_mir_node(mir) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
+    each_mir_surface_node(result) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
+    each_mir_surface_node(mir) { |node| names << node.name.to_s if node.is_a?(MIR::AllocMark) }
     names
   end
 
@@ -594,7 +638,7 @@ class MIRLowering
   def register_visible_alloc_names!(root)
     lowered_alloc_names = T.must(@lowered_alloc_names)
     lowered_guarded_cleanup_names = T.must(@lowered_guarded_cleanup_names)
-    walk_mir_node(root) do |node|
+    each_mir_surface_node(root) do |node|
       lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
       next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
 
@@ -609,7 +653,7 @@ class MIRLowering
   def visible_guarded_cleanup_names_for_transfer(result, mir)
     names = T.let(T.must(@lowered_guarded_cleanup_names).dup, T::Set[String])
     [result, mir].each do |root|
-      walk_mir_node(root) do |node|
+      each_mir_surface_node(root) do |node|
         next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
         entry = node.cleanup_entry
         guarded = entry.respond_to?(:has_moved_guard?) ? entry.has_moved_guard? : !!(entry.respond_to?(:[]) && entry[:has_moved_guard])
@@ -680,35 +724,23 @@ class MIRLowering
     nodes
   end
 
+  sig { params(root: T.untyped, blk: T.proc.params(arg0: MIR::Node).void).void }
+  def each_mir_surface_node(root, &blk)
+    if root.is_a?(Array)
+      root.each { |node| each_mir_surface_node(node, &blk) }
+      return
+    end
+    return unless root.respond_to?(:mir?) && root.mir?
+
+    ownership_surface_nodes(T.cast(root, MIR::Node)).each { |node| yield node }
+  end
+
   sig { params(node: T.nilable(MIR::Node), nodes: T::Array[MIR::Node]).void }
   def collect_ownership_surface_nodes(node, nodes)
     return unless node
 
     nodes << node
-    case node
-    when MIR::Let
-      collect_ownership_expr_surface_nodes(node.init, nodes)
-    when MIR::ExprStmt
-      collect_ownership_expr_surface_nodes(node.expr, nodes)
-    when MIR::Set
-      collect_ownership_expr_surface_nodes(node.target, nodes)
-      collect_ownership_expr_surface_nodes(node.value, nodes)
-    when MIR::ReassignWithCleanup
-      collect_ownership_expr_surface_nodes(node.value, nodes)
-    when MIR::ReturnStmt, MIR::BreakStmt
-      collect_ownership_expr_surface_nodes(node.value, nodes)
-    when MIR::IfStmt
-      collect_ownership_expr_surface_nodes(node.cond, nodes)
-    when MIR::IfBindStmt
-      node.bindings&.each do |binding|
-        expr = binding.is_a?(Hash) ? binding[:expr] : nil
-        collect_ownership_expr_surface_nodes(expr, nodes) if expr.respond_to?(:mir?) && expr.mir?
-      end
-    when MIR::WhileStmt
-      collect_ownership_expr_surface_nodes(node.cond, nodes)
-    when MIR::ForStmt
-      collect_ownership_expr_surface_nodes(node.iter, nodes)
-    end
+    node.child_exprs.each { |expr| collect_ownership_expr_surface_nodes(expr, nodes) }
     nil
   end
 
@@ -718,9 +750,6 @@ class MIRLowering
 
     nodes << expr
     if expr.is_a?(MIR::BlockExpr)
-      expr.body&.each do |stmt|
-        collect_ownership_surface_nodes(T.cast(stmt, MIR::Node), nodes) if stmt.respond_to?(:mir?) && stmt.mir?
-      end
       return
     end
     each_mir_expr_child(expr) do |child|
@@ -887,45 +916,11 @@ class MIRLowering
 
   sig { params(node: MIR::Node, inherited_alloc_names: T::Set[String], inherited_guarded_names: T::Set[String]).void }
   def finalize_nested_mir_bodies!(node, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
-    case node
-    when MIR::Let
-      finalize_nested_mir_expr_bodies!(node.init, inherited_alloc_names, inherited_guarded_names)
-    when MIR::Set
-      finalize_nested_mir_expr_bodies!(node.target, inherited_alloc_names, inherited_guarded_names)
-      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
-    when MIR::ReassignWithCleanup
-      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
-    when MIR::ExprStmt
-      finalize_nested_mir_expr_bodies!(node.expr, inherited_alloc_names, inherited_guarded_names)
-    when MIR::ReturnStmt, MIR::BreakStmt
-      finalize_nested_mir_expr_bodies!(node.value, inherited_alloc_names, inherited_guarded_names)
-    when MIR::WhileStmt, MIR::ForStmt
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
-    when MIR::ScopeBlock, MIR::BlockExpr
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
-    when MIR::BgBlock
-      node.run_body = append_ownership_transfers_for_mir_body(node.run_body ? node.run_body : [], inherited_alloc_names, inherited_guarded_names)
-    when MIR::StreamSpawn
-      node.body = append_ownership_transfers_for_mir_body(node.body ? node.body : [], inherited_alloc_names, inherited_guarded_names)
-    when MIR::DoBlock
-      node.branch_bodies&.map! { |branch_body| append_ownership_transfers_for_mir_body(branch_body ? branch_body : [], inherited_alloc_names, inherited_guarded_names) }
-    when MIR::CatchWrapper
-      node.clause_bodies&.map! { |clause_body| append_ownership_transfers_for_mir_body(clause_body ? clause_body : [], inherited_alloc_names, inherited_guarded_names) }
-    when MIR::IfStmt, MIR::IfBindStmt
-      node.then_body = append_ownership_transfers_for_mir_body(node.then_body ? node.then_body : [], inherited_alloc_names, inherited_guarded_names)
-      node.else_body = append_ownership_transfers_for_mir_body(node.else_body ? node.else_body : [], inherited_alloc_names, inherited_guarded_names) if node.else_body
-    when MIR::IfChain
-      node.branches&.each do |branch|
-        branch[:body] = append_ownership_transfers_for_mir_body(branch[:body] ? branch[:body] : [], inherited_alloc_names, inherited_guarded_names)
-      end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : [], inherited_alloc_names, inherited_guarded_names) if node.default_body
-    when MIR::SwitchStmt
-      node.arms&.each do |arm|
-        arm[:body] = append_ownership_transfers_for_mir_body(arm[:body] ? arm[:body] : [], inherited_alloc_names, inherited_guarded_names)
-      end
-      node.default_body = append_ownership_transfers_for_mir_body(node.default_body ? node.default_body : [], inherited_alloc_names, inherited_guarded_names) if node.default_body
-    else
-      each_mir_expr_child(node) { |child| finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names) }
+    node.child_exprs.each do |child|
+      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names)
+    end
+    node.body_slots.each do |slot|
+      slot.replace(append_ownership_transfers_for_mir_body(slot.body, inherited_alloc_names, inherited_guarded_names))
     end
     nil
   end
@@ -934,9 +929,8 @@ class MIRLowering
   def finalize_nested_mir_expr_bodies!(expr, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     return unless expr
     return unless expr.expr?
-    if expr.is_a?(MIR::BlockExpr)
-      expr.body = append_ownership_transfers_for_mir_body(expr.body ? expr.body : [], inherited_alloc_names, inherited_guarded_names)
-      return
+    expr.body_slots.each do |slot|
+      slot.replace(append_ownership_transfers_for_mir_body(slot.body, inherited_alloc_names, inherited_guarded_names))
     end
     each_mir_expr_child(expr) { |child| finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names) }
     nil
@@ -957,7 +951,7 @@ class MIRLowering
 
     name = node.name.to_s
     existing_mark = T.let(nil, T.nilable(MIR::AllocMark))
-    walk_mir_node(out) do |child|
+    each_mir_surface_node(out) do |child|
       existing_mark = child if child.is_a?(MIR::AllocMark) && child.name.to_s == name
     end
     if existing_mark
@@ -1027,7 +1021,7 @@ class MIRLowering
       contract_alloc = ownership_contract_sink_alloc(node, name)
       return contract_alloc if contract_alloc
 
-      walk_mir_node(node) do |child|
+      each_mir_surface_node(node) do |child|
         fact = child.ownership_consumption
         next unless fact.is_a?(MIR::OwnershipConsumptionFact)
         next unless fact.names.map(&:to_s).include?(name)
@@ -1056,7 +1050,7 @@ class MIRLowering
     nodes.compact.each do |node|
       next unless node.respond_to?(:mir?) && node.mir?
       found = T.let(nil, T.nilable(Symbol))
-      walk_mir_node(node) do |child|
+      each_mir_surface_node(node) do |child|
         next unless child.is_a?(MIR::AllocMark)
         next unless child.name.to_s == name
         found = child.alloc
@@ -1098,7 +1092,7 @@ class MIRLowering
       collect_mir_consumed_roots(node.inner).each { |name| names << name.to_s }
       return names.uniq
     end
-    walk_mir_node(node) do |child|
+    each_mir_surface_node(node) do |child|
       ownership_contract_consumes(child).each { |name| names << name.to_s }
       structural_ownership_consumes(child).each { |name| names << name.to_s }
       if child.is_a?(MIR::StructInit) || child.is_a?(MIR::ArrayInit)
@@ -1122,21 +1116,10 @@ class MIRLowering
     return unless node.respond_to?(:mir?) && node.mir?
 
     yield node
-    return if node.is_a?(MIR::BlockExpr) || node.is_a?(MIR::Pipeline) ||
-              node.is_a?(MIR::WhileStmt) || node.is_a?(MIR::ForStmt) ||
-              node.is_a?(MIR::IfStmt) || node.is_a?(MIR::IfBindStmt) ||
-              node.is_a?(MIR::IfChain) || node.is_a?(MIR::SwitchStmt) ||
-              node.is_a?(MIR::ScopeBlock) || node.is_a?(MIR::FnDef)
-    return unless node.class.respond_to?(:members)
-    node.class.members.each do |member|
-      value = node[member]
-      if value.is_a?(Array)
-        value.each { |child| walk_mir_node(child, &blk) }
-      elsif value.is_a?(Hash)
-        value.each_value { |child| walk_mir_node(child, &blk) }
-      else
-        walk_mir_node(value, &blk) if value.respond_to?(:mir?)
-      end
+    node.child_exprs.each { |child| walk_mir_node(child, &blk) }
+    node.body_slots.each { |slot| walk_mir_node(slot.body, &blk) }
+    if node.is_a?(MIR::Pipeline)
+      walk_mir_node(node.inner, &blk)
     end
   end
 
@@ -2455,38 +2438,60 @@ class MIRLowering
   sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(T.untyped) }
   def materialize_owned_sink_value(value, ast_node, sink_alloc, sink_type = nil)
     return value unless ast_node
+    plan = owned_sink_plan(value, ast_node, sink_alloc, sink_type)
+    return value if plan.keep?
+
+    case plan.action
+    when :dupe_slice
+      MIR::DupeSlice.new(value, plan.target_alloc)
+    when :deep_copy
+      MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, plan.copy_mode, plan.target_alloc)
+    when :dupe_union
+      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::Ident.new(alloc_zig_str(plan.target_alloc))])
+    else
+      value
+    end
+  end
+
+  sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(OwnedSinkPlan) }
+  def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
     ti = Type.from_node!(ast_node, context: "owned sink materialization")
     dst_ti = Type.from_node(sink_type) || ti
+    keep = OwnedSinkPlan.new(action: :keep, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
 
     if ti.string?
-      value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
-      return value if AST.moved?(ast_node) &&
-                      value_alloc == sink_alloc &&
-                      !ti.rodata? &&
-                      !ast_node.is_a?(AST::CopyNode) && !ast_node.is_a?(AST::CloneNode)
-      return value if value_alloc == sink_alloc && verifiable_owned_source?(ast_node)
-      return value if value_alloc == sink_alloc && existing_owned_source?(ast_node) &&
-                      !verifiable_owned_source?(ast_node)
-      return value if owned_sink_value?(value, ast_node)
-      return MIR::DupeSlice.new(value, sink_alloc)
+      return keep if owned_sink_source_satisfies?(value, ast_node, sink_alloc, ti)
+      return OwnedSinkPlan.new(action: :dupe_slice, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
     end
 
     if ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
-      value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
-      return value if AST.moved?(ast_node) &&
-                      value_alloc == sink_alloc &&
-                      !ast_node.is_a?(AST::CopyNode) && !ast_node.is_a?(AST::CloneNode)
-      return value if owned_parameter_source?(ast_node)
-      return value if ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create
-      return value if value_alloc == sink_alloc && ownership_transfer_source?(ast_node)
-      return value if ownership_transfer_source_without_local_cleanup?(ast_node)
-      return value unless existing_owned_source?(ast_node)
-      return MIR::DeepCopy.new(value, dst_ti.zig_type(is_field: true), nil, :full_value, sink_alloc)
+      return keep if owned_sink_source_satisfies?(value, ast_node, sink_alloc, ti)
+      return keep unless existing_owned_source?(ast_node)
+      return OwnedSinkPlan.new(
+        action: :deep_copy,
+        target_alloc: sink_alloc,
+        zig_type: dst_ti.zig_type(is_field: true),
+        copy_mode: :full_value,
+      )
     end
 
-    return value unless borrowed_union_sink_value?(ast_node, ti)
-    zig_t = bare_zig_type(ti)
-    emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), value, MIR::Ident.new(alloc_zig_str(sink_alloc))])
+    return keep unless borrowed_union_sink_value?(ast_node, ti)
+
+    OwnedSinkPlan.new(action: :dupe_union, target_alloc: sink_alloc, zig_type: bare_zig_type(ti), copy_mode: nil)
+  end
+
+  sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, ti: Type).returns(T::Boolean) }
+  def owned_sink_source_satisfies?(value, ast_node, sink_alloc, ti)
+    value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
+    moved_without_copy = AST.moved?(ast_node) && !ast_node.is_a?(AST::CopyNode) && !ast_node.is_a?(AST::CloneNode)
+    return true if moved_without_copy && value_alloc == sink_alloc && (!ti.string? || !ti.rodata?)
+    return true if owned_parameter_source?(ast_node)
+    return true if ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create
+    return true if value_alloc == sink_alloc && verifiable_owned_source?(ast_node)
+    return true if value_alloc == sink_alloc && ownership_transfer_source?(ast_node)
+    return true if value_alloc == sink_alloc && existing_owned_source?(ast_node) && !verifiable_owned_source?(ast_node)
+    return true if ownership_transfer_source_without_local_cleanup?(ast_node)
+    owned_sink_value?(value, ast_node)
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }

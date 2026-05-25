@@ -902,6 +902,37 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
+  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[T.untyped], mir_args: T::Array[T.untyped]).returns(T.nilable(MIR::CallableContract)) }
+  def callable_contract_for_lowered_args(sig, ast_args, mir_args)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless sig
+
+    takes_indices = T.let(Set.new, T::Set[Integer])
+    consumed = T.let([], T::Array[String])
+    ast_args.each_with_index do |arg, idx|
+      param = sig.params[idx]
+      next unless call_arg_consumes_ownership?(arg, param)
+      takes_indices << idx
+      next unless ownership_tracked_transfer_type?(Type.from_node!(arg, context: "lowered call ownership argument"))
+      ownership_consumed_arg_names(mir_args[idx]).each { |name| consumed << name.to_s }
+    end
+    facts = CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq)
+    MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
+  end
+
+  sig { params(arg: T.untyped).returns(T::Array[String]) }
+  def ownership_consumed_arg_names(arg)
+    T.bind(self, MIRLowering) rescue nil
+    case arg
+    when MIR::Ident
+      [arg.name.to_s]
+    when MIR::OwnedSlice, MIR::Cast, MIR::TryExpr, MIR::AddressOf, MIR::Deref
+      ownership_consumed_arg_names(arg.expr)
+    else
+      mir_ident_names(arg)
+    end
+  end
+
   sig { params(ast_arg: AST::Node, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
   def call_arg_facts(ast_arg, callee_sig, param_index)
     T.bind(self, MIRLowering) rescue nil
@@ -1101,7 +1132,7 @@ module MIRLoweringFunctions
     if node.respond_to?(:fn_var_call) && node.fn_var_call
       # fn-type variable call
       all_args = [MIR::Ident.new(@rt_name)] + args_mir
-      contract = callable_contract_for(FunctionSignature.unwrap(node.matched_signature), node.args)
+      contract = callable_contract_for_lowered_args(FunctionSignature.unwrap(node.matched_signature), node.args, args_mir)
       return MIR::Call.new("try #{node.name}", all_args, false, call_owned_return?(node), contract)
     end
 
@@ -1122,7 +1153,7 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, node.args))
+    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for_lowered_args(callee_sig, node.args, args_mir))
   end
 
   sig { params(node: AST::MethodCall).returns(T.untyped) }
@@ -1172,7 +1203,7 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for(callee_sig, [node.object] + node.args))
+    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir))
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

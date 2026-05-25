@@ -12,7 +12,7 @@
 # expected :pass; a failing/leaking :pass cell is a SURFACED bug.
 
 MM_CELLS = []
-MM_SUBJECT = %i[union_payload union_unit enum]
+MM_SUBJECT = %i[union_payload union_unit enum union_string_as union_list_as union_inline_struct_as]
 MM_DEFAULT = %i[with_default no_default]
 MM_OUTCOME = %i[matched default_taken]
 
@@ -80,6 +80,60 @@ FuzzGenerator.register(:match_matrix, cells: MM_CELLS) do |p|
               Dir.South -> got = 2.0;,
       #{mm_default_arm(p[:default])}    END
           ASSERT got == #{expected}, "enum match";
+          RETURN;
+      END
+    CHT
+  when :union_string_as
+    subject_expr = p[:outcome] == :default_taken ? "Box.Empty" : 'Box{ Text: COPY "abc" }'
+    expected = p[:outcome] == :default_taken ? "9_i64" : "3_i64"
+    <<~CHT
+      UNION Box { Empty, Text: String }
+
+      FN main() RETURNS Void ->
+          b = #{subject_expr};
+          MUTABLE got: Int64 = 0_i64;
+          PARTIAL MATCH b START
+              Box.Text AS x -> got = x.length();,
+      #{mm_default_arm(p[:default]).gsub("9.0", "9_i64")}    END
+          ASSERT got == #{expected}, "union string AS match";
+          RETURN;
+      END
+    CHT
+  when :union_list_as
+    subject_expr = p[:outcome] == :default_taken ? "Box.Empty" : "Box{ Items: xs }"
+    pre_subject =
+      if p[:outcome] == :default_taken
+        ""
+      else
+        "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    "
+      end
+    expected = p[:outcome] == :default_taken ? "9_i64" : "2_i64"
+    <<~CHT
+      UNION Box { Empty, Items: Int64[]@list }
+
+      FN main() RETURNS Void ->
+          #{pre_subject}b = #{subject_expr};
+          MUTABLE got: Int64 = 0_i64;
+          PARTIAL MATCH b START
+              Box.Items AS x -> got = x.length();,
+      #{mm_default_arm(p[:default]).gsub("9.0", "9_i64")}    END
+          ASSERT got == #{expected}, "union list AS match";
+          RETURN;
+      END
+    CHT
+  when :union_inline_struct_as
+    subject_expr = p[:outcome] == :default_taken ? "Box.Empty" : 'Box.Item{ label: COPY "xyz", count: 4_i64 }'
+    expected = p[:outcome] == :default_taken ? "9_i64" : "7_i64"
+    <<~CHT
+      UNION Box { Empty, Item { label: String, count: Int64 } }
+
+      FN main() RETURNS Void ->
+          b = #{subject_expr};
+          MUTABLE got: Int64 = 0_i64;
+          PARTIAL MATCH b START
+              Box.Item AS x -> got = x.label.length() + x.count;,
+      #{mm_default_arm(p[:default]).gsub("9.0", "9_i64")}    END
+          ASSERT got == #{expected}, "union inline struct AS match";
           RETURN;
       END
     CHT
