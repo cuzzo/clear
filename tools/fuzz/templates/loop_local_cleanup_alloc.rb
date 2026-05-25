@@ -5,7 +5,7 @@
 #
 # Surfaces the LoopFrameAnalysis frame-decl detection gap:
 #   `local_frame_decls` recognises bindings whose `storage == :frame`
-#   (post-EscapeGraph) as needing per-iteration mark/rewind. But a
+#   (post-escape-analysis) as needing per-iteration mark/rewind. But a
 #   cleanup-alloc-frame binding -- e.g. a STRUCT-literal bound inside a
 #   loop body where one field is an owned-string ArrayList -- is NOT
 #   currently surfaced as frame-local, so the per-iteration arena rewind

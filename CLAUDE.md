@@ -48,7 +48,7 @@ Default build has Zig safety checks (bounds/overflow/null) but no `__morestack` 
 | 0. Parse | `src/ast/lexer.rb`, `src/ast/parser.rb` | raw AST |
 | 1. Annotate | `src/annotator.rb`, `src/ast/type.rb`, `src/ast/scope.rb`, `src/mir/ownership_graph.rb` | `type_info`, `full_type`, `was_moved`, `container_borrow`, `matched_stdlib_def`, `param[:takes]` |
 | 2a. Escape analysis | `src/mir/escape_analysis.rb` | `storage`, `provenance` on declarations |
-| 2b. Cleanup + MIR | `src/mir/promotion_plan.rb`, `src/mir/control_flow.rb`, `src/mir/mir_lowering.rb` | `bindings[name] = entry`; inline MIR nodes |
+| 2b. Cleanup + MIR | `src/mir/cleanup_classifier.rb`, `src/mir/control_flow.rb`, `src/mir/mir_lowering.rb` | `bindings[name] = entry`; inline MIR nodes |
 | 3. Check | `src/mir/mir_checker.rb` | (verify only — see 7 invariants below) |
 | 4. Emit | `src/backends/transpiler.rb`, `src/mir/mir_emitter.rb` | Zig source |
 

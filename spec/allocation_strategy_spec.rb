@@ -586,7 +586,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     end
 
     # Borrow-return carve-out. `RETURNS x:T` ties the return to a param;
-    # EscapeGraph's borrow_return? suppresses the S-return sink and keeps
+    # Escape analysis suppresses the S-return sink for borrowed returns and keeps
     # the fn out of heap_fns. End-to-end `clear test` of borrow-return
     # data types fails at PreMirTypeCheck (lifetime MIR lowering isn't
     # complete for non-`~Void` returns); these specs use run_mir which

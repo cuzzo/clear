@@ -35,8 +35,8 @@ COND_OR_FALLBACK_CELLS = []
       # Every cell is active. A condition-position OR fallback must either
       # compile correctly or expose a real regression.
       # :return cells exercise OR-fallback in RETURN position
-      # (`RETURN maybe(x) OR fallback`) -- the escape_graph
-      # return_value_is_heap? BinaryOp/OR_RESCUE arm.
+      # (`RETURN maybe(x) OR fallback`) -- the escape analysis
+      # return-value heap decision for BinaryOp/OR_RESCUE.
       cell[:expected] = :pass
       COND_OR_FALLBACK_CELLS << cell
     end
@@ -158,8 +158,8 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
 
   if p[:container] == :return
     # OR-fallback in RETURN position: a wrapper fn returns
-    # `maybe(arg) OR fallback`. Exercises return_value_is_heap?'s
-    # BinaryOp/OR_RESCUE arm in escape_graph.
+    # `maybe(arg) OR fallback`. Exercises the return-value heap decision
+    # for BinaryOp/OR_RESCUE in escape analysis.
     rt = cof_value_type(p[:value_type])
     param_t = cof_value_type(p[:value_type])
     next <<~CHT

@@ -5,7 +5,7 @@
 # and letting it fall off the end of scope (forcing the classifier to
 # stamp a cleanup entry + the checker to verify alloc<->cleanup pairing).
 #
-# Targets the uncovered classify_* branches in promotion_plan.rb:
+# Targets the uncovered classify_* branches in cleanup_classifier.rb:
 #   classify_non_copy_union, classify_optional, classify_owned_string,
 #   classify_struct_cleanup_fields, classify_rc_or_link,
 #   classify_heap_provenance / classify_heap_composite.

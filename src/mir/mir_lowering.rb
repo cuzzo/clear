@@ -127,6 +127,14 @@ class MIRLowering
     prop :out, T::Array[T.untyped]
   end
 
+  class BodyAssemblyState < T::Struct
+    extend T::Sig
+
+    prop :out, T::Array[T.untyped]
+    prop :visible_alloc_names, T::Set[String]
+    prop :visible_guarded_names, T::Set[String]
+  end
+
   class OwnershipFactTarget < T::Struct
     extend T::Sig
 
@@ -204,8 +212,8 @@ class MIRLowering
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
     @target = target
     @fn_alloc_marked_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
-    @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[T.untyped]))
+    @lowered_alloc_names = T.let(Set.new, T.nilable(T::Set[String]))
+    @lowered_guarded_cleanup_names = T.let(Set.new, T.nilable(T::Set[String]))
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @guarded_cleanup_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -628,51 +636,87 @@ class MIRLowering
   sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
   def lower_body(stmts)
     return [] unless stmts
-    result = []
+
+    state = BodyAssemblyState.new(
+      out: [],
+      visible_alloc_names: T.must(@lowered_alloc_names).dup,
+      visible_guarded_names: T.must(@lowered_guarded_cleanup_names).dup,
+    )
     stmts.each { |s|
       packet = lowered_stmt_packet(s)
       next unless packet
 
-      packet.pending.compact.each do |p|
-        result << p
-        result.concat(ownership_facts_for_mir_surface(p))
-        register_visible_alloc_names!(p)
-        visible_alloc_names = visible_alloc_names_for_transfer(result, p)
-        visible_guarded_names = visible_guarded_cleanup_names_for_transfer(result, p)
-        ownership_transfers_for_mir(p, visible_alloc_names, visible_guarded_names).each do |mark|
-          result << mark
-          result.concat(ownership_facts_for_structural_node(mark))
-        end
-      end
-      if s.is_a?(AST::MoveNode)
-        ownership_marks_for_transferred_temp(packet.mir).each { |mark| result << mark }
-        next
-      end
-      mir_nodes = normalize_allocating_mir_body(packet.mir.is_a?(Array) ? packet.mir.compact : [packet.mir])
-      mir_nodes.each { |m| finalize_nested_mir_bodies!(m) }
-
-      # Inject source map comment for this user-visible statement.
-      # Placed after pending (hoisted synthetic temps have no user source line).
-      line = packet.source_line
-      col  = packet.source_column
-      result << MIR::Comment.new("CLR:#{line}") if line
-      mir_nodes.each do |m|
-        stamp_source_line!(m, line, col)
-        pre_terminator_transfer_marks(m, result, mir_nodes).each do |mark|
-          stamp_source_line!(mark, line, col)
-          result << mark
-        end
-        result << m
-      end
-      register_visible_alloc_names!(mir_nodes)
-      visible_alloc_names = visible_alloc_names_for_transfer(result, mir_nodes)
-      visible_guarded_names = visible_guarded_cleanup_names_for_transfer(result, mir_nodes)
-      (ownership_transfers_for_stmt(s, visible_alloc_names, visible_guarded_names) + ownership_transfers_for_mir(mir_nodes, visible_alloc_names, visible_guarded_names)).uniq { |m| [m.class, m.name, m.respond_to?(:target) ? m.target : nil] }.each do |m|
-        stamp_source_line!(m, line, col)
-        result << m
-      end
+      append_pending_packet_nodes!(state, packet)
+      append_lowered_statement_packet!(state, packet)
     }
-    result
+    state.out
+  end
+
+  sig { params(state: BodyAssemblyState, packet: LoweredStmtPacket).void }
+  def append_pending_packet_nodes!(state, packet)
+    packet.pending.compact.each do |node|
+      append_ownership_finalized_node!(state, node, [node], nil, nil)
+    end
+    nil
+  end
+
+  sig { params(state: BodyAssemblyState, packet: LoweredStmtPacket).void }
+  def append_lowered_statement_packet!(state, packet)
+    if packet.ast_stmt.is_a?(AST::MoveNode)
+      append_transfer_marks_to_body!(state, ownership_marks_for_transferred_temp(packet.mir), nil, nil)
+      return
+    end
+
+    mir_nodes = normalize_allocating_mir_body(packet.mir.is_a?(Array) ? packet.mir.compact : [packet.mir])
+    line = packet.source_line
+    col = packet.source_column
+    state.out << MIR::Comment.new("CLR:#{line}") if line
+    mir_nodes.each { |node| append_ownership_finalized_node!(state, node, mir_nodes, line, col) }
+    marks = ownership_transfers_for_stmt(packet.ast_stmt, state.visible_alloc_names, state.visible_guarded_names) +
+            ownership_transfers_for_mir(mir_nodes, state.visible_alloc_names, state.visible_guarded_names, state.out + mir_nodes)
+    append_transfer_marks_to_body!(state, dedupe_transfer_marks(marks), line, col)
+    nil
+  end
+
+  sig do
+    params(
+      state: BodyAssemblyState,
+      node: T.untyped,
+      body: T::Array[T.untyped],
+      line: T.nilable(Integer),
+      col: T.nilable(Integer),
+    ).void
+  end
+  def append_ownership_finalized_node!(state, node, body, line, col)
+    finalize_nested_mir_bodies!(node, state.visible_alloc_names, state.visible_guarded_names)
+    stamp_source_line!(node, line, col)
+    append_transfer_marks_to_body!(state, pre_terminator_transfer_marks(node, state.out, body), line, col)
+    state.out << node
+    state.out.concat(ownership_facts_for_mir_surface(node))
+    register_body_visible_names!(state, node)
+    append_transfer_marks_to_body!(
+      state,
+      ownership_transfers_for_mir(node, state.visible_alloc_names, state.visible_guarded_names, state.out + body),
+      line,
+      col,
+    )
+    nil
+  end
+
+  sig { params(state: BodyAssemblyState, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
+  def append_transfer_marks_to_body!(state, marks, line, col)
+    marks.each do |mark|
+      stamp_source_line!(mark, line, col)
+      state.out << mark
+      state.out.concat(ownership_facts_for_structural_node(mark)) if mark.respond_to?(:mir?) && mark.mir?
+      register_body_visible_names!(state, mark)
+    end
+    nil
+  end
+
+  sig { params(marks: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  def dedupe_transfer_marks(marks)
+    marks.uniq { |mark| [mark.class, mark.respond_to?(:name) ? mark.name : nil, mark.respond_to?(:target) ? mark.target : nil] }
   end
 
   sig { params(stmt: T.untyped).returns(T.nilable(LoweredStmtPacket)) }
@@ -731,17 +775,26 @@ class MIRLowering
     names
   end
 
+  sig { params(state: BodyAssemblyState, root: T.untyped).void }
+  def register_body_visible_names!(state, root)
+    each_mir_surface_node(root) do |node|
+      state.visible_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
+      guarded_name = cleanup_node_move_guarded_name(node)
+      state.visible_guarded_names << guarded_name if guarded_name
+    end
+    @lowered_alloc_names = state.visible_alloc_names
+    @lowered_guarded_cleanup_names = state.visible_guarded_names
+    nil
+  end
+
   sig { params(root: T.untyped).void }
   def register_visible_alloc_names!(root)
     lowered_alloc_names = T.must(@lowered_alloc_names)
     lowered_guarded_cleanup_names = T.must(@lowered_guarded_cleanup_names)
     each_mir_surface_node(root) do |node|
       lowered_alloc_names << node.name.to_s if node.is_a?(MIR::AllocMark)
-      next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
-
-      entry = node.cleanup_entry
-      guarded = entry.respond_to?(:has_moved_guard?) ? entry.has_moved_guard? : !!(entry.respond_to?(:[]) && entry[:has_moved_guard])
-      lowered_guarded_cleanup_names << node.name.to_s if guarded
+      guarded_name = cleanup_node_move_guarded_name(node)
+      lowered_guarded_cleanup_names << guarded_name if guarded_name
     end
     nil
   end
@@ -751,13 +804,18 @@ class MIRLowering
     names = T.let(T.must(@lowered_guarded_cleanup_names).dup, T::Set[String])
     [result, mir].each do |root|
       each_mir_surface_node(root) do |node|
-        next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
-        entry = node.cleanup_entry
-        guarded = entry.respond_to?(:has_moved_guard?) ? entry.has_moved_guard? : !!(entry.respond_to?(:[]) && entry[:has_moved_guard])
-        names << node.name.to_s if guarded
+        guarded_name = cleanup_node_move_guarded_name(node)
+        names << guarded_name if guarded_name
       end
     end
     names
+  end
+
+  sig { params(node: MIR::Node).returns(T.nilable(String)) }
+  def cleanup_node_move_guarded_name(node)
+    return nil unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+
+    node.cleanup_entry.has_moved_guard? ? node.name.to_s : nil
   end
 
   sig do

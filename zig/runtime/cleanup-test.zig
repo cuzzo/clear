@@ -560,7 +560,7 @@ test "needsCleanup: recursive union with 17 variants compiles" {
     try std.testing.expect(CheatLib.needsCleanup(RecValue_Pair));
 }
 
-// cleanupAlloc + the mixed-provenance test were removed: EscapeGraph now
+// cleanupAlloc + the mixed-provenance test were removed: escape analysis now
 // promotes any frame container that would receive heap-owned elements
 // to heap at the binding site, so the "mixed-provenance" scenario this
 // test simulated cannot arise in compiler output. tools/audit_provenance_mismatch

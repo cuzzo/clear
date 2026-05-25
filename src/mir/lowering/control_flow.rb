@@ -137,7 +137,7 @@ module MIRLoweringControlFlow
 
   # Single-source frame-arena marker injection for every loop shape
   # (lower_while / lower_while_bind / lower_for_each / lower_for_range).
-  # When mark_per_iter is set by EscapeGraph (frame allocs that survive
+  # When mark_per_iter is set by escape analysis (frame allocs that survive
   # past the iteration end would otherwise grow the arena unbounded),
   # prepend a saveLoopMark/restoreLoopMark pair so each iteration rewinds
   # to the pre-body high-water mark. `after_mark` is interposed between

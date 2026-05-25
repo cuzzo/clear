@@ -38,9 +38,11 @@ module Boobytrap
     end
 
     def filter_paths(hash)
-      return hash if @only.empty?
+      hash.select { |rel, _| in_scope?(rel) && current_file?(rel) }
+    end
 
-      hash.select { |rel, _| in_scope?(rel) }
+    def current_file?(rel)
+      ::File.file?(::File.join(@repo, rel))
     end
 
     def to_markdown

@@ -6,7 +6,7 @@
 # binding inherits a per-iteration / per-branch cleanup contract.
 #
 # Targets the uncovered each_capture_binding + walk_capture_bindings
-# arms in promotion_plan.rb (the WhileBindLoop / IfBind cases, the
+# arms in cleanup_classifier.rb (the WhileBindLoop / IfBind cases, the
 # wrapped_type extraction, the elem_zig_type fill).
 #
 # `form` axis  : :while drains a list via .pop(); :if takes one .pop().

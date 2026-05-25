@@ -747,7 +747,7 @@ module CleanupClassifier
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes
   # (sync/shared/multiowned/link/frozen) all imply heap; stack/frame
   # imply frame. Reads decl symbol via sym.reg for the authoritative
-  # post-EscapeGraph storage.
+  # post-escape-analysis storage.
   sig { params(sym: T.untyped, node: T.untyped).returns(Symbol) }
   private_class_method def self.container_alloc_from(sym, node)
     decl = sym && sym.respond_to?(:reg) ? sym.reg : nil
@@ -804,7 +804,7 @@ module CleanupClassifier
     is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
     # Optional binding alloc inherits from the binding's authoritative
-    # storage. EscapeGraph promotes optionals receiving cross-fiber/heap
+    # storage. Escape analysis marks optionals receiving cross-fiber/heap
     # data to heap; the rest stay frame. The runtime cleanup arm uses
     # the binding's allocator to free the payload -- frame.free is a
     # no-op for frame strings (arena reclaim), heap.free for heap
@@ -960,7 +960,7 @@ module CleanupClassifier
     # addressed.
     # Struct with cleanup-needing fields: alloc inherits provenance.
     # Frame structs have frame-allocated nested collection/string fields
-    # (uniform via the same EscapeGraph promotion that handles direct
+    # (uniform via the same escape-analysis storage decision that handles direct
     # @list bindings); the runtime's frame.free is a no-op for them,
     # so the arena reclaim is correct. The previous :cleanup fallback
     # was a workaround for the same mismatch class the list-elem case

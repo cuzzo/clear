@@ -6,7 +6,7 @@
 #
 # Known compiler bug this template surfaces:
 #   When the consumer binding has explicit frame-collection sigil (or
-#   defaults to frame), EscapeGraph doesn't promote it to heap despite
+#   defaults to frame), escape analysis doesn't mark it heap despite
 #   the cross-fiber data. The :cleanup allocator dispatch bridges today;
 #   under the "one collection = one allocator" policy this becomes a
 #   leak.
