@@ -527,13 +527,8 @@ module MIRLoweringExpressions
         ex = node.right
         exit_facts = or_exit_facts(ex, facts.line)
         msg_mir = ex.message ? lower(ex.message) : nil
-        reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-          kind: exit_facts.kind, name_id: exit_facts.name_id,
-          clear_type: exit_facts.clear_type, has_message: exit_facts.has_message,
-          line: exit_facts.line
-        })
         catch_block = MIR::ScopeBlock.new([
-          MIR::ExprStmt.new(reassign, false),
+          MIR::ExprStmt.new(or_exit_bc_reassign(exit_facts, msg_mir), false),
           MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
         ])
         return try_catch_with_provenance(left, catch_block, "__exit_err")
@@ -542,16 +537,8 @@ module MIRLoweringExpressions
       if facts.left_is_error
         ex = node.right
         exit_facts = or_exit_facts(ex, facts.line)
-        stmts = or_exit_error_update_stmts(exit_facts)
-
-        if ex.message
-          msg_zig = emit_expr(lower(ex.message))
-          stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.message = #{msg_zig}", "or_exit_msg")
-        end
-
-        stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.clear_line = #{exit_facts.line}", "or_exit_line")
-        stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
-        catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
+        msg_zig = ex.message ? emit_expr(lower(ex.message)) : nil
+        catch_block = or_exit_scope(exit_facts, msg_zig, MIR::Ident.new("__exit_err"))
         return try_catch_with_provenance(left, catch_block, "__exit_err")
       end
       return left
@@ -777,6 +764,27 @@ module MIRLoweringExpressions
       end
     end
     stmts
+  end
+
+  sig { params(facts: OrExitFacts, msg_mir: T.nilable(MIR::Node)).returns(MIR::InlineBc) }
+  def or_exit_bc_reassign(facts, msg_mir)
+    MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
+      kind: facts.kind,
+      name_id: facts.name_id,
+      clear_type: facts.clear_type,
+      has_message: facts.has_message,
+      line: facts.line,
+    })
+  end
+
+  sig { params(facts: OrExitFacts, msg_zig: T.nilable(String), return_value: MIR::Node).returns(MIR::ScopeBlock) }
+  def or_exit_scope(facts, msg_zig, return_value)
+    T.bind(self, MIRLowering) rescue nil
+    stmts = or_exit_error_update_stmts(facts)
+    stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.message = #{msg_zig}", "or_exit_msg") if msg_zig
+    stmts << MIR::InlineZig.new("#{runtime_binding_name}.__error.clear_line = #{facts.line}", "or_exit_line")
+    stmts << MIR::ReturnStmt.new(return_value)
+    MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
   end
 
   sig { params(node: AST::BinaryOp).returns(BinaryIntArithmeticFacts) }

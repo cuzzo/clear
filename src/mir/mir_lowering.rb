@@ -119,6 +119,28 @@ class MIRLowering
     const :source_column, T.nilable(Integer)
   end
 
+  class LoweredItemTarget < T::Struct
+    extend T::Sig
+
+    const :items, T::Array[T.untyped]
+    const :line, T.nilable(Integer)
+  end
+
+  class UnionVariantLoweringFact < T::Struct
+    extend T::Sig
+
+    const :owner_name, String
+    const :name, String
+    const :data, T.untyped
+    const :inline_struct, T::Boolean
+    const :zig_type, String
+
+    sig { returns(String) }
+    def helper_name
+      "#{owner_name}_#{name}"
+    end
+  end
+
   class OwnershipFinalizationState < T::Struct
     extend T::Sig
 
@@ -928,21 +950,9 @@ class MIRLowering
     return unless node
 
     nodes << node
-    node.child_exprs.each { |expr| collect_ownership_expr_surface_nodes(expr, nodes) }
-    nil
-  end
+    return if node.is_a?(MIR::BlockExpr)
 
-  sig { params(expr: T.untyped, nodes: T::Array[MIR::Node]).void }
-  def collect_ownership_expr_surface_nodes(expr, nodes)
-    return unless expr.respond_to?(:mir?) && expr.mir?
-
-    nodes << expr
-    if expr.is_a?(MIR::BlockExpr)
-      return
-    end
-    each_mir_expr_child(expr) do |child|
-      collect_ownership_expr_surface_nodes(child, nodes)
-    end
+    node.child_exprs.each { |expr| collect_ownership_surface_nodes(expr, nodes) }
     nil
   end
 
@@ -1562,20 +1572,24 @@ class MIRLowering
 
     # Lower each statement, adding source line comments
     node.statements.each do |stmt|
-      lowered = lower(stmt)
-      next unless lowered
-      line = stmt.token&.line
-      # Some lowerings (e.g. union with helpers) return arrays of nodes
-      nodes = lowered.is_a?(::Array) ? lowered : [lowered]
-      nodes.each_with_index do |n, i|
-        items << MIR::Comment.new("CLR:#{line}") if i == 0
-        items << n
-      end
+      append_lowered_items!(LoweredItemTarget.new(items: items, line: stmt.token&.line), lower(stmt))
     end
 
     state = MIRPassState.for!(node).copy
     state.mark!(:mir_lowered)
     MIR::Program.new(items, state)
+  end
+
+  sig { params(target: LoweredItemTarget, lowered: T.untyped).void }
+  def append_lowered_items!(target, lowered)
+    return unless lowered
+
+    nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+    nodes.each_with_index do |node, index|
+      target.items << MIR::Comment.new("CLR:#{target.line}") if index.zero? && target.line
+      target.items << node
+    end
+    nil
   end
 
   # Lower a module AST into MIR items for inlining via REQUIRE.
@@ -1593,37 +1607,14 @@ class MIRLowering
       case stmt
       when AST::FunctionDef
         next if stmt.visibility == :private
-        lowered = lower(stmt)
-        next unless lowered
-        line = stmt.token.line
-        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
-        nodes.each_with_index do |n, i|
-          fn_items << MIR::Comment.new("CLR:#{line}") if i == 0
-          fn_items << n
-        end
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
       when AST::StructDef, AST::EnumDef, AST::UnionDef
         next if stmt.visibility == :private
-        lowered = lower(stmt)
-        next unless lowered
-        line = stmt.token.line
-        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
-        nodes.each_with_index do |n, i|
-          type_items << MIR::Comment.new("CLR:#{line}") if i == 0
-          type_items << n
-        end
+        append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower(stmt))
       when AST::RequireNode
-        lowered = lower(stmt)
-        next unless lowered
-        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower(stmt))
       when AST::ExternFnDecl, AST::ExternStructDecl
-        lowered = lower(stmt)
-        next unless lowered
-        line = stmt.token.line
-        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
-        nodes.each_with_index do |n, i|
-          fn_items << MIR::Comment.new("CLR:#{line}") if i == 0
-          fn_items << n
-        end
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
       end
     end
 
@@ -1897,18 +1888,20 @@ class MIRLowering
   sig { params(node: AST::UnionDef).returns(T.untyped) }
   def lower_union_def(node)
     @union_schemas[node.name.to_sym] = Schemas::UnionSchema.new(variants: node.variants)
+    variant_facts = union_variant_lowering_facts(node)
 
     # Emit helper structs for inline struct variants
-    helper_structs = node.variants.filter_map do |var_name, var_data|
-      next unless Schemas.inline_struct?(var_data)
-      fields = var_data.fields.map { |fname, ftype|
+    helper_structs = variant_facts.filter_map do |fact|
+      next unless fact.inline_struct
+
+      fields = fact.data.fields.map { |fname, ftype|
         zig_t = transpile_type(ftype, is_field: true)
         MIR::FieldDef.new(fname.to_s, zig_t, nil)
       }
 
       alloc_ref = MIR::Ident.new("alloc")
       self_ref  = MIR::Ident.new("self")
-      deinit_stmts = (var_data.deinit_entries || []).flat_map { |de|
+      deinit_stmts = (fact.data.deinit_entries || []).flat_map { |de|
         self_field = MIR::FieldGet.new(self_ref, de[:field])
         case de[:kind]
         when :indirect
@@ -1954,20 +1947,11 @@ class MIRLowering
         [deinit_fn]
       end
 
-      MIR::StructDef.new("#{node.name}_#{var_name}", fields, methods, nil)
+      MIR::StructDef.new(fact.helper_name, fields, methods, nil)
     end
 
     # Build variant list
-    variants = node.variants.map { |var_name, var_data|
-      zig_t = if var_data.nil?
-        "void"
-      elsif Schemas.inline_struct?(var_data)
-        "#{node.name}_#{var_name}"
-      else
-        transpile_type(var_data, is_field: true)
-      end
-      { name: var_name.to_s, zig_type: zig_t }
-    }
+    variants = variant_facts.map { |fact| { name: fact.name, zig_type: fact.zig_type } }
 
     if node.type_params&.any?
       # Generic union: fn Name(comptime T: type) type { return union(enum) { ... }; }
@@ -1987,6 +1971,29 @@ class MIRLowering
       else
         union_node
       end
+    end
+  end
+
+  sig { params(node: AST::UnionDef).returns(T::Array[UnionVariantLoweringFact]) }
+  def union_variant_lowering_facts(node)
+    node.variants.map do |var_name, var_data|
+      inline_struct = Schemas.inline_struct?(var_data)
+      name = var_name.to_s
+      zig_type =
+        if var_data.nil?
+          "void"
+        elsif inline_struct
+          "#{node.name}_#{name}"
+        else
+          transpile_type(var_data, is_field: true)
+        end
+      UnionVariantLoweringFact.new(
+        owner_name: node.name.to_s,
+        name: name,
+        data: var_data,
+        inline_struct: inline_struct,
+        zig_type: zig_type,
+      )
     end
   end
 
@@ -2054,66 +2061,22 @@ class MIRLowering
 
   sig { params(node: AST::OrExit).returns(MIR::ScopeBlock) }
   def lower_or_exit(node)
-    # Unified OR EXIT: any combination of (kind, error_name, message).
-    # Unspecified fields inherit from the pre-existing rt.__error set
-    # by the failing call. If a Kind is specified but no Type, the
-    # type is explicitly cleared (set to 0 / None) to avoid carrying
-    # a stale type that no longer matches the new kind.
-    stmts = []
-    rt_name = @rt_name
-    line = node.token.line.to_s
+    facts = or_exit_facts(node, node.token.line)
 
     # Register VM: structured sibling of the InlineZig sequence below.
     # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
     # reassignment as one InlineBc with structured fields. The Zig
     # backend path (target != :bc) is byte-for-byte unchanged.
     if @target == :bc
-      bc_kind = nil
-      bc_name_id = nil
-      bc_clear_type = false
-      if node.kind
-        bc_kind = node.kind.to_s
-        if node.error_name
-          bc_name_id = AST.id_of_type(node.error_name.to_sym)
-        else
-          bc_clear_type = true
-        end
-      elsif node.error_name && AST.error_type?(node.error_name.to_sym)
-        bc_kind = AST.kind_of_type(node.error_name.to_sym).to_s
-        bc_name_id = AST.id_of_type(node.error_name.to_sym)
-      end
       msg_mir = node.message ? lower(node.message) : nil
-      reassign = MIR::InlineBc.new(:or_exit, [msg_mir].compact, {
-        kind: bc_kind, name_id: bc_name_id,
-        clear_type: bc_clear_type, has_message: !node.message.nil?,
-        line: node.token.line.to_i
-      })
       return MIR::ScopeBlock.new([
-        MIR::ExprStmt.new(reassign, false),
+        MIR::ExprStmt.new(or_exit_bc_reassign(facts, msg_mir), false),
         MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
       ])
     end
 
-    if node.kind
-      stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind"), false)
-      if node.error_name
-        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type"), false)
-      else
-        # Kind without type -> clear any stale type from the prior context.
-        stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type"), false)
-      end
-    end
-
-    if node.message
-      msg_zig = emit_expr(lower(node.message))
-      stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg"), false)
-    end
-
-    # Always update clear_line so diagnostics point at this OR EXIT.
-    stmts << MIR::ExprStmt.new(MIR::InlineZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line"), false)
-
-    stmts << MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
-    MIR::ScopeBlock.new(stmts)
+    msg_zig = node.message ? emit_expr(lower(node.message)) : nil
+    or_exit_scope(facts, msg_zig, MIR::Ident.new("error.CheatError"))
   end
 
   # Test-framework MIR lowering (lower_test_block, lower_assert_raises,
