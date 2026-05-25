@@ -2,8 +2,8 @@ require "rspec"
 require "tmpdir"
 require_relative "../src/backends/transpiler"  # transitively loads annotator + lexer + parser + ast
 require_relative "../src/ast/fixable_error"
-require_relative "../src/annotator-helpers/fixable_helpers"
-require_relative "../src/annotator-helpers/auto_inference"
+require_relative "../src/annotator/helpers/fixable_helpers"
+require_relative "../src/annotator/helpers/auto_inference"
 require_relative "../src/backends/importer"
 
 # M1.1 — parser-level coverage for the `Auto` placeholder.

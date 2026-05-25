@@ -2,7 +2,7 @@ require "rspec"
 require "set"
 
 require_relative "../src/backends/transpiler"
-require_relative "../src/annotator-helpers/with_match_check"
+require_relative "../src/annotator/helpers/with_match_check"
 
 # Atomics M1.4 -- REQUIRES c: ATOMIC parsing + family validation.
 #

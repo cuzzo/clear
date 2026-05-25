@@ -48,7 +48,7 @@ module CoverageBootstrap
 
       add_group "AST + Parser",      "src/ast"
       add_group "Annotator",         "src/annotator"
-      add_group "Annotator helpers", "src/annotator-helpers"
+      add_group "Annotator helpers", "src/annotator/helpers"
       add_group "MIR",               "src/mir"
       add_group "Backends",          "src/backends"
 

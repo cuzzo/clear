@@ -17,7 +17,7 @@
 # New nodes here use distinct names to coexist during migration.
 
 require "sorbet-runtime"
-require_relative "../annotator-helpers/intrinsic_registry"
+require_relative "../annotator/helpers/intrinsic_registry"
 require_relative "pass_state"
 
 module MIR

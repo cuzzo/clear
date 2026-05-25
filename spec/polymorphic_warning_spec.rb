@@ -1,7 +1,7 @@
 require "rspec"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
-require_relative "../src/annotator-helpers/with_match_check"
+require_relative "../src/annotator/helpers/with_match_check"
 
 # True-Sync-Polymorphism step 5 (#327): polymorphic-warning surface
 # + the new effect names `contends_maybe` / `blocks_maybe`.

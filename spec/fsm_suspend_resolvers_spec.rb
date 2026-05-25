@@ -7,7 +7,7 @@ require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
 require_relative '../src/mir/fsm_transform/segments'
 require_relative '../src/mir/fsm_transform/suspend_resolvers'
-require_relative '../src/annotator-helpers/intrinsic_registry'
+require_relative '../src/annotator/helpers/intrinsic_registry'
 
 # Tests for FsmTransform::SuspendResolvers, the per-suspend-kind
 # resolvers that turn a Segments::*Suspend tail into a

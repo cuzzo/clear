@@ -17,18 +17,18 @@ annotator coverage enabled before using it to prioritize tests.
 Decomplex does give clear annotator action items. The strongest convergence
 points are:
 
-- `src/annotator.rb:5471` `handle_assign_move`
-- `src/annotator-helpers/function_analysis.rb:193` `resolve_call`
-- `src/annotator.rb:1459` `visit_MatchStatement`
-- `src/annotator.rb:4739` `visit_WithBlock`
-- `src/annotator-helpers/pipe_analysis.rb:805` `analyze_pipe_to_named_function`
-- `src/annotator-helpers/pipe_analysis.rb:1462` `analyze_concurrent_op`
-- `src/annotator.rb:5350` `visit_NextExpr`
-- `src/annotator.rb:3602` `visit_StructLit`
-- `src/annotator.rb:3357` `visit_GetField`
-- `src/annotator-helpers/generic_analysis.rb:227` `validate_type_annotation!`
-- `src/annotator-helpers/generic_analysis.rb:558` `propagate_collection_metadata!`
-- `src/annotator.rb:3963` `visit_OrRescue`
+- `src/annotator/annotator.rb:5471` `handle_assign_move`
+- `src/annotator/helpers/function_analysis.rb:193` `resolve_call`
+- `src/annotator/annotator.rb:1459` `visit_MatchStatement`
+- `src/annotator/annotator.rb:4739` `visit_WithBlock`
+- `src/annotator/helpers/pipe_analysis.rb:805` `analyze_pipe_to_named_function`
+- `src/annotator/helpers/pipe_analysis.rb:1462` `analyze_concurrent_op`
+- `src/annotator/annotator.rb:5350` `visit_NextExpr`
+- `src/annotator/annotator.rb:3602` `visit_StructLit`
+- `src/annotator/annotator.rb:3357` `visit_GetField`
+- `src/annotator/helpers/generic_analysis.rb:227` `validate_type_annotation!`
+- `src/annotator/helpers/generic_analysis.rb:558` `propagate_collection_metadata!`
+- `src/annotator/annotator.rb:3963` `visit_OrRescue`
 
 ## Architectural Wins
 

@@ -1,7 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
-require_relative "../ast/ast"
-require_relative "../ast/type"
+require_relative "../../ast/ast"
+require_relative "../../ast/type"
 require 'set'
 
 module PipeAnalysis

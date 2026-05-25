@@ -2522,4 +2522,4 @@ end
 # T.nilable(Type)` evaluates at class-body time). All Type refs to
 # FunctionSignature are runtime-lazy (method bodies), so deferring
 # this require is safe.
-require_relative "../annotator-helpers/function_signature"
+require_relative "../annotator/helpers/function_signature"

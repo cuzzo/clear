@@ -739,7 +739,7 @@ module DiagnosticRegistry
     # CAPABILITIES — WITH blocks, GUARD/RESTRICT/BORROWED, PRE/DEBUG_POST
     # ===================================================================
     # Added in Tranche 3. Migrated from
-    # src/annotator-helpers/capabilities.rb's ad-hoc strings.
+    # src/annotator/helpers/capabilities.rb's ad-hoc strings.
 
     WITH_CAP_BAD_TARGET: {
       severity: :error, category: :capability,
@@ -934,7 +934,7 @@ module DiagnosticRegistry
     # PIPELINES — pipe stages, CONCURRENT, SHARD, JOIN, WINDOW
     # ===================================================================
     # Added in Tranche 4. Migrated from
-    # src/annotator-helpers/pipe_analysis.rb's ad-hoc strings.
+    # src/annotator/helpers/pipe_analysis.rb's ad-hoc strings.
 
     PIPE_BAD_DESTINATION: {
       severity: :error, category: :type,

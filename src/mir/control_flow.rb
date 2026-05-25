@@ -21,7 +21,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
-require_relative "../annotator-helpers/function_signature"
+require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_entry"
 require_relative "local_binding_facts"
 

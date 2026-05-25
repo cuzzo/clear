@@ -9,7 +9,7 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
-require_relative "../annotator-helpers/function_signature"
+require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_classifier"
 require_relative "escape_analysis"
 require_relative "bg_capture_classifier"

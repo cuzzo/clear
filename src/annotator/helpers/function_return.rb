@@ -20,7 +20,7 @@
 #                         / infer_map_return_type) -- a typed variant,
 #                         not a Proc; resolve dispatches via the host.
 require "sorbet-runtime"
-require_relative "../ast/type"
+require_relative "../../ast/type"
 
 class FunctionReturn < T::Struct
   extend T::Sig

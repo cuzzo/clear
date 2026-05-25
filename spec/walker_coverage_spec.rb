@@ -57,7 +57,7 @@ RSpec.describe "AST walker coverage" do
 
         Either:
           (a) Add `def visit_<Name>(node)` to SemanticAnnotator (or one
-              of its included helper modules in src/annotator-helpers/),
+              of its included helper modules in src/annotator/helpers/),
               OR
           (b) If the node is a sub-expression visited via a parent's
               visit_ method, add it to INDIRECT_DISPATCH in this spec

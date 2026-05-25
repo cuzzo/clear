@@ -6,7 +6,7 @@ require_relative "./lexer"
 require_relative "./error_registry"
 require_relative "./source_error"
 require_relative "./fixable_error"
-require_relative "../annotator-helpers/fixable_helpers"
+require_relative "../annotator/helpers/fixable_helpers"
 
 # ==========================================
 # PARSER

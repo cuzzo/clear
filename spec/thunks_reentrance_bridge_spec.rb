@@ -4,7 +4,7 @@ require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/ast/ast"
 require_relative "../src/backends/transpiler"
-require_relative "../src/annotator-helpers/reentrance"
+require_relative "../src/annotator/helpers/reentrance"
 
 # Thunk Phase 1.3 — annotator bridge that unifies the legacy
 # `@reentrant` annotation and the new `EFFECTS REENTRANT[:VARIANT]`

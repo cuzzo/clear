@@ -1,6 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
-require_relative "../ast/ast"
+require_relative "../../ast/ast"
 # Auto inference — Pass B (constraint collection).
 #
 # Given a parsed program and the @fn_nodes registry produced by

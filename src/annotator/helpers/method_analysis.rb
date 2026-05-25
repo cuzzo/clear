@@ -1,6 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
-require_relative "../ast/ast"
+require_relative "../../ast/ast"
 # method_analysis.rb — Type-specific method resolution for Pool and HashMap.
 #
 # Resolves method calls on collection types using the declarative registries

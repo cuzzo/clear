@@ -1,35 +1,35 @@
 # typed: strict
 require "sorbet-runtime"
 
-require_relative "ast/source_error"
-require_relative "ast/fixable_error"
-require_relative "ast/scope"
-require_relative "ast/parser"
-require_relative "ast/std_lib"
-require_relative "annotator-helpers/function_context"
-require_relative "annotator-helpers/function_signature"
-require_relative "annotator-helpers/function_analysis"
-require_relative "annotator-helpers/pipe_analysis"
-require_relative "mir/ownership_graph"
-require_relative "mir/escape_analysis"
-require_relative "mir/pass_state"
-require_relative "mir/bg_capture_classifier"
-require_relative "mir/effect_inference"
-require_relative "mir/concurrency_checks"
-require_relative "annotator-helpers/generic_analysis"
-require_relative "annotator-helpers/capabilities"
-require_relative "annotator-helpers/test_annotation"
-require_relative "annotator-helpers/with_match_check"
-require_relative "annotator-helpers/fixable_helpers"
-require_relative "annotator-helpers/effects"
-require_relative "annotator-helpers/reentrance"
-require_relative "mir/thunk_transform"
-require_relative "annotator-helpers/lock_helper"
-require_relative "mir/alloc"
-require_relative "annotator-helpers/method_analysis"
-require_relative "annotator-helpers/union"
-require_relative "annotator-helpers/auto_inference"
-require_relative "backends/importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
+require_relative "../ast/source_error"
+require_relative "../ast/fixable_error"
+require_relative "../ast/scope"
+require_relative "../ast/parser"
+require_relative "../ast/std_lib"
+require_relative "helpers/function_context"
+require_relative "helpers/function_signature"
+require_relative "helpers/function_analysis"
+require_relative "helpers/pipe_analysis"
+require_relative "../mir/ownership_graph"
+require_relative "../mir/escape_analysis"
+require_relative "../mir/pass_state"
+require_relative "../mir/bg_capture_classifier"
+require_relative "../mir/effect_inference"
+require_relative "../mir/concurrency_checks"
+require_relative "helpers/generic_analysis"
+require_relative "helpers/capabilities"
+require_relative "helpers/test_annotation"
+require_relative "helpers/with_match_check"
+require_relative "helpers/fixable_helpers"
+require_relative "helpers/effects"
+require_relative "helpers/reentrance"
+require_relative "../mir/thunk_transform"
+require_relative "helpers/lock_helper"
+require_relative "../mir/alloc"
+require_relative "helpers/method_analysis"
+require_relative "helpers/union"
+require_relative "helpers/auto_inference"
+require_relative "../backends/importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -958,7 +958,7 @@ private
   # REQUIRES set.
   sig { params(sig: FunctionSignature, args: T::Array[T.untyped]).returns(T::Set[Symbol]) }
   def collapse_errors_for_call(sig, args)
-    require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
+    require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
     collapsed = Set.new
     sig.requires.each do |param_name, _families|
       idx = sig.params.find_index { |p| p.name.to_s == param_name }
@@ -1997,7 +1997,7 @@ private
   # Test-grammar visitors (visit_TestBlock, visit_WhenBlock,
   # visit_TestThat, visit_AssertRaises, visit_BenchmarkStmt,
   # visit_SmashStmt, visit_ProfileStmt, visit_StubDecl) are mixed in
-  # from annotator-helpers/test_annotation.rb.
+  # from annotator/helpers/test_annotation.rb.
 
   sig { params(node: AST::DieNode).returns(Symbol) }
   def visit_DieNode(node)
@@ -2379,7 +2379,7 @@ private
     # Effect propagation needs the actual sync family passed at each call
     # site so ?-form effects can collapse to concrete effects or no effect.
     if node.args && !node.args.empty? && node.name.is_a?(String)
-      require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
+      require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
       arg_family_sets = node.args.map { |a| WithMatchCheck.family_of_arg_set(a) }
       node.arg_families = arg_family_sets
       record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
@@ -6255,7 +6255,7 @@ private
   # stubbed in test bodies. Walks the call chain transitively.
 
   # IO_BUILTINS and validate_strict_io! moved to
-  # annotator-helpers/test_annotation.rb (TestAnnotation module).
+  # annotator/helpers/test_annotation.rb (TestAnnotation module).
 
   # ── Tail Call Validation ─────────────────────────────────────────
 

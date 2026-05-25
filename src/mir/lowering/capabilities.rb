@@ -785,7 +785,7 @@ module MIRLoweringCapabilities
     safe_alias = zig_safe_name(alias_name)
     # Emit the cell raw, with no auto-`.load()` injection. The atomic-
     # cell read path that visit_Identifier installs (line 4056 in
-    # annotator-helpers/cell access) wraps `@atomic` reads in `.load()`,
+    # annotator/helpers/cell access) wraps `@atomic` reads in `.load()`,
     # which returns a value -- but `polymorphicMutate` needs the cell
     # OBJECT to dispatch by `@hasDecl`. Set `@atomic_emit_raw` so the
     # surrounding emit_expr returns the bare ident.

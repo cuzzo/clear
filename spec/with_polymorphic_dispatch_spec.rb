@@ -1,7 +1,7 @@
 require "rspec"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
-require_relative "../src/annotator-helpers/with_match_check"
+require_relative "../src/annotator/helpers/with_match_check"
 
 # True-Sync-Polymorphism step 4 (#326): annotator validation for the
 # polymorphic-iff rule and the SNAPSHOTTED REQUIRES family.

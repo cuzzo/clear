@@ -3,7 +3,7 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
-require_relative "../annotator-helpers/intrinsic_registry"
+require_relative "../annotator/helpers/intrinsic_registry"
 
 # ==========================================
 # AST
@@ -1097,7 +1097,7 @@ module AST
     #                                                             requires `!T` return type;
     #                                                             max_depth_n stamped on FunctionDef)
     # The annotator bridges this with the legacy `@reentrant`/`tail_call` attrs into a
-    # canonical reentrance_kind via src/annotator-helpers/reentrance.rb (Phase 1.3).
+    # canonical reentrance_kind via src/annotator/helpers/reentrance.rb (Phase 1.3).
     attr_accessor :effects_decl
     # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
     # `effects_decl` or `reentrant` directly. Same value space as effects_decl;

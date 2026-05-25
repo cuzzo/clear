@@ -7,7 +7,7 @@
   },
   {
     "kind": "replace_nil_with_default",
-    "path": "src/annotator-helpers/effects.rb",
+    "path": "src/annotator/helpers/effects.rb",
     "code": "reason.nil?",
     "note": "boolean expression — reason.nil? is not a nil-with-default pattern; the result is assigned to fsm_eligible"
   }

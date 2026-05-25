@@ -2,7 +2,7 @@ require "rspec"
 require "set"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
-require_relative "../src/annotator-helpers/effects"
+require_relative "../src/annotator/helpers/effects"
 
 # Atomics M1.6.5 — :CONTENTION / :BLOCKING effect axis for sync capabilities.
 #

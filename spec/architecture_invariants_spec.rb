@@ -26,8 +26,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
   # parsed nodes; rewrite/lowering adapters may copy that metadata onto
   # synthetic nodes, but escape placement must not be written here.
   NODE_STORAGE_OK = lambda do |rel|
-    rel == "annotator.rb" ||
-      rel.start_with?("annotator-helpers/") ||
+    rel == "annotator/annotator.rb" ||
+      rel.start_with?("annotator/helpers/") ||
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
