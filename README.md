@@ -29,22 +29,16 @@ bill = users AS $u
 ### Combine with in-line error handling
 
 ```ruby
-FN myFunc(id: Int64, name: String) RETURNS MyPage ->
+FN myFunc(id: Int64, name: String) RETURNS !MyPage ->
   page = fetchData(id, name) OR RAISE
-    |> parseHeader OR EXIT "Invalid Header"   # parseHeader RAISES Input, ParseError
-    |> parseBody OR EXIT "Invalid Body"       # we can attach messages to be handled specifically below
+    |> parseHeader
+    |> parseBody
     |> fetchUser
       |> RECOVER(defaultUser())
     |> TAP saveToDb(id, name, _)
     |> renderHomePage;
     
   RETURN page; 
-
-CATCH ParseError
-  IF __error.context == "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
-  RETURN defaultPage();
-DEFAULT
-  RAISE __error;
 END
 ```
 
