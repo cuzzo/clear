@@ -811,6 +811,13 @@ module MIR
   BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
     extend T::Sig
     include Stmt
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+    sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
     sig { returns(T.nilable(MIR::ExecutionBoundaryFact)) }
     def boundary_fact
       @boundary_fact = T.let(nil, T.nilable(MIR::ExecutionBoundaryFact)) unless defined?(@boundary_fact)
@@ -2028,6 +2035,14 @@ module MIR
     extend T::Sig
     include Expr
 
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+    sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
+
     sig { params(callee: String, args: T::Array[T.untyped], try_wrap: T::Boolean, owned_return: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
     def initialize(callee, args, try_wrap, owned_return = false, callable_contract = nil)
       super(callee, args, try_wrap, owned_return, callable_contract)
@@ -2066,6 +2081,14 @@ module MIR
   MethodCall = Struct.new(:receiver, :method, :args, :try_wrap, :callable_contract, :owned_result_alloc) do
     extend T::Sig
     include Expr
+
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+    sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
 
     sig do
       params(
@@ -2268,6 +2291,15 @@ module MIR
     extend T::Sig
     include Expr
     # capture: error variable name or nil
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+
+    sig { params(value: T.nilable(Type)).void }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr, catch_body])
     sig { returns(OwnershipEffect) }

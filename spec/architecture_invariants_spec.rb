@@ -381,6 +381,41 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       "Backend AST consumers must use Locatable#full_type!; plain .full_type is only for producer writes:\n" \
       "#{offenders.join("\n")}"
   end
+
+  it "does not treat full_type! itself as an optional condition in MIR/backend code" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\b(?:if|unless)\s+[\w.]+\.full_type!\s*(?:#.*)?$/) ||
+                    line.match?(/&&\s*[\w.]+\.full_type!\s*(?:#.*)?$/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "full_type! is a hard post-annotation contract, not a nilable predicate:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not manufacture untyped MIR/backend ownership facts" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/mir/pre_mir_type_check.rb"
+
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("Type.new(:Untyped)")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Post-annotation MIR/backend facts must carry authoritative Type payloads, never :Untyped:\n" \
+      "#{offenders.join("\n")}"
+  end
 end
 
 RSpec.describe "architecture invariants: closed placement pipeline" do

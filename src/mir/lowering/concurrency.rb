@@ -529,6 +529,7 @@ module MIRLoweringConcurrency
       }
     ZIG
     bg = MIR::BgBlock.new(bg_code, captured, run_body || [])
+    bg.result_type = Type.new(node.full_type!)
     bg.boundary_fact = execution_boundary_fact(
       :bg,
       execution_boundary_dispatch(node.parallel, node.pinned),
@@ -586,6 +587,7 @@ module MIRLoweringConcurrency
     # The fiber body is consumed into the FSM state machine. Exposing it again
     # through run_body would double-walk ownership and manufacture diagnostics.
     bg = MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
+    bg.result_type = Type.new(node.full_type!)
     bg.boundary_fact = execution_boundary_fact(
       :bg,
       execution_boundary_dispatch(node.parallel, node.pinned),
@@ -744,6 +746,7 @@ module MIRLoweringConcurrency
       }
     ZIG
     bg = MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
+    bg.result_type = Type.new(tense_t)
     bg.boundary_fact = execution_boundary_fact(:bg_stream, :local, analysis)
     bg
   end
@@ -838,6 +841,7 @@ module MIRLoweringConcurrency
     @tmp_counter = T.let(@tmp_counter, T.untyped)
     plan = next_expr_plan(node, alloc_sym)
     promise_type = plan.promise_type
+    result_t = plan.result_type
 
     if plan.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
@@ -851,7 +855,11 @@ module MIRLoweringConcurrency
       # through MethodCall("next") so the bc_emitter emits AWAIT, which
       # the runner extends to walk Value.List (await each item, build
       # result list).
-      return MIR::MethodCall.new(promise_list_inner, "next", [], true, MIR::CallableContract.no_ownership(0), alloc_sym) if @target == :bc
+      if @target == :bc
+        call = MIR::MethodCall.new(promise_list_inner, "next", [], true, MIR::CallableContract.no_ownership(0), alloc_sym)
+        call.result_type = Type.new(result_t)
+        return call
+      end
 
       promise_list_inner_str = emit_expr(promise_list_inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
@@ -867,7 +875,7 @@ module MIRLoweringConcurrency
              "    break :#{promise_list_label} #{results_var};\n" \
              "}"
       iz = MIR::InlineZig.new(code, "next_promise_list")
-      iz.stdlib_def = FunctionSignature.allocating_intrinsic
+      iz.stdlib_def = FunctionSignature.intrinsic_contract(return_type: Type.new(result_t), allocates: true)
       iz.allocs = { results_var => alloc_sym }
       return iz
     end
@@ -883,8 +891,10 @@ module MIRLoweringConcurrency
       # The materialized list inherits the receiving binding's placement
       # alloc_sym is the
       # fallback when NEXT is lowered outside a binding.
-      return MIR::MethodCall.new(observable_list_inner, "materializeNext",
+      call = MIR::MethodCall.new(observable_list_inner, "materializeNext",
         [MIR::AllocatorRef.new(alloc_sym)], true, MIR::CallableContract.no_ownership(1), alloc_sym)
+      call.result_type = Type.new(result_t)
+      return call
     end
 
     if plan.observable_string?

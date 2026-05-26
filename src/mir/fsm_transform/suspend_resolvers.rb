@@ -187,6 +187,7 @@ module FsmTransform
         MIR::ScopeBlock.new([MIR::ReturnStmt.new(MIR::Ident.new(err_name))]),
         err_name,
       )
+      finish_expr.result_type = inner_type_info if inner_type_info
       bind_stmts =
         if result_var
           res_name = "__res_#{susp_idx}"

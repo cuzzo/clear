@@ -646,7 +646,14 @@ module MIRLoweringFunctions
     # Structured: MIR::Call(callee, args, try_wrap).
     # The `try_wrap` field forwards errors verbatim before any POST
     # predicate evaluates; on success, `result` binds the payload.
-    inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, call_owned_return?(node))
+    inner_sig = FunctionSignature.from_function_def(node)
+    inner_contract = MIR::CallableContract.new(
+      inner_sig,
+      MIR::OwnershipContract.new(covers_consuming_params: true),
+      arg_idents.length,
+    )
+    inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, call_owned_return?(node), inner_contract)
+    inner_call_mir.result_type = Type.new(payload_type || :Void)
     call_zig = emit_expr(inner_call_mir)
 
     # Each predicate check decomposes into structured MIR:

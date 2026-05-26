@@ -25,6 +25,7 @@ Every AST and MIR program carries a typed `MIRPassState`. Each pass asserts the 
 
 6. **MIR Allocation Normalization**
    Runs inside lowering before ownership finalization for each lowered statement body. It recursively removes allocation-producing expressions from non-owning expression positions by hoisting them to named MIR bindings. Allocation-producing result chains are allowed only where a binding owns the result, such as a `Let` init that must preserve `try` / `catch` semantics. This is the only MIR stage allowed to walk expression trees to rewrite ownership shape.
+   Every generated `AllocMark` must carry a concrete `Type` derived from the allocation producer or an already-typed AST source. `:Untyped` is illegal after `PreMirTypeCheck`.
 
 7. **MIR Ownership Finalization**
    Emits ownership transfer events from normalized MIR. At this point decisions are mechanical: named owned values are either cleaned, transferred, or rejected later by the checker. This phase must not compensate for missing placement, missing cleanup entries, or unnormalized allocation shape.
@@ -54,6 +55,7 @@ Any new pass that reads or writes MIR-relevant facts must add itself to this cha
 - `CleanupEntry#alloc` is cleanup metadata. `src/mir/cleanup_classifier.rb` is the only writer.
 - `CleanupEntry#scope` is frame-lifetime metadata. `src/mir/cleanup_classifier.rb` is the only writer. Valid values are `:iteration`, `:scope`, `:function`, and `:heap`.
 - MIR lowering does not decide heap versus frame. It reads `SymbolEntry#storage` and `CleanupEntry#alloc`, emits `MIR::AllocMark`, `MIR::Cleanup`, `MIR::ErrCleanup`, and `MIR::TransferMark`, and leaves verification to `MIRChecker`.
+- `MIR::AllocMark#type_info` is a post-annotation ownership fact. It must be a concrete `Type` from `MIRHoistLowering#mir_alloc_mark_type_info` or an equivalent already-typed producer. It may never be `Type.new(:Untyped)`.
 - `MIR::Call#owned_return` is a structural ownership fact from lowering. If true, the call result must be bound with an `AllocMark` and cleanup/transfer, or the checker reports a leak.
 - `MIR::CallableContract` is the only representation for structural call ownership effects. It carries the typed `FunctionSignature`, the checked user-level argument count, and a typed `MIR::OwnershipContract` with concrete consumed binding names for this callsite. `covers_consuming_params` must be true whenever a TAKES slot was examined, even if the actual argument is a value type and no owned binding is consumed. A structural call without it is invalid MIR.
 - `MIR::OwnershipContract` is the only representation for opaque Zig ownership effects. It is a strongly typed, non-nil contract with frozen `consumes`, `produces`, and `borrows` arrays plus `covers_consuming_params`. Hashes, nils, and ad-hoc side channels are invalid MIR.

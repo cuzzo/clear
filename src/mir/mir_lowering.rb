@@ -395,7 +395,9 @@ class MIRLowering
     right = ti.string? || or_fallback_borrowed_source?(ast_node.right) ?
       place_owned_branch_value_for_destination(mir.catch_body, ti, dest_alloc) :
       mir.catch_body
-    MIR::TryCatch.new(mir.expr, right, mir.capture)
+    out = MIR::TryCatch.new(mir.expr, right, mir.capture)
+    out.result_type = Type.new(ti)
+    out
   end
 
   sig { params(mir: T.untyped, ast_node: AST::BinaryOp).returns(T.untyped) }
@@ -409,7 +411,9 @@ class MIRLowering
 
       left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
       right = place_or_branch_value_for_destination(mir.catch_body, ast_node.right)
-      MIR::TryCatch.new(left, right, mir.capture)
+      out = MIR::TryCatch.new(left, right, mir.capture)
+      out.result_type = Type.from_node!(ast_node, context: "string OR destination result")
+      out
     when MIR::Orelse
       left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
       right = place_or_branch_value_for_destination(mir.fallback, ast_node.right)
@@ -1205,10 +1209,11 @@ class MIRLowering
     effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
     alloc = effect.alloc || mir_owned_alloc(init) || :heap
     stamp_allocating_result_target!(init, name, alloc: alloc)
+    type_info = node.annotation ? Type.new(node.annotation) : mir_alloc_mark_type_info(init, nil, context: "implicit MIR allocation fact")
     AllocatingResultFact.new(
       name: name,
       ownership_effect: effect.produces_owned ? effect.with_target(name) : MIR::OwnershipEffect.owned(alloc: alloc, target_var: name),
-      type_info: Type.new(:Untyped),
+      type_info: type_info,
       scope: alloc == :heap ? :heap : :iteration,
     )
   end
@@ -2537,17 +2542,28 @@ class MIRLowering
   # Returns a new node without try, or the original node if not try-wrapped.
   sig { params(left: T.untyped, catch_body: T.untyped, capture: T.nilable(String), fallback: T.untyped).returns(MIR::TryCatch) }
   def try_catch_with_provenance(left, catch_body, capture, fallback: nil)
-    MIR::TryCatch.new(strip_try(left), catch_body, capture)
+    stripped = strip_try(left)
+    out = MIR::TryCatch.new(stripped, catch_body, capture)
+    if stripped.respond_to?(:result_type) && T.unsafe(stripped).result_type
+      out.result_type = Type.new(T.unsafe(stripped).result_type)
+    elsif fallback && fallback.respond_to?(:full_type!)
+      out.result_type = Type.new(T.unsafe(fallback).full_type!(context: "try-catch fallback result"))
+    end
+    out
   end
 
   sig { params(mir_node: T.untyped).returns(T.untyped) }
   def strip_try(mir_node)
     case mir_node
     when MIR::Call
-      MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.owned_return, mir_node.callable_contract)
+      out = MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.owned_return, mir_node.callable_contract)
+      out.result_type = Type.new(mir_node.result_type) if mir_node.result_type
+      out
     when MIR::MethodCall
-      MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false,
+      out = MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false,
         mir_node.callable_contract, mir_node.owned_result_alloc)
+      out.result_type = Type.new(mir_node.result_type) if mir_node.result_type
+      out
     when MIR::TryExpr
       mir_node.expr
     when MIR::InlineZig

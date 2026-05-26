@@ -172,11 +172,10 @@ module FsmTransform
   def foreach_local_entry(node)
     T.bind(self, T.untyped) rescue nil
     return nil unless node.var_name
-    ct_obj = node.collection&.full_type!
-    ct = ct_obj.is_a?(Type) ? ct_obj : (ct_obj ? Type.new(ct_obj) : nil)
-    desc = ct.is_a?(Type) ? ct.fsm_foreach_descriptor : nil
+    ct = Type.new(node.collection.full_type!(context: "FSM foreach collection"))
+    desc = ct.fsm_foreach_descriptor
     elem_zig = (desc && desc[:var_zig_type]) || begin
-      elem_t = ct.is_a?(Type) ? ct.element_type : nil
+      elem_t = ct.element_type
       elem_t ? Type.new(elem_t).zig_type : "anyopaque"
     end
     { name: node.var_name, zig_type: elem_zig }

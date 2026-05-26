@@ -672,7 +672,9 @@ class PipelineHost
       @lowering.send(:stamp_allocating_result_target!, value_expr, temp_name, alloc: value_alloc)
       entry = CleanupEntry.build(:uniform, alloc: value_alloc, has_moved_guard: true,
         zig_type: value_expr.respond_to?(:zig_type) && value_expr.zig_type ? value_expr.zig_type : "void")
-      mark = MIR::AllocMark.new(temp_name, value_alloc, Type.new(:Untyped))
+      mark_type = @lowering.send(:mir_alloc_mark_type_info, value_expr, nil,
+        context: "pipeline owned append item")
+      mark = MIR::AllocMark.new(temp_name, value_alloc, mark_type)
       mark.scope = value_alloc == :heap ? :heap : :iteration
       return MIR::ScopeBlock.new([
         mark,
@@ -2309,7 +2311,7 @@ class PipelineHost
     conc = AST::ConcurrentOp.new(each_op.token, each_op, {})
     # Synthesized post-annotation: inherit the wrapped EachOp's type
     # so the AST->MIR type-resolution invariant holds.
-    conc.full_type = each_op.full_type! if each_op.full_type!
+    conc.full_type = each_op.full_type!(context: "sharded EACH result")
     cb = build_bounded_concurrent_callback_pointer(conc, item_t)
 
     source_mir = visit_mir(list_node)
@@ -2672,8 +2674,8 @@ class PipelineHost
     elsif source_ti&.inf_stream?
       source_ti.inf_stream_element_type
     else
-      start_ft = source_node.respond_to?(:start) && source_node.start.full_type!
-      Type.new(start_ft || :Int64)
+      start_ft = source_node.is_a?(AST::RangeLit) ? source_node.start.full_type!(context: "lazy range start") : Type.new(:Int64)
+      Type.new(start_ft)
     end
     elem_zig = elem_t.zig_type
 
@@ -2918,7 +2920,8 @@ class PipelineHost
     # net allocation here. Borrows both pointers.
     set_completion.stdlib_def = ALLOC_REF_DEF
     set_completion.ownership_contract = MIR::OwnershipContract.consumes(["__obs_wg"])
-    wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap, Type.new(:Untyped))
+    wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap,
+      Type.new(:"CheatHeader.WaitGroup", layout: :indirect))
     wg_alloc_mark.scope = :heap
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],

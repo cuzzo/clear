@@ -5479,7 +5479,8 @@ private
       return if path.nil?
       if Type.new(node.value.resolved_type).requires_move?
         graph_path = path.map(&:to_s).join(".")
-        @og.declare(graph_path, kind: :affine, scope_depth: @og_scope_depth) unless @og[graph_path]
+        @og.declare(graph_path, kind: :affine, type_info: Type.new(node.value.resolved_type),
+          scope_depth: @og_scope_depth) unless @og[graph_path]
         og_set_moved(graph_path, at_token: node.value.token, action: :move)
       end
       return

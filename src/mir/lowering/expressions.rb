@@ -394,9 +394,19 @@ module MIRLoweringExpressions
       collect_alloc = @current_decl_alloc == :heap ? :heap : :frame
       collect_args = collect_method == "materializeNext" ?
         [MIR::AllocatorRef.new(collect_alloc)] : []
+      collect_type = if collect_method == "materializeNext"
+        elem_t = ft.tense_type.element_type
+        Type.new("#{elem_t.resolved}[]", collection: :list)
+      else
+        ft&.tense_type ? Type.new(ft.tense_type) : Type.new(ft)
+      end
+      collect_alloc_fact = collect_method == "materializeNext" ? collect_alloc : nil
       named_source = node.left.is_a?(AST::Identifier)
       if named_source
-        return MIR::MethodCall.new(left, collect_method, collect_args, true, MIR::CallableContract.no_ownership(collect_args.length))
+        call = MIR::MethodCall.new(left, collect_method, collect_args, true,
+          MIR::CallableContract.no_ownership(collect_args.length), collect_alloc_fact)
+        call.result_type = collect_type
+        return call
       end
       inner_zig = ft && ft.tense? && ft.tense_type ? Type.new(ft.tense_type).zig_type : "i64"
       # The accumulator's Zig type comes from the observable's full_type
@@ -418,9 +428,13 @@ module MIRLoweringExpressions
         # `inner_zig` from `tense_type` only matches scalar terminals
         # and breaks DISTINCT/REDUCE-collection paths.
         MIR::Let.new(val_var,
-          MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,
-            MIR::CallableContract.no_ownership(collect_args.length)),
-          false, nil, nil),
+          begin
+            call = MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true,
+              MIR::CallableContract.no_ownership(collect_args.length), collect_alloc_fact)
+            call.result_type = collect_type
+            call
+          end,
+          false, collect_type.zig_type, nil),
         MIR::ExprStmt.new(
           MIR::MethodCall.new(
             MIR::Ident.new(collect_var),
@@ -439,7 +453,9 @@ module MIRLoweringExpressions
     if rhs.is_a?(AST::RecoverOp)
       left = lower(node.left)
       default_val = lower(rhs.default_expr)
-      return MIR::TryCatch.new(strip_try(left), default_val, nil)
+      out = MIR::TryCatch.new(strip_try(left), default_val, nil)
+      out.result_type = Type.new(node.full_type!(context: "RECOVER result"))
+      return out
     end
 
     # Simple pipe: x |> f -> f(x) or x |> f(y) -> f(x, y)

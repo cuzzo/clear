@@ -21,6 +21,9 @@ must not probe for it, re-normalize it optionally, or rebuild it from shape.
 - [ ] All new/modified type-flow structs are strongly typed. No new
   `T.untyped`, nilable arrays, or hash-as-tuple protocols are allowed for type
   facts.
+- [x] Post-annotation MIR/backend allocation and ownership facts never use the
+  `:Untyped` sentinel. Any allocation marker must carry an authoritative
+  `Type` derived from the allocation producer, or fail during lowering.
 - [ ] Annotation producers stamp type/storage through a single typed mechanism
   or a small sanctioned producer set. Downstream consumers never decide storage
   from raw AST shape.
@@ -50,6 +53,8 @@ Raw metadata boundaries may normalize non-AST type payloads:
 - Function signatures and return type declarations.
 - Schema / union variant metadata.
 - MIR structs whose field is already typed as `Type`.
+- `PreMirTypeCheck`, which is the only boundary allowed to mention the
+  `:Untyped` sentinel because it rejects that state before MIR lowering.
 
 Every other use is a burndown target.
 
@@ -70,6 +75,8 @@ Every other use is a burndown target.
 - [x] Scoped post-annotation optional-probe ban across annotator/MIR/backends.
 - [x] MIR direct-read classification and conversion.
 - [x] Backend direct-read classification and conversion.
+- [x] MIR/backend allocation facts no longer manufacture `Type.new(:Untyped)`;
+  the architecture spec rejects regressions.
 - [ ] Annotator producer/consumer split for direct reads.
 - [ ] Annotation stamping single mechanism.
 - [ ] Full validation and metrics after complete burndown.

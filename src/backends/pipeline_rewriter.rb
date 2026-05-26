@@ -316,19 +316,17 @@ class PipelineRewriter
 
     # 2. Build loop body
     current_it = AST::Identifier.new(token, it_var)
-    if source.full_type!
-      src_t = Type.new(source.full_type!)
-      elem_t = if src_t.open_stream?
-        src_t.open_stream_element_type
-      elsif src_t.dynamic_stream? || src_t.bounded_stream?
-        src_t.tense_type.element_type
-      elsif src_t.inf_stream?
-        src_t.inf_stream_element_type
-      else
-        src_t.element_type
-      end
-      current_it.full_type = elem_t if elem_t
+    src_t = Type.new(source.full_type!(context: "fused pipeline source"))
+    elem_t = if src_t.open_stream?
+      src_t.open_stream_element_type
+    elsif src_t.dynamic_stream? || src_t.bounded_stream?
+      src_t.tense_type.element_type
+    elsif src_t.inf_stream?
+      src_t.inf_stream_element_type
+    else
+      src_t.element_type
     end
+    current_it.full_type = elem_t if elem_t
 
     stage_inits = []
     res_type = smooth_node.full_type!
@@ -684,10 +682,8 @@ class PipelineRewriter
       inner_it = AST::Identifier.new(token, inner_it_var)
       # inner_it iterates inner_expr's elements — its type IS that
       # element type (not a guess; derived from the flattened array).
-      if inner_expr.full_type!
-        et = Type.new(inner_expr.full_type!).element_type
-        inner_it.full_type = et if et
-      end
+      et = Type.new(inner_expr.full_type!(context: "pipeline unnest inner expression")).element_type
+      inner_it.full_type = et if et
 
       append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
       append.full_type = Type.new(:Void)

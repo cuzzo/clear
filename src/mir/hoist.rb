@@ -566,12 +566,70 @@ module MIRHoistLowering
     MIR::Ident.new(name)
   end
 
+  sig { params(mir: T.untyped, ast_node: T.untyped, context: String).returns(Type) }
+  def mir_alloc_mark_type_info(mir, ast_node = nil, context: "MIR allocation")
+    return T.unsafe(self).alloc_mark_type_info(mir, ast_node, context) if ast_node
+
+    alloc = mir_owned_alloc(mir) || :heap
+    case mir
+    when MIR::DupeSlice, MIR::ConcatStr
+      Type.new(:String, location: alloc)
+    when MIR::AllocSlice
+      Type.new("#{mir.elem_type}[]", location: alloc)
+    when MIR::OwnedSlice
+      Type.new(:Slice, location: alloc)
+    when MIR::MakeList
+      Type.new("#{mir.elem_type}[]", collection: :list, location: alloc)
+    when MIR::HeapCreate
+      Type.new(mir.zig_type.to_s.delete_prefix("*").to_sym, layout: :indirect)
+    when MIR::ContainerInit
+      Type.new(mir.zig_type.to_s, location: alloc)
+    when MIR::DeepCopy
+      Type.new(deep_copy_zig_type(mir, nil), location: alloc)
+    when MIR::CapWrap
+      wrapped = mir.sync_type || mir.zig_base
+      Type.new(wrapped.to_s, layout: mir.sync_fn || mir.own_fn ? :indirect : nil, location: alloc)
+    when MIR::SharePromote, MIR::WeakUpgrade
+      Type.new(mir.zig_base.to_s, ownership: :shared, location: :heap)
+    when MIR::RcRetain, MIR::RcDowngrade, MIR::FreezeExpr
+      Type.new(mir.zig_base.to_s, ownership: :multiowned, location: :heap)
+    when MIR::Cast, MIR::TryExpr
+      mir_alloc_mark_type_info(mir.expr, nil, context: context)
+    when MIR::Call, MIR::MethodCall, MIR::TailCall
+      if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
+        return Type.new(T.must(T.unsafe(mir).result_type))
+      end
+
+      sig = mir.respond_to?(:callable_contract) ? mir.callable_contract&.signature : nil
+      raise "#{context}: allocating #{mir.class} has no callable return type" unless sig
+
+      Type.new(sig.return_type)
+    when MIR::InlineZig
+      sig = FunctionSignature.unwrap(mir.stdlib_def)
+      raise "#{context}: allocating MIR::InlineZig has no typed stdlib return" unless sig
+
+      Type.new(sig.return_type)
+    when MIR::BgBlock
+      raise "#{context}: allocating MIR::BgBlock has no result type" unless mir.result_type
+
+      Type.new(T.must(mir.result_type))
+    when MIR::TryCatch
+      raise "#{context}: allocating MIR::TryCatch has no result type" unless mir.result_type
+
+      Type.new(T.must(mir.result_type))
+    when MIR::Orelse, MIR::IfOptional, MIR::BlockExpr
+      raise "#{context}: allocating #{mir.class} has no typed allocation result"
+    else
+      raise "#{context}: unhandled allocating MIR node #{mir.class}"
+    end
+  end
+
   sig { params(expr: T.untyped, transfer_on_success: T::Boolean).returns([T::Array[T.untyped], MIR::Ident]) }
   def hoist_normalized_alloc_expr(expr, transfer_on_success: false)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, Type.new(:Untyped))
+    mark = MIR::AllocMark.new(name, alloc, mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
     mark.scope = alloc == :heap ? :heap : :iteration
     stamp_allocating_result_target!(expr, name, alloc: alloc)
     entry = hoist_cleanup_entry(expr, nil)
