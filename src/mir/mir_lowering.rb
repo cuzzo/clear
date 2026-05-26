@@ -536,7 +536,7 @@ class MIRLowering
         []
       end
     when MIR::Alloc
-      mark = MIR::AllocMark.new(node.name, node.alloc, nil)
+      mark = MIR::AllocMark.new(node.name, node.alloc, Type.from_node!(node, context: "legacy MIR::Alloc"))
       mark.scope = node.alloc == :heap ? :heap : :iteration
       mark
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)

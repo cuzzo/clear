@@ -1098,7 +1098,7 @@ module MIRLoweringExpressions
           mir_ident_names(val),
           "MIR::HeapCreate",
         ), MIR::HeapCreate)
-        mark = MIR::AllocMark.new(temp, :heap, nil)
+        mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect struct field allocation"))
         mark.scope = :heap
         hoisted << mark
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
@@ -1198,7 +1198,7 @@ module MIRLoweringExpressions
           mir_ident_names(val),
           "MIR::HeapCreate",
         ), MIR::HeapCreate)
-        mark = MIR::AllocMark.new(temp, :heap, nil)
+        mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect union field allocation"))
         mark.scope = :heap
         hoisted << mark
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)

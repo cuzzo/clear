@@ -144,3 +144,29 @@ Every other use is a burndown target.
   type-flow metric that moves the wrong way must be fixed or documented with a
   concrete architectural reason.
 - [ ] `completion-commit`: commit and push the completed increment.
+
+## Next Hardening Round
+
+The previous round made `stamp_type!` the single visible annotation type
+writer. The next round locks that boundary down so future work cannot
+accidentally make memory-safety decisions from coincidental type state.
+
+Acceptance criteria:
+
+- [x] `stamp_type!` is typed as the only annotator producer API for
+  `full_type` writes and rejects `:Untyped` immediately. It may accept raw
+  producer values only at the boundary, but the boundary must verify the
+  stored value as a concrete `Type`.
+- [x] Architecture specs fail on any direct annotator `.full_type =` write
+  outside `stamp_type!`, any optional consumer read, and any stamp helper that
+  stops being fail-closed.
+- [x] Every `MIR::AllocMark` carries a concrete `Type`. `nil` and `:Untyped`
+  are hard MIRChecker errors because cleanup and ownership verification depend
+  on knowing whether the value owns heap memory.
+- [x] Lowering must derive each `AllocMark` type from the allocation producer
+  or an already-typed AST source. No allocation marker can rely on later
+  inference or checker-side guessing.
+- [x] MIRChecker owns the fail-closed rule: unverifiable allocation type facts
+  compile-error before allocator/cleanup matching can accidentally pass.
+- [x] The docs and architecture specs name this as a memory-safety invariant,
+  not a style rule.

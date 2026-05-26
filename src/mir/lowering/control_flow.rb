@@ -820,7 +820,11 @@ module MIRLoweringControlFlow
       @tmp_counter += 1
       name = "__tmp_#{@tmp_counter}"
       entry = hoist_cleanup_entry(stmt.value, ast_value)
-      mark = MIR::AllocMark.new(name, :heap, nil)
+      mark = MIR::AllocMark.new(
+        name,
+        :heap,
+        mir_alloc_mark_type_info(stmt.value, ast_value, context: "unhoisted return allocation"),
+      )
       mark.scope = :heap
       out = T.let([
         mark,

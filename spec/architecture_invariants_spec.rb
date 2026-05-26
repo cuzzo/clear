@@ -344,6 +344,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       %r{\Asrc/backends/pipeline_rewriter\.rb\z},
       %r{\Asrc/backends/string_concat_rewriter\.rb\z},
       %r{\Asrc/mir/hoist\.rb\z},
+      %r{\Asrc/mir/mir_pass\.rb\z},
       %r{\Asrc/mir/pre_mir_type_check\.rb\z},
       %r{\Asrc/mir/mir_lowering\.rb\z},
       %r{\Asrc/mir/lowering/},
@@ -379,6 +380,18 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(offenders).to be_empty,
       "annotator type producers must call SemanticAnnotator#stamp_type!, not write .full_type directly:\n" \
       "#{offenders.join("\n")}"
+  end
+
+  it "keeps the annotator stamp boundary typed and fail-closed" do
+    annotator = source("src/annotator/annotator.rb")
+    expect(annotator).to include("def stamp_type!(node, value)")
+    expect(annotator).to include("type_parameters(:Stamp)")
+    expect(annotator).to include("value: T.type_parameter(:Stamp)")
+    expect(annotator).to include("raise \"annotation stamp missing type")
+    expect(annotator).to include("node.full_type = value")
+    expect(annotator).to include('node.full_type!(context: "annotation stamp")')
+    expect(annotator).to include("stamped.untyped?")
+    expect(annotator).to include('raise "annotation stamp produced :Untyped')
   end
 
   it "uses hard AST type reads in annotator consumers" do
@@ -507,6 +520,32 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(offenders).to be_empty,
       "Post-annotation MIR/backend facts must carry authoritative Type payloads, never :Untyped:\n" \
       "#{offenders.join("\n")}"
+  end
+
+  it "does not emit AllocMark without authoritative type info" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next if line.include?("mir_alloc_mark_type_info(")
+        next unless line.match?(/MIR::AllocMark\.new\([^#\n]*,\s*nil[,\)]/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR::AllocMark must carry concrete Type info; nil makes ownership verification coincidental:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps MIRChecker fail-closed on missing AllocMark type facts" do
+    checker = source("src/mir/mir_checker.rb")
+    expect(checker).to include("INV-ALLOC-MARK-TYPE")
+    expect(checker).to include("verify_alloc_marks_typed!(allocs)")
+    expect(checker).to include("def verify_alloc_marks_typed!(allocs)")
+    expect(checker).to include("ALLOC_MARK_TYPE_MISSING")
+    expect(checker).to include("ti.is_a?(Type) && !ti.untyped?")
+    expect(source("src/ast/diagnostic_registry.rb")).to include("ALLOC_MARK_TYPE_MISSING")
   end
 
   it "keeps Auto inference slot identity in typed objects, not tuple arrays" do

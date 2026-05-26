@@ -2078,6 +2078,13 @@ module DiagnosticRegistry
       cause: "Placement must be finalized before MIR lowering. AllocMark, Cleanup, and InlineZig allocator metadata may only carry :heap or :frame. Any other symbol is a downstream side channel.",
       fix_hint: "Move the decision to escape analysis or cleanup classification, then emit only :heap or :frame into MIR.",
     },
+    ALLOC_MARK_TYPE_MISSING: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR::AllocMark has no concrete Type payload.",
+      cause: "The lowering emitted an allocation ownership fact without the type needed to prove whether the value owns heap memory and what cleanup shape is legal. Nil or :Untyped type info makes cleanup verification coincidental.",
+      fix_hint: "Lowering bug — derive the AllocMark type from the allocation producer or already-typed AST source before MIRChecker runs.",
+    },
     COPY_CLEANUP: {
       severity: :error, category: :mir,
       template: "%{message}",

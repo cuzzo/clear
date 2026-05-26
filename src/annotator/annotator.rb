@@ -65,7 +65,13 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Stamp))
   end
   def stamp_type!(node, value)
+    case value
+    when nil
+      raise "annotation stamp missing type for #{node.class}"
+    end
     node.full_type = value
+    stamped = node.full_type!(context: "annotation stamp")
+    raise "annotation stamp produced :Untyped for #{node.class}" if stamped.untyped?
     value
   end
 
@@ -3199,7 +3205,7 @@ private
     end
     validate_assignment_type(assignment_node, assign_type_resolved, assignment_node.value.resolved_type)
 
-    stamp_type!(assignment_node, assign_type_resolved)
+    stamp_type!(assignment_node, T.must(assign_type_resolved))
 
     # HashMap put may allocate, so needs_rt must propagate.
     target_type = index_node.target.full_type!(context: "index assignment collection")

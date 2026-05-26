@@ -59,6 +59,13 @@ class MIRPass
     entry&.needs_cleanup? ? entry : nil
   end
 
+  sig { params(token: T.untyped, name: String, alloc: Symbol, type_info: Type).returns(MIR::Alloc) }
+  def alloc_marker(token, name, alloc, type_info)
+    marker = MIR::Alloc.new(token, name, alloc)
+    marker.full_type = type_info
+    marker
+  end
+
   # Computes plans, classifies bindings, inserts MIR nodes, and stamps AST.
   # Hoist has already lifted anonymous allocating expressions into bindings.
   # Escape analysis writes final binding storage; this pass inserts MIR markers.
@@ -733,7 +740,12 @@ class MIRPass
       if src_entry
         mir_prefix << MIR::SuppressCleanup.new(stmt.token, stmt.expr.name.to_s)
       end
-      mir_prefix << MIR::Alloc.new(stmt.token, c.binding.to_s, as_entry.alloc)
+      alloc_type = if c.destructure.is_a?(AST::Locatable)
+        c.destructure.full_type!(context: "match AS allocation marker")
+      else
+        Type.from_node!(stmt.expr, context: "match AS allocation marker")
+      end
+      mir_prefix << alloc_marker(stmt.token, c.binding.to_s, as_entry.alloc, alloc_type)
       drop = MIR::Drop.new(stmt.token, c.binding.to_s)
       drop.cleanup_entry = as_entry
       mir_prefix << drop
@@ -750,7 +762,12 @@ class MIRPass
     return unless stmt.is_a?(AST::WhileBindLoop)
     entry = live_cleanup_entry(bindings, stmt.binding_name)
     return unless entry
-    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry.alloc)
+    alloc_node = alloc_marker(
+      stmt.token,
+      stmt.binding_name.to_s,
+      entry.alloc,
+      T.must(Type.from_node!(stmt.condition, context: "while-bind allocation marker").wrapped_type),
+    )
     drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
     drop.cleanup_entry = entry
     stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
@@ -763,7 +780,7 @@ class MIRPass
     stmt.bindings.each do |b|
       entry = live_cleanup_entry(bindings, b.name)
       next unless entry
-      mir_prefix << MIR::Alloc.new(stmt.token, b.name.to_s, entry.alloc)
+      mir_prefix << alloc_marker(stmt.token, b.name.to_s, entry.alloc, b.unwrapped_type)
       drop = MIR::Drop.new(stmt.token, b.name.to_s)
       drop.cleanup_entry = entry
       mir_prefix << drop

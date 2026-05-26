@@ -213,10 +213,12 @@ RSpec.describe MIRLowering do
 
     it "translates MIR::Alloc to MIR::AllocMark" do
       alloc = MIR::Alloc.new(tok, "x", :heap)
+      alloc.full_type = :String
       result = lowering.lower(alloc)
       expect(result).to be_a(MIR::AllocMark)
       expect(result.name).to eq("x")
       expect(result.alloc).to eq(:heap)
+      expect(result.type_info.resolved).to eq(:String)
       expect(emit(result)).to be_nil
     end
 

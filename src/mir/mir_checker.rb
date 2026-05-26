@@ -39,6 +39,11 @@
 #     and :frame. Any other symbol means a downstream pass is carrying
 #     placement side-channel state instead of finalized placement.
 #
+#   INV-ALLOC-MARK-TYPE: Every MIR::AllocMark must carry a concrete
+#     Type payload. Allocation cleanup safety depends on the checker
+#     knowing what owns heap memory; nil or :Untyped means lowering
+#     emitted an unverifiable ownership fact.
+#
 #   INV-FRAME-REWIND: Every loop body that frame-allocates must contain
 #     a restoreLoopMark defer to prevent unbounded frame arena growth.
 #
@@ -292,6 +297,7 @@ class MIRChecker
 
     hpt_leaks.each { |e| @errors << e }
     verify_allocator_closed_set!(allocs, cleanups, inline_alloc_nodes)
+    verify_alloc_marks_typed!(allocs)
     verify_owned_return_alloc_marks!(owned_return_lets, allocs)
     verify_owned_result_alloc_marks!(owned_result_lets, allocs)
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, fn_def)
@@ -330,6 +336,19 @@ class MIRChecker
 
       @errors << error(:RETURN_TRANSFER_FRAME_ALLOC, name,
         "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")
+    end
+  end
+
+  sig { params(allocs: AllocMarksByName).void }
+  def verify_alloc_marks_typed!(allocs)
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        ti = mark.type_info
+        next if ti.is_a?(Type) && !ti.untyped?
+
+        @errors << error(:ALLOC_MARK_TYPE_MISSING, name,
+          "MIR::AllocMark must carry a concrete Type so MIRChecker can prove cleanup/ownership safety")
+      end
     end
   end
 
