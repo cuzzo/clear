@@ -36,6 +36,42 @@ RSpec.describe MIRChecker do
     MIR::Call.new(name, [MIR::Ident.new("rt")], false, true)
   end
 
+  describe "OWNERSHIP_CLEANUP_FOR_BORROW" do
+    it "rejects cleanup for an indexed borrow alias" do
+      body = [
+        alloc_mark("tmp", :heap, Type.new(:Value)),
+        MIR::Let.new(
+          "tmp",
+          MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Lit.new("0")),
+          false,
+          nil,
+          nil,
+        ),
+        MIR::Cleanup.new("tmp", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("borrow_cleanup", body))
+      expect(errors.any? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") && e.include?("tmp") }).to be true
+    end
+
+    it "allows cleanup when the binding is produced by a deep copy" do
+      body = [
+        alloc_mark("tmp", :heap, Type.new(:Value)),
+        MIR::Let.new(
+          "tmp",
+          MIR::DeepCopy.new(MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Lit.new("0")), "Value", nil, :full_value, :heap),
+          false,
+          nil,
+          nil,
+        ),
+        MIR::Cleanup.new("tmp", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("owned_copy_cleanup", body))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
+  end
+
   # ===========================================================================
   # HPT_LEAK -- heap-returning call result discarded
   # ===========================================================================

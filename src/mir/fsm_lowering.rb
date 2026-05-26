@@ -36,6 +36,19 @@ require_relative 'fsm_wrapper_emitter'
 module FsmLowering
     extend T::Sig
 
+  class FsmResultTransferFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target_alloc, Symbol
+    const :move_guarded, T::Boolean
+
+    sig { returns(T::Array[MIR::Stmt]) }
+    def marks
+      MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: target_alloc, move_guarded: move_guarded)
+    end
+  end
+
   # The stackful capture_inits string starts with `.inner = ..., .alloc = ...`
   # followed by user captures. For FSM we pre-set those fields with their
   # explicit values in the struct-literal, so extract just the capture
@@ -113,7 +126,7 @@ module FsmLowering
       result_mir = []
       if last_step
         expr_type = last_step[:expr].full_type!
-        expr_t = expr_type.is_a?(Type) ? expr_type : (Type.new(expr_type) rescue nil)
+        expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
         result_alloc = escaping_value_alloc(expr_t)
         last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
         last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, expr_t) if last_mir
@@ -165,13 +178,18 @@ module FsmLowering
     end
   end
 
-  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[T.untyped]) }
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[MIR::Stmt]) }
   def fsm_result_transfer_marks(result_mir, ast_node)
+    fsm_result_transfer_facts(result_mir, ast_node).flat_map(&:marks)
+  end
+
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[FsmResultTransferFact]) }
+  def fsm_result_transfer_facts(result_mir, ast_node)
     T.bind(self, MIRLowering) rescue nil
     @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     @current_bindings = T.let(@current_bindings, T.untyped)
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    marks = T.let([], T::Array[T.untyped])
+    facts = T.let([], T::Array[FsmResultTransferFact])
     consumed = collect_mir_consumed_roots(result_mir)
     consumed.concat(fsm_ast_result_consumed_roots(ast_node))
     consumed.each do |name|
@@ -179,12 +197,14 @@ module FsmLowering
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
       entry = @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
       next unless entry.present?
-      marks << MIR::TransferMark.new(safe.to_s, :owned_sink, entry.alloc)
-      if entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s)
-        marks << MIR::MoveMark.new(safe.to_s)
-      end
+      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s) == true
+      facts << FsmResultTransferFact.new(
+        name: safe.to_s,
+        target_alloc: entry.alloc,
+        move_guarded: guarded,
+      )
     end
-    marks
+    facts
   end
 
   sig { params(node: T.untyped).returns(T::Array[String]) }

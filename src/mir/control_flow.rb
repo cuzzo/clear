@@ -772,7 +772,6 @@ class OwnershipDataflow
   # Both explicit (was_moved) and implicit (non-Copy identifier = ownership transfer).
   #
   # Ownership-transferring positions (non-Copy = move):
-  #   - Direct RHS identifier: b = a
   #   - Struct literal field value: S{ field: a }
   #   - Union constructor payload: U.Variant(a)
   #   - List literal items: [a, b]
@@ -1420,11 +1419,9 @@ module LoopFrameAnalysis
   def self.loop_capture_frame_alloc?(loop_node, schema_lookup = nil)
     return false unless loop_node.is_a?(AST::WhileBindLoop)
     cond_t = loop_node.condition.full_type!(context: "loop capture condition")
-    inner = cond_t&.wrapped_type
+    inner = cond_t.wrapped_type
     return false unless inner.is_a?(Type)
     inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
-  rescue
-    false
   end
 
   # ── SHARD context frame-alloc flags ──────────────────────────────────────

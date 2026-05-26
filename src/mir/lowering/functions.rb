@@ -1412,14 +1412,15 @@ module MIRLoweringFunctions
     # indexed/container stores. The stdlib registry decides whether ownership
     # transfers; this code only ensures a borrowed/rodata value becomes owned
     # in the allocator selected for that sink.
-    resolved_allocs = {}
+    alloc_placeholder = T.let(nil, T.nilable(Symbol))
+    val_alloc_placeholder = T.let(nil, T.nilable(Symbol))
     if pattern.include?("{alloc}")
       resolved = pre_resolved_alloc || :heap
-      resolved_allocs[:alloc] = resolved
+      alloc_placeholder = resolved
     end
 
     if stdlib_facts.args.any?
-      sink_alloc = resolved_allocs[:alloc] || pre_resolved_alloc || :heap
+      sink_alloc = alloc_placeholder || pre_resolved_alloc || :heap
       stdlib_facts.args.each do |arg_fact|
         i = arg_fact.index
         next unless ownership_facts.takes?(i)
@@ -1453,12 +1454,12 @@ module MIRLoweringFunctions
         end
       end
       consumed_names.uniq!
-      if !consumed_names.empty? && resolved_allocs[:val_alloc].nil?
+      if !consumed_names.empty? && val_alloc_placeholder.nil?
         consumed_alloc = consumed_names.filter_map do |name|
           mark = @pending_stmts.reverse.find { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
           mark&.alloc || @current_bindings[name.to_s]&.alloc
         end.uniq
-        resolved_allocs[:val_alloc] = consumed_alloc.first if consumed_alloc.length == 1
+        val_alloc_placeholder = consumed_alloc.first if consumed_alloc.length == 1
       end
     end
 
@@ -1504,16 +1505,19 @@ module MIRLoweringFunctions
     # zig_pattern was set by the annotator together with matched_stdlib_def
     # (src/annotator.rb). Both are always present together.
     iz.stdlib_def = node.matched_stdlib_def
-    iz.allocs = resolved_allocs unless resolved_allocs.empty?
+    alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
+    iz.allocs = alloc_metadata unless alloc_metadata.empty?
     if ownership_facts.takes_any?
       iz.ownership_contract = MIR::OwnershipContract.consumes(consumed_names)
     end
     # Store target variable name for checker cross-reference with AllocMark.
     # Use extract_root_var_name so renamed variables (same-name collision fix)
     # get the correct disambiguated Zig name.
-    if node.is_a?(AST::MethodCall) && node.object.respond_to?(:name)
+    receiver_mutates = node.mutates_receiver ||
+      (node.matched_stdlib_def && FunctionSignature.unwrap(node.matched_stdlib_def)&.mutates_receiver?)
+    if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
       iz.target_var = extract_root_var_name(node.object)
-    elsif node.mutates_receiver && node.args&.first&.respond_to?(:name)
+    elsif receiver_mutates && node.args&.first&.respond_to?(:name)
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz

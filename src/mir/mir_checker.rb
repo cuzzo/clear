@@ -265,23 +265,23 @@ class MIRChecker
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
         owned_result_lets << node if expr_owned_result_alloc(node.init)
-        if node.init.is_a?(MIR::InlineZig) && node.init.allocs
+        if node.init.is_a?(MIR::InlineZig) && node.init.has_alloc_metadata?
           inline_alloc_nodes << node.init
         end
         all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
-        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::DiscardOwned
-        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::InlineZig
-        if node.allocs && !inline_alloc_nodes.include?(node)
+        if node.has_alloc_metadata? && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
         end
         all_zig_nodes << node unless all_zig_nodes.include?(node)
@@ -304,6 +304,7 @@ class MIRChecker
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
     verify_err_cleanup_transfers!(err_cleanups, transfers)
     verify_return_transfers_heap!(return_transfers, allocs)
+    verify_cleanup_sources_own_values!(fn_def.body, cleanups, err_cleanups)
     verify_allocating_lets_marked!(fn_def.body, allocs)
     verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
@@ -360,8 +361,8 @@ class MIRChecker
 
       sink_alloc = if node.is_a?(MIR::ReassignWithCleanup)
         node.alloc
-      elsif node.respond_to?(:resolved_allocs) && node.resolved_allocs.is_a?(Hash)
-        node.resolved_allocs[:val_alloc]
+      elsif node.respond_to?(:resolved_allocs) && node.resolved_allocs.is_a?(MIR::InlineAllocMetadata)
+        node.resolved_allocs.value_alloc
       end
 
       consumed.each do |name|
@@ -861,16 +862,16 @@ class MIRChecker
   def linear_expr_consumed_names(expr)
     names = T.let(Set.new, T::Set[String])
     walk_mir_node(expr) do |node|
-      contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
-      if contract.is_a?(MIR::OwnershipContract)
-        contract.consumes.each { |name| names.add(name.to_s) }
+      if node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+        node.ownership_contract.consumes.each { |name| names.add(name.to_s) }
       end
       if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
         collect_linear_expr_ident_names(node, names)
       end
-      callable = node.respond_to?(:callable_contract) ? node.callable_contract : nil
-      next unless callable.is_a?(MIR::CallableContract)
-      callable.ownership_contract.consumes.each { |name| names.add(name.to_s) }
+      next unless node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall) || node.is_a?(MIR::MethodCall)
+
+      callable = node.callable_contract
+      callable&.ownership_contract&.consumes&.each { |name| names.add(name.to_s) }
     end
     names
   end
@@ -1077,7 +1078,7 @@ class MIRChecker
   # INV-INDIRECT-SINGLE-BOX: a HeapCreate is exactly one indirection
   # (`HeapCreate(T)` -> `*T`), so its cell type must never itself be a
   # pointer. A `*`-typed cell is a `**U` double box -> UAF on read.
-  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.nilable(T::Array[T.untyped])).void }
   def verify_heap_create_single_indirection!(body)
     each_heap_create(body) do |hc|
       zt = hc.zig_type
@@ -1085,24 +1086,15 @@ class MIRChecker
       @errors << error(:INDIRECT_DOUBLE_BOX, @fn_name,
         "HeapCreate cell type is `#{zt}` (already a pointer) — boxing it yields a double indirection")
     end
+    nil
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.untyped).returns(T.untyped) }
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.proc.params(arg0: MIR::HeapCreate).void).void }
   def each_heap_create(stmts, &blk)
     walk_mir(stmts) do |node|
-      [node.respond_to?(:init) ? node.init : nil,
-       node.respond_to?(:expr) ? node.expr : nil,
-       node.respond_to?(:value) ? node.value : nil].each do |root|
-        deep_each_expr(root) { |e| yield e if e.is_a?(MIR::HeapCreate) }
-      end
+      yield node if node.is_a?(MIR::HeapCreate)
     end
-  end
-
-  sig { params(expr: T.untyped, blk: T.untyped).returns(T.untyped) }
-  def deep_each_expr(expr, &blk)
-    return unless expr
-    yield expr
-    each_sub_expr(expr) { |sub| deep_each_expr(sub, &blk) }
+    nil
   end
 
   sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }
@@ -1170,14 +1162,70 @@ class MIRChecker
     false
   end
 
+  # INV-CLEANUP-SOURCE-OWNS: Cleanup is legal only for a binding whose
+  # initializer creates ownership or receives ownership through an explicit
+  # structural transfer. Borrowed views (IndexGet/GetField/match payloads)
+  # may have recursive types, but cleaning them frees their owner.
+  sig do
+    params(
+      body: T.nilable(T::Array[T.untyped]),
+      cleanups: CleanupMarksByName,
+      err_cleanups: CleanupMarksByName,
+    ).void
+  end
+  def verify_cleanup_sources_own_values!(body, cleanups, err_cleanups)
+    cleanup_by_name = T.let({}, T::Hash[String, T.any(MIR::Cleanup, MIR::ErrCleanup)])
+    cleanups.each do |name, nodes|
+      first = nodes.first
+      cleanup_by_name[name] = first if first
+    end
+    err_cleanups.each do |name, nodes|
+      first = nodes.first
+      cleanup_by_name[name] = first if first
+    end
+    return if cleanup_by_name.empty?
+
+    owned_creates = T.let(Set.new, T::Set[String])
+    walk_mir(body) do |node|
+      owned_creates << node.name.to_s if node.is_a?(MIR::OwnedCreate)
+    end
+
+    walk_mir(body) do |node|
+      next unless node.is_a?(MIR::Let)
+      cleanup = cleanup_by_name[node.name.to_s]
+      next unless cleanup
+      next if cleanup_source_owns_value?(node, cleanup, owned_creates)
+
+      @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, node.name,
+        "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; " \
+        "MIRChecker cannot prove this binding owns memory")
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Let, cleanup: T.any(MIR::Cleanup, MIR::ErrCleanup), owned_creates: T::Set[String]).returns(T::Boolean) }
+  def cleanup_source_owns_value?(node, cleanup, owned_creates)
+    init = node.init
+    return true if cleanup.cleanup_entry.match_as?
+    return true if owned_creates.include?(node.name.to_s)
+    return true if allocating_expr?(init)
+    return true if owned_return_init?(init)
+    return true if expr_owned_result_alloc(init)
+    return true if structural_consumed_names(node).any?
+    return true if init.respond_to?(:ownership_consumption) &&
+                   init.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact) &&
+                   !init.ownership_consumption.names.empty?
+
+    false
+  end
+
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
     return false unless node.stdlib_def&.emits_allocating?
     return true if node.stdlib_def&.heap_return_alloc?
     return false unless node.is_a?(MIR::InlineZig)
 
-    allocs = node.allocs
-    !!(allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap })
+    node.allocs&.any_heap? == true
   end
 
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
@@ -1391,7 +1439,7 @@ class MIRChecker
     end
 
     inline_nodes.each do |node|
-      next unless node.allocs
+      next unless node.has_alloc_metadata?
       node.allocs.each do |alloc_key, alloc|
         next if VALID_ALLOCATORS.include?(alloc)
         @errors << error(:INVALID_ALLOCATOR_MARK, node.target_var || node.reason || "inline_zig",
@@ -1408,7 +1456,7 @@ class MIRChecker
   def verify_inline_alloc_targets!(inline_nodes)
     inline_nodes.each do |node|
       unsafe_node = T.unsafe(node)
-      next unless unsafe_node.allocs && !unsafe_node.allocs.empty?
+      next unless unsafe_node.has_alloc_metadata?
       next if unsafe_node.target_var && !unsafe_node.target_var.to_s.empty?
 
       @errors << error(:INLINE_ALLOC_WITHOUT_TARGET, unsafe_node.reason || "inline_zig",
@@ -1418,30 +1466,21 @@ class MIRChecker
   end
 
   # Tree walker -- yields every node in the MIR tree.
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir(stmts, &block)
-    return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_mir_node(s, &block) }
-  end
-
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-  def walk_mir_node(node, &block)
-    if node.is_a?(Array)
-      node.each { |child| walk_mir_node(child, &block) }
-      return
-    end
-    return unless node.is_a?(MIR::Emittable)
-
-    yield node
-    node.child_exprs.each { |child| walk_mir_node(child, &block) }
-    node.body_slots.each { |slot| walk_mir(slot.body, &block) }
-    if node.is_a?(MIR::Pipeline)
-      walk_mir_node(node.inner, &block)
-    end
+    MIR.each_node(stmts, &block)
     nil
   end
 
-  sig { params(expr: T.untyped, block: T.untyped).void }
+  sig { params(node: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
+  def walk_mir_node(node, &block)
+    return unless node.is_a?(MIR::Emittable) || node.is_a?(Array)
+
+    MIR.each_node(node, &block)
+    nil
+  end
+
+  sig { params(expr: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
   def walk_mir_expr(expr, &block)
     walk_mir_node(expr, &block)
     nil
@@ -1495,11 +1534,12 @@ class MIRChecker
   def verify_inline_alloc_contracts!(inline_nodes, allocs, fn_def)
     param_names = T.let(fn_def.params.map { |param| param.name.to_s }.to_set, T::Set[String])
     inline_nodes.each do |iz|
-      next unless iz.allocs
+      next unless iz.has_alloc_metadata?
       target = iz.target_var
       next unless target && !target.to_s.empty?
 
-      requires_target_alloc = iz.allocs.key?(:alloc) || iz.allocs.key?(:key_alloc)
+      alloc_metadata = iz.allocs
+      requires_target_alloc = alloc_metadata.requires_target_alloc?
       unless allocs.key?(target)
         next if param_names.include?(target.to_s)
         next unless requires_target_alloc
@@ -1511,8 +1551,8 @@ class MIRChecker
       container_alloc = T.must(allocs[target]).first.alloc
 
       # Check primary allocator.
-      if iz.allocs.key?(:alloc)
-        op_alloc = iz.allocs[:alloc]
+      if alloc_metadata.primary
+        op_alloc = alloc_metadata.primary
         if op_alloc != container_alloc
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
@@ -1521,9 +1561,8 @@ class MIRChecker
 
       # Check key/value allocators: frame-allocated stored data in a heap
       # container = use-after-free when the frame rewinds.
-      [:key_alloc, :val_alloc].each do |alloc_key|
-        next unless iz.allocs.key?(alloc_key)
-        stored_alloc = iz.allocs[alloc_key]
+      { key_alloc: alloc_metadata.key_alloc, val_alloc: alloc_metadata.value_alloc }.each do |alloc_key, stored_alloc|
+        next unless stored_alloc
         if stored_alloc == :frame && container_alloc == :heap
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "#{alloc_key} is :frame but container '#{target}' is :heap " \
@@ -1557,7 +1596,7 @@ class MIRChecker
     return if pointer_passed.empty?
 
     inline_nodes.each do |iz|
-      next unless iz.allocs
+      next unless iz.has_alloc_metadata?
       target = iz.target_var.to_s
       next unless pointer_passed.include?(target)
 
@@ -1892,7 +1931,7 @@ class MIRChecker
 
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }
   def inline_ownership_side_channel?(node)
-    return true if node.allocs && !node.allocs.empty?
+    return true if node.has_alloc_metadata?
     return true if node.stdlib_def&.emits_allocating?
     return false if stdlib_consumption_covered_without_owned_values?(node)
     return true if stdlib_takes_ownership?(node)
@@ -1945,9 +1984,9 @@ class MIRChecker
   sig { params(node: T.untyped, consumes: T::Array[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
   def check_consumed_allocators_match_sink!(node, consumes, allocs)
     return if consumes.empty?
-    return unless node.respond_to?(:allocs) && node.allocs.is_a?(Hash)
-    sink_alloc = node.allocs[:val_alloc] || node.allocs[:alloc]
-    return unless sink_alloc.is_a?(Symbol)
+    return unless node.is_a?(MIR::InlineZig)
+    sink_alloc = node.allocs&.sink_alloc
+    return unless sink_alloc
 
     consumes.each do |name|
       mark = allocs[name]&.first
@@ -2152,7 +2191,7 @@ class MIRChecker
     case expr
     when MIR::InlineZig
       return false if expr.stdlib_def&.mutates_receiver?
-      expr.allocs&.any? { |_k, v| v == :frame }
+      expr.allocs&.any_frame?
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
       expr.alloc == :frame

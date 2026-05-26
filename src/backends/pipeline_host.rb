@@ -93,6 +93,27 @@ class PipelineHost
     end
   end
 
+  class PipelinePublishSpec < T::Struct
+    extend T::Sig
+
+    const :publish_method, String
+    const :expr, Symbol
+    const :gate, Symbol
+    const :transfers_item_on_success, T::Boolean
+
+    sig { params(raw: T::Hash[Symbol, T.untyped]).returns(PipelinePublishSpec) }
+    def self.from(raw)
+      expr = T.cast(raw.fetch(:expr), Symbol)
+      gate = T.cast(raw.fetch(:gate), Symbol)
+      PipelinePublishSpec.new(
+        publish_method: T.cast(raw.fetch(:method), String),
+        expr: expr,
+        gate: gate,
+        transfers_item_on_success: expr == :item && gate == :pred,
+      )
+    end
+  end
+
   sig { returns(T.untyped) }
   attr_reader :fn_sigs
 
@@ -527,9 +548,8 @@ class PipelineHost
     source_mir = visit_mir(list_node)
     source_prefix = T.let([], T::Array[T.untyped])
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
-    if source_mir.is_a?(MIR::InlineZig) && source_mir.allocs && !source_mir.allocs.empty?
-      alloc_values = source_mir.allocs.values.select { |value| value.is_a?(Symbol) }
-      alloc = alloc_values.include?(:heap) ? :heap : :frame
+    if source_mir.is_a?(MIR::InlineZig) && source_mir.has_alloc_metadata?
+      alloc = source_mir.allocs.any_heap? ? :heap : :frame
       @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
       mark = MIR::AllocMark.new("pipe_src_list", alloc, list_node.full_type!)
       mark.scope = alloc == :heap ? :heap : :iteration
@@ -684,8 +704,7 @@ class PipelineHost
           MIR::MethodCall.new(MIR::Ident.new(receiver), "append",
             [MIR::AllocatorRef.new(alloc), MIR::Ident.new(temp_name)], true,
             MIR::CallableContract.no_ownership(2)), false),
-        MIR::TransferMark.new(temp_name, :owned_sink, alloc),
-        MIR::MoveMark.new(temp_name),
+        *MIR.ownership_transfer_marks(temp_name, :owned_sink, target_alloc: alloc, move_guarded: true),
       ])
     end
 
@@ -2026,12 +2045,12 @@ class PipelineHost
     right_value = MIR::Ident.new("__match")
     after_append = []
     if left_owns
-      after_append << MIR::TransferMark.new("__jl_owned", :owned_sink, pipeline_result_alloc)
-      after_append << MIR::MoveMark.new("__jl_owned")
+      after_append.concat(MIR.ownership_transfer_marks("__jl_owned", :owned_sink,
+        target_alloc: pipeline_result_alloc, move_guarded: true))
     end
     if right_owns
-      after_append << MIR::TransferMark.new("__match", :owned_sink, pipeline_result_alloc)
-      after_append << MIR::MoveMark.new("__match")
+      after_append.concat(MIR.ownership_transfer_marks("__match", :owned_sink,
+        target_alloc: pipeline_result_alloc, move_guarded: true))
     end
 
     MIR::BlockExpr.new(label, [
@@ -3059,8 +3078,8 @@ class PipelineHost
   # truth). Adding a default-handled terminal means one entry there;
   # this projection picks up the :publish key automatically.
   PUBLISH_SPEC = T.let(Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
-    h[sym] = entry[:publish] if entry[:publish]
-  }.freeze, T::Hash[T.untyped, T.untyped])
+    h[sym] = PipelinePublishSpec.from(T.cast(entry[:publish], T::Hash[Symbol, T.untyped])) if entry[:publish]
+  }.freeze, T::Hash[Symbol, PipelinePublishSpec])
 
   # Single shared lowering for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND.
   # REDUCE and DISTINCT need seeded inits or inline CAS, so they keep
@@ -3071,7 +3090,7 @@ class PipelineHost
     item  = p[:item_var]
     inner_recv = MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner")
 
-    arg = case spec[:expr]
+    arg = case spec.expr
           when :typed
             inner_zig = transpile_type(smooth_node.full_type!.tense_type)
             [numeric_fold_expr_typed(fold_op.expression, item, inner_zig)]
@@ -3086,27 +3105,16 @@ class PipelineHost
           end
 
     call = MIR::ExprStmt.new(
-      MIR::MethodCall.new(inner_recv, spec[:method], T.must(arg), false,
+      MIR::MethodCall.new(inner_recv, spec.publish_method, T.must(arg), false,
         MIR::CallableContract.no_ownership(T.must(arg).length)), nil)
 
-    publish = case spec[:gate]
+    publish = case spec.gate
               when :always then [call]
               when :pred
                 pred_mir = with_pipeline_context(placeholder: item) {
                   visit_mir(fold_op.expression)
                 }
-                # #203: when the source stream yields heap-owned items
-                # (currently only String → []const u8), the consumer
-                # fiber owns each item it pulls from `gen.next()`.
-                # FIND with `expr: :item` transfers ownership into the
-                # accumulator's submit() on the truthy branch, so the
-                # else branch must free the item explicitly. Other
-                # predicate-gated terminals (COUNT) don't pass the
-                # item to the call, so they must free unconditionally
-                # — but a String-source COUNT-observable isn't yet
-                # exercised end-to-end and would need additional
-                # codegen work; this fix is scoped to FIND-on-string.
-                else_body = string_source_else_free(p, source_node, terminal, spec)
+                else_body = predicate_miss_cleanup(p, source_node, spec)
                 [MIR::IfStmt.new(pred_mir, [call], else_body)]
               end
 
@@ -3115,24 +3123,21 @@ class PipelineHost
       publish_stmts: T.must(publish))
   end
 
-  # #203: produce an `else` body that frees a heap-owned item when the
-  # predicate-gated terminal didn't consume it. Only FIND for now —
-  # FIND's truthy branch transfers ownership via submit, so the else
-  # branch is the only leak path. Returns nil when the source is not
-  # heap-owned-element (numeric streams, etc.).
-  #
-  # Uses MIR::FreeSlice with MIR::AllocatorRef(:heap) so the emitter
-  # picks up the consumer fiber's runtime name during body-emit
-  # (lower_range_fold_observable swaps @emitter.rt_name to fiber_rt
-  # for the consumer body — C8 partial fix). A literal InlineZig
-  # like "rt.heapAlloc().free(...)" would bake in the outer scope's
-  # `rt` and crash with "rt not accessible from inner function".
-  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier, terminal: Symbol, spec: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
-  def string_source_else_free(p, source_node, terminal, spec)
-    return nil unless terminal == :find
+  sig { params(type_info: Type).returns(T::Boolean) }
+  def pipeline_element_owns_heap?(type_info)
+    type_info.string? ||
+      type_info.heap_ptr? ||
+      type_info.recursive_cleanup_shape?(pipeline_schema_lookup) ||
+      type_info.needs_explicit_cleanup?(:heap, pipeline_schema_lookup)
+  end
+
+  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier, spec: PipelinePublishSpec).returns(T.nilable(T::Array[T.untyped])) }
+  def predicate_miss_cleanup(p, source_node, spec)
+    return nil unless spec.transfers_item_on_success
     src_t = source_node.full_type!(context: "pipeline source cleanup")
     elem_t = src_t.tense_type&.element_type
-    return nil unless elem_t&.string?
+    return nil unless elem_t && pipeline_element_owns_heap?(elem_t)
+
     [MIR::ExprStmt.new(
       MIR::Call.new("CheatLib.cleanup", [
         MIR::Ident.new("@TypeOf(#{p[:item_var]})"),
@@ -4254,25 +4259,18 @@ class PipelineHost
     }
   end
 
-  sig { params(lhs: AST::Identifier, id: Integer).returns(T::Array[T.untyped]) }
-  def bounded_stream_items_setup(lhs, id)
+  sig { params(lhs: AST::Identifier, _id: Integer).returns(T::Array[T.untyped]) }
+  def bounded_stream_items_setup(lhs, _id)
     source = visit_mir(lhs)
-    if lhs.is_a?(AST::Identifier)
-      [[], MIR::AddressOf.new(MIR::FieldGet.new(source, "items"))]
-    else
-      local = "__bounded_conc_stream_#{id}"
-      setup = MIR::Let.new(local, source, true, nil, "_ = &#{local};")
-      [[setup], MIR::AddressOf.new(MIR::FieldGet.new(MIR::Ident.new(local), "items"))]
-    end
+    [[], MIR::AddressOf.new(MIR::FieldGet.new(source, "items"))]
   end
 
   sig { params(lhs: AST::Identifier).returns(T::Array[T.untyped]) }
   def bounded_stream_source_move(lhs)
-    return [] unless lhs.is_a?(AST::Identifier)
     name = lhs.name.to_s
     guarded = @lowering.instance_variable_get(:@guarded_cleanup_names)&.[](name)
     return [] unless guarded
-    [MIR::TransferMark.new(name, :owned_sink, :heap), MIR::MoveMark.new(name)]
+    MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: :heap, move_guarded: true)
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }

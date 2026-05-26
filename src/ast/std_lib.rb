@@ -295,7 +295,7 @@ STD_LIB = T.let({
     zig: "try CheatLib.readFile({alloc}, {0})",
     bc: true,
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     suspends: true,   # io_uring submitRead + yield
     # FSM-mode templates (Phase B2-IO). Single-syscall variant: open
     # → fileSize → alloc buffer → one io_uring read → close. Most
@@ -402,7 +402,7 @@ STD_LIB = T.let({
     return_alloc: :frame,
     zig: "try CheatLib.readLine({alloc})",
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     can_fail: true,
   },
 
@@ -413,7 +413,7 @@ STD_LIB = T.let({
     return_alloc: :frame,
     zig: "try CheatLib.readLinePrompt({alloc}, {0})",
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     can_fail: true,
   },
 
@@ -1227,7 +1227,7 @@ MAP_METHODS = T.let({
     arity: 0, tag: :map_method, allocates: true,
     bc: true,
     zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)",
-    alloc: :frame,
+    alloc: :node_storage,
     sharded_zig: "try {0}.keys({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
@@ -1269,7 +1269,7 @@ MAP_METHODS = T.let({
     arity: 0, tag: :map_method, allocates: true,
     bc: true,
     zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)",
-    alloc: :frame,
+    alloc: :node_storage,
     sharded_zig: "try {0}.values({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",

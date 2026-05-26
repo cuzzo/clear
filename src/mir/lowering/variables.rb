@@ -14,7 +14,7 @@ module MIRLoweringVariables
     const :template, String
     const :key_zig, T.nilable(String)
     const :val_zig, T.nilable(String)
-    const :resolved_allocs, T::Hash[Symbol, Symbol]
+    const :resolved_allocs, MIR::InlineAllocMetadata
     const :sink_alloc, Symbol
   end
 
@@ -43,6 +43,40 @@ module MIRLoweringVariables
     const :has_caps, T::Boolean
     const :bare_zig, String
     const :generic_id, T::Boolean
+  end
+
+  sig do
+    params(
+      node: AST::VarDecl,
+      type_info: Type,
+      binding_entry: CleanupEntry,
+      heap_return_var: T::Boolean,
+      heap_return_binding_allocates: T::Boolean,
+    ).returns(MIR::Placement::BindingFact)
+  end
+  def binding_placement_fact(node, type_info, binding_entry, heap_return_var, heap_return_binding_allocates)
+    T.bind(self, MIRLowering) rescue nil
+    storage = (node.symbol&.heap_storage? || heap_return_binding_allocates) ? :heap : :frame
+    cleanup_alloc = if storage == :heap
+      :heap
+    elsif heap_return_var
+      :frame
+    elsif binding_entry.present?
+      binding_entry.alloc
+    else
+      alloc_for_node(node)
+    end
+    alloc = MIR::Placement.binding_alloc(storage: storage, cleanup_alloc: cleanup_alloc, default: :frame)
+    scope = binding_entry.present? ? binding_entry.scope : MIR::Placement.cleanup_scope(alloc)
+    MIR::Placement::BindingFact.new(
+      name: node.name.to_s,
+      type_info: type_info,
+      storage: storage,
+      alloc: alloc,
+      scope: scope,
+      heap_return: heap_return_var,
+      escape_reason: storage == :heap ? :symbol_storage : nil,
+    )
   end
 
   sig { params(node: AST::FunctionDef, mutable_scalar_params: T::Set[String]).returns(T.nilable(String)) }
@@ -129,6 +163,7 @@ module MIRLoweringVariables
     init = with_decl_alloc(facts.decl_alloc) do
       lower_var_decl_init(node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)
     end
+    init = ensure_cleanup_binding_owns_string_init(init, facts, node.value)
 
     safe_name = var_decl_safe_name(node, facts.has_mir_drop)
     stamp_var_decl_init_target!(init, safe_name, facts.decl_alloc)
@@ -149,6 +184,18 @@ module MIRLoweringVariables
     return nodes + owner_marks if nodes.is_a?(Array)
 
     [nodes, *owner_marks]
+  end
+
+  sig { params(init: T.untyped, facts: VarDeclFacts, ast_value: T.untyped).returns(T.untyped) }
+  def ensure_cleanup_binding_owns_string_init(init, facts, ast_value)
+    return init unless facts.has_mir_drop
+    return init unless facts.ft.string?
+
+    effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    return init if effect.produces_owned
+    return init if ast_value.is_a?(AST::Identifier) && AST.moved?(ast_value)
+
+    MIR::DupeSlice.new(init, facts.decl_alloc)
   end
 
   sig { params(node: AST::VarDecl).returns(VarDeclFacts) }
@@ -174,10 +221,14 @@ module MIRLoweringVariables
     decl_name = node.name.to_s
     binding_entry = node_entry || @current_bindings[decl_name] || CleanupEntry::NONE
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
+    @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
+    heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s) == true
+    heap_return_binding_allocates = (heap_return_var && escaping_value_alloc(ft) == :heap) == true
+    placement = binding_placement_fact(node, ft, binding_entry, heap_return_var, heap_return_binding_allocates)
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
     actually_mutated = actually_mutated == true
-    is_heap = !!node.symbol&.heap_storage?
+    is_heap = placement.heap?
     has_mutable_cleanup = has_mir_drop || ft.collection? || ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? ||
                           ft.open_stream? || ft.inf_stream? || (ft.array? && ft.dynamic?) ||
                           is_heap || ft.resource? || node.resource_close_zig
@@ -205,16 +256,7 @@ module MIRLoweringVariables
     # name-keyed cleanup plan (which may be stale for same-name vars in different scopes).
     # Escape analysis stamping (:heap) takes precedence. For :frame, trust the
     # cleanup_bindings alloc (which correctly handles sharded/pool/always-heap types).
-    @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
-    heap_return_binding_allocates = heap_return_var && escaping_value_alloc(ft) == :heap
-    base_decl_alloc = if node.symbol&.heap_storage? || heap_return_binding_allocates
-      :heap
-    elsif heap_return_var
-      :frame
-    else
-      (binding_entry.present? && binding_entry.alloc) || alloc_for_node(node)
-    end
+    base_decl_alloc = placement.alloc
     next_owned_alloc = if node.value.is_a?(AST::NextExpr)
       next_result_owned_alloc(Type.from_node!(node.value.expr, context: "NEXT source"), ft, base_decl_alloc)
     end
@@ -328,7 +370,7 @@ module MIRLoweringVariables
       if !init.target_var || init.assignable_allocating_result?
         init.target_var = safe_name
       end
-      init.allocs = init.allocs.transform_values { |_alloc| decl_alloc } if init.target_var == safe_name
+      init.allocs = init.allocs.with_all(decl_alloc) if init.target_var == safe_name
     end
   end
 
@@ -374,10 +416,9 @@ module MIRLoweringVariables
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node]
-    elsif init.is_a?(MIR::InlineZig) && init.allocs && !init.allocs.empty? && init.target_var == safe_name &&
+    elsif init.is_a?(MIR::InlineZig) && init.has_alloc_metadata? && init.target_var == safe_name &&
           !generic_id
-      alloc_values = init.allocs.values
-      mir_alloc = alloc_values.include?(:heap) ? :heap : :frame
+      mir_alloc = init.allocs.any_heap? ? :heap : :frame
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       [alloc_mark, let_node]
     elsif binding_entry.present? && !binding_entry.needs_cleanup? && actually_mutated && ownership_bearing_type?(ft) &&
@@ -517,9 +558,7 @@ module MIRLoweringVariables
 
     guarded_names = @guarded_cleanup_names
     guarded = entry.has_moved_guard? || guarded_names&.[](safe) == true
-    marks = T.let([MIR::TransferMark.new(safe, :owned_sink, entry.alloc)], T::Array[MIR::Stmt])
-    marks << MIR::MoveMark.new(safe) if guarded
-    marks
+    ownership_transfer_marks(safe, :owned_sink, target_alloc: entry.alloc, move_guarded: guarded)
   end
 
   sig { params(value: AST::GetField).returns(T::Boolean) }
@@ -544,8 +583,7 @@ module MIRLoweringVariables
       return true if init.stdlib_def&.heap_return_alloc?
       return false unless init.is_a?(MIR::InlineZig)
 
-      allocs = init.allocs
-      return !!(allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap })
+      return init.allocs&.any_heap? == true
     end
 
     false
@@ -618,6 +656,7 @@ module MIRLoweringVariables
         place_value_for_destination(lowered, node.value, assign_alloc, node.full_type!)
       end
       value = copy_container_borrow_if_needed(value, node.value)
+      stamp_allocating_result_target!(value, mapped || safe, alloc: assign_alloc) if assign_alloc && value
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
         !fallible_self_fallback_reassign?(mapped || safe, value)
       result = if rp
@@ -759,9 +798,7 @@ module MIRLoweringVariables
     guarded = !!(@guarded_cleanup_names && @guarded_cleanup_names[name])
     return [] unless guarded || entry.present?
     alloc = target_alloc || (entry.present? ? entry.alloc : :heap)
-    marks = T.let([MIR::TransferMark.new(name, :owned_sink, alloc)], T::Array[MIR::Stmt])
-    marks << MIR::MoveMark.new(name) if guarded
-    marks
+    ownership_transfer_marks(name, :owned_sink, target_alloc: alloc, move_guarded: guarded)
   end
 
   sig { params(node: AST::Assignment).returns(T.untyped) }
@@ -832,8 +869,16 @@ module MIRLoweringVariables
     target = lower(node.name.target)
     idx = lower(node.name.index)
     idx = MIR::Cast.new(idx, "usize", :intCast) if cast_index
-    val = lower(node.value)
-    MIR::Set.new(MIR::IndexGet.new(target, idx), val)
+    target_alloc = placement_for_node(node.name.target)
+    value_type = Type.from_node!(node.value, context: "direct indexed assignment value")
+    val = with_decl_alloc(target_alloc) { lower(node.value) }
+    if ownership_tracked_transfer_type?(value_type)
+      val = materialize_owned_sink_value(val, node.value, target_alloc, value_type)
+      val = hoist_alloc(val, node.value, err_cleanup: true) if mir_allocates?(val)
+    end
+    set = MIR::Set.new(MIR::IndexGet.new(target, idx), val)
+    with_ownership_consumption(set, mir_ident_names(val), "MIR::Set", target_alloc: target_alloc)
+    set
   end
 
   sig do
@@ -958,9 +1003,8 @@ module MIRLoweringVariables
     iz.target_var = extract_root_var_name(target_node)
     setAt_stmt = MIR::ExprStmt.new(iz, false)
     post_transfer_marks = consumed_names.flat_map do |name|
-      marks = T.let([MIR::TransferMark.new(name, :owned_sink, dispatch.sink_alloc)], T::Array[MIR::Stmt])
-      marks << MIR::MoveMark.new(name) if @guarded_cleanup_names&.[](name)
-      marks
+      guarded = @guarded_cleanup_names&.[](name) == true
+      ownership_transfer_marks(name, :owned_sink, target_alloc: dispatch.sink_alloc, move_guarded: guarded)
     end
 
     # Emit pre-cleanup for non-Copy element types in list collections so the
@@ -1015,7 +1059,7 @@ module MIRLoweringVariables
       key_zig: (kind == :numeric_map ? receiver_type.key_type&.zig_type : nil),
       val_zig: (kind == :numeric_map ? receiver_type.value_type&.zig_type : nil),
       resolved_allocs: resolved_allocs,
-      sink_alloc: resolved_allocs[:val_alloc] || resolved_allocs[:alloc] || resolved_allocs[:shard_alloc] || :heap
+      sink_alloc: resolved_allocs.value_alloc || resolved_allocs.primary || resolved_allocs.shard_alloc || :heap
     )
   end
 
@@ -1031,7 +1075,7 @@ module MIRLoweringVariables
       target_node: T.untyped,
       assignment: AST::Assignment,
       include_val_alloc: T::Boolean
-    ).returns(T::Hash[Symbol, Symbol])
+    ).returns(MIR::InlineAllocMetadata)
   end
   def indexed_assignment_allocs(template, op, target_node, assignment, include_val_alloc:)
     T.bind(self, MIRLowering) rescue nil
@@ -1043,7 +1087,7 @@ module MIRLoweringVariables
       next if alloc_key == :val_alloc && op[alloc_key].nil? && include_val_alloc
       resolved_allocs[alloc_key] = resolve_alloc_sym(alloc_sym, target_node, assignment)
     end
-    resolved_allocs
+    MIR::InlineAllocMetadata.new(resolved_allocs)
   end
 
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }

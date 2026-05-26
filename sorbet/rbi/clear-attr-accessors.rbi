@@ -687,6 +687,44 @@ class Assignment
   def field_pre_cleanup=(value); end
 end
 
+class AutoMapShapeEntry
+  sig { returns(T.untyped) }
+  def key; end
+  sig { returns(T.untyped) }
+  def value; end
+end
+
+class AutoShapeSlots
+  sig { returns(T.untyped) }
+  def key; end
+  sig { returns(T.untyped) }
+  def list; end
+  sig { returns(T.untyped) }
+  def value; end
+end
+
+class AutoSlotId
+  sig { returns(T.untyped) }
+  def decl_id; end
+  sig { returns(T.untyped) }
+  def fn_name; end
+  sig { returns(T.untyped) }
+  def index; end
+  sig { returns(T.untyped) }
+  def kind; end
+end
+
+class AutoUnifier::MapPairResolution
+  sig { returns(T.nilable(AutoUnifier::Resolution)) }
+  def key; end
+  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
+  def key=(value); end
+  sig { returns(T.nilable(AutoUnifier::Resolution)) }
+  def value; end
+  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
+  def value=(value); end
+end
+
 class BasicBlock
   sig { returns(T.untyped) }
   def id; end
@@ -812,6 +850,13 @@ class BindExpr
   def reassign_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reassign_cleanup=(value); end
+end
+
+class BodySlot
+  sig { returns(T.untyped) }
+  def body; end
+  sig { returns(T.untyped) }
+  def name; end
 end
 
 class BorrowChecker
@@ -1385,6 +1430,11 @@ class IfStatement
   def then_result_type=(value); end
 end
 
+class InlineAllocMetadata
+  sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
+  def placeholders; end
+end
+
 class InlineStructVariant
   sig { returns(T.untyped) }
   def deinit_entries; end
@@ -1423,6 +1473,13 @@ class LinearOwnershipState
   def terminated=(value); end
 end
 
+class MIR::BodySlot
+  sig { returns(T.untyped) }
+  def body; end
+  sig { returns(T.untyped) }
+  def name; end
+end
+
 class MIR::CallableContract
   sig { returns(T.untyped) }
   def checked_arg_count; end
@@ -1444,6 +1501,11 @@ class MIR::FieldDef
   def boxed_capture; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def boxed_capture=(value); end
+end
+
+class MIR::InlineAllocMetadata
+  sig { returns(T::Hash[T.any(Symbol, String), Symbol]) }
+  def placeholders; end
 end
 
 class MIR::OwnershipContract
@@ -1520,6 +1582,17 @@ end
 class MIRPassState
   sig { returns(T::Set[Symbol]) }
   def completed; end
+end
+
+class MapPairResolution
+  sig { returns(T.nilable(AutoUnifier::Resolution)) }
+  def key; end
+  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
+  def key=(value); end
+  sig { returns(T.nilable(AutoUnifier::Resolution)) }
+  def value; end
+  sig { params(value: T.nilable(AutoUnifier::Resolution)).returns(T.nilable(AutoUnifier::Resolution)) }
+  def value=(value); end
 end
 
 class MatchStatement

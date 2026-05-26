@@ -409,10 +409,12 @@ module MIRLoweringConcurrency
         last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
         body_mir.concat(last_pending)
-        body_mir << last_mir
         result_code = emit_expr(last_mir)
         pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
         result_code = T.must(result_code).sub(/\Atry /, '') if T.must(result_code).start_with?("try ")
+        result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
+        body_mir.concat(ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap))
+        body_mir << MIR::Set.new(result_target, last_mir)
         assignment = "__ctx_#{id}.inner.result = #{result_code};"
         pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
       end
@@ -901,13 +903,16 @@ module MIRLoweringConcurrency
       observable_string_inner = plan.inner
       @tmp_counter += 1
       observable_string_label = "__obs_next_string_#{@tmp_counter}"
-      return MIR::BlockExpr.new(observable_string_label, [
+      materialize = MIR::MethodCall.new(observable_string_inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
+        MIR::CallableContract.no_ownership(1), :heap)
+      materialize.result_type = Type.new(result_t)
+      block = MIR::BlockExpr.new(observable_string_label, [
         MIR::ExprStmt.new(MIR::MethodCall.new(observable_string_inner, "wait", [], false,
           MIR::CallableContract.no_ownership(0)), nil),
-        MIR::BreakStmt.new(observable_string_label,
-          MIR::MethodCall.new(observable_string_inner, "materialize", [MIR::AllocatorRef.new(:heap)], true,
-            MIR::CallableContract.no_ownership(1), :heap)),
+        MIR::BreakStmt.new(observable_string_label, materialize),
       ])
+      block.result_type = Type.new(result_t)
+      return block
     end
 
     receiver = plan.inner

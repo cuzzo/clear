@@ -67,7 +67,7 @@ module MIRLoweringControlFlow
       out
     end
 
-    sig { params(value_names: T::Set[String], visible_guarded_names: T::Set[String]).returns(T::Array[T.untyped]) }
+    sig { params(value_names: T::Set[String], visible_guarded_names: T::Set[String]).returns(T::Array[MIR::Stmt]) }
     def transfer_marks_for(value_names, visible_guarded_names)
       names = T.let(Set.new, T::Set[String])
       value_names.each { |name| names << name }
@@ -79,9 +79,7 @@ module MIRLoweringControlFlow
             converted_cleanup_names.include?(name)
         end
         .flat_map do |name|
-          nodes = T.let([MIR::TransferMark.new(name, :return)], T::Array[T.untyped])
-          nodes << MIR::MoveMark.new(name) if visible_guarded_names.include?(name)
-          nodes
+          MIR.ownership_transfer_marks(name, :return, move_guarded: visible_guarded_names.include?(name))
         end
     end
   end
@@ -831,7 +829,10 @@ module MIRLoweringControlFlow
         MIR::Let.new(name, stmt.value, false, nil, nil)
       ], T::Array[T.untyped])
       out << MIR::ErrCleanup.new(name, entry) if entry
-      out << MIR::TransferMark.new(name, :return) if entry
+      if entry
+        plan = synthetic_return_ownership_plan(name)
+        out.concat(plan.transfer_marks_for(Set[name], @lowered_guarded_cleanup_names || Set.new))
+      end
       out << MIR::ReturnStmt.new(MIR::Ident.new(name))
       out
     end
@@ -930,6 +931,20 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
     marks.empty? ? ret : marks + [ret]
+  end
+
+  sig { params(name: String).returns(ReturnOwnershipPlan) }
+  def synthetic_return_ownership_plan(name)
+    names = T.let(Set[name], T::Set[String])
+    ReturnOwnershipPlan.new(
+      value: MIR::Ident.new(name),
+      explicit_return_names: Set.new,
+      moved_root_names: Set.new,
+      consumed_root_names: Set.new,
+      direct_value_names: names,
+      converted_cleanup_names: Set.new,
+      transfer_required_names: names,
+    )
   end
 
   sig { params(node: AST::ReturnNode).returns(ReturnOwnershipPlan) }

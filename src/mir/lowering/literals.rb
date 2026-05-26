@@ -53,7 +53,9 @@ module MIRLoweringLiterals
         { name: "items", value: MIR::ArrayInit.new(promise_zig, n.to_s, item_idents) }
       ])
       body << MIR::BreakStmt.new(label, stream_value)
-      return MIR::BlockExpr.new(label, body)
+      block = MIR::BlockExpr.new(label, body)
+      block.result_type = Type.new(ti)
+      return block
     end
 
     list_alloc = @current_decl_alloc || alloc_for_node(node)
@@ -203,6 +205,8 @@ module MIRLoweringLiterals
       items << MIR::ExprStmt.new(put_call, false)
     end
     items << MIR::BreakStmt.new("__hm_blk", MIR::Ident.new("__hm"))
-    MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
+    block = MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
+    block.result_type = Type.new(ti)
+    block
   end
 end

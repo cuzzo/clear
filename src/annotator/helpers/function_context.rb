@@ -7,6 +7,7 @@ class FunctionContext
     extend T::Sig
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
 
+  sig { returns(T.untyped) }
   attr_accessor :name, :type_params,
                 :frame_count, :heap_count, :alloc_count,
                 :loop_depth, :conditional_depth, :returns,

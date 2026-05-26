@@ -167,6 +167,7 @@ module MIRLoweringCapabilities
     @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
     @with_alias_alloc_map = T.let(@with_alias_alloc_map, T.untyped)
+    @with_alias_owner_map = T.let(@with_alias_owner_map, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     return lower_with_match_block(node) if node.arms
 
@@ -430,14 +431,19 @@ module MIRLoweringCapabilities
     prev_locked = @locked_unwrap_map
     prev_rc = @rc_unwrap_map
     prev_alias_alloc = @with_alias_alloc_map
+    prev_alias_owner = @with_alias_owner_map
     @locked_unwrap_map = (prev_locked || {}).dup
     @rc_unwrap_map = (prev_rc || {}).dup
     @with_alias_alloc_map = (prev_alias_alloc || {}).dup
+    @with_alias_owner_map = (prev_alias_owner || {}).dup
 
     (node.capabilities || []).each do |cap|
       var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
       alias_name = cap[:alias] || var_name
-      @with_alias_alloc_map[alias_name.to_s] = placement_for_node(cap[:var_node]) if cap[:alias]
+      if cap[:alias]
+        @with_alias_alloc_map[alias_name.to_s] = placement_for_node(cap[:var_node])
+        @with_alias_owner_map[alias_name.to_s] = var_name.to_s
+      end
       case cap[:capability]
       when :EXCLUSIVE, :write_locked_read
         @locked_unwrap_map[alias_name] = true
@@ -464,6 +470,7 @@ module MIRLoweringCapabilities
     @locked_unwrap_map = prev_locked
     @rc_unwrap_map = prev_rc
     @with_alias_alloc_map = prev_alias_alloc
+    @with_alias_owner_map = prev_alias_owner
 
     # Bindings is mixed: legacy WITH paths (EXCLUSIVE / BORROWED /
     # RESTRICT / multiowned / shared) push String entries that get

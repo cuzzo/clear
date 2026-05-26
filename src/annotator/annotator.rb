@@ -52,6 +52,7 @@ class SemanticAnnotator
   include LockHelper
   include TestAnnotation
 
+  sig { returns(T.untyped) }
   attr_reader :scope_stack
 
   sig { returns(T.untyped) }
@@ -107,6 +108,7 @@ class SemanticAnnotator
   # locate source-level spans (e.g., the `;` at the end of a
   # declaration line so `@multiowned` can be inserted before it).
   # When nil, affected helpers fall back to the plain `error!` path.
+  sig { returns(T.nilable(String)) }
   attr_accessor :source_code
 
   sig { params(importer: T.nilable(ModuleImporter), compiler: T.nilable(ModuleImporter), source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }

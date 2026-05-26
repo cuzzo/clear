@@ -212,25 +212,30 @@ module CleanupClassifier
         next
       end
 
-      # Heap struct string fields: heap-allocated structs dupe their string
-      # fields to heap at creation. Overwriting without freeing the old leaks.
-      if field_ti.string? && !field_needs_cleanup && target_node.is_a?(AST::Identifier)
-        target_entry = bindings[target_node.name.to_s]
-        if target_entry && target_entry[:alloc] == :heap
-          stmt.field_pre_cleanup = :heap
-          next
-        end
+      heap_field_alloc = heap_owned_field_pre_cleanup_alloc(field_ti, target_node, bindings)
+      if !field_needs_cleanup && heap_field_alloc
+        stmt.field_pre_cleanup = heap_field_alloc
+        next
       end
 
       next unless field_needs_cleanup
 
-      stmt.field_pre_cleanup = if target_node.is_a?(AST::Identifier)
-        target_entry = bindings[target_node.name.to_s]
-        (target_entry && target_entry[:alloc] == :heap) ? :heap : :frame
-      else
-        :frame
-      end
+      stmt.field_pre_cleanup = field_owner_cleanup_alloc(target_node, bindings)
     end
+  end
+
+  sig { params(field_ti: Type, target_node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(Symbol)) }
+  private_class_method def self.heap_owned_field_pre_cleanup_alloc(field_ti, target_node, bindings)
+    return nil unless field_ti.string?
+    field_owner_cleanup_alloc(target_node, bindings) == :heap ? :heap : nil
+  end
+
+  sig { params(target_node: T.untyped, bindings: T::Hash[String, CleanupEntry]).returns(Symbol) }
+  private_class_method def self.field_owner_cleanup_alloc(target_node, bindings)
+    return :frame unless target_node.is_a?(AST::Identifier)
+
+    target_entry = bindings[target_node.name.to_s]
+    target_entry&.alloc == :heap ? :heap : :frame
   end
 
   # ── Promoted function detection ──────────────────────────────────
@@ -568,10 +573,11 @@ module CleanupClassifier
   # array_struct_strings) stay as separate methods due to their size.
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
-    return nil if node.respond_to?(:container_borrow) && node.container_borrow
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    return nil if node_sym&.borrow_provenance? ||
-                  (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?)
+    return nil if node.respond_to?(:container_borrow) && node.container_borrow
+    return nil if !node_sym&.heap_storage? &&
+                  (node_sym&.borrow_provenance? ||
+                   (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?))
     return nil if ti.string? && !node_sym&.heap_storage? &&
                   !mutable_owning_slot?(ti, node, schema_lookup) &&
                   (node_sym&.rodata_provenance? ||
@@ -595,21 +601,23 @@ module CleanupClassifier
       entry = entry(:resource, resource_close_zig: node.resource_close_zig)
     end
     entry ||= classify_mutable_owning_slot(ti, node, schema_lookup)
+    entry ||= classify_optional(ti, schema_lookup, node: node)
     if !entry && node_sym&.heap_storage? && ti.recursive_cleanup_shape?(schema_lookup)
       entry = entry(:uniform, has_moved_guard: false)
       entry[:fixed_alloc] = true
     end
     entry ||= classify_owned_return_call(ti, node, schema_lookup)
     entry ||= classify_collection(ti, schema_lookup, node: node)
-    entry ||= entry(:uniform, has_moved_guard: true) if ti.direct_indexable_collection?
-    entry ||= entry(:uniform, has_moved_guard: true) if ti.heap_ptr? || ti.indirect?
+    if !entry && ti.direct_indexable_collection? && elem_needs_cleanup?(ti, schema_lookup)
+      entry = entry(:uniform, has_moved_guard: true)
+    end
+    entry ||= entry(:uniform, has_moved_guard: true) if !ti.optional? && (ti.heap_ptr? || ti.indirect?)
     entry ||= classify_array_struct_strings(ti, node, schema_lookup)
     if !entry && ti.respond_to?(:atomic?) && ti.atomic? && ti.respond_to?(:indirect?) && ti.indirect?
       entry = entry(:uniform)
     end
     entry ||= classify_rc_or_link(ti, schema_lookup)
     entry ||= entry(:uniform, has_moved_guard: false) if ti.any_sync? || SymbolEntry.cleanup_sync?(sync)
-    entry ||= classify_optional(ti, schema_lookup, node: node)
     entry ||= classify_owned_string(ti, node, promoted_fns, schema_lookup)
     entry ||= classify_heap_storage(ti, node, schema_lookup, sync)
     entry ||= classify_heap_composite(ti, node, schema_lookup, sync)
@@ -800,6 +808,8 @@ module CleanupClassifier
     # or a borrowed view -- never heap-owned, so freeing it (cleanupAlloc only
     # skips frame, not rodata) is an invalid free. No cleanup needed.
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    value = node.respond_to?(:value) ? node.value : nil
+    return nil if optional_empty_initializer?(value)
     is_rodata = !!node_sym&.rodata_provenance?
     is_borrow = !!node_sym&.borrow_provenance?
     return nil if is_rodata || is_borrow
@@ -812,12 +822,16 @@ module CleanupClassifier
     storage = node_sym&.storage
     alloc = storage == :heap ? :heap : :frame
     e = entry(:uniform, alloc: alloc)
-    value = node.respond_to?(:value) ? node.value : nil
     if value.is_a?(AST::NextExpr)
       e[:alloc] = :heap
       e[:fixed_alloc] = true
     end
     e
+  end
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  private_class_method def self.optional_empty_initializer?(value)
+    value.is_a?(AST::Literal) && value.type == :NIL ? true : false
   end
 
   sig { params(inner: Type, schema_lookup: Proc).returns(T::Boolean) }
@@ -840,6 +854,7 @@ module CleanupClassifier
     fixed_heap = value.is_a?(AST::NextExpr) || capture_expr_heap?(value, promoted_fns, schema_lookup)
     owns_heap = value.is_a?(AST::CopyNode) ||
                 fixed_heap ||
+                node_sym&.heap_storage? ||
                 value.is_a?(AST::StringConcat) ||
                 (value.is_a?(AST::BinaryOp) && value.op == :ADD && value.string_concat)
     return nil unless owns_heap

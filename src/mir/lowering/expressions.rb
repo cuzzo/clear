@@ -596,7 +596,9 @@ module MIRLoweringExpressions
     end
 
     # Optional orelse
-    MIR::Orelse.new(left, right)
+    out = MIR::Orelse.new(left, right)
+    out.result_type = Type.from_node!(node, context: "optional OR result")
+    out
   end
 
   sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
@@ -874,21 +876,22 @@ module MIRLoweringExpressions
                       else :zig
                       end
       template = op[template_kind]
-      resolved_allocs = {}
+      resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
         next unless template&.include?("{#{alloc_key}}")
         sym = op[alloc_key] || :heap
         resolved_allocs[alloc_key] = resolve_alloc_sym(sym, node.target, node)
       end
+      alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)
       key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
       val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
       if shard_direct
         return MIR::ShardedMapGet.new(target, index,
           MIR::Ident.new(@shard_context[:idx]),
           MIR::Ident.new(@shard_context[:key]),
-          kind, op, key_zig, val_zig, resolved_allocs, template_kind)
+          kind, op, key_zig, val_zig, alloc_metadata, template_kind)
       end
-      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, resolved_allocs, template_kind)
+      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, alloc_metadata, template_kind)
     elsif ti.pool?
       # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
       # BC dispatches via compile_inline_bc :get on tag == :pool_method
@@ -1141,7 +1144,7 @@ module MIRLoweringExpressions
       end
       result_names = mir_ident_names(result).map(&:to_s).to_set
       local_alloc_names.intersection(result_names).each do |name|
-        hoisted << MIR::TransferMark.new(name, :block_result)
+        hoisted.concat(ownership_transfer_marks(name, :block_result))
       end
       hoisted << MIR::BreakStmt.new(label, result)
       MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
@@ -1242,7 +1245,7 @@ module MIRLoweringExpressions
       end
       result_names = mir_ident_names(result).map(&:to_s).to_set
       local_alloc_names.intersection(result_names).each do |name|
-        hoisted << MIR::TransferMark.new(name, :block_result)
+        hoisted.concat(ownership_transfer_marks(name, :block_result))
       end
       hoisted << MIR::BreakStmt.new(label, result)
       MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
@@ -1324,8 +1327,7 @@ module MIRLoweringExpressions
       end
       if cleanup
         cleanup.cleanup_entry[:has_moved_guard] = true
-        T.must(body) << MIR::TransferMark.new(transfer_name, :block_result)
-        T.must(body) << MIR::MoveMark.new(transfer_name)
+        T.must(body).concat(ownership_transfer_marks(transfer_name, :block_result, move_guarded: true))
       end
     end
     T.must(body) << MIR::BreakStmt.new(label, result)

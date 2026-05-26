@@ -236,7 +236,8 @@ class MIREmitter
     end
     pattern = pattern.gsub("{key_zig}", node.key_zig) if node.key_zig
     pattern = pattern.gsub("{val_zig}", node.val_zig) if node.val_zig
-    (node.resolved_allocs || {}).each do |alloc_key, sym|
+    allocs = MIR::InlineAllocMetadata.from(node.resolved_allocs)
+    allocs&.each do |alloc_key, sym|
       pattern = pattern.gsub("{#{alloc_key}}", alloc_zig(sym))
     end
     pattern

@@ -2029,6 +2029,13 @@ module DiagnosticRegistry
       cause: "MoveMark changes runtime cleanup behavior. Without a matching TransferMark, the checker cannot prove who owns the value after cleanup is suppressed.",
       fix_hint: "Lowering bug — emit a TransferMark for the same binding at the same ownership boundary, or remove the MoveMark.",
     },
+    OWNERSHIP_CLEANUP_FOR_BORROW: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR cleanup was emitted for a borrowed/non-owning binding.",
+      cause: "A binding initialized from a borrowed view, such as an indexed element or field payload, received Cleanup/ErrCleanup even though it did not create or receive ownership. Cleaning that alias can free memory still owned by the source aggregate.",
+      fix_hint: "Lowering bug — either deep-copy into a fresh owned binding, transfer ownership explicitly, or keep the borrowed alias cleanup-free.",
+    },
     MOVEMARK_WITHOUT_GUARD: {
       severity: :error, category: :mir,
       template: "%{message}",

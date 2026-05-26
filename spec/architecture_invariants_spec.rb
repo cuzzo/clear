@@ -228,10 +228,15 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "keeps escape analysis sinks registered with concrete handlers" do
     escape = source("src/mir/escape_analysis.rb")
     expect(escape).to include("ESCAPE_SINK_HANDLERS")
+    expect(escape).to include("DERIVED_PLACEMENT_HANDLERS")
     expect(escape).to include("validate_escape_sink_handlers!")
-    expect(escape).to include("return_value")
+    expect(escape).to include("owning_return")
     expect(escape).to include("takes_or_mutable_arg")
     expect(escape).to include("execution_boundary_capture")
+    expect(escape).to include("receiver_backing_storage")
+    sink_registry = escape[/ESCAPE_SINK_HANDLERS = T\.let\(\{.*?\n  \}\.freeze, EscapeHandlerRegistry\)/m]
+    expect(sink_registry).not_to include("assignment_ownership")
+    expect(sink_registry).not_to include("hoist_dependency")
   end
 end
 
@@ -708,6 +713,18 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
       pattern: /\|\|\s*\[\]|\b&&\s*\w+\.any\?|\w+&\.any\?/,
       allowed: [],
     ),
+    ForbiddenPattern.new(
+      name: "pass-local MIR traversal helpers",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb}",
+      pattern: /\bdef\s+(?:walk_mir_node|each_mir_surface_node|collect_ownership_surface_nodes|ownership_surface_nodes)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "InlineZig allocator hash protocol",
+      glob: "src/**/*.rb",
+      pattern: /(?<!resolved_)allocs\.is_a\?\(Hash\)|\.allocs\.values|\.allocs\.key\?\(|\.allocs\[:|\.allocs\.transform_values|resolved_allocs\.is_a\?\(Hash\)|resolved_allocs\[:/,
+      allowed: [],
+    ),
   ].freeze
 
   def scan_for(pattern)
@@ -731,5 +748,83 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
       expect(hits).to be_empty,
         "#{hits.size} forbidden #{pattern.name} hit(s):\n#{hits.join("\n")}"
     end
+  end
+
+  it "keeps VarDecl allocator placement behind the typed placement fact" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/lowering/variables.rb"))
+    expect(source).to include("def binding_placement_fact")
+    expect(source).to include("placement = binding_placement_fact")
+    expect(source).to include("base_decl_alloc = placement.alloc")
+    expect(source).not_to include("base_decl_alloc = if")
+  end
+
+  it "routes production ownership transfer marks through the typed transfer plan" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 [File.join(ARCH_ROOT, "src/backends/pipeline_host.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/mir/mir.rb"
+
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("MIR::TransferMark.new")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Ownership transfers must be emitted through MIR.ownership_transfer_marks / OwnershipTransferPlan:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "routes function return transfers through ReturnOwnershipPlan" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/lowering/control_flow.rb"))
+    expect(source).to include("class ReturnOwnershipPlan < T::Struct")
+    expect(source).to include("def return_lowering_plan")
+    expect(source).to include("def return_with_transfer_marks")
+    expect(source).to include("def synthetic_return_ownership_plan")
+
+    direct_return_transfers = source.lines.each_with_index.filter_map do |line, idx|
+      next if line.strip.start_with?("#")
+      next unless line.include?("MIR.ownership_transfer_marks") && line.include?(":return")
+
+      "#{idx + 1}: #{line.strip}"
+    end
+
+    expect(direct_return_transfers).to eq([
+      "82: MIR.ownership_transfer_marks(name, :return, move_guarded: visible_guarded_names.include?(name))",
+    ])
+  end
+
+  it "keeps owned-sink source shape behind one typed source fact" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/mir_lowering.rb"))
+    expect(source).to include("class OwnedSinkSourceFact < T::Struct")
+    expect(source).to include("def owned_sink_source_fact")
+    expect(source).to include("source.satisfies_sink?")
+    expect(source).not_to include("def owned_sink_source_satisfies?")
+    expect(source).not_to include("def verifiable_owned_source?")
+    expect(source).not_to include("def ownership_transfer_source?")
+    expect(source).not_to include("def borrowed_union_sink_value?")
+  end
+
+  it "fences FSM/thunk memory-safety emission behind typed facts" do
+    fsm = File.read(File.join(ARCH_ROOT, "src/mir/fsm_lowering.rb"))
+    expect(fsm).to include("class FsmResultTransferFact < T::Struct")
+    expect(fsm).to include("def fsm_result_transfer_facts")
+
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/fsm_transform/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/mir/thunk_transform/**/*.rb")] +
+                 [File.join(ARCH_ROOT, "src/mir/fsm_ops.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/MIR::(?:AllocMark|Cleanup|ErrCleanup|TransferMark|MoveMark)\.new|MIR\.ownership_transfer_marks/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "FSM/thunk transforms must produce typed facts or structural MIR, not direct ownership markers:\n" \
+      "#{offenders.join("\n")}"
   end
 end

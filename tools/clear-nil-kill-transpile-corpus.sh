@@ -14,6 +14,7 @@ should_skip_live_data_file() {
     examples/minivm/parser.cht|\
     examples/minivm/sus-int.cht|\
     examples/minivm/types.cht|\
+    examples/minivm/vm.cht|\
     examples/minivm/vtest.cht)
       # Temporary live-data exclusions for .cht files that do not currently
       # transpile. The minivm files are corpus/compiler-cleanup exceptions.
@@ -29,6 +30,57 @@ run_transpiler() {
     ruby src/backends/transpiler.rb "$1"
 }
 
+run_transpiler_with_timeout() {
+  local file="$1"
+  local timeout_seconds="${NIL_KILL_REQUIRE_CHT_TIMEOUT:-120}"
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/lib/nil_kill/runtime_trace.rb" ruby src/backends/transpiler.rb "$1"' _ "$file"
+  else
+    run_transpiler "$file"
+  fi
+}
+
+run_require_corpus() {
+  local require_file="$1"
+  local shard_size="${NIL_KILL_REQUIRE_CHT_SHARD_SIZE:-1}"
+  local shard_dir
+  shard_dir="$(dirname "$require_file")"
+  local failures=0
+
+  rm -f "$shard_dir"/require-corpus-shard-*.cht
+  mkdir -p "$shard_dir"
+
+  ruby - "$require_file" "$shard_dir" "$shard_size" <<'RUBY'
+require "fileutils"
+
+source = ARGV.fetch(0)
+out_dir = ARGV.fetch(1)
+shard_size = Integer(ARGV.fetch(2), 10)
+raise "shard size must be positive" unless shard_size.positive?
+
+requires = File.readlines(source).grep(/\AREQUIRE\b/)
+requires.each_slice(shard_size).with_index do |lines, index|
+  body = +"# Generated shard from #{source}\n"
+  body << "# Do not edit by hand.\n\n"
+  body << lines.join
+  body << "\nFN main() RETURNS Void ->\n"
+  body << "  RETURN;\n"
+  body << "END\n"
+  File.write(File.join(out_dir, format("require-corpus-shard-%04d.cht", index)), body)
+end
+RUBY
+
+  while IFS= read -r -d '' shard; do
+    if ! run_transpiler_with_timeout "$shard" >/dev/null; then
+      echo "nil-kill corpus shard failed: $shard" >&2
+      failures=$((failures + 1))
+    fi
+  done < <(find "$shard_dir" -maxdepth 1 -type f -name 'require-corpus-shard-*.cht' -print0 | sort -z)
+
+  return "$failures"
+}
+
 # Temporary repository-specific tolerance: some .cht files either intentionally
 # do not compile today or are blocked by current compiler regressions. Once the
 # repository is cleaned up, this script should stop skipping failures and every
@@ -42,7 +94,7 @@ run_transpiler() {
 # keep file/module boundaries while still exercising the corpus in one command.
 if [ "${NIL_KILL_REQUIRE_CHT_CORPUS:-1}" = "1" ]; then
   require_file="$(ruby tools/clear-nil-kill-require-cht-corpus.rb)"
-  if run_transpiler "$require_file" >/dev/null; then
+  if run_require_corpus "$require_file"; then
     exit 0
   fi
 

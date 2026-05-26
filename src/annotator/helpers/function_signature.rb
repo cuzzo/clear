@@ -14,7 +14,9 @@ class FunctionSignature
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
 
   # Static signature fields (set at creation)
+  sig { returns(T.untyped) }
   attr_reader :visibility, :type_params, :reentrant
+  sig { returns(T.untyped) }
   attr_accessor :return_strategy
 
   sig { returns(T::Array[LifetimeSource]) }
@@ -42,29 +44,36 @@ class FunctionSignature
   end
 
   # EXTERN function fields
+  sig { returns(T.untyped) }
   attr_accessor :extern, :module_alias, :extern_effects
+  sig { returns(T.untyped) }
   attr_accessor :fn_type_params, :owner_type, :owner_type_params
 
   # Computed metadata (set after annotation passes)
+  sig { returns(T.untyped) }
   attr_accessor :needs_rt, :can_fail, :alloc_fault, :error_fallible, :effects, :stack_tier
 
   # Intrinsic marker
+  sig { returns(T.untyped) }
   attr_accessor :intrinsic, :zig_pattern
 
   # Intrinsic signature semantics (set by the registry converter; nil
   # for ordinary user functions). `arg_validator` the custom arg
   # type-checker; `arg_spec` the raw args shape; `emit` the typed
   # codegen/dispatch metadata (IntrinsicEmit).
+  sig { returns(T.untyped) }
   attr_accessor :arg_validator, :arg_spec, :arity, :emit
   # Strongly-typed return (FunctionReturn). Non-nil; defaults to
   # Fixed(Void). The single return facility -- resolve(receiver,
   # args, host) always yields a concrete Type. Replaced the former
   # untyped return_spec (Symbol|Hash|Proc|nil) / return_resolver Proc.
+  sig { returns(T.untyped) }
   attr_accessor :return_def
 
   # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
   # Mirrors FunctionDef#requires; needed at signature level so call-site
   # checks survive cross-module flow.
+  sig { returns(T.untyped) }
   attr_accessor :requires
 
   # Canonical adapter: a function binding's signature is stored as a
