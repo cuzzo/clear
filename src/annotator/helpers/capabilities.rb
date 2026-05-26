@@ -90,13 +90,12 @@ module CapabilityHelper
   # struct schema and projected onto the GetField node's full_type
   # during annotation). These helpers paper over the difference so the
   # rest of the WITH logic doesn't have to.
-  sig { params(var_node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_sync(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     sym_sync = var_node.symbol&.sync
     return sym_sync if sym_sync
-    return var_node.full_type.sync if var_node.full_type
-    nil
+    var_node.full_type!(context: "WITH capability sync target").sync
   end
 
   sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
@@ -104,7 +103,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    var_node.full_type&.ownership_storage
+    var_node.full_type!(context: "WITH capability storage target").ownership_storage
   end
 
   # Read layout from the SymbolEntry when available, or from full_type before
@@ -114,8 +113,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
-    return var_node.full_type.layout if var_node.full_type
-    nil
+    var_node.full_type!(context: "WITH capability layout target").layout
   end
 
   # Validate that a capability type is legal for the given variable.
@@ -123,7 +121,7 @@ module CapabilityHelper
   def validate_capability(node, capability_type, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     @deferred_with_validations = T.let(@deferred_with_validations, T.untyped)
-    var_type = var_node.full_type
+    var_type = var_node.full_type!(context: "WITH capability target")
     allowed = T.let([AST::Identifier, AST::GetField], T::Array[T::Class[T.untyped]])
     allowed << AST::GetIndex if capability_type == :BORROWED
     unless allowed.any? { |t| var_node.is_a?(t) }
@@ -455,7 +453,7 @@ module CapabilityHelper
         }
         visit(gcap[:guard_expr])
 
-        guard_type = gcap[:guard_expr].full_type
+        guard_type = gcap[:guard_expr].full_type!(context: "WITH guard expression")
         unless guard_type && guard_type.resolved == :Bool
           error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
@@ -519,7 +517,7 @@ module CapabilityHelper
         }
         visit(expr)
 
-        pred_type = expr.full_type
+        pred_type = expr.full_type!(context: "PRE expression")
         unless pred_type && pred_type.resolved == :Bool
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
@@ -585,7 +583,7 @@ module CapabilityHelper
           }
           visit(expr)
 
-          pred_type = expr.full_type
+          pred_type = expr.full_type!(context: "DEBUG_POST expression")
           unless pred_type && pred_type.resolved == :Bool
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
@@ -639,7 +637,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
     visit(var_node)
-    cap[:resolved_type] = var_node.full_type
+    cap[:resolved_type] = var_node.full_type!(context: "WITH resolved capability target")
 
     cap[:old_scope] = lookup_scope_for(cap_var_name(var_node))
 
@@ -729,14 +727,14 @@ module CapabilityHelper
           capability: cap[:capability],
           var_node: field_node,
           old_scope: cap[:old_scope],
-          resolved_type: field_node.full_type
+          resolved_type: field_node.full_type!(context: "WITH wildcard field")
         )
       end
       # The per-field caps above each alias the base variable name; the
       # base binding must remain the struct type (a field cap declaring
       # `p` as a field's type would break `p.field` inside the block).
       # Re-assert the whole-struct cap last so the base keeps its type.
-      base_t = var_node.target.full_type
+      base_t = var_node.target.full_type!(context: "WITH wildcard base")
       base_t = Type.new(base_t) unless base_t.is_a?(Type)
       expanded << AST::Capability.new(
         capability: cap[:capability],
@@ -783,7 +781,7 @@ module CapabilityHelper
       # WITH on a sync-wrapped struct field. The alias holds the unwrapped
       # inner value (post-`.acquire().get()`). Resolve the bare inner type
       # from the field's declared type and declare the alias.
-      inner_type = cap[:var_node].full_type
+      inner_type = cap[:var_node].full_type!(context: "WITH capability field alias")
       if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
         inner_type = inner_type.bare_data_type
       end
@@ -1098,7 +1096,7 @@ module CapabilityHelper
           # need the full cell shape so the captured ref keeps identity across
           # fibers.
           unless result.captures.key?(name)
-            cap_type = info.atomic? ? info.type : node.full_type
+            cap_type = info.atomic? ? info.type : node.full_type!(context: "BG capture identifier")
             result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
@@ -1178,7 +1176,7 @@ module CapabilityHelper
           info = current_scope.locals[name]
           next unless info
           result.has_outer_ref = true
-          result.captures[name] ||= var_node.full_type
+          result.captures[name] ||= var_node.full_type!(context: "WITH capture identifier")
           # Also record the live SymbolEntry so mir_lowering can re-resolve
           # types after EscapeAnalysis.propagate_caller_sync! stamps params.
           result.capture_symbols[name] ||= info

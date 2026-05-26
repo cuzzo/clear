@@ -292,6 +292,25 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       "#{offenders.join("\n")}"
   end
 
+  it "does not treat full_type as optional in scoped compiler code" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("full_type")
+        optional_predicate =
+          line.match?(/\b(?:return\s+)?(?:if|unless)\s+[^#\n]*\.full_type\s*(?:#.*)?$/) ||
+          line.match?(/\.full_type&\./) ||
+          line.match?(/&\.full_type(?![!\w])/)
+        next unless optional_predicate
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "full_type is a fail-closed annotation fact, not an optional predicate:\n" \
+      "#{offenders.join("\n")}"
+  end
+
   it "does not use optional Type.from_node on post-annotation AST values in burned-down consumers" do
     offenders = scoped_source_files.flat_map do |rel|
       source(rel).lines.each_with_index.filter_map do |line, idx|
@@ -314,6 +333,79 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(ast).to include("def full_type!(context: \"post-annotation AST\")")
     expect(ast).to include('raise "#{context}: unresolved type info')
     expect(source("src/mir/pre_mir_type_check.rb")).to include("full_type is the :Untyped")
+  end
+
+  it "keeps AST full_type writes inside annotation and synthetic-node producer boundaries" do
+    allowed = [
+      %r{\Asrc/ast/ast\.rb\z},
+      %r{\Asrc/ast/parser\.rb\z},
+      %r{\Asrc/annotator/},
+      %r{\Asrc/backends/pipeline_host\.rb\z},
+      %r{\Asrc/backends/pipeline_rewriter\.rb\z},
+      %r{\Asrc/backends/string_concat_rewriter\.rb\z},
+      %r{\Asrc/mir/hoist\.rb\z},
+      %r{\Asrc/mir/pre_mir_type_check\.rb\z},
+      %r{\Asrc/mir/mir_lowering\.rb\z},
+      %r{\Asrc/mir/lowering/},
+      %r{\Asrc/mir/fsm_transform/segments\.rb\z},
+    ]
+
+    offenders = scoped_source_files.flat_map do |rel|
+      next [] if allowed.any? { |pattern| pattern.match?(rel) }
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=(?![=~])/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "AST full_type writes must stay in annotation or synthetic-node producer boundaries:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "routes annotator full_type writes through the typed stamp helper" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=(?![=~])/)
+        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = value")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "annotator type producers must call SemanticAnnotator#stamp_type!, not write .full_type directly:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "uses hard AST type reads in annotator consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        # Annotation producers are the sanctioned place where AST nodes are
+        # stamped or copied after the visitor has computed the authoritative type.
+        if line.match?(/\.full_type\s*=/)
+          rhs = line.split(/\.full_type\s*=/, 2).last || ""
+          next unless rhs.match?(/\.full_type(?![!\w])/)
+        end
+        # OwnershipGraph::Node exposes its stored Type payload through
+        # #full_type; this is not an AST annotation read.
+        next if rel == "src/annotator/helpers/fixable_helpers.rb" && line.include?("og_node.full_type")
+        # FunctionSignature.from_function_def is a raw signature producer. It
+        # can be called before a FunctionDef has been annotation-stamped.
+        next if rel == "src/annotator/helpers/function_signature.rb" && line.include?("fn.full_type")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Annotator consumers must use Locatable#full_type!; plain .full_type is only for producer writes or typed payloads:\n" \
+      "#{offenders.join("\n")}"
   end
 
   it "does not use optional Type.from_node on MIR AST consumers" do
@@ -414,6 +506,43 @@ RSpec.describe "architecture invariants: post-annotation type access" do
 
     expect(offenders).to be_empty,
       "Post-annotation MIR/backend facts must carry authoritative Type payloads, never :Untyped:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps Auto inference slot identity in typed objects, not tuple arrays" do
+    expect(source("src/annotator/helpers/auto_inference.rb")).to include("class AutoSlotId")
+    offenders = [
+      "src/annotator/helpers/auto_inference.rb",
+      "src/annotator/helpers/fixable_helpers.rb",
+      "src/annotator/annotator.rb",
+    ].flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\[:(?:param|return|local|list_element|map_key|map_value)\b/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Auto inference slot identity must use AutoSlotId/typed shape objects, not tuple arrays:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps Auto inference facts in typed structs, not anonymous Struct bags" do
+    auto = source("src/annotator/helpers/auto_inference.rb")
+    expect(auto).to include("class Slot < T::Struct")
+    expect(auto).to include("class Resolution < T::Struct")
+    expect(auto).to include("class Ambiguity < T::Struct")
+    expect(auto).to include("class Result < T::Struct")
+
+    offenders = auto.lines.each_with_index.filter_map do |line, idx|
+      next if line.strip.start_with?("#")
+      next unless line.match?(/\b(?:Slot|Result|Resolution|Ambiguity)\s*=\s*Struct\.new/)
+      "src/annotator/helpers/auto_inference.rb:#{idx + 1}: #{line.strip}"
+    end
+
+    expect(offenders).to be_empty,
+      "Auto inference protocol facts must be explicit T::Struct classes:\n" \
       "#{offenders.join("\n")}"
   end
 end

@@ -118,7 +118,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.untyped)
-    @snapshot_txn_violations = T.let(@snapshot_txn_violations, T.untyped)
     return unless current_fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)
@@ -128,9 +127,9 @@ module EffectTracker
     # SUSPENDS effects recorded while @inside_snapshot_txn is set so
     # the WITH-block visitor can raise once the body is complete.
     if @inside_snapshot_txn && @inside_snapshot_txn > 0 && SUSPENDS_FAMILY.include?(effect)
-      @snapshot_txn_violations ||= []
-      @snapshot_txn_violations << { effect: effect, fn: current_fn_ctx.name }
+      record_snapshot_txn_violation!(effect, current_fn_ctx.name)
     end
+    nil
   end
 
   # Promote a bare SUSPENDS to SUSPENDS_LOOP / SUSPENDS_CONDITIONAL based
@@ -367,7 +366,7 @@ module EffectTracker
     @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
     fn_nodes.each do |name, fn_node|
-      fsig = FunctionSignature.unwrap(fn_node.full_type)
+      fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
       ret_type = fsig&.return_type
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params.any? { |p|
@@ -718,7 +717,7 @@ module EffectTracker
         n.each_value { |v| traverse.call(v) }
       when AST::FuncCall, AST::MethodCall
         n.args.each do |arg|
-          arg_ft = arg.full_type
+          arg_ft = arg.full_type!(context: "function pointer argument")
           if arg.is_a?(AST::Identifier) && arg_ft.is_a?(Type) && arg_ft.fn_type?
             fn = fn_nodes[arg.name]
             if fn

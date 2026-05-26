@@ -1,6 +1,96 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/ast"
+
+class AutoSlotId
+    extend T::Sig
+
+  sig { returns(Symbol) }
+  attr_reader :kind
+  sig { returns(T.nilable(String)) }
+  attr_reader :fn_name
+  sig { returns(T.nilable(Integer)) }
+  attr_reader :index
+  sig { returns(T.nilable(Integer)) }
+  attr_reader :decl_id
+
+  sig do
+    params(
+      kind: Symbol,
+      fn_name: T.nilable(String),
+      index: T.nilable(Integer),
+      decl_id: T.nilable(Integer),
+    ).void
+  end
+  def initialize(kind:, fn_name: nil, index: nil, decl_id: nil)
+    @kind = kind
+    @fn_name = fn_name
+    @index = index
+    @decl_id = decl_id
+  end
+
+  sig { params(fn_name: String, index: Integer).returns(AutoSlotId) }
+  def self.param(fn_name, index)
+    new(kind: :param, fn_name: fn_name, index: index)
+  end
+
+  sig { params(fn_name: String).returns(AutoSlotId) }
+  def self.return(fn_name)
+    new(kind: :return, fn_name: fn_name)
+  end
+
+  sig { params(decl_node: AST::Locatable).returns(AutoSlotId) }
+  def self.local(decl_node)
+    new(kind: :local, decl_id: decl_node.object_id)
+  end
+
+  sig { params(decl_node: AST::Locatable).returns(AutoSlotId) }
+  def self.list_element(decl_node)
+    new(kind: :list_element, decl_id: decl_node.object_id)
+  end
+
+  sig { params(decl_node: AST::Locatable).returns(AutoSlotId) }
+  def self.map_key(decl_node)
+    new(kind: :map_key, decl_id: decl_node.object_id)
+  end
+
+  sig { params(decl_node: AST::Locatable).returns(AutoSlotId) }
+  def self.map_value(decl_node)
+    new(kind: :map_value, decl_id: decl_node.object_id)
+  end
+
+  sig { returns(Integer) }
+  def hash
+    [@kind, @fn_name, @index, @decl_id].hash
+  end
+
+  sig { params(other: T.untyped).returns(T::Boolean) }
+  def eql?(other)
+    return false unless other.is_a?(AutoSlotId)
+    @kind == other.kind &&
+      @fn_name == other.fn_name &&
+      @index == other.index &&
+      @decl_id == other.decl_id
+  end
+
+  alias == eql?
+end
+
+class AutoMapShapeEntry
+    extend T::Sig
+
+  sig { returns(AutoSlotId) }
+  attr_reader :key
+  sig { returns(AutoSlotId) }
+  attr_reader :value
+
+  sig { params(key: AutoSlotId, value: AutoSlotId).void }
+  def initialize(key:, value:)
+    @key = key
+    @value = value
+  end
+end
+
 # Auto inference — Pass B (constraint collection).
 #
 # Given a parsed program and the @fn_nodes registry produced by
@@ -15,17 +105,21 @@ require_relative "../../ast/ast"
 # It just records "expression X is what would have to flow into slot
 # Y" so the unifier can decide.
 #
-# Slot identifiers:
-#   [:param, fn_name, index]  — a function parameter typed Auto
-#   [:return, fn_name]        — a function return typed Auto
-#   [:local, ast_node_id]     — a BindExpr/VarDecl typed Auto (object_id
-#                                of the decl node disambiguates locals
-#                                that share a name across scopes)
+# Slot identifiers are AutoSlotId objects:
+#   AutoSlotId.param(fn_name, index) — a function parameter typed Auto
+#   AutoSlotId.return(fn_name)       — a function return typed Auto
+#   AutoSlotId.local(decl_node)      — a BindExpr/VarDecl typed Auto
 #
 # See docs/agents/gradual-typing.md §4.1 for the constraint-collection
 # specification.
 class AutoConstraintCollector
     extend T::Sig
+
+  DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+  SlotDeclNode = T.type_alias { T.any(AST::FunctionDef, DeclarationNode) }
+  ObservedType = T.type_alias { T.any(Type, Symbol) }
+  SlotMap = T.type_alias { T::Hash[AutoSlotId, AutoConstraintCollector::Slot] }
+  LocalDeclEntry = T.type_alias { T.any(AutoSlotId, AutoMapShapeEntry) }
 
   # `shape`: nil for scalar slots; for empty `[]` / `{}` initializers, one
   # of `:list_element`, `:map_key`, `:map_value`.
@@ -41,7 +135,16 @@ class AutoConstraintCollector
   # original Auto Type. Callers that need the source span for the
   # `clear fix` edit (the fixable-helpers' `auto_token_for`) read
   # this cached copy.
-  Slot = Struct.new(:kind, :fn_name, :index, :decl_node, :sources, :shape, :auto_token, keyword_init: true)
+  class Slot < T::Struct
+    const :kind, Symbol
+    const :fn_name, T.nilable(String), default: nil
+    const :index, T.nilable(Integer), default: nil
+    const :decl_node, SlotDeclNode
+    const :sources, T::Array[AST::Locatable]
+    const :shape, T.nilable(Symbol), default: nil
+    const :auto_token, T.nilable(Lexer::Token), default: nil
+    prop :resolved_scalar, T.nilable(Type), default: nil
+  end
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
@@ -50,7 +153,7 @@ class AutoConstraintCollector
     # fn_nodes: { name => AST::FunctionDef }, exactly as the existing
     # annotator's signature-collection pass produces.
     @fn_nodes = fn_nodes
-    @slots = T.let({}, T::Hash[T.untyped, T.untyped])
+    @slots = T.let({}, SlotMap)
     # Per-function map of `local_name → slot_id`, threaded through
     # the walk via @local_decls (saved/restored on FunctionDef entry).
     # Lets MUTABLE-local reassignments — `BindExpr(name="x", type=nil)`
@@ -58,13 +161,13 @@ class AutoConstraintCollector
     # slot. Without this, only the initializer would constrain the
     # slot and re-binding ambiguity (`MUTABLE x: Auto = 0_i64; x =
     # "hello";`) would slip through unification.
-    @local_decls = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
+    @local_decls = T.let(nil, T.nilable(T::Hash[String, LocalDeclEntry]))
   end
 
   # Walk the program. Populates @slots with one entry per Auto slot
   # and accumulates source-node lists. Returns @slots so callers can
   # inspect / pass directly to the unifier.
-  sig { params(program_node: AST::Program).returns(T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot]) }
+  sig { params(program_node: AST::Program).returns(SlotMap) }
   def collect!(program_node)
     register_signature_slots
     walk(program_node, current_fn: nil)
@@ -76,25 +179,26 @@ class AutoConstraintCollector
   # Phase 1: scan every FunctionDef in @fn_nodes and register slots
   # for each Auto-typed param / return. Locals are registered lazily
   # during the walk because they live inside bodies.
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(SlotMap) }
   def register_signature_slots
     @fn_nodes.each do |name, fn|
       fn.params.each_with_index do |param, i|
         next unless auto?(param.type)
-        @slots[[:param, name, i]] = Slot.new(
+        @slots[AutoSlotId.param(name, i)] = Slot.new(
           kind: :param, fn_name: name, index: i,
           decl_node: fn, sources: [],
           auto_token: param.type.auto_token,
         )
       end
       if auto?(fn.return_type)
-        @slots[[:return, name]] = Slot.new(
+        @slots[AutoSlotId.return(name)] = Slot.new(
           kind: :return, fn_name: name, index: nil,
           decl_node: fn, sources: [],
           auto_token: fn.return_type.auto_token,
         )
       end
     end
+    @slots
   end
 
   sig { params(t: T.nilable(Type)).returns(T::Boolean) }
@@ -107,7 +211,7 @@ class AutoConstraintCollector
   # FunctionDef entry, resets @local_decls (per-function map of
   # local-name → slot-id) so reassignments only match decls in the
   # same function body.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).returns(T.untyped) }
+  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
   def walk(node, current_fn:)
     return if node.nil?
     case node
@@ -123,7 +227,7 @@ class AutoConstraintCollector
       saved_local_decls = nil
       if node.is_a?(AST::FunctionDef)
         saved_local_decls = @local_decls
-        @local_decls = {}
+        @local_decls = T.let({}, T.nilable(T::Hash[String, LocalDeclEntry]))
       end
       if node.respond_to?(:each_pair)
         node.each_pair { |_, v| walk(v, current_fn: next_fn) }
@@ -134,7 +238,7 @@ class AutoConstraintCollector
 
   # Per-node-type constraint recording. Each branch corresponds to
   # one of the constraint sources from §4.1 of the spec.
-  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped, current_fn: T.nilable(AST::FunctionDef)).void }
   def record_constraint(node, current_fn)
     case node
     when AST::FuncCall
@@ -148,7 +252,7 @@ class AutoConstraintCollector
 
   # Param Auto ← call-site arg type. The arg AST node is the
   # constraint source; the unifier reads its eventual type_info.
-  sig { params(call_node: AST::FuncCall).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(call_node: AST::FuncCall).void }
   def record_call_site(call_node)
     callee = @fn_nodes[call_node.name]
     return unless callee
@@ -156,7 +260,7 @@ class AutoConstraintCollector
       next unless auto?(param.type)
       arg = call_node.args && call_node.args[i]
       next unless arg
-      slot = @slots[[:param, callee.name, i]]
+      slot = @slots[AutoSlotId.param(callee.name, i)]
       slot.sources << arg if slot
     end
   end
@@ -164,11 +268,11 @@ class AutoConstraintCollector
   # Return Auto ← RETURN expr type. Only attaches the source when
   # the enclosing function actually has an Auto return — a RETURN
   # inside a non-Auto-return function is a regular type-checked stmt.
-  sig { params(return_node: AST::ReturnNode, current_fn: AST::FunctionDef).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(return_node: AST::ReturnNode, current_fn: AST::FunctionDef).void }
   def record_return(return_node, current_fn)
     return unless current_fn && auto?(current_fn.return_type)
     return unless return_node.value
-    slot = @slots[[:return, current_fn.name]]
+    slot = @slots[AutoSlotId.return(current_fn.name)]
     slot.sources << return_node.value if slot
   end
 
@@ -187,7 +291,7 @@ class AutoConstraintCollector
   #      type=nil, value=new_val)` for this. Attach the new value
   #      as another constraint source on the SAME slot — ambiguity
   #      flows out of the unifier when types disagree.
-  sig { params(decl_node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(decl_node: DeclarationNode).void }
   def record_local(decl_node)
     if auto?(decl_node.type)
       # Empty container literals need shape-tagged slots because `Any[]` /
@@ -201,13 +305,13 @@ class AutoConstraintCollector
         return
       end
 
-      slot_id = [:local, decl_node.object_id]
+      slot_id = AutoSlotId.local(decl_node)
       @slots[slot_id] ||= Slot.new(
         kind: :local, fn_name: nil, index: nil,
         decl_node: decl_node, sources: [], shape: nil,
         auto_token: decl_node.type.auto_token,
       )
-      @slots[slot_id].sources << decl_node.value if decl_node.value
+      T.must(@slots[slot_id]).sources << T.cast(decl_node.value, AST::Locatable) if decl_node.value
       # Remember this name so later reassignments can find the slot.
       @local_decls[decl_node.name] = slot_id if @local_decls
     elsif decl_node.type.nil? && @local_decls && decl_node.respond_to?(:name)
@@ -227,17 +331,17 @@ class AutoConstraintCollector
   #   - scalar slot: append the whole RHS node.
   #   - :list_element: append each list literal item as evidence.
   #   - map shape: append each pair's key/value to the matching slots.
-  sig { params(entry: T.untyped, rhs: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(entry: LocalDeclEntry, rhs: T.nilable(AST::Locatable)).void }
   def record_reassignment_sources(entry, rhs)
     return unless rhs
 
-    if entry.is_a?(Hash) && entry[:key] && entry[:value]
+    if entry.is_a?(AutoMapShapeEntry)
       # Map shape pair. Only HashLit RHSes contribute structured
       # evidence; arbitrary expressions get skipped (we can't see
       # inside them at this layer).
       return unless rhs.is_a?(AST::HashLit)
-      key_slot = @slots[entry[:key]]
-      val_slot = @slots[entry[:value]]
+      key_slot = @slots[entry.key]
+      val_slot = @slots[entry.value]
       rhs.pairs.each do |k, v|
         key_slot.sources << k if key_slot && k
         val_slot.sources << v if val_slot && v
@@ -266,20 +370,20 @@ class AutoConstraintCollector
   # Recognize `[]` (no items, no constructor metadata). A literal
   # like `Pool[]` sets `@constructor_collection`, which means the
   # user picked a specific collection — don't reinterpret as Auto.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
   def empty_list_lit?(node)
     node.is_a?(AST::ListLit) && node.items.empty? &&
       !node.instance_variable_get(:@constructor_collection)
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(node: T.nilable(AST::Locatable)).returns(T::Boolean) }
   def empty_hash_lit?(node)
     node.is_a?(AST::HashLit) && node.pairs.empty?
   end
 
-  sig { params(decl_node: T.untyped).void }
+  sig { params(decl_node: DeclarationNode).void }
   def register_list_shape_slot(decl_node)
-    slot_id = [:list_element, decl_node.object_id]
+    slot_id = AutoSlotId.list_element(decl_node)
     @slots[slot_id] ||= Slot.new(
       kind: :local, fn_name: nil, index: nil,
       decl_node: decl_node, sources: [], shape: :list_element,
@@ -288,10 +392,10 @@ class AutoConstraintCollector
     @local_decls[decl_node.name] = slot_id if @local_decls
   end
 
-  sig { params(decl_node: T.untyped).void }
+  sig { params(decl_node: DeclarationNode).void }
   def register_map_shape_slots(decl_node)
-    key_id = [:map_key, decl_node.object_id]
-    val_id = [:map_value, decl_node.object_id]
+    key_id = AutoSlotId.map_key(decl_node)
+    val_id = AutoSlotId.map_value(decl_node)
     auto_tok = decl_node.type.auto_token
     @slots[key_id] ||= Slot.new(
       kind: :local, fn_name: nil, index: nil,
@@ -305,7 +409,31 @@ class AutoConstraintCollector
     )
     # Register the binding name with both shape slot ids so later
     # reassignments can deliver evidence to both halves.
-    @local_decls[decl_node.name] = { key: key_id, value: val_id } if @local_decls
+    @local_decls[decl_node.name] = AutoMapShapeEntry.new(key: key_id, value: val_id) if @local_decls
+  end
+end
+
+class AutoShapeSlots
+    extend T::Sig
+
+  sig { returns(T.nilable(AutoConstraintCollector::Slot)) }
+  attr_reader :list
+  sig { returns(T.nilable(AutoConstraintCollector::Slot)) }
+  attr_reader :key
+  sig { returns(T.nilable(AutoConstraintCollector::Slot)) }
+  attr_reader :value
+
+  sig do
+    params(
+      list: T.nilable(AutoConstraintCollector::Slot),
+      key: T.nilable(AutoConstraintCollector::Slot),
+      value: T.nilable(AutoConstraintCollector::Slot),
+    ).void
+  end
+  def initialize(list:, key:, value:)
+    @list = list
+    @key = key
+    @value = value
   end
 end
 
@@ -332,38 +460,68 @@ end
 class AutoUnifier
     extend T::Sig
 
-  # Aggregated unifier output. Each map keys by the same slot id
-  # used in @slots: resolved → Resolution, ambiguous → Ambiguity,
-  # unresolved → the original Slot (no observations gathered).
-  Result = Struct.new(:resolved, :ambiguous, :unresolved, keyword_init: true)
-
   # A successfully resolved slot — exactly one observed concrete
   # type. The fix-emission helpers read `slot` (label / token) and
   # `type` (the source form to write into the user's code).
-  Resolution = Struct.new(:slot, :type, :sources, keyword_init: true)
+  class Resolution < T::Struct
+    const :slot, AutoConstraintCollector::Slot
+    const :type, AutoConstraintCollector::ObservedType
+    const :sources, T::Array[AST::Locatable]
+  end
 
   # A slot with two-or-more incompatible observations. The
   # diagnostic builder reads `observed_types` to enumerate options
   # and `sources` to attribute each observation to its callsite.
-  Ambiguity  = Struct.new(:slot, :observed_types, :sources, keyword_init: true)
+  class Ambiguity < T::Struct
+    const :slot, AutoConstraintCollector::Slot
+    const :observed_types, T::Array[AutoConstraintCollector::ObservedType]
+    const :sources, T::Array[AST::Locatable]
+  end
 
-  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], type_of: T.nilable(Proc)).void }
+  class MapPairResolution
+      extend T::Sig
+
+    sig { returns(T.nilable(AutoUnifier::Resolution)) }
+    attr_accessor :key
+    sig { returns(T.nilable(AutoUnifier::Resolution)) }
+    attr_accessor :value
+
+    sig { void }
+    def initialize
+      @key = T.let(nil, T.nilable(AutoUnifier::Resolution))
+      @value = T.let(nil, T.nilable(AutoUnifier::Resolution))
+    end
+  end
+
+  ResultMap = T.type_alias { T::Hash[AutoSlotId, AutoUnifier::Resolution] }
+  AmbiguityMap = T.type_alias { T::Hash[AutoSlotId, AutoUnifier::Ambiguity] }
+  UnresolvedMap = T.type_alias { T::Hash[AutoSlotId, AutoConstraintCollector::Slot] }
+  TypeResolver = T.type_alias do
+    T.proc.params(node: AST::Locatable).returns(T.nilable(AutoConstraintCollector::ObservedType))
+  end
+
+  # Aggregated unifier output. Each map keys by the same slot id
+  # used in @slots: resolved → Resolution, ambiguous → Ambiguity,
+  # unresolved → the original Slot (no observations gathered).
+  class Result < T::Struct
+    const :resolved, AutoUnifier::ResultMap
+    const :ambiguous, AutoUnifier::AmbiguityMap
+    const :unresolved, AutoUnifier::UnresolvedMap
+  end
+
+  sig { params(slots: AutoConstraintCollector::SlotMap, type_of: T.nilable(TypeResolver)).void }
   def initialize(slots, type_of: nil)
     @slots = slots
     # `type_of` lets callers plug in a custom source-type resolver.
-    # Default reads `node.full_type` (CLEAR's existing per-node type
-    # accessor — set by the annotator on AST nodes during body
-    # validation). The tolerant body-pass populates type_info on each
-    # constraint source before this unifier runs.
-    @type_of = T.let(type_of || ->(node) {
-      node.is_a?(AST::Locatable) ? node.full_type : nil
-    }, T.untyped)
+    # Default reads the finalized per-node type. The tolerant body-pass
+    # populates type_info on each constraint source before this unifier runs.
+    @type_of = T.let(type_of || ->(node) { node.full_type!(context: "AUTO inference source") }, TypeResolver)
   end
 
   sig { returns(AutoUnifier::Result) }
   def resolve!
-    resolved   = {}
-    ambiguous  = {}
+    resolved   = T.let({}, ResultMap)
+    ambiguous  = T.let({}, AmbiguityMap)
 
     progress = T.let(true, T::Boolean)
     while progress
@@ -374,7 +532,7 @@ class AutoUnifier
         observed = collect_observed_types(slot)
         case observed.length
         when 1
-          type = observed.first
+          type = T.must(observed.first)
           stamp_slot!(slot, type)
           resolved[id] = Resolution.new(slot: slot, type: type, sources: slot.sources)
           progress = true
@@ -391,7 +549,7 @@ class AutoUnifier
       end
     end
 
-    unresolved = {}
+    unresolved = T.let({}, UnresolvedMap)
     @slots.each do |id, slot|
       next if resolved.key?(id) || ambiguous.key?(id)
       unresolved[id] = slot
@@ -414,13 +572,13 @@ class AutoUnifier
   # `HashMap<Byte[1], V>` (unfit for use). The user almost always
   # means `String` when they pass / store a string literal; widening
   # converts the diagnostic to the type they actually want.
-  sig { params(slot: AutoConstraintCollector::Slot).returns(T::Array[T.untyped]) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T::Array[AutoConstraintCollector::ObservedType]) }
   def collect_observed_types(slot)
-    seen = []
+    seen = T.let([], T::Array[AutoConstraintCollector::ObservedType])
     slot.sources.each do |source|
       t = @type_of.call(source)
       next if t.nil?
-      next if t.respond_to?(:auto?) && t.auto?
+      next if t.is_a?(Type) && t.auto?
       t = widen_byte_array_to_string(t)
       next if seen.any? { |existing| types_equal?(existing, t) }
       seen << t
@@ -428,9 +586,9 @@ class AutoUnifier
     seen
   end
 
-  sig { params(t: Type).returns(T.untyped) }
+  sig { params(t: AutoConstraintCollector::ObservedType).returns(AutoConstraintCollector::ObservedType) }
   def widen_byte_array_to_string(t)
-    sym = t.respond_to?(:resolved) ? t.resolved : t
+    sym = t.is_a?(Type) ? t.resolved : t
     return :String if sym.is_a?(Symbol) && sym.to_s.start_with?("Byte[") && sym.to_s.end_with?("]")
     t
   end
@@ -438,12 +596,12 @@ class AutoUnifier
   # Type comparison that handles bare symbols and Type objects.
   # The annotator sometimes stores `:Int64` and sometimes `Type.new(:Int64)`;
   # for unification purposes we treat them as the same observation.
-  sig { params(a: T.untyped, b: T.untyped).returns(T::Boolean) }
+  sig { params(a: AutoConstraintCollector::ObservedType, b: AutoConstraintCollector::ObservedType).returns(T::Boolean) }
   def types_equal?(a, b)
     return true if a == b
-    return false unless a.respond_to?(:resolved) || b.respond_to?(:resolved)
-    a_sym = a.respond_to?(:resolved) ? a.resolved : a
-    b_sym = b.respond_to?(:resolved) ? b.resolved : b
+    return false unless a.is_a?(Type) || b.is_a?(Type)
+    a_sym = a.is_a?(Type) ? a.resolved : a
+    b_sym = b.is_a?(Type) ? b.resolved : b
     a_sym == b_sym
   end
 
@@ -457,29 +615,30 @@ class AutoUnifier
   # `:map_value` are stamped jointly by the post-pass below; this
   # method records the resolution on the slot and leaves the decl
   # untouched until both sub-slots resolve.
-  sig { params(slot: AutoConstraintCollector::Slot, type: T.untyped).returns(T.nilable(Type)) }
+  sig { params(slot: AutoConstraintCollector::Slot, type: AutoConstraintCollector::ObservedType).void }
   def stamp_slot!(slot, type)
     resolved_type = type.is_a?(Type) ? type : Type.new(type)
     case slot.shape
     when :list_element
-      element_sym = resolved_type.respond_to?(:resolved) ? resolved_type.resolved : resolved_type
-      slot.decl_node.type = Type.new(:"#{element_sym}[]")
+      element_sym = resolved_type.resolved
+      T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).type = Type.new(:"#{element_sym}[]")
       return
     when :map_key, :map_value
       # Defer: stamp_map_pairs! below builds the joint HashMap<K,V>
       # type once both sub-slots resolve. Record the resolved scalar
       # on the slot for the post-pass to read.
-      slot.instance_variable_set(:@resolved_scalar, resolved_type)
+      slot.resolved_scalar = resolved_type
       return
     end
 
     case slot.kind
     when :param
-      slot.decl_node.params[slot.index][:type] = resolved_type
+      fn = T.cast(slot.decl_node, AST::FunctionDef)
+      fn.params[T.must(slot.index)][:type] = resolved_type
     when :return
-      slot.decl_node.return_type = resolved_type
+      T.cast(slot.decl_node, AST::FunctionDef).return_type = resolved_type
     when :local
-      slot.decl_node.type = resolved_type
+      T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).type = resolved_type
     end
   end
 
@@ -491,21 +650,31 @@ class AutoUnifier
   # decl. Returns the list of decl_nodes whose stamping is
   # incomplete (only one half resolved) — the caller emits per-slot
   # unresolved findings for those.
-  sig { params(resolved_slots: T::Hash[T::Array[T.untyped], AutoUnifier::Resolution]).returns(T::Hash[Integer, T::Hash[T.untyped, T.untyped]]) }
+  sig { params(resolved_slots: ResultMap).void }
   def stamp_map_pairs!(resolved_slots)
-    by_decl = Hash.new { |h, k| h[k] = {} }
+    by_decl = T.let(
+      Hash.new { |h, k| h[k] = MapPairResolution.new },
+      T::Hash[Integer, MapPairResolution],
+    )
     resolved_slots.each_value do |resolution|
       next unless resolution.slot.shape == :map_key || resolution.slot.shape == :map_value
-      by_decl[resolution.slot.decl_node.object_id][resolution.slot.shape] = resolution
+      pair = T.must(by_decl[resolution.slot.decl_node.object_id])
+      if resolution.slot.shape == :map_key
+        pair.key = resolution
+      else
+        pair.value = resolution
+      end
     end
 
     by_decl.each do |_decl_id, pair|
-      key_res = pair[:map_key]
-      val_res = pair[:map_value]
+      key_res = pair.key
+      val_res = pair.value
       next unless key_res && val_res
-      decl = key_res.slot.decl_node
-      k_sym = key_res.type.respond_to?(:resolved) ? key_res.type.resolved : key_res.type
-      v_sym = val_res.type.respond_to?(:resolved) ? val_res.type.resolved : val_res.type
+      decl = T.cast(key_res.slot.decl_node, AutoConstraintCollector::DeclarationNode)
+      key_type = key_res.type
+      val_type = val_res.type
+      k_sym = key_type.is_a?(Type) ? key_type.resolved : key_type
+      v_sym = val_type.is_a?(Type) ? val_type.resolved : val_type
       decl.type = Type.new(:"HashMap<#{k_sym}, #{v_sym}>")
     end
   end
@@ -529,13 +698,15 @@ end
 class ShapeEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: AutoConstraintCollector::FnNodes).void }
+  NameShapeMap = T.type_alias { T::Hash[String, AutoShapeSlots] }
+
+  sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(AutoConstraintCollector::SlotMap) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @slots
@@ -554,15 +725,15 @@ class ShapeEvidenceCollector
   end
 
   # Walk body for shape-bearing decls and map their name → shape slots.
-  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Hash[T.untyped, T.untyped]]) }
+  sig { params(fn: AST::FunctionDef).returns(NameShapeMap) }
   def build_name_map(fn)
-    map = {}
+    map = T.let({}, NameShapeMap)
     walk_for_shape_decls(fn.body) do |decl|
-      list_slot = @slots[[:list_element, decl.object_id]]
-      key_slot  = @slots[[:map_key, decl.object_id]]
-      val_slot  = @slots[[:map_value, decl.object_id]]
+      list_slot = @slots[AutoSlotId.list_element(decl)]
+      key_slot  = @slots[AutoSlotId.map_key(decl)]
+      val_slot  = @slots[AutoSlotId.map_value(decl)]
       next unless list_slot || key_slot || val_slot
-      map[decl.name] = { list: list_slot, key: key_slot, value: val_slot }
+      map[decl.name] = AutoShapeSlots.new(list: list_slot, key: key_slot, value: val_slot)
     end
     map
   end
@@ -588,7 +759,7 @@ class ShapeEvidenceCollector
   end
 
   # Walk the body and record evidence into shape slots.
-  sig { params(node: T.untyped, name_map: T::Hash[String, T::Hash[T.untyped, T.untyped]]).returns(T.untyped) }
+  sig { params(node: T.untyped, name_map: NameShapeMap).returns(T.untyped) }
   def walk(node, name_map)
     return if node.nil?
     case node
@@ -614,7 +785,7 @@ class ShapeEvidenceCollector
 
   # Detect `x.append(e)` / `x.insert(e)` / `x.put(k, v)` and record
   # the corresponding evidence onto the shape slots for `x`.
-  sig { params(call: AST::MethodCall, name_map: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(call: AST::MethodCall, name_map: NameShapeMap).returns(T.nilable(T::Array[T.untyped])) }
   def record_method_call(call, name_map)
     target = call.object
     return unless target.is_a?(AST::Identifier)
@@ -627,8 +798,8 @@ class ShapeEvidenceCollector
       # List-append: 1-arg form is element evidence. Pool/Set
       # `insert(e)` also fits this shape. Pool/Map `insert(k,v)`
       # 2-arg form delivers map-pair evidence.
-      if slots[:list] && args.length == 1
-        slots[:list].sources << args[0]
+      if slots.list && args.length == 1
+        T.must(slots.list).sources << args[0]
       elsif args.length == 2
         record_map_pair_evidence(slots, args)
       end
@@ -641,16 +812,16 @@ class ShapeEvidenceCollector
   # Append (k, v) to the matching map sub-slots when the slot map
   # carries both halves. No-op for non-map shapes — keeps
   # method-call dispatch noise out of the call sites.
-  sig { params(slots: T::Hash[T.untyped, T.untyped], args: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(slots: AutoShapeSlots, args: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def record_map_pair_evidence(slots, args)
-    return unless slots[:key] && slots[:value]
-    slots[:key].sources << args[0]
-    slots[:value].sources << args[1]
+    return unless slots.key && slots.value
+    T.must(slots.key).sources << args[0]
+    T.must(slots.value).sources << args[1]
   end
 
   # Detect `x[i] = v`. For list shape: v is element evidence. For
   # map shape: i is key, v is value.
-  sig { params(assign: AST::Assignment, name_map: T::Hash[T.untyped, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(assign: AST::Assignment, name_map: NameShapeMap).returns(T.nilable(T::Array[T.untyped])) }
   def record_index_assign(assign, name_map)
     target = assign.name
     return unless target.is_a?(AST::GetIndex)
@@ -659,11 +830,11 @@ class ShapeEvidenceCollector
     slots = name_map[base.name]
     return unless slots
 
-    if slots[:list]
-      slots[:list].sources << assign.value
-    elsif slots[:key] && slots[:value]
-      slots[:key].sources << target.index
-      slots[:value].sources << assign.value
+    if slots.list
+      T.must(slots.list).sources << assign.value
+    elsif slots.key && slots.value
+      T.must(slots.key).sources << target.index
+      T.must(slots.value).sources << assign.value
     end
   end
 end
@@ -687,14 +858,17 @@ end
 class OperatorEvidenceCollector
     extend T::Sig
 
-  sig { params(slots: T::Hash[T::Array[T.untyped], AutoConstraintCollector::Slot], fn_nodes: AutoConstraintCollector::FnNodes).void }
+  NameSlotMap = T.type_alias { T::Hash[String, AutoSlotId] }
+  EvidenceMap = T.type_alias { T::Hash[AutoSlotId, T::Set[Symbol]] }
+
+  sig { params(slots: AutoConstraintCollector::SlotMap, fn_nodes: AutoConstraintCollector::FnNodes).void }
   def initialize(slots, fn_nodes)
     @slots = slots
     @fn_nodes = fn_nodes
-    @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[T.untyped, T.untyped])
+    @evidence = T.let(Hash.new { |h, k| h[k] = Set.new }, EvidenceMap)
   end
 
-  sig { returns(T::Hash[T.untyped, T.untyped]) }
+  sig { returns(EvidenceMap) }
   def collect!
     @fn_nodes.each_value { |fn| collect_in_function(fn) }
     @evidence
@@ -709,18 +883,17 @@ class OperatorEvidenceCollector
   end
 
   # Map from binding-name → slot-id within this function. Includes
-  # Auto-typed params (registered by AutoConstraintCollector under
-  # [:param, fn_name, i]) and Auto-typed locals (registered under
-  # [:local, decl_node.object_id]).
-  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, T::Array[T.untyped]]) }
+  # Auto-typed params and locals registered by AutoConstraintCollector
+  # under AutoSlotId keys.
+  sig { params(fn: AST::FunctionDef).returns(NameSlotMap) }
   def build_name_map(fn)
-    map = {}
+    map = T.let({}, NameSlotMap)
     fn.params.each_with_index do |param, i|
-      slot_id = [:param, fn.name, i]
+      slot_id = AutoSlotId.param(fn.name, i)
       map[param.name] = slot_id if @slots.key?(slot_id)
     end
     walk_for_local_decls(fn.body) do |decl|
-      slot_id = [:local, decl.object_id]
+      slot_id = AutoSlotId.local(decl)
       map[decl.name] = slot_id if @slots.key?(slot_id)
     end
     map
@@ -750,7 +923,7 @@ class OperatorEvidenceCollector
   # Walk for BinaryOp expressions; record `op` per slot whose
   # binding appears as an Identifier operand. Returns also recorded
   # for return-Auto when the RETURN value is a BinaryOp.
-  sig { params(node: T.untyped, name_to_slot: T::Hash[String, T::Array[T.untyped]], fn: AST::FunctionDef).returns(T.untyped) }
+  sig { params(node: T.untyped, name_to_slot: NameSlotMap, fn: AST::FunctionDef).returns(T.untyped) }
   def walk_binops(node, name_to_slot, fn)
     return if node.nil?
     case node
@@ -759,9 +932,9 @@ class OperatorEvidenceCollector
       walk_binops(node.left, name_to_slot, fn)
       walk_binops(node.right, name_to_slot, fn)
     when AST::ReturnNode
-      ret_slot = [:return, fn.name]
+      ret_slot = AutoSlotId.return(fn.name)
       if @slots.key?(ret_slot) && node.value.is_a?(AST::BinaryOp)
-        @evidence[ret_slot] << node.value.op
+        (@evidence[ret_slot] ||= Set.new) << node.value.op
       end
       walk_binops(node.value, name_to_slot, fn)
     when AST::FunctionDef
@@ -777,12 +950,12 @@ class OperatorEvidenceCollector
     end
   end
 
-  sig { params(binop: AST::BinaryOp, name_to_slot: T::Hash[String, T::Array[T.untyped]]).returns(T::Array[T.untyped]) }
+  sig { params(binop: AST::BinaryOp, name_to_slot: NameSlotMap).returns(T::Array[T.untyped]) }
   def record_binop(binop, name_to_slot)
     [binop.left, binop.right].each do |operand|
       next unless operand.is_a?(AST::Identifier)
       slot_id = name_to_slot[operand.name]
-      @evidence[slot_id] << binop.op if slot_id
+      (@evidence[slot_id] ||= Set.new) << binop.op if slot_id
     end
   end
 

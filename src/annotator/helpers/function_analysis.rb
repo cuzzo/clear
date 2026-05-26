@@ -136,7 +136,7 @@ module FunctionAnalysis
 
       if func_type.extern
         args.each do |arg|
-          if arg.full_type.soa?
+          if arg.full_type!(context: "extern argument").soa?
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
@@ -147,7 +147,7 @@ module FunctionAnalysis
         params.each_with_index do |p, i|
           if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
-            args[i].full_type = :Type  # Mark as type-value, not a variable
+            stamp_type!(args[i], :Type) # Mark as type-value, not a variable
           end
         end
         if comptime_type_args.any?
@@ -171,7 +171,7 @@ module FunctionAnalysis
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
-        node.full_type = substituted.return_type
+        stamp_type!(node, substituted.return_type)
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
@@ -179,7 +179,7 @@ module FunctionAnalysis
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
         rt = func_type.return_type
-        node.full_type = rt.is_a?(Type) ? Type.new(rt) : rt
+        stamp_type!(node, rt.is_a?(Type) ? Type.new(rt) : rt)
         # Auto-propagate (CLEAR's error-handling default): the call's
         # *expression-level* type is the SUCCESS branch -- a binding
         # `h = call()` sees `T`, not `!T`. The error union flows
@@ -190,10 +190,11 @@ module FunctionAnalysis
         # The original `!T` is stashed on `error_union_type` so
         # OR-RESCUE handlers (which read the LHS's union to pick
         # `catch`/`orelse`) can still see the un-stripped form.
-        if node.full_type.respond_to?(:error_union?) &&
-           node.full_type.error_union?
-          node.error_union_type = node.full_type if node.respond_to?(:error_union_type=)
-          outer = node.full_type
+        call_type = node.full_type!(context: "function call result")
+        if call_type.respond_to?(:error_union?) &&
+           call_type.error_union?
+          node.error_union_type = call_type if node.respond_to?(:error_union_type=)
+          outer = call_type
           inner = outer.payload_type
           # The parser stamps storage/ownership/sync/layout on the
           # OUTER error union (e.g. `!Node @multiowned` -> outer.ownership
@@ -228,7 +229,7 @@ module FunctionAnalysis
               inner.collection = outer.collection
             end
           end
-          node.full_type = inner
+          stamp_type!(node, inner)
         end
       end
 
@@ -244,10 +245,10 @@ module FunctionAnalysis
       call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, synthetic_sig)
       node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
-      node.full_type = sig.return_type
+      stamp_type!(node, sig.return_type)
 
     elsif func_type.is_a?(Symbol)
-      node.full_type = func_type
+      stamp_type!(node, func_type)
 
     else
       error!(node, :NOT_A_FUNCTION, name: func_name)
@@ -386,7 +387,7 @@ module FunctionAnalysis
         # you cannot take ownership of data inside a container.
         # Use .remove(i) or COPY arr[i] instead.
         if inner_node.container_borrow
-          arg_ti = inner_node.full_type
+          arg_ti = inner_node.full_type!(context: "TAKES index argument")
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti.is_a?(Type) ?
             (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
@@ -760,7 +761,7 @@ module FunctionAnalysis
               error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
             end
           end
-          param.default.full_type = param.type
+          stamp_type!(param.default, param.type)
         else
           visit(param.default)
           def_type = param.default.resolved_type
@@ -1020,7 +1021,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     pred = REJECT_TYPE_PREDICATES[kind]
     return false unless pred
-    type = arg.full_type
+    type = arg.full_type!(context: "intrinsic reject argument")
     return false unless type.is_a?(Type)
     pred.call(type)
   end
@@ -1044,7 +1045,7 @@ module FunctionAnalysis
           expected = spec[:type]
           next false unless is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.full_type
+          arg_type = arg.full_type!(context: "intrinsic capability argument")
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true

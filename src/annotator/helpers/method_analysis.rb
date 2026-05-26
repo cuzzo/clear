@@ -15,7 +15,7 @@ module MethodAnalysis
   sig { params(node: AST::MethodCall).returns(T.nilable(T::Boolean)) }
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    obj_type = node.object.full_type
+    obj_type = node.object.full_type!(context: "collection method receiver")
     config = COLLECTION_METHOD_CONFIGS[obj_type&.dispatch_key]
     return false unless config
     resolve_typed_method(node, obj_type, config[:registry], config[:tag],
@@ -50,7 +50,7 @@ module MethodAnalysis
     new_type.elem_ownership = ti.elem_ownership if ti.elem_ownership
     new_type.elem_sync = ti.elem_sync if ti.elem_sync
     scope_entry.type = new_type
-    list_arg.full_type = new_type
+    stamp_type!(list_arg, new_type)
   end
 
   private
@@ -87,7 +87,7 @@ module MethodAnalysis
 
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
-    node.full_type = defn.return_def.resolve(obj_type, [], self)
+    stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
@@ -133,7 +133,7 @@ module MethodAnalysis
         entry = node.object.symbol
         if entry
           entry.type = new_type
-          node.object.full_type = new_type
+          stamp_type!(node.object, new_type)
         end
       end
     end
