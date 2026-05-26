@@ -170,3 +170,19 @@ Acceptance criteria:
   compile-error before allocator/cleanup matching can accidentally pass.
 - [x] The docs and architecture specs name this as a memory-safety invariant,
   not a style rule.
+
+## Full Completion Round
+
+This round removes the remaining dual paths left after the stamp hardening:
+
+- [x] `MIRPass` emits `MIR::AllocMark` directly. The old `MIR::Alloc` marker
+  type and lowering bridge are deleted.
+- [x] `MIR::AllocMark.new` requires a concrete `Type` at construction. The
+  checker still verifies the invariant, but invalid allocation facts cannot be
+  built accidentally by normal code.
+- [x] MIR/backend synthetic AST type writes use `AST.stamp_synthetic_type!`
+  instead of raw `.full_type =`, giving generated nodes one fail-closed type
+  mutation boundary.
+- [x] `full_type_or` is deleted; post-annotation code has only hard reads
+  (`full_type!`) or explicit producer stamps.
+- [x] Full validation after the completion round.

@@ -11,6 +11,17 @@ require_relative "../annotator/helpers/intrinsic_registry"
 module AST
     extend T::Sig
 
+  SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
+
+  sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
+  def self.stamp_synthetic_type!(node, value, context:)
+    node.full_type = value
+    stamped = node.full_type!(context: context)
+    raise "#{context}: synthetic type stamp produced :Untyped for #{node.class}" if stamped.untyped?
+
+    stamped
+  end
+
   # A node's value-type is, for these kinds, a pure function of its
   # structure — so it is DERIVED, never stamped. The full_type getter
   # below memoizes the derived Type into @type_object; the pre-MIR
@@ -720,18 +731,6 @@ module AST
       raise "#{context}: missing type info for #{self.class}" unless ft
       raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
       ft
-    end
-
-    sig do
-      params(default: T.nilable(T.any(Type, Symbol, String)),
-             blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
-        .returns(T.any(Type, Symbol, String))
-    end
-    def full_type_or(default = nil, &blk)
-      ft = full_type
-      return ft unless ft.untyped?
-      return blk.call if blk
-      default.nil? ? ft : default
     end
 
     # True when the node carries a real (stamped) type, i.e. full_type
@@ -2251,16 +2250,6 @@ module MIR
   # (TAKES calls, GIVE, return escapes). Emits `x_moved = true;` to prevent
   # double-free via the defer guard emitted by Drop.
   SuppressCleanup = Struct.new(:token, :name) do
-    include AST::Locatable
-  end
-
-  # Alloc: marks an allocation point - a variable binding that owns a resource
-  # and will need cleanup. Inserted alongside MIR::Drop for each VarDecl/BindExpr
-  # with cleanup. The StaticLeakChecker verifies every Alloc has exactly one
-  # Drop or Move/Escape on every path through the function.
-  #
-  # alloc: :heap or :frame - which allocator owns this value
-  Alloc = Struct.new(:token, :name, :alloc) do
     include AST::Locatable
   end
 

@@ -28,7 +28,7 @@ RSpec.describe MIRChecker do
     MIR::Program.new(items, state)
   end
 
-  def alloc_mark(name, alloc, type_info = nil, scope: nil)
+  def alloc_mark(name, alloc, type_info = Type.new(:String), scope: nil)
     MIR::AllocMark.new(name, alloc, type_info, scope || (alloc == :heap ? :heap : :function))
   end
 

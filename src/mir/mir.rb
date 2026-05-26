@@ -12,7 +12,7 @@
 # 4. No Type objects: nodes carry Zig type strings, never Type instances
 # 5. Recursive expressions: expression nodes contain sub-expression nodes
 #
-# Old MIR nodes (Drop, Promote, SuppressCleanup, Alloc, Return,
+# Old MIR nodes (Drop, Promote, SuppressCleanup, Return,
 # ReassignCleanup, FieldCleanup) in ast.rb remain for the existing pipeline.
 # New nodes here use distinct names to coexist during migration.
 
@@ -727,7 +727,7 @@ module MIR
   #
   # ownership_contract: MIR::OwnershipContract
   #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
-  #   produces: bindings the raw block creates (must have MIR::Alloc + MIR::Drop)
+  #   produces: bindings the raw block creates (must have MIR::AllocMark + MIR::Drop)
   #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
   RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
     extend T::Sig
@@ -1927,17 +1927,24 @@ module MIR
   # Verification-Only Nodes (no codegen, for MIRChecker)
   # ================================================================
 
-  # Marks an allocation point. Subsumes old MIR::Alloc.
+  # Marks an allocation point.
   AllocMark = Struct.new(:name, :alloc, :type_info, :scope) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, alloc: Symbol, type_info: Type, scope: T.nilable(Symbol)).void }
+    def initialize(name, alloc, type_info, scope = nil)
+      raise "MIR::AllocMark requires concrete Type info" if type_info.untyped?
+
+      super(name, alloc, type_info, scope)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
     # Carrier struct: member stays :type_info; expose the project-wide
     # canonical accessor name so readers use one name everywhere.
-    sig { returns(T.untyped) }
+    sig { returns(Type) }
     def full_type; type_info; end
-    sig { params(val: T.untyped).returns(T.untyped) }
+    sig { params(val: Type).returns(Type) }
     def full_type=(val); self.type_info = val; end
   end
 
@@ -2761,14 +2768,14 @@ module MIR
   end
 
   LEGACY_OWNERSHIP_NODE_TYPES = T.let(
-    [:Alloc, :ReassignCleanup, :FieldCleanup, :ReassignPlan].filter_map do |name|
+    [:ReassignCleanup, :FieldCleanup, :ReassignPlan].filter_map do |name|
       value = const_defined?(name, false) ? const_get(name, false) : nil
       value if value.is_a?(Class)
     end.freeze,
     T::Array[T::Class[T.anything]],
   )
   LEGACY_OWNERSHIP_NODE_NAMES = T.let(
-    ["MIR::Alloc", "MIR::ReassignCleanup", "MIR::FieldCleanup", "MIR::ReassignPlan"].freeze,
+    ["MIR::ReassignCleanup", "MIR::FieldCleanup", "MIR::ReassignPlan"].freeze,
     T::Array[String],
   )
 

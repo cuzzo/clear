@@ -21,7 +21,7 @@ Every AST and MIR program carries a typed `MIRPassState`. Each pass asserts the 
    Runs after cleanup classification. It reads cleanup lifetime facts and marks loop frame save/restore requirements. It does not inspect container kinds, method names, or storage destinations to infer lifetime.
 
 5. **MIR Lowering**
-   Converts finalized AST facts into MIR. It emits structural calls, `AllocMark`, `Cleanup` / `ErrCleanup`, `TransferMark`, and `MoveMark` from already-finalized placement and cleanup data. It does not decide heap versus frame.
+   Converts finalized AST facts into MIR. It emits structural calls, `AllocMark`, `Cleanup` / `ErrCleanup`, `TransferMark`, and `MoveMark` from already-finalized placement and cleanup data. It does not decide heap versus frame and it does not accept an old allocation-marker bridge.
 
 6. **MIR Allocation Normalization**
    Runs inside lowering before ownership finalization for each lowered statement body. It recursively removes allocation-producing expressions from non-owning expression positions by hoisting them to named MIR bindings. Allocation-producing result chains are allowed only where a binding owns the result, such as a `Let` init that must preserve `try` / `catch` semantics. This is the only MIR stage allowed to walk expression trees to rewrite ownership shape.
@@ -52,6 +52,7 @@ Any new pass that reads or writes MIR-relevant facts must add itself to this cha
 
 - `node.storage` is expression-shape metadata. Annotation owns it. Rewriters and lowering adapters may only copy already-known storage onto synthetic nodes.
 - `symbol.storage` is placement metadata. `src/mir/escape_analysis.rb` is the only writer.
+- Synthetic AST nodes created after annotation must receive type facts through `AST.stamp_synthetic_type!`. Raw `.full_type =` writes in MIR/backend code are invalid because they bypass the fail-closed synthetic producer boundary.
 - `CleanupEntry#alloc` is cleanup metadata. `src/mir/cleanup_classifier.rb` is the only writer.
 - `CleanupEntry#scope` is frame-lifetime metadata. `src/mir/cleanup_classifier.rb` is the only writer. Valid values are `:iteration`, `:scope`, `:function`, and `:heap`.
 - MIR lowering does not decide heap versus frame. It reads `SymbolEntry#storage` and `CleanupEntry#alloc`, emits `MIR::AllocMark`, `MIR::Cleanup`, `MIR::ErrCleanup`, and `MIR::TransferMark`, and leaves verification to `MIRChecker`.

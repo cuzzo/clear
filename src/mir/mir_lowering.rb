@@ -3,7 +3,7 @@
 #
 # Pipeline: Parse -> Annotate -> MIRPass -> Lower -> Emit
 #
-# The lowering reads the annotated AST with old MIR nodes (Drop, Promote,
+# The lowering reads the annotated AST with marker nodes (Drop, AllocMark,
 # SuppressCleanup, etc.) already inserted by MIRPass, and produces a
 # complete MIR tree that the MIREmitter can emit to Zig.
 #
@@ -526,8 +526,9 @@ class MIRLowering
     # --- Top-level ---
     when AST::Program           then lower_program(node)
 
-    # --- Old MIR nodes (from MIRPass) -> new MIR nodes ---
+    # --- Marker nodes from MIRPass ---
     when MIR::Drop              then lower_drop(node)
+    when MIR::AllocMark         then node
     when MIR::SuppressCleanup
       safe = zig_safe_name(node.name)
       if @guarded_cleanup_names&.[](safe)
@@ -535,10 +536,6 @@ class MIRLowering
       else
         []
       end
-    when MIR::Alloc
-      mark = MIR::AllocMark.new(node.name, node.alloc, Type.from_node!(node, context: "legacy MIR::Alloc"))
-      mark.scope = node.alloc == :heap ? :heap : :iteration
-      mark
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)
     when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
     when MIR::FieldCleanup      then MIR::FieldCleanupMark.new(node.target_name, node.field, node.alloc)
@@ -768,12 +765,13 @@ class MIRLowering
     mir, hoisted_discard = materialize_statement_discard(stmt, mir)
     pending = flush_pending
     mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt) && !hoisted_discard
+    token = stmt.respond_to?(:token) ? stmt.token : nil
     LoweredStmtPacket.new(
       ast_stmt: stmt,
       mir: mir,
       pending: pending,
-      source_line: stmt.token&.line,
-      source_column: stmt.token&.column,
+      source_line: token&.line,
+      source_column: token&.column,
     )
   end
 
@@ -1565,7 +1563,7 @@ class MIRLowering
 
     # Find the last non-old-MIR-verification node (the result expression)
     last_user_idx = stmts.rindex { |s|
-      !s.is_a?(MIR::Drop) && !s.is_a?(MIR::Alloc) &&
+      !s.is_a?(MIR::Drop) && !s.is_a?(MIR::AllocMark) &&
       !s.is_a?(MIR::Return) && !s.is_a?(MIR::SuppressCleanup) &&
       !s.is_a?(MIR::ReassignCleanup) && !s.is_a?(MIR::FieldCleanup)
     }

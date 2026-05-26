@@ -211,9 +211,8 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("\nbuf_moved = true;")
     end
 
-    it "translates MIR::Alloc to MIR::AllocMark" do
-      alloc = MIR::Alloc.new(tok, "x", :heap)
-      alloc.full_type = :String
+    it "passes MIR::AllocMark through as the allocation marker" do
+      alloc = MIR::AllocMark.new("x", :heap, Type.new(:String))
       result = lowering.lower(alloc)
       expect(result).to be_a(MIR::AllocMark)
       expect(result.name).to eq("x")

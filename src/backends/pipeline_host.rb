@@ -343,9 +343,9 @@ class PipelineHost
       if @soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
         @soa_needed_fields << node.field
         soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
-        soa_field.full_type = soa_field_slice_type(node)
+        AST.stamp_synthetic_type!(soa_field, soa_field_slice_type(node), context: "synthetic AST type")
         soa_idx = AST::Identifier.new(node.token, "__soa_i")
-        soa_idx.full_type = :Int64
+        AST.stamp_synthetic_type!(soa_idx, :Int64, context: "synthetic AST type")
         new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
         copy_type_info(node, new_gi)
         return new_gi
@@ -438,7 +438,7 @@ class PipelineHost
 
   sig { params(src: AST::Locatable, dst: AST::Locatable).void }
   def copy_type_info(src, dst)
-    dst.full_type = src.full_type!(context: "pipeline rewrite type copy")
+    AST.stamp_synthetic_type!(dst, src.full_type!(context: "pipeline rewrite type copy"), context: "synthetic AST type")
     dst.coerced_type = src.coerced_type if src.coerced_type
     dst.storage = src.storage if src.storage
     dst.var_used = src.var_used
@@ -2311,7 +2311,7 @@ class PipelineHost
     conc = AST::ConcurrentOp.new(each_op.token, each_op, {})
     # Synthesized post-annotation: inherit the wrapped EachOp's type
     # so the AST->MIR type-resolution invariant holds.
-    conc.full_type = each_op.full_type!(context: "sharded EACH result")
+    AST.stamp_synthetic_type!(conc, each_op.full_type!(context: "sharded EACH result"), context: "synthetic AST type")
     cb = build_bounded_concurrent_callback_pointer(conc, item_t)
 
     source_mir = visit_mir(list_node)

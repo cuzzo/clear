@@ -343,7 +343,7 @@ module MIRLoweringVariables
     actually_mutated = facts.actually_mutated
     generic_id = facts.generic_id
     # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
-    # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
+    # Replaces old Drop sibling nodes inserted by MIRPass.
     if has_mir_drop
       # has_mir_drop implies binding_entry.needs_cleanup?, so the entry is
       # always present (NONE.needs_cleanup? is false). The cleanup recipe is
@@ -569,7 +569,7 @@ module MIRLoweringVariables
       # Proxy to VarDecl logic. Copy mir_binding_entry so lower_var_decl
       # uses node-identity lookup rather than the name-keyed dict.
       proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
-      proxy.full_type = node.full_type!(context: "bind expression proxy")
+      AST.stamp_synthetic_type!(proxy, node.full_type!(context: "bind expression proxy"), context: "synthetic AST type")
       proxy.storage = node.storage
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig

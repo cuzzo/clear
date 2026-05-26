@@ -398,13 +398,13 @@ module FsmTransform
           tok = stmt.left.token
           bind = AST::BindExpr.new(tok, synth_name, nil, stmt.left)
           bind.mode = :decl
-          bind.full_type = stmt.left.full_type!(context: "FSM pipeline split")
+          AST.stamp_synthetic_type!(bind, stmt.left.full_type!(context: "FSM pipeline split"), context: "synthetic AST type")
           out << bind
 
           ident = AST::Identifier.new(tok, synth_name)
-          ident.full_type = stmt.left.full_type!(context: "FSM pipeline split")
+          AST.stamp_synthetic_type!(ident, stmt.left.full_type!(context: "FSM pipeline split"), context: "synthetic AST type")
           rewritten = AST::BinaryOp.new(stmt.token, ident, stmt.op, stmt.right)
-          rewritten.full_type = stmt.full_type!(context: "FSM pipeline split")
+          AST.stamp_synthetic_type!(rewritten, stmt.full_type!(context: "FSM pipeline split"), context: "synthetic AST type")
           out << rewritten
         else
           out << stmt

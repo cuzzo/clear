@@ -281,7 +281,7 @@ def mir_checker_negative_source(case_name, error_code)
       MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
     end
 
-    def alloc_mark(name, alloc, type_info = nil)
+    def alloc_mark(name, alloc, type_info = Type.new(:String))
       MIR::AllocMark.new(name, alloc, type_info, alloc == :heap ? :heap : :function)
     end
 

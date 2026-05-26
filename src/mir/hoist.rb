@@ -277,7 +277,7 @@ module Hoist
     end
 
     decl = AST::VarDecl.new(tok, name, nil, concat, false)
-    decl.full_type = ti
+    AST.stamp_synthetic_type!(decl, ti, context: "synthetic AST type")
     # The temp is always consumed by the statement it was lifted from
     # (return / yield / element store), so it is used by construction --
     # var-use analysis ran before this pass and cannot know that.
@@ -290,7 +290,7 @@ module Hoist
     hoists << decl
 
     ident = AST::Identifier.new(tok, name)
-    ident.full_type = ti
+    AST.stamp_synthetic_type!(ident, ti, context: "synthetic AST type")
     ident.symbol = sym
     # The temp replaces a sub-expression in an ownership-consuming
     # position (element-store arg / struct field of one). Stamp the

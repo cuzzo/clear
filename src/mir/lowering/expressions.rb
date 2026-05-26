@@ -486,14 +486,14 @@ module MIRLoweringExpressions
     call_mir = if rhs.is_a?(AST::Identifier)
       # x |> f -> f(x)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
-      synthetic.full_type = node.full_type!(context: "pipeline synthetic call")
+      AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
       synthetic.storage = node.storage
       synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       lower_func_call(synthetic)
     elsif rhs.is_a?(AST::FuncCall)
       # x |> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
-      synthetic.full_type = node.full_type!(context: "pipeline synthetic call")
+      AST.stamp_synthetic_type!(synthetic, node.full_type!(context: "pipeline synthetic call"), context: "synthetic AST type")
       synthetic.storage = node.storage
       synthetic.zig_pattern = rhs.zig_pattern if rhs.zig_pattern
       synthetic.coerced_type = rhs.coerced_type if rhs.coerced_type

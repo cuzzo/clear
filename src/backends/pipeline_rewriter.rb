@@ -184,13 +184,13 @@ class PipelineRewriter
         # Use the source's collection type for the intermediate list (not
         # the terminal's scalar result type).
         list_proxy = node.dup
-        list_proxy.full_type = real_source.full_type!
+        AST.stamp_synthetic_type!(list_proxy, real_source.full_type!, context: "synthetic AST type")
         list_proxy.storage   = real_source.storage
         fused_loop = fuse_pipeline(list_proxy, real_source, stages, nil)
 
         # Create a new SMOOTH node for the terminal call
         outer_smooth = AST::BinaryOp.new(node.token, fused_loop, :SMOOTH, terminal.dup)
-        outer_smooth.full_type = node.full_type!
+        AST.stamp_synthetic_type!(outer_smooth, node.full_type!, context: "synthetic AST type")
         outer_smooth.storage   = node.storage
 
         return rewrite_pipeline(outer_smooth)
@@ -213,7 +213,7 @@ class PipelineRewriter
     if rhs.is_a?(AST::FuncCall) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
-        lhs_node.full_type = Type.new(source.full_type!).payload_type
+        AST.stamp_synthetic_type!(lhs_node, T.must(Type.new(source.full_type!).payload_type), context: "synthetic AST type")
       end
 
       rhs.args.unshift(lhs_node)
@@ -223,11 +223,11 @@ class PipelineRewriter
     if rhs.is_a?(AST::Identifier) && !result_is_error
       lhs_node = needs_try ? AST::UnaryOp.new(rhs.token, :TRY, source.dup) : source.dup
       if needs_try
-        lhs_node.full_type = Type.new(source.full_type!).payload_type
+        AST.stamp_synthetic_type!(lhs_node, T.must(Type.new(source.full_type!).payload_type), context: "synthetic AST type")
       end
 
       call = AST::FuncCall.new(rhs.token, rhs.name, [lhs_node])
-      call.full_type = node.full_type!
+      AST.stamp_synthetic_type!(call, node.full_type!, context: "synthetic AST type")
       call.storage   = node.storage
       config = IntrinsicRegistry.sig(STD_LIB, T.unsafe(rhs).name)
       if config
@@ -240,7 +240,7 @@ class PipelineRewriter
     # CASE 4: x |> RECOVER(default) -> x OR default
     if rhs.is_a?(AST::RecoverOp)
       op = AST::BinaryOp.new(rhs.token, source.dup, :OR_RESCUE, rhs.default_expr.dup)
-      op.full_type = node.full_type!
+      AST.stamp_synthetic_type!(op, node.full_type!, context: "synthetic AST type")
       op.storage   = node.storage
       return op
     end
@@ -326,7 +326,7 @@ class PipelineRewriter
     else
       src_t.element_type
     end
-    current_it.full_type = elem_t if elem_t
+    AST.stamp_synthetic_type!(current_it, elem_t, context: "synthetic AST type") if elem_t
 
     stage_inits = []
     res_type = smooth_node.full_type!
@@ -338,16 +338,16 @@ class PipelineRewriter
     # 3. Create ForEach loop
     is_each = terminal.is_a?(AST::EachOp)
     foreach = AST::ForEach.new(token, it_var, source.dup, loop_body, nil, is_each)
-    foreach.full_type = Type.new(:Void)
+    AST.stamp_synthetic_type!(foreach, Type.new(:Void), context: "synthetic AST type")
     foreach.instance_variable_set(:@var_used, true)
     body << foreach
 
     # 4. Post-loop guards
     if terminal.is_a?(AST::MinOp) || terminal.is_a?(AST::MaxOp)
       found_ident = AST::Identifier.new(token, "#{res_var}_found")
-      found_ident.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(found_ident, Type.new(:Bool), context: "synthetic AST type")
       guard = AST::Assert.new(token, found_ident, "MIN/MAX applied to empty list")
-      guard.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(guard, Type.new(:Void), context: "synthetic AST type")
       body << guard
     end
 
@@ -357,7 +357,7 @@ class PipelineRewriter
       # Return the ForEach directly (or wrap in a sequence if there are init nodes).
       return foreach if body.length == 1
       wrapper = AST::BlockExpr.new(token, body, nil)
-      wrapper.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(wrapper, Type.new(:Void), context: "synthetic AST type")
       return wrapper
     end
 
@@ -366,9 +366,9 @@ class PipelineRewriter
     if terminal.is_a?(AST::AverageOp)
       avg_var = "#{res_var}_avg"
       zero = AST::Literal.new(token, :NUMBER, 0.0)
-      zero.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(zero, Type.new(:Float64), context: "synthetic AST type")
       avg_decl = AST::VarDecl.new(token, avg_var, nil, zero.dup, true)
-      avg_decl.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(avg_decl, Type.new(:Float64), context: "synthetic AST type")
       avg_decl.storage   = :stack
       avg_decl.slot_size = 1
       avg_decl.instance_variable_set(:@var_used, true)
@@ -377,26 +377,26 @@ class PipelineRewriter
 
       sum_id = AST::Identifier.new(token, "#{res_var}_sum")
       cnt_id = AST::Identifier.new(token, "#{res_var}_cnt")
-      sum_id.full_type = Type.new(:Float64)
-      cnt_id.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(sum_id, Type.new(:Float64), context: "synthetic AST type")
+      AST.stamp_synthetic_type!(cnt_id, Type.new(:Float64), context: "synthetic AST type")
       cond = AST::BinaryOp.new(token, cnt_id.dup, :GT, zero.dup)
-      cond.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(cond, Type.new(:Bool), context: "synthetic AST type")
       div = AST::BinaryOp.new(token, sum_id, :DIV, cnt_id)
-      div.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(div, Type.new(:Float64), context: "synthetic AST type")
       avg_assign = AST::Assignment.new(token, avg_var, div)
-      avg_assign.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(avg_assign, Type.new(:Float64), context: "synthetic AST type")
       guard = AST::IfStatement.new(token, cond, [avg_assign], [])
-      guard.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(guard, Type.new(:Void), context: "synthetic AST type")
       body << guard
 
       result = AST::Identifier.new(token, avg_var)
-      result.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(result, Type.new(:Float64), context: "synthetic AST type")
     else
       result = build_final_result(terminal, res_var, token, smooth_node)
     end
 
     block = AST::BlockExpr.new(token, body, result)
-    block.full_type = smooth_node.full_type!
+    AST.stamp_synthetic_type!(block, smooth_node.full_type!, context: "synthetic AST type")
     block.storage   = smooth_node.storage
     block
   end
@@ -407,9 +407,9 @@ class PipelineRewriter
     when AST::SumOp, AST::CountOp
       is_int = Type.new(smooth_node.full_type!).integer?
       val = AST::Literal.new(token, is_int ? :INT64 : :NUMBER, is_int ? 0 : 0.0)
-      val.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(val, smooth_node.full_type!, context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
-      decl.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = 1
       decl.instance_variable_set(:@var_used, true)
@@ -418,14 +418,14 @@ class PipelineRewriter
     when AST::AverageOp
       # Two accumulators: sum and count
       sum_decl = AST::VarDecl.new(token, "#{res_var}_sum", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
-      sum_decl.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(sum_decl, Type.new(:Float64), context: "synthetic AST type")
       sum_decl.storage   = :stack
       sum_decl.slot_size = 1
       sum_decl.instance_variable_set(:@var_used, true)
       sum_decl.var_mutated = true
 
       cnt_decl = AST::VarDecl.new(token, "#{res_var}_cnt", nil, AST::Literal.new(token, :NUMBER, 0.0), true)
-      cnt_decl.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(cnt_decl, Type.new(:Float64), context: "synthetic AST type")
       cnt_decl.storage   = :stack
       cnt_decl.slot_size = 1
       cnt_decl.instance_variable_set(:@var_used, true)
@@ -435,9 +435,9 @@ class PipelineRewriter
     when AST::AnyOp, AST::AllOp
       init_val = terminal.is_a?(AST::AllOp)
       val = AST::Literal.new(token, :BOOLEAN, init_val)
-      val.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(val, Type.new(:Bool), context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
-      decl.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(decl, Type.new(:Bool), context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = 1
       decl.instance_variable_set(:@var_used, true)
@@ -445,7 +445,7 @@ class PipelineRewriter
       [decl]
     when AST::ReduceOp
       decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
-      decl.full_type = terminal.full_type!
+      AST.stamp_synthetic_type!(decl, terminal.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
@@ -453,9 +453,9 @@ class PipelineRewriter
       [decl]
     when AST::FindOp
       val = AST::Literal.new(token, :NIL, nil)
-      val.full_type = Type.new(:NIL)
+      AST.stamp_synthetic_type!(val, Type.new(:NIL), context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
-      decl.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = :stack
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
@@ -464,18 +464,18 @@ class PipelineRewriter
     when AST::MinOp, AST::MaxOp
       # Found-flag pattern: first element always sets result, subsequent compare
       zero = AST::Literal.new(token, :NUMBER, 0.0)
-      zero.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(zero, Type.new(:Float64), context: "synthetic AST type")
       val_decl = AST::VarDecl.new(token, res_var, nil, zero, true)
-      val_decl.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(val_decl, Type.new(:Float64), context: "synthetic AST type")
       val_decl.storage   = :stack
       val_decl.slot_size = 1
       val_decl.instance_variable_set(:@var_used, true)
       val_decl.var_mutated = true
 
       found_init = AST::Literal.new(token, :BOOLEAN, false)
-      found_init.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(found_init, Type.new(:Bool), context: "synthetic AST type")
       found_decl = AST::VarDecl.new(token, "#{res_var}_found", nil, found_init, true)
-      found_decl.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(found_decl, Type.new(:Bool), context: "synthetic AST type")
       found_decl.storage   = :stack
       found_decl.slot_size = 1
       found_decl.instance_variable_set(:@var_used, true)
@@ -485,9 +485,9 @@ class PipelineRewriter
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp,
          AST::UnnestOp, AST::DistinctOp
       lit = AST::ListLit.new(token, [], :stack)
-      lit.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(lit, smooth_node.full_type!, context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, lit, true)
-      decl.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
       decl.storage   = smooth_node.storage
       decl.slot_size = Type.new(decl.full_type!).slot_size(schema_lookup)
       decl.instance_variable_set(:@var_used, true)
@@ -511,7 +511,7 @@ class PipelineRewriter
       pred = replace_placeholder(stage.expression, current_val)
       then_branch = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::SelectOp
       expr = replace_placeholder(stage.expression, current_val)
@@ -519,12 +519,12 @@ class PipelineRewriter
       # position. Zig forbids StructType{...}.field in arithmetic/boolean contexts.
       sel_var = next_var("__sel")
       sel_decl = AST::VarDecl.new(stage.token, sel_var, nil, expr, false)
-      sel_decl.full_type = stage.expression.full_type!
+      AST.stamp_synthetic_type!(sel_decl, stage.expression.full_type!, context: "synthetic AST type")
       sel_decl.storage   = :stack
       sel_decl.slot_size = 0
       sel_decl.instance_variable_set(:@var_used, true)
       sel_ident = AST::Identifier.new(stage.token, sel_var)
-      sel_ident.full_type = stage.expression.full_type!
+      AST.stamp_synthetic_type!(sel_ident, stage.expression.full_type!, context: "synthetic AST type")
       rest = build_recursive_body(T.must(remaining), terminal, sel_ident, res_var, token, stage_inits, res_type)
       [sel_decl] + rest
     when AST::TapOp
@@ -534,14 +534,14 @@ class PipelineRewriter
       pred = replace_placeholder(stage.expression, current_val)
       then_branch = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [AST::BreakNode.new(stage.token)])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::SkipOp
       cnt_var = next_var("__skip_cnt")
       zero = AST::Literal.new(token, :INT64, 0)
-      zero.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(zero, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl = AST::VarDecl.new(token, cnt_var, nil, zero, true)
-      cnt_decl.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(cnt_decl, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl.storage = :stack
       cnt_decl.slot_size = 1
       cnt_decl.instance_variable_set(:@var_used, true)
@@ -549,26 +549,26 @@ class PipelineRewriter
       stage_inits << cnt_decl
 
       cnt_ident = AST::Identifier.new(token, cnt_var)
-      cnt_ident.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Int64), context: "synthetic AST type")
       one = AST::Literal.new(token, :INT64, 1)
-      one.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(one, Type.new(:Int64), context: "synthetic AST type")
       increment = AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident.dup, :ADD, one))
-      increment.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(increment, Type.new(:Void), context: "synthetic AST type")
 
       skip_n = stage.count.dup
       cond = AST::BinaryOp.new(token, cnt_ident.dup, :LTE, skip_n)
-      cond.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(cond, Type.new(:Bool), context: "synthetic AST type")
       skip_if = AST::IfStatement.new(token, cond, [AST::ContinueNode.new(token)], [])
-      skip_if.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(skip_if, Type.new(:Void), context: "synthetic AST type")
 
       rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       [increment, skip_if] + rest
     when AST::LimitOp
       cnt_var = next_var("__lim_cnt")
       zero = AST::Literal.new(token, :INT64, 0)
-      zero.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(zero, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl = AST::VarDecl.new(token, cnt_var, nil, zero, true)
-      cnt_decl.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(cnt_decl, Type.new(:Int64), context: "synthetic AST type")
       cnt_decl.storage = :stack
       cnt_decl.slot_size = 1
       cnt_decl.instance_variable_set(:@var_used, true)
@@ -576,17 +576,17 @@ class PipelineRewriter
       stage_inits << cnt_decl
 
       cnt_ident = AST::Identifier.new(token, cnt_var)
-      cnt_ident.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Int64), context: "synthetic AST type")
       one = AST::Literal.new(token, :INT64, 1)
-      one.full_type = Type.new(:Int64)
+      AST.stamp_synthetic_type!(one, Type.new(:Int64), context: "synthetic AST type")
       increment = AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident.dup, :ADD, one))
-      increment.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(increment, Type.new(:Void), context: "synthetic AST type")
 
       limit_n = stage.count.dup
       cond = AST::BinaryOp.new(token, cnt_ident.dup, :GT, limit_n)
-      cond.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(cond, Type.new(:Bool), context: "synthetic AST type")
       limit_if = AST::IfStatement.new(token, cond, [AST::BreakNode.new(token)], [])
-      limit_if.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(limit_if, Type.new(:Void), context: "synthetic AST type")
 
       rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       [increment, limit_if] + rest
@@ -598,20 +598,20 @@ class PipelineRewriter
   sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(T::Array[T.untyped]) }
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
-    res_ident.full_type = res_type if res_type
+    AST.stamp_synthetic_type!(res_ident, res_type, context: "synthetic AST type") if res_type
     actions = case terminal
     when AST::SumOp
       expr = replace_placeholder(terminal.expression, current_val)
       assign = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, expr))
-      assign.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(assign, Type.new(:Void), context: "synthetic AST type")
       [assign]
     when AST::CountOp
       expr = replace_placeholder(terminal.expression, current_val)
       one = AST::Literal.new(token, :INT64, 1)
       increment = AST::Assignment.new(token, res_ident, AST::BinaryOp.new(token, res_ident, :ADD, one))
-      increment.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(increment, Type.new(:Void), context: "synthetic AST type")
       if_stmt = AST::IfStatement.new(token, expr, [increment], [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::AverageOp
       expr = replace_placeholder(terminal.expression, current_val)
@@ -619,58 +619,58 @@ class PipelineRewriter
       cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
       # AVERAGE's sum/cnt accumulators are Float64 by the desugar's own
       # definition (same as build_init / build_final_result type them).
-      sum_ident.full_type = Type.new(:Float64)
-      cnt_ident.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(sum_ident, Type.new(:Float64), context: "synthetic AST type")
+      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Float64), context: "synthetic AST type")
       [AST::Assignment.new(token, sum_ident, AST::BinaryOp.new(token, sum_ident, :ADD, expr)),
        AST::Assignment.new(token, cnt_ident, AST::BinaryOp.new(token, cnt_ident, :ADD, AST::Literal.new(token, :NUMBER, 1.0)))]
     when AST::AnyOp
       expr = replace_placeholder(terminal.expression, current_val)
       set_true = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, true))
-      set_true.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(set_true, Type.new(:Void), context: "synthetic AST type")
       if_stmt = AST::IfStatement.new(token, expr, [set_true, AST::BreakNode.new(token)], [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::AllOp
       expr = replace_placeholder(terminal.expression, current_val)
       set_false = AST::Assignment.new(token, res_ident, AST::Literal.new(token, :BOOLEAN, false))
-      set_false.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(set_false, Type.new(:Void), context: "synthetic AST type")
       if_stmt = AST::IfStatement.new(token, AST::UnaryOp.new(token, :NOT, expr), [set_false, AST::BreakNode.new(token)], [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::ReduceOp
       expr = replace_placeholder(terminal.expression, current_val)
       expr = replace_named_placeholder(expr, "acc", res_ident)
       assign = AST::Assignment.new(token, res_ident, expr)
-      assign.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(assign, Type.new(:Void), context: "synthetic AST type")
       [assign]
     when AST::FindOp
       expr = replace_placeholder(terminal.expression, current_val)
       assign = AST::Assignment.new(token, res_ident, current_val.dup)
-      assign.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(assign, Type.new(:Void), context: "synthetic AST type")
       if_stmt = AST::IfStatement.new(token, expr, [assign, AST::BreakNode.new(token)], [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::MinOp, AST::MaxOp
       expr = replace_placeholder(terminal.expression, current_val)
       op = terminal.is_a?(AST::MinOp) ? :LT : :GT
       found_ident = AST::Identifier.new(token, "#{res_var}_found")
-      found_ident.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(found_ident, Type.new(:Bool), context: "synthetic AST type")
 
       # if !found || expr < res { res = expr; found = true }
       not_found = AST::UnaryOp.new(token, :NOT, found_ident.dup)
-      not_found.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(not_found, Type.new(:Bool), context: "synthetic AST type")
       cmp = AST::BinaryOp.new(token, expr, op, res_ident.dup)
-      cmp.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(cmp, Type.new(:Bool), context: "synthetic AST type")
       cond = AST::BinaryOp.new(token, not_found, :OR, cmp)
-      cond.full_type = Type.new(:Bool)
+      AST.stamp_synthetic_type!(cond, Type.new(:Bool), context: "synthetic AST type")
 
       assign_val = AST::Assignment.new(token, res_ident, expr.dup)
-      assign_val.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(assign_val, Type.new(:Void), context: "synthetic AST type")
       set_found = AST::Assignment.new(token, found_ident, AST::Literal.new(token, :BOOLEAN, true))
-      set_found.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(set_found, Type.new(:Void), context: "synthetic AST type")
 
       if_stmt = AST::IfStatement.new(token, cond, [assign_val, set_found], [])
-      if_stmt.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]
     when AST::EachOp
       terminal.body.map { |s| replace_placeholder(s, current_val) }
@@ -683,17 +683,17 @@ class PipelineRewriter
       # inner_it iterates inner_expr's elements — its type IS that
       # element type (not a guess; derived from the flattened array).
       et = Type.new(inner_expr.full_type!(context: "pipeline unnest inner expression")).element_type
-      inner_it.full_type = et if et
+      AST.stamp_synthetic_type!(inner_it, et, context: "synthetic AST type") if et
 
       append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
-      append.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(append, Type.new(:Void), context: "synthetic AST type")
       append.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       append.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
 
       # Iterate directly over the expression (avoids ArrayList/slice confusion).
       # Mark collection as a slice so the transpiler uses &expr, not .items.
       inner_foreach = AST::ForEach.new(token, inner_it_var, inner_expr, [append], nil, false)
-      inner_foreach.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(inner_foreach, Type.new(:Void), context: "synthetic AST type")
       inner_foreach.instance_variable_set(:@var_used, true)
 
       [inner_foreach]
@@ -701,22 +701,22 @@ class PipelineRewriter
       # Set insert: result is a T[]@set; insert deduplicates in O(1).
       key_expr = replace_placeholder(terminal.expression, current_val)
       insert_call = AST::MethodCall.new(token, res_ident.dup, "insert", [key_expr])
-      insert_call.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(insert_call, Type.new(:Void), context: "synthetic AST type")
       insert_call.zig_pattern = "try {0}.insert({alloc}, {1})"
       insert_call.matched_stdlib_def = IntrinsicRegistry.sig(STD_LIB, "insert") if STD_LIB.key?("insert")
       [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       value = AST::CopyNode.new(token, current_val.dup)
-      value.full_type = current_val.full_type!
+      AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
       call = AST::MethodCall.new(token, res_ident, "append", [value])
-      call.full_type = Type.new(:Void)
+      AST.stamp_synthetic_type!(call, Type.new(:Void), context: "synthetic AST type")
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
       [call]
     else
       value = AST::CopyNode.new(token, current_val.dup)
-      value.full_type = current_val.full_type!
+      AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
       call = AST::MethodCall.new(token, res_ident, "append", [value])
       call.zig_pattern = T.must(IntrinsicRegistry.sig(STD_LIB, "append")).emit&.zig
       call.matched_stdlib_def = T.must(IntrinsicRegistry.sig(STD_LIB, "append"))
@@ -730,14 +730,14 @@ class PipelineRewriter
     if terminal.is_a?(AST::AverageOp)
       sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
       cnt_ident = AST::Identifier.new(token, "#{res_var}_cnt")
-      sum_ident.full_type = Type.new(:Float64)
-      cnt_ident.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(sum_ident, Type.new(:Float64), context: "synthetic AST type")
+      AST.stamp_synthetic_type!(cnt_ident, Type.new(:Float64), context: "synthetic AST type")
       div = AST::BinaryOp.new(token, sum_ident, :DIV, cnt_ident)
-      div.full_type = Type.new(:Float64)
+      AST.stamp_synthetic_type!(div, Type.new(:Float64), context: "synthetic AST type")
       div
     else
       res = AST::Identifier.new(token, res_var)
-      res.full_type = smooth_node.full_type!
+      AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
       res.storage   = smooth_node.storage
       res
     end

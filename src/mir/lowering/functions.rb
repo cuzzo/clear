@@ -1320,7 +1320,7 @@ module MIRLoweringFunctions
     inner_mir = lower(node.object.target)
 
     snav_ident = AST::Identifier.new(node.object.token, snav_var)
-    snav_ident.full_type = node.object.full_type!(context: "safe-nav receiver")  # T (unwrapped)
+    AST.stamp_synthetic_type!(snav_ident, node.object.full_type!(context: "safe-nav receiver"), context: "synthetic AST type")  # T (unwrapped)
 
     synthetic = node.dup
     synthetic.object = snav_ident

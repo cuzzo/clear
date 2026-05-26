@@ -59,10 +59,10 @@ class MIRPass
     entry&.needs_cleanup? ? entry : nil
   end
 
-  sig { params(token: T.untyped, name: String, alloc: Symbol, type_info: Type).returns(MIR::Alloc) }
-  def alloc_marker(token, name, alloc, type_info)
-    marker = MIR::Alloc.new(token, name, alloc)
-    marker.full_type = type_info
+  sig { params(name: String, alloc: Symbol, type_info: Type).returns(MIR::AllocMark) }
+  def alloc_marker(name, alloc, type_info)
+    marker = MIR::AllocMark.new(name, alloc, type_info)
+    marker.scope = alloc == :heap ? :heap : :iteration
     marker
   end
 
@@ -374,7 +374,7 @@ class MIRPass
     mark_returned_cleanup_bindings!(fn, bindings)
 
     # Stamp cleanup_bindings on the FunctionDef so MIRLowering can read
-    # allocator + cleanup info without relying on OLD MIR::Alloc/Drop siblings.
+    # allocator + cleanup info without relying on old Drop siblings.
     fn.cleanup_bindings = bindings
 
     # Stamp field pre-cleanup info directly on Assignment nodes.
@@ -716,7 +716,7 @@ class MIRPass
   end
 
   # Insert MIR nodes for MATCH-AS cleanup into case bodies.
-  # Previously stamp-only; now inserts MIR::Alloc + MIR::Drop + MIR::SuppressCleanup
+  # Previously stamp-only; now inserts MIR::AllocMark + MIR::Drop + MIR::SuppressCleanup
   # so the checker verifies match_as cleanup like any other binding.
   sig { params(stmt: T.untyped, bindings: T::Hash[String, CleanupEntry]).void }
   def stamp_match_as_cleanup!(stmt, bindings)
@@ -745,7 +745,7 @@ class MIRPass
       else
         Type.from_node!(stmt.expr, context: "match AS allocation marker")
       end
-      mir_prefix << alloc_marker(stmt.token, c.binding.to_s, as_entry.alloc, alloc_type)
+      mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
       drop = MIR::Drop.new(stmt.token, c.binding.to_s)
       drop.cleanup_entry = as_entry
       mir_prefix << drop
@@ -763,7 +763,6 @@ class MIRPass
     entry = live_cleanup_entry(bindings, stmt.binding_name)
     return unless entry
     alloc_node = alloc_marker(
-      stmt.token,
       stmt.binding_name.to_s,
       entry.alloc,
       T.must(Type.from_node!(stmt.condition, context: "while-bind allocation marker").wrapped_type),
@@ -780,7 +779,7 @@ class MIRPass
     stmt.bindings.each do |b|
       entry = live_cleanup_entry(bindings, b.name)
       next unless entry
-      mir_prefix << alloc_marker(stmt.token, b.name.to_s, entry.alloc, b.unwrapped_type)
+      mir_prefix << alloc_marker(b.name.to_s, entry.alloc, b.unwrapped_type)
       drop = MIR::Drop.new(stmt.token, b.name.to_s)
       drop.cleanup_entry = entry
       mir_prefix << drop

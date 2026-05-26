@@ -414,7 +414,7 @@ module MIRLoweringCapabilities
           MIR::CallableContract.no_ownership(1)
         )
         if is_collection
-          mark = MIR::AllocMark.new(safe_alias, :heap, rt.tense_type)
+          mark = MIR::AllocMark.new(T.must(safe_alias), :heap, rt.tense_type)
           mark.scope = :heap
           entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
           bindings << mark

@@ -394,6 +394,31 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(annotator).to include('raise "annotation stamp produced :Untyped')
   end
 
+  it "keeps MIR/backend synthetic AST type writes behind one fail-closed helper" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Synthetic AST nodes in MIR/backend code must use AST.stamp_synthetic_type!, not raw full_type=:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps the synthetic AST type stamp boundary typed and fail-closed" do
+    ast = source("src/ast/ast.rb")
+    expect(ast).to include("SyntheticTypeInput =")
+    expect(ast).to include("def self.stamp_synthetic_type!(node, value, context:)")
+    expect(ast).to include("node.full_type = value")
+    expect(ast).to include("node.full_type!(context: context)")
+    expect(ast).to include("stamped.untyped?")
+  end
+
   it "uses hard AST type reads in annotator consumers" do
     offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].sort.flat_map do |path|
       rel = path.sub(ARCH_ROOT + "/", "")
@@ -536,6 +561,29 @@ RSpec.describe "architecture invariants: post-annotation type access" do
     expect(offenders).to be_empty,
       "MIR::AllocMark must carry concrete Type info; nil makes ownership verification coincidental:\n" \
       "#{offenders.join("\n")}"
+  end
+
+  it "does not keep the old MIR::Alloc allocation marker path" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/**/*.rb")] -
+                 [File.join(ARCH_ROOT, "src/mir/mir_emitter.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\bMIR::Alloc\b/) || line.match?(/\bAlloc\s*=\s*Struct\.new\(:token,\s*:name,\s*:alloc\)/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIRPass must emit final MIR::AllocMark facts directly; old MIR::Alloc is a dual allocation path:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps AllocMark construction fail-closed on concrete Type" do
+    mir = source("src/mir/mir.rb")
+    expect(mir).to include("def initialize(name, alloc, type_info, scope = nil)")
+    expect(mir).to include("type_info: Type")
+    expect(mir).to include("raise \"MIR::AllocMark requires concrete Type info\" if type_info.untyped?")
   end
 
   it "keeps MIRChecker fail-closed on missing AllocMark type facts" do
