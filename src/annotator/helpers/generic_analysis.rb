@@ -1,6 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
-require_relative "../ast/ast"
+require_relative "../../ast/ast"
 
 # ==========================================
 # GENERIC ANALYSIS
@@ -18,6 +18,8 @@ module GenericAnalysis
     extend T::Sig
 
   BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
+  DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
+  TypeShape = T.type_alias { T.any(Type, Symbol, String) }
 
   # ----------------------------------------
   # Type param list validation
@@ -269,11 +271,7 @@ module GenericAnalysis
       arg = actual_args[i]
       next unless arg
       param_type = param.type || Type.new(:Any)
-      actual_type = if arg.respond_to?(:full_type) && arg.full_type
-        arg.full_type
-      else
-        Type.new(arg.resolved_type || :Any)
-      end
+      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "generic call argument")
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
     enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
@@ -294,11 +292,7 @@ module GenericAnalysis
       next unless arg
       param_type = param.type || Type.new(:Any)
       next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
-      actual_type = if arg.respond_to?(:full_type) && arg.full_type
-        arg.full_type
-      else
-        Type.new(arg.resolved_type || :Any)
-      end
+      actual_type = T.cast(arg, AST::Locatable).full_type!(context: "shared generic call argument")
       next unless actual_type.shared?
       shared_args << {
         name: param.name,
@@ -462,23 +456,9 @@ module GenericAnalysis
     t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
-    ownership = case t.ownership
-    when :shared then "@shared"
-    when :multiowned then "@multiowned"
-    when :link then "@link"
-    when :split then "@split"
-    when :frozen then "@frozen"
-    end
+    ownership = t.ownership_surface_name
+    sync = t.sync_surface_name
     parts << ownership if ownership
-
-    sync = case t.sync
-    when :locked then "@locked"
-    when :write_locked then "@writeLocked"
-    when :versioned then "@versioned"
-    when :atomic then "@atomic"
-    when :local then "@local"
-    when :always_mutable then "@alwaysMutable"
-    end
     parts << sync if sync
 
     parts.join("")
@@ -490,14 +470,7 @@ module GenericAnalysis
     t = type.is_a?(Type) ? type : Type.new(type)
     caps = ["@shared"]
     caps << "indirect" if t.indirect?
-    caps << T.must(case t.sync
-            when :locked then "locked"
-            when :write_locked then "writeLocked"
-            when :versioned then "versioned"
-            when :atomic then "atomic"
-            when :local then "local"
-            when :always_mutable then "alwaysMutable"
-            end)
+    caps << T.must(t.sync_family_name)
     caps.compact.join(":")
   end
 
@@ -534,75 +507,72 @@ module GenericAnalysis
   # After coerce! validates type compatibility, propagate declared-type metadata
   # into the value node so the transpiler sees the correct runtime type.
   # Handles: BgStreamBlock ~T[INF] retyping, shard_count, @shared promise ownership.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Type)) }
+  sig { params(node: DeclarationNode, final_type: TypeShape).void }
   def propagate_declared_type_to_value!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless node.type
+    final_type_info = final_type.is_a?(Type) ? final_type : Type.new(final_type)
 
     # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
     if node.value.is_a?(AST::BgStreamBlock) && node.type.inf_stream?
-      node.value.full_type = final_type
+      stamp_type!(node.value, final_type_info)
     end
 
     if node.value.is_a?(AST::BgStreamBlock) && node.type.split_open_stream?
-      node.value.full_type = Type.new(node.value.full_type, ownership: :split)
+      value_type = node.value.full_type!(context: "BgStreamBlock split_open_stream value")
+      stamp_type!(node.value, Type.new(value_type, ownership: :split))
     end
 
     # Propagate shard_count from declared type into final_type (lost during coerce!).
     if node.type.shard_count
-      if final_type.is_a?(Type)
-        final_type.shard_count = node.type.shard_count
-      end
+      final_type_info.shard_count = node.type.shard_count
     end
 
     # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
     if node.value.is_a?(AST::BgBlock) && node.type.shared_promise?
-      node.value.full_type = Type.new(node.value.full_type, ownership: :shared)
+      value_type = node.value.full_type!(context: "BgBlock shared_promise value")
+      stamp_type!(node.value, Type.new(value_type, ownership: :shared))
     end
   end
 
   # Propagate collection, shard_count, soa, and sync metadata from the declared
   # type annotation (or inferred value type) into node.full_type and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
-  sig { params(node: T.untyped, final_type: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(node: DeclarationNode, final_type: TypeShape).void }
   def propagate_collection_metadata!(node, final_type)
     T.bind(self, SemanticAnnotator) rescue nil
-    coll_src = if (decl_t = node.type) && decl_t.collection
-      decl_t
-    elsif node.value.full_type.collection
-      node.value.full_type
+    _ = final_type
+    decl_type = node.type
+    node_type = node.full_type!(context: "declaration metadata target")
+    value_type = node.value.full_type!(context: "declaration metadata value")
+
+    coll_src = if decl_type&.collection
+      decl_type
+    elsif value_type.collection
+      value_type
     end
     if coll_src
-      node.full_type.collection  = coll_src.collection
-      node.full_type.provenance  = :heap if coll_src.pool? || coll_src.set_collection?
-      node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count
-      node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-      if node.full_type
-        node.full_type.collection  = coll_src.collection unless node.full_type.collection
-        node.full_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
-        node.full_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node.full_type.shard_count
-      end
+      node_type.collection  = coll_src.collection unless node_type.collection
+      node_type.provenance  = :heap if coll_src.pool? || coll_src.set_collection?
+      node_type.shard_count = coll_src.shard_count if coll_src.shard_count && !node_type.shard_count
+      node_type.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
     end
 
     # Standalone @soa on fixed arrays (no collection): propagate soa flag directly.
-    if !coll_src && (decl_t = node.type) && decl_t.soa
-      node.full_type.soa = true if node.full_type
-      node.full_type.soa = true
+    if !coll_src && decl_type&.soa
+      node_type.soa = true
     end
 
     # Map-specific propagation: maps don't use :collection, so the above doesn't cover them.
-    if (decl_t = node.type)
-      if decl_t.shard_count && !node.full_type.shard_count
-        node.full_type.shard_count = decl_t.shard_count if node.full_type
-        node.full_type.instance_variable_set(:@shard_count, decl_t.shard_count)
+    if decl_type
+      if decl_type.shard_count && !node_type.shard_count
+        node_type.shard_count = decl_type.shard_count
       end
-      if decl_t.sync && node.full_type && !node.full_type.sync
-        node.full_type.sync = decl_t.sync
-        node.full_type.sync = decl_t.sync
+      if decl_type.sync && !node_type.sync
+        node_type.sync = decl_type.sync
       end
-      if decl_t.ownership != :affine && node.full_type
-        node.full_type.instance_variable_set(:@ownership, decl_t.ownership)
-        node.full_type.instance_variable_set(:@ownership, decl_t.ownership)
+      if decl_type.ownership != :affine
+        node_type.instance_variable_set(:@ownership, decl_type.ownership)
       end
     end
   end
@@ -636,8 +606,8 @@ module GenericAnalysis
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
-    if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:full_type)
-      ti = Type.from_node!(expr.target, context: "container source")
+    if expr.is_a?(AST::GetIndex)
+      ti = expr.target.full_type!(context: "container source")
       if ti.collection_value?
         return root_variable_name(expr.target)
       end
@@ -647,12 +617,12 @@ module GenericAnalysis
     # the parent's cleanup also frees the field -- double-free.
     # Skip enum/union variant constructors (e.g. Value.Nil) - these create new
     # values, not borrows from an existing variable.
-    if expr.is_a?(AST::GetField) && expr.respond_to?(:full_type)
+    if expr.is_a?(AST::GetField)
       if expr.target.is_a?(AST::Identifier)
         target_schema = (lookup_type_schema(expr.target.name.to_sym) rescue nil)
         return nil if (Schemas.union?(target_schema) || Schemas.enum?(target_schema))
       end
-      field_ti = expr.full_type
+      field_ti = expr.full_type!(context: "field container source")
       if !field_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         return root_variable_name(expr.target)
       end

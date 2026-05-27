@@ -12,9 +12,12 @@
 
 require "sorbet-runtime"
 require "stringio"
+require_relative "../ast/ast"
 
 class StackVerifier
     extend T::Sig
+
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   # Fiber stack tier budgets (total allocation minus 4 KB frame arena).
   TIER_BUDGET = {
@@ -22,6 +25,7 @@ class StackVerifier
     standard: 16384 - 4096,  # 12 KB usable
     large:    65536 - 4096,  # 60 KB usable
     xl:       262144 - 4096, # 252 KB usable
+    service:  4 * 1024 * 1024,
   }.freeze
 
   attr_reader :binary_path, :module_prefix
@@ -330,7 +334,7 @@ class StackVerifier
   #                                  :reentrant, so this path only
   #                                  matters as a sanity check)
   # Functions that trampoline off the fiber stack are treated as leaf nodes.
-  sig { params(entry_addr: String, graph_data: Hash, fn_nodes: T.untyped).returns(Integer) }
+  sig { params(entry_addr: String, graph_data: Hash, fn_nodes: T.nilable(FnNodes)).returns(Integer) }
   def deepest_path_cost(entry_addr, graph_data, fn_nodes: nil)
     frame_sizes = graph_data[:frame_sizes]
     call_graph  = graph_data[:call_graph]
@@ -380,7 +384,7 @@ class StackVerifier
 
   # Compute optimal tier for the main fiber (clearMain entry point).
   # Returns { entry_name:, path_cost:, optimal_tier: } or nil if clearMain not found.
-  sig { params(fn_nodes: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(fn_nodes: T.nilable(FnNodes)).returns(T.nilable(Hash)) }
   def compute_main_optimal_tier(fn_nodes: nil)
     graph_data = extract_full_call_graph
     return nil unless graph_data
@@ -394,7 +398,7 @@ class StackVerifier
 
   # Compute optimal tiers for all BG entry functions in the binary.
   # Returns array of { bg_index:, entry_name:, path_cost:, optimal_tier:, current_tier: }
-  sig { params(fn_nodes: T.untyped).returns(Array) }
+  sig { params(fn_nodes: T.nilable(FnNodes)).returns(Array) }
   def compute_optimal_tiers(fn_nodes: nil)
     graph_data = extract_full_call_graph
     return [] unless graph_data
@@ -429,8 +433,10 @@ class StackVerifier
       :standard
     elsif bytes <= TIER_BUDGET[:large]
       :large
-    else
+    elsif bytes <= TIER_BUDGET[:xl]
       :xl
+    else
+      :service
     end
   end
 

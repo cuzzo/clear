@@ -351,6 +351,6 @@ RSpec.describe "SHARE keyword" do
           RETURN b;
         END
       CLEAR
-    }.to raise_error(CompilerError, /expected to return 'Box'.*returned 'Box @multiOwned'/m)
+      }.to raise_error(CompilerError, /expected to return 'Box'.*returned 'Box @multiowned'/m)
   end
 end

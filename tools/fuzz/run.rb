@@ -15,6 +15,7 @@ require 'fileutils'
 require 'digest'
 require 'etc'
 require 'open3'
+require 'rbconfig'
 require_relative 'generator'
 # Route SimpleCov to a 'fuzz' resultset key (gen.rb defaults to
 # 'transpile-tests') so fuzz cell hits stay attributable.
@@ -62,6 +63,7 @@ opts[:seed] ||= Random.new_seed
 
 if opts[:clean] && Dir.exist?(opts[:out])
   Dir.glob(File.join(opts[:out], 'fuzz_*.cht')).each { |f| File.delete(f) }
+  Dir.glob(File.join(opts[:out], 'fuzz_*.rb')).each { |f| File.delete(f) }
 end
 
 FileUtils.mkdir_p(opts[:out])
@@ -81,19 +83,22 @@ if opts[:quarantine]
                     .reject(&:empty?)
                     .map(&:to_sym)
                     .to_set
+  before_quarantine = tuples.length
   tuples =
     if opts[:quarantine] == :skip
       tuples.reject { |t| quarantined.include?(t[:template]) }
     else
       tuples.select { |t| quarantined.include?(t[:template]) }
     end
+  skipped = before_quarantine - tuples.length
+  puts "[fuzz] quarantine filter=#{opts[:quarantine]} skipped=#{skipped} selected=#{tuples.length}"
 end
 if opts[:shard]
   idx, total = opts[:shard]
   tuples = tuples.each_with_index.select { |_tuple, i| (i % total) == idx }.map(&:first)
 end
 
-emitted = []   # array of { path:, expected: }
+emitted = []   # array of { path:, expected:, kind:, error_code: }
 in_dev_count = 0
 tuples.each do |tuple|
   result = gen.emit(tuple)
@@ -102,13 +107,24 @@ tuples.each do |tuple|
     next
   end
   hash = Digest::SHA1.hexdigest(result[:source])[0, 10]
-  name = "fuzz_#{tuple[:template]}_#{hash}.cht"
+  ext = result[:kind] == :mir_checker ? "rb" : "cht"
+  name = "fuzz_#{tuple[:template]}_#{hash}.#{ext}"
   path = File.join(opts[:out], name)
   File.write(path, result[:source])
-  emitted << { path: path, expected: result[:expected] }
+  emitted << {
+    path: path,
+    expected: result[:expected],
+    kind: result[:kind] || :cht,
+    error_code: result[:error_code],
+  }
 end
 
 puts "[fuzz] emitted #{emitted.size} programs to #{opts[:out]} (seed=#{opts[:seed]}, mode=#{opts[:mode]}, in_dev=#{in_dev_count})"
+puts "[fuzz] skipped in_dev=#{in_dev_count}"
+if in_dev_count.positive?
+  warn "[fuzz] ERROR: :in_dev cells are not allowed in the required fuzz matrix"
+  exit 1
+end
 
 if opts[:generate_only]
   exit 0
@@ -201,7 +217,23 @@ def run_pass_bundle(entries, out_dir)
 
   [entries.map { |e| e[:path] }, [], [], []]
 ensure
-  FileUtils.rm_rf(build_dir) if build_dir
+  FileUtils.rm_rf(build_dir) if build_dir && ENV['FUZZ_KEEP_BUNDLE'] != '1'
+end
+
+def print_failure_excerpt(out)
+  lines = out.each_line.to_a
+  failure_index = lines.index { |line| line.include?('FAIL') || line.include?('error:') }
+  excerpt =
+    if failure_index
+      first = [failure_index - 8, 0].max
+      lines[first, 40]
+    else
+      lines.first(40)
+    end
+  excerpt.each { |line| puts "      #{line}" }
+  return unless lines.size > excerpt.size
+
+  puts "      ... #{lines.size - excerpt.size} more lines omitted"
 end
 
 def run_negative_builds(entries, out_dir)
@@ -243,14 +275,103 @@ def run_negative_builds(entries, out_dir)
   [pass, unexpected_pass]
 end
 
+def run_mir_checker_negatives(entries)
+  return [[], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  pass = []
+  unexpected_pass = []
+
+  entries.each do |entry|
+    out, status = Open3.capture2e(RbConfig.ruby, entry[:path], chdir: LITEDB_ROOT)
+    if status.success?
+      pass << entry[:path]
+    else
+      unexpected_pass << [entry[:path], out]
+    end
+  end
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] MIR checker negatives: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  [pass, unexpected_pass]
+end
+
+def async_runtime_cell?(entry)
+  src = File.read(entry[:path])
+  src.include?('BG') || src.include?('DO {')
+end
+
+def run_positive_files(entries)
+  return [[], [], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  clear = File.expand_path('../../clear', __dir__)
+  pass, fails, leaks, mir_errors = [], [], [], []
+  workers = [
+    Integer(ENV.fetch('FUZZ_ISOLATED_WORKERS', '8')),
+    entries.size,
+  ].min
+  workers = 1 if workers < 1
+  queue = Queue.new
+  entries.each { |entry| queue << entry }
+  mutex = Mutex.new
+
+  threads = workers.times.map do
+    Thread.new do
+      loop do
+        entry = queue.pop(true) rescue nil
+        break unless entry
+
+        path = entry[:path]
+        out, status = Open3.capture2e(clear, 'test', path)
+        compile_error = out.include?('MIR ownership verification failed') ||
+                        out.include?('[Compiler Error]') ||
+                        out.include?('Transpilation failed') ||
+                        out =~ /\.zig:\d+:\d+: error:/
+        leak = out =~ /MEMORY LEAKS:\s*[1-9]/ ||
+               out.include?('[DebugAllocator] (err)') ||
+               out.include?('[gpa] (err)') ||
+               out =~ /\d+ tests leaked memory/
+
+        mutex.synchronize do
+          if compile_error
+            mir_errors << [path, out]
+          elsif leak
+            leaks << [path, out]
+          elsif !status.success?
+            fails << [path, out]
+          else
+            pass << path
+          end
+        end
+      end
+    end
+  end
+  threads.each(&:join)
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] isolated async positives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
+  [pass, fails, mir_errors, leaks]
+end
+
 def hybrid_run(emitted, out_dir)
-  pass_entries = emitted.select { |e| e[:expected] == :pass }
-  negative_entries = emitted.select { |e| e[:expected] == :compile_error }
+  pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
+  negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
+  mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
+  isolated_pass_entries, bundled_pass_entries = pass_entries.partition { |entry| async_runtime_cell?(entry) }
+  pass_ok, fails, mir_errors, leaks = run_pass_bundle(bundled_pass_entries, out_dir)
+  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir)
+  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
 
-  [pass_ok + negative_ok, fails, leaks, mir_errors, unexpected_pass]
+  [
+    pass_ok + iso_ok + negative_ok + mir_negative_ok,
+    fails + iso_fails,
+    leaks + iso_leaks,
+    mir_errors + iso_mir_errors,
+    unexpected_pass + mir_unexpected_pass,
+  ]
 end
 
 def per_file_run(emitted)
@@ -323,13 +444,9 @@ puts "=" * 60
   puts "#{label}:"
   list.each do |path, out|
     puts "  - #{path}"
-    out.each_line.first(10).each { |l| puts "      #{l}" }
+    print_failure_excerpt(out)
   end
 end
 
-ok = if opts[:quarantine] == :only
-       true
-     else
-       fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
-     end
+ok = fails.empty? && leaks.empty? && mir_errors.empty? && unexpected_pass.empty?
 exit ok ? 0 : 1

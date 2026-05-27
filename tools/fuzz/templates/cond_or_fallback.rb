@@ -30,24 +30,16 @@
 COND_OR_FALLBACK_CELLS = []
 [:if, :while, :return].each do |ctr|
   [:empty, :default].each do |fb|
-    # value_type is :heap_string only. The :heap_list variant
-    # (`COPY xs` of a `Int64[]@list` parameter) hits an unrelated CLEAR
-    # codegen defect ("no member named 'items' in '[]i64'") that would
-    # mask the bug-1 signal — tracked separately, not part of this
-    # template's job.
-    cell = { container: ctr, fallback: fb, value_type: :heap_string }
-    # :if cells isolate bug #1 (lower_if cond-pending leak) and pass
-    # once lower_if drains+wraps the cond's @pending_stmts. :while cells
-    # are the same bug class in a loop, but the fix is structurally
-    # different (the cond is re-evaluated per iteration, so the hoist
-    # can't sit before the loop). Keep them visible but :in_dev until
-    # the WHILE-cond lowering is restructured. See
-    # docs/agents/clear-bug123-forensic.md #1.
-    # :return cells exercise OR-fallback in RETURN position
-    # (`RETURN maybe(x) OR fallback`) -- the escape_graph
-    # return_value_is_heap? BinaryOp/OR_RESCUE arm.
-    cell[:expected] = (ctr == :while) ? :in_dev : :pass
-    COND_OR_FALLBACK_CELLS << cell
+    [:heap_string, :heap_list].each do |value_type|
+      cell = { container: ctr, fallback: fb, value_type: value_type }
+      # Every cell is active. A condition-position OR fallback must either
+      # compile correctly or expose a real regression.
+      # :return cells exercise OR-fallback in RETURN position
+      # (`RETURN maybe(x) OR fallback`) -- the escape analysis
+      # return-value heap decision for BinaryOp/OR_RESCUE.
+      cell[:expected] = :pass
+      COND_OR_FALLBACK_CELLS << cell
+    end
   end
 end
 
@@ -61,8 +53,28 @@ end
 def cof_fallback_literal(fb, t)
   return "\"\""    if fb == :empty   && t == :heap_string
   return "\"x\""   if fb == :default && t == :heap_string
-  return "[]"      if fb == :empty   && t == :heap_list
-  "[1_i64, 2_i64]" if fb == :default && t == :heap_list
+  return "cofFallbackEmpty()" if fb == :empty && t == :heap_list
+  "cofFallback()" if fb == :default && t == :heap_list
+end
+
+def cof_extra_fn(fb, t)
+  return "" unless t == :heap_list
+
+  return <<~CHT.chomp if fb == :empty
+    FN cofFallbackEmpty() RETURNS Int64[]@list ->
+        MUTABLE xs: Int64[]@list = [];
+        RETURN xs;
+    END
+  CHT
+
+  <<~CHT.chomp
+    FN cofFallback() RETURNS Int64[]@list ->
+        MUTABLE xs: Int64[]@list = [];
+        xs.append(1_i64);
+        xs.append(2_i64);
+        RETURN xs;
+    END
+  CHT
 end
 
 def cof_baseline(t)
@@ -140,24 +152,27 @@ end
 
 FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
   inner_fn = cof_inner_fn(p[:value_type])
+  extra_fn = cof_extra_fn(p[:fallback], p[:value_type])
   arg      = cof_call_arg(p[:value_type])
   fb_lit   = cof_fallback_literal(p[:fallback], p[:value_type])
 
   if p[:container] == :return
     # OR-fallback in RETURN position: a wrapper fn returns
-    # `maybe(arg) OR fallback`. Exercises return_value_is_heap?'s
-    # BinaryOp/OR_RESCUE arm in escape_graph.
+    # `maybe(arg) OR fallback`. Exercises the return-value heap decision
+    # for BinaryOp/OR_RESCUE in escape analysis.
     rt = cof_value_type(p[:value_type])
+    param_t = cof_value_type(p[:value_type])
     next <<~CHT
       #{inner_fn}
+      #{extra_fn}
 
-      FN wrap(s: String) RETURNS #{rt} ->
-          RETURN maybe(s) OR #{fb_lit};
+      FN wrap(x: #{param_t}) RETURNS #{rt} ->
+          RETURN maybe(x) OR #{fb_lit};
       END
 
       FN main() RETURNS Void ->
           ok = wrap(#{arg});
-          ASSERT ok == #{cof_call_arg(p[:value_type])}, "or-fallback in return";
+          ASSERT #{cof_compare(p[:value_type], 'ok', cof_call_arg(p[:value_type]))} == FALSE, "or-fallback in return";
           RETURN;
       END
     CHT
@@ -171,6 +186,7 @@ FuzzGenerator.register(:cond_or_fallback, cells: COND_OR_FALLBACK_CELLS) do |p|
 
   <<~CHT
     #{inner_fn}
+    #{extra_fn}
 
     FN main() RETURNS !Void ->
         #{block}

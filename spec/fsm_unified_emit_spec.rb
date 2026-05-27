@@ -60,6 +60,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
         nil,
         # result_zig_type
         nil,
+        # result_needs_cleanup
+        false,
       )
     }
 
@@ -133,6 +135,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
           ["#{sp_field}: P = undefined,"],
           nil,
           nil,
+          false,
         )
       end
     }
@@ -181,6 +184,7 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
         ["sp: P = undefined,"],
         nil,
         nil,
+        false,
       )
     }
 

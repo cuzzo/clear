@@ -24,6 +24,7 @@ require "sorbet-runtime"
 
 require_relative "mir"
 require_relative "cleanup_entry"
+require_relative "placement"
 
 class MIREmitter
     extend T::Sig
@@ -66,11 +67,13 @@ class MIREmitter
     when MIR::WhileStmt        then emit_while(node)
     when MIR::ForStmt          then emit_for(node)
     when MIR::SwitchStmt       then emit_switch(node)
+    when MIR::UnionMatchStmt   then emit_union_match(node)
     when MIR::IfChain          then emit_if_chain(node)
     when MIR::ReturnStmt       then emit_return(node)
     when MIR::BreakStmt        then emit_break(node)
     when MIR::ContinueStmt     then "continue;"
     when MIR::Panic            then "@panic(#{node.message.inspect});"
+    when MIR::AssertStmt       then emit_assert_stmt(node)
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
@@ -122,7 +125,8 @@ class MIREmitter
     when MIR::PolymorphicMutateFlow then emit_polymorphic_mutate_flow(node)
     when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
     # --- Verification-only (no codegen) ---
-    when MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark
+    when MIR::AllocMark, MIR::ReturnMark, MIR::TransferMark, MIR::ReassignMark, MIR::FieldCleanupMark,
+         MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
       nil
 
     # --- Expressions ---
@@ -130,6 +134,7 @@ class MIREmitter
     when MIR::TailCall         then emit_tail_call(node)
     when MIR::MethodCall       then emit_method_call(node)
     when MIR::FieldGet         then emit_field_get(node)
+    when MIR::UnionPayloadGet  then emit_union_payload_get(node)
     when MIR::IndexGet         then emit_index_get(node)
     when MIR::BinOp            then emit_bin_op(node)
     when MIR::UnaryOp          then emit_unary_op(node)
@@ -144,6 +149,7 @@ class MIREmitter
     when MIR::Cast             then emit_cast(node)
     when MIR::TryExpr          then "try #{emit(node.expr)}"
     when MIR::TryCatch         then emit_try_catch(node)
+    when MIR::BreakExpr        then emit_break_expr(node)
     when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
@@ -161,6 +167,7 @@ class MIREmitter
     when MIR::RangeLit         then emit_range_lit(node)
     when MIR::HasField         then emit_has_field(node)
     when MIR::ItemsAccess      then emit_items_access(node)
+    when MIR::OwnedSlice       then emit_owned_slice(node)
     when MIR::LambdaExpr       then emit_lambda(node)
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
@@ -230,7 +237,8 @@ class MIREmitter
     end
     pattern = pattern.gsub("{key_zig}", node.key_zig) if node.key_zig
     pattern = pattern.gsub("{val_zig}", node.val_zig) if node.val_zig
-    (node.resolved_allocs || {}).each do |alloc_key, sym|
+    allocs = MIR::InlineAllocMetadata.from(node.resolved_allocs)
+    allocs&.each do |alloc_key, sym|
       pattern = pattern.gsub("{#{alloc_key}}", alloc_zig(sym))
     end
     pattern
@@ -515,7 +523,7 @@ class MIREmitter
     parts.each_with_index do |part, i|
       if i == 0
         out << part
-      elsif parts[i - 1].start_with?("// CLR:")
+      elsif T.must(parts[i - 1]).start_with?("// CLR:")
         out << "\n#{part}"
       else
         out << "\n\n#{part}"
@@ -617,10 +625,36 @@ class MIREmitter
 
   sig { params(node: MIR::ReassignWithCleanup).returns(String) }
   def emit_reassign_cleanup(node)
+    if (try_expr = reassign_success_only_expr(node))
+      opt = "__new_#{node.name}_opt"
+      val = "__new_#{node.name}_val"
+      alloc = alloc_zig(node.alloc)
+      return [
+        "{",
+        "const #{opt}: ?#{node.zig_type} = (#{emit(try_expr)} catch null);",
+        "if (#{opt}) |#{val}| {",
+        "    CheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});",
+        "    #{node.name} = #{val};",
+        "}",
+        "}",
+      ].join("\n")
+    end
+
     tmp = "__new_#{node.name}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
     "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+  end
+
+  sig { params(node: MIR::ReassignWithCleanup).returns(T.untyped) }
+  def reassign_success_only_expr(node)
+    value = node.value
+    value = value.expr if value.is_a?(MIR::Cast)
+    return nil unless value.is_a?(MIR::TryCatch)
+    return nil unless value.capture.nil?
+    return nil unless value.catch_body.is_a?(MIR::Ident)
+    return nil unless value.catch_body.name.to_s == node.name.to_s
+    value.expr
   end
 
   sig { params(node: MIR::IfStmt).returns(String) }
@@ -643,7 +677,8 @@ class MIREmitter
     if node.bindings.length == 1
       b = node.bindings[0]
       expr = emit(b[:expr])
-      result = "if (#{expr}) |#{b[:capture]}| {\n#{then_body}\n}"
+      suppress = b[:capture].to_s == "_" ? "" : "_ = &#{b[:capture]};\n"
+      result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
       result += " else {\n#{else_body}\n}" if else_body
       result
     else
@@ -675,7 +710,8 @@ class MIREmitter
       ""
     end
     body = emit_body(node.body)
-    "while (#{cond})#{upd}#{cap} {\n#{body}\n}"
+    capture_suppress = node.capture && node.capture.to_s != "_" ? "_ = &#{node.capture};\n" : ""
+    "while (#{cond})#{upd}#{cap} {\n#{capture_suppress}#{body}\n}"
   end
 
   sig { params(node: MIR::ForStmt).returns(String) }
@@ -683,6 +719,11 @@ class MIREmitter
     iter = emit(node.iter)
     captures = [node.capture, node.index_capture].compact.join(", ")
     body = emit_body(node.body)
+    if node.iter.is_a?(MIR::IterRange) && node.iter.capture_type == :i64 && node.index_capture.nil? &&
+       node.capture.is_a?(String) && !node.capture.start_with?("*")
+      raw_capture = "__#{node.capture}_usize"
+      return "for (#{iter}) |#{raw_capture}| {\nconst #{node.capture}: i64 = @intCast(#{raw_capture});\n#{body}\n}"
+    end
     "for (#{iter}) |#{captures}| {\n#{body}\n}"
   end
 
@@ -693,6 +734,22 @@ class MIREmitter
       body = emit_body(arm[:body])
       "#{arm[:pattern]} => {\n#{body}\n}"
     }
+    if node.default_body
+      body = node.default_body.empty? ? "" : emit_body(node.default_body)
+      arms << "else => {\n#{body}\n}"
+    end
+    "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
+  end
+
+  sig { params(node: MIR::UnionMatchStmt).returns(String) }
+  def emit_union_match(node)
+    subject = emit(node.subject)
+    arms = node.arms.map do |arm|
+      body = emit_body(arm[:body])
+      payload = arm[:payload]
+      capture = payload ? " |#{payload}|" : ""
+      "#{arm[:pattern]} =>#{capture} {\n#{body}\n}"
+    end
     if node.default_body
       body = node.default_body.empty? ? "" : emit_body(node.default_body)
       arms << "else => {\n#{body}\n}"
@@ -726,6 +783,14 @@ class MIREmitter
     parts << ":#{node.label}" if node.label
     parts << T.must(emit(node.value)) if node.value
     "#{parts.join(' ')};"
+  end
+
+  sig { params(node: MIR::BreakExpr).returns(String) }
+  def emit_break_expr(node)
+    parts = ["break"]
+    parts << ":#{node.label}" if node.label
+    parts << T.must(emit(node.value)) if node.value
+    parts.join(" ")
   end
 
   sig { params(node: MIR::IndexInsert).returns(String) }
@@ -950,7 +1015,7 @@ class MIREmitter
 
   sig { params(node: MIR::DupeSlice).returns(String) }
   def emit_dupe_slice(node)
-    "try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)})"
+    "@as([]const u8, try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)}))"
   end
 
   sig { params(node: MIR::AllocSlice).returns(String) }
@@ -1020,12 +1085,7 @@ class MIREmitter
       # via_pointer bindings hold *T directly; strip one pointer level
       # so cleanup's T matches the pointee shape.
       use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
-      # Heap strings force a moved guard in defer context. Some classifier
-      # paths (heap_carry promotion) build the entry with has_moved_guard
-      # false; the string IS move-tracked at scope end though, so the
-      # guard is unconditional for the kind.
-      use_guard = entry.kind == :heap_string ? (!errdefer || entry.has_moved_guard?) : g
-      result = guarded_cleanup(use_name, use_type, use_alloc, use_guard, errdefer:, via_pointer: vp)
+      result = guarded_cleanup(use_name, use_type, use_alloc, g, errdefer:, via_pointer: vp)
       if entry.kind == :rc && entry.needs_release_fields?
         guard = g ? "if (!#{name}_moved) " : ""
         kw = errdefer ? "errdefer" : "defer"
@@ -1055,7 +1115,13 @@ class MIREmitter
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
       type_arg = node.zig_type || "@TypeOf(#{src})"
-      "try CheatLib.dupeValue(#{type_arg}, #{src}, #{alloc})"
+      if type_arg.start_with?("[]")
+        "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
+      else
+        pointer_type_arg = node.zig_type || "@TypeOf(__copy_src)"
+        pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
+        "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
+      end
     else
       raise "MIREmitter#emit_deep_copy: unhandled strategy :#{node.strategy}"
     end
@@ -1187,6 +1253,18 @@ class MIREmitter
   sig { params(node: MIR::FieldGet).returns(String) }
   def emit_field_get(node)
     "#{paren_if_try(T.must(emit(node.object)))}.#{node.field}"
+  end
+
+  sig { params(node: MIR::UnionPayloadGet).returns(String) }
+  def emit_union_payload_get(node)
+    subject = T.must(emit(node.subject))
+    variant = node.variant.to_s
+    "(switch (#{subject}) { .#{variant} => |payload| payload, else => unreachable })"
+  end
+
+  sig { params(node: MIR::AssertStmt).returns(String) }
+  def emit_assert_stmt(node)
+    "CheatLib.assert(#{emit(node.cond)}, #{node.message});"
   end
 
   # Parenthesize try-expressions to prevent Zig precedence issues where
@@ -1349,12 +1427,7 @@ class MIREmitter
     # rewrites `rt` to the consumer fiber's `__rt_obs_N` — produce
     # consistent allocator strings across both AllocatorRef and
     # alloc_zig-emitted call sites.
-    rt = @rt_name || "rt"
-    case node.kind
-    when :heap    then "#{rt}.heapAlloc()"
-    when :frame   then "#{rt}.frameAlloc()"
-    else               "#{rt}.heapAlloc()"
-    end
+    MIR::Placement.zig_allocator(node.kind, @rt_name)
   end
 
   sig { params(node: MIR::TypeSentinel).returns(T.nilable(String)) }
@@ -1423,6 +1496,17 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::OwnedSlice).returns(String) }
+  def emit_owned_slice(node)
+    inner = emit(node.expr)
+    label = "blk_owned_slice_#{node.object_id.abs}"
+    alloc = alloc_expr(node.alloc)
+    "#{label}: { var __x = #{inner}; " \
+      "break :#{label} if (comptime @typeInfo(@TypeOf(__x)) == .@\"struct\" and @hasDecl(@TypeOf(__x), \"toOwnedSlice\")) " \
+      "try __x.toOwnedSlice(#{alloc}) else " \
+      "__x; }"
+  end
+
   # --- Helpers ---
 
   sig { params(stmts: T::Array[T.untyped]).returns(String) }
@@ -1456,12 +1540,9 @@ class MIREmitter
   # Single source of truth: symbol -> Zig allocator expression.
   sig { params(sym: Symbol).returns(String) }
   def alloc_zig(sym)
-    rt = @rt_name || "rt"
-    case sym
-    when :heap    then "#{rt}.heapAlloc()"
-    when :frame   then "#{rt}.frameAlloc()"
-    else raise "alloc_zig: unknown allocator symbol :#{sym.inspect}"
-    end
+    raise "alloc_zig: unknown allocator symbol :#{sym.inspect}" unless sym == :heap || sym == :frame
+
+    MIR::Placement.zig_allocator(sym, @rt_name)
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean, errdefer: T::Boolean).returns(String) }

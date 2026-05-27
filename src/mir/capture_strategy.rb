@@ -171,16 +171,21 @@ module CaptureStrategy
       return MoveInto.new(zig_t, name, name)
     end
 
-    # 4. Value-like captures are always safe: primitives, strings
+    # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
+    #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
+    #    safely via the existing retain/release discipline.
+    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
+
+    # 4b. Scheduler-affine synchronized collections are safe only when
+    #     the boundary analysis pins the fiber. They are not Rc/Arc values
+    #     and must fall through to FiberCtxBuilder's pointer-capture path.
+    return ByValue.new(zig_t, name) if pinned_sync_collection?(type)
+
+    # 5. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
     #    whose fields are all themselves value-like (resolved via
     #    schema_lookup).
     return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
-
-    # 5. @multiowned / @shared / @locked / @writeLocked / @local clone
-    #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
-    #    safely via the existing retain/release discipline.
-    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
 
     # 6. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
@@ -207,8 +212,7 @@ module CaptureStrategy
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
     # Id<T> handles are opaque u64 indices into a pool — the pool owns the
     # data; the Id is just a key. Byte-copy is always safe.
-    if type.respond_to?(:generic_instance?) && type.generic_instance? &&
-       type.respond_to?(:generic_base) && type.generic_base == :Id
+    if type.respond_to?(:id_handle?) && type.id_handle?
       return true
     end
     # Plain structs / enums / unions whose fields are all
@@ -230,11 +234,13 @@ module CaptureStrategy
   # topologies. All of these preserve the safe-sharing guarantee.
   sig { params(type: Type).returns(T::Boolean) }
   def self.safe_shared_across_fibers?(type)
-    return true if type.multiowned? || type.shared?
-    return true if type.respond_to?(:any_sync?) && type.any_sync?
-    return true if type.respond_to?(:sharded?) && type.sharded?
-    return true if type.respond_to?(:striped?) && type.striped?
-    false
+    zig = type.zig_type
+    zig.start_with?("CheatLib.Arc(") || zig.start_with?("CheatLib.Rc(")
+  end
+
+  sig { params(type: Type).returns(T::Boolean) }
+  def self.pinned_sync_collection?(type)
+    type.collection? && type.any_sync?
   end
 
   # Where the fiber's deep-copy should live when the user writes COPY.

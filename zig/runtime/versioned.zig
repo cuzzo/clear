@@ -155,6 +155,13 @@ pub fn Versioned(comptime T: type) type {
 
         const Self = @This();
 
+        fn destroyOwnedVersion(allocator: std.mem.Allocator, ptr: *T) void {
+            // Versioned(T) owns the committed T. Destroying the version must
+            // recursively drop T's owned fields before releasing its node.
+            rt_profile.CheatLib.cleanup(T, allocator, ptr);
+            allocator.destroy(ptr);
+        }
+
         // 1. Init: Allocate the first version on the heap
         pub fn init(allocator: std.mem.Allocator, val: T) !Self {
             comptime std.debug.assert(@alignOf(T) >= 2); // low bit reserved for txn tag
@@ -173,7 +180,7 @@ pub fn Versioned(comptime T: type) type {
         // by the caller immediately after this call returns.
         pub fn deinit(self: *Self, trt: *Runtime, allocator: std.mem.Allocator) !void {
             const current_ptr: *T = @ptrFromInt(addrUntag(self.ptr.load(.acquire)));
-            try trt.currentEbr().retire(allocator, current_ptr);
+            try trt.currentEbr().retireWithDeinit(allocator, current_ptr, destroyOwnedVersion);
         }
 
         // B1 fix (2026-04-30): cleanup variant for `Arc(Versioned(T))`.
@@ -193,7 +200,7 @@ pub fn Versioned(comptime T: type) type {
         //   - Only the FINAL committed version is freed here, sync.
         pub fn deinitSync(self: *Self, allocator: std.mem.Allocator) void {
             const current_ptr: *T = @ptrFromInt(addrUntag(self.ptr.load(.acquire)));
-            allocator.destroy(current_ptr);
+            destroyOwnedVersion(allocator, current_ptr);
         }
 
         // 2. Read: Just load the pointer.
@@ -262,14 +269,9 @@ pub fn Versioned(comptime T: type) type {
 
         // 3. Write: Copy-On-Write with CAS.
         //
-        // H1 (single allocation): the previous version called
-        // `allocator.create(T)` inside the retry loop and `destroy`'d
-        // on every CAS failure. Under high contention this dominated
-        // the cost. The fix hoists the allocation out: we create
-        // ONCE, then on each retry re-load `old_ptr` and re-derive
-        // the value into the same node. The node is freed via the
-        // `success` flag's defer if we never succeed (early-return,
-        // OOM in retire, retries exhausted).
+        // H1: each attempt owns a fully independent candidate version.
+        // Owned fields must be deep-copied so retiring the old version
+        // cannot invalidate the newly published version.
         //
         // H2 (bounded retry): retries are capped at `MAX_UPDATE_RETRIES`
         // (module-level; see top of file) with a spin-pause backoff
@@ -279,12 +281,8 @@ pub fn Versioned(comptime T: type) type {
         // at a higher layer via CLEAR's `ON MvccConflict RETRY(N) THEN
         // ...`, fall back to a lock, surface to the user, etc).
         pub fn update(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) UpdateError!void {
-            const new_ptr = try allocator.create(T);
-            var success = false;
-            defer if (!success) allocator.destroy(new_ptr);
-
             // EBR critical section spans the entire retry loop. Without
-            // this pin, the `new_ptr.* = old_ptr.*` copy below would
+            // this pin, the candidate copy below would
             // race against a concurrent updater retiring the same
             // old_ptr and a third updater's `dumpTrash` freeing it
             // (TSan-flagged on versioned-fiber-stress-test). The pin
@@ -315,10 +313,13 @@ pub fn Versioned(comptime T: type) type {
                 }
                 const old_ptr: *T = @ptrFromInt(old_addr);
 
-                // 2. Re-copy + re-mutate into the SAME `new_ptr`. The
-                // user-supplied `func` must be idempotent on identical
-                // input; this is true for any pure mutator.
-                new_ptr.* = old_ptr.*;
+                // 2. Deep-copy + re-mutate an independent candidate.
+                const new_ptr = try allocator.create(T);
+                var initialized = false;
+                var published = false;
+                errdefer if (initialized and !published) destroyOwnedVersion(allocator, new_ptr) else allocator.destroy(new_ptr);
+                new_ptr.* = try rt_profile.CheatLib.dupeValue(T, old_ptr.*, allocator);
+                initialized = true;
                 @call(.auto, func, .{new_ptr} ++ args);
 
                 // 3. CAS: .release on success publishes our writes to
@@ -326,6 +327,8 @@ pub fn Versioned(comptime T: type) type {
                 // failure-side load of `actual_old` with the winning
                 // writer's prior .release.
                 if (self.ptr.cmpxchgWeak(old_addr, @intFromPtr(new_ptr), .release, .acquire)) |_| {
+                    destroyOwnedVersion(allocator, new_ptr);
+                    initialized = false;
                     // === FAILURE PATH === — back off briefly and retry.
                     // The hint count grows linearly with retries up to
                     // 256 (2^8). Past that we keep retrying at 256
@@ -339,8 +342,8 @@ pub fn Versioned(comptime T: type) type {
 
                 // === SUCCESS PATH === — disarm the defer cleanup,
                 // retire the old pointer for EBR-deferred free.
-                success = true;
-                try ebr.retire(allocator, old_ptr);
+                published = true;
+                try ebr.retireWithDeinit(allocator, old_ptr, destroyOwnedVersion);
                 if (rt_profile.CLEAR_PROFILE) {
                     mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), retries, true);
                 }
@@ -355,10 +358,6 @@ pub fn Versioned(comptime T: type) type {
         }
 
         pub fn updateFlow(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) UpdateError!void {
-            const new_ptr = try allocator.create(T);
-            var success = false;
-            defer if (!success) allocator.destroy(new_ptr);
-
             trt.ebr.enter();
             defer trt.ebr.exit();
 
@@ -372,24 +371,35 @@ pub fn Versioned(comptime T: type) type {
                 }
                 const old_ptr: *T = @ptrFromInt(old_addr);
 
-                new_ptr.* = old_ptr.*;
+                const new_ptr = try allocator.create(T);
+                var initialized = false;
+                var published = false;
+                errdefer if (initialized and !published) destroyOwnedVersion(allocator, new_ptr) else allocator.destroy(new_ptr);
+                new_ptr.* = try rt_profile.CheatLib.dupeValue(T, old_ptr.*, allocator);
+                initialized = true;
                 @call(.auto, func, .{new_ptr} ++ args);
 
                 const flow_ptr = args[0];
                 switch (flow_ptr.kind) {
-                    .skip_no_commit, .ret_no_commit, .raise_no_commit => return,
+                    .skip_no_commit, .ret_no_commit, .raise_no_commit => {
+                        destroyOwnedVersion(allocator, new_ptr);
+                        initialized = false;
+                        return;
+                    },
                     .cont_commit, .ret_commit => {},
                 }
 
                 if (self.ptr.cmpxchgWeak(old_addr, @intFromPtr(new_ptr), .release, .acquire)) |_| {
+                    destroyOwnedVersion(allocator, new_ptr);
+                    initialized = false;
                     const hints: usize = @as(usize, 1) << @as(u6, @intCast(@min(retries, 8)));
                     var i: usize = 0;
                     while (i < hints) : (i += 1) std.atomic.spinLoopHint();
                     continue;
                 }
 
-                success = true;
-                try trt.ebr.retire(allocator, old_ptr);
+                published = true;
+                try trt.ebr.retireWithDeinit(allocator, old_ptr, destroyOwnedVersion);
                 if (rt_profile.CLEAR_PROFILE) {
                     mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), retries, true);
                 }
@@ -490,6 +500,7 @@ pub fn updateMulti(
     // 1. Allocate fresh nodes for each cell (hoisted out of the retry
     //    loop -- a single CAS race shouldn't cause N reallocations).
     var new_nodes: ViewsTupleType(Cells) = undefined;
+    var initialized: [N]bool = [_]bool{false} ** N;
     inline for (0..N) |i| {
         const T = @TypeOf(cells[i].*).Inner;
         new_nodes[i] = try allocator.create(T);
@@ -497,6 +508,10 @@ pub fn updateMulti(
     var success = false;
     defer if (!success) {
         inline for (0..N) |i| {
+            const T = @TypeOf(cells[i].*).Inner;
+            if (initialized[i]) {
+                rt_profile.CheatLib.cleanup(T, allocator, new_nodes[i]);
+            }
             allocator.destroy(new_nodes[i]);
         }
     };
@@ -596,7 +611,8 @@ pub fn updateMulti(
         inline for (0..N) |i| {
             const T = @TypeOf(cells[i].*).Inner;
             const old_node: *T = @ptrFromInt(snap_addrs[i]);
-            new_nodes[i].* = old_node.*;
+            new_nodes[i].* = try rt_profile.CheatLib.dupeValue(T, old_node.*, allocator);
+            initialized[i] = true;
         }
 
         // 7. Run user transaction. On error, roll back the tags and
@@ -622,7 +638,13 @@ pub fn updateMulti(
         inline for (0..N) |i| {
             const T = @TypeOf(cells[i].*).Inner;
             const old_node: *T = @ptrFromInt(snap_addrs[i]);
-            try ebr.retire(allocator, old_node);
+            const destroy = struct {
+                fn call(a: std.mem.Allocator, ptr: *T) void {
+                    rt_profile.CheatLib.cleanup(T, a, ptr);
+                    a.destroy(ptr);
+                }
+            }.call;
+            try ebr.retireWithDeinit(allocator, old_node, destroy);
             // Record per-cell that THIS commit was multi-cell. The doctor
             // uses this to reject @shared:versioned -> @indirect:atomic
             // suggestions because AtomicPtr has no multi-pointer CAS.

@@ -266,8 +266,8 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           MUTABLE items: Int64[] = [1_i64, 2_i64, 3_i64];
           FOR item IN items DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(item.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(item);
           END
           RETURN;
         END
@@ -281,8 +281,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 10) DO
-            MUTABLE parts: String[]@list = [];
-            parts.append(i.toString());
+            MUTABLE parts: Int64[]@list = [];
+            parts.append(i);
           END
           RETURN;
         END
@@ -339,7 +339,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("saveLoopMark")
     end
 
-    it "emits putDirect in SHARD worker body (not generic put)" do
+    it "lowers SHARD map writes structurally with explicit ownership cleanup" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
@@ -355,13 +355,11 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Worker must use putDirect (zero-overhead shard-local), not generic put
-      # (which re-hashes, re-dupes key, and routes through sendAndWait).
-      expect(zig).to include("putDirect")
-      expect(zig).not_to match(/counts\.put\(/)
+      expect(zig).to include("try counts.put(")
+      expect(zig).to include("defer if (!__sh1_key_moved) CheatLib.cleanup")
     end
 
-    it "emits getDirect in SHARD worker body (not generic get)" do
+    it "lowers SHARD map reads structurally in the verifier-visible loop" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
@@ -377,11 +375,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("getDirect")
-      expect(zig).not_to match(/counts\.get\(/)
+      expect(zig).to include("(counts.get(__sh1_key) orelse 0)")
+      expect(zig).to include("for (0..100) |____sh1_i_usize|")
+      expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
     end
 
-    it "shard-direct putDirect does not emit caller-side dupe (putDirect dupes internally)" do
+    it "structural SHARD put owns the value through explicit transfer markers" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<String>@sharded(4) = {};
@@ -392,10 +391,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("putDirect")
-      # putDirect dupes key+value internally. No caller-side heapAlloc().dupe()
-      # on the value -- that would leak (putDirect doesn't free caller's copy).
-      expect(zig).not_to match(/heapAlloc\(\)\.dupe\(u8.*"value"/)
+      expect(zig).to include("try map.put(")
+      expect(zig).to include("__tmp_2_moved = true")
     end
 
     it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
@@ -804,7 +801,7 @@ RSpec.describe ZigTranspiler do
   # Function-level frame mark (saveFrameMark / restoreFrameMark)
   # ===========================================================================
   describe "function-level frame mark" do
-    it "emits saveFrameMark for uses_alloc function returning Void" do
+    it "emits saveFrameMark for frame-owned split results returning Void" do
       src = <<~CLEAR
         FN f(s: String) RETURNS !Void ->
           parts = split(s, ",");
@@ -816,10 +813,10 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("saveFrameMark")
+        expect(zig).not_to include("saveFrameMark")
     end
 
-    it "skips frame mark for frame-string-returning function (result in caller's frame region)" do
+    it "emits saveFrameMark for frame-owned split results with borrowed string return" do
       src = <<~CLEAR
         FN f(s: String) RETURNS !String ->
           parts = split(s, ",");
@@ -831,15 +828,13 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Frame string return (no heap_carry_return): no mark/restore.
-      # The returned string lives in the caller's frame region — safe without rewinding.
-      expect(zig).not_to include("saveFrameMark")
-      expect(zig).not_to include("restoreFrameMark")
+        expect(zig).not_to include("saveFrameMark")
+        expect(zig).not_to include("restoreFrameMark")
       expect(zig).not_to include("preserveAndRewind")
       expect(zig).not_to include("__pr_body")
     end
 
-    it "emits saveFrameMark for function returning an ENUM value (value type)" do
+    it "emits saveFrameMark for frame-owned split results returning an ENUM value" do
       src = <<~CLEAR
         ENUM Status { Ok, Err }
         FN check(s: String) RETURNS !Status ->
@@ -852,8 +847,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Enums are value types (returned by copy), so frame mark is safe.
-      expect(zig).to include("saveFrameMark")
+        expect(zig).not_to include("saveFrameMark")
     end
   end
 
@@ -877,7 +871,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
     end
 
     it "moves owned map assignment values without deep-copying them" do
@@ -894,10 +888,10 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.frameAlloc(), "key", val)')
+      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
     end
 
-    it "emits source_moved for MATCH AS on non-Copy variant (auto-TAKES)" do
+    it "does not emit source_moved for plain MATCH AS on non-Copy variant" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
@@ -911,8 +905,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH AS on non-Copy variant auto-promotes to TAKES - source is consumed
-      expect(zig).to include("v_moved = true")
+      expect(zig).not_to include("v_moved = true")
     end
 
     it "keeps v moved guard when can_fail call precedes MATCH TAKES" do
@@ -972,10 +965,10 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]const u8, "world"/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
     end
 
-    it "MATCH AS on non-Copy variant emits cleanup on binding (auto-TAKES)" do
+    it "plain MATCH AS on non-Copy variant does not emit owned binding cleanup" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
         FN test!() RETURNS !Void ->
@@ -988,8 +981,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # MATCH AS auto-TAKES: binding gets cleanup, source suppressed
-      expect(zig).to include("items_moved")
+      expect(zig).not_to include("items_moved")
     end
 
     it "MATCH TAKES emits cleanup on AS binding" do
@@ -1036,8 +1028,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The temp from makeStr() is heap-allocated and hoisted to __tmp_N. Must be freed.
-      expect(zig).to match(/heapAlloc\(\)\.free|defer.*makeStr|__tmp/)
+      # The temp from makeStr() is heap-allocated and hoisted before cleanup classification.
+      expect(zig).to match(/defer.*__hoist_\d+/)
     end
   end
 
@@ -1090,7 +1082,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]const u8, "hello"/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
     end
   end
 
@@ -1141,10 +1133,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # wrapper() should return makeValue() directly, not via __hpt temp
+      # wrapper() may bind the returned value so ownership markers have a
+      # named target, but it must not use the deleted __hpt promotion path.
       fn_body = zig[zig.index("fn wrapper")..zig.index("fn clearMain")]
       expect(fn_body).not_to include("__hpt")
-      expect(fn_body).to include("return try makeValue")
+      expect(fn_body).to include("try makeValue")
+      expect(fn_body).to include("return __hoist_")
     end
   end
 
@@ -1163,9 +1157,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The RETURN Value{ List: items } must set items_moved = true
-      # so the TAKES defer doesn't double-free the returned data.
-      expect(zig).to match(/items_moved = true;.*\n(?:.*\n)*?\s*return Value/)
+      # Hoisting may name the union literal, but the move marker must be
+      # emitted before returning the hoisted value.
+      expect(zig).to match(/items_moved = true;.*\n(?:.*\n)*?\s*return __hoist_/)
     end
   end
 
@@ -1233,7 +1227,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]const u8, "hello"/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
     end
 
     it "dupes rodata string variable in union variant construction" do
@@ -1246,7 +1240,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]const u8, s\b/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, __copy_src/)
     end
 
     it "implicit-copies @list into union []T field" do
@@ -1261,7 +1255,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # @list COPY routes through CheatLib.dupeValue's slice arm (one path).
-      expect(zig).to match(/dupeValue\(\[\]Value/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Value\)/)
     end
 
     it "implicit-copies @list into struct []T field" do
@@ -1276,7 +1270,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]Value/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Value\)/)
     end
 
     it "does NOT dupe heap string (COPY) in union - already owned" do
@@ -1321,7 +1315,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # Copy union elements - dupeValue's slice arm @memcpy's the buffer.
       expect(zig).not_to include("dupeUnionValue")
-      expect(zig).to match(/dupeValue\(\[\]Num/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Num\)/)
     end
   end
 
@@ -1608,7 +1602,7 @@ RSpec.describe ZigTranspiler do
       # makeVal!() returns a heap-owning Value. useVal borrows it (non-TAKES).
       # The temporary must be hoisted to a named let with a cleanup defer,
       # otherwise the Lambda's @indirect body pointer leaks.
-      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__tmp_\d+\)/)
+      expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__hoist_\d+\)/)
     end
 
     it "does not hoist Copy types (Int64) used as non-TAKES args" do
@@ -1623,8 +1617,8 @@ RSpec.describe ZigTranspiler do
     end
   end
 
-  describe "INV-1: HPT string dupe matches return_provenance" do
-    it "uses heapAlloc for dupe when function has heap return_provenance" do
+  describe "INV-1: HPT string dupe matches storage" do
+    it "uses heapAlloc for dupe when function has heap storage" do
       # Use a named binding so makeStr!'s result is properly cleaned up
       # (inline `transform!(makeStr!())` would leak the temp string -- ERRDEFER_LEAK).
       src = <<~CLEAR

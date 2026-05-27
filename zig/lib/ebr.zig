@@ -33,6 +33,19 @@ pub const RetiredPtr = struct {
             }.call,
         };
     }
+
+    pub fn createWithDeinit(comptime T: type, ptr: *T, epoch: u32, comptime deinit_func: anytype) RetiredPtr {
+        return .{
+            .ptr = ptr,
+            .epoch = epoch,
+            .deinit_fn = struct {
+                fn call(allocator: std.mem.Allocator, p: *anyopaque) void {
+                    const typed: *T = @ptrCast(@alignCast(p));
+                    deinit_func(allocator, typed);
+                }
+            }.call,
+        };
+    }
 };
 
 pub const EbrContext = struct {
@@ -172,6 +185,13 @@ pub const ThreadLocalEbr = struct {
         const T = @TypeOf(ptr.*);
         const current_time = self.local_epoch.load(.monotonic);
         const node = RetiredPtr.create(T, ptr, current_time);
+        try self.limbo_list.append(allocator, node);
+    }
+
+    pub fn retireWithDeinit(self: *ThreadLocalEbr, allocator: std.mem.Allocator, ptr: anytype, comptime deinit_func: anytype) !void {
+        const T = @TypeOf(ptr.*);
+        const current_time = self.local_epoch.load(.monotonic);
+        const node = RetiredPtr.createWithDeinit(T, ptr, current_time, deinit_func);
         try self.limbo_list.append(allocator, node);
     }
 

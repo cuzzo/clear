@@ -48,11 +48,11 @@
 
 POLYMORPHIC_ADMISSION_CELLS = []
 
-CALLEE_FORMS = [:concrete, :shared_param, :req_locked, :req_versioned, :req_local, :req_locked_or_local]
+CALLEE_FORMS = [:concrete, :shared_param, :req_locked, :req_versioned, :req_local]
 CALLER_BINDINGS = [:locked, :write_locked, :versioned, :local, :multiowned, :plain]
 
 ADMITS = {
-  concrete:            [:plain],
+  concrete:            [:local, :plain],
   shared_param:        [:locked, :write_locked, :versioned],
   req_locked:          [:locked, :write_locked],
   req_versioned:       [:versioned],
@@ -97,14 +97,14 @@ def admission_callee_def(callee)
     CHT
   when :shared_param
     <<~CHT.chomp
-      FN tick!(MUTABLE c: SHARED Counter) RETURNS Void ->
+      FN tick!(MUTABLE c: SHARED Counter) RETURNS !Void ->
           #{body_locked}
           RETURN;
       END
     CHT
   when :req_locked
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS Void
+      FN tick!(MUTABLE c: Counter) RETURNS !Void
           REQUIRES c: LOCKED
       ->
           #{body_locked}
@@ -143,9 +143,9 @@ end
 
 def admission_caller_decl(caller)
   case caller
-  when :locked       then "MUTABLE c = Counter{ value: 0_i64 } @locked;"
-  when :write_locked then "MUTABLE c = Counter{ value: 0_i64 } @writeLocked;"
-  when :versioned    then "MUTABLE c = Counter{ value: 0_i64 } @versioned;"
+  when :locked       then "MUTABLE c = Counter{ value: 0_i64 } @shared:locked;"
+  when :write_locked then "MUTABLE c = Counter{ value: 0_i64 } @shared:writeLocked;"
+  when :versioned    then "MUTABLE c = Counter{ value: 0_i64 } @shared:versioned;"
   when :local        then "MUTABLE c = Counter{ value: 0_i64 } @local;"
   when :multiowned   then "MUTABLE c = Counter{ value: 0_i64 } @multiowned;"
   when :plain        then "MUTABLE c = Counter{ value: 0_i64 };"
@@ -155,15 +155,16 @@ end
 FuzzGenerator.register(:polymorphic_sync_admission, cells: POLYMORPHIC_ADMISSION_CELLS) do |p|
   callee_def = admission_callee_def(p[:callee])
   caller_decl = admission_caller_decl(p[:caller])
+  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR RAISE" : "tick!(c)"
 
   <<~CHT
     STRUCT Counter { value: Int64 }
 
     #{callee_def}
 
-    FN main() RETURNS Void ->
+    FN main() RETURNS !Void ->
         #{caller_decl}
-        tick!(c);
+        #{call};
         RETURN;
     END
   CHT

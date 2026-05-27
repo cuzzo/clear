@@ -57,8 +57,8 @@ module FsmTransform
         # NextSuspend with a binding); that var is "defined" at
         # the end of this segment AND consumed by the next, so
         # it counts as cross-segment by construction.
-        if seg.tail.respond_to?(:result_var) && seg.tail.result_var &&
-           !seg.tail.is_a?(Segments::IoSuspend)
+        if Segments.suspend_tail?(seg.tail) && seg.tail.result_var &&
+           seg.tail.kind != :io
           # Type info comes from the call's full_type; the
           # emitter resolves it via the AST node when emitting
           # the state field decl.
@@ -147,11 +147,10 @@ module FsmTransform
       when Segments::Goto, Segments::LoopBack      then [seg.tail.target_index]
       when Segments::CondBranch
         [seg.tail.then_index, seg.tail.else_index]
-      when Segments::IoSuspend, Segments::NextSuspend,
-           Segments::LockSuspend
+      when Segments::LockSuspend
         [seg.index + 1]
       else
-        []
+        Segments.suspend_tail?(seg.tail) ? [seg.index + 1] : []
       end
     end
 
@@ -216,10 +215,10 @@ module FsmTransform
     sig { params(stmt: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
     def stmt_decl_type(stmt)
       candidates = []
-      candidates << stmt.full_type
+      candidates << stmt.full_type!(context: "FSM liveness declaration")
       candidates << stmt.type                if stmt.respond_to?(:type)
       candidates << stmt.declared_type       if stmt.respond_to?(:declared_type)
-      candidates << stmt.value&.full_type    if stmt.value
+      candidates << stmt.value&.full_type!(context: "FSM liveness declaration value") if stmt.value
       candidates.compact.first
     end
 

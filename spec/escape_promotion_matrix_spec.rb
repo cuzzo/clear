@@ -13,7 +13,7 @@ require_relative "../src/backends/transpiler"
 #
 # Expected outcomes:
 #   :int                 - storage :stack, no cleanup (Copy)
-#   :string_rodata       - storage :rodata, no cleanup (literal, static)
+#   :string_rodata       - storage :heap (owned return binding), no cleanup
 #   :string_frame        - storage :heap (concat must promote), cleanup :heap
 #   :list_int            - storage :heap, cleanup :heap
 #   :list_string         - storage :heap, cleanup :heap
@@ -32,18 +32,7 @@ require_relative "../src/backends/transpiler"
 # `needs_escape_promotion?` coverage gap.
 RSpec.describe "Escape promotion matrix (Phase 1a)" do
   def run_mir(src)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    PipelineRewriter.new.rewrite!(ast)
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir = MIRPass.new(fn_nodes: fn_nodes,
-                      schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-    mir.transform!(ast)
-    ast
+    run_mir_frontend(src)
   end
 
   def make_fn(ast)
@@ -84,7 +73,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     ],
     string_rodata: [
       "FN make() RETURNS !String -> MUTABLE s = \"hi\"; RETURN s; END",
-      "s", :rodata, nil,
+      "s", :heap, nil,
     ],
     string_frame: [
       # Frame-string concat: the function-side decl stays :frame and
@@ -146,7 +135,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       # consistently with the other heap cells.
       "UNION B { Box: Int64 @indirect }\n" \
       "FN make() RETURNS !B -> MUTABLE b = B{ Box: 7_i64 }; RETURN b; END",
-      "b", :stack, :heap,
+      "b", :heap, :heap,
     ],
   }.freeze
 

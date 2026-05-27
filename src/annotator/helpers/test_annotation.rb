@@ -17,6 +17,9 @@ require 'set'
 
 module TestAnnotation
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
   # Used by `validate_strict_io!` to demand a STUB for any reachable
@@ -34,7 +37,7 @@ module TestAnnotation
       visit_test_hook_bodies(node)
       node.whens.each { |w| visit_WhenBlock(w) }
     end
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::WhenBlock).returns(T.nilable(Symbol)) }
@@ -60,7 +63,7 @@ module TestAnnotation
       end
     end
     node.benchmarks.each { |b| visit(b) }
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   # Visit LET fixture RHS expressions and declare each name in the
@@ -74,7 +77,7 @@ module TestAnnotation
     return unless node.respond_to?(:lets)
     (node.lets || []).each do |let_node|
       visit(let_node.expr)
-      let_type = let_node.expr.full_type
+      let_type = let_node.expr.full_type!(context: "TEST LET expression")
       # Declare as immutable (LET is by definition non-rebindable);
       # tests can still field-mutate / call methods on the bound
       # value just like a normal `name = expr;` decl.
@@ -103,35 +106,35 @@ module TestAnnotation
   def visit_TestThat(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit_stmts(node.body)
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: T.untyped).void }
   def visit_AssertRaises(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::BenchmarkStmt).returns(Symbol) }
   def visit_BenchmarkStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::SmashStmt).returns(Symbol) }
   def visit_SmashStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::ProfileStmt).returns(Symbol) }
   def visit_ProfileStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::StubDecl).returns(Symbol) }
@@ -148,7 +151,7 @@ module TestAnnotation
       current_scope.declare(cap_name, node, :Int64, true, false, nil, :stack)
       og_declare(cap_name, node, :Int64)
     end
-    node.full_type = :Void
+    stamp_type!(node, :Void)
   end
 
   # Strict-test mode coverage check: walk the call graph from a
@@ -176,8 +179,9 @@ module TestAnnotation
       end
 
       # Check if it's a user function with BLOCKING/EXTERN effects
-      @fn_nodes = T.let(@fn_nodes, T.untyped)
-      fn = @fn_nodes[name]
+      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+      fn_nodes = T.must(@fn_nodes)
+      fn = fn_nodes[name]
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
         if has_io

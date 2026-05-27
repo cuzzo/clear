@@ -5,7 +5,7 @@
 #
 # Surfaces the LoopFrameAnalysis frame-decl detection gap:
 #   `local_frame_decls` recognises bindings whose `storage == :frame`
-#   (post-EscapeGraph) as needing per-iteration mark/rewind. But a
+#   (post-escape-analysis) as needing per-iteration mark/rewind. But a
 #   cleanup-alloc-frame binding -- e.g. a STRUCT-literal bound inside a
 #   loop body where one field is an owned-string ArrayList -- is NOT
 #   currently surfaced as frame-local, so the per-iteration arena rewind
@@ -30,7 +30,7 @@
 #   element_shape ∈ {string_elems, int_elems}
 
 LLCA_CELLS = []
-%i[struct_with_list].each do |c|
+%i[struct_with_list struct_with_optional_string struct_with_map].each do |c|
   %i[while for_range].each do |l|
     %i[string_elems int_elems].each do |e|
       LLCA_CELLS << { carrier: c, loop_kind: l, element_shape: e }
@@ -39,8 +39,6 @@ LLCA_CELLS = []
 end
 
 FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
-  # Skip carrier/element combos that are vacuous (e.g. struct_with_map
-  # uses string-keyed map; int_elems means int values either way).
   elem_zig = p[:element_shape] == :string_elems ? "String" : "Int64"
   elem_val = p[:element_shape] == :string_elems ? 'COPY "x"' : "1_i64"
 
@@ -50,6 +48,20 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
       "STRUCT Holder { items: #{elem_zig}[], tag: String }",
       "Holder{ items: [#{elem_val}], tag: COPY \"t\" }",
       "holder.items.length()",
+    ]
+  when :struct_with_optional_string
+    item_peek = p[:element_shape] == :string_elems ? "holder.tag.length()" : "(holder.item OR 1_i64).toString().length()"
+    [
+      "STRUCT Holder { item: ?#{elem_zig}, tag: String }",
+      "Holder{ item: #{elem_val}, tag: COPY \"t\" }",
+      item_peek,
+    ]
+  when :struct_with_map
+    map_peek = p[:element_shape] == :string_elems ? "holder.items.count()" : "(holder.items[\"k\"] OR 1_i64).toString().length()"
+    [
+      "STRUCT Holder { items: HashMap<#{elem_zig}>, tag: String }",
+      "Holder{ items: { \"k\": #{elem_val} }, tag: COPY \"t\" }",
+      map_peek,
     ]
   end
 

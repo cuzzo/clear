@@ -2,8 +2,8 @@ require "rspec"
 require "tmpdir"
 require_relative "../src/backends/transpiler"  # transitively loads annotator + lexer + parser + ast
 require_relative "../src/ast/fixable_error"
-require_relative "../src/annotator-helpers/fixable_helpers"
-require_relative "../src/annotator-helpers/auto_inference"
+require_relative "../src/annotator/helpers/fixable_helpers"
+require_relative "../src/annotator/helpers/auto_inference"
 require_relative "../src/backends/importer"
 
 # M1.1 — parser-level coverage for the `Auto` placeholder.
@@ -238,7 +238,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots).to have_key([:param, "double", 0])
+      expect(slots).to have_key(AutoSlotId.param("double", 0))
     end
 
     it "collects every call site's arg as a constraint source" do
@@ -254,7 +254,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      sources = slots[[:param, "double", 0]].sources
+      sources = slots[AutoSlotId.param("double", 0)].sources
       expect(sources.length).to eq(3)
       # Each source is the AST::Literal arg from a FuncCall.
       expect(sources).to all(be_a(AST::Literal))
@@ -271,9 +271,9 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots).not_to have_key([:param, "add", 0])
-      expect(slots).to have_key([:param, "add", 1])
-      expect(slots[[:param, "add", 1]].sources.length).to eq(1)
+      expect(slots).not_to have_key(AutoSlotId.param("add", 0))
+      expect(slots).to have_key(AutoSlotId.param("add", 1))
+      expect(slots[AutoSlotId.param("add", 1)].sources.length).to eq(1)
     end
 
     it "produces empty sources for an Auto param that is never called" do
@@ -286,7 +286,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots[[:param, "unused", 0]].sources).to be_empty
+      expect(slots[AutoSlotId.param("unused", 0)].sources).to be_empty
     end
   end
 
@@ -301,7 +301,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots).to have_key([:return, "identity"])
+      expect(slots).to have_key(AutoSlotId.return("identity"))
     end
 
     it "collects every RETURN expr in the body" do
@@ -320,7 +320,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots[[:return, "classify"]].sources.length).to eq(3)
+      expect(slots[AutoSlotId.return("classify")].sources.length).to eq(3)
     end
 
     it "does NOT attach RETURN exprs to non-Auto-return functions" do
@@ -333,8 +333,8 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      expect(slots).not_to have_key([:return, "notAuto"])
-      expect(slots).to have_key([:return, "withAuto"])
+      expect(slots).not_to have_key(AutoSlotId.return("notAuto"))
+      expect(slots).to have_key(AutoSlotId.return("withAuto"))
     end
   end
 
@@ -347,7 +347,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      local_slots = slots.select { |k, _| k.first == :local }
+      local_slots = slots.select { |k, _| k.kind == :local }
       expect(local_slots.length).to eq(1)
       slot = local_slots.values.first
       expect(slot.kind).to eq(:local)
@@ -366,7 +366,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      local_slots = slots.select { |k, _| k.first == :local }
+      local_slots = slots.select { |k, _| k.kind == :local }
       # Each :local slot is keyed by decl-node object_id, so
       # same-named locals in different functions are distinct.
       expect(local_slots.length).to eq(2)
@@ -399,7 +399,7 @@ RSpec.describe "Gradual typing — AutoConstraintCollector (Pass B)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      local_slots = slots.select { |k, _| k.first == :local }
+      local_slots = slots.select { |k, _| k.kind == :local }
       # Only foo's `x` should have a slot. bar's `x = 99` is its own
       # decl (not Auto), not visible as a reassignment of foo's x.
       expect(local_slots.length).to eq(1)
@@ -461,11 +461,11 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
 
       # Find the literal `5` arg and stamp it as Int64.
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      arg5 = slots[[:param, "double", 0]].sources.first
+      arg5 = slots[AutoSlotId.param("double", 0)].sources.first
       result = AutoUnifier.new(slots, type_of: ->(n) { n == arg5 ? Type.new(:Int64) : nil }).resolve!
 
       expect(result.resolved.length).to eq(1)
-      resolution = result.resolved[[:param, "double", 0]]
+      resolution = result.resolved[AutoSlotId.param("double", 0)]
       expect(resolution.type.resolved).to eq(:Int64)
       # decl mutation: the FunctionDef's param[:type] is now concrete
       fn = ast.statements.first
@@ -485,7 +485,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       CLEAR
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      ret_expr = slots[[:return, "identity"]].sources.first
+      ret_expr = slots[AutoSlotId.return("identity")].sources.first
       result = AutoUnifier.new(slots, type_of: ->(n) { n == ret_expr ? Type.new(:Int64) : nil }).resolve!
 
       expect(result.resolved.length).to eq(1)
@@ -506,12 +506,12 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       CLEAR
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      param_slot = slots[[:param, "double", 0]]
+      param_slot = slots[AutoSlotId.param("double", 0)]
       types = { param_slot.sources[0].object_id => Type.new(:Int64),
                 param_slot.sources[1].object_id => Type.new(:Int64) }
       result = AutoUnifier.new(slots, type_of: ->(n) { types[n.object_id] }).resolve!
 
-      expect(result.resolved).to have_key([:param, "double", 0])
+      expect(result.resolved).to have_key(AutoSlotId.param("double", 0))
       expect(result.ambiguous).to be_empty
     end
   end
@@ -530,14 +530,14 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       CLEAR
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      sources = slots[[:param, "parseValue", 0]].sources
+      sources = slots[AutoSlotId.param("parseValue", 0)].sources
       types = { sources[0].object_id => Type.new(:Int64),
                 sources[1].object_id => Type.new(:String) }
       result = AutoUnifier.new(slots, type_of: ->(n) { types[n.object_id] }).resolve!
 
       expect(result.resolved).to be_empty
-      expect(result.ambiguous).to have_key([:param, "parseValue", 0])
-      ambiguity = result.ambiguous[[:param, "parseValue", 0]]
+      expect(result.ambiguous).to have_key(AutoSlotId.param("parseValue", 0))
+      ambiguity = result.ambiguous[AutoSlotId.param("parseValue", 0)]
       observed = ambiguity.observed_types.map { |t| t.respond_to?(:resolved) ? t.resolved : t }
       expect(observed).to contain_exactly(:Int64, :String)
     end
@@ -556,12 +556,12 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       CLEAR
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      sources = slots[[:return, "classify"]].sources
+      sources = slots[AutoSlotId.return("classify")].sources
       types = { sources[0].object_id => Type.new(:String),
                 sources[1].object_id => Type.new(:Int64) }
       result = AutoUnifier.new(slots, type_of: ->(n) { types[n.object_id] }).resolve!
 
-      expect(result.ambiguous).to have_key([:return, "classify"])
+      expect(result.ambiguous).to have_key(AutoSlotId.return("classify"))
     end
 
     it "flags MUTABLE local re-binding ambiguity (Int64 init then String assign)" do
@@ -576,7 +576,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      local_id = slots.keys.find { |k| k.first == :local }
+      local_id = slots.keys.find { |k| k.kind == :local }
       sources = slots[local_id].sources
       types = { sources[0].object_id => Type.new(:Int64),
                 sources[1].object_id => Type.new(:String) }
@@ -598,7 +598,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      local_id = slots.keys.find { |k| k.first == :local }
+      local_id = slots.keys.find { |k| k.kind == :local }
       sources = slots[local_id].sources
       types = sources.each_with_object({}) { |s, h| h[s.object_id] = Type.new(:Int64) }
       result = AutoUnifier.new(slots, type_of: ->(n) { types[n.object_id] }).resolve!
@@ -622,7 +622,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       result = unify_with_source_types(ast, {})
       expect(result.resolved).to be_empty
       expect(result.ambiguous).to be_empty
-      expect(result.unresolved).to have_key([:param, "unused", 0])
+      expect(result.unresolved).to have_key(AutoSlotId.param("unused", 0))
     end
 
     it "marks a local Auto with an untypeable RHS as unresolved" do
@@ -634,7 +634,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       CLEAR
 
       result = unify_with_source_types(ast, {})  # source returns nil
-      local_id = result.unresolved.keys.find { |k| k.first == :local }
+      local_id = result.unresolved.keys.find { |k| k.kind == :local }
       expect(local_id).not_to be_nil
     end
   end
@@ -644,22 +644,35 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       # Simulate: round 1 resolves slot A; round 2 sees a source that
       # was nil in round 1 because its type came from slot A. The
       # unifier should iterate until no more progress.
+      ast = parse(<<~CLEAR)
+        FN a() RETURNS Auto ->
+          RETURN 1;
+        END
+        FN b() RETURNS Auto ->
+          RETURN a();
+        END
+      CLEAR
+      fn_a = T.must(fn_nodes_of(ast)["a"])
+      fn_b = T.must(fn_nodes_of(ast)["b"])
+      src_a = AST::Identifier.new(Lexer::Token.new(:IDENTIFIER, "src_a", 1, 1), "src_a")
+      src_b = AST::Identifier.new(Lexer::Token.new(:IDENTIFIER, "src_b", 1, 1), "src_b")
       slot_a = AutoConstraintCollector::Slot.new(
-        kind: :return, fn_name: "a", index: nil, decl_node: nil, sources: [:src_a],
+        kind: :return, fn_name: "a", index: nil, decl_node: fn_a, sources: [src_a],
       )
       slot_b = AutoConstraintCollector::Slot.new(
-        kind: :return, fn_name: "b", index: nil, decl_node: nil, sources: [:src_b],
+        kind: :return, fn_name: "b", index: nil, decl_node: fn_b, sources: [src_b],
       )
-      slots = { [:return, "a"] => slot_a, [:return, "b"] => slot_b }
+      slots = { AutoSlotId.return("a") => slot_a, AutoSlotId.return("b") => slot_b }
 
       # In round 1, src_a → Int64; src_b → nil.
       # In round 2 (after a resolved), src_b → Int64 (because b's
       # body now sees a's resolution).
       a_resolved = false
       type_of = ->(node) {
-        case node
-        when :src_a then Type.new(:Int64)
-        when :src_b then a_resolved ? Type.new(:Int64) : nil
+        if node.equal?(src_a)
+          Type.new(:Int64)
+        elsif node.equal?(src_b)
+          a_resolved ? Type.new(:Int64) : nil
         end
       }
 
@@ -671,7 +684,7 @@ RSpec.describe "Gradual typing — AutoUnifier (Pass C)" do
       end
       result = unifier.resolve!
 
-      expect(result.resolved.keys).to contain_exactly([:return, "a"], [:return, "b"])
+      expect(result.resolved.keys).to contain_exactly(AutoSlotId.return("a"), AutoSlotId.return("b"))
     end
   end
 end
@@ -710,10 +723,17 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
     # than emitting a useless "slot" placeholder in a user-facing
     # diagnostic.
     it "raises ArgumentError when slot.kind is unrecognized" do
+      ast = parse(<<~CLEAR)
+        FN main() RETURNS !Void ->
+          x: Auto = 1;
+          RETURN;
+        END
+      CLEAR
+      decl = T.must(T.must(fn_nodes_of(ast)["main"]).body.find { |stmt| stmt.is_a?(AST::BindExpr) })
       bogus = AutoConstraintCollector::Slot.new(
         kind: :unknown_kind,
         fn_name: nil, index: nil,
-        decl_node: nil, sources: [],
+        decl_node: T.cast(decl, AST::BindExpr), sources: [],
         shape: nil, auto_token: nil,
       )
       expect {
@@ -730,7 +750,7 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      slot  = slots[[:param, "double", 0]]
+      slot  = slots[AutoSlotId.param("double", 0)]
       resolution = AutoUnifier::Resolution.new(slot: slot, type: Type.new(:Int64), sources: [])
 
       HelperHost.new.emit_auto_resolved_finding!(resolution)
@@ -762,7 +782,7 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
       Parser.gradual_mode = saved
 
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      slot  = slots[[:param, "double", 0]]
+      slot  = slots[AutoSlotId.param("double", 0)]
       expect(slot.decl_node.params[0][:type].auto_token).to be_nil  # implicit
       resolution = AutoUnifier::Resolution.new(slot: slot, type: Type.new(:Int64), sources: [])
 
@@ -782,7 +802,7 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      slot  = slots[[:param, "parseValue", 0]]
+      slot  = slots[AutoSlotId.param("parseValue", 0)]
       ambiguity = AutoUnifier::Ambiguity.new(
         slot: slot,
         observed_types: [Type.new(:Int64), Type.new(:String)],
@@ -817,7 +837,7 @@ RSpec.describe "Gradual typing — fix emission (M1.4)" do
         END
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
-      slot  = slots[[:param, "unused", 0]]
+      slot  = slots[AutoSlotId.param("unused", 0)]
 
       HelperHost.new.emit_auto_unresolved_finding!(slot)
 
@@ -1129,7 +1149,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
       evidence = OperatorEvidenceCollector.new(slots, fn_nodes_of(ast)).collect!
-      expect(evidence[[:param, "double", 0]]).to include(:ADD)
+      expect(evidence[AutoSlotId.param("double", 0)]).to include(:ADD)
     end
 
     it "records the RETURN expression's BinaryOp op against the return slot" do
@@ -1140,7 +1160,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
       evidence = OperatorEvidenceCollector.new(slots, fn_nodes_of(ast)).collect!
-      expect(evidence[[:return, "compute"]]).to include(:MUL)
+      expect(evidence[AutoSlotId.return("compute")]).to include(:MUL)
     end
 
     it "records multiple distinct ops when the binding is used in several BinaryOps" do
@@ -1154,7 +1174,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
       evidence = OperatorEvidenceCollector.new(slots, fn_nodes_of(ast)).collect!
-      ops = evidence[[:param, "compute", 0]]
+      ops = evidence[AutoSlotId.param("compute", 0)]
       expect(ops).to include(:ADD, :MUL, :SUB)
     end
 
@@ -1169,7 +1189,7 @@ RSpec.describe "Gradual typing — operator-aware suggestions (M2.1)" do
       CLEAR
       slots = AutoConstraintCollector.new(fn_nodes_of(ast)).collect!(ast)
       evidence = OperatorEvidenceCollector.new(slots, fn_nodes_of(ast)).collect!
-      expect(evidence[[:param, "foo", 0]]).to be_empty
+      expect(evidence[AutoSlotId.param("foo", 0)]).to be_empty
     end
   end
 

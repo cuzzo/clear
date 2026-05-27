@@ -83,23 +83,7 @@ INFALLIBLE_SIG_FAIL_SOURCES.each do |fs|
       #     Zig `!`). No :in_dev parks remain -- the gate is now the
       #     full regression oracle for the model.
       expected =
-        if decl == :error_union && ret == :heap_list
-          # #13 residue: a fn that DECLARES `RETURNS !Int64[]@list` and
-          # returns a collection LITERAL now COMPILES (the #10 coerced-
-          # type payload strip), but `r = subject() OR RAISE` leaks at
-          # the caller: the literal-returning subject is not in E1
-          # heap_fns (return_expr_is_heap? only recognizes call/ident/
-          # getfield, not literals) so no caller cleanup is paired.
-          # The safe-looking fixes (e3 see-through-OR_RESCUE +
-          # contract-level heap recognition) reintroduce the
-          # 527_discard_owned_value double-free / allocator-alignment
-          # mismatch -- strictly worse than the leak. This is the one
-          # precisely-isolated residual; it needs a dedicated cleanup-
-          # machinery change that recognizes literal-collection returns
-          # as heap-owning WITHOUT broadening heap_fns into the
-          # discard/GIVE path. Tracked: puck-clear-bugs.md #13.
-          :in_dev
-        elsif decl == :plain && true_fallible
+        if decl == :plain && true_fallible
           :compile_error            # ERROR under-declared, must reject
         else
           :pass                     # FAULT/declared-error: must compile

@@ -295,7 +295,7 @@ STD_LIB = T.let({
     zig: "try CheatLib.readFile({alloc}, {0})",
     bc: true,
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     suspends: true,   # io_uring submitRead + yield
     # FSM-mode templates (Phase B2-IO). Single-syscall variant: open
     # → fileSize → alloc buffer → one io_uring read → close. Most
@@ -402,7 +402,7 @@ STD_LIB = T.let({
     return_alloc: :frame,
     zig: "try CheatLib.readLine({alloc})",
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     can_fail: true,
   },
 
@@ -413,7 +413,7 @@ STD_LIB = T.let({
     return_alloc: :frame,
     zig: "try CheatLib.readLinePrompt({alloc}, {0})",
     allocates: true,
-    alloc: :frame,
+    alloc: :node_storage,
     can_fail: true,
   },
 
@@ -1018,6 +1018,7 @@ STD_LIB = T.let({
 POOL_METHODS = T.let({
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
+    mutates_receiver: true,
     bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
@@ -1091,8 +1092,8 @@ SET_METHODS = T.let({
     bc: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
-    borrows: :all,  # set dupes strings internally; caller retains ownership
-    args: [:"Any[]", :Any],
+    takes_args: [0],
+    args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
@@ -1123,7 +1124,7 @@ SET_METHODS = T.let({
   },
   "length" => {
     arity: 0, tag: :set_method,
-    zig: "{0}.length()",
+    zig: "CheatLib.len({0})",
     bc: true,
     return_type: :Int64,
     borrows: :all,
@@ -1226,7 +1227,7 @@ MAP_METHODS = T.let({
     arity: 0, tag: :map_method, allocates: true,
     bc: true,
     zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)",
-    alloc: :frame,
+    alloc: :node_storage,
     sharded_zig: "try {0}.keys({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
@@ -1268,7 +1269,7 @@ MAP_METHODS = T.let({
     arity: 0, tag: :map_method, allocates: true,
     bc: true,
     zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)",
-    alloc: :frame,
+    alloc: :node_storage,
     sharded_zig: "try {0}.values({alloc})",
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
@@ -1309,7 +1310,7 @@ INDEX_OPS = T.let({
       zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})",
       takes_value: true,
       allocates: true,
-      key_alloc: :heap,
+      key_alloc: :receiver_storage,
       val_alloc: :receiver_storage,
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
       shard_alloc: :heap,
@@ -1344,7 +1345,8 @@ INDEX_OPS = T.let({
     },
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
-      takes_value: false,
+      takes_value: true,
+      val_alloc: :receiver_storage,
     },
   },
   list: {
@@ -1355,7 +1357,8 @@ INDEX_OPS = T.let({
     },
     set: {
       zig: "CheatLib.setAt({target}, {index}, {value})",
-      takes_value: false,
+      takes_value: true,
+      val_alloc: :receiver_storage,
     },
   },
   pool: {

@@ -1,9 +1,12 @@
 # typed: strict
 require "sorbet-runtime"
-require_relative "../ast/ast"
+require_relative "../../ast/ast"
 
 module FunctionAnalysis
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Analyze a function or lambda body: enter scope, declare params/captures,
   # visit all statements, finalize scope, and resolve the return type.
@@ -92,9 +95,10 @@ module FunctionAnalysis
 
     scope = lookup_scope_for(func_name)
     unless scope
-      @fn_nodes = T.let(@fn_nodes, T.untyped)
+      @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+      fn_nodes = T.must(@fn_nodes)
       emit_typo_suggestion!(
-        node.token, func_name, @fn_nodes.keys,
+        node.token, func_name, fn_nodes.keys,
         "Undefined function '#{func_name}'",
         "closest declared function"
       )
@@ -132,7 +136,7 @@ module FunctionAnalysis
 
       if func_type.extern
         args.each do |arg|
-          if arg.full_type.soa?
+          if arg.full_type!(context: "extern argument").soa?
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
@@ -143,7 +147,7 @@ module FunctionAnalysis
         params.each_with_index do |p, i|
           if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
-            args[i].full_type = :Type  # Mark as type-value, not a variable
+            stamp_type!(args[i], :Type) # Mark as type-value, not a variable
           end
         end
         if comptime_type_args.any?
@@ -167,7 +171,7 @@ module FunctionAnalysis
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
-        node.full_type = substituted.return_type
+        stamp_type!(node, substituted.return_type)
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
@@ -175,7 +179,7 @@ module FunctionAnalysis
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
         rt = func_type.return_type
-        node.full_type = rt.is_a?(Type) ? Type.new(rt) : rt
+        stamp_type!(node, rt.is_a?(Type) ? Type.new(rt) : rt)
         # Auto-propagate (CLEAR's error-handling default): the call's
         # *expression-level* type is the SUCCESS branch -- a binding
         # `h = call()` sees `T`, not `!T`. The error union flows
@@ -186,10 +190,11 @@ module FunctionAnalysis
         # The original `!T` is stashed on `error_union_type` so
         # OR-RESCUE handlers (which read the LHS's union to pick
         # `catch`/`orelse`) can still see the un-stripped form.
-        if node.full_type.respond_to?(:error_union?) &&
-           node.full_type.error_union?
-          node.error_union_type = node.full_type if node.respond_to?(:error_union_type=)
-          outer = node.full_type
+        call_type = node.full_type!(context: "function call result")
+        if call_type.respond_to?(:error_union?) &&
+           call_type.error_union?
+          node.error_union_type = call_type if node.respond_to?(:error_union_type=)
+          outer = call_type
           inner = outer.payload_type
           # The parser stamps storage/ownership/sync/layout on the
           # OUTER error union (e.g. `!Node @multiowned` -> outer.ownership
@@ -218,8 +223,13 @@ module FunctionAnalysis
                inner.respond_to?(:layout=)
               inner.layout = outer.layout
             end
+            if outer.respond_to?(:collection) && outer.collection &&
+               inner.respond_to?(:collection) && inner.collection.nil? &&
+               inner.respond_to?(:collection=)
+              inner.collection = outer.collection
+            end
           end
-          node.full_type = inner
+          stamp_type!(node, inner)
         end
       end
 
@@ -234,10 +244,11 @@ module FunctionAnalysis
       )
       call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, synthetic_sig)
-      node.full_type = sig.return_type
+      node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
+      stamp_type!(node, sig.return_type)
 
     elsif func_type.is_a?(Symbol)
-      node.full_type = func_type
+      stamp_type!(node, func_type)
 
     else
       error!(node, :NOT_A_FUNCTION, name: func_name)
@@ -367,13 +378,16 @@ module FunctionAnalysis
 
       is_give = arg_node.is_a?(AST::MoveNode)
       inner_node = is_give ? arg_node.value : arg_node
+      if is_give && !param.takes
+        error!(arg_node, :GIVE_TO_BORROW_PARAM, param: param.name)
+      end
       if param.takes || is_give
         # Reject borrowed values passed to TAKES params.
         # Container index access (arr[i], map[key]) returns a borrow -
         # you cannot take ownership of data inside a container.
         # Use .remove(i) or COPY arr[i] instead.
         if inner_node.container_borrow
-          arg_ti = inner_node.full_type
+          arg_ti = inner_node.full_type!(context: "TAKES index argument")
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti.is_a?(Type) ?
             (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
@@ -409,7 +423,7 @@ module FunctionAnalysis
         # `@shared` / `@multiowned` upgrade — irrelevant when the
         # consumer's parameter is plain affine and won't accept a
         # refcounted handle anyway.
-        move_if_not_copyable!(
+        move_if_takes_ownership!(
           inner_node,
           action: is_give ? :give : :takes,
           consumer_param_type: param.type,
@@ -424,7 +438,7 @@ module FunctionAnalysis
       end
 
       # Weak refs must be RESOLVE'd before passing to concrete params.
-      arg_ti = arg_node.respond_to?(:full_type) ? arg_node.full_type : nil
+      arg_ti = T.cast(arg_node, AST::Locatable).full_type!(context: "call argument")
       expected_raw = param.type
       if arg_ti&.link? && expected_raw != :Any
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
@@ -443,11 +457,11 @@ module FunctionAnalysis
       # resolved_type only returns the return-type symbol for fn_types, so we
       # must compare the full Type objects to validate signature compatibility.
       expected_type_obj = expected.is_a?(Type) ? expected : Type.new(expected || :Any)
-      if expected_type_obj.fn_type? && arg_node.respond_to?(:full_type)
-        actual_type_obj = arg_node.full_type
-        if actual_type_obj.is_a?(Type) && expected_type_obj.accepts?(actual_type_obj)
+      if expected_type_obj.fn_type?
+        actual_type_obj = T.cast(arg_node, AST::Locatable).full_type!(context: "fn-typed argument")
+        if expected_type_obj.accepts?(actual_type_obj)
           match = true
-        elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
+        elsif actual_type_obj.fn_type? &&
               actual_type_obj.raw.reentrant && !expected_type_obj.raw.reentrant
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
           error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param.name)
@@ -608,9 +622,7 @@ module FunctionAnalysis
       error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
-    # Empty return_lifetime means the signature has no lifetime annotation.
-    lifetime_paths = signature.return_lifetime || []
-    lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
+    lifetime_paths = signature.return_lifetime
     return true if lifetime_paths.empty?
 
     borrow_type = param.mutable ? :mutable : :immutable
@@ -749,7 +761,7 @@ module FunctionAnalysis
               error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param.name, type: param.type, missing: missing.join(', '))
             end
           end
-          param.default.full_type = param.type
+          stamp_type!(param.default, param.type)
         else
           visit(param.default)
           def_type = param.default.resolved_type
@@ -922,7 +934,7 @@ module FunctionAnalysis
       return true if (Schemas.union?(schema) || Schemas.enum?(schema))
     end
 
-    lifetime_paths = current_fn_ctx&.lifetime || []
+    lifetime_paths = current_fn_ctx.lifetime
     type_info = node.type_object
     has_lifetime = !lifetime_paths.empty?
     is_wildcard = lifetime_paths == [:wildcard]
@@ -1009,7 +1021,7 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     pred = REJECT_TYPE_PREDICATES[kind]
     return false unless pred
-    type = arg.full_type
+    type = arg.full_type!(context: "intrinsic reject argument")
     return false unless type.is_a?(Type)
     pred.call(type)
   end
@@ -1033,7 +1045,7 @@ module FunctionAnalysis
           expected = spec[:type]
           next false unless is_safe_autocast?(arg.resolved_type, expected)
           # Check capability constraints (sync, ownership, etc.)
-          arg_type = arg.full_type
+          arg_type = arg.full_type!(context: "intrinsic capability argument")
           next false if spec[:sync] && arg_type&.sync != spec[:sync]
           next false if spec[:ownership] && arg_type&.ownership != spec[:ownership]
           true

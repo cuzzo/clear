@@ -381,6 +381,7 @@ pub fn SplitStream(
                 .alloc = alloc,
                 .wg = WaitGroupType.init(sched),
             };
+            inner.wg.add(1);
             const head_seq = inner.head_seq.load(.acquire);
             // spawnNew's anchor handle is is_reader=0 — it exists to hold
             // a reference to Inner but typically does not call next().
@@ -467,24 +468,18 @@ pub fn SplitStream(
 
         pub fn close(self: *Self) void {
             self.inner.mutex.lock() catch unreachable;
+            const already_closed = self.inner.closed.load(.acquire) != 0;
             if (self.inner.chunks_tail.load(.acquire)) |tail| {
                 _ = publishChunk(self.inner, tail);
             }
-            self.inner.closed.store(1, .release);
+            if (!already_closed) self.inner.closed.store(1, .release);
             wakeAllParkedSubscribers(self.inner);
             // Producer may have parked itself for backpressure and never
             // returned to push; close() must wake it (typically a no-op
             // since close() is called by the producer after it finishes).
             wakeParkedProducer(self.inner);
-            const should_destroy = self.inner.active_subscribers.load(.acquire) == 0;
             self.inner.mutex.unlock();
-
-            if (should_destroy) {
-                self.inner.mutex.lock() catch unreachable;
-                clearAllChunks(self.inner);
-                self.inner.mutex.unlock();
-                destroyInner(self.inner);
-            }
+            if (!already_closed) self.inner.wg.done();
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
@@ -629,6 +624,7 @@ pub fn SplitStream(
             if (!self.active) return;
 
             var should_destroy = false;
+            var should_signal_close = false;
             self.inner.mutex.lock() catch unreachable;
             if (self.subscriber_id != InvalidSubscriber) {
                 var record = &self.inner.subscribers.items[self.subscriber_id];
@@ -646,8 +642,10 @@ pub fn SplitStream(
             self.next_index = 0;
 
             if (self.inner.active_subscribers.load(.acquire) == 0) {
+                should_signal_close = self.inner.closed.load(.acquire) == 0;
+                self.inner.closed.store(1, .release);
                 clearAllChunks(self.inner);
-                should_destroy = self.inner.closed.load(.acquire) != 0;
+                should_destroy = true;
             } else {
                 releaseConsumedPrefix(self.inner);
             }
@@ -656,7 +654,11 @@ pub fn SplitStream(
             wakeParkedProducer(self.inner);
             self.inner.mutex.unlock();
 
-            if (should_destroy) destroyInner(self.inner);
+            if (should_destroy) {
+                if (should_signal_close) self.inner.wg.done();
+                self.inner.wg.wait();
+                destroyInner(self.inner);
+            }
         }
     };
 }

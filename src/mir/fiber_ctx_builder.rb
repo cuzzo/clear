@@ -68,7 +68,27 @@ module FiberCtxBuilder
   # dupe_decl_zig  : String?             -- pre-spawn dupe decl (FreshHeapCopy only)
   # body_cleanup_zig : String?           -- in-body cleanup defer (FreshHeapCopy only)
   CaptureSpec = Struct.new(:name, :field_type_zig, :init_value_zig, :init_value_mir,
-                           :dupe_decl_zig, :body_cleanup_zig)
+                           :dupe_decl_zig, :body_cleanup_zig, :setup_mir,
+                           :release_func, :payload_zig) do
+    extend T::Sig
+
+    sig { params(receiver: String).returns(T.nilable(MIR::DeferStmt)) }
+    def cleanup_mir_for(receiver)
+      return nil unless release_func && payload_zig
+
+      MIR::DeferStmt.new(MIR::Call.new(
+        "CheatLib.#{release_func}",
+        [
+          MIR::Ident.new(T.cast(payload_zig, String)),
+          MIR::Ident.new("std.heap.page_allocator"),
+          MIR::Ident.new("#{receiver}.#{name}"),
+        ],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3),
+      ))
+    end
+  end
 
   # specs                : Array<CaptureSpec>
   # capture_map          : Hash<name => "<prefix>.name"> for body identifier rewrites
@@ -100,9 +120,9 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String]).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
-                 fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {})
+                 fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {}, schema_lookup: nil)
     captured = analysis&.captures || {}
     strategies = analysis&.strategies || {}
     pointer_captures = analysis&.pointer_captures || Set.new
@@ -110,21 +130,53 @@ module FiberCtxBuilder
       strat = strategies[name]
       if promoted_names[name]
         CaptureSpec.new(name, "[]const u8", promoted_names[name],
-                        MIR::Ident.new(promoted_names[name]), nil, nil)
+                        MIR::Ident.new(promoted_names[name]), nil, nil, nil, nil, nil)
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
+        needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup)
         # ctx field type and dupe return type must be the same
         # expression (CapturedValue) so they cannot diverge for a
         # `*const T` borrowed-param source.
-        dupe_decl =
-          "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});\n" \
-          "        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});"
-        body_cleanup =
-          "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
+        dupe_decl = "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});"
+        dupe_decl += "\n        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});" if needs_cleanup
+        body_cleanup = if needs_cleanup
+          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
+        end
         CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
-                        MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
+                        MIR::Ident.new(dupe_var), dupe_decl, body_cleanup, nil, nil, nil)
+      elsif strat.is_a?(CaptureStrategy::RcClone)
+        retain_var = "__fc_#{fresh_heap_id}_#{name}_retain"
+        source_ref = source_overrides[name] || name
+        ti = _type_obj.is_a?(Type) ? _type_obj : Type.new(_type_obj)
+        sym = analysis&.capture_symbols&.dig(name)
+        shared_capture = ti.shared? || sym&.storage == :shared
+        func = shared_capture ? "arcRetain" : "rcRetain"
+        release = shared_capture ? "arcRelease" : "rcRelease"
+        payload_zig = rc_payload_zig_type(ti)
+        retain_decl = "const #{retain_var} = CheatLib.#{func}(#{payload_zig}, #{source_ref});"
+        body_cleanup =
+          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.#{release}(#{payload_zig}, std.heap.page_allocator, " \
+          "#{body_access_prefix}.#{name});"
+        setup_mir = MIR::Let.new(retain_var, MIR::Call.new(
+          "CheatLib.#{func}",
+          [MIR::Ident.new(payload_zig), MIR::Ident.new(source_ref)],
+          false,
+          false,
+          MIR::CallableContract.no_ownership(2),
+        ), false, nil, nil)
+        CaptureSpec.new(name, "@TypeOf(#{source_ref})", retain_var,
+                        MIR::Ident.new(retain_var), retain_decl, body_cleanup,
+                        setup_mir, release, payload_zig)
+      elsif strat.is_a?(CaptureStrategy::MoveInto)
+        source_ref = source_overrides[name] || name
+        cleanup = if needs_move_capture_cleanup?(_type_obj, schema_lookup)
+                    "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
+                    "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
+                  end
+        CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
+                        MIR::Ident.new(source_ref), nil, cleanup, nil, nil, nil)
       elsif pointer_captures.include?(name)
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
         # Capture by pointer so writes inside the fiber body land on the
@@ -146,17 +198,54 @@ module FiberCtxBuilder
         sym = analysis&.capture_symbols&.dig(name)
         if sym&.is_param
           CaptureSpec.new(name, "@TypeOf(#{name})", name,
-                          MIR::Ident.new(name), nil, nil)
+                          MIR::Ident.new(name), nil, nil, nil, nil, nil)
         else
           CaptureSpec.new(name, "@TypeOf(&#{name})", "&#{name}",
-                          MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil)
+                          MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil, nil, nil, nil)
         end
       else
         CaptureSpec.new(name, "@TypeOf(#{name})", name,
-                        MIR::Ident.new(name), nil, nil)
+                        MIR::Ident.new(name), nil, nil, nil, nil, nil)
       end
     end
     map = captured.keys.to_h { |n| [n, "#{body_access_prefix}.#{n}"] }
     Result.new(specs, map, analysis&.capture_symbols || {})
+  end
+
+  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.needs_move_capture_cleanup?(type_obj, schema_lookup = nil)
+    ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
+    return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
+  rescue StandardError
+    false
+  end
+
+  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil)
+    ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
+    return false if ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    needs_move_capture_cleanup?(ti, schema_lookup) ||
+      ti.any_sync? || ti.any_rc? || !!(ti.ownership && ti.ownership != :affine)
+  rescue StandardError
+    false
+  end
+
+  sig { params(ti: Type).returns(String) }
+  def self.rc_payload_zig_type(ti)
+    payload = Type.new(ti)
+    payload.ownership = :affine
+    payload.provenance = nil
+    payload.instance_variable_set(:@zig_type_cache, nil)
+    if payload.any_sync? && !(payload.map? && payload.striped?)
+      inner = payload.bare_data_type.zig_type
+      inner = "CheatLib.Locked(#{inner})" if payload.locked?
+      inner = "CheatLib.RwLocked(#{inner})" if payload.write_locked?
+      inner = "CheatLib.RefCell(#{inner})" if payload.sync == :always_mutable
+      inner = "CheatLib.Versioned(#{inner})" if payload.versioned?
+      inner = payload.indirect? ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})" if payload.atomic?
+      return inner
+    end
+    payload.zig_type
   end
 end

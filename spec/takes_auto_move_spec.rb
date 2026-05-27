@@ -112,8 +112,9 @@ RSpec.describe "TAKES auto-move" do
       END
     CLEAR
     body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
-    # ast is MOVED on all paths (TAKES) or UNINIT on error path → no cleanup
-    expect(body).not_to include("ast_moved")
+    # The RETURN call is still an ownership boundary: the guarded cleanup is
+    # suppressed by an explicit move mark before the callee takes ownership.
+    expect(body).to include("ast_moved = true")
   end
 
   it "TAKES + RETURN eliminates caller defer (no double-free)" do

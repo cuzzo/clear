@@ -22,24 +22,16 @@ require_relative "../src/mir/mir"
 
 RSpec.describe CleanupClassifier do
   def cleanup_for(src, fn_name)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
+    result = compile_mir_frontend(src)
+    ast = result.ast
 
     fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
     raise "Function '#{fn_name}' not found" unless fn_node
 
     CleanupClassifier.classify(
       fn_node,
-      fn_nodes: fn_nodes,
-      schema_lookup: schema_lookup,
+      fn_nodes: result.fn_nodes,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
     )
   end
 
@@ -86,7 +78,7 @@ RSpec.describe CleanupClassifier do
         expect(entry).not_to be_nil
         # Provenance-based: :heap_union (heap cleanup_alloc for unions with heap variants)
         expect([:uniform]).to include(entry[:kind])
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
         expect(entry[:alloc]).to eq(:heap)
       end
     end
@@ -204,7 +196,7 @@ RSpec.describe CleanupClassifier do
   # MATCH AS bindings (the double-free bug fix)
   # =========================================================================
   describe "MATCH AS binding (borrow)" do
-    context "MATCH AS auto-promotes to TAKES for non-Copy variants" do
+    context "plain MATCH AS borrows non-Copy variants" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
@@ -218,11 +210,8 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks AS binding for cleanup (auto-TAKES)" do
-        expect(plan["items"]).not_to be_nil
-        # :match_as_slice was a vestigial alias of :takes_slice (same emit body).
-        expect(plan["items"][:kind]).to eq(:uniform)
-        expect(plan["items"][:match_as]).to eq(true)
+      it "does not synthesize owned cleanup for the AS binding" do
+        expect(plan["items"]).to be_nil
       end
     end
 
@@ -326,7 +315,7 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks for heap cleanup with _moved guard" do
+      it "marks for map-owned heap cleanup with a moved guard" do
         entry = plan["m"]
         expect(entry[:alloc]).to eq(:heap)
         expect(entry[:kind]).to eq(:uniform)
@@ -358,7 +347,7 @@ RSpec.describe CleanupClassifier do
       it "marks for heap cleanup" do
         entry = plan["list1"]
         expect(entry[:alloc]).to eq(:heap)
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
       end
     end
 
@@ -425,13 +414,13 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "marks for cleanup with _moved guard" do
+      it "marks for cleanup without a moved guard until a move site exists" do
         entry = plan["v"]
         expect(entry).not_to be_nil
         expect(entry[:needs_cleanup]).to eq(true)
         # Provenance-based: :heap_union (COPY produces :heap provenance)
         expect([:uniform]).to include(entry[:kind])
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
       end
     end
   end
@@ -472,8 +461,9 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "has no entries" do
-        expect(plan["s"]).to be_nil
+      it "has a no-cleanup frame lifetime entry" do
+        expect(plan["s"]&.dig(:needs_cleanup)).to be false
+        expect(plan["s"]&.dig(:alloc)).to eq(:frame)
       end
     end
 
@@ -509,9 +499,9 @@ RSpec.describe CleanupClassifier do
         CLEAR
       end
 
-      it "pool has _moved guard through collection cleanup" do
+      it "pool uses unguarded cleanup until a move site requires a guard" do
         entry = plan["pool"]
-        expect(entry[:has_moved_guard]).to eq(true)
+        expect(entry[:has_moved_guard]).to eq(false)
         expect(entry[:kind]).to eq(:uniform)
       end
     end
@@ -581,7 +571,7 @@ RSpec.describe CleanupClassifier do
       CLEAR
       entry = plan["r"]
       expect(entry).not_to be_nil, "CATCH string return should have cleanup"
-      expect(entry[:kind]).to eq(:heap_string)
+      expect(entry[:kind]).to eq(:uniform)
     end
   end
 
@@ -694,16 +684,9 @@ RSpec.describe CleanupClassifier do
 
   # Run the full MIRPass pipeline and return the cleanup plan for a function.
   def mir_plan_for(src, fn_name)
-    tokens = Lexer.new(src).tokenize
-    ast = Parser.new(tokens, src).parse
-    annotator = SemanticAnnotator.new
-    annotator.annotate!(ast)
-    fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir.transform!(ast)
-    mir.cleanup_bindings[fn_name]
+    result = compile_mir_frontend(src)
+    fn = result.fn_nodes[fn_name]
+    fn&.cleanup_bindings || {}
   end
 
   # ===========================================================================
@@ -720,7 +703,7 @@ RSpec.describe CleanupClassifier do
         FN main() RETURNS Void ->
             d = makeNested();
             d2 = COPY d;
-            PARTIAL MATCH d2 START
+            PARTIAL MATCH TAKES d2 START
                 Data.Nested AS n -> print(n.label);,
                 DEFAULT -> print("wrong");
             END

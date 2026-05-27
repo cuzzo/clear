@@ -65,8 +65,9 @@ class IntrinsicEmit < T::Struct
   prop :elem,            T.nilable(String),                  default: nil
   prop :fallible_clauses, T.untyped,                         default: nil
 
+  # --- Lifetime sources ---
+  prop :lifetime,        T::Array[String],                   default: []
   # --- Strings ---
-  prop :lifetime,        T.nilable(String),                  default: nil
   prop :reject_error,    T.nilable(String),                  default: nil
 
   # --- Arg-shape (element typing deferred; union keeps it bounded) ---

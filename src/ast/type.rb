@@ -36,6 +36,39 @@ class Type
   STRING_TYPE = :String
   HEAP_STRING_TYPE = :String
 
+  OWNERSHIP_SURFACE_NAMES = T.let({
+    multiowned: "@multiowned",
+    shared: "@shared",
+    split: "@split",
+    link: "@link",
+    frozen: "@frozen",
+  }.freeze, T::Hash[Symbol, String])
+
+  SYNC_SURFACE_NAMES = T.let({
+    locked: "@locked",
+    write_locked: "@writeLocked",
+    versioned: "@versioned",
+    atomic: "@atomic",
+    always_mutable: "@alwaysMutable",
+    local: "@local",
+  }.freeze, T::Hash[Symbol, String])
+
+  SYNC_FAMILY_NAMES = T.let({
+    locked: "locked",
+    write_locked: "writeLocked",
+    versioned: "versioned",
+    atomic: "atomic",
+    always_mutable: "alwaysMutable",
+    local: "local",
+  }.freeze, T::Hash[Symbol, String])
+
+  sig { params(value: T.untyped).returns(T::Boolean) }
+  def self.indirect_type?(value)
+    return false unless value.is_a?(Type)
+
+    value.indirect? == true
+  end
+
   # Operator categories
   BOOL_RESULT_OPS = [:EQ, :NEQ, :LT, :GT, :LTE, :GTE]
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
@@ -334,7 +367,7 @@ class Type
   sig { returns(Symbol) }
   def escape_class
     return :value          if primitive?
-    return :value          if generic_instance? && generic_base == :Id
+    return :value          if id_handle?
     return :refcounted     if any_rc?
     return :sync_wrapped   if any_sync?
     return (rodata? ? :slice_rodata : :slice_managed) if string?
@@ -408,14 +441,14 @@ class Type
     # 3. Optional coercion: ?T accepts T, NIL, or ?T
     if optional?
       return true if other_type.resolved == :NIL
-      inner = other_type.optional? ? other_type.wrapped_type : other_type
-      return wrapped_type.accepts?(inner)
+      inner = other_type.optional? ? T.must(other_type.wrapped_type) : other_type
+      return T.must(wrapped_type).accepts?(inner)
     end
 
     # 4. Error union coercion: !T accepts T or !T
     if error_union?
-      inner = other_type.error_union? ? other_type.payload_type : other_type
-      return payload_type.accepts?(inner)
+      inner = other_type.error_union? ? T.must(other_type.payload_type) : other_type
+      return T.must(payload_type).accepts?(inner)
     end
 
     # 5. Tense (Promise/Stream) coercion
@@ -784,6 +817,14 @@ class Type
     collection? || non_string_array?
   end
 
+  # True when values of this type carry pointer-backed data that must not
+  # outlive its allocator region.
+  sig { returns(T::Boolean) }
+  def heap_ptr?
+    return !!(wrapped_type&.heap_ptr?) if optional?
+    string? || indirect? || tense_observable? || collection? || (array? && !fixed? && !string?)
+  end
+
   sig { returns(T::Boolean) }
   def associative_collection?
     map?
@@ -796,13 +837,13 @@ class Type
 
   sig { returns(T.nilable(Symbol)) }
   def ownership_storage
-    return ownership if ownership == :shared || ownership == :multiowned
+    return ownership if shared? || multiowned?
     nil
   end
 
   sig { returns(T::Boolean) }
   def direct_indexable_collection?
-    list_collection? || (array? && !string?)
+    list_collection? || (array? && !string? && !collection?)
   end
 
   sig { returns(T::Boolean) }
@@ -899,7 +940,7 @@ class Type
   # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   sig { returns(T::Boolean) }
   def needs_heap_backing?
-    pool? || sharded? || heap? || map? || tense_observable?
+    pool? || sharded? || heap? || tense_observable?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.
@@ -1050,6 +1091,26 @@ class Type
     @generic_base_raw
   end
 
+  sig { returns(T::Boolean) }
+  def id_handle?
+    generic_instance? && @generic_base_raw == :Id
+  end
+
+  sig { returns(T.nilable(String)) }
+  def ownership_surface_name
+    OWNERSHIP_SURFACE_NAMES[@ownership]
+  end
+
+  sig { returns(T.nilable(String)) }
+  def sync_surface_name
+    SYNC_SURFACE_NAMES[@sync]
+  end
+
+  sig { returns(T.nilable(String)) }
+  def sync_family_name
+    SYNC_FAMILY_NAMES[@sync]
+  end
+
   # The type arguments as Type objects: [Type(:Float64), Type(:String)]
   sig { returns(T.untyped) }
   def generic_args
@@ -1067,7 +1128,7 @@ class Type
     @is_optional
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def wrapped_type
     return nil unless optional?
     @wrapped_type_obj ||= T.let(Type.new(@wrapped_type_raw || :Any), T.nilable(Type))
@@ -1079,10 +1140,36 @@ class Type
     @is_error_union
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(Type)) }
   def payload_type
     return nil unless error_union?
     @payload_type_obj ||= T.let(Type.new(@payload_type_raw || :Any), T.nilable(Type))
+  end
+
+  sig { returns(Type) }
+  def success_type
+    return self unless error_union?
+
+    error_union_payload_with_outer_capabilities
+  end
+
+  sig { returns(Type) }
+  def error_union_payload_with_outer_capabilities
+    payload = Type.new(T.must(payload_type))
+    payload.instance_variable_set(:@collection, @collection) if @collection && !payload.collection
+    payload.instance_variable_set(:@shard_count, @shard_count) if @shard_count && !payload.shard_count
+    payload.instance_variable_set(:@soa, @soa) if @soa && !payload.soa?
+    payload.instance_variable_set(:@layout, @layout) if @layout && !payload.layout
+    payload.instance_variable_set(:@ownership, @ownership) if @ownership && @ownership != :affine
+    payload.instance_variable_set(:@sync, @sync) if @sync
+    payload.instance_variable_set(:@provenance, @provenance) if @provenance && !payload.provenance
+    payload
+  end
+
+  sig { returns(Type) }
+  def value_payload_type
+    t = success_type
+    t.optional? ? T.must(t.wrapped_type) : t
   end
 
   # Tense (Promise) types: ~T — a background task that will produce T
@@ -1097,6 +1184,18 @@ class Type
   sig { returns(T::Boolean) }
   def observable?
     !!@is_observable
+  end
+
+  # NEXT on an observable array future materializes an owned array snapshot.
+  # Keep that source-shape decision with Type so annotation and MIR lowering
+  # cannot drift on the `observable? && tense_type.array?` protocol.
+  sig { returns(T::Boolean) }
+  def observable_array_future?
+    tt = tense_type
+    return false unless observable?
+    return false unless tt.is_a?(Type)
+
+    tt.array? == true
   end
 
   # True when this is a pipeline-terminal observable binding shape:
@@ -1480,7 +1579,7 @@ class Type
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     # Pool Id<T> handles are u64 indices — always Copy.
-    return true if generic_instance? && generic_base == :Id
+    return true if id_handle?
     # String literals (rodata) are Copy - static data, never freed.
     return true if string? && rodata?
     # Non-literal strings are NOT Copy - they reference frame/heap data.
@@ -1520,9 +1619,11 @@ class Type
     seen.add(key)
 
     return false if provenance == :borrow
-    return true if string? || any_rc? || link? || collection?
+    return wrapped_type&.recursive_cleanup_shape?(schema_lookup, seen) || false if optional?
+    return true if string? || any_rc? || link? || collection? || indirect?
 
     if array?
+      return true unless fixed?
       et = element_type
       return false unless et
       return Type.from_node(et)&.recursive_cleanup_shape?(schema_lookup, seen) || false
@@ -1697,12 +1798,12 @@ class Type
       fields = vt.fields
       return fields.any? { |_, ft|
         t = ft.is_a?(Type) ? ft : (Type.new(ft) rescue nil)
-        t && (t.indirect? || t.string? || t.collection? || (t.array? && !t.fixed?))
+        t && t.heap_ptr?
       }
     end
     t = vt.is_a?(Type) ? vt : Type.new(vt) rescue nil
     return false unless t
-    (t.indirect? || t.collection? || t.string? || (t.array? && !t.fixed?)) rescue false
+    t.heap_ptr? rescue false
   end
 
   # Safely extract a normalized Type from any AST/MIR node or raw type value.
@@ -2137,48 +2238,13 @@ class Type
 
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
-      # The parser stamps storage decorators (heap/frame, ownership
-      # like @multiowned/@shared, sync, layout) on the OUTER
-      # error-union Type, but `payload_type` is built from the bare
-      # base symbol -- so a `RETURNS !User @indirect` payload is `User` (no
-      # heap), and `RETURNS !Node @multiowned` payload is `Node` (no
-      # ownership). Propagate the outer's storage hints so the
-      # payload renders as `*User`, `CheatLib.Rc(Node)`,
-      # `CheatLib.Arc(Node)`, etc. -- matching what the body actually
-      # returns and what zig_type would produce for the bare type.
-      pt = payload_type
-      if pt
-        # Make a copy so we don't mutate the cached payload Type.
-        pt = Type.new(pt) if pt.is_a?(Type)
-        if heap? && pt.respond_to?(:provenance) && pt.provenance != :heap &&
-           pt.respond_to?(:provenance=)
-          pt.provenance = :heap
-        end
-        # Generic ownership propagation: any non-default outer
-        # ownership (multiowned / shared / link / ...) flows to the
-        # payload so the inner zig_type renders the right wrapper
-        # (Rc / Arc / WeakRc / ...).
-        if respond_to?(:ownership) && ownership && ownership != :affine &&
-           pt.respond_to?(:ownership) && (pt.ownership.nil? || pt.ownership == :affine) &&
-           pt.respond_to?(:ownership=)
-          pt.ownership = ownership
-        end
-        if respond_to?(:sync) && sync && pt.respond_to?(:sync) && pt.sync.nil? &&
-           pt.respond_to?(:sync=)
-          pt.sync = sync
-        end
-        if respond_to?(:layout) && layout && pt.respond_to?(:layout) && pt.layout.nil? &&
-           pt.respond_to?(:layout=)
-          pt.layout = layout
-        end
-      end
-      inner_zig = pt.zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = error_union_payload_with_outer_capabilities.zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
     end
 
     # 2. Handle Optional: ?T -> ?zig_type
     if optional?
-      inner_zig = wrapped_type.zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = T.must(wrapped_type).zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
     end
 
@@ -2360,7 +2426,7 @@ class Type
     #    Pair<Number> -> Pair(f64),  Map<String,Number> -> Map([]const u8, f64)
     #    Id<User>     -> u64        (compiler-intrinsic handle, type param is for CLEAR safety only)
     if generic_instance?
-      return "u64" if @generic_base_raw == :Id
+      return "u64" if id_handle?
       args_zig = @generic_args_raw.map { |a| Type.new(a).zig_type }.join(", ")
       return "#{@generic_base_raw}(#{args_zig})"
     end
@@ -2428,4 +2494,4 @@ end
 # T.nilable(Type)` evaluates at class-body time). All Type refs to
 # FunctionSignature are runtime-lazy (method bodies), so deferring
 # this require is safe.
-require_relative "../annotator-helpers/function_signature"
+require_relative "../annotator/helpers/function_signature"

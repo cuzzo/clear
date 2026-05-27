@@ -247,20 +247,9 @@ module FsmTransform
     def emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
-      tail =
-        case susp_tail
-        when Segments::IoSuspend
-          Segments::IoSuspend.new(
-            susp_tail.call_node, susp_tail.stdlib_def, susp_tail.result_var,
-            after_idx,
-          )
-        when Segments::NextSuspend
-          Segments::NextSuspend.new(
-            susp_tail.promise_ast, susp_tail.result_var, after_idx,
-          )
-        else
-          raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}"
-        end
+      raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
+
+      tail = susp_tail.with_next_index(after_idx)
       builder.fill(idx, pre, tail)
       idx
     end
@@ -273,17 +262,10 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
       case stmt
-      when AST::WhileLoop, AST::WhileBindLoop
-        contains_suspend_anywhere?(stmt.do_branch)
-      when AST::ForRange, AST::ForEach
-        contains_suspend_anywhere?(stmt.body)
-      when AST::IfStatement
-        contains_suspend_anywhere?(stmt.then_branch) ||
-          contains_suspend_anywhere?(stmt.else_branch || [])
       when AST::WithBlock
         with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
       else
-        false
+        AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
       end
     end
 
@@ -296,17 +278,10 @@ module FsmTransform
       Array(stmts).any? do |stmt|
         next true if Segments.classify_suspend(stmt)
         case stmt
-        when AST::WhileLoop, AST::WhileBindLoop
-          contains_suspend_anywhere?(stmt.do_branch)
-        when AST::ForRange, AST::ForEach
-          contains_suspend_anywhere?(stmt.body)
         when AST::WithBlock
           with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
-        when AST::IfStatement
-          contains_suspend_anywhere?(stmt.then_branch) ||
-            contains_suspend_anywhere?(stmt.else_branch || [])
         else
-          false
+          AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
         end
       end
     end
@@ -381,7 +356,7 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return false unless sus.is_a?(Segments::NextSuspend)
-      pt = sus.promise_ast.full_type
+      pt = Type.from_node!(sus.promise_ast, context: "FSM suspend promise")
       return true unless pt.future?
       return true if pt.respond_to?(:stream?) && pt.stream?
       return true if pt.respond_to?(:promise_list?) && pt.promise_list?
@@ -418,20 +393,9 @@ module FsmTransform
     def emit_suspend(susp_tail, after_idx, builder)
       T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
-      tail =
-        case susp_tail
-        when Segments::IoSuspend
-          Segments::IoSuspend.new(
-            susp_tail.call_node, susp_tail.stdlib_def, susp_tail.result_var,
-            after_idx,
-          )
-        when Segments::NextSuspend
-          Segments::NextSuspend.new(
-            susp_tail.promise_ast, susp_tail.result_var, after_idx,
-          )
-        else
-          raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}"
-        end
+      raise UnsupportedShape, "Unhandled suspend kind #{susp_tail.class}" unless Segments.suspend_tail?(susp_tail)
+
+      tail = susp_tail.with_next_index(after_idx)
       builder.fill(idx, [], tail)
       idx
     end
@@ -518,7 +482,7 @@ module FsmTransform
     def emit_for_each_fragment(for_stmt, after_idx, builder, lowering)
       T.bind(self, T.untyped) rescue nil
       coll_ast = for_stmt.collection
-      coll_type = coll_ast.full_type
+      coll_type = Type.from_node!(coll_ast, context: "FSM foreach collection")
       ct = coll_type.is_a?(Type) ? coll_type : (coll_type ? Type.new(coll_type) : nil)
       raise UnsupportedShape, "ForEach without resolved coll type" if ct.nil?
 
@@ -825,16 +789,8 @@ module FsmTransform
           mapping.fetch(tail.then_index),
           mapping.fetch(tail.else_index),
         )
-      when Segments::IoSuspend
-        Segments::IoSuspend.new(
-          tail.call_node, tail.stdlib_def, tail.result_var,
-          tail.next_index ? mapping.fetch(tail.next_index) : nil,
-        )
-      when Segments::NextSuspend
-        Segments::NextSuspend.new(
-          tail.promise_ast, tail.result_var,
-          tail.next_index ? mapping.fetch(tail.next_index) : nil,
-        )
+      when Segments::IoSuspend, Segments::NextSuspend
+        tail.with_next_index(tail.next_index ? mapping.fetch(tail.next_index) : nil)
       when Segments::LockSuspend
         Segments::LockSuspend.new(
           tail.with_node, tail.cap, tail.prior_caps,

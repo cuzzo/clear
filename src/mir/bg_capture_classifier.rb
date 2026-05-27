@@ -35,8 +35,11 @@ require_relative "../ast/scope"
 module BgCaptureClassifier
     extend T::Sig
 
-  sig { params(fn_nodes: T::Hash[String, T.untyped], schema_lookup: T.nilable(Proc)).returns(T::Hash[String, T.untyped]) }
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Hash[String, CapabilityHelper::CaptureAnalysis]) }
   def self.classify_all!(fn_nodes, schema_lookup: nil)
+    analyses = T.let({}, T::Hash[String, CapabilityHelper::CaptureAnalysis])
     fn_nodes.each do |_name, fn|
       next unless fn&.body
       # `Scope.live_param_syms` returns the {name => live SymbolEntry}
@@ -48,8 +51,12 @@ module BgCaptureClassifier
       # docs/agents/sync-boundary-unification.md (Gap C) and fixes
       # transpile-tests/257_concurrent_capture_locked_param.cht.
       live_param_syms = Scope.live_param_syms(fn)
-      AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms, schema_lookup: schema_lookup) }
+      AST.each_capture_analysis(fn.body) do |a|
+        classify_one!(a, live_param_syms, schema_lookup: schema_lookup)
+        analyses["#{fn.name}:#{a.object_id}"] = a
+      end
     end
+    analyses
   end
 
   # `a` is a CaptureAnalysis instance. Source can be BgBlock,

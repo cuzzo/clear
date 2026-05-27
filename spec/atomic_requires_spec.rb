@@ -2,7 +2,7 @@ require "rspec"
 require "set"
 
 require_relative "../src/backends/transpiler"
-require_relative "../src/annotator-helpers/with_match_check"
+require_relative "../src/annotator/helpers/with_match_check"
 
 # Atomics M1.4 -- REQUIRES c: ATOMIC parsing + family validation.
 #
@@ -88,9 +88,7 @@ RSpec.describe "Atomics M1.4: REQUIRES c: ATOMIC" do
       # classified into the LOCAL family (admits @local /
       # @multiowned / plain T) so they can be passed to
       # `REQUIRES c: LOCAL` parameters.
-      sym = Object.new
-      def sym.sync; nil; end
-      def sym.storage; nil; end
+      sym = SymbolEntry.new(reg: "x", type: :Int64, mutable: false, storage: :stack, sync: nil)
       arg = Object.new
       arg.define_singleton_method(:symbol) { sym }
       arg.define_singleton_method(:respond_to?) { |m| m == :symbol || super(m) }

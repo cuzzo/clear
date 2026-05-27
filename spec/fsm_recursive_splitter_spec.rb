@@ -61,15 +61,7 @@ RSpec.describe FsmTransform::RecursiveSplitter do
 
   let(:default_ctx) { { id: 0, captured: {}, bg_rt: "__rt_bg0" } }
 
-  # Fake type wrapper that satisfies the recursive splitter's
-  # NEXT-eligibility check (future? && !stream? && !promise_list?).
-  FUTURE_TYPE = Class.new {
-    def future?; true; end
-    def stream?; false; end
-    def promise_list?; false; end
-    def tense_type; :Int64; end
-    def zig_type; "CheatLib.Promise(i64)"; end
-  }.new
+  FUTURE_TYPE = Type.new(:"~Int64")
 
   def ident(name)
     n = AST::Identifier.new(nil, name)

@@ -188,7 +188,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     let(:src) { <<~CHT }
       FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
 
-      FN runit(ops: Int64[]@list) RETURNS !Int64 ->
+      FN runit(TAKES ops: Int64[]@list) RETURNS !Int64 ->
           p: ~Int64 = BG { consume(COPY ops); };
           RETURN NEXT p;
       END

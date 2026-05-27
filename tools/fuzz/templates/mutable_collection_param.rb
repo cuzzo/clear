@@ -8,24 +8,39 @@
 
 MUTABLE_PARAM_CELLS = []
 
-[:int, :string].each do |elem|
-  [:none, :outer_loop].each do |context|
-    [1, 4].each do |calls|
-      MUTABLE_PARAM_CELLS << { elem: elem, context: context, calls: calls }
+[:list, :set, :map].each do |collection|
+  [:int, :string].each do |elem|
+    [:none, :outer_loop].each do |context|
+      [1, 4].each do |calls|
+        MUTABLE_PARAM_CELLS << { collection: collection, elem: elem, context: context, calls: calls }
+      end
     end
   end
 end
 
 FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do |p|
   zig_type = (p[:elem] == :int) ? "Int64" : "String"
-  type_decl = "#{zig_type}[]@list"
+  type_decl = case p[:collection]
+              when :list then "#{zig_type}[]@list"
+              when :set then "#{zig_type}[]@set"
+              when :map then "HashMap<#{zig_type}>"
+              end
 
-  push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
+  mutation = case p[:collection]
+             when :list
+               push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
+               "xs.append(#{push_value});"
+             when :set
+               p[:elem] == :int ? "xs.insert(xs.length());" : "xs.insert(xs.length().toString());"
+             when :map
+               push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
+               "xs[\"k\" + xs.count().toString()] = #{push_value};"
+             end
 
   # `xs.append` is fallible (OOM) so callee must declare !Void.
   callee = <<~CHT.chomp
     FN add!(MUTABLE xs: #{type_decl}) RETURNS !Void ->
-        xs.append(#{push_value});
+        #{mutation}
         RETURN;
     END
   CHT
@@ -38,14 +53,15 @@ FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do
   end
 
   expected_len = p[:calls]
+  len_expr = p[:collection] == :map ? "lst.count()" : "length(lst)"
 
   <<~CHT
     #{callee}
 
     FN main() RETURNS Void ->
-        MUTABLE lst: #{type_decl} = [];
+        MUTABLE lst: #{type_decl} = #{p[:collection] == :map ? '{}' : '[]'};
     #{call_block}
-        ASSERT length(lst) == #{expected_len}_i64, "list length after mutating calls";
+        ASSERT #{len_expr} == #{expected_len}_i64, "collection length after mutating calls";
         RETURN;
     END
   CHT

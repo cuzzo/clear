@@ -3,7 +3,7 @@
 require "minitest/autorun"
 require_relative "../lib/boobytrap"
 
-class HotspotTest < Monitor::Test
+class HotspotTest < Minitest::Test
   G = Boobytrap::CoverageGap::File_
 
   def test_hotspot_is_normalized_fix_times_gap_and_ranked

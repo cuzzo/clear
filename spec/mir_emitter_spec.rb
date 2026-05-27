@@ -398,12 +398,12 @@ RSpec.describe MIREmitter do
   describe "DupeSlice" do
     it "emits heap dupe" do
       node = MIR::DupeSlice.new(MIR::Ident.new("src"), :heap)
-      expect(e.emit(node)).to eq("try rt.heapAlloc().dupe(u8, src)")
+      expect(e.emit(node)).to eq("@as([]const u8, try rt.heapAlloc().dupe(u8, src))")
     end
 
     it "emits frame dupe" do
       node = MIR::DupeSlice.new(MIR::Ident.new("src"), :frame)
-      expect(e.emit(node)).to eq("try rt.frameAlloc().dupe(u8, src)")
+      expect(e.emit(node)).to eq("@as([]const u8, try rt.frameAlloc().dupe(u8, src))")
     end
   end
 
@@ -491,12 +491,12 @@ RSpec.describe MIREmitter do
   describe "DeepCopy" do
     it "emits string copy via dupeValue with explicit []const u8 type" do
       node = MIR::DeepCopy.new(MIR::Ident.new("src"), "[]const u8", nil, :full_value, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]const u8, src, rt.heapAlloc())")
+      expect(e.emit(node)).to include("try CheatLib.dupeValue([]const u8, __copy_src, rt.heapAlloc())")
     end
 
     it "emits union copy via dupeValue with explicit union type" do
       node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :full_value, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeValue(Result, val, rt.heapAlloc())")
+      expect(e.emit(node)).to include("try CheatLib.dupeValue(Result, __copy_src, rt.heapAlloc())")
     end
 
     it "emits slice copy via CheatLib.dupeValue (subsumes the old :list_shallow / :list_deep strategies)" do
@@ -505,10 +505,10 @@ RSpec.describe MIREmitter do
       # both shallow (Copy elements -> @memcpy) and deep (heap-owning
       # elements -> recursive dupeValue) internally.
       node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]i64", "i64", :full_value, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]i64, items, rt.heapAlloc())")
+      expect(e.emit(node)).to include("try CheatLib.dupeValue([]i64, __copy_src, rt.heapAlloc())")
 
       node = MIR::DeepCopy.new(MIR::Ident.new("items"), "[]Value", "Value", :full_value, :heap)
-      expect(e.emit(node)).to eq("try CheatLib.dupeValue([]Value, items, rt.heapAlloc())")
+      expect(e.emit(node)).to include("try CheatLib.dupeValue([]Value, __copy_src, rt.heapAlloc())")
     end
 
     it "emits passthrough for value types as a comptime-evaluated inline expression" do
@@ -607,7 +607,7 @@ RSpec.describe MIREmitter do
   # =========================================================================
 
   it "emits nil for AllocMark" do
-    expect(e.emit(MIR::AllocMark.new("x", :frame))).to be_nil
+    expect(e.emit(MIR::AllocMark.new("x", :frame, Type.new(:String)))).to be_nil
   end
 
   it "emits nil for ReturnMark" do

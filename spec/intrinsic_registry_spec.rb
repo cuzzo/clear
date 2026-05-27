@@ -4,7 +4,7 @@ require_relative "spec_helper"
 require_relative "../src/ast/type"
 require_relative "../src/mir/mir"
 require_relative "../src/ast/std_lib"
-require_relative "../src/annotator-helpers/intrinsic_registry"
+require_relative "../src/annotator/helpers/intrinsic_registry"
 
 # Totality + fidelity: every real registry entry must convert without
 # error (T::Struct raises on any mistyped IntrinsicEmit prop, so this

@@ -112,8 +112,8 @@ module UnionAnalysis
           cascade: true
         )
       end
-      node.target.full_type = type_name
-      node.full_type = type_name
+      stamp_type!(node.target, type_name)
+      stamp_type!(node, type_name)
       return true
     end
 
@@ -131,8 +131,8 @@ module UnionAnalysis
       if Schemas.inline_struct?(var_data) && !@match_pattern_context
         error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
-      node.target.full_type = type_name
-      node.full_type = type_name
+      stamp_type!(node.target, type_name)
+      stamp_type!(node, type_name)
       return true
     end
 
@@ -207,7 +207,7 @@ module UnionAnalysis
       end
 
       expected_type = expected_fields[fname]
-      actual = val_node.full_type
+      actual = val_node.full_type!(context: "union variant field")
       unless T.must(expected_type).accepts?(actual)
         error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH, union: node.union_name, variant: node.variant_name, field: fname, expected: T.must(expected_type).resolved, got: actual&.resolved)
       end

@@ -80,6 +80,9 @@ end
 # acquire_capability! used by visit_WithBlock.
 module CapabilityHelper
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # WITH can be applied to an Identifier or a GetField (`obj.field`).
   # For an Identifier, sync/ownership lives on the SymbolEntry. For a
@@ -87,13 +90,12 @@ module CapabilityHelper
   # struct schema and projected onto the GetField node's full_type
   # during annotation). These helpers paper over the difference so the
   # rest of the WITH logic doesn't have to.
-  sig { params(var_node: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_sync(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     sym_sync = var_node.symbol&.sync
     return sym_sync if sym_sync
-    return var_node.full_type.sync if var_node.full_type
-    nil
+    var_node.full_type!(context: "WITH capability sync target").sync
   end
 
   sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
@@ -101,7 +103,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
-    var_node.full_type&.ownership_storage
+    var_node.full_type!(context: "WITH capability storage target").ownership_storage
   end
 
   # Read layout from the SymbolEntry when available, or from full_type before
@@ -111,8 +113,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
-    return var_node.full_type.layout if var_node.full_type
-    nil
+    var_node.full_type!(context: "WITH capability layout target").layout
   end
 
   # Validate that a capability type is legal for the given variable.
@@ -120,7 +121,7 @@ module CapabilityHelper
   def validate_capability(node, capability_type, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     @deferred_with_validations = T.let(@deferred_with_validations, T.untyped)
-    var_type = var_node.full_type
+    var_type = var_node.full_type!(context: "WITH capability target")
     allowed = T.let([AST::Identifier, AST::GetField], T::Array[T::Class[T.untyped]])
     allowed << AST::GetIndex if capability_type == :BORROWED
     unless allowed.any? { |t| var_node.is_a?(t) }
@@ -397,7 +398,6 @@ module CapabilityHelper
   sig { params(call: T.untyped, callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
     return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
@@ -410,7 +410,9 @@ module CapabilityHelper
       return nil
     end
 
-    fn = @fn_nodes[callee] if callee.is_a?(String)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn = fn_nodes[callee] if callee.is_a?(String)
     return nil unless fn
     return "can fail" if fn.can_fail
     effects = fn.effects || Set.new
@@ -451,7 +453,7 @@ module CapabilityHelper
         }
         visit(gcap[:guard_expr])
 
-        guard_type = gcap[:guard_expr].full_type
+        guard_type = gcap[:guard_expr].full_type!(context: "WITH guard expression")
         unless guard_type && guard_type.resolved == :Bool
           error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
@@ -515,7 +517,7 @@ module CapabilityHelper
         }
         visit(expr)
 
-        pred_type = expr.full_type
+        pred_type = expr.full_type!(context: "PRE expression")
         unless pred_type && pred_type.resolved == :Bool
           error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
@@ -581,7 +583,7 @@ module CapabilityHelper
           }
           visit(expr)
 
-          pred_type = expr.full_type
+          pred_type = expr.full_type!(context: "DEBUG_POST expression")
           unless pred_type && pred_type.resolved == :Bool
             error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
@@ -635,7 +637,7 @@ module CapabilityHelper
     T.bind(self, SemanticAnnotator) rescue nil
     var_node = cap[:var_node]
     visit(var_node)
-    cap[:resolved_type] = var_node.full_type
+    cap[:resolved_type] = var_node.full_type!(context: "WITH resolved capability target")
 
     cap[:old_scope] = lookup_scope_for(cap_var_name(var_node))
 
@@ -725,14 +727,14 @@ module CapabilityHelper
           capability: cap[:capability],
           var_node: field_node,
           old_scope: cap[:old_scope],
-          resolved_type: field_node.full_type
+          resolved_type: field_node.full_type!(context: "WITH wildcard field")
         )
       end
       # The per-field caps above each alias the base variable name; the
       # base binding must remain the struct type (a field cap declaring
       # `p` as a field's type would break `p.field` inside the block).
       # Re-assert the whole-struct cap last so the base keeps its type.
-      base_t = var_node.target.full_type
+      base_t = var_node.target.full_type!(context: "WITH wildcard base")
       base_t = Type.new(base_t) unless base_t.is_a?(Type)
       expanded << AST::Capability.new(
         capability: cap[:capability],
@@ -779,7 +781,7 @@ module CapabilityHelper
       # WITH on a sync-wrapped struct field. The alias holds the unwrapped
       # inner value (post-`.acquire().get()`). Resolve the bare inner type
       # from the field's declared type and declare the alias.
-      inner_type = cap[:var_node].full_type
+      inner_type = cap[:var_node].full_type!(context: "WITH capability field alias")
       if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
         inner_type = inner_type.bare_data_type
       end
@@ -1063,22 +1065,19 @@ module CapabilityHelper
       # the capture might not be registered yet. We don't gate on that;
       # we record every wrapped outer-scope Identifier and let the
       # classifier filter against the eventual captures dict.
-      if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_moved << nm unless locally_bound.include?(nm)
+      if node.is_a?(AST::MoveNode)
+        root = AST.root_identifier(node.value) rescue nil
+        nm = root&.name&.to_s
+        result.site_moved << nm if nm && !locally_bound.include?(nm)
       end
-      if (node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)) && node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_copied << nm unless locally_bound.include?(nm)
+      if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+        root = AST.root_identifier(node.value) rescue nil
+        nm = root&.name&.to_s
+        result.site_copied << nm if nm && !locally_bound.include?(nm)
       end
-      # Phase 3 (was_moved CopyNode wrapper produced by ensure_owned_value!):
-      # function_analysis.rb stamps was_moved=true on a CopyNode wrapper that
-      # encodes the user's GIVE intent for type adaptation. Treat as moved.
-      if node.is_a?(AST::CopyNode) && node.was_moved &&
-         node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_moved << nm unless locally_bound.include?(nm)
-      end
+      # A CopyNode can also carry `was_moved` when its copied result is
+      # consumed by a TAKES call. That consumes the copy, not the source
+      # identifier, so capture strategy remains FreshHeapCopy.
 
       if node.is_a?(AST::Identifier)
         name = node.name
@@ -1099,7 +1098,7 @@ module CapabilityHelper
           # need the full cell shape so the captured ref keeps identity across
           # fibers.
           unless result.captures.key?(name)
-            cap_type = info.atomic? ? info.type : node.full_type
+            cap_type = info.atomic? ? info.type : node.full_type!(context: "BG capture identifier")
             result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
@@ -1179,7 +1178,7 @@ module CapabilityHelper
           info = current_scope.locals[name]
           next unless info
           result.has_outer_ref = true
-          result.captures[name] ||= var_node.full_type
+          result.captures[name] ||= var_node.full_type!(context: "WITH capture identifier")
           # Also record the live SymbolEntry so mir_lowering can re-resolve
           # types after EscapeAnalysis.propagate_caller_sync! stamps params.
           result.capture_symbols[name] ||= info
@@ -1335,7 +1334,6 @@ module CapabilityAudit
   sig { params(var_name: String, node: T.untyped, final_type: T.untyped, storage: Symbol).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def record_capability_binding(var_name, node, final_type, storage)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @capability_audit = T.let(@capability_audit, T.untyped)
     return unless var_name.is_a?(String) && current_fn_ctx&.name
 
@@ -1345,8 +1343,11 @@ module CapabilityAudit
     return unless sync || own
 
     # Skip PUB functions — libraries can't know how consumers will use exports.
-    fn_node = @fn_nodes[current_fn_ctx&.name]
-    return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
+    fn_name = current_fn_ctx&.name
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn_node = fn_name ? fn_nodes[fn_name] : nil
+    return if fn_node&.visibility == :pub
 
     key = "#{current_fn_ctx&.name}:#{var_name}"
     line   = node.token&.line
@@ -1385,7 +1386,7 @@ module CapabilityAudit
       sync = info[:sync]
       own  = info[:ownership]
 
-      if (sync == :locked || sync == :write_locked) && !info[:mutated] && !info[:sharded]
+      if SymbolEntry.locked_family_sync?(sync) && !info[:mutated] && !info[:sharded]
         $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @#{sync} but never mutated via WITH EXCLUSIVE. " \
                      "You are paying for lock acquire/release on every access. Consider @local or removing the lock.#{loc}"
       end
@@ -1395,7 +1396,7 @@ module CapabilityAudit
                      "You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.#{loc}"
       end
 
-      if sync == :local && !info[:captured_bg]
+      if SymbolEntry.local_sync?(sync) && !info[:captured_bg]
         emit_local_never_shared_finding!(info)
       end
     end

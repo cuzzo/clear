@@ -739,7 +739,7 @@ module DiagnosticRegistry
     # CAPABILITIES — WITH blocks, GUARD/RESTRICT/BORROWED, PRE/DEBUG_POST
     # ===================================================================
     # Added in Tranche 3. Migrated from
-    # src/annotator-helpers/capabilities.rb's ad-hoc strings.
+    # src/annotator/helpers/capabilities.rb's ad-hoc strings.
 
     WITH_CAP_BAD_TARGET: {
       severity: :error, category: :capability,
@@ -934,7 +934,7 @@ module DiagnosticRegistry
     # PIPELINES — pipe stages, CONCURRENT, SHARD, JOIN, WINDOW
     # ===================================================================
     # Added in Tranche 4. Migrated from
-    # src/annotator-helpers/pipe_analysis.rb's ad-hoc strings.
+    # src/annotator/helpers/pipe_analysis.rb's ad-hoc strings.
 
     PIPE_BAD_DESTINATION: {
       severity: :error, category: :type,
@@ -1624,6 +1624,13 @@ module DiagnosticRegistry
       fix_hint: "While the lookup-style GIVE isn't supported, bind the value to a variable first and `GIVE` the variable.",
       pending: true,
     },
+    GIVE_TO_BORROW_PARAM: {
+      severity: :error, category: :ownership,
+      template: "GIVE passed to non-TAKES parameter '%{param}'",
+      summary:  "Ownership transfer must be declared on the callee parameter.",
+      cause: "A call-site GIVE suppresses the caller's cleanup. If the callee parameter is not TAKES, the callee treats the value as a borrow and has no cleanup obligation, making ownership implicit and unverifiable.",
+      fix_hint: "Mark the callee parameter as TAKES, or pass COPY/CLONE/borrowed value instead of GIVE.",
+    },
     COPY_NON_COPYABLE: {
       severity: :error, category: :ownership,
       template: "Cannot COPY non-copyable type '%{type}'",
@@ -1850,16 +1857,51 @@ module DiagnosticRegistry
     INLINE_NO_CONTRACT: {
       severity: :error, category: :mir,
       template: "%{message}",
-      summary:  "InlineZig calls CheatLib without a stdlib_def — checker can't see ownership effects.",
-      cause: "`MIR::InlineZig` whose Zig text calls `CheatLib.<fn>` must declare a `stdlib_def` so the checker knows which calls allocate, take ownership, etc. Without it, ownership analysis is blind across the inline.",
-      fix_hint: "Add `stdlib_def: { allocates: ..., return: ... }` matching the registry entry for the called CheatLib helper, or replace the InlineZig with a registered stdlib call shape that the lowering already handles.",
+      summary:  "InlineZig has no verifier-visible callable contract.",
+      cause: "`MIR::InlineZig` is opaque Zig text. MIRChecker cannot prove that the text does not allocate, free, borrow, or transfer unless lowering attaches a typed `stdlib_def` / FunctionSignature contract.",
+      fix_hint: "Replace the InlineZig with structural MIR, or lower it from a registry entry that carries a FunctionSignature and ownership metadata.",
+    },
+    OPAQUE_ZIG_OWNERSHIP: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "InlineZig hides allocator ownership operations.",
+      cause: "`MIR::InlineZig` text contains allocator operations such as alloc, dupe, create, destroy, free, or deinit. A callable signature can describe boundary effects, but it cannot prove that arbitrary internal heap ownership is balanced.",
+      fix_hint: "Decompose the operation into structural MIR with AllocMark, Cleanup, ErrCleanup, DestroyPtr, and TransferMark nodes, or move the operation behind a runtime API whose implementation is outside compiler MIR.",
+    },
+    OWNERSHIP_FACT_REQUIRED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Ownership-capable MIR must be finalized into explicit ownership facts.",
+      cause: "The MIR node can allocate, free, consume, store, capture, or return owned data, but that effect is still encoded through node-specific side channels. MIRChecker can only be a memory-safety gate when it reads a closed ownership fact stream.",
+      fix_hint: "Lowering bug — run ownership finalization before MIRChecker and emit MIR::OwnedCreate / OwnedDestroy / OwnedTransfer / OwnedStore / OwnedReturn facts for this operation. Do not hide ownership in InlineZig text or ad-hoc node fields.",
+    },
+    BOUNDARY_FACT_REQUIRED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Execution-boundary MIR must carry typed boundary/capture facts.",
+      cause: "A BG, BG STREAM, DO branch, or similar execution boundary reached MIRChecker without the closed fact object that names its dispatch mode and captured capabilities. Without that fact, the checker cannot prove scheduler/capture safety.",
+      fix_hint: "Lowering bug — copy the annotated capture analysis into MIR::ExecutionBoundaryFact before MIRChecker. Do not rely on parser flags or pre-MIR booleans as the final authority.",
+    },
+    BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A non-parallel-safe capture crosses a parallel execution boundary.",
+      cause: "The boundary dispatches work across schedulers, but one captured binding is scheduler-affine or non-atomic. That can break capability guarantees even if the emitted code happens to compile.",
+      fix_hint: "Use a parallel-safe capability such as @shared where appropriate, pin the boundary instead of using @parallel, or avoid capturing the binding.",
     },
     RAW_NO_CONTRACT: {
       severity: :error, category: :mir,
       template: "%{message}",
-      summary:  "RawZig with allocating CheatLib calls and no ownership_contract.",
-      cause: "Same as INLINE_NO_CONTRACT but for `MIR::RawZig` (the unsafer escape hatch). Allocating CheatLib calls inside RawZig need an explicit `ownership_contract` so the checker can see them.",
-      fix_hint: "Add an `ownership_contract` declaring the allocations and ownership transfers. Strongly consider replacing the RawZig with an InlineZig + stdlib_def, or with a stdlib registry entry, since RawZig is the last-resort form.",
+      summary:  "RawZig is opaque to MIRChecker.",
+      cause: "`MIR::RawZig` can hide allocations, frees, and moves inside arbitrary statement text. MIRChecker cannot prove memory safety across that boundary.",
+      fix_hint: "Delete the RawZig and decompose the operation into structural MIR nodes that expose allocation, transfer, and cleanup events.",
+    },
+    MIR_CALL_NO_CONTRACT: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR call has no verifier-visible callable contract.",
+      cause: "`MIR::Call`, `MIR::TailCall`, and `MIR::MethodCall` only carry emitted callee text and arguments. Without a typed callable contract, MIRChecker cannot prove whether arguments are borrowed, consumed, or returned.",
+      fix_hint: "Lowering bug — attach a typed callable/effect contract to the MIR call or lower the operation into structural MIR nodes with explicit ownership events.",
     },
     RAW_UNJUSTIFIED: {
       severity: :error, category: :mir,
@@ -1882,6 +1924,13 @@ module DiagnosticRegistry
       cause: "Every MIR node that allocates memory (DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap, SharePromote, deep DeepCopy, ContainerInit) must appear as the direct init of a `MIR::Let` so it has an AllocMark. Found one in argument / return / field-value position instead.",
       fix_hint: "Lowering bug — HPT hoisting (hoist_alloc) should have lifted the call into a Let. Check the producer pass that emitted the allocating node; it should bind the result to a fresh local.",
     },
+    ALLOCATING_LET_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Heap-allocating Let initializer has no checker-visible AllocMark.",
+      cause: "A top-level MIR::Let may be the legal place for an allocating expression, but the binding still needs an AllocMark so MIRChecker can prove it is cleaned or explicitly transferred.",
+      fix_hint: "Lowering bug — emit AllocMark for the binding from its finalized storage, then emit Cleanup/ErrCleanup or TransferMark at the ownership boundary.",
+    },
     OWNED_RETURN_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",
@@ -1896,6 +1945,41 @@ module DiagnosticRegistry
       cause: "A call whose return value owns heap data was paired with an AllocMark that says the value is frame-allocated. That lets AllocMark and Cleanup agree with each other while still freeing heap-owned data through the wrong allocator.",
       fix_hint: "Lowering bug — the AllocMark for a heap-provenance return must use :heap or :cleanup, never :frame.",
     },
+    OWNED_RESULT_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-result expression is bound without a checker-visible AllocMark.",
+      cause: "A MIR expression declared that it produces owned storage, but the receiving binding has no AllocMark. Without the marker, MIRChecker cannot verify cleanup or transfer.",
+      fix_hint: "Lowering bug — propagate the expression's owned_result_alloc fact into the binding's allocation and cleanup plan.",
+    },
+    OWNED_RESULT_ALLOC_MISMATCH: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned-result expression allocator disagrees with its binding AllocMark.",
+      cause: "The producer declared that its result is owned by one allocator, while the receiving binding was stamped with another. AllocMark and Cleanup may match each other while still freeing through the wrong allocator.",
+      fix_hint: "Lowering bug — the receiving binding must use the producer's owned_result_alloc as the authoritative allocator.",
+    },
+    RETURN_TRANSFER_WITHOUT_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Return ownership transfer exists without a matching AllocMark.",
+      cause: "A MIR::TransferMark(:return) says the caller owns a binding after return, but the callee has no checker-visible allocation event for that binding.",
+      fix_hint: "Lowering bug — return transfers must be attached to a named binding with an AllocMark.",
+    },
+    RETURN_TRANSFER_FRAME_ALLOC: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Return ownership transfer is backed by frame allocation.",
+      cause: "A value whose ownership leaves the function cannot be allocated in the callee's frame arena. The frame rewinds before the caller's cleanup runs, producing a dangling buffer or allocator mismatch.",
+      fix_hint: "Escape analysis/lowering bug — escaping owned returns must set the binding storage to heap before MIR lowering emits AllocMark.",
+    },
+    FRAME_ALLOC_ESCAPES: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Frame-allocated ownership transfers to an escaping owner.",
+      cause: "A frame allocation is only valid within the current frame lifetime. Transferring it to a return value, container, captured boundary, or external parameter lets another owner observe memory after the frame rewinds.",
+      fix_hint: "Escape analysis bug — the binding reached an escape sink but was not stamped heap before MIR lowering emitted AllocMark.",
+    },
     TRANSFER_WITHOUT_ALLOC: {
       severity: :error, category: :mir,
       template: "%{message}",
@@ -1903,12 +1987,138 @@ module DiagnosticRegistry
       cause: "MIR::TransferMark suppresses local cleanup because ownership left the current scope. Without a matching AllocMark, there is no checker-visible allocation event to prove what was transferred.",
       fix_hint: "Lowering bug — emit TransferMark only alongside the AllocMark for the owned binding being moved.",
     },
+    OWNERSHIP_USE_AFTER_TRANSFER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR reads an owned binding after ownership left the scope.",
+      cause: "Once MIR emits a TransferMark or equivalent release for an owned binding, later reads of that binding are use-after-free unless the binding has been reallocated.",
+      fix_hint: "Lowering bug — emit the transfer at the actual ownership boundary after the final read, or materialize a separate owned copy before transferring.",
+    },
+    OWNERSHIP_DOUBLE_RELEASE: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR releases or transfers the same owned binding more than once.",
+      cause: "A binding may have exactly one success-path owner at a time. Multiple TransferMark/release events for the same allocation are a double-free risk.",
+      fix_hint: "Lowering bug — collapse the ownership transfer to one event, or split distinct allocations into distinct bindings.",
+    },
+    OWNERSHIP_DOUBLE_FINALIZER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR registers more than one cleanup finalizer for the same owned binding.",
+      cause: "Multiple Cleanup/ErrCleanup registrations for one allocation mean the same owned value can be freed more than once.",
+      fix_hint: "Lowering bug — each AllocMark must own one cleanup strategy: normal cleanup, errcleanup plus transfer, destroy, or transfer.",
+    },
+    OWNERSHIP_UNVERIFIED_PATH: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR control flow rejoins with different ownership state.",
+      cause: "MIRChecker cannot prove memory safety when one branch owns/transfers/finalizes a binding differently from another branch.",
+      fix_hint: "Lowering bug — make ownership events explicit and identical at the join, or keep ownership entirely outside the branch.",
+    },
+    LINEAR_STMT_NOT_REGISTERED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR statement is missing from linear ownership verification.",
+      cause: "A statement node reached MIRChecker without being registered in the closed linear ownership traversal. Treating it as a generic expression would let new ownership-affecting statement types bypass leak/UAF/double-free checks.",
+      fix_hint: "Register the statement in MIRChecker::LINEAR_STATEMENT_NODE_TYPES and add the structural traversal it needs. If it can affect ownership, expose that through explicit MIR ownership facts.",
+    },
+    OWNERSHIP_IMPLICIT_MOVE: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR suppresses cleanup without an explicit ownership transfer.",
+      cause: "MoveMark changes runtime cleanup behavior. Without a matching TransferMark, the checker cannot prove who owns the value after cleanup is suppressed.",
+      fix_hint: "Lowering bug — emit a TransferMark for the same binding at the same ownership boundary, or remove the MoveMark.",
+    },
+    OWNERSHIP_CLEANUP_FOR_BORROW: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR cleanup was emitted for a borrowed/non-owning binding.",
+      cause: "A binding initialized from a borrowed view, such as an indexed element or field payload, received Cleanup/ErrCleanup even though it did not create or receive ownership. Cleaning that alias can free memory still owned by the source aggregate.",
+      fix_hint: "Lowering bug — either deep-copy into a fresh owned binding, transfer ownership explicitly, or keep the borrowed alias cleanup-free.",
+    },
+    MOVEMARK_WITHOUT_GUARD: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MoveMark exists outside the lexical scope that declares its moved guard.",
+      cause: "MIR::MoveMark emits `name_moved = true`, but that variable is only declared by a visible guarded Cleanup/ErrCleanup. If lowering moves the marker out of the binding's scope, Zig sees an undeclared guard and ownership cannot be verified.",
+      fix_hint: "Lowering bug — emit MoveMark only at the consuming expression in the same lexical body as the guarded cleanup, or remove it when success is represented by ErrCleanup + TransferMark.",
+    },
+    ERRCLEANUP_WITHOUT_TRANSFER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "ErrCleanup exists without an explicit success-path ownership transfer.",
+      cause: "MIR::ErrCleanup means the binding is cleaned only on error because success transfers ownership. Without a matching MIR::TransferMark, the success-path owner is implicit and MIRChecker cannot prove leak/double-free safety.",
+      fix_hint: "Lowering bug — emit MIR::TransferMark at the same ownership boundary that converts Cleanup to ErrCleanup, or keep a normal Cleanup if ownership does not transfer.",
+    },
+    AGGREGATE_CHILD_ALLOC_MISMATCH: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "Owned aggregate child allocator disagrees with the aggregate owner.",
+      cause: "An owned temporary was inserted into an aggregate whose owner uses a different allocator. The aggregate cleanup cannot be authoritative if nested children were independently placed.",
+      fix_hint: "Lowering bug — flow the aggregate destination allocator recursively into child materialization, or make the aggregate owner heap when its children must be heap.",
+    },
+    PROVENANCE_PLACEMENT_FORBIDDEN: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR still carries provenance-based heap/frame placement.",
+      cause: "Heap/frame placement must be closed before MIR lowering and represented by binding AllocMark/Cleanup facts. A MIR node carrying side-channel placement means downstream code is still deciding ownership after placement.",
+      fix_hint: "Delete the provenance path. Hoist the value to a binding if needed, stamp the binding's SymbolEntry#storage during escape analysis, then emit AllocMark/Cleanup from that binding placement.",
+    },
+    INLINE_ALLOC_WITHOUT_TARGET: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "InlineZig allocates but has no target binding for MIRChecker to verify.",
+      cause: "Allocator-bearing InlineZig must be attached to the binding/container it mutates or produces. Without a target binding, MIRChecker cannot compare the operation allocator against authoritative placement.",
+      fix_hint: "Hoist the operation into a named binding or attach target_var to the receiver/result binding. Do not infer the allocator locally in lowering.",
+    },
+    INLINE_ALLOC_WITHOUT_ALLOCMARK: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "InlineZig allocates for a target binding that has no AllocMark.",
+      cause: "Allocator-bearing InlineZig named a target, but the target has no checker-visible allocation marker. That means the operation allocator cannot be compared against authoritative binding placement.",
+      fix_hint: "Lowering bug — the target binding must have an AllocMark emitted from CleanupClassifier placement before allocator-bearing operations can mutate it.",
+    },
+    INVALID_ALLOCATOR_MARK: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR uses an allocator symbol outside the closed heap/frame set.",
+      cause: "Placement must be finalized before MIR lowering. AllocMark, Cleanup, and InlineZig allocator metadata may only carry :heap or :frame. Any other symbol is a downstream side channel.",
+      fix_hint: "Move the decision to escape analysis or cleanup classification, then emit only :heap or :frame into MIR.",
+    },
+    ALLOC_MARK_TYPE_MISSING: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "MIR::AllocMark has no concrete Type payload.",
+      cause: "The lowering emitted an allocation ownership fact without the type needed to prove whether the value owns heap memory and what cleanup shape is legal. Nil or :Untyped type info makes cleanup verification coincidental.",
+      fix_hint: "Lowering bug — derive the AllocMark type from the allocation producer or already-typed AST source before MIRChecker runs.",
+    },
     COPY_CLEANUP: {
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "Cleanup attached to a primitive / Id<T> value — value types don't own heap memory.",
       cause: "A Cleanup paired with an AllocMark whose `type_info` is a primitive (Int*, Float*, Bool, Byte) or `Id<T>` (with no sync/rc capability) can't be right — these are pure value types that never own heap memory, so a cleanup is structurally meaningless.",
       fix_hint: "Lowering bug. Check that the cleanup classifier doesn't promote primitives to needing cleanup. The fix usually drops the cleanup node and the alloc-site decision rather than 'fixing' the cleanup.",
+    },
+    IMPLICIT_OWNERSHIP_TRANSFER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A consuming MIR operation has no explicit ownership contract.",
+      cause: "The stdlib registry declares a TAKES/consuming parameter, but the lowered InlineZig/RawZig node did not name the concrete binding being consumed in ownership_contract.consumes. MIRChecker cannot prove whether that binding is cleaned, transferred, double-freed, or leaked.",
+      fix_hint: "Lowering bug — carry the consumed binding names from the annotated TAKES/GIVE site into ownership_contract.consumes, and emit matching MIR::TransferMark nodes. If the call deep-copies instead of consumes, do not mark the source moved.",
+    },
+    OWNERSHIP_CONTRACT_WITHOUT_TRANSFER: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "An ownership contract consumes a binding with no TransferMark.",
+      cause: "ownership_contract.consumes says a binding leaves the current scope, but MIR has no TransferMark for that binding. The checker cannot distinguish an intended transfer from a missing cleanup.",
+      fix_hint: "Lowering bug — emit MIR::TransferMark at the consuming boundary, or keep the binding's normal Cleanup if ownership does not actually transfer.",
+    },
+    OWNERSHIP_TRANSFER_COPIED: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A consuming ownership contract was lowered as a deep copy.",
+      cause: "Copying and consuming are different ownership events. A deep copy leaves the source owned by the current scope; a consuming TAKES transfer removes local ownership. Treating both as the same event causes leaks or double-frees.",
+      fix_hint: "Lowering bug — either pass the original binding and transfer it, or deep-copy into a separate owned temporary and consume that temporary while keeping the source cleanup.",
     },
     # Tranche 6: remaining ad-hoc strings — added in one big sweep
     TIGHT_CALLS_EXTERN_FN: {
@@ -2419,7 +2629,7 @@ module DiagnosticRegistry
     },
     CAN_SMASH_NOT_SUPPORTED: {
       severity: :error, category: :reentrance,
-      template: "`@canSmash` on BG/DO blocks is recognized but not yet supported by the compiler. The runtime has stack-hysteresis (page-guarded soft overflow detection) to protect fiber stacks, but the compiler does not yet wire that feature on. Use `@service` instead (spawns on a dedicated OS thread with a 2 MB pre-allocated stack); `@canSmash` is expected to be supported in v0.3.",
+      template: "`@canSmash` on BG/DO blocks is recognized but not yet supported by the compiler. The runtime has stack-hysteresis (page-guarded soft overflow detection) to protect fiber stacks, but the compiler does not yet wire that feature on. Use `@service` instead (spawns on a dedicated OS thread with a 4 MB pre-allocated stack); `@canSmash` is expected to be supported in v0.3.",
       summary:  "@canSmash is parsed but not yet implemented.",
     },
 

@@ -16,6 +16,7 @@ LIVE_DATA_EXCLUDES = %w[
   examples/minivm/parser.cht
   examples/minivm/sus-int.cht
   examples/minivm/types.cht
+  examples/minivm/vm.cht
   examples/minivm/vtest.cht
 ].freeze
 

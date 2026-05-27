@@ -135,70 +135,50 @@ module FsmTransform
     T.bind(self, T.untyped) rescue nil
     out = []
     seen = {}
-    visit = T.let(nil, T.untyped)
-    visit = lambda do |node|
-      case node
-      when Array
-        node.each { |n| visit.call(n) }
-      when AST::VarDecl
-        entry = local_entry(node.name, node.full_type)
-        if entry && !seen[entry[:name]]
-          seen[entry[:name]] = true
-          out << entry
-        end
-        visit.call(node.value) if node.value
-      when AST::BindExpr
-        if node.mode == :decl
-          entry = local_entry(node.name, node.full_type)
-          if entry && !seen[entry[:name]]
-            seen[entry[:name]] = true
-            # Mark suspend-result decls so the caller can include
-            # them in the capture_map (so body refs become
-            # __ctx.NAME) but skip them from the ctx field-decl
-            # list (the suspend descriptor's ctx_field_decls
-            # already declares the field; emitting it again would
-            # be a duplicate struct member).
-            entry[:is_suspend_result] = true if suspend_value?(node.value)
-            out << entry
-          end
-        end
-        visit.call(node.value) if node.value
-      when AST::WhileLoop
-        visit.call(node.do_branch)
-      when AST::WhileBindLoop
-        visit.call(node.do_branch)
-      when AST::ForRange
-        if node.var_name && !seen[node.var_name]
-          seen[node.var_name] = true
-          out << { name: node.var_name, zig_type: "i64" }
-        end
-        visit.call(node.body)
-      when AST::ForEach
-        if node.var_name && !seen[node.var_name]
-          ct_obj = node.collection&.full_type
-          ct = ct_obj.is_a?(Type) ? ct_obj : (ct_obj ? Type.new(ct_obj) : nil)
-          # Defer to the FSM ForEach descriptor for the bound var
-          # type (map's `k` is the KEY type, not element_type which
-          # is the value type). Falls back to element_type for
-          # collections that don't set var_zig_type.
-          desc = ct.is_a?(Type) ? ct.fsm_foreach_descriptor : nil
-          elem_zig = (desc && desc[:var_zig_type]) || begin
-            elem_t = ct.is_a?(Type) ? ct.element_type : nil
-            elem_t ? Type.new(elem_t).zig_type : "anyopaque"
-          end
-          seen[node.var_name] = true
-          out << { name: node.var_name, zig_type: elem_zig }
-        end
-        visit.call(node.body)
-      when AST::IfStatement
-        visit.call(node.then_branch)
-        visit.call(node.else_branch) if node.else_branch
-      when AST::WithBlock
-        visit.call(node.body)
-      end
+    AST.each_locatable(stmts) do |node|
+      entry = local_entry_for_node(node)
+      next unless entry
+      name = entry[:name]
+      next if seen[name]
+      seen[name] = true
+      out << entry
     end
-    visit.call(stmts)
     out
+  end
+
+  sig { params(node: T.untyped).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  def local_entry_for_node(node)
+    T.bind(self, T.untyped) rescue nil
+    case node
+    when AST::VarDecl
+      local_entry(node.name, node.full_type!)
+    when AST::BindExpr
+      return nil unless node.mode == :decl
+      entry = local_entry(node.name, node.full_type!)
+      if entry
+        # Mark suspend-result decls so the caller can include them in the
+        # capture_map but skip duplicate ctx field declarations.
+        entry[:is_suspend_result] = true if suspend_value?(node.value)
+      end
+      entry
+    when AST::ForRange
+      node.var_name ? { name: node.var_name, zig_type: "i64" } : nil
+    when AST::ForEach
+      foreach_local_entry(node)
+    end
+  end
+
+  sig { params(node: AST::ForEach).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  def foreach_local_entry(node)
+    T.bind(self, T.untyped) rescue nil
+    return nil unless node.var_name
+    ct = Type.new(node.collection.full_type!(context: "FSM foreach collection"))
+    desc = ct.fsm_foreach_descriptor
+    elem_zig = (desc && desc[:var_zig_type]) || begin
+      elem_t = ct.element_type
+      elem_t ? Type.new(elem_t).zig_type : "anyopaque"
+    end
+    { name: node.var_name, zig_type: elem_zig }
   end
 
   # True if the BG body contains a WithBlock or an IF/WHILE/FOR
@@ -212,20 +192,10 @@ module FsmTransform
   def body_needs_conservative?(stmts)
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
-      case s
-      when AST::WithBlock then true
-      when AST::WhileLoop, AST::WhileBindLoop
-        contains_suspend_anywhere?(s.do_branch) ||
-          body_needs_conservative?(s.do_branch)
-      when AST::ForRange, AST::ForEach
-        contains_suspend_anywhere?(s.body) ||
-          body_needs_conservative?(s.body)
-      when AST::IfStatement
-        contains_suspend_anywhere?(s.then_branch) ||
-          contains_suspend_anywhere?(s.else_branch || []) ||
-          body_needs_conservative?(s.then_branch) ||
-          body_needs_conservative?(s.else_branch || [])
-      else false
+      next true if s.is_a?(AST::WithBlock)
+
+      AST.child_bodies(s).any? do |body|
+        contains_suspend_anywhere?(body) || body_needs_conservative?(body)
       end
     end
   end
@@ -235,15 +205,9 @@ module FsmTransform
     T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       next true if Segments.classify_suspend(s)
-      case s
-      when AST::WhileLoop, AST::WhileBindLoop then contains_suspend_anywhere?(s.do_branch)
-      when AST::ForRange, AST::ForEach then contains_suspend_anywhere?(s.body)
-      when AST::WithBlock then true
-      when AST::IfStatement
-        contains_suspend_anywhere?(s.then_branch) ||
-          contains_suspend_anywhere?(s.else_branch || [])
-      else false
-      end
+      next true if s.is_a?(AST::WithBlock)
+
+      AST.child_bodies(s).any? { |body| contains_suspend_anywhere?(body) }
     end
   end
 

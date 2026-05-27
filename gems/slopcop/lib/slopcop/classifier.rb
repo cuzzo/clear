@@ -11,8 +11,10 @@ module SlopCop
   #   :type_norm  arm/decision guards a type/nil check (is_a?/kind_of?/
   #               nil?/respond_to?/safe-nav). Likely dead if the
   #               contract were strictly typed.
-  #   :dead       no sibling arm of the decision is ever taken: the
-  #               decision never executes. Audit as dead code.
+  #   :dead       no sibling arm of the decision is ever taken in the
+  #               supplied coverage. Audit as unexercised code: it may
+  #               be a missing test, or dead only if static reachability
+  #               tools agree.
   #   :defensive  live decision, inert/pinned polarity (empty else,
   #               nil, invariant-guaranteed). Accept.
   #   :ffi        a caller-declared external/boundary method -> needs
@@ -147,19 +149,22 @@ module SlopCop
           sl, sc, el, ec = a[2].to_i, a[3].to_i, a[4].to_i, a[5].to_i
           meth = midx[sl] || "(top-level)"
           anode = node_for(nodes, sl, sc, el, ec)
-          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary)
+          source_line = sl > lines.length ? "" : lines[sl - 1]
+          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary, pnode, source_line)
           out << Arm.new(file: abspath, defn: meth, line: sl, category: cat)
         end
       end
       out
     end
 
-    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [])
+    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil)
       return :ffi if ffi_boundary.include?(method)
       return :diagnostic if anode && subtree(anode, mids: DIAGNOSTIC_MIDS)
       # type/nil guard family: check the decision's CONDITION and the
       # arm body -> the decomplex DecisionPressure class.
       return :type_norm if (cond && type_guard?(cond)) || (anode && type_guard?(anode))
+      return :defensive if !sibling_taken && coverage_artifact_source?(source_line)
+      return :defensive if pnode && !decision_node?(pnode) && !sibling_taken
       return :dead unless sibling_taken          # decision never executes
       return :defensive if trivial?(anode)
 
@@ -168,6 +173,16 @@ module SlopCop
       else
         :defensive
       end
+    end
+
+    def decision_node?(node)
+      %i[IF UNLESS WHILE UNTIL CASE].include?(node.type)
+    end
+
+    def coverage_artifact_source?(source_line)
+      return false if source_line.nil?
+      stripped = source_line.to_s.strip
+      stripped.empty? || stripped == "end" || stripped.start_with?("sig {")
     end
 
     def type_guard?(node)

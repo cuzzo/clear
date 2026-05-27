@@ -24,10 +24,25 @@
 #     functions with ownership effects must declare stdlib_def so the
 #     checker can see those effects. Without it, the node is opaque.
 #
+#   INV-EXPLICIT-OWNERSHIP: Any stdlib/RawZig node that transfers
+#     ownership must declare the concrete binding names in
+#     ownership_contract.consumes. Registry metadata says the call shape
+#     can consume; the contract says this lowered call does consume `x`.
+#     Each consumed binding must have a matching MIR::TransferMark.
+#
 #   INV-INLINE-ALLOC-MATCH: When an InlineZig operation uses an allocator
 #     (:alloc/:key_alloc/:val_alloc), that allocator must match the
 #     container binding's AllocMark allocator. Frame data stored in a
 #     heap container becomes a dangling pointer after frame rewind.
+#
+#   INV-ALLOCATOR-CLOSED-SET: MIR allocator facts are closed to :heap
+#     and :frame. Any other symbol means a downstream pass is carrying
+#     placement side-channel state instead of finalized placement.
+#
+#   INV-ALLOC-MARK-TYPE: Every MIR::AllocMark must carry a concrete
+#     Type payload. Allocation cleanup safety depends on the checker
+#     knowing what owns heap memory; nil or :Untyped means lowering
+#     emitted an unverifiable ownership fact.
 #
 #   INV-FRAME-REWIND: Every loop body that frame-allocates must contain
 #     a restoreLoopMark defer to prevent unbounded frame arena growth.
@@ -66,14 +81,130 @@
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
 require "sorbet-runtime"
+require "set"
 
 require_relative "../ast/type"
 require_relative "../ast/diagnostic_registry"
+require_relative "pass_state"
 
 class MIRChecker
     extend T::Sig
 
+  OWNERSHIP_FIELD_NAMES = T.let(
+    Set[:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :owned_result_alloc, :callable_contract, :target_var],
+    T::Set[Symbol],
+  )
+
+  LINEAR_STATEMENT_NODE_TYPES = T.let([
+    MIR::AllocMark, MIR::AssertStmt, MIR::BatchWindowFlush, MIR::BatchWindowPush,
+    MIR::BgBlock, MIR::BreakStmt, MIR::CatchWrapper, MIR::Cleanup,
+    MIR::Comment, MIR::ContinueStmt, MIR::DeferStmt, MIR::DiscardOwned,
+    MIR::DoBlock, MIR::EnumDef, MIR::ErrCleanup, MIR::ErrDeferStmt,
+    MIR::ExprStmt, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
+    MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
+    MIR::FsmIoBody, MIR::IfBindStmt, MIR::IfChain, MIR::IfStmt,
+    MIR::Import, MIR::IndexInsert, MIR::Let, MIR::MoveMark,
+    MIR::MutualThunkTrampoline, MIR::Noop, MIR::OwnedBorrow,
+    MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
+    MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
+    MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
+    MIR::RawBc, MIR::RawZig, MIR::ReassignMark, MIR::ReassignWithCleanup,
+    MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
+    MIR::ShardedMapPut, MIR::SnapshotMultiTxn, MIR::SnapshotRead,
+    MIR::SnapshotTransaction, MIR::Sort, MIR::StreamSpawn, MIR::StreamYield,
+    MIR::StructDef, MIR::Suppress, MIR::SwitchStmt, MIR::TestDef,
+    MIR::ThunkTrampoline, MIR::TransferMark, MIR::TypeAlias,
+    MIR::UnionMatchStmt, MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
+  ].freeze, T::Array[T::Class[T.anything]])
+
+  LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS = T.let(
+    Set[:return, :external_param, :capture, :field_store, :aggregate_store].freeze,
+    T::Set[Symbol],
+  )
+
+  class LinearOwnershipState
+    extend T::Sig
+
+    sig { returns(T::Set[String]) }
+    attr_reader :owned
+    sig { returns(T::Set[String]) }
+    attr_reader :released
+    sig { returns(T::Set[String]) }
+    attr_reader :maybe_released
+    sig { returns(T::Set[String]) }
+    attr_reader :cleanup_finalizers
+    sig { returns(T::Set[String]) }
+    attr_reader :guarded_finalizers
+    sig { returns(T::Set[String]) }
+    attr_reader :err_finalizers
+    sig { returns(T::Set[String]) }
+    attr_reader :pending_return_transfers
+    sig { returns(T::Set[String]) }
+    attr_reader :pending_block_transfers
+    sig { returns(T::Hash[String, Symbol]) }
+    attr_reader :alloc_kinds
+    sig { returns(T::Hash[String, Symbol]) }
+    attr_reader :alloc_scopes
+    sig { returns(T::Set[String]) }
+    attr_reader :move_marks
+    sig { returns(T::Boolean) }
+    attr_accessor :terminated
+
+    sig { void }
+    def initialize
+      @owned = T.let(Set.new, T::Set[String])
+      @released = T.let(Set.new, T::Set[String])
+      @maybe_released = T.let(Set.new, T::Set[String])
+      @cleanup_finalizers = T.let(Set.new, T::Set[String])
+      @guarded_finalizers = T.let(Set.new, T::Set[String])
+      @err_finalizers = T.let(Set.new, T::Set[String])
+      @pending_return_transfers = T.let(Set.new, T::Set[String])
+      @pending_block_transfers = T.let(Set.new, T::Set[String])
+      @alloc_kinds = T.let({}, T::Hash[String, Symbol])
+      @alloc_scopes = T.let({}, T::Hash[String, Symbol])
+      @move_marks = T.let(Set.new, T::Set[String])
+      @terminated = T.let(false, T::Boolean)
+    end
+
+    sig { returns(LinearOwnershipState) }
+    def copy
+      other = LinearOwnershipState.new
+      other.owned.merge(@owned)
+      other.released.merge(@released)
+      other.maybe_released.merge(@maybe_released)
+      other.cleanup_finalizers.merge(@cleanup_finalizers)
+      other.guarded_finalizers.merge(@guarded_finalizers)
+      other.err_finalizers.merge(@err_finalizers)
+      other.pending_return_transfers.merge(@pending_return_transfers)
+      other.pending_block_transfers.merge(@pending_block_transfers)
+      other.alloc_kinds.merge!(@alloc_kinds)
+      other.alloc_scopes.merge!(@alloc_scopes)
+      other.move_marks.merge(@move_marks)
+      other.terminated = @terminated
+      other
+    end
+
+    sig { returns(T::Array[String]) }
+    def snapshot
+      [
+        "owned=#{@owned.to_a.sort.join(",")}",
+        "released=#{@released.to_a.sort.join(",")}",
+        "maybe=#{@maybe_released.to_a.sort.join(",")}",
+        "cleanup=#{@cleanup_finalizers.to_a.sort.join(",")}",
+        "guarded=#{@guarded_finalizers.to_a.sort.join(",")}",
+        "err=#{@err_finalizers.to_a.sort.join(",")}",
+        "return=#{@pending_return_transfers.to_a.sort.join(",")}",
+        "block=#{@pending_block_transfers.to_a.sort.join(",")}",
+        "alloc=#{@alloc_kinds.map { |k, v| "#{k}:#{v}" }.sort.join(",")}",
+      ]
+    end
+  end
+
   attr_reader :errors
+
+  AllocMarksByName = T.type_alias { T::Hash[String, T::Array[MIR::AllocMark]] }
+  CleanupMarksByName = T.type_alias { T::Hash[String, T::Array[T.any(MIR::Cleanup, MIR::ErrCleanup)]] }
+  NameSet = T.type_alias { T::Set[String] }
 
   sig { params(fn_name: T.untyped).void }
   def initialize(fn_name: nil)
@@ -81,34 +212,50 @@ class MIRChecker
     @errors = T.let([], T::Array[T.untyped])
   end
 
-  # strict: true enables the UNHOISTED_ALLOC check.
-  # Disabled by default until Phase 1-3 hoisting is complete -- enabling it
-  # on the current codebase would flag every string return, @indirect field,
-  # and list literal that hasn't been hoisted yet.  Each phase task fixes a
-  # category and re-enables the check for that category.  Once all violations
-  # are resolved this parameter will be removed and the check always runs.
+  # `strict` is retained for call-site compatibility only. MIR ownership
+  # checks are always strict: an unhoisted allocation or provenance placement
+  # side channel is a compiler bug, not an optional lint.
   sig { params(fn_def: MIR::FnDef, strict: T::Boolean).returns(T::Array[String]) }
   def check_fn!(fn_def, strict: false)
     @fn_name = fn_def.name
     @errors = []
 
-    allocs = {}
-    cleanups = {}
-    transfers = Set.new
-    errdefer_destroy_names = Set.new
+    allocs = T.let({}, AllocMarksByName)
+    cleanups = T.let({}, CleanupMarksByName)
+    err_cleanups = T.let({}, CleanupMarksByName)
+    transfers = T.let(Set.new, NameSet)
+    return_transfers = T.let(Set.new, NameSet)
+    errdefer_destroy_names = T.let(Set.new, NameSet)
     hpt_leaks = []
     owned_return_lets = []
+    owned_result_lets = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
+    structural_ownership_nodes = []
+    ownership_fact_nodes = []
 
     walk_mir(fn_def.body) do |node|
+      if node.respond_to?(:ownership_consumption) &&
+         node.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+        structural_ownership_nodes << node
+      end
+
       case node
+      when MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
+        ownership_fact_nodes << node
+        if node.is_a?(MIR::OwnedTransfer)
+          transfers << node.name.to_s
+          return_transfers << node.name.to_s if node.target == :return
+        end
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup, MIR::ErrCleanup
         (cleanups[node.name] ||= []) << node
+        (err_cleanups[node.name] ||= []) << node if node.is_a?(MIR::ErrCleanup)
       when MIR::TransferMark
-        transfers << node.name
+        name = node.name.to_s
+        transfers << name
+        return_transfers << name if node.target == :return
       when MIR::ErrDeferStmt
         # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
@@ -117,20 +264,24 @@ class MIRChecker
         end
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
+        owned_result_lets << node if expr_owned_result_alloc(node.init)
+        if node.init.is_a?(MIR::InlineZig) && node.init.has_alloc_metadata?
+          inline_alloc_nodes << node.init
+        end
         all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
-        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::DiscardOwned
-        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.has_alloc_metadata?
           inline_alloc_nodes << node.expr
         end
         all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::InlineZig
-        if node.allocs && !inline_alloc_nodes.include?(node)
+        if node.has_alloc_metadata? && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
         end
         all_zig_nodes << node unless all_zig_nodes.include?(node)
@@ -145,23 +296,789 @@ class MIRChecker
     end
 
     hpt_leaks.each { |e| @errors << e }
+    verify_allocator_closed_set!(allocs, cleanups, inline_alloc_nodes)
+    verify_alloc_marks_typed!(allocs)
     verify_owned_return_alloc_marks!(owned_return_lets, allocs)
-    verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
+    verify_owned_result_alloc_marks!(owned_result_lets, allocs)
+    verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, fn_def)
     verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
+    verify_err_cleanup_transfers!(err_cleanups, transfers)
+    verify_return_transfers_heap!(return_transfers, allocs)
+    verify_cleanup_sources_own_values!(fn_def.body, cleanups, err_cleanups)
+    verify_allocating_lets_marked!(fn_def.body, allocs)
+    verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
     verify_zig_contracts!(all_zig_nodes)
-    verify_raw_justified!(all_zig_nodes)
+    verify_call_contracts!(fn_def.body, transfers, allocs)
+    verify_structural_ownership_contracts!(structural_ownership_nodes, transfers, allocs)
+    verify_explicit_ownership_contracts!(all_zig_nodes, transfers, allocs)
+    verify_ownership_surfaces_finalized!(fn_def.body, ownership_fact_nodes)
+    verify_execution_boundary_facts!(fn_def.body)
     verify_frame_rewind!(fn_def.body)
-    verify_unhoisted_allocs!(fn_def.body) if strict
+    verify_inline_alloc_targets!(inline_alloc_nodes)
+    verify_unhoisted_allocs!(fn_def.body)
     verify_heap_create_single_indirection!(fn_def.body)
+    verify_move_mark_scope!(fn_def.body)
+    verify_linear_ownership!(fn_def.body)
 
     @errors
+  end
+
+  sig { params(return_transfers: NameSet, allocs: AllocMarksByName).void }
+  def verify_return_transfers_heap!(return_transfers, allocs)
+    return_transfers.each do |name|
+      marks = allocs[name]
+      unless marks && !marks.empty?
+        @errors << error(:RETURN_TRANSFER_WITHOUT_ALLOC, name,
+          "return ownership transfer has no MIR::AllocMark")
+        next
+      end
+      next if marks.all? { |mark| mark.alloc == :heap }
+
+      @errors << error(:RETURN_TRANSFER_FRAME_ALLOC, name,
+        "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")
+    end
+  end
+
+  sig { params(allocs: AllocMarksByName).void }
+  def verify_alloc_marks_typed!(allocs)
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        ti = mark.type_info
+        next if ti.is_a?(Type) && !ti.untyped?
+
+        @errors << error(:ALLOC_MARK_TYPE_MISSING, name,
+          "MIR::AllocMark must carry a concrete Type so MIRChecker can prove cleanup/ownership safety")
+      end
+    end
+  end
+
+  sig { params(nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  def verify_structural_ownership_contracts!(nodes, transfers, allocs)
+    nodes.uniq.each do |node|
+      consumed = structural_consumed_names(node)
+      next if consumed.empty?
+
+      sink_alloc = if node.is_a?(MIR::ReassignWithCleanup)
+        node.alloc
+      elsif node.respond_to?(:resolved_allocs) && node.resolved_allocs.is_a?(MIR::InlineAllocMetadata)
+        node.resolved_allocs.value_alloc
+      end
+
+      consumed.each do |name|
+        next unless allocs.key?(name)
+
+        unless transfers.include?(name)
+          @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
+            "structural ownership sink consumes '#{name}' but no MIR::TransferMark exists for that binding")
+        end
+
+        mark = allocs[name]&.first
+        next unless mark&.alloc.is_a?(Symbol) && sink_alloc.is_a?(Symbol)
+        next if mark.alloc == sink_alloc
+
+        @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
+          "structural ownership sink consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \
+          "owned transfer allocator is incoherent")
+      end
+    end
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def structural_consumed_names(node)
+    fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+    return fact.names.map(&:to_s).uniq if fact.is_a?(MIR::OwnershipConsumptionFact)
+    return [] unless stdlib_takes_ownership?(node)
+
+    value = node.respond_to?(:value) ? node.value : nil
+    return [value.name.to_s] if value.is_a?(MIR::Ident)
+    if allocating_expr?(value)
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
+        "structural ownership sink takes a value, but the source owner is not a named MIR binding")
+    end
+    []
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  def verify_linear_ownership!(body)
+    final_state = check_linear_stmts!(body, LinearOwnershipState.new)
+    final_state.pending_return_transfers.each do |name|
+      @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
+        "TransferMark(:return) was emitted but no ReturnStmt consumed that ownership transfer")
+    end
+    nil
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), state: LinearOwnershipState).returns(LinearOwnershipState) }
+  def check_linear_stmts!(stmts, state)
+    return state unless stmts.is_a?(Array)
+
+    stmts.each do |stmt|
+      break if state.terminated
+      check_linear_stmt!(stmt, state)
+    end
+    state
+  end
+
+  sig { params(stmt: T.untyped, state: LinearOwnershipState).void }
+  def check_linear_stmt!(stmt, state)
+    return unless stmt
+    unless stmt.is_a?(MIR::Stmt)
+      check_linear_expr_uses!(stmt, state) if stmt.is_a?(MIR::Emittable)
+      return
+    end
+    unless LINEAR_STATEMENT_NODE_TYPES.include?(stmt.class)
+      @errors << error(:LINEAR_STMT_NOT_REGISTERED, stmt.class.name.to_s,
+        "MIR statement is not registered with MIRChecker linear ownership traversal")
+      return
+    end
+
+    case stmt
+    when MIR::AllocMark
+      linear_alloc!(stmt, state)
+    when MIR::Cleanup
+      linear_register_cleanup!(stmt.name.to_s, stmt.cleanup_entry.has_moved_guard?, state)
+    when MIR::ErrCleanup
+      linear_register_err_cleanup!(stmt.name.to_s, state)
+    when MIR::TransferMark
+      linear_transfer!(stmt.name.to_s, stmt.target, stmt.target_alloc, state)
+    when MIR::MoveMark
+      linear_move_mark!(stmt.name.to_s, state)
+    when MIR::OwnedCreate, MIR::OwnedBorrow, MIR::OwnedStore,
+         MIR::OwnedTransfer, MIR::OwnedReturn, MIR::OwnedDestroy,
+         MIR::ReassignMark, MIR::FieldCleanupMark, MIR::ReturnMark
+      # Legacy and fact nodes are validated by the ownership-fact passes.
+      nil
+    when MIR::ReturnStmt
+      return_reads = state.pending_return_transfers.dup
+      linear_expr_consumed_names(stmt.value).each { |name| return_reads.add(name) }
+      check_linear_expr_uses!(stmt.value, state, return_reads)
+      returned_names = linear_expr_ident_names(stmt.value)
+      verify_guarded_transfers_moved!(state.pending_return_transfers, state, :return)
+      state.pending_return_transfers.each { |name| linear_release!(name, :return, nil, state) }
+      state.pending_return_transfers.each do |name|
+        next if returned_names.include?(name)
+        @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
+          "TransferMark(:return) does not match the returned expression")
+      end
+      state.pending_return_transfers.clear
+      state.terminated = true
+    when MIR::Let
+      check_linear_expr_uses!(stmt.init, state)
+    when MIR::Set
+      check_linear_expr_uses!(stmt.target, state)
+      check_linear_expr_uses!(stmt.value, state)
+    when MIR::ReassignWithCleanup
+      check_linear_expr_uses!(stmt.value, state)
+    when MIR::ExprStmt
+      check_linear_expr_uses!(stmt.expr, state)
+    when MIR::AssertStmt
+      check_linear_expr_uses!(stmt.cond, state)
+    when MIR::DiscardOwned
+      check_linear_expr_uses!(stmt.expr, state)
+    when MIR::BreakStmt
+      block_reads = state.pending_block_transfers.dup
+      linear_expr_consumed_names(stmt.value).each { |name| block_reads.add(name) }
+      check_linear_expr_uses!(stmt.value, state, block_reads)
+      break_names = linear_expr_ident_names(stmt.value)
+      verify_guarded_transfers_moved!(state.pending_block_transfers, state, :block_result)
+      state.pending_block_transfers.each { |name| linear_release!(name, :block_result, nil, state) }
+      state.pending_block_transfers.each do |name|
+        next if break_names.include?(name)
+        @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
+          "TransferMark(:block_result) does not match the block break expression")
+      end
+      state.pending_block_transfers.clear
+    when MIR::IfStmt
+      check_linear_expr_uses!(stmt.cond, state)
+      check_linear_branch_join!(stmt.then_body, stmt.else_body, state, "if")
+    when MIR::IfBindStmt
+      stmt.bindings&.each do |binding|
+        expr = binding.is_a?(Hash) ? binding[:expr] : nil
+        check_linear_expr_uses!(expr, state)
+      end
+      check_linear_branch_join!(stmt.then_body, stmt.else_body, state, "if-bind")
+    when MIR::WhileStmt
+      check_linear_expr_uses!(stmt.cond, state)
+      body_state = check_linear_stmts!(stmt.body, state.copy)
+      projected = state.copy
+      linear_exit_scope!(projected, body_state, "while")
+      linear_require_same_state!(state, projected, "while")
+    when MIR::ForStmt
+      check_linear_expr_uses!(stmt.iter, state)
+      body_state = check_linear_stmts!(stmt.body, state.copy)
+      projected = state.copy
+      linear_exit_scope!(projected, body_state, "for")
+      linear_require_same_state!(state, projected, "for")
+    when MIR::ScopeBlock, MIR::BlockExpr
+      inner = check_linear_stmts!(stmt.body, state.copy)
+      linear_exit_scope!(state, inner, "scope")
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
+      check_linear_expr_uses!(stmt.subject, state)
+      states = T.let([], T::Array[LinearOwnershipState])
+      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "match") }
+      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "match")
+      linear_merge_branch_states!(states, state, "match")
+    when MIR::IfChain
+      states = T.let([], T::Array[LinearOwnershipState])
+      stmt.branches&.each do |branch|
+        check_linear_expr_uses!(branch[:cond], state)
+        states << linear_project_branch_state(check_linear_stmts!(branch[:body], state.copy), state, "if-chain")
+      end
+      states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "if-chain")
+      linear_merge_branch_states!(states, state, "if-chain")
+    when MIR::DeferStmt
+      check_linear_stmt!(stmt.body, state)
+    when MIR::ErrDeferStmt
+      check_linear_stmt!(stmt.body, state)
+    when MIR::BatchWindowPush
+      check_linear_expr_uses!(stmt.item_expr, state)
+      check_linear_expr_uses!(stmt.value_expr, state)
+    when MIR::BatchWindowFlush
+      check_linear_expr_uses!(stmt.value_expr, state)
+    when MIR::IndexInsert
+      check_linear_expr_uses!(stmt.map, state)
+      check_linear_expr_uses!(stmt.key_expr, state)
+      check_linear_expr_uses!(stmt.value_expr, state)
+    when MIR::ShardedMapPut
+      check_linear_expr_uses!(stmt.target, state)
+      check_linear_expr_uses!(stmt.key, state)
+      check_linear_expr_uses!(stmt.value, state)
+      check_linear_expr_uses!(stmt.shard_idx, state)
+      check_linear_expr_uses!(stmt.shard_key, state)
+    when MIR::Sort
+      check_linear_expr_uses!(stmt.items_expr, state)
+      check_linear_expr_uses!(stmt.key_a, state)
+      check_linear_expr_uses!(stmt.key_b, state)
+    when MIR::StreamYield
+      check_linear_expr_uses!(stmt.value, state)
+    when MIR::StreamSpawn
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::Pipeline
+      check_linear_expr_uses!(stmt.inner, state)
+    when MIR::RawBc
+      stmt.args&.each { |arg| check_linear_expr_uses!(arg, state) }
+      check_linear_expr_uses!(stmt, state)
+    when MIR::RawZig
+      check_linear_expr_uses!(stmt, state)
+    when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+      inner = check_linear_stmts!(stmt.body, state.copy)
+      linear_exit_scope!(state, inner, stmt.class.name.to_s)
+    when MIR::PolymorphicMutate
+      inner = check_linear_stmts!(stmt.body, state.copy)
+      linear_exit_scope!(state, inner, "polymorphic-mutate")
+    when MIR::PolymorphicMutateFlow
+      check_linear_expr_uses!(stmt.guard_cond, state)
+      states = T.let([], T::Array[LinearOwnershipState])
+      states << linear_project_branch_state(check_linear_stmts!(stmt.body, state.copy), state, "polymorphic-mutate-flow")
+      states << linear_project_branch_state(check_linear_stmts!(stmt.guard_fail_body, state.copy), state, "polymorphic-mutate-flow")
+      linear_merge_branch_states!(states, state, "polymorphic-mutate-flow")
+    when MIR::WithMatchDispatch
+      states = T.let([], T::Array[LinearOwnershipState])
+      stmt.arms&.each { |arm| states << linear_project_branch_state(check_linear_stmts!(arm[:body], state.copy), state, "with-match") }
+      linear_merge_branch_states!(states, state, "with-match")
+    when MIR::BgBlock
+      check_linear_stmts!(stmt.run_body, LinearOwnershipState.new)
+    when MIR::DoBlock
+      stmt.branch_bodies&.each { |body| check_linear_stmts!(body, LinearOwnershipState.new) }
+    when MIR::CatchWrapper
+      stmt.clause_bodies&.each { |body| check_linear_stmts!(body, state.copy) }
+    when MIR::FnDef
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::TestDef
+      check_linear_stmts!(stmt.body, LinearOwnershipState.new)
+    when MIR::StructDef
+      stmt.methods&.each { |method| check_linear_stmt!(method, LinearOwnershipState.new) if method.is_a?(MIR::FnDef) }
+    when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
+      ctx = stmt.ctx_struct
+      check_linear_stmts!(ctx.run_body, LinearOwnershipState.new) if ctx.respond_to?(:run_body)
+    when MIR::Panic
+      state.terminated = true
+    when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
+         MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
+         MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,
+         MIR::UnionTypeDef
+      nil
+    end
+    nil
+  end
+
+  sig { params(mark: MIR::AllocMark, state: LinearOwnershipState).void }
+  def linear_alloc!(mark, state)
+    name = mark.name.to_s
+    if state.owned.include?(name) && !state.released.include?(name)
+      @errors << error(:OWNERSHIP_UNVERIFIED_PATH, name,
+        "AllocMark appears while prior ownership for the same binding is still active")
+    end
+    state.owned.add(name)
+    state.alloc_kinds[name] = mark.alloc if mark.alloc.is_a?(Symbol)
+    state.alloc_scopes[name] = mark.scope if mark.scope.is_a?(Symbol)
+    state.released.delete(name)
+    state.maybe_released.delete(name)
+    state.cleanup_finalizers.delete(name)
+    state.guarded_finalizers.delete(name)
+    state.err_finalizers.delete(name)
+    state.pending_return_transfers.delete(name)
+    state.pending_block_transfers.delete(name)
+    nil
+  end
+
+  sig { params(name: String, guarded: T::Boolean, state: LinearOwnershipState).void }
+  def linear_register_cleanup!(name, guarded, state)
+    if state.released.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
+        "Cleanup registered after ownership for this binding was already transferred")
+    end
+    if state.cleanup_finalizers.include?(name) || state.err_finalizers.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_FINALIZER, name,
+        "multiple cleanup strategies registered for one owned binding")
+    end
+    state.cleanup_finalizers.add(name)
+    state.guarded_finalizers.add(name) if guarded
+    nil
+  end
+
+  sig { params(name: String, state: LinearOwnershipState).void }
+  def linear_register_err_cleanup!(name, state)
+    if state.released.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
+        "ErrCleanup registered after ownership for this binding was already transferred")
+    end
+    if state.cleanup_finalizers.include?(name) || state.err_finalizers.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_FINALIZER, name,
+        "multiple cleanup strategies registered for one owned binding")
+    end
+    state.err_finalizers.add(name)
+    nil
+  end
+
+  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  def linear_transfer!(name, target, target_alloc, state)
+    if target == :return
+      state.pending_return_transfers.add(name)
+      return
+    end
+    if target == :block_result
+      state.pending_block_transfers.add(name)
+      return
+    end
+    if state.cleanup_finalizers.include?(name) && !state.guarded_finalizers.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
+        "TransferMark and unguarded Cleanup both own the success-path release")
+    end
+    linear_release!(name, target, target_alloc, state)
+    nil
+  end
+
+  sig { params(name: String, state: LinearOwnershipState).void }
+  def linear_move_mark!(name, state)
+    return if state.released.include?(name) ||
+              state.pending_return_transfers.include?(name) ||
+              state.pending_block_transfers.include?(name)
+
+    @errors << error(:OWNERSHIP_IMPLICIT_MOVE, name,
+      "MoveMark suppresses cleanup but no matching TransferMark was seen first")
+    nil
+  ensure
+    state.move_marks.add(name)
+  end
+
+  sig { params(names: T::Set[String], state: LinearOwnershipState, target: Symbol).void }
+  def verify_guarded_transfers_moved!(names, state, target)
+    names.each do |name|
+      next unless state.guarded_finalizers.include?(name)
+      next if state.move_marks.include?(name)
+
+      @errors << error(:OWNERSHIP_IMPLICIT_MOVE, name,
+        "TransferMark(:#{target}) moves a guarded cleanup binding without MIR::MoveMark")
+    end
+    nil
+  end
+
+  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  def linear_release!(name, target, target_alloc, state)
+    unless state.owned.include?(name)
+      @errors << error(:TRANSFER_WITHOUT_ALLOC, name,
+        "ownership release to #{target.inspect} has no active AllocMark")
+      return
+    end
+    if target == :owned_sink && !target_alloc.is_a?(Symbol)
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, name,
+        "TransferMark(:owned_sink) must carry target_alloc so MIRChecker can prove whether ownership escapes")
+    end
+    if state.alloc_kinds[name] == :frame && escaping_transfer_target?(target, target_alloc)
+      @errors << error(:FRAME_ALLOC_ESCAPES, name,
+        "frame-allocated ownership is transferred to #{target.inspect}; escaping owned values must be heap")
+    end
+    if state.released.include?(name)
+      @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
+        "binding ownership is released more than once")
+      return
+    end
+    state.released.add(name)
+    state.maybe_released.delete(name)
+    nil
+  end
+
+  sig { params(target: T.untyped, target_alloc: T.untyped).returns(T::Boolean) }
+  def escaping_transfer_target?(target, target_alloc)
+    return false unless target.is_a?(Symbol)
+    return target_alloc == :heap if target == :owned_sink
+
+    LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS.include?(target)
+  end
+
+  sig { params(then_body: T.nilable(T::Array[T.untyped]), else_body: T.nilable(T::Array[T.untyped]), state: LinearOwnershipState, label: String).void }
+  def check_linear_branch_join!(then_body, else_body, state, label)
+    then_state = check_linear_stmts!(then_body, state.copy)
+    else_state = check_linear_stmts!(else_body, state.copy)
+    projected_then = linear_project_branch_state(then_state, state, label)
+    projected_else = linear_project_branch_state(else_state, state, label)
+    linear_merge_branch_states!([projected_then, projected_else], state, label)
+    nil
+  end
+
+  sig { params(branch_state: LinearOwnershipState, outer_state: LinearOwnershipState, label: String).returns(LinearOwnershipState) }
+  def linear_project_branch_state(branch_state, outer_state, label)
+    projected = outer_state.copy
+    linear_exit_scope!(projected, branch_state, label)
+    projected
+  end
+
+  sig { params(states: T::Array[LinearOwnershipState], into: LinearOwnershipState, label: String).void }
+  def linear_merge_branch_states!(states, into, label)
+    return if states.empty?
+    live_states = states.reject(&:terminated)
+    if live_states.empty?
+      into.terminated = true
+      return
+    end
+    first = T.must(live_states.first)
+    normalize_guarded_conditional_releases!(live_states)
+    live_states.drop(1).each do |state|
+      next if state.snapshot == first.snapshot
+      @errors << error(:OWNERSHIP_UNVERIFIED_PATH, label,
+        "control-flow branches rejoin with different ownership state: " \
+        "#{first.snapshot.join(" ")} vs #{state.snapshot.join(" ")}")
+    end
+    copy_linear_state!(first, into)
+    nil
+  end
+
+  sig { params(states: T::Array[LinearOwnershipState]).void }
+  def normalize_guarded_conditional_releases!(states)
+    return if states.empty?
+    names = T.let(Set.new, T::Set[String])
+    states.each { |state| names.merge(state.released) }
+    names.each do |name|
+      released_count = states.count { |state| state.released.include?(name) }
+      next if released_count == 0 || released_count == states.length
+      next unless states.all? { |state| state.guarded_finalizers.include?(name) }
+
+      states.each do |state|
+        state.released.delete(name)
+        state.maybe_released.add(name)
+      end
+    end
+    nil
+  end
+
+  sig { params(expected: LinearOwnershipState, actual: LinearOwnershipState, label: String).void }
+  def linear_require_same_state!(expected, actual, label)
+    return if expected.snapshot == actual.snapshot
+
+    @errors << error(:OWNERSHIP_UNVERIFIED_PATH, label,
+      "nested control flow changes ownership state in a way MIRChecker cannot prove: " \
+      "#{expected.snapshot.join(" ")} vs #{actual.snapshot.join(" ")}")
+    nil
+  end
+
+  sig { params(outer: LinearOwnershipState, inner: LinearOwnershipState, label: String).void }
+  def linear_exit_scope!(outer, inner, label)
+    projected = inner.copy
+    local_names = projected.owned - outer.owned
+    local_names.each do |name|
+      unless projected.released.include?(name) ||
+             projected.cleanup_finalizers.include?(name) ||
+             projected.err_finalizers.include?(name) ||
+             projected.alloc_kinds[name] == :frame
+        @errors << error(:OWNERSHIP_UNVERIFIED_PATH, label,
+          "scope-local owned binding '#{name}' exits without cleanup or transfer")
+      end
+      projected.owned.delete(name)
+      projected.released.delete(name)
+      projected.cleanup_finalizers.delete(name)
+      projected.guarded_finalizers.delete(name)
+      projected.err_finalizers.delete(name)
+      projected.pending_return_transfers.delete(name)
+      projected.pending_block_transfers.delete(name)
+      projected.maybe_released.delete(name)
+      projected.alloc_kinds.delete(name)
+      projected.alloc_scopes.delete(name)
+    end
+    copy_linear_state!(projected, outer)
+    nil
+  end
+
+  sig { params(source: LinearOwnershipState, target: LinearOwnershipState).void }
+  def copy_linear_state!(source, target)
+    target.owned.replace(source.owned)
+    target.released.replace(source.released)
+    target.maybe_released.replace(source.maybe_released)
+    target.cleanup_finalizers.replace(source.cleanup_finalizers)
+    target.guarded_finalizers.replace(source.guarded_finalizers)
+    target.err_finalizers.replace(source.err_finalizers)
+    target.pending_return_transfers.replace(source.pending_return_transfers)
+    target.pending_block_transfers.replace(source.pending_block_transfers)
+    target.alloc_kinds.replace(source.alloc_kinds)
+    target.alloc_scopes.replace(source.alloc_scopes)
+    target.terminated = source.terminated
+    nil
+  end
+
+  sig { params(expr: T.untyped, state: LinearOwnershipState, transfer_reads: T::Set[String]).void }
+  def check_linear_expr_uses!(expr, state, transfer_reads = Set.new)
+    consuming_reads = T.let(transfer_reads.dup, T::Set[String])
+    linear_expr_consumed_names(expr).each { |name| consuming_reads.add(name) }
+    if expr.is_a?(MIR::Pipeline)
+      check_linear_expr_uses!(expr.inner, state, consuming_reads)
+      return
+    end
+    if expr.is_a?(MIR::BlockExpr)
+      inner = check_linear_stmts!(expr.body, state.copy)
+      linear_exit_scope!(state, inner, "block-expr")
+      return
+    end
+    linear_expr_ident_names(expr).each do |name|
+      next if consuming_reads.include?(name)
+      next unless state.released.include?(name) || state.maybe_released.include?(name)
+      @errors << error(:OWNERSHIP_USE_AFTER_TRANSFER, name,
+        "binding read after ownership was transferred")
+    end
+    nil
+  end
+
+  sig { params(expr: T.untyped).returns(T::Set[String]) }
+  def linear_expr_consumed_names(expr)
+    names = T.let(Set.new, T::Set[String])
+    walk_mir_node(expr) do |node|
+      if node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+        node.ownership_contract.consumes.each { |name| names.add(name.to_s) }
+      end
+      if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
+        collect_linear_expr_ident_names(node, names)
+      end
+      next unless node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall) || node.is_a?(MIR::MethodCall)
+
+      callable = node.callable_contract
+      callable&.ownership_contract&.consumes&.each { |name| names.add(name.to_s) }
+    end
+    names
+  end
+
+  sig { params(expr: T.untyped).returns(T::Set[String]) }
+  def linear_expr_ident_names(expr)
+    names = T.let(Set.new, T::Set[String])
+    collect_linear_expr_ident_names(expr, names)
+    names
+  end
+
+  sig { params(expr: T.untyped, names: T::Set[String]).void }
+  def collect_linear_expr_ident_names(expr, names)
+    return unless expr
+    case expr
+    when MIR::Ident
+      names.add(expr.name.to_s)
+      return
+    when MIR::InlineZig, MIR::RawZig, MIR::BlockExpr
+      return
+    end
+    each_sub_expr(expr) { |sub| collect_linear_expr_ident_names(sub, names) }
+    nil
+  end
+
+  # INV-MOVEMARK-GUARD-SCOPE: MoveMark lowers to `name_moved = true`; that
+  # variable only exists if a same-or-outer lexical body emitted a guarded
+  # Cleanup/ErrCleanup for the binding earlier in the same scope. This rejects
+  # ownership markers leaked out of nested returns/loops before Zig codegen can
+  # see an undeclared `_moved` variable.
+  sig { params(body: T.nilable(T::Array[T.untyped]), visible: T::Set[String]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_move_mark_scope!(body, visible = Set.new)
+    return unless body.is_a?(Array)
+    body.each do |stmt|
+      case stmt
+      when MIR::Cleanup, MIR::ErrCleanup
+        visible.add(stmt.name.to_s) if stmt.cleanup_entry.has_moved_guard?
+      when MIR::MoveMark
+        unless visible.include?(stmt.name.to_s)
+          @errors << error(:MOVEMARK_WITHOUT_GUARD, stmt.name,
+            "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")
+        end
+      when MIR::IfStmt
+        verify_move_mark_scope!(stmt.then_body, visible.dup)
+        verify_move_mark_scope!(stmt.else_body, visible.dup)
+      when MIR::IfBindStmt
+        verify_move_mark_scope!(stmt.then_body, visible.dup)
+        verify_move_mark_scope!(stmt.else_body, visible.dup)
+      when MIR::WhileStmt, MIR::ForStmt
+        verify_move_mark_scope!(stmt.body, visible.dup)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        verify_move_mark_scope!(stmt.body, visible.dup)
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
+        stmt.arms&.each { |a| verify_move_mark_scope!(a[:body], visible.dup) }
+        verify_move_mark_scope!(stmt.default_body, visible.dup)
+      when MIR::IfChain
+        stmt.branches&.each { |b| verify_move_mark_scope!(b[:body], visible.dup) }
+        verify_move_mark_scope!(stmt.default_body, visible.dup)
+      when MIR::BgBlock
+        verify_move_mark_scope!(stmt.run_body, visible.dup)
+      when MIR::DoBlock
+        stmt.branch_bodies&.each { |b| verify_move_mark_scope!(b, visible.dup) }
+      when MIR::CatchWrapper
+        stmt.clause_bodies&.each { |b| verify_move_mark_scope!(b, visible.dup) }
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        verify_move_mark_scope!(stmt.body, visible.dup)
+      when MIR::WithMatchDispatch
+        stmt.arms&.each { |a| verify_move_mark_scope!(a[:body], visible.dup) }
+      end
+    end
+    nil
+  end
+
+  # INV-ERRCLEANUP-TRANSFER: ErrCleanup means "clean this binding only on the
+  # error path because success transfers ownership". Success transfer must be
+  # represented by TransferMark; otherwise the compiler is relying on context
+  # folklore and the checker cannot distinguish a valid move from a leak.
+  sig { params(err_cleanups: T::Hash[String, T::Array[T.untyped]], transfers: T::Set[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_err_cleanup_transfers!(err_cleanups, transfers)
+    err_cleanups.each_key do |name|
+      next if transfers.include?(name)
+      @errors << error(:ERRCLEANUP_WITHOUT_TRANSFER, name,
+        "MIR::ErrCleanup requires a matching MIR::TransferMark; success-path owner is implicit")
+    end
+    nil
+  end
+
+  # INV-ALLOCATING-LET-MARKED: a top-level Let init is the only legal place
+  # for an allocating MIR expression, but "legal expression position" is not
+  # ownership tracking. The binding must still have an AllocMark so cleanup or
+  # transfer can be verified by name.
+  sig { params(body: T.nilable(T::Array[T.untyped]), allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_allocating_lets_marked!(body, allocs)
+    walk_mir(body) do |node|
+      next unless node.is_a?(MIR::Let)
+      next unless allocating_expr?(node.init)
+      next if allocs.key?(node.name)
+      @errors << error(:ALLOCATING_LET_WITHOUT_ALLOC, node.name,
+        "heap-allocating Let init has no MIR::AllocMark; ownership is implicit")
+    end
+    nil
+  end
+
+  # INV-AGGREGATE-OWNERSHIP: an aggregate that owns recursive data must have a
+  # single allocator story. If an owned temp is inserted into a frame aggregate
+  # while the temp was allocated on heap, the aggregate cleanup cannot
+  # authoritatively free its children. Lowering must either materialize the
+  # child in the aggregate allocator or make the aggregate heap-owned.
+  sig { params(body: T.nilable(T::Array[T.untyped]), allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_aggregate_owned_children!(body, allocs)
+    return unless body.is_a?(Array)
+    alloc_by_name = T.let({}, T::Hash[String, Symbol])
+    allocs.each do |name, marks|
+      mark = marks.first
+      alloc_by_name[name] = mark.alloc if mark && VALID_ALLOCATORS.include?(mark.alloc)
+    end
+    check_aggregate_stmts!(body, alloc_by_name)
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), alloc_by_name: T::Hash[String, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
+  def check_aggregate_stmts!(stmts, alloc_by_name)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when MIR::Let
+        check_aggregate_expr!(stmt.init, alloc_by_name[stmt.name], alloc_by_name)
+      when MIR::Set
+        check_aggregate_expr!(stmt.value, nil, alloc_by_name)
+      when MIR::ReassignWithCleanup
+        check_aggregate_expr!(stmt.value, stmt.alloc, alloc_by_name)
+      when MIR::ReturnStmt, MIR::BreakStmt
+        check_aggregate_expr!(stmt.value, nil, alloc_by_name)
+      when MIR::ExprStmt
+        check_aggregate_expr!(stmt.expr, nil, alloc_by_name)
+      when MIR::DiscardOwned
+        check_aggregate_expr!(stmt.expr, nil, alloc_by_name)
+      when MIR::IfStmt
+        check_aggregate_expr!(stmt.cond, nil, alloc_by_name)
+        check_aggregate_stmts!(stmt.then_body, alloc_by_name)
+        check_aggregate_stmts!(stmt.else_body, alloc_by_name)
+      when MIR::WhileStmt
+        check_aggregate_expr!(stmt.cond, nil, alloc_by_name)
+        check_aggregate_stmts!(stmt.body, alloc_by_name)
+      when MIR::ForStmt
+        check_aggregate_expr!(stmt.iter, nil, alloc_by_name)
+        check_aggregate_stmts!(stmt.body, alloc_by_name)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        check_aggregate_stmts!(stmt.body, alloc_by_name)
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
+        check_aggregate_expr!(stmt.subject, nil, alloc_by_name)
+        stmt.arms&.each { |a| check_aggregate_stmts!(a[:body], alloc_by_name) }
+        check_aggregate_stmts!(stmt.default_body, alloc_by_name)
+      when MIR::IfChain
+        stmt.branches&.each do |b|
+          check_aggregate_expr!(b[:cond], nil, alloc_by_name)
+          check_aggregate_stmts!(b[:body], alloc_by_name)
+        end
+        check_aggregate_stmts!(stmt.default_body, alloc_by_name)
+      end
+    end
+  end
+
+  sig { params(expr: T.untyped, owner_alloc: T.nilable(Symbol), alloc_by_name: T::Hash[String, Symbol]).returns(T.nilable(T::Array[T.untyped])) }
+  def check_aggregate_expr!(expr, owner_alloc, alloc_by_name)
+    return unless expr
+    case expr
+    when MIR::Cast
+      check_aggregate_expr!(expr.expr, owner_alloc, alloc_by_name)
+    when MIR::MakeList
+      list_alloc = expr.alloc.is_a?(Symbol) ? expr.alloc : owner_alloc
+      expr.items&.each { |item| check_aggregate_expr!(item, list_alloc, alloc_by_name) }
+    when MIR::StructInit
+      expr.fields&.each do |field|
+        field_alloc = field[:alloc].is_a?(Symbol) ? field[:alloc] : owner_alloc
+        check_aggregate_expr!(field[:value], field_alloc, alloc_by_name)
+      end
+    when MIR::ArrayInit
+      expr.items&.each { |item| check_aggregate_expr!(item, owner_alloc, alloc_by_name) }
+    when MIR::DeepCopy
+      # DeepCopy reads its source and produces a fresh owned value in its own
+      # allocator; the source is not inserted into the destination aggregate.
+      return
+    when MIR::RcRetain
+      # Retain reads an Arc/Rc source and produces a new owned handle; the
+      # source binding itself is not inserted into the aggregate.
+      return
+    when MIR::RcDowngrade, MIR::WeakUpgrade
+      # Weak-link operations read their source handles and produce a distinct
+      # handle; they do not insert the source binding into the aggregate.
+      return
+    when MIR::Ident
+      child_alloc = alloc_by_name[expr.name]
+      return unless child_alloc && owner_alloc
+      return if child_alloc == owner_alloc
+      @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, expr.name,
+        "owned child is :#{child_alloc} but aggregate owner is :#{owner_alloc}; " \
+        "nested ownership placement is implicit/incoherent")
+    else
+      each_sub_expr(expr) { |sub| check_aggregate_expr!(sub, nil, alloc_by_name) }
+    end
+    nil
   end
 
   # INV-INDIRECT-SINGLE-BOX: a HeapCreate is exactly one indirection
   # (`HeapCreate(T)` -> `*T`), so its cell type must never itself be a
   # pointer. A `*`-typed cell is a `**U` double box -> UAF on read.
-  sig { params(body: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T.nilable(T::Array[T.untyped])).void }
   def verify_heap_create_single_indirection!(body)
     each_heap_create(body) do |hc|
       zt = hc.zig_type
@@ -169,40 +1086,67 @@ class MIRChecker
       @errors << error(:INDIRECT_DOUBLE_BOX, @fn_name,
         "HeapCreate cell type is `#{zt}` (already a pointer) — boxing it yields a double indirection")
     end
+    nil
   end
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.untyped).returns(T.untyped) }
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), blk: T.proc.params(arg0: MIR::HeapCreate).void).void }
   def each_heap_create(stmts, &blk)
     walk_mir(stmts) do |node|
-      [node.respond_to?(:init) ? node.init : nil,
-       node.respond_to?(:expr) ? node.expr : nil,
-       node.respond_to?(:value) ? node.value : nil].each do |root|
-        deep_each_expr(root) { |e| yield e if e.is_a?(MIR::HeapCreate) }
-      end
+      yield node if node.is_a?(MIR::HeapCreate)
     end
-  end
-
-  sig { params(expr: T.untyped, blk: T.untyped).returns(T.untyped) }
-  def deep_each_expr(expr, &blk)
-    return unless expr
-    yield expr
-    each_sub_expr(expr) { |sub| deep_each_expr(sub, &blk) }
+    nil
   end
 
   sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }
   def check_program!(program, strict: false)
-    all_errors = []
+    MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")
+    all_errors = T.let(ownership_registry_errors, T::Array[String])
     program.items.each do |item|
       next unless item.is_a?(MIR::FnDef)
       all_errors.concat(check_fn!(item, strict: strict))
     end
+    MIRPassState.for!(program).mark!(:mir_checked) if all_errors.empty?
     all_errors
+  end
+
+  sig { returns(T::Array[String]) }
+  def ownership_registry_errors
+    missing = T.let([], T::Array[String])
+    unhandled_stmts = T.let([], T::Array[String])
+    MIR.constants.each do |const_name|
+      value = MIR.const_get(const_name)
+      next unless value.is_a?(Class)
+      next unless value < Struct
+
+      klass = value
+      if klass < MIR::Stmt && !LINEAR_STATEMENT_NODE_TYPES.include?(klass)
+        unhandled_stmts << T.must(klass.name)
+      end
+      next if MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES.include?(klass)
+      next if MIR::OWNERSHIP_SIGNIFICANT_NODE_NAMES.include?(T.must(klass.name))
+
+      members = T.cast(T.unsafe(klass).members, T::Array[Symbol])
+      next if (members & OWNERSHIP_FIELD_NAMES.to_a).empty?
+
+      missing << T.must(klass.name)
+    end
+    errors = T.let([], T::Array[String])
+    unhandled_stmts.sort.each do |name|
+      errors << "[LINEAR_STMT_NOT_REGISTERED] #{name} -- MIR statement is absent " \
+        "from MIRChecker::LINEAR_STATEMENT_NODE_TYPES"
+    end
+
+    missing.sort.each do |name|
+      errors << "[OWNERSHIP_NODE_NOT_REGISTERED] #{name} -- MIR node has ownership-significant fields " \
+        "but is absent from MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES"
+    end
+    errors
   end
 
   sig { params(init: T.untyped).returns(T::Boolean) }
   def owned_return_init?(init)
-    return true if init.is_a?(MIR::Call) && init.heap_provenance
-    return true if init.is_a?(MIR::TryCatch) && init.heap_provenance
+    return true if init.is_a?(MIR::Call) && init.owned_return?
+
     if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
       return false unless stdlib_owned_return?(init)
       # Receiver-dependent (Proc-resolved) returns -- collection
@@ -218,14 +1162,70 @@ class MIRChecker
     false
   end
 
+  # INV-CLEANUP-SOURCE-OWNS: Cleanup is legal only for a binding whose
+  # initializer creates ownership or receives ownership through an explicit
+  # structural transfer. Borrowed views (IndexGet/GetField/match payloads)
+  # may have recursive types, but cleaning them frees their owner.
+  sig do
+    params(
+      body: T.nilable(T::Array[T.untyped]),
+      cleanups: CleanupMarksByName,
+      err_cleanups: CleanupMarksByName,
+    ).void
+  end
+  def verify_cleanup_sources_own_values!(body, cleanups, err_cleanups)
+    cleanup_by_name = T.let({}, T::Hash[String, T.any(MIR::Cleanup, MIR::ErrCleanup)])
+    cleanups.each do |name, nodes|
+      first = nodes.first
+      cleanup_by_name[name] = first if first
+    end
+    err_cleanups.each do |name, nodes|
+      first = nodes.first
+      cleanup_by_name[name] = first if first
+    end
+    return if cleanup_by_name.empty?
+
+    owned_creates = T.let(Set.new, T::Set[String])
+    walk_mir(body) do |node|
+      owned_creates << node.name.to_s if node.is_a?(MIR::OwnedCreate)
+    end
+
+    walk_mir(body) do |node|
+      next unless node.is_a?(MIR::Let)
+      cleanup = cleanup_by_name[node.name.to_s]
+      next unless cleanup
+      next if cleanup_source_owns_value?(node, cleanup, owned_creates)
+
+      @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, node.name,
+        "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; " \
+        "MIRChecker cannot prove this binding owns memory")
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Let, cleanup: T.any(MIR::Cleanup, MIR::ErrCleanup), owned_creates: T::Set[String]).returns(T::Boolean) }
+  def cleanup_source_owns_value?(node, cleanup, owned_creates)
+    init = node.init
+    return true if cleanup.cleanup_entry.match_as?
+    return true if owned_creates.include?(node.name.to_s)
+    return true if allocating_expr?(init)
+    return true if owned_return_init?(init)
+    return true if expr_owned_result_alloc(init)
+    return true if structural_consumed_names(node).any?
+    return true if init.respond_to?(:ownership_consumption) &&
+                   init.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact) &&
+                   !init.ownership_consumption.names.empty?
+
+    false
+  end
+
   sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
-    return false unless node.stdlib_def&.emit&.allocates
-    return true if node.stdlib_def.emit&.return_alloc == :heap
+    return false unless node.stdlib_def&.emits_allocating?
+    return true if node.stdlib_def&.heap_return_alloc?
     return false unless node.is_a?(MIR::InlineZig)
 
-    allocs = node.allocs
-    !!(allocs.is_a?(Hash) && allocs.values.any? { |v| v == :heap })
+    node.allocs&.any_heap? == true
   end
 
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
@@ -243,6 +1243,34 @@ class MIRChecker
           "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")
       end
     end
+  end
+
+  sig { params(init: T.untyped).returns(T.nilable(Symbol)) }
+  def expr_owned_result_alloc(init)
+    return nil unless init && init.respond_to?(:ownership_effect)
+    init.ownership_effect.alloc
+  end
+
+  sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_owned_result_alloc_marks!(lets, allocs)
+    lets.each do |let|
+      expected_alloc = expr_owned_result_alloc(let.init)
+      next unless expected_alloc
+
+      marks = allocs[let.name]
+      unless marks && !marks.empty?
+        @errors << error(:OWNED_RESULT_WITHOUT_ALLOC, let.name,
+          "owned-result initializer has no MIR::AllocMark; ownership is implicit")
+        next
+      end
+
+      bad_mark = marks.find { |mark| mark.alloc != expected_alloc }
+      next unless bad_mark
+
+      @errors << error(:OWNED_RESULT_ALLOC_MISMATCH, let.name,
+        "owned-result initializer produces :#{expected_alloc} storage but MIR::AllocMark uses :#{bad_mark.alloc}")
+    end
+    nil
   end
 
   # ===================================================================
@@ -373,69 +1401,100 @@ class MIRChecker
 
   private
 
-  # Tree walker -- yields every node in the MIR tree.
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-  def walk_mir(stmts, &block)
-    return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_mir_node(s, &block) }
+  VALID_ALLOCATORS = T.let([:heap, :frame].freeze, T::Array[Symbol])
+  VALID_ALLOC_SCOPES = T.let([:heap, :function, :iteration].freeze, T::Array[Symbol])
+
+  sig do
+    params(
+      allocs: T::Hash[String, T::Array[T.untyped]],
+      cleanups: T::Hash[String, T::Array[T.untyped]],
+      inline_nodes: T::Array[T.untyped],
+    ).returns(T.nilable(T::Array[T.untyped]))
+  end
+  def verify_allocator_closed_set!(allocs, cleanups, inline_nodes)
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        next if VALID_ALLOCATORS.include?(mark.alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "AllocMark uses #{mark.alloc.inspect}; MIR allocator facts must be :heap or :frame")
+      end
+    end
+
+    allocs.each do |name, marks|
+      marks.each do |mark|
+        scope = mark.respond_to?(:scope) ? mark.scope : nil
+        next if VALID_ALLOC_SCOPES.include?(scope)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "AllocMark has scope #{scope.inspect}; MIR allocation lifetime must be :heap, :function, or :iteration")
+      end
+    end
+
+    cleanups.each do |name, nodes|
+      nodes.each do |cleanup|
+        alloc = cleanup.cleanup_entry.alloc
+        next if VALID_ALLOCATORS.include?(alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, name,
+          "#{cleanup.class.name} uses #{alloc.inspect}; MIR cleanup allocators must be :heap or :frame")
+      end
+    end
+
+    inline_nodes.each do |node|
+      next unless node.has_alloc_metadata?
+      node.allocs.each do |alloc_key, alloc|
+        next if VALID_ALLOCATORS.include?(alloc)
+        @errors << error(:INVALID_ALLOCATOR_MARK, node.target_var || node.reason || "inline_zig",
+          "InlineZig #{alloc_key} uses #{alloc.inspect}; MIR allocator metadata must be :heap or :frame")
+      end
+    end
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-  def walk_mir_node(node, &block)
-    return unless node
-    yield node
+  # INV-INLINE-TARGET: allocator-bearing InlineZig must name the binding or
+  # receiver whose placement it consumes. Without that target, the checker
+  # cannot compare allocator use to authoritative placement and lowering can
+  # smuggle local guesses through codegen.
+  sig { params(inline_nodes: T::Array[T.anything]).returns(T.nilable(T::Array[T.anything])) }
+  def verify_inline_alloc_targets!(inline_nodes)
+    inline_nodes.each do |node|
+      unsafe_node = T.unsafe(node)
+      next unless unsafe_node.has_alloc_metadata?
+      next if unsafe_node.target_var && !unsafe_node.target_var.to_s.empty?
 
-    case node
-    when MIR::FnDef       then walk_mir(node.body, &block)
-    when MIR::IfStmt
-      walk_mir(node.then_body, &block)
-      walk_mir(node.else_body, &block)
-    when MIR::IfBindStmt
-      walk_mir(node.then_body, &block)
-      walk_mir(node.else_body, &block)
-    when MIR::WhileStmt, MIR::ForStmt
-      walk_mir(node.body, &block)
-    when MIR::ScopeBlock, MIR::BlockExpr
-      walk_mir(node.body, &block)
-    when MIR::SwitchStmt
-      node.arms&.each { |a| walk_mir(a[:body], &block) }
-      walk_mir(node.default_body, &block)
-    when MIR::IfChain
-      node.branches&.each { |b| walk_mir(b[:body], &block) }
-      walk_mir(node.default_body, &block)
-    when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
-    when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
-    when MIR::DiscardOwned then walk_mir_node(node.expr, &block) if node.expr
-    when MIR::BatchWindowPush
-      walk_mir_node(node.item_expr, &block)
-      walk_mir_node(node.value_expr, &block)
-    when MIR::BatchWindowFlush
-      walk_mir_node(node.value_expr, &block)
-    when MIR::Let          then yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
-    when MIR::BgBlock      then walk_mir(node.run_body, &block)
-    when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
-    when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
-    when MIR::Pipeline     then walk_mir_node(node.inner, &block)
-    when MIR::SnapshotRead         then walk_mir(node.body, &block)
-    when MIR::SnapshotTransaction  then walk_mir(node.body, &block)
-    when MIR::SnapshotMultiTxn     then walk_mir(node.body, &block)
-    when MIR::WithMatchDispatch    then node.arms&.each { |a| walk_mir(a[:body], &block) }
+      @errors << error(:INLINE_ALLOC_WITHOUT_TARGET, unsafe_node.reason || "inline_zig",
+        "InlineZig has allocator metadata #{unsafe_node.allocs.inspect} but no target_var; " \
+        "allocator use is not checker-verifiable against binding placement")
     end
+  end
+
+  # Tree walker -- yields every node in the MIR tree.
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: MIR::Node).void).void }
+  def walk_mir(stmts, &block)
+    MIR.each_node(stmts, &block)
+    nil
+  end
+
+  sig { params(node: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
+  def walk_mir_node(node, &block)
+    return unless node.is_a?(MIR::Emittable) || node.is_a?(Array)
+
+    MIR.each_node(node, &block)
+    nil
+  end
+
+  sig { params(expr: T.untyped, block: T.proc.params(arg0: MIR::Node).void).void }
+  def walk_mir_expr(expr, &block)
+    walk_mir_node(expr, &block)
+    nil
   end
 
   # HPT_LEAK: heap-returning call result discarded.
   sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
-    if node.is_a?(MIR::Call) && node.heap_provenance
-      leaks << error(:HPT_LEAK, node.callee,
-        "heap-returning call result not bound to variable (leak)")
-    end
-    if node.is_a?(MIR::TryCatch) && node.heap_provenance
-      leaks << error(:HPT_LEAK, "try-catch",
-        "heap-returning try/catch result not bound to variable (leak)")
-    end
-    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
+    effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
+    if effect.produces_owned
+      leaks << error(:HPT_LEAK, ownership_effect_label(node),
+        "owned-result expression not bound to variable (leak)")
+    elsif (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
        node.stdlib_def.fixed_return?
       ret = node.stdlib_def.return_type
       unless ret.void?
@@ -446,6 +1505,23 @@ class MIRChecker
     end
     if node.is_a?(MIR::Call) && node.args
       node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
+    elsif node.is_a?(MIR::MethodCall)
+      scan_expr_for_hpt_leak!(node.receiver, leaks)
+      node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
+    end
+  end
+
+  sig { params(node: T.untyped).returns(String) }
+  def ownership_effect_label(node)
+    case node
+    when MIR::Call
+      node.callee.to_s
+    when MIR::MethodCall
+      node.method.to_s
+    when MIR::InlineZig, MIR::RawZig
+      node.reason.to_s
+    else
+      node.class.name.to_s
     end
   end
 
@@ -454,25 +1530,30 @@ class MIRChecker
   # Checks ALL allocator params (:alloc, :key_alloc, :val_alloc) against the
   # container's AllocMark. A frame-allocated key/value stored in a heap
   # container becomes a dangling pointer after frame rewind.
-  sig { params(inline_nodes: T::Array[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T::Array[T.untyped]) }
-  def verify_inline_alloc_contracts!(inline_nodes, allocs)
+  sig { params(inline_nodes: T::Array[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]], fn_def: MIR::FnDef).returns(T::Array[T.untyped]) }
+  def verify_inline_alloc_contracts!(inline_nodes, allocs, fn_def)
+    param_names = T.let(fn_def.params.map { |param| param.name.to_s }.to_set, T::Set[String])
     inline_nodes.each do |iz|
-      next unless iz.allocs
+      next unless iz.has_alloc_metadata?
       target = iz.target_var
-      next unless target && allocs.key?(target)
+      next unless target && !target.to_s.empty?
+
+      alloc_metadata = iz.allocs
+      requires_target_alloc = alloc_metadata.requires_target_alloc?
+      unless allocs.key?(target)
+        next if param_names.include?(target.to_s)
+        next unless requires_target_alloc
+        @errors << error(:INLINE_ALLOC_WITHOUT_ALLOCMARK, target,
+          "InlineZig has allocator metadata #{iz.allocs.inspect} for '#{target}' but no MIR::AllocMark")
+        next
+      end
 
       container_alloc = T.must(allocs[target]).first.alloc
 
-      # Check primary allocator. :cleanup is a mixed-provenance
-      # container -- it tolerates any op allocator (the runtime
-      # cleanupAlloc.free dispatches per-pointer). Per the
-      # "one collection = one allocator" policy this kind is being
-      # phased out, but while it exists it's correct for ops to use
-      # the actual element's allocator (often :frame) inside a
-      # :cleanup container.
-      if iz.allocs.key?(:alloc)
-        op_alloc = iz.allocs[:alloc]
-        if op_alloc != container_alloc && container_alloc != :cleanup
+      # Check primary allocator.
+      if alloc_metadata.primary
+        op_alloc = alloc_metadata.primary
+        if op_alloc != container_alloc
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
         end
@@ -480,9 +1561,8 @@ class MIRChecker
 
       # Check key/value allocators: frame-allocated stored data in a heap
       # container = use-after-free when the frame rewinds.
-      [:key_alloc, :val_alloc].each do |alloc_key|
-        next unless iz.allocs.key?(alloc_key)
-        stored_alloc = iz.allocs[alloc_key]
+      { key_alloc: alloc_metadata.key_alloc, val_alloc: alloc_metadata.value_alloc }.each do |alloc_key, stored_alloc|
+        next unless stored_alloc
         if stored_alloc == :frame && container_alloc == :heap
           @errors << error(:INLINE_ALLOC_MISMATCH, target,
             "#{alloc_key} is :frame but container '#{target}' is :heap " \
@@ -516,7 +1596,7 @@ class MIRChecker
     return if pointer_passed.empty?
 
     inline_nodes.each do |iz|
-      next unless iz.allocs
+      next unless iz.has_alloc_metadata?
       target = iz.target_var.to_s
       next unless pointer_passed.include?(target)
 
@@ -560,8 +1640,8 @@ class MIRChecker
       # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
       # or visit_CopyNode missed the gate.
       if (ti = alloc_marks.first.full_type)
-        no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
-        if no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+        no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared? && !ti.heap_ptr?
+        if no_caps && (ti.primitive? || ti.id_handle?)
           @errors << error(:COPY_CLEANUP, name,
             "cleanup emitted for value type #{ti} (primitive or Id<T>) that can never " \
             "own heap memory -- needs_explicit_cleanup? or visit_CopyNode missed the gate")
@@ -602,75 +1682,368 @@ class MIRChecker
     end
   end
 
-  # NO_CONTRACT: InlineZig/RawZig with CheatLib calls must have stdlib_def.
+  # NO_CONTRACT: InlineZig/RawZig must have verifier-visible semantics.
   #
-  # CheatLib.* functions allocate, free, or transfer ownership. Without stdlib_def,
-  # the checker cannot verify HPT_LEAK or INLINE_ALLOC_MISMATCH. This makes the
-  # node opaque -- ownership bugs inside it are invisible.
-  #
-  # Exempt: CheatLib calls that are pure reads or comparisons (no ownership effect).
-  CHEATLIB_EXEMPT = %w[
-    CheatLib.timestampMs CheatLib.threadCount CheatLib.assert
-    CheatLib.intAdd CheatLib.intSub CheatLib.intMul CheatLib.intDiv
-    CheatLib.wrapAdd CheatLib.wrapMul CheatLib.wrapSub
-    CheatLib.getAt CheatLib.numericMapGet CheatLib.setAt
-    CheatLib.Range CheatLib.Promise CheatLib.BoundedStream
-    CheatLib.len CheatLib.countOccurrences CheatLib.intToString
-    CheatLib.listDir CheatLib.readFile CheatLib.eql
-    CheatLib.needsCleanup
-  ].freeze
-
+  # RawZig is always opaque. InlineZig is acceptable only when it carries a
+  # stdlib_def/FunctionSignature contract that declares ownership effects. An
+  # empty ownership_contract is not proof of purity; it is only meaningful after
+  # the callable contract says whether ownership can move.
   sig { params(zig_nodes: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def verify_zig_contracts!(zig_nodes)
     zig_nodes.each do |node|
+      if node.is_a?(MIR::RawZig)
+        @errors << error(:RAW_NO_CONTRACT, node.reason || "raw_zig",
+          "RawZig is opaque to MIRChecker; decompose into structural MIR")
+        next
+      end
+
+      if opaque_zig_allocator_ownership?(node)
+        @errors << error(:OPAQUE_ZIG_OWNERSHIP, node.reason || "inline_zig",
+          "InlineZig performs allocator ownership operations inside opaque code; decompose into structural MIR")
+      end
+
+      if !node.stdlib_def && inline_zig_requires_contract?(node)
+        @errors << error(:INLINE_NO_CONTRACT, node.reason || "inline_zig",
+          "InlineZig has no stdlib_def/FunctionSignature; ownership effects are unverifiable")
+      end
+
+      next unless inline_ownership_side_channel?(node)
       next if node.stdlib_def
-      next unless node.code.is_a?(String)
-
-      kind = node.is_a?(MIR::RawZig) ? :RAW_NO_CONTRACT : :INLINE_NO_CONTRACT
-
-      # Find CheatLib calls in the code string
-      calls = node.code.scan(/CheatLib\.\w+/)
-      next if calls.empty?
-
-      # Filter out exempt calls: type references (CheatLib.Pool, CheatLib.Locked, etc.)
-      # and pure read/arithmetic functions.
-      unaudited = calls.reject { |c| CHEATLIB_EXEMPT.include?(c) || c.match?(/\ACheatLib\.[A-Z]/) }
-      next if unaudited.empty?
-
-      label = node.is_a?(MIR::RawZig) ? "RawZig" : "InlineZig"
-      @errors << error(kind, node.reason || label.downcase,
-        "#{label} calls #{unaudited.uniq.join(', ')} without stdlib_def " \
-        "(ownership effects invisible to checker)")
+      @errors << error(:INLINE_NO_CONTRACT, node.reason || "inline_zig",
+        "InlineZig has no stdlib_def/FunctionSignature; ownership effects are unverifiable")
     end
   end
 
-  # RAW_UNJUSTIFIED: every MIR::RawZig must carry a reason: in this whitelist.
-  #
-  # RawZig is an opaque escape hatch. The checker cannot see inside raw Zig
-  # code, so each use must be explicitly justified. New sites added to
-  # mir_lowering.rb must either (a) be decomposed into structural MIR, or
-  # (b) add the reason here with a commit message explaining why the site
-  # cannot be decomposed.
-  RAW_JUSTIFIED_REASONS = %w[
-    require_local_module_opaque
-  ].freeze
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def opaque_zig_allocator_ownership?(node)
+    code = node.code.to_s
+    code.match?(/\b(?:heapAlloc|getSched\(\)\.allocator|allocator)\s*\(\)?\s*\.(?:alloc|dupe|create|destroy|free|deinit)\b/) ||
+      code.match?(/\b(?:alloc|dupe|create|destroy|free|deinit)\s*\(/)
+  end
 
-  RAW_JUSTIFIED_PREFIXES = T.let([].freeze, T::Array[T.untyped])
+  sig { params(body: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  def verify_call_contracts!(body, transfers, allocs)
+    walk_mir(body) do |node|
+      case node
+      when MIR::Call
+        verify_callable_contract!(node.callable_contract, node.callee.to_s, "MIR::Call", transfers, allocs)
+      when MIR::TailCall
+        verify_callable_contract!(node.callable_contract, node.callee.to_s, "MIR::TailCall", transfers, allocs)
+      when MIR::MethodCall
+        verify_callable_contract!(node.callable_contract, node.method.to_s, "MIR::MethodCall", transfers, allocs)
+      end
+    end
+    nil
+  end
 
-  sig { params(zig_nodes: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
-  def verify_raw_justified!(zig_nodes)
+  sig { params(contract: T.untyped, label: String, node_kind: String, transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  def verify_callable_contract!(contract, label, node_kind, transfers, allocs)
+    unless contract.is_a?(MIR::CallableContract)
+      @errors << error(:MIR_CALL_NO_CONTRACT, label,
+        "#{node_kind} has no typed callable/effect contract; argument ownership is unverifiable")
+      return
+    end
+
+    sig = contract.signature
+    unless sig.is_a?(FunctionSignature)
+      @errors << error(:MIR_CALL_NO_CONTRACT, label,
+        "#{node_kind} callable contract does not carry a FunctionSignature")
+      return
+    end
+
+    ownership = contract.ownership_contract
+    unless ownership.is_a?(MIR::OwnershipContract)
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, label,
+        "#{node_kind} callable contract has no typed ownership contract")
+      return
+    end
+
+    if sig.params.length < contract.checked_arg_count
+      @errors << error(:MIR_CALL_NO_CONTRACT, label,
+        "#{node_kind} callable contract covers #{sig.params.length} params but callsite has #{contract.checked_arg_count} args")
+    end
+
+    if function_signature_takes_ownership?(sig, contract.checked_arg_count) && !ownership.covers_consuming_params
+      @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, label,
+        "#{node_kind} target declares TAKES/consuming params but concrete consumed bindings are absent")
+    end
+
+    ownership.consumes.each do |name|
+      unless transfers.include?(name)
+        @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
+          "#{node_kind} ownership_contract consumes '#{name}' but no MIR::TransferMark exists for that binding")
+      end
+    end
+    check_consumed_allocators_match_sink!(contract, ownership.consumes, allocs)
+    nil
+  end
+
+  sig { params(sig: FunctionSignature, checked_arg_count: Integer).returns(T::Boolean) }
+  def function_signature_takes_ownership?(sig, checked_arg_count)
+    sig.params.first(checked_arg_count).any? { |p| p.respond_to?(:takes) && p.takes }
+  end
+
+  # INV-EXPLICIT-OWNERSHIP: registry metadata says a call shape can transfer
+  # ownership; the ownership_contract says which concrete lowered bindings are
+  # consumed at this callsite. Without that binding list, TransferMark/Cleanup
+  # verification cannot prove leak/double-free safety.
+  sig { params(zig_nodes: T::Array[T.untyped], transfers: T::Set[T.untyped], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
+  def verify_explicit_ownership_contracts!(zig_nodes, transfers, allocs)
     zig_nodes.each do |node|
-      next unless node.is_a?(MIR::RawZig)
-      reason = node.reason.to_s
-      next if RAW_JUSTIFIED_REASONS.include?(reason)
-      next if RAW_JUSTIFIED_PREFIXES.any? { |p| reason.start_with?(p) }
-      @errors << error(:RAW_UNJUSTIFIED, node.reason || "raw_zig",
-        "RawZig with reason '#{node.reason}' is not in RAW_JUSTIFIED_REASONS " \
-        "(add to whitelist with justification, or decompose into structural MIR)")
+      next unless node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
+
+      unless node.ownership_contract.is_a?(MIR::OwnershipContract)
+        @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
+          "ownership_contract must be MIR::OwnershipContract; Hash/nil contracts make ownership unverifiable")
+        next
+      end
+
+      consumes = ownership_contract_consumes(node.ownership_contract)
+      if stdlib_takes_ownership?(node) && !ownership_contract_present?(node.ownership_contract)
+        @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, ownership_node_name(node),
+          "stdlib_def declares a TAKES/consuming parameter but ownership_contract is absent; " \
+          "MIRChecker cannot prove whether this call consumes an owned binding")
+      end
+
+      consumes.each do |name|
+        unless transfers.include?(name)
+          @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
+            "ownership_contract consumes '#{name}' but no MIR::TransferMark exists for that binding")
+        end
+
+        next unless copying_consumed_binding?(node, name)
+        @errors << error(:OWNERSHIP_TRANSFER_COPIED, name,
+          "ownership_contract consumes '#{name}', but emitted Zig deep-copies it; " \
+          "copying and consuming are different ownership events")
+      end
+
+      check_consumed_allocators_match_sink!(node, consumes, allocs)
+    end
+    nil
+  end
+
+  # INV-FINALIZED-OWNERSHIP-SURFACE: by the time MIRChecker runs, ownership
+  # must be represented by the closed Owned* fact surface. Node-specific fields
+  # like InlineZig#allocs, Call#owned_return, MethodCall#owned_result_alloc, or
+  # callable/stdlib TAKES side channels are lowering inputs only. If they remain
+  # authoritative here, the checker is forced to infer ownership through many
+  # unrelated protocols and memory bugs can slip through opaque code.
+  sig { params(body: T::Array[T.untyped], facts: T::Array[T.untyped]).void }
+  def verify_ownership_surfaces_finalized!(body, facts)
+    facts_seen = !facts.empty?
+    walk_mir(body) do |node|
+      case node
+      when MIR::InlineZig
+        next unless inline_ownership_side_channel?(node)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "InlineZig carries allocator/ownership effects through stdlib_def, allocs, " \
+          "or ownership_contract. Finalize it into Owned* facts or decompose it into structural MIR.")
+      when MIR::Call
+        next unless node.owned_return? || callable_contract_consumes?(node.callable_contract)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, node.callee.to_s,
+          "MIR::Call carries ownership through owned_return/callable_contract. " \
+          "Finalize call ownership into OwnedCreate/OwnedTransfer/OwnedReturn facts.")
+      when MIR::MethodCall
+        next unless node.owned_result_alloc.is_a?(Symbol) || callable_contract_consumes?(node.callable_contract)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, node.method.to_s,
+          "MIR::MethodCall carries ownership through owned_result_alloc/callable_contract. " \
+          "Finalize method ownership into OwnedCreate/OwnedTransfer/OwnedStore facts.")
+      when MIR::ShardedMapPut, MIR::ReassignWithCleanup
+        next unless stdlib_takes_ownership?(node)
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "#{node.class.name} consumes or replaces owned data through node-specific fields. " \
+          "Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")
+      when MIR::BgBlock
+        next if facts_seen && ownership_fact_covers_node?(facts, node)
+
+        @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
+          "MIR::BgBlock creates/captures promise-owned state across an execution boundary. " \
+          "Finalize BG ownership into OwnedCreate/OwnedTransfer/OwnedReturn/OwnedDestroy facts.")
+      end
+    end
+    nil
+  end
+
+  sig { params(body: T::Array[T.untyped]).void }
+  def verify_execution_boundary_facts!(body)
+    walk_mir(body) do |node|
+      case node
+      when MIR::BgBlock
+        verify_execution_boundary_fact!(node.boundary_fact, "MIR::BgBlock")
+      when MIR::StreamSpawn
+        verify_execution_boundary_fact!(node.boundary_fact, "MIR::StreamSpawn")
+      when MIR::DoBlock
+        facts = node.boundary_facts
+        unless facts.is_a?(Array) && facts.all? { |f| f.is_a?(MIR::ExecutionBoundaryFact) }
+          @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
+            "MIR::DoBlock has no typed ExecutionBoundaryFact array for its branches")
+          next
+        end
+        expected = node.branch_bodies&.length || 0
+        if facts.length != expected
+          @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::DoBlock",
+            "MIR::DoBlock has #{facts.length} boundary facts for #{expected} branch bodies")
+        end
+        facts.each do |fact|
+          verify_execution_boundary_fact!(fact, "MIR::DoBlock")
+        end
+      end
+    end
+    nil
+  end
+
+  sig { params(fact: T.nilable(MIR::ExecutionBoundaryFact), label: String).void }
+  def verify_execution_boundary_fact!(fact, label)
+    unless fact
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has no typed ExecutionBoundaryFact")
+      return
+    end
+
+    unless [:bg, :bg_stream, :do_branch, :stream_spawn].include?(fact.kind)
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has invalid boundary kind #{fact.kind.inspect}")
+    end
+    unless [:local, :pinned, :parallel].include?(fact.dispatch)
+      @errors << error(:BOUNDARY_FACT_REQUIRED, label,
+        "#{label} has invalid boundary dispatch #{fact.dispatch.inspect}")
+    end
+
+    fact.captures.each do |capture|
+      next unless fact.dispatch == :parallel
+      next if capture.parallel_safe
+
+      reason = capture.forbidden_reason || :not_parallel_safe
+      @errors << error(:BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, capture.name,
+        "capture '#{capture.name}' is not safe for @parallel dispatch " \
+        "(storage=#{capture.storage.inspect}, sync=#{capture.sync.inspect}, reason=#{reason.inspect})")
+    end
+    nil
+  end
+
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def inline_ownership_side_channel?(node)
+    return true if node.has_alloc_metadata?
+    return true if node.stdlib_def&.emits_allocating?
+    return false if stdlib_consumption_covered_without_owned_values?(node)
+    return true if stdlib_takes_ownership?(node)
+    return false unless node.ownership_contract.is_a?(MIR::OwnershipContract)
+
+    !node.ownership_contract.consumes.empty? || !node.ownership_contract.produces.empty?
+  end
+
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def inline_zig_requires_contract?(node)
+    code = node.code.to_s
+    return true if code.match?(/\bCheat(?:Lib|Header)\./)
+    return false if code.match?(/\A\s*@(?:as|bitCast|constCast|enumFromInt|floatFromInt|intCast|intFromEnum|intFromPtr|ptrCast|alignCast)\b/)
+    return false if code.match?(/\A\s*\.?[A-Za-z_][A-Za-z0-9_]*\s*\z/)
+    return false if code.match?(/\A\s*[A-Za-z_][A-Za-z0-9_]*(?:\.\*)?\s*=/)
+
+    code.match?(/\b[A-Za-z_][A-Za-z0-9_]*\s*\(/)
+  end
+
+  sig { params(node: MIR::InlineZig).returns(T::Boolean) }
+  def stdlib_consumption_covered_without_owned_values?(node)
+    return false unless stdlib_takes_ownership?(node)
+
+    contract = node.ownership_contract
+    return false unless contract.is_a?(MIR::OwnershipContract)
+    return false unless contract.covers_consuming_params
+
+    contract.consumes.empty? && contract.produces.empty? && contract.borrows.empty?
+  end
+
+  sig { params(contract: T.untyped).returns(T::Boolean) }
+  def callable_contract_consumes?(contract)
+    return false unless contract.is_a?(MIR::CallableContract)
+    !contract.ownership_contract.consumes.empty?
+  end
+
+  sig { params(facts: T::Array[T.untyped], node: T.untyped).returns(T::Boolean) }
+  def ownership_fact_covers_node?(facts, node)
+    if node.respond_to?(:ownership_consumption) &&
+       node.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+      return true
+    end
+
+    source = ownership_node_name(node)
+    facts.any? do |fact|
+      fact.respond_to?(:source) && fact.source.to_s == source
     end
   end
 
-  # FRAME_NO_REWIND: every loop that frame-allocates must rewind per iteration.
+  sig { params(node: T.untyped, consumes: T::Array[String], allocs: T::Hash[String, T::Array[T.untyped]]).void }
+  def check_consumed_allocators_match_sink!(node, consumes, allocs)
+    return if consumes.empty?
+    return unless node.is_a?(MIR::InlineZig)
+    sink_alloc = node.allocs&.sink_alloc
+    return unless sink_alloc
+
+    consumes.each do |name|
+      mark = allocs[name]&.first
+      next unless mark&.alloc.is_a?(Symbol)
+      next if mark.alloc == sink_alloc
+      @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
+        "ownership_contract consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \
+        "owned transfer allocator is incoherent")
+    end
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def stdlib_takes_ownership?(node)
+    return true if node.is_a?(MIR::ReassignWithCleanup)
+
+    sig = node.respond_to?(:stdlib_def) ? node.stdlib_def : nil
+    return false unless sig
+    params = sig.respond_to?(:params) ? sig.params : nil
+    return true if params.respond_to?(:any?) && params.any? { |p| p.respond_to?(:takes) && p.takes }
+
+    sig.takes_ownership?
+  end
+
+  sig { params(contract: MIR::OwnershipContract).returns(T::Array[String]) }
+  def ownership_contract_consumes(contract)
+    contract.consumes
+  end
+
+  sig { params(contract: MIR::OwnershipContract).returns(T::Boolean) }
+  def ownership_contract_present?(contract)
+    !contract.empty? || contract.covers_consuming_params
+  end
+
+  sig { params(node: T.untyped).returns(String) }
+  def ownership_node_name(node)
+    return ownership_node_name(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr)
+    target = node.respond_to?(:target_var) ? node.target_var : nil
+    return target.to_s if target
+    return node.callee.to_s if node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall)
+    return node.method.to_s if node.is_a?(MIR::MethodCall)
+    return "MIR::BgBlock" if node.is_a?(MIR::BgBlock)
+    return "MIR::StreamSpawn" if node.is_a?(MIR::StreamSpawn)
+    reason = node.respond_to?(:reason) ? node.reason : nil
+    reason ? reason.to_s : node.class.name.to_s
+  end
+
+  sig { params(node: T.untyped, name: String).returns(T::Boolean) }
+  def copying_consumed_binding?(node, name)
+    return false unless node.respond_to?(:code) && node.code.is_a?(String)
+    escaped = Regexp.escape(name)
+    !!(node.code.match?(/CheatLib\.dupe(?:Value|UnionValue)?\(.*\b#{escaped}\b/m) ||
+       node.code.match?(/\.dupe\(.*\b#{escaped}\b/m))
+  end
+
+  # FRAME_NO_REWIND: every iteration-scoped frame allocation must be inside a
+  # loop restore, and every restored loop may contain only iteration-scoped
+  # frame allocations.
   #
   # Post-lowering check: walks the MIR tree looking for loops that contain
   # frame AllocMarks or InlineZig with frame allocs but lack mark_per_iter.
@@ -690,10 +2063,16 @@ class MIRChecker
         # Structural check: verify the actual DeferStmt(restoreLoopMark) is present,
         # not a flag. This catches lowerer bugs where mark_per_iter is set but the
         # defer was not emitted, and unifies the check with the actual MIR structure.
-        unless stmt.tight || body_has_loop_restore?(stmt.body)
-          if body_has_frame_alloc?(stmt.body)
+        has_restore = body_has_loop_restore?(stmt.body)
+        if !stmt.tight && !has_restore
+          if body_has_iteration_frame_alloc?(stmt.body)
             @errors << error(:FRAME_NO_REWIND, @fn_name,
-              "loop body frame-allocates but has no restoreLoopMark defer")
+              "loop body has iteration-scoped frame allocations but no restoreLoopMark defer")
+          end
+        elsif has_restore
+          if body_has_non_iteration_frame_alloc?(stmt.body)
+            @errors << error(:FRAME_NO_REWIND, @fn_name,
+              "loop restore encloses frame allocations not scoped to one iteration")
           end
         end
         check_loop_rewind!(stmt.body)
@@ -703,7 +2082,7 @@ class MIRChecker
         check_loop_rewind!(stmt.else_body)
       when MIR::ScopeBlock, MIR::BlockExpr
         check_loop_rewind!(stmt.body)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
         check_loop_rewind!(stmt.default_body)
       when MIR::IfChain
@@ -733,7 +2112,7 @@ class MIRChecker
         body_has_loop_restore?(s.then_body) || body_has_loop_restore?(s.else_body)
       when MIR::ScopeBlock, MIR::BlockExpr
         body_has_loop_restore?(s.body)
-      when MIR::SwitchStmt
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
         (s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }) ||
           body_has_loop_restore?(s.default_body)
       when MIR::IfChain
@@ -750,40 +2129,49 @@ class MIRChecker
     end
   end
 
-  # Does this statement list contain frame allocations, recursing into all
+  # Does this statement list contain iteration-scoped frame allocations,
+  # recursing into branch/block nodes but stopping at nested loop and
+  # fiber/lambda boundaries.
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  def body_has_iteration_frame_alloc?(stmts)
+    body_has_frame_alloc_scope?(stmts) { |scope| scope == :iteration }
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
+  def body_has_non_iteration_frame_alloc?(stmts)
+    body_has_frame_alloc_scope?(stmts) { |scope| scope != :iteration }
+  end
+
+  # Does this statement list contain frame allocations matching a scope
+  # predicate, recursing into all
   # branch/block nodes (IfStmt, SwitchStmt, IfChain, ScopeBlock, BlockExpr)
   # but stopping at nested loop and fiber/lambda boundaries.
   # Mirrors the same traversal used by check_loop_rewind! so both methods
   # see the same nodes -- no special-cased paths.
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
-  def body_has_frame_alloc?(stmts)
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
+  def body_has_frame_alloc_scope?(stmts, &block)
     return false unless stmts.is_a?(Array)
     stmts.any? do |s|
       case s
       when MIR::AllocMark
-        s.alloc == :frame
-      when MIR::ExprStmt
-        expr_has_frame_alloc?(s.expr)
-      when MIR::Let
-        expr_has_frame_alloc?(s.init)
-      when MIR::BatchWindowPush
-        expr_has_frame_alloc?(s.item_expr) || expr_has_frame_alloc?(s.value_expr)
-      when MIR::BatchWindowFlush
-        expr_has_frame_alloc?(s.value_expr)
+        next false unless s.alloc == :frame
+        scope = T.unsafe(s).scope
+        scope = scope.is_a?(Symbol) ? scope : :unknown
+        block.call(scope)
       when MIR::IfStmt
-        body_has_frame_alloc?(s.then_body) || body_has_frame_alloc?(s.else_body)
+        body_has_frame_alloc_scope?(s.then_body, &block) || body_has_frame_alloc_scope?(s.else_body, &block)
       when MIR::ScopeBlock, MIR::BlockExpr
-        body_has_frame_alloc?(s.body)
-      when MIR::SwitchStmt
-        (s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }) ||
-          body_has_frame_alloc?(s.default_body)
+        body_has_frame_alloc_scope?(s.body, &block)
+      when MIR::SwitchStmt, MIR::UnionMatchStmt
+        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) } ||
+          body_has_frame_alloc_scope?(s.default_body, &block)
       when MIR::IfChain
-        (s.branches&.any? { |b| body_has_frame_alloc?(b[:body]) }) ||
-          body_has_frame_alloc?(s.default_body)
+        s.branches.any? { |b| body_has_frame_alloc_scope?(b[:body], &block) } ||
+          body_has_frame_alloc_scope?(s.default_body, &block)
       when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        body_has_frame_alloc?(s.body)
+        body_has_frame_alloc_scope?(s.body, &block)
       when MIR::WithMatchDispatch
-        s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }
+        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) }
       # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops are checked independently
       # MIR::BgBlock, MIR::LambdaExpr: stop -- separate fiber/function frame scopes
       else
@@ -802,8 +2190,8 @@ class MIRChecker
     return false unless expr
     case expr
     when MIR::InlineZig
-      return false if expr.stdlib_def&.emit&.mutates_receiver
-      expr.allocs&.any? { |_k, v| v == :frame }
+      return false if expr.stdlib_def&.mutates_receiver?
+      expr.allocs&.any_frame?
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
       expr.alloc == :frame
@@ -839,13 +2227,11 @@ class MIRChecker
   # AllocMark, so the checker cannot verify its lifetime, allocator
   # consistency, or cleanup.
   #
-  # Allocating types:
+  # Allocating result types:
+  #   HeapCreate, owned-return Call, non-mutating allocator-bearing InlineZig,
   #   DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap,
   #   SharePromote,
   #   DeepCopy (strategy != :passthrough), ContainerInit (alloc != nil)
-  #
-  # Called only when strict: true because the codebase still has open
-  # violations that are fixed progressively in Phase 1-3 tasks.
 
   sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
   def verify_unhoisted_allocs!(body)
@@ -886,15 +2272,19 @@ class MIRChecker
       check_expr_for_unhoisted(node.cond, allow_top: false)
       check_stmts_for_unhoisted(node.then_body)
       check_stmts_for_unhoisted(node.else_body)
+    when MIR::IfBindStmt
+      node.bindings&.each { |binding| check_expr_for_unhoisted(binding[:expr], allow_top: true) }
+      check_stmts_for_unhoisted(node.then_body)
+      check_stmts_for_unhoisted(node.else_body)
     when MIR::WhileStmt
-      check_expr_for_unhoisted(node.cond, allow_top: false)
+      check_expr_for_unhoisted(node.cond, allow_top: node.capture ? true : false)
       check_stmts_for_unhoisted(node.body)
     when MIR::ForStmt
       check_expr_for_unhoisted(node.iter, allow_top: false)
       check_stmts_for_unhoisted(node.body)
     when MIR::ScopeBlock, MIR::BlockExpr
       check_stmts_for_unhoisted(node.body)
-    when MIR::SwitchStmt
+    when MIR::SwitchStmt, MIR::UnionMatchStmt
       check_expr_for_unhoisted(node.subject, allow_top: false)
       node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
       check_stmts_for_unhoisted(node.default_body)
@@ -934,6 +2324,39 @@ class MIRChecker
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       return
     end
+    if expr.is_a?(MIR::TryExpr)
+      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+      check_stmts_for_unhoisted(expr.body)
+      return
+    end
+    if expr.is_a?(MIR::TryCatch)
+      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.catch_body, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::Orelse)
+      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.fallback, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::IfOptional)
+      check_expr_for_unhoisted(expr.optional, allow_top: false)
+      check_expr_for_unhoisted(expr.then_expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.else_expr, allow_top: allow_top)
+      return
+    end
+    if expr.is_a?(MIR::Pipeline)
+      if !allow_top && allocating_expr?(expr)
+        @errors << error(:UNHOISTED_ALLOC, @fn_name,
+          "Pipeline in non-Let-init position (must be hoisted to a named variable)")
+        return
+      end
+      check_expr_for_unhoisted(expr.inner, allow_top: allow_top)
+      return
+    end
     # CapWrap composes a sync/ownership layer around an inner data-shape
     # allocation. The outer CapWrap is the alloc-tracked node (AllocMark);
     # the inner ContainerInit's lifetime is owned by the wrapper. Treat
@@ -956,88 +2379,32 @@ class MIRChecker
       return  # one error per site -- don't recurse into nested allocs
     end
     each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub, allow_top: false) }
+    nil
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
-  # MIR nodes whose `allocates?` decision is just `alloc == :heap`.
-  ALLOC_HEAP_MIR_CLASSES = [
+  # MIR result nodes whose `allocates?` decision is just "has finalized
+  # allocator placement". Heap allocations need cleanup/transfer; frame
+  # allocations need loop-rewind proof. Either way, unnamed nested allocation is
+  # unverifiable.
+  ALLOC_PLACED_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::ConcatStr,
     MIR::CapWrap, MIR::SharePromote, MIR::ContainerInit,
   ].freeze
 
   def allocating_expr?(expr)
-    # Only flag HEAP allocations. Frame allocations are managed by the frame
-    # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.
-    return true if MIR::HeapCreate === expr  # always heap by definition
-    return expr.alloc == :heap if ALLOC_HEAP_MIR_CLASSES.any? { |c| c === expr }
-    return expr.strategy != :passthrough && expr.alloc == :heap if MIR::DeepCopy === expr
-    false
+    return false unless expr && expr.respond_to?(:ownership_effect)
+    effect = expr.ownership_effect
+    effect.produces_owned && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
   end
 
   # Yield each immediate sub-expression of expr.
   # Stops at opaque boundaries (RawZig, InlineZig, BgBlock).
   # BlockExpr bodies are walked separately by check_stmts_for_unhoisted.
-  sig { params(expr: T.anything, blk: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(expr: T.untyped, blk: T.untyped).void }
   def each_sub_expr(expr, &blk)
-    return unless expr
-    case expr
-    when MIR::HeapCreate    then yield expr.init    if expr.init
-    when MIR::DupeSlice     then yield expr.source  if expr.source
-    when MIR::AllocSlice    then yield expr.len     if expr.len
-    when MIR::FreeSlice     then yield expr.slice   if expr.slice
-    when MIR::DestroyPtr    then yield expr.ptr     if expr.ptr
-    when MIR::DeepCopy      then yield expr.source  if expr.source
-    when MIR::CapWrap       then yield expr.inner   if expr.inner
-    when MIR::SharePromote  then yield expr.source  if expr.source
-    when MIR::ContainerInit then yield expr.capacity if expr.capacity
-    when MIR::ConcatStr     then expr.parts&.each { |p| yield p }
-    when MIR::MakeList      then expr.items&.each  { |i| yield i }
-    when MIR::RcRetain      then yield expr.source  if expr.source
-    when MIR::Call
-      expr.args&.each { |a| yield a }
-    when MIR::TailCall
-      expr.args&.each { |a| yield a }
-    when MIR::MethodCall
-      yield expr.receiver if expr.receiver
-      expr.args&.each { |a| yield a }
-    when MIR::FieldGet      then yield expr.object if expr.object
-    when MIR::IndexGet
-      yield expr.object if expr.object
-      yield expr.index  if expr.index
-    when MIR::BinOp
-      yield expr.left  if expr.left
-      yield expr.right if expr.right
-    when MIR::UnaryOp        then yield expr.operand    if expr.operand
-    when MIR::Cast           then yield expr.expr       if expr.expr
-    when MIR::TryExpr        then yield expr.expr       if expr.expr
-    when MIR::TryCatch
-      yield expr.expr if expr.expr
-      yield expr.catch_body if expr.catch_body.is_a?(MIR::Emittable)
-    when MIR::Orelse
-      yield expr.expr     if expr.expr
-      yield expr.fallback if expr.fallback
-    when MIR::Conditional
-      yield expr.cond     if expr.cond
-      yield expr.then_val if expr.then_val
-      yield expr.else_val if expr.else_val
-    when MIR::AddressOf      then yield expr.expr if expr.expr
-    when MIR::Deref          then yield expr.expr if expr.expr
-    when MIR::OptionalUnwrap then yield expr.expr if expr.expr
-    when MIR::StructInit
-      expr.fields&.each { |f| yield f[:value] if f[:value] }
-    when MIR::ArrayInit
-      expr.items&.each { |i| yield i }
-    when MIR::SliceExpr
-      yield expr.target   if expr.target
-      yield expr.start    if expr.start
-      yield expr.end_expr if expr.end_expr
-    when MIR::ItemsAccess    then yield expr.expr if expr.expr
-    when MIR::RangeLit
-      yield expr.start   if expr.start
-      yield expr.end_val if expr.end_val
-    # Opaque: RawZig, InlineZig, BgBlock, CatchWrapper
-    # Leaf: Lit, Ident, FnRef, RcDowngrade, WeakUpgrade, HasField
-    # BlockExpr: body is statements, walked by check_stmts_for_unhoisted
-    end
+    return unless expr.is_a?(MIR::Emittable)
+    expr.child_exprs.each { |child| yield child }
+    nil
   end
 end

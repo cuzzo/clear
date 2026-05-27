@@ -1,7 +1,7 @@
 require "rspec"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
-require_relative "../src/annotator-helpers/effects"
+require_relative "../src/annotator/helpers/effects"
 
 RSpec.describe "Effect Tracking" do
   def run(source)
@@ -21,14 +21,14 @@ RSpec.describe "Effect Tracking" do
   # --- HEAP ---
 
   describe "HEAP effect" do
-    it "detects HashMap creation" do
+    it "does not treat non-escaping HashMap creation as heap placement" do
       effs = effects_of(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE counts: HashMap<Int64> = {"alice": 1_i64, "bob": 2_i64};
           RETURN;
         END
       CLEAR
-      expect(effs).to include(:HEAP)
+      expect(effs).not_to include(:HEAP)
     end
 
     it "detects @pool collection" do

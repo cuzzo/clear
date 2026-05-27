@@ -44,8 +44,13 @@ RSpec.describe "MiniVM golden harness", :integration do
   # `examples/minivm/update_vm_golden.rb --target register` to record
   # the freshly-supported snapshot.
   REGISTER_PENDING_FIXTURES = %w[
+    types/union_helper_arg_i64.cht
+    types/union_payload_i64.cht
+    types/union_tag_i64.cht
     values/map_contains_i64.cht
     values/map_delete_i64.cht
+    values/string_length.cht
+    values/union_helper_multi_return_i64.cht
   ].to_set.freeze
 
   MiniVM::Golden::Case.all(File.expand_path("../examples/minivm/vm-tests", __dir__)).each do |test_case|

@@ -37,6 +37,9 @@ require "sorbet-runtime"
 # Mixed into SemanticAnnotator alongside EffectTracker.
 module ReentranceBridge
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Compute and stamp the canonical reentrance_kind for every FunctionDef
   # in @fn_nodes. Idempotent. Validates REQUIRES clauses against the
@@ -218,9 +221,10 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_not_logical_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
 
       # `@call_graph[name]` strips self-calls (annotator.rb:599), so
@@ -241,7 +245,7 @@ module ReentranceBridge
 
   # F4: EFFECTS REENTRANT:MAX_DEPTH(N) on a function whose name
   # appears in a @call_graph cycle silently demotes the cycle to
-  # `:unbounded` stack tier (2 MB :service OS thread per fiber) --
+  # `:unbounded` stack tier (4 MB :service OS thread per fiber) --
   # the user picked `:MAX_DEPTH` precisely to avoid that cost; the
   # silent demotion defeats the choice. Computing a precise SCC
   # product bound is Phase 5+ work; until then, emit a fixable
@@ -252,9 +256,10 @@ module ReentranceBridge
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
       # Direct-only is fine; counter handles it.
       direct = @fn_direct_effects[name]&.include?(EffectTracker::REENTRANT) || false
@@ -264,7 +269,7 @@ module ReentranceBridge
       cycle_members = thunk_cycle_members(name).sort
 
       msg = "EFFECTS REENTRANT:MAX_DEPTH(#{fn_node.max_depth_n}) on '#{name}' " \
-            "is silently demoted to ':unbounded' stack tier (2 MB :service " \
+            "is silently demoted to ':unbounded' stack tier (4 MB :service " \
             "OS thread per fiber) because the function is part of a mutual " \
             "cycle (#{cycle_members.join(', ')}) and the compiler can't " \
             "bound the SCC's interleaved-counter product (Phase 5+ work). " \
@@ -302,9 +307,10 @@ module ReentranceBridge
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def validate_thunk_recursion!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @call_graph = T.let(@call_graph, T.untyped)
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
       next if fn_node.tail_call # tail-recursive :THUNK already routed (Phase 4b)
       next if fn_node.thunk_plan # simple-recurrence handled by Phase 4d codegen
@@ -345,15 +351,18 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def try_stamp_mutual_thunk_plan!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
     # Phase 4f.1 scope: every cycle member must be defined locally
     # AND declare :reentrant_thunk AND not already be claimed by
     # the simple-recurrence (Phase 4d) path.
-    cycle_fns = cycle_names.map { |n| @fn_nodes[n] }
+    cycle_fns = cycle_names.map { |n| fn_nodes[n] }
     return false if cycle_fns.any?(&:nil?)
-    return false unless cycle_fns.all? { |f| f.reentrance_kind == :reentrant_thunk }
-    return false if cycle_fns.any? { |f| f.tail_call || f.thunk_plan }
+    concrete_cycle_fns = T.let(cycle_fns.compact, T::Array[AST::FunctionDef])
+    return false unless concrete_cycle_fns.all? { |f| f.reentrance_kind == :reentrant_thunk }
+    return false if concrete_cycle_fns.any? { |f| f.tail_call || f.thunk_plan }
 
     # All members must agree on return type so the union can hold
     # any variant's payload and the trampoline can return a single
@@ -367,18 +376,18 @@ module ReentranceBridge
     # `to_s` so dedup is value-based. (CLEAR has no user-level type
     # aliases, so different `to_s` strings always mean different
     # canonical types -- this is correct, not just convenient.)
-    ret_types = cycle_fns.map(&:return_type).map { |t| t&.to_s }.uniq
+    ret_types = concrete_cycle_fns.map(&:return_type).map { |t| t&.to_s }.uniq
     return false unless ret_types.size == 1
 
     plans = {}
-    cycle_fns.each do |f|
+    concrete_cycle_fns.each do |f|
       partners = cycle_names - [f.name]
       mp = ThunkTransform::RecursiveSplitter.split_mutual(f.body, f.name, partners, self)
       return false if mp.nil?
       plans[f.name] = mp
     end
 
-    cycle_fns.each do |f|
+    concrete_cycle_fns.each do |f|
       f.mutual_thunk_plan = ThunkTransform::RecursiveSplitter::MutualThunkPlan.new(
         cycle_fns: cycle_fns,
         own_plan:  plans[f.name],
@@ -402,9 +411,11 @@ module ReentranceBridge
   sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
   def emit_mutual_thunk_unsupported!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
-    cycle_thunk_fns = cycle_names.filter_map { |n| @fn_nodes[n] }
+    cycle_thunk_fns = cycle_names.filter_map { |n| fn_nodes[n] }
                                   .select { |f| f.reentrance_kind == :reentrant_thunk }
     msg = "EFFECTS REENTRANT:THUNK on '#{name}' is mutually recursive (cycle through " \
           "other functions: #{cycle_names.sort.join(', ')}) and the cycle's body shape " \

@@ -3,13 +3,24 @@ require "sorbet-runtime"
 
 require_relative "type"
 require_relative "schemas"
-require_relative "../annotator-helpers/intrinsic_registry"
+require_relative "../annotator/helpers/intrinsic_registry"
 
 # ==========================================
 # AST
 # ==========================================
 module AST
     extend T::Sig
+
+  SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
+
+  sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
+  def self.stamp_synthetic_type!(node, value, context:)
+    node.full_type = value
+    stamped = node.full_type!(context: context)
+    raise "#{context}: synthetic type stamp produced :Untyped for #{node.class}" if stamped.untyped?
+
+    stamped
+  end
 
   # A node's value-type is, for these kinds, a pure function of its
   # structure — so it is DERIVED, never stamped. The full_type getter
@@ -312,6 +323,32 @@ module AST
     end
   end
 
+  # Walk every AST Locatable reachable from a root object. This is the
+  # structural expression+statement walker; semantic walkers should layer
+  # their own filtering on top instead of re-open-coding Struct member scans.
+  sig { params(root: T.untyped, descend_functions: T::Boolean, visitor: T.untyped).void }
+  def self.each_locatable(root, descend_functions: false, &visitor)
+    stack = T.let(root.is_a?(Array) ? root.reverse : [root], T::Array[T.untyped])
+    until stack.empty?
+      node = stack.pop
+      next unless node
+      yield node if node.is_a?(Locatable)
+      next if node.is_a?(FunctionDef) && !descend_functions
+      next unless node.is_a?(Struct)
+
+      node.class.members.reverse_each do |member|
+        value = node[member]
+        if value.is_a?(Array)
+          value.reverse_each { |child| stack << child if child.is_a?(Struct) }
+        elsif value.is_a?(Hash)
+          value.each_value { |child| stack << child if child.is_a?(Struct) }
+        elsif value.is_a?(Struct)
+          stack << value
+        end
+      end
+    end
+  end
+
   # Walk a GetField/GetIndex access chain down to the root Identifier it
   # is anchored at; nil if the chain does not bottom out at an Identifier.
   #
@@ -338,6 +375,38 @@ module AST
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
+  # Explicit ownership transfer marker stamped by annotation. This is a
+  # predicate over the AST contract, not an ad hoc respond_to? check.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.moved?(node)
+    node.respond_to?(:was_moved) && node.was_moved == true
+  end
+
+  # Statement-position body traversal is an AST fact. MIR passes may attach
+  # loop-specific meaning to a body, but they should not maintain parallel
+  # lists of every node shape that can contain one.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def self.loop_node?(node)
+    node.is_a?(AST::WhileLoop) || node.is_a?(AST::WhileBindLoop) ||
+      node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
+  def self.child_bodies(node)
+    node.is_a?(AST::HasBodies) ? node.child_bodies : []
+  end
+
+  # Canonical recursion-yield policy: non-tight recursive functions that can
+  # run arbitrarily long must thread rt so MIR can inject checkYield().
+  sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
+  def self.recursion_yield_needed?(fn_node)
+    return false if fn_node.tight_reentrance
+
+    fn_node.reentrance_kind == :reentrant ||
+      fn_node.reentrance_kind == :reentrant_tail_call ||
+      fn_node.reentrance_kind == :reentrant_max_depth
+  end
+
   # The immediately-nested *value* children of a transparent wrapper
   # expression: struct/union-literal field values, list-literal items,
   # and the inner value of a MOVE/COPY/CLONE/SHARE/FREEZE/CapabilityWrap
@@ -357,7 +426,8 @@ module AST
       (expr.fields&.values || []).compact
     when ListLit
       (expr.items || []).compact
-    when MoveNode, CopyNode, CloneNode, ShareNode, FreezeNode, CapabilityWrap
+    when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
+         FreezeNode, CapabilityWrap
       expr.value ? [expr.value] : []
     else
       []
@@ -407,7 +477,17 @@ module AST
     when MethodCall
       _expr_each_bg_block_recursive(expr.object, &block)
       expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
+    when StructLit, UnionVariantLit
+      expr.fields.each_value { |v| _expr_each_bg_block_recursive(v, &block) }
+    when ListLit
+      expr.items.each { |v| _expr_each_bg_block_recursive(v, &block) }
+    when HashLit
+      expr.entries.each { |k, v| _expr_each_bg_block_recursive(k, &block); _expr_each_bg_block_recursive(v, &block) }
+    when BinaryOp
+      _expr_each_bg_block_recursive(expr.left, &block)
+      _expr_each_bg_block_recursive(expr.right, &block)
     end
+    nil
   end
 
   # Yield ONLY the BgBlocks directly embedded in `stmt`'s expression
@@ -446,7 +526,17 @@ module AST
     when MethodCall
       _expr_each_bg_block_shallow(expr.object, &block)
       expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
+    when StructLit, UnionVariantLit
+      expr.fields.each_value { |v| _expr_each_bg_block_shallow(v, &block) }
+    when ListLit
+      expr.items.each { |v| _expr_each_bg_block_shallow(v, &block) }
+    when HashLit
+      expr.entries.each { |k, v| _expr_each_bg_block_shallow(k, &block); _expr_each_bg_block_shallow(v, &block) }
+    when BinaryOp
+      _expr_each_bg_block_shallow(expr.left, &block)
+      _expr_each_bg_block_shallow(expr.right, &block)
     end
+    nil
   end
 
   # Yield every CaptureAnalysis instance reachable from `body`. A
@@ -535,8 +625,15 @@ module AST
     def matched_stdlib_def; @matched_stdlib_def = T.let(@matched_stdlib_def, T.untyped); end
     sig { params(val: T.untyped).returns(T.untyped) }
     def matched_stdlib_def=(val)
-      @matched_stdlib_def = T.let(IntrinsicRegistry.fs(val), T.untyped)
+      fs = IntrinsicRegistry.fs(val)
+      @matched_stdlib_def = T.let(fs, T.untyped)
+      self.matched_signature = fs
     end
+
+    sig { returns(T.untyped) }
+    def matched_signature; @matched_signature = T.let(@matched_signature, T.untyped); end
+    sig { params(val: T.untyped).returns(T.untyped) }
+    def matched_signature=(val); @matched_signature = T.let(val, T.untyped); end
 
     sig { void }
     def stdlib_allocates; @stdlib_allocates = T.let(@stdlib_allocates, T.untyped); end
@@ -627,16 +724,13 @@ module AST
       @type_object ||= Type.new(:Untyped)
     end
 
-    sig do
-      params(default: T.nilable(T.any(Type, Symbol, String)),
-             blk: T.nilable(T.proc.returns(T.any(Type, Symbol, String))))
-        .returns(T.any(Type, Symbol, String))
-    end
-    def full_type_or(default = nil, &blk)
+    sig { params(context: String).returns(Type) }
+    def full_type!(context: "post-annotation AST")
       ft = full_type
-      return ft unless ft.untyped?
-      return blk.call if blk
-      default.nil? ? ft : default
+      ft = Type.new(ft) unless ft.nil? || ft.is_a?(Type)
+      raise "#{context}: missing type info for #{self.class}" unless ft
+      raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
+      ft
     end
 
     # True when the node carries a real (stamped) type, i.e. full_type
@@ -842,10 +936,27 @@ module AST
     # Reads sym.storage when a symbol is attached (binding-level), else the
     # node's @storage_override (expression-level, stamped by annotator).
     sig { returns(T::Boolean) }
-    def heap_provenance?
+    def heap_storage?
       sym = respond_to?(:symbol) ? symbol : nil
-      return true if sym&.heap_provenance?
+      return true if sym&.heap_storage?
       @storage_override == :heap
+    end
+
+    sig { returns(T::Boolean) }
+    def frame_provenance?
+      sym = respond_to?(:symbol) ? symbol : nil
+      return true if sym&.frame_provenance?
+      @storage_override == :frame
+    end
+
+    sig { returns(T::Boolean) }
+    def stack_storage?
+      @storage_override == :stack
+    end
+
+    sig { returns(T::Boolean) }
+    def stack_or_frame_storage?
+      storage == :stack || storage == :frame
     end
 
     sig { returns(T::Boolean) }
@@ -891,11 +1002,29 @@ module AST
     end
   end
 
+  Node = T.type_alias { Locatable }
+
+  sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
+  def self.each_child_node(node, &blk)
+    node.class.members.each do |member|
+      value = node[member]
+      if value.is_a?(Array)
+        value.each { |child| yield child if child.is_a?(Locatable) }
+      elsif value.is_a?(Hash)
+        value.each_value { |child| yield child if child.is_a?(Locatable) }
+      elsif value.is_a?(Locatable)
+        yield value
+      end
+    end
+    nil
+  end
+
   Program      = Struct.new(:token, :statements) do
     include Locatable
     # Resolved program-level SYNC POLICY, either user-written or the baked-in
     # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
+    attr_accessor :mir_pass_state
   end
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
@@ -976,7 +1105,7 @@ module AST
     #                                                             requires `!T` return type;
     #                                                             max_depth_n stamped on FunctionDef)
     # The annotator bridges this with the legacy `@reentrant`/`tail_call` attrs into a
-    # canonical reentrance_kind via src/annotator-helpers/reentrance.rb (Phase 1.3).
+    # canonical reentrance_kind via src/annotator/helpers/reentrance.rb (Phase 1.3).
     attr_accessor :effects_decl
     # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
     # `effects_decl` or `reentrant` directly. Same value space as effects_decl;
@@ -998,6 +1127,7 @@ module AST
     # parameters. Hash mapping param name (String) to constraint symbol (e.g. :non_reentrant).
     attr_accessor :requires_clauses
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
+    attr_accessor :fn_value_ref  # true when referenced as a function value; MIRPass finalizes needs_rt from it
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :alloc_fault   # computed by compute_can_fail! post-pass: fn allocates (direct or via a non-OR-absorbed callee) -> can OOM. A FAULT (panics by default, catchable by OR/CATCH), NOT an ERROR (never forces RETURNS !T). #3/#12
     attr_accessor :error_fallible # computed by compute_can_fail! post-pass: GENUINE error fallibility only (RAISE/PRE/declared !T/transitive ERROR callee). can_fail = error_fallible || alloc_fault; only error_fallible forces RETURNS !T (step 4). #3
@@ -1013,7 +1143,6 @@ module AST
     def uses_runtime?
       uses_frame == true || uses_heap == true || uses_alloc == true || uses_rt == true
     end
-    attr_accessor :return_provenance # :rodata, :frame, :heap — provenance of the return value
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
@@ -1305,7 +1434,7 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
-    attr_accessor :matched_signature # resolved FunctionSignature for named calls; escape/lowering read it directly
+    # matched_signature is provided by Locatable for both function and method calls.
     attr_accessor :arg_families      # per-arg Set<Family> for ?-form effect resolution
     attr_accessor :collapsed_errors  # Set<Symbol> of errors this
                                      # specific call site can surface, projected per actual-family of
@@ -1580,6 +1709,69 @@ module AST
   # RECOVER(default): pipeline operator that replaces errors with a default value.
   RecoverOp      = Struct.new(:token, :default_expr) { include Locatable }
 
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_fusible_stage?(node)
+    case node
+    when AST::WhereOp, AST::SelectOp, AST::TapOp, AST::TakeWhileOp,
+         AST::LimitOp, AST::SkipOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_select_filter_op?(node)
+    node.is_a?(AST::SelectOp) || node.is_a?(AST::WhereOp)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_stream_value_op?(node)
+    pipeline_select_filter_op?(node) || node.is_a?(AST::EachOp)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_terminal_fold?(node)
+    case node
+    when AST::SumOp, AST::AverageOp, AST::CountOp, AST::ReduceOp,
+         AST::MinOp, AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_range_fold?(node)
+    case node
+    when AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
+         AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp
+      true
+    else
+      false
+    end
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_list_terminal?(node)
+    node.is_a?(AST::UnnestOp) || node.is_a?(AST::DistinctOp)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_complex_op?(node)
+    case node
+    when AST::SelectOp, AST::WhereOp, AST::IndexOp, AST::ReduceOp,
+         AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
+         AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
+         AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+         AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp,
+         AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
+      true
+    else
+      false
+    end
+  end
+
   # BlockExpr: sequence of statements that produces a value.
   # Used by pipeline rewriter to express loops-that-return-a-value.
   # Transpiles to Zig labeled block: blk: { stmts; break :blk result; }
@@ -1757,7 +1949,6 @@ module AST
     include HasBodies
     sig { returns(T::Array[T::Array[T.untyped]]) }
     def child_bodies = [body].compact
-    attr_accessor :return_provenance # :heap when the value escapes as heap-owned
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
@@ -2059,16 +2250,6 @@ module MIR
   # (TAKES calls, GIVE, return escapes). Emits `x_moved = true;` to prevent
   # double-free via the defer guard emitted by Drop.
   SuppressCleanup = Struct.new(:token, :name) do
-    include AST::Locatable
-  end
-
-  # Alloc: marks an allocation point - a variable binding that owns a resource
-  # and will need cleanup. Inserted alongside MIR::Drop for each VarDecl/BindExpr
-  # with cleanup. The StaticLeakChecker verifies every Alloc has exactly one
-  # Drop or Move/Escape on every path through the function.
-  #
-  # alloc: :heap or :frame - which allocator owns this value
-  Alloc = Struct.new(:token, :name, :alloc) do
     include AST::Locatable
   end
 

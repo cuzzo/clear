@@ -13,7 +13,7 @@
 
 CRM_CELLS = []
 CRM_VARKIND = %i[local struct_field]
-CRM_VALUE   = %i[string int]
+CRM_VALUE   = %i[string int list struct]
 CRM_TAKEN   = %i[success failure]
 
 CRM_VARKIND.each do |vk|
@@ -24,55 +24,105 @@ CRM_VARKIND.each do |vk|
   end
 end
 
-def crm_ret(vt)  = (vt == :string ? "!String" : "!Int64")
-def crm_succ(vt) = (vt == :string ? "RETURN COPY s;" : "RETURN s.length();")
+def crm_ret(vt)
+  case vt
+  when :string then "!String"
+  when :int    then "!Int64"
+  when :list   then "!Int64[]@list"
+  when :struct then "!Box"
+  end
+end
+
+def crm_succ(vt)
+  case vt
+  when :string then "RETURN COPY s;"
+  when :int    then "RETURN s.length();"
+  when :list
+    "MUTABLE xs: Int64[]@list = [];\n    xs.append(s.length());\n    RETURN xs;"
+  when :struct then "RETURN Box{ name: COPY s };"
+  end
+end
 def crm_arg(tk)  = (tk == :success ? "\"X\"" : "\"\"")
 
 def crm_inner(vt)
-  "FN maybe(s: String) RETURNS #{crm_ret(vt)} ->\n" \
+  prelude = vt == :struct ? "STRUCT Box { name: String }\n\n" : ""
+  prelude + "FN maybe(s: String) RETURNS #{crm_ret(vt)} ->\n" \
   "    IF s.length() == 0_i64 THEN RAISE \"empty\"; END\n" \
   "    #{crm_succ(vt)}\nEND"
 end
 
-def crm_init(vt) = (vt == :string ? "\"init\"" : "7_i64")
+def crm_init(vt)
+  case vt
+  when :string then "\"init\""
+  when :int    then "7_i64"
+  when :list   then "[7_i64]"
+  when :struct then "Box{ name: \"init\" }"
+  end
+end
 
 def crm_assert(vt, tk)
   if vt == :string
     tk == :success ? "ASSERT acc.length() == 1_i64, \"reassigned to success\";" \
                     : "ASSERT acc.length() == 4_i64, \"kept old value on failure\";"
-  else
+  elsif vt == :int
     tk == :success ? "ASSERT acc == 1_i64, \"reassigned to success\";" \
                     : "ASSERT acc == 7_i64, \"kept old value on failure\";"
+  elsif vt == :list
+    "ASSERT acc.length() == 1_i64, \"list remains live after reassign\";"
+  else
+    tk == :success ? "ASSERT acc.name.length() == 1_i64, \"struct reassigned to success\";" \
+                    : "ASSERT acc.name.length() == 4_i64, \"struct kept old value on failure\";"
   end
 end
 
 FuzzGenerator.register(:catch_reassign_matrix, cells: CRM_CELLS) do |p|
   if p[:var] == :local
+    init = if p[:value] == :list
+             "MUTABLE acc: Int64[]@list = [];\n        acc.append(7_i64);"
+           else
+             "MUTABLE acc = #{crm_init(p[:value])};"
+           end
     <<~CHT
       #{crm_inner(p[:value])}
 
       FN main() RETURNS Void ->
-          MUTABLE acc = #{crm_init(p[:value])};
+          #{init}
           acc = maybe(#{crm_arg(p[:taken])}) OR acc;
           #{crm_assert(p[:value], p[:taken])}
           RETURN;
       END
     CHT
   else
-    field_t = p[:value] == :string ? "String" : "Int64"
-    rd = p[:value] == :string ? "h.acc.length()" : "h.acc"
-    exp = if p[:value] == :string
-            p[:taken] == :success ? "1_i64" : "4_i64"
-          else
-            p[:taken] == :success ? "1_i64" : "7_i64"
+    field_t = case p[:value]
+              when :string then "String"
+              when :int    then "Int64"
+              when :list   then "Int64[]@list"
+              when :struct then "Box"
+              end
+    rd = case p[:value]
+         when :string then "h.acc.length()"
+         when :int    then "h.acc"
+         when :list   then "h.acc.length()"
+         when :struct then "h.acc.name.length()"
+         end
+    exp = case p[:value]
+          when :string then p[:taken] == :success ? "1_i64" : "4_i64"
+          when :int    then p[:taken] == :success ? "1_i64" : "7_i64"
+          when :list   then "1_i64"
+          when :struct then p[:taken] == :success ? "1_i64" : "4_i64"
           end
+    holder_init = if p[:value] == :list
+                    "MUTABLE start: Int64[]@list = [];\n        start.append(7_i64);\n        MUTABLE h = Holder{ acc: start };"
+                  else
+                    "MUTABLE h = Holder{ acc: #{crm_init(p[:value])} };"
+                  end
     <<~CHT
       #{crm_inner(p[:value])}
 
       STRUCT Holder { acc: #{field_t} }
 
       FN main() RETURNS Void ->
-          MUTABLE h = Holder{ acc: #{crm_init(p[:value])} };
+          #{holder_init}
           h.acc = maybe(#{crm_arg(p[:taken])}) OR h.acc;
           ASSERT #{rd} == #{exp}, "struct field reassign #{p[:taken]}";
           RETURN;

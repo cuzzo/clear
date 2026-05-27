@@ -75,6 +75,11 @@ module WithMatchCheck
       warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                          T.must(policy_handlers), T.must(warn_handler)) unless node.arms
 
+      if node.polymorphic
+        fn.uses_rt = true if fn.respond_to?(:uses_rt=)
+        fn.uses_alloc = true if fn.respond_to?(:uses_alloc=)
+      end
+
       # Rule 1: WITH-on-param ⇒ REQUIRES-on-param.
       bound_params.each do |pname|
         next if requires_map.key?(pname)
@@ -300,7 +305,7 @@ module WithMatchCheck
     #   - @local       -> sym.sync == :local
     #   - @multiowned  -> sym.storage == :multiowned (sync nil)
     #   - plain T      -> sym.sync nil + storage stack/heap (no shared)
-    return :LOCAL if sym.sync == :local
+    return :LOCAL if sym.local?
     return :LOCAL if sym.sync.nil? && sym.storage == :multiowned
     return :LOCAL if sym.sync.nil? && (sym.storage.nil? ||
                                        sym.storage == :stack ||

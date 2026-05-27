@@ -257,7 +257,7 @@ module FixableHelper
     # wrong keyword would either compile-error (CLONE on plain T) or
     # do something semantically different from what the user wants
     # (deep-COPY on an Arc handle when a refcount bump suffices).
-    type = og_node.respond_to?(:full_type) ? og_node.full_type : nil
+    type = og_node.full_type
     is_shared = type.respond_to?(:shared?)     ? type.shared?     : false
     is_multi  = type.respond_to?(:multiowned?) ? type.multiowned? : false
     is_split  = type.respond_to?(:split?)      ? type.split?      : false
@@ -778,7 +778,7 @@ module FixableHelper
         )]
       )
     end
-    kw = { type: node.full_type }
+    kw = { type: node.full_type!(context: "borrowed return diagnostic") }
     return error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw) unless fix
     fixable!(node,
       message: T.must(DiagnosticRegistry.format(:RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw)),
@@ -1520,7 +1520,7 @@ module FixableHelper
   # conversion fixes are a follow-up because they require each callsite's
   # argument span and a coercion table. Operator-derived candidates are added
   # when the body uses the binding in operator expressions.
-  sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
+  sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: OperatorEvidenceCollector::EvidenceMap).returns(T.untyped) }
   def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     slot = ambiguity.slot
@@ -1530,7 +1530,8 @@ module FixableHelper
 
     message = build_auto_ambiguity_message(T.must(label), observed_strs, slot)
 
-    ops = op_evidence[slot_id_for(slot)] || Set.new
+    slot_id = slot_id_for(slot)
+    ops = slot_id ? (op_evidence[slot_id] || Set.new) : Set.new
     candidates = auto_rank_candidates(ops)
     message += build_auto_op_evidence_block(ops, candidates) unless candidates.empty?
 
@@ -1551,13 +1552,14 @@ module FixableHelper
   # empty `[]` never used). Emits :error directing the user to
   # specify a concrete type. When the body uses the binding in operator
   # expressions, ranked candidate types are offered as interactive fixes.
-  sig { params(slot: AutoConstraintCollector::Slot, op_evidence: T::Hash[T.untyped, T.untyped]).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot, op_evidence: OperatorEvidenceCollector::EvidenceMap).returns(T.untyped) }
   def emit_auto_unresolved_finding!(slot, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     label = auto_slot_label(slot)
     base_msg = "Cannot infer type for #{label} — no observed uses to drive inference."
 
-    ops = op_evidence[slot_id_for(slot)] || Set.new
+    slot_id = slot_id_for(slot)
+    ops = slot_id ? (op_evidence[slot_id] || Set.new) : Set.new
     candidates = auto_rank_candidates(ops)
 
     message = base_msg.dup
@@ -1581,13 +1583,18 @@ module FixableHelper
 
   # Reverse-lookup helper: given a Slot struct, return its hash key
   # in the slots map (matches the IDs AutoConstraintCollector uses).
-  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(AutoSlotId)) }
   def slot_id_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     case slot.kind
-    when :param  then [:param, slot.fn_name, slot.index]
-    when :return then [:return, slot.fn_name]
-    when :local  then [:local, slot.decl_node.object_id]
+    when :param
+      return nil unless slot.fn_name && slot.index
+      AutoSlotId.param(T.must(slot.fn_name), T.must(slot.index))
+    when :return
+      return nil unless slot.fn_name
+      AutoSlotId.return(T.must(slot.fn_name))
+    when :local
+      AutoSlotId.local(T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode))
     end
   end
 
@@ -1595,12 +1602,12 @@ module FixableHelper
   # Auto helpers (private to this module).
   # ---------------------------------------------------------------
 
-  sig { params(type: T.untyped).returns(String) }
+  sig { params(type: AutoConstraintCollector::ObservedType).returns(String) }
   def auto_type_source_form(type)
     T.bind(self, SemanticAnnotator) rescue nil
     # Prefer the resolved symbol's name; falls back to to_s for
     # parameterized types (`Int64[]`, `HashMap<String, Int64>`).
-    if type.respond_to?(:resolved)
+    if type.is_a?(Type)
       sym = type.resolved
       sym.to_s
     else
@@ -1614,7 +1621,7 @@ module FixableHelper
     # Shape-tagged slots get a more specific label so the diagnostic tells the
     # user which sub-type is being inferred.
     if slot.respond_to?(:shape) && slot.shape
-      name = slot.decl_node.respond_to?(:name) ? slot.decl_node.name : "<local>"
+      name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
       case slot.shape
       when :list_element then return "element type of list `#{name}`"
       when :map_key      then return "key type of map `#{name}`"
@@ -1624,12 +1631,13 @@ module FixableHelper
 
     case slot.kind
     when :param
-      param = slot.decl_node.params[slot.index]
+      fn = T.cast(slot.decl_node, AST::FunctionDef)
+      param = fn.params[T.must(slot.index)]
       "parameter '#{param.name}' of `#{slot.fn_name}`"
     when :return
       "return type of `#{slot.fn_name}`"
     when :local
-      name = slot.decl_node.respond_to?(:name) ? slot.decl_node.name : "<local>"
+      name = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode).name
       "local '#{name}'"
     else
       # AutoConstraintCollector only creates :param / :return /
@@ -1676,7 +1684,12 @@ module FixableHelper
 
     # Option 3: union — example only, never auto-applied.
     if slot.kind == :param || slot.kind == :return
-      union_name = slot.kind == :param ? slot.decl_node.params[slot.index][:name].to_s.capitalize : "Result"
+      union_name = if slot.kind == :param
+        fn = T.cast(slot.decl_node, AST::FunctionDef)
+        fn.params[T.must(slot.index)][:name].to_s.capitalize
+      else
+        "Result"
+      end
       variants = observed_strs.map.with_index { |t, i| "Variant#{i}: #{t}" }.join(', ')
       msg << "  Option 3 (last resort): if you genuinely need to accept\n"
       msg << "    multiple types, define a union explicitly:\n"

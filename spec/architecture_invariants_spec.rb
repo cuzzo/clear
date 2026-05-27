@@ -1,5 +1,7 @@
 require "rspec"
 
+ARCH_ROOT = File.expand_path("..", __dir__)
+
 # Static-analysis guard for the placement-field architecture.
 #
 # Storage / allocator decisions flow through a staged pipeline, and EACH
@@ -11,11 +13,12 @@ require "rspec"
 #   node.storage        <- annotation ONLY
 #   symbol.storage      <- escape analysis ONLY
 #   CleanupEntry#alloc  <- cleanup classification ONLY
+#   CleanupEntry#scope  <- cleanup classification ONLY
 #
 # These invariants are non-negotiable: fixing the compiler means making
 # every placement decision in its one sanctioned pass, never beside it.
 RSpec.describe "architecture invariants: placement-field writers" do
-  SRC = File.expand_path("../src", __dir__)
+  SRC = File.join(ARCH_ROOT, "src")
 
   # ── the ONE sanctioned writer of each field ─────────────────────────
 
@@ -23,8 +26,8 @@ RSpec.describe "architecture invariants: placement-field writers" do
   # parsed nodes; rewrite/lowering adapters may copy that metadata onto
   # synthetic nodes, but escape placement must not be written here.
   NODE_STORAGE_OK = lambda do |rel|
-    rel == "annotator.rb" ||
-      rel.start_with?("annotator-helpers/") ||
+    rel == "annotator/annotator.rb" ||
+      rel.start_with?("annotator/helpers/") ||
       rel == "ast/ast.rb" ||           # finalize_storage! -- the annotation mechanism
       rel == "ast/parser.rb" ||        # parse-time literal storage
       rel == "mir/alloc.rb" ||         # downgrade_frame_to_stack: mixed into SemanticAnnotator
@@ -37,7 +40,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
 
   # symbol.storage is made DEFINITIVE by escape analysis.
   SYMBOL_STORAGE_OK = lambda do |rel|
-    rel == "mir/escape_graph.rb" || rel == "mir/escape_analysis.rb"
+    rel == "mir/escape_analysis.rb"
   end
 
   # CleanupEntry#alloc is set once, by cleanup classification.
@@ -51,6 +54,7 @@ RSpec.describe "architecture invariants: placement-field writers" do
     node_w = []
     sym_w = []
     cleanup_w = []
+    cleanup_scope_w = []
     Dir[File.join(SRC, "**", "*.rb")].sort.each do |path|
       rel = path.sub(SRC + "/", "")
       File.readlines(path).each_with_index do |line, idx|
@@ -71,9 +75,13 @@ RSpec.describe "architecture invariants: placement-field writers" do
         if line.match(/\b\w*(?:entry|cleanup)\w*\[:alloc\]\s*=(?![=~])/i)
           cleanup_w << [loc, code]
         end
+
+        if line.match(/\b\w*(?:entry|cleanup)\w*\[:scope\]\s*=(?![=~])/i)
+          cleanup_scope_w << [loc, code]
+        end
       end
     end
-    { node: node_w, symbol: sym_w, cleanup: cleanup_w }
+    { node: node_w, symbol: sym_w, cleanup: cleanup_w, cleanup_scope: cleanup_scope_w }
   end
 
   WRITES = scan
@@ -100,5 +108,723 @@ RSpec.describe "architecture invariants: placement-field writers" do
   it "CleanupEntry#alloc is written ONLY by cleanup classification" do
     bad = renegades(WRITES[:cleanup], CLEANUP_ALLOC_OK)
     expect(bad).to be_empty, report("CleanupEntry#alloc", bad)
+  end
+
+  it "CleanupEntry#scope is written ONLY by cleanup classification" do
+    bad = renegades(WRITES[:cleanup_scope], CLEANUP_ALLOC_OK)
+    expect(bad).to be_empty, report("CleanupEntry#scope", bad)
+  end
+end
+
+RSpec.describe "architecture invariants: MIR pass order" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  def expect_order(rel, *patterns)
+    text = source(rel)
+    positions = patterns.map do |pattern|
+      idx = text.index(pattern)
+      expect(idx).not_to be_nil, "#{rel} is missing #{pattern.inspect}"
+      idx
+    end
+    expect(positions).to eq(positions.sort),
+      "#{rel} has wrong pass order:\n  #{patterns.join("\n  ")}"
+  end
+
+  it "runs top-level rewrites before hoist, type check, and MIRPass" do
+    expect_order(
+      "src/backends/compiler_frontend.rb",
+      "annotator.annotate!",
+      "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "MIRPassState.for!(T.must(ast)).mark!(:pipeline_rewritten)",
+      "StringConcatRewriter.new.rewrite!(T.must(ast))",
+      "MIRPassState.for!(T.must(ast)).mark!(:string_concat_rewritten)",
+      "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
+      "Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)",
+      "PreMirTypeCheck.verify!(T.must(ast))",
+      "mir_pass = MIRPass.new",
+      "mir_pass.transform!",
+    )
+  end
+
+  it "runs imported modules through the same rewrite/hoist/typecheck/MIRPass boundary" do
+    expect_order(
+      "src/backends/importer.rb",
+      "annotator.annotate!",
+      "PipelineRewriter.new(annotator).rewrite!(ast)",
+      "MIRPassState.for!(ast).mark!(:pipeline_rewritten)",
+      "StringConcatRewriter.new.rewrite!(ast)",
+      "MIRPassState.for!(ast).mark!(:string_concat_rewritten)",
+      "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
+      "Hoist.apply!(ast, schema_lookup: schema_lookup)",
+      "PreMirTypeCheck.verify!(ast)",
+      "mir_pass = MIRPass.new",
+      "mir_pass.transform!",
+    )
+  end
+
+  it "runs MIR placement before cleanup classification, loop analysis, and lowering stamps" do
+    expect_order(
+      "src/mir/mir_pass.rb",
+      "pass_state.require!(:premir_type_checked",
+      "EscapeAnalysis.apply!",
+      "pass_state.mark!(:escape_analyzed)",
+      "CleanupClassifier.classify",
+      "pass_state.mark!(:cleanup_classified)",
+      "LoopFrameAnalysis.analyze!",
+      "pass_state.mark!(:loop_frame_analyzed)",
+      "finalize_needs_rt!",
+      "pass_state.mark!(:needs_rt_finalized)",
+      "transform_function!",
+      "pass_state.mark!(:mir_pass_complete)",
+    )
+  end
+
+  it "requires each MIR consumer to assert the pass-state stage it consumes" do
+    expect(source("src/mir/hoist.rb")).to include('MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")')
+    expect(source("src/mir/pre_mir_type_check.rb")).to include('MIRPassState.require!(program, :hoisted, consumer: "PreMirTypeCheck")')
+    expect(source("src/mir/mir_lowering.rb")).to include('MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering")')
+    expect(source("src/mir/mir_checker.rb")).to include('MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")')
+  end
+
+  it "keeps pass stages registered as typed producer/requirement specs" do
+    pass_state = source("src/mir/pass_state.rb")
+    expect(pass_state).to include("class StageSpec < T::Struct")
+    expect(pass_state).to include("const :producer, String")
+    expect(pass_state).to include("const :requires, T.nilable(Symbol)")
+    expect(pass_state).to include("STAGE_BY_NAME")
+    expect(pass_state).to include("next required stage")
+  end
+
+  it "aborts compilation on MIRChecker errors in emitted program paths" do
+    expect(source("src/backends/transpiler.rb")).to include("MIR ownership verification failed")
+    expect(source("src/backends/transpiler.rb")).to match(/raise\s+"MIR ownership verification failed/)
+  end
+
+  it "requires structural calls to carry typed callable contracts" do
+    expect(source("src/mir/mir.rb")).to include("class CallableContract")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :signature")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :ownership_contract")
+    expect(source("src/mir/mir.rb")).to include("attr_reader :checked_arg_count")
+    expect(source("src/mir/mir_checker.rb")).to include("verify_callable_contract!")
+    expect(source("src/mir/mir_checker.rb")).to include("MIR::CallableContract")
+  end
+
+  it "keeps ownership-significant MIR node classes in an explicit registry" do
+    expect(source("src/mir/mir.rb")).to include("OWNERSHIP_SIGNIFICANT_NODE_TYPES")
+    expect(source("src/mir/mir.rb")).to include("AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark")
+    expect(source("src/mir/mir.rb")).to include("RawZig, InlineZig")
+    expect(source("src/mir/mir.rb")).to include("Call, TailCall, MethodCall")
+  end
+
+  it "keeps linear MIR ownership traversal closed over statement node classes" do
+    checker = source("src/mir/mir_checker.rb")
+    expect(checker).to include("LINEAR_STATEMENT_NODE_TYPES")
+    expect(checker).to include("LINEAR_STMT_NOT_REGISTERED")
+    expect(checker).not_to match(/else\s*\n\s*check_linear_expr_uses!\(stmt, state\)/)
+  end
+
+  it "keeps escape analysis sinks registered with concrete handlers" do
+    escape = source("src/mir/escape_analysis.rb")
+    expect(escape).to include("ESCAPE_SINK_HANDLERS")
+    expect(escape).to include("DERIVED_PLACEMENT_HANDLERS")
+    expect(escape).to include("validate_escape_sink_handlers!")
+    expect(escape).to include("owning_return")
+    expect(escape).to include("takes_or_mutable_arg")
+    expect(escape).to include("execution_boundary_capture")
+    expect(escape).to include("receiver_backing_storage")
+    sink_registry = escape[/ESCAPE_SINK_HANDLERS = T\.let\(\{.*?\n  \}\.freeze, EscapeHandlerRegistry\)/m]
+    expect(sink_registry).not_to include("assignment_ownership")
+    expect(sink_registry).not_to include("hoist_dependency")
+  end
+end
+
+RSpec.describe "architecture invariants: post-annotation type access" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  TYPE_CONTRACT_BURNDOWN_FILES = [
+    "src/annotator/annotator.rb",
+    "src/annotator/helpers/function_analysis.rb",
+    "src/annotator/helpers/generic_analysis.rb",
+    "src/annotator/helpers/pipe_analysis.rb",
+    "src/backends/pipeline_host.rb",
+    "src/backends/pipeline_rewriter.rb",
+    "src/mir/escape_analysis.rb",
+    "src/mir/lowering/expressions.rb",
+    "src/mir/lowering/variables.rb",
+  ].freeze
+
+  TYPE_CONTRACT_SOURCE_DIRS = [
+    "src/annotator",
+    "src/backends",
+    "src/mir",
+  ].freeze
+
+  def scoped_source_files
+    TYPE_CONTRACT_SOURCE_DIRS.flat_map do |dir|
+      Dir[File.join(ARCH_ROOT, dir, "**/*.rb")]
+    end.sort.map { |path| path.sub(ARCH_ROOT + "/", "") }
+  end
+
+  it "does not re-derive whether AST nodes have full_type in burned-down consumers" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("respond_to?(:full_type)") || line.include?('respond_to?("full_type")')
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "post-annotation consumers must use Locatable#full_type!, not defensive full_type probes:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not keep legacy full_type_or readers in scoped compiler code" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("full_type_or")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "scoped compiler code must use Locatable#full_type! rather than full_type_or:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not treat full_type as optional in scoped compiler code" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("full_type")
+        optional_predicate =
+          line.match?(/\b(?:return\s+)?(?:if|unless)\s+[^#\n]*\.full_type\s*(?:#.*)?$/) ||
+          line.match?(/\.full_type&\./) ||
+          line.match?(/&\.full_type(?![!\w])/)
+        next unless optional_predicate
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "full_type is a fail-closed annotation fact, not an optional predicate:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not use optional Type.from_node on post-annotation AST values in burned-down consumers" do
+    offenders = scoped_source_files.flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/Type\.from_node\((?![^\)]*,\s*context:)/)
+        # Raw metadata is not an annotated AST value; it may still be
+        # normalized optionally because absence has semantic meaning there.
+        next if line.match?(/\b(?:variant_data|return_type|expected_type|current_expected_type|current_fn_return_type|type_info)\b/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "post-annotation AST values must use Locatable#full_type! or Type.from_node!, not optional Type.from_node:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps required AST type access as a hard contract" do
+    ast = source("src/ast/ast.rb")
+    expect(ast).to include("def full_type!(context: \"post-annotation AST\")")
+    expect(ast).to include('raise "#{context}: unresolved type info')
+    expect(source("src/mir/pre_mir_type_check.rb")).to include("full_type is the :Untyped")
+  end
+
+  it "keeps AST full_type writes inside annotation and synthetic-node producer boundaries" do
+    allowed = [
+      %r{\Asrc/ast/ast\.rb\z},
+      %r{\Asrc/ast/parser\.rb\z},
+      %r{\Asrc/annotator/},
+      %r{\Asrc/backends/pipeline_host\.rb\z},
+      %r{\Asrc/backends/pipeline_rewriter\.rb\z},
+      %r{\Asrc/backends/string_concat_rewriter\.rb\z},
+      %r{\Asrc/mir/hoist\.rb\z},
+      %r{\Asrc/mir/mir_pass\.rb\z},
+      %r{\Asrc/mir/pre_mir_type_check\.rb\z},
+      %r{\Asrc/mir/mir_lowering\.rb\z},
+      %r{\Asrc/mir/lowering/},
+      %r{\Asrc/mir/fsm_transform/segments\.rb\z},
+    ]
+
+    offenders = scoped_source_files.flat_map do |rel|
+      next [] if allowed.any? { |pattern| pattern.match?(rel) }
+
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=(?![=~])/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "AST full_type writes must stay in annotation or synthetic-node producer boundaries:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "routes annotator full_type writes through the typed stamp helper" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=(?![=~])/)
+        next if rel == "src/annotator/annotator.rb" && line.include?("node.full_type = value")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "annotator type producers must call SemanticAnnotator#stamp_type!, not write .full_type directly:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps the annotator stamp boundary typed and fail-closed" do
+    annotator = source("src/annotator/annotator.rb")
+    expect(annotator).to include("def stamp_type!(node, value)")
+    expect(annotator).to include("type_parameters(:Stamp)")
+    expect(annotator).to include("value: T.type_parameter(:Stamp)")
+    expect(annotator).to include("raise \"annotation stamp missing type")
+    expect(annotator).to include("node.full_type = value")
+    expect(annotator).to include('node.full_type!(context: "annotation stamp")')
+    expect(annotator).to include("stamped.untyped?")
+    expect(annotator).to include('raise "annotation stamp produced :Untyped')
+  end
+
+  it "keeps MIR/backend synthetic AST type writes behind one fail-closed helper" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type\s*=/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Synthetic AST nodes in MIR/backend code must use AST.stamp_synthetic_type!, not raw full_type=:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps the synthetic AST type stamp boundary typed and fail-closed" do
+    ast = source("src/ast/ast.rb")
+    expect(ast).to include("SyntheticTypeInput =")
+    expect(ast).to include("def self.stamp_synthetic_type!(node, value, context:)")
+    expect(ast).to include("node.full_type = value")
+    expect(ast).to include("node.full_type!(context: context)")
+    expect(ast).to include("stamped.untyped?")
+  end
+
+  it "uses hard AST type reads in annotator consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/annotator/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        # Annotation producers are the sanctioned place where AST nodes are
+        # stamped or copied after the visitor has computed the authoritative type.
+        if line.match?(/\.full_type\s*=/)
+          rhs = line.split(/\.full_type\s*=/, 2).last || ""
+          next unless rhs.match?(/\.full_type(?![!\w])/)
+        end
+        # OwnershipGraph::Node exposes its stored Type payload through
+        # #full_type; this is not an AST annotation read.
+        next if rel == "src/annotator/helpers/fixable_helpers.rb" && line.include?("og_node.full_type")
+        # FunctionSignature.from_function_def is a raw signature producer. It
+        # can be called before a FunctionDef has been annotation-stamped.
+        next if rel == "src/annotator/helpers/function_signature.rb" && line.include?("fn.full_type")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Annotator consumers must use Locatable#full_type!; plain .full_type is only for producer writes or typed payloads:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not use optional Type.from_node on MIR AST consumers" do
+    allowed_raw_metadata = [
+      /current_expected_type/,
+      /current_fn_return_type/,
+      /return_type/,
+      /expected_type/,
+      /variant_data/,
+      /\btype_info\b/,
+    ]
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("Type.from_node(")
+        next if allowed_raw_metadata.any? { |pattern| line.match?(pattern) }
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR AST consumers must use Type.from_node! / Locatable#full_type!; optional Type.from_node is only for raw type metadata:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "uses hard AST type reads in MIR consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        # Producer writes/copies are the sanctioned place for synthetic nodes
+        # to receive already-authoritative annotation facts.
+        next if line.match?(/\.full_type\s*=/)
+        # PreMirTypeCheck is the boundary that rejects the :Untyped sentinel.
+        next if rel == "src/mir/pre_mir_type_check.rb"
+        # MIR AllocMark exposes a Type payload through #full_type; this is not
+        # an AST annotation read and has no bang accessor.
+        next if rel == "src/mir/mir_checker.rb" && line.include?("alloc_marks.first.full_type")
+        # OwnershipGraph::Node exposes its stored Type payload through
+        # #full_type; this is not an AST annotation read.
+        next if rel == "src/mir/ownership_graph.rb" && line.include?("source.full_type")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR AST consumers must use Locatable#full_type!; plain .full_type is only for producer writes or MIR Type payloads:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "uses hard AST type reads in backend consumers" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\.full_type(?![!\w])/)
+        next if line.match?(/\.full_type\s*=/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Backend AST consumers must use Locatable#full_type!; plain .full_type is only for producer writes:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not treat full_type! itself as an optional condition in MIR/backend code" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\b(?:if|unless)\s+[\w.]+\.full_type!\s*(?:#.*)?$/) ||
+                    line.match?(/&&\s*[\w.]+\.full_type!\s*(?:#.*)?$/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "full_type! is a hard post-annotation contract, not a nilable predicate:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not manufacture untyped MIR/backend ownership facts" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/mir/pre_mir_type_check.rb"
+
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("Type.new(:Untyped)")
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Post-annotation MIR/backend facts must carry authoritative Type payloads, never :Untyped:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not emit AllocMark without authoritative type info" do
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next if line.include?("mir_alloc_mark_type_info(")
+        next unless line.match?(/MIR::AllocMark\.new\([^#\n]*,\s*nil[,\)]/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR::AllocMark must carry concrete Type info; nil makes ownership verification coincidental:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not keep the old MIR::Alloc allocation marker path" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/**/*.rb")] -
+                 [File.join(ARCH_ROOT, "src/mir/mir_emitter.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\bMIR::Alloc\b/) || line.match?(/\bAlloc\s*=\s*Struct\.new\(:token,\s*:name,\s*:alloc\)/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIRPass must emit final MIR::AllocMark facts directly; old MIR::Alloc is a dual allocation path:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps AllocMark construction fail-closed on concrete Type" do
+    mir = source("src/mir/mir.rb")
+    expect(mir).to include("def initialize(name, alloc, type_info, scope = nil)")
+    expect(mir).to include("type_info: Type")
+    expect(mir).to include("raise \"MIR::AllocMark requires concrete Type info\" if type_info.untyped?")
+  end
+
+  it "keeps MIRChecker fail-closed on missing AllocMark type facts" do
+    checker = source("src/mir/mir_checker.rb")
+    expect(checker).to include("INV-ALLOC-MARK-TYPE")
+    expect(checker).to include("verify_alloc_marks_typed!(allocs)")
+    expect(checker).to include("def verify_alloc_marks_typed!(allocs)")
+    expect(checker).to include("ALLOC_MARK_TYPE_MISSING")
+    expect(checker).to include("ti.is_a?(Type) && !ti.untyped?")
+    expect(source("src/ast/diagnostic_registry.rb")).to include("ALLOC_MARK_TYPE_MISSING")
+  end
+
+  it "keeps Auto inference slot identity in typed objects, not tuple arrays" do
+    expect(source("src/annotator/helpers/auto_inference.rb")).to include("class AutoSlotId")
+    offenders = [
+      "src/annotator/helpers/auto_inference.rb",
+      "src/annotator/helpers/fixable_helpers.rb",
+      "src/annotator/annotator.rb",
+    ].flat_map do |rel|
+      source(rel).lines.each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/\[:(?:param|return|local|list_element|map_key|map_value)\b/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Auto inference slot identity must use AutoSlotId/typed shape objects, not tuple arrays:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps Auto inference facts in typed structs, not anonymous Struct bags" do
+    auto = source("src/annotator/helpers/auto_inference.rb")
+    expect(auto).to include("class Slot < T::Struct")
+    expect(auto).to include("class Resolution < T::Struct")
+    expect(auto).to include("class Ambiguity < T::Struct")
+    expect(auto).to include("class Result < T::Struct")
+
+    offenders = auto.lines.each_with_index.filter_map do |line, idx|
+      next if line.strip.start_with?("#")
+      next unless line.match?(/\b(?:Slot|Result|Resolution|Ambiguity)\s*=\s*Struct\.new/)
+      "src/annotator/helpers/auto_inference.rb:#{idx + 1}: #{line.strip}"
+    end
+
+    expect(offenders).to be_empty,
+      "Auto inference protocol facts must be explicit T::Struct classes:\n" \
+      "#{offenders.join("\n")}"
+  end
+end
+
+RSpec.describe "architecture invariants: closed placement pipeline" do
+  ForbiddenPattern = Struct.new(:name, :glob, :pattern, :allowed, keyword_init: true)
+
+  FORBIDDEN = [
+    ForbiddenPattern.new(
+      name: "return/heap provenance as placement data",
+      glob: "src/**/*.rb",
+      pattern: /\b(?:return_provenance|heap_provenance)\b/,
+      allowed: [
+        %r{\Asrc/mir/mir_checker\.rb\z},
+        %r{\Asrc/mir/mir\.rb\z},
+        %r{\Asrc/ast/diagnostic_registry\.rb\z},
+      ],
+    ),
+    ForbiddenPattern.new(
+      name: "lowering-side heap/frame inference helpers",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb,cleanup_classifier.rb}",
+      pattern: /\b(?:node_is_heap\?|heap_owned_value\?|takes_arg_alloc|receiver_root_heap\?|storage_to_alloc|authoritative_storage|call_return_provenance|return_expr_provenance)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "recursive cleanup shape used as allocator input downstream",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb}",
+      pattern: /\b(?:recursive_cleanup_shape\?|type_shape_needs_recursive_cleanup\?)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "lowering/hoist context allocator state",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb}",
+      pattern: /@(?:decl_alloc|current_fn_return_alloc)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "node storage used as downstream allocator authority",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb,hoist.rb,cleanup_classifier.rb}",
+      pattern: /\bnode\.storage\s*(?:==|=~|!=|=)\s*:heap\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "inactive escape fuzz cells",
+      glob: "tools/fuzz/templates/**/*.rb",
+      pattern: /(?:expected\s*[:=]|\?\s*)\s*:in_dev\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "source-specific call metadata in escape analysis",
+      glob: "src/mir/escape_analysis.rb",
+      pattern: /\bmatched_stdlib_def\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop-analysis special escape flags",
+      glob: "src/**/*.rb",
+      pattern: /\b(?:frame_alloc_escapes|stores_into_nonlocal_collection)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop rewind decisions from collection mutator names",
+      glob: "src/mir/{control_flow.rb,mir_checker.rb}",
+      pattern: /\b(?:append|insert|push|put|ELEMENT_STORE)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "loop rewind decisions from collection shape",
+      glob: "src/mir/{control_flow.rb,mir_checker.rb}",
+      pattern: /\b(?:collection\?|collection_value\?|list_collection\?|set_collection\?|pool\?|map\?|array\?)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "defensive nil-array fallbacks in placement helpers",
+      glob: "src/mir/{cleanup_classifier.rb,hoist.rb}",
+      pattern: /\|\|\s*\[\]|\b&&\s*\w+\.any\?|\w+&\.any\?/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "pass-local MIR traversal helpers",
+      glob: "src/mir/{mir_lowering.rb,lowering/**/*.rb}",
+      pattern: /\bdef\s+(?:walk_mir_node|each_mir_surface_node|collect_ownership_surface_nodes|ownership_surface_nodes)\b/,
+      allowed: [],
+    ),
+    ForbiddenPattern.new(
+      name: "InlineZig allocator hash protocol",
+      glob: "src/**/*.rb",
+      pattern: /(?<!resolved_)allocs\.is_a\?\(Hash\)|\.allocs\.values|\.allocs\.key\?\(|\.allocs\[:|\.allocs\.transform_values|resolved_allocs\.is_a\?\(Hash\)|resolved_allocs\[:/,
+      allowed: [],
+    ),
+  ].freeze
+
+  def scan_for(pattern)
+    files = Dir[File.join(ARCH_ROOT, pattern.glob)].uniq.sort
+    files.each_with_object([]) do |path, hits|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next if pattern.allowed.any? { |allowed| allowed.match?(rel) }
+
+      File.readlines(path).each_with_index do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(pattern.pattern)
+
+        hits << "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+  end
+
+  FORBIDDEN.each do |pattern|
+    it "forbids #{pattern.name}" do
+      hits = scan_for(pattern)
+      expect(hits).to be_empty,
+        "#{hits.size} forbidden #{pattern.name} hit(s):\n#{hits.join("\n")}"
+    end
+  end
+
+  it "keeps VarDecl allocator placement behind the typed placement fact" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/lowering/variables.rb"))
+    expect(source).to include("def binding_placement_fact")
+    expect(source).to include("placement = binding_placement_fact")
+    expect(source).to include("base_decl_alloc = placement.alloc")
+    expect(source).not_to include("base_decl_alloc = if")
+  end
+
+  it "routes production ownership transfer marks through the typed transfer plan" do
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")] +
+                 [File.join(ARCH_ROOT, "src/backends/pipeline_host.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if rel == "src/mir/mir.rb"
+
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("MIR::TransferMark.new")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Ownership transfers must be emitted through MIR.ownership_transfer_marks / OwnershipTransferPlan:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "routes function return transfers through ReturnOwnershipPlan" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/lowering/control_flow.rb"))
+    expect(source).to include("class ReturnOwnershipPlan < T::Struct")
+    expect(source).to include("def return_lowering_plan")
+    expect(source).to include("def return_with_transfer_marks")
+    expect(source).to include("def synthetic_return_ownership_plan")
+
+    direct_return_transfers = source.lines.each_with_index.filter_map do |line, idx|
+      next if line.strip.start_with?("#")
+      next unless line.include?("MIR.ownership_transfer_marks") && line.include?(":return")
+
+      "#{idx + 1}: #{line.strip}"
+    end
+
+    expect(direct_return_transfers).to eq([
+      "82: MIR.ownership_transfer_marks(name, :return, move_guarded: visible_guarded_names.include?(name))",
+    ])
+  end
+
+  it "keeps owned-sink source shape behind one typed source fact" do
+    source = File.read(File.join(ARCH_ROOT, "src/mir/mir_lowering.rb"))
+    expect(source).to include("class OwnedSinkSourceFact < T::Struct")
+    expect(source).to include("def owned_sink_source_fact")
+    expect(source).to include("source.satisfies_sink?")
+    expect(source).not_to include("def owned_sink_source_satisfies?")
+    expect(source).not_to include("def verifiable_owned_source?")
+    expect(source).not_to include("def ownership_transfer_source?")
+    expect(source).not_to include("def borrowed_union_sink_value?")
+  end
+
+  it "fences FSM/thunk memory-safety emission behind typed facts" do
+    fsm = File.read(File.join(ARCH_ROOT, "src/mir/fsm_lowering.rb"))
+    expect(fsm).to include("class FsmResultTransferFact < T::Struct")
+    expect(fsm).to include("def fsm_result_transfer_facts")
+
+    offenders = (Dir[File.join(ARCH_ROOT, "src/mir/fsm_transform/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "src/mir/thunk_transform/**/*.rb")] +
+                 [File.join(ARCH_ROOT, "src/mir/fsm_ops.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/MIR::(?:AllocMark|Cleanup|ErrCleanup|TransferMark|MoveMark)\.new|MIR\.ownership_transfer_marks/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "FSM/thunk transforms must produce typed facts or structural MIR, not direct ownership markers:\n" \
+      "#{offenders.join("\n")}"
   end
 end

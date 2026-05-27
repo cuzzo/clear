@@ -7,7 +7,7 @@ require_relative '../src/mir/mir'
 require_relative '../src/mir/fsm_ops'
 require_relative '../src/mir/fsm_transform/segments'
 require_relative '../src/mir/fsm_transform/suspend_resolvers'
-require_relative '../src/annotator-helpers/intrinsic_registry'
+require_relative '../src/annotator/helpers/intrinsic_registry'
 
 # Tests for FsmTransform::SuspendResolvers, the per-suspend-kind
 # resolvers that turn a Segments::*Suspend tail into a
@@ -98,7 +98,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
     # via lowering.lower(); our double returns the input unchanged.
     let(:promise_ast) {
       ast = Object.new
-      def ast.full_type; nil; end
+      def ast.full_type; Type.new(:"~Int64"); end
       ast
     }
 

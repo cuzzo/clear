@@ -19,6 +19,9 @@ require 'set'
 # both an effect and a call-graph property.
 module EffectTracker
     extend T::Sig
+    extend T::Helpers
+
+  requires_ancestor { SemanticAnnotator }
 
   # Core effect constants.
   HEAP         = :HEAP
@@ -115,7 +118,6 @@ module EffectTracker
     T.bind(self, SemanticAnnotator) rescue nil
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @inside_snapshot_txn = T.let(@inside_snapshot_txn, T.untyped)
-    @snapshot_txn_violations = T.let(@snapshot_txn_violations, T.untyped)
     return unless current_fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)
@@ -125,9 +127,9 @@ module EffectTracker
     # SUSPENDS effects recorded while @inside_snapshot_txn is set so
     # the WITH-block visitor can raise once the body is complete.
     if @inside_snapshot_txn && @inside_snapshot_txn > 0 && SUSPENDS_FAMILY.include?(effect)
-      @snapshot_txn_violations ||= []
-      @snapshot_txn_violations << { effect: effect, fn: current_fn_ctx.name }
+      record_snapshot_txn_violation!(effect, current_fn_ctx.name)
     end
+    nil
   end
 
   # Promote a bare SUSPENDS to SUSPENDS_LOOP / SUSPENDS_CONDITIONAL based
@@ -201,8 +203,9 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_effects!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
     @call_site_context = T.let(@call_site_context, T.untyped)
     # Seed from direct effects.
@@ -213,7 +216,7 @@ module EffectTracker
     # Seed YIELD so hold-lock-across-yield sees calls inside WITH lock bodies.
     # TIGHT skips the yield emission, so TIGHT fns aren't seeded.
     # NOT_LOGICAL never yields (the StackGuard doesn't suspend).
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       next if fn_node.tight_reentrance
       kind = fn_node.reentrance_kind
       next unless [:reentrant, :reentrant_tail_call, :reentrant_thunk, :reentrant_max_depth].include?(kind)
@@ -242,7 +245,7 @@ module EffectTracker
     end
 
     # Store frozen effect sets on FunctionDef nodes.
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       fn_node.effects = (resolved[name] || Set.new).freeze
     end
   end
@@ -356,21 +359,20 @@ module EffectTracker
   sig { void }
   def compute_needs_rt!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
     @fn_has_fnptr = T.let(@fn_has_fnptr, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
     needs_rt = {}
-    @fn_nodes.each do |name, fn_node|
-      fsig = FunctionSignature.unwrap(fn_node.full_type)
+    fn_nodes.each do |name, fn_node|
+      fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
       ret_type = fsig&.return_type
       heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
       has_takes_heap = fn_node.params.any? { |p|
         next unless p.takes
         ti = Type.new(p.type || :Any)
-        is_pure_copy = ti.primitive? ||
-                       (ti.respond_to?(:generic_instance?) && ti.generic_instance? &&
-                        ti.generic_base == :Id)
+        is_pure_copy = ti.primitive? || ti.id_handle?
         !is_pure_copy
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
@@ -411,9 +413,10 @@ module EffectTracker
       end
     end
 
-    @fn_nodes.each do |name, fn_node|
-      fn_node.needs_rt = (needs_rt[name] == true)
-    end
+    # MIRPass owns FunctionDef#needs_rt because allocator threading depends
+    # on finalized storage and cleanup facts. This annotator pass only
+    # computes local analysis used by can_fail/effects; it must not stamp the
+    # final calling convention bit.
   end
 
   # Post-pass: compute can_fail for every function.
@@ -424,7 +427,8 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_can_fail!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
@@ -435,7 +439,7 @@ module EffectTracker
     # alloc-only-faulting callee never makes a caller error_fallible
     # (that would re-introduce #3).
     error_fallible = {}
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       # The most authoritative failure signal is the EXPLICIT signature:
       # a fn declared `RETURNS !T` is fallible by contract even if its
       # body has no RAISE (e.g. an interface fn, or one whose only error
@@ -501,7 +505,7 @@ module EffectTracker
     # the #3 fix removed from the ERROR seed; they were never an error,
     # they are this fault. (puck-clear-bugs.md #3/#12)
     alloc_fault = {}
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       # Direct body allocation (counted at annotation: append/split/...).
       # uses_rt deliberately excluded -- alloc_fault is "fn could OOM" and
       # uses_rt fns reference rt without necessarily allocating (e.g.
@@ -568,7 +572,7 @@ module EffectTracker
     # the node so enforce_fallible_returns! (step 4) requires explicit
     # `RETURNS !T` for error_fallible ONLY -- a FAULT-only fn stays
     # `RETURNS T` (panics on unhandled OOM; catchable via OR/CATCH).
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       ef = (error_fallible[name] == true)
       af = (alloc_fault[name] == true)
       fn_node.error_fallible = ef
@@ -593,13 +597,14 @@ module EffectTracker
   sig { returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
   def enforce_fallible_returns!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     # Enforcement is gated because migrating every fallible `RETURNS T` to
     # `RETURNS !T` is a tree-wide source change. Keep the scaffolding in place
     # so the flag can flip once call sites have been migrated.
     return unless T.unsafe(FALLIBLE_RETURNS_ENFORCE)
 
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       # Surface enforcement applies to the ERROR axis ONLY. An
       # alloc-only FAULT (can_fail true purely via alloc_fault) never
       # forces `RETURNS !T`: it stays `RETURNS T`, panics (System/
@@ -610,8 +615,6 @@ module EffectTracker
       # also require/surface the fault. (puck-clear-bugs.md #3/#12)
       next unless fn_node.error_fallible
       next if name == "main"
-      next if fn_node.respond_to?(:extern) && fn_node.extern
-      next if fn_node.respond_to?(:synthesized) && fn_node.synthesized
 
       # A fn that absorbs its errors locally via CATCH (or a
       # DEFAULT catch-all) doesn't propagate, so the surface
@@ -685,12 +688,13 @@ module EffectTracker
   sig { params(name: String).returns(String) }
   def fallibility_hint_for(name)
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @fn_raises_directly = T.let(@fn_raises_directly, T.untyped)
     @call_graph = T.let(@call_graph, T.untyped)
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     return "raises directly via RAISE" if @fn_raises_directly[name]
     callees = @call_graph[name] || []
-    fallible_callee = callees.find { |c| @fn_nodes[c]&.can_fail }
+    fallible_callee = callees.find { |c| fn_nodes[c]&.can_fail }
     return "calls fallible '#{fallible_callee}'" if fallible_callee
     "transitively"
   end
@@ -701,7 +705,8 @@ module EffectTracker
   sig { params(program_node: AST::Program).returns(T::Array[T.untyped]) }
   def mark_fn_value_references!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
@@ -712,11 +717,11 @@ module EffectTracker
         n.each_value { |v| traverse.call(v) }
       when AST::FuncCall, AST::MethodCall
         n.args.each do |arg|
-          arg_ft = arg.full_type
+          arg_ft = arg.full_type!(context: "function pointer argument")
           if arg.is_a?(AST::Identifier) && arg_ft.is_a?(Type) && arg_ft.fn_type?
-            fn = @fn_nodes[arg.name]
+            fn = fn_nodes[arg.name]
             if fn
-              fn.needs_rt = true
+              fn.fn_value_ref = true
               fn.can_fail  = true
             end
           end
@@ -727,6 +732,14 @@ module EffectTracker
         traverse.call(n.value)
       when AST::ReturnNode
         traverse.call(n.value)
+      when AST::Identifier
+        if n.respond_to?(:fn_ref) && n.fn_ref
+          fn = fn_nodes[n.name]
+          if fn
+            fn.fn_value_ref = true
+            fn.can_fail = true
+          end
+        end
       when AST::FunctionDef
         traverse.call(n.body)
       else
@@ -754,8 +767,9 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_fsm_eligibility!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
-    @fn_nodes.each do |_name, fn_node|
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn_nodes.each do |_name, fn_node|
       effs = fn_node.effects || Set.new
 
       reason = nil
@@ -787,8 +801,9 @@ module EffectTracker
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def enumerate_fsm_suspend_points!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
-    @fn_nodes.each do |_name, fn_node|
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
+    fn_nodes.each do |_name, fn_node|
       next unless fn_node.fsm_eligible
       points = []
       scan_suspend_points(fn_node.body, fn_node, points)
@@ -843,10 +858,11 @@ module EffectTracker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def func_call_suspends?(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     return true if node.matched_stdlib_def&.emit&.suspends
     return false if node.respond_to?(:fn_var_call) && node.fn_var_call
-    callee = @fn_nodes[node.name]
+    callee = fn_nodes[node.name]
     return false unless callee
     effs = callee.effects
     effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) }
@@ -898,7 +914,8 @@ module EffectTracker
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(T::Array[T.nilable(Symbol)]) }
   def bg_spawn_form_for(callee_names, has_fnptr)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @call_graph = T.let(@call_graph, T.untyped)
     return [:stackful, :fn_pointer] if has_fnptr
     visited = Set.new
@@ -907,7 +924,7 @@ module EffectTracker
       name = queue.shift
       next if visited.include?(name)
       visited << name
-      fn = @fn_nodes[name]
+      fn = fn_nodes[T.must(name)]
       # Stdlib / extern callees not in @fn_nodes: treat as FSM-compatible
       # unless the callee is explicitly EXTERN at the scope level.
       next unless fn
@@ -939,9 +956,9 @@ module EffectTracker
   #   :standard (16 KB)  - heap allocations, extern calls, moderate locals
   #   :large    (64 KB)  - recursive functions, deep call chains
   #   :xl       (256 KB) - recursive + heap-heavy
-  #   :service  (2 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
+  #   :service  (4 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
   #
-  STACK_TIER_BUDGET = T.let({ micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze, T::Hash[Symbol, Integer])
+  STACK_TIER_BUDGET = T.let({ micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 4_194_304 }.freeze, T::Hash[Symbol, Integer])
 
   # Recursion co-op yield budget: matches the runtime's YIELD_BUDGET
   # constant in zig/runtime/runtime.zig. The compiler injects
@@ -958,19 +975,14 @@ module EffectTracker
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def recursion_yield_needed?(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false if fn_node.tight_reentrance
-    case fn_node.reentrance_kind
-    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
-      true
-    else
-      false
-    end
+    AST.recursion_yield_needed?(fn_node)
   end
 
   sig { returns(NilClass) }
   def compute_stack_tiers!
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @call_graph = T.let(@call_graph, T.untyped)
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
@@ -987,7 +999,7 @@ module EffectTracker
     #                         to :unbounded (interleaved counters
     #                         are too hard to bound precisely -- TODO
     #                         (Phase 5+): SCC-aware product bound)
-    @fn_nodes.each do |name, fn_node|
+    fn_nodes.each do |name, fn_node|
       effs = fn_node.effects || Set.new
       stack_bytes = fn_node.stack_vars_bytes || 0
       kind = fn_node.reentrance_kind
@@ -1016,9 +1028,15 @@ module EffectTracker
       # is bounded; treat per-frame size as the worst-case stack
       # contribution (modulo MAX_DEPTH's *N already applied above).
 
+      return_t = fn_node.return_type
+      return_t = Type.new(return_t) if return_t && !return_t.is_a?(Type)
+      declared_runtime_return = !!(return_t && (return_t.heap? || return_t.indirect? || return_t.needs_escape_promotion?))
+
       tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
-      elsif fn_node.needs_rt
+      elsif fn_node.uses_runtime? || fn_node.fn_value_ref == true ||
+            !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil? ||
+            recursion_yield_needed?(fn_node) || declared_runtime_return
         :standard
       else
         :micro
@@ -1046,10 +1064,10 @@ module EffectTracker
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
-        fn = @fn_nodes[fn_name]
+        fn = fn_nodes[fn_name]
         next unless fn
         next if fn.stack_tier == :unbounded
-        if callees.any? { |c| @fn_nodes[c]&.stack_tier == :unbounded }
+        if callees.any? { |c| fn_nodes[c]&.stack_tier == :unbounded }
           fn.stack_tier = :unbounded
           changed = T.let(true, T::Boolean)
         end
@@ -1096,7 +1114,8 @@ module EffectTracker
   sig { params(fn_names: T::Set[String]).returns(Symbol) }
   def max_tier_for_calls(fn_names)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @call_graph = T.let(@call_graph, T.untyped)
     visited = Set.new
     max = T.let(:micro, Symbol)
@@ -1107,7 +1126,7 @@ module EffectTracker
       next if visited.include?(name)
       visited << name
 
-      fn = @fn_nodes[name]
+      fn = fn_nodes[T.must(name)]
       if fn&.stack_tier
         max = fn.stack_tier if TIER_ORDER.fetch(fn.stack_tier, 0) > TIER_ORDER.fetch(max, 0)
       end
@@ -1133,7 +1152,8 @@ module EffectTracker
   sig { params(node: T.untyped, loop_node: T.any(AST::WhileLoop, AST::ForRange)).returns(T.untyped) }
   def validate_tight_node!(node, loop_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     return if node.nil?
     case node
     when Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -1145,7 +1165,7 @@ module EffectTracker
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
-      fn = @fn_nodes[node.name]
+      fn = fn_nodes[node.name]
       # Only plain :reentrant is unbounded native stack; :thunk /
       # :tail_call / :max_depth are bounded and TIGHT-safe.
       if fn&.reentrance_kind == :reentrant
@@ -1156,7 +1176,7 @@ module EffectTracker
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
-      fn = @fn_nodes[node.name]
+      fn = fn_nodes[node.name]
       # Only plain :reentrant is unbounded native stack; :thunk /
       # :tail_call / :max_depth are bounded and TIGHT-safe.
       if fn&.reentrance_kind == :reentrant
@@ -1244,11 +1264,12 @@ module EffectTracker
   sig { returns(T.nilable(T::Hash[String, T::Set[String]])) }
   def check_indirect_reentrancy!
     T.bind(self, SemanticAnnotator) rescue nil
+    @fn_nodes = T.let(@fn_nodes, T.nilable(T::Hash[String, AST::FunctionDef]))
+    fn_nodes = T.must(@fn_nodes)
     @call_graph = T.let(@call_graph, T.untyped)
-    @fn_nodes = T.let(@fn_nodes, T.untyped)
     @fn_direct_effects = T.let(@fn_direct_effects, T.untyped)
     @call_graph.each_key do |fn_name|
-      node = @fn_nodes[fn_name]
+      node = fn_nodes[fn_name]
       next if node.nil?
       next if node.reentrant  # already annotated — no complaint needed
 

@@ -21,7 +21,9 @@
 require "sorbet-runtime"
 
 require_relative "../ast/ast"
+require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_entry"
+require_relative "local_binding_facts"
 
 # ==========================================
 # CFG - Control Flow Graph (analysis only)
@@ -94,8 +96,12 @@ class FunctionCFG
 
   private
 
-  sig { params(stmts: T::Array[T.untyped], current_block: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG).returns(T.nilable(BasicBlock)) }
-  def self.build_body(stmts, current_block, exit_target, cfg)
+  sig do
+    params(stmts: T::Array[T.untyped], current_block: BasicBlock, exit_target: BasicBlock,
+           cfg: FunctionCFG, break_target: T.nilable(BasicBlock),
+           continue_target: T.nilable(BasicBlock)).returns(T.nilable(BasicBlock))
+  end
+  def self.build_body(stmts, current_block, exit_target, cfg, break_target: nil, continue_target: nil)
     stmts = [stmts] unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
@@ -108,11 +114,13 @@ class FunctionCFG
         current_block.add_successor(then_block)
         current_block.add_successor(else_block || join_block)
 
-        then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg)
+        then_exit = build_body(stmt.then_branch || [], then_block, exit_target, cfg,
+                               break_target: break_target, continue_target: continue_target)
         then_exit.add_successor(join_block) if then_exit
 
         if stmt.else_branch
-          else_exit = build_body(stmt.else_branch, T.must(else_block), exit_target, cfg)
+          else_exit = build_body(stmt.else_branch, T.must(else_block), exit_target, cfg,
+                                 break_target: break_target, continue_target: continue_target)
           else_exit.add_successor(join_block) if else_exit
         end
 
@@ -126,9 +134,9 @@ class FunctionCFG
         current_block.add_successor(body_block)   # enter loop
         current_block.add_successor(after_block)   # skip loop
 
-        body_exit = build_body(stmt.do_branch || [], body_block, exit_target, cfg)
+        body_exit = build_body(stmt.do_branch || [], body_block, exit_target, cfg,
+                               break_target: after_block, continue_target: current_block)
         body_exit&.add_successor(current_block)    # loop back
-        body_exit&.add_successor(after_block)      # break
 
         current_block = after_block
 
@@ -140,9 +148,9 @@ class FunctionCFG
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
 
-        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg,
+                               break_target: after_block, continue_target: current_block)
         body_exit&.add_successor(current_block)    # loop back
-        body_exit&.add_successor(after_block)      # done
 
         current_block = after_block
 
@@ -153,13 +161,15 @@ class FunctionCFG
         stmt.cases.each do |c|
           case_block = cfg.new_block
           current_block.add_successor(case_block)
-          case_exit = build_body(c.body, case_block, exit_target, cfg)
+          case_exit = build_body(c.body, case_block, exit_target, cfg,
+                                 break_target: break_target, continue_target: continue_target)
           case_exit.add_successor(join_block) if case_exit
         end
         if stmt.default_case
           default_block = cfg.new_block
           current_block.add_successor(default_block)
-          default_exit = build_body(stmt.default_case, default_block, exit_target, cfg)
+          default_exit = build_body(stmt.default_case, default_block, exit_target, cfg,
+                                    break_target: break_target, continue_target: continue_target)
           default_exit.add_successor(join_block) if default_exit
         end
 
@@ -171,7 +181,8 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)  # WITH can fail to acquire
-        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg,
+                               break_target: break_target, continue_target: continue_target)
         body_exit.add_successor(after_block) if body_exit
         current_block = after_block
 
@@ -181,7 +192,8 @@ class FunctionCFG
         stmt.branches.each do |b|
           branch_block = cfg.new_block
           current_block.add_successor(branch_block)
-          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg)
+          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg,
+                                   break_target: break_target, continue_target: continue_target)
           branch_exit.add_successor(join_block) if branch_exit
         end
         current_block.add_successor(join_block)  # fallthrough if no branches
@@ -193,7 +205,8 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
-        build_body(stmt.body, body_block, exit_target, cfg)
+        build_body(stmt.body, body_block, exit_target, cfg,
+                   break_target: break_target, continue_target: continue_target)
         # BG body runs in separate fiber -- no fall-through back to parent
         current_block = after_block
 
@@ -209,7 +222,13 @@ class FunctionCFG
 
       when AST::BreakNode
         current_block.stmts << stmt
-        return nil  # break exits the loop - handled by loop structure
+        current_block.add_successor(break_target) if break_target
+        return nil
+
+      when AST::ContinueNode
+        current_block.stmts << stmt
+        current_block.add_successor(continue_target) if continue_target
+        return nil
 
       else
         # Error edge: if this statement can fail (contains a try call),
@@ -454,6 +473,7 @@ class OwnershipDataflow
   sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(T::Hash[String, CleanupEntry]) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
+    ambiguous_names = duplicate_binding_names(fn_node.body || [])
 
     # Rule 1: Use-after-move check.
     checker = UseAfterMoveChecker.new(fn_node, self)
@@ -462,15 +482,24 @@ class OwnershipDataflow
       raise "[Ownership Error] #{checker.errors.first}"
     end
 
-    bindings.each do |var, entry|
+    cleanup_entry_pairs(fn_node, bindings).each do |var, entry|
       next unless entry.needs_cleanup?
-      df_entry = summary[var]
+      block_entry = block_exit_cleanup_summary(var)
+      df_entry = if block_entry && !block_entry[:needs_cleanup]
+        block_entry
+      else
+        summary[var] || block_entry
+      end
       next unless df_entry # variable not tracked by dataflow - keep plan
 
       if !df_entry[:needs_cleanup]
         # Moved on ALL paths -> normally no cleanup needed.
         # Exception: MATCH TAKES unions need the defer with a moved guard.
         if entry.kind == :takes_union || match_takes_var?(fn_node, var)
+          entry[:has_moved_guard] = true
+        elsif MIR::LocalBindingAnalysis.declared_inside_loop?(fn_node.body || [], var)
+          entry[:has_moved_guard] = true
+        elsif ambiguous_names.include?(var)
           entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
@@ -485,6 +514,92 @@ class OwnershipDataflow
         entry[:has_moved_guard] = true
       end
     end
+    bindings
+  end
+
+  sig do
+    params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry])
+      .returns(T::Array[[String, CleanupEntry]])
+  end
+  def cleanup_entry_pairs(fn_node, bindings)
+    pairs = T.let([], T::Array[[String, CleanupEntry]])
+    seen = T.let(Set.new, T::Set[Integer])
+
+    AST.each_locatable(fn_node.body || []) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode != :assign)
+      entry = node.mir_binding_entry
+      next unless entry
+
+      pairs << [node.name.to_s, entry]
+      seen << entry.object_id
+    end
+
+    bindings.each do |name, entry|
+      next if seen.include?(entry.object_id)
+
+      pairs << [name, entry]
+    end
+    pairs
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  def duplicate_binding_names(body)
+    counts = T.let(Hash.new(0), T::Hash[String, Integer])
+    AST.each_locatable(body) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode != :assign)
+
+      name = node.name.to_s
+      counts[name] = T.must(counts[name]) + 1
+    end
+    counts.each_with_object(Set.new) do |(name, count), out|
+      out << name if count > 1
+    end
+  end
+
+  sig { params(stmts: T::Array[T.untyped], var: String).returns(T::Boolean) }
+  def linear_scope_decl_always_moves?(stmts, var)
+    stmts.each_with_index do |stmt, idx|
+      if declares_name?(stmt, var)
+        return stmts[(idx + 1)..].to_a.any? { |s| stmt_moves_name?(s, var) }
+      end
+
+      nested = AST.child_bodies(stmt).flatten
+      return true if !nested.empty? && linear_scope_decl_always_moves?(nested, var)
+    end
+    false
+  end
+
+  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  def declares_name?(stmt, var)
+    return false unless stmt.is_a?(AST::Locatable)
+
+    MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
+  end
+
+  sig { params(stmt: T.untyped, var: String).returns(T::Boolean) }
+  def stmt_moves_name?(stmt, var)
+    return false if stmt.is_a?(AST::ReturnNode)
+    state = { var => OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: true) }
+    collect_binding_moves(stmt, state).include?(var) ||
+      collect_explicit_moves(stmt, state).include?(var) ||
+      (AST.call?(stmt) && collect_bg_captures_in_args(stmt, state).include?(var))
+  end
+
+  sig { params(var: String).returns(T.nilable(T::Hash[Symbol, T::Boolean])) }
+  def block_exit_cleanup_summary(var)
+    states = @block_out.values.filter_map do |state|
+      entry = state[var]
+      entry if entry.is_a?(OwnerEntry)
+    end
+    return nil if states.empty?
+
+    moved = states.any? { |entry| entry.state == MOVED } &&
+            states.none? { |entry| entry.state == MAYBE_MOVED }
+    maybe = states.any? { |entry| entry.state == MAYBE_MOVED }
+    {
+      needs_cleanup: !moved,
+      has_moved_guard: maybe || (!moved && states.any? { |entry| entry.state == MOVED }),
+    }
   end
 
   private
@@ -605,8 +720,8 @@ class OwnershipDataflow
   # Create an OwnerEntry for a new declaration from its type info.
   sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
-    ti = Type.from_node(node)
-    is_heap = node.is_a?(AST::Locatable) && node.heap_provenance?
+    ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "ownership dataflow owner") : nil
+    is_heap = node.is_a?(AST::Locatable) && node.heap_storage?
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (is_heap ? :heap : :frame)) : :frame
     needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
@@ -700,7 +815,6 @@ class OwnershipDataflow
   # Both explicit (was_moved) and implicit (non-Copy identifier = ownership transfer).
   #
   # Ownership-transferring positions (non-Copy = move):
-  #   - Direct RHS identifier: b = a
   #   - Struct literal field value: S{ field: a }
   #   - Union constructor payload: U.Variant(a)
   #   - List literal items: [a, b]
@@ -901,15 +1015,14 @@ class OwnershipDataflow
   # ownership (handled by was_moved from the annotator).
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = Type.from_node(ident)
-    return true unless ti  # unknown type, assume Copy (safe)
+    ti = ident.full_type!(context: "ownership dataflow copy type")
     # Heap-allocated strings own their backing buffer; RETURN/move
     # transfers ownership to the receiver (just like a heap-allocated
     # collection or struct). Rodata / frame / param strings are still
     # treated as Copy — those don't own heap memory. Symbol#storage is
     # the canonical provenance (SIMP-13f) that EscapeAnalysis makes
     # definitive; read it, not the VarDecl node's annotation-time value.
-    if ti.string? && ident.symbol&.heap_provenance?
+    if ti.string? && ident.symbol&.heap_storage?
       return false
     end
     is_atomic_ptr = ti.atomic_ptr?
@@ -919,8 +1032,8 @@ class OwnershipDataflow
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
-    ti = Type.from_node(node)
-    ti.is_a?(Type) && ti.indirect?
+    ti = node.full_type!(context: "ownership dataflow field move")
+    Type.indirect_type?(ti)
   rescue
     false
   end
@@ -1270,36 +1383,22 @@ end
 # ==========================================
 #
 # Sets mark_per_iter on every loop AST node and updates SHARD shard_context
-# frame-alloc flags.  Runs after CleanupClassifier has finalised every
-# binding's allocator, before MIR node insertion (Phase 3).
+# frame-alloc flags. Runs after CleanupClassifier has finalized every binding's
+# allocator, before MIR node insertion.
 #
-# Invariant: mark_per_iter = true  iff  the loop body contains at least one
-# local, non-escaping, frame-allocated VarDecl.
-#
-#   "local"      -- declared inside THIS loop (not a nested loop or outer scope)
-#   "frame"      -- node.storage == :frame  (set by annotator / upgrade phases)
-#   "non-escaping" -- not passed as a value argument to a mutates_receiver
-#                    call on an outer-scope container (where the stored pointer
-#                    must survive the per-iteration rewind)
-#
-# If mark_per_iter becomes true and the direct body also contains
-# mutates_receiver calls on OUTER containers, those containers are promoted to
-# heap so the per-iteration rewind cannot corrupt their backing store.
-#
-# Scope of rewind:
-#   - FOR / WHILE / FOREACH loops -- regular AST loops
-#   - IF / MATCH / WITH  -- NOT a rewind boundary; always recurse into branches
-#   - Nested loops       -- analysed first (inner→outer); their outer-mutation
-#                          promotions are applied before the enclosing loop runs
-#   - Functions/lambdas  -- their own frame; the callee rewinds on return
+# A loop is only a repeated scope boundary. It may request a per-iteration frame
+# rewind when finalized cleanup facts prove every direct frame allocation in the
+# loop is iteration-local. It must not infer escaping from method names or
+# collection shapes.
 #
 module LoopFrameAnalysis
 
   extend T::Sig
 
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
 
   # Entry point.  Call once per pass, after CleanupClassifier.
-  sig { params(fn_nodes: T::Hash[String, T.untyped], schema_lookup: T.nilable(Proc)).returns(T::Hash[String, T.untyped]) }
+  sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(FnNodes) }
   def self.analyze!(fn_nodes, schema_lookup = nil)
     fn_nodes.each_value do |fn|
       next unless fn.body
@@ -1319,27 +1418,9 @@ module LoopFrameAnalysis
 
   sig { params(stmt: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def self.walk_stmt!(stmt, schema_lookup = nil)
-    case stmt
-    when AST::WhileLoop, AST::WhileBindLoop
-      walk_stmts!(stmt.do_branch, schema_lookup)          # inner loops first
-      process_loop!(stmt, stmt.do_branch, schema_lookup)
-    when AST::ForRange
-      walk_stmts!(stmt.body, schema_lookup)
-      process_loop!(stmt, stmt.body, schema_lookup)
-    when AST::ForEach
-      walk_stmts!(stmt.body, schema_lookup)
-      process_loop!(stmt, stmt.body, schema_lookup)
-    when AST::IfStatement
-      walk_stmts!(stmt.then_branch, schema_lookup)
-      walk_stmts!(stmt.else_branch, schema_lookup)
-    when AST::MatchStatement
-      stmt.cases.each { |c| walk_stmts!(c.body, schema_lookup) }
-      walk_stmts!(stmt.default_case, schema_lookup)
-    when AST::WithBlock
-      walk_stmts!(stmt.body, schema_lookup)
-    when AST::DoBlock
-      stmt.branches.each { |b| walk_stmts!(b[:body], schema_lookup) }
-    end
+    child_bodies = AST.child_bodies(stmt)
+    child_bodies.each { |body| walk_stmts!(body, schema_lookup) }
+    process_loop!(stmt, child_bodies.first || [], schema_lookup) if AST.loop_node?(stmt)
     nil
   end
 
@@ -1348,87 +1429,42 @@ module LoopFrameAnalysis
   sig { params(loop_node: T.untyped, body: T::Array[T.untyped], schema_lookup: T.nilable(Proc)).void }
   def self.process_loop!(loop_node, body, schema_lookup = nil)
     return if loop_node.tight
-    local_names = collect_local_names(body)
-    loop_node.mark_per_iter = local_frame_decls(body, local_names).any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
+    local_names = local_facts.names
+    has_iteration_frame_locals = local_facts.iteration_frame_decls.any? || loop_capture_frame_alloc?(loop_node, schema_lookup)
+    has_extended_frame_locals = local_facts.frame_decls.any? do |decl|
+      entry = MIR::LocalBindingAnalysis.binding_entry(decl)
+      entry&.present? && entry.alloc == :frame && entry.scope != :iteration
+    end || outer_frame_receiver_alloc?(body, local_names)
+    loop_node.mark_per_iter = has_iteration_frame_locals && !has_extended_frame_locals
     nil
+  end
+
+  sig { params(body: T::Array[T.untyped], local_names: T::Set[String]).returns(T::Boolean) }
+  def self.outer_frame_receiver_alloc?(body, local_names)
+    found = T.let(false, T::Boolean)
+    MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |node|
+      next unless node.is_a?(AST::MethodCall)
+      sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
+      emit = sig&.emit
+      next unless emit&.allocates && emit&.mutates_receiver
+      root = AST.root_identifier(node.object)
+      next unless root&.symbol
+      next if local_names.include?(root.name.to_s)
+      decl = root.symbol.respond_to?(:reg) ? root.symbol.reg : nil
+      sym = (decl && decl.respond_to?(:symbol) && decl.symbol) || root.symbol
+      found = true unless sym.heap_storage?
+    end
+    found
   end
 
   sig { params(loop_node: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def self.loop_capture_frame_alloc?(loop_node, schema_lookup = nil)
     return false unless loop_node.is_a?(AST::WhileBindLoop)
-    cond_t = Type.from_node(loop_node.condition)
-    inner = cond_t&.wrapped_type
+    cond_t = loop_node.condition.full_type!(context: "loop capture condition")
+    inner = cond_t.wrapped_type
     return false unless inner.is_a?(Type)
     inner.needs_cleanup?(schema_lookup) && inner.cleanup_allocator(schema_lookup) == :frame
-  rescue
-    false
-  end
-
-  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
-  def self.collect_local_names(body)
-    names = Set.new
-    scan_direct(body) do |s|
-      case s
-      when AST::VarDecl
-        names << s.name.to_s if s.name.is_a?(String)
-      when AST::BindExpr
-        names << s.name.to_s if s.name.is_a?(String) && s.mode == :decl
-      end
-    end
-    names
-  end
-
-  sig { params(ti: Type).returns(T::Boolean) }
-  def self.frame_local_collection?(ti)
-    collection_shaped = ti.collection_value? || ti.string?
-    collection_shaped && !ti.heap? && !ti.rodata?
-  end
-
-  sig { params(body: T::Array[T.untyped], _local_names: T::Set[String]).returns(T::Array[T.untyped]) }
-  def self.local_frame_decls(body, _local_names)
-    decls = []
-    scan_direct(body) do |s|
-      case s
-      when AST::VarDecl
-        next unless frame_local_collection?(Type.from_node!(s, context: "loop frame decl")) && s.name.is_a?(String)
-        decls << s
-      when AST::BindExpr
-        next unless s.mode == :decl && s.name.is_a?(String)
-        decls << s if frame_local_collection?(Type.from_node!(s, context: "loop frame bind"))
-      end
-    end
-    decls
-  end
-
-  # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
-  # nested loops and function definitions.
-  #
-  # `body` is always an Array (non-nil): a statement body. then_branch /
-  # else_branch / WithBlock#body / DoBlock branch bodies are array
-  # invariants (the parser uses `[]` for an absent else, never nil).
-  # Only MatchStatement#default_case is `[ASTNode] or nil` by AST design
-  # (ast.rb:1171) -- so that ONE recurse site is guarded here (mirrors
-  # `bodies << default_case if default_case` in ast.rb). No nil ever
-  # reaches scan_direct, so the contract sig is strictly non-nil.
-  sig { params(body: T::Array[T.untyped], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
-  def self.scan_direct(body, &block)
-    body.each do |s|
-      yield s
-      case s
-      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
-        next  # boundary -- do not enter nested loop / fn body
-      when AST::IfStatement
-        scan_direct(s.then_branch, &block)
-        scan_direct(s.else_branch, &block)
-      when AST::MatchStatement
-        s.cases.each { |c| scan_direct(c.body, &block) }
-        scan_direct(s.default_case, &block) if s.default_case
-      when AST::WithBlock
-        scan_direct(s.body, &block)
-      when AST::DoBlock
-        s.branches.each { |b| scan_direct(b[:body], &block) }
-      end
-    end
   end
 
   # ── SHARD context frame-alloc flags ──────────────────────────────────────
@@ -1462,7 +1498,7 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T::Array[T.untyped], fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(body: T::Array[T.untyped], fn_nodes: FnNodes).returns(T.nilable(T::Array[T.untyped])) }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1475,22 +1511,20 @@ module LoopFrameAnalysis
       # body_allocates_frame: does the EACH body contain local frame allocs?
       each_body = node.respond_to?(:op) && node.op.respond_to?(:body) ? node.op.body : nil
       if each_body
-        local_names = collect_local_names(each_body)
-        ctx[:body_allocates_frame] = local_frame_decls(each_body, local_names).any?
+        ctx[:body_allocates_frame] = MIR::LocalBindingAnalysis.direct_loop_body_facts(each_body).frame_decls.any?
       end
     end
   end
 
   # Returns true when expr is a call to a frame-allocating function
   #.
-  sig { params(expr: T.untyped, fn_nodes: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     case expr
     when AST::FuncCall
       fn = fn_nodes[expr.name]
       # uses_frame=true means the function frame-allocates internally (e.g. intToString
-      # intermediates). Even when return_provenance=:heap (string heap-dup on return),
-      # those intermediate frame allocations accumulate in the caller's frame arena.
+      # intermediates). Those intermediate frame allocations accumulate in the caller's frame arena.
       # The SHARD loop must saveLoopMark/restoreLoopMark to rewind them each iteration.
       fn&.uses_frame ? true : false
     when AST::MethodCall
@@ -1591,29 +1625,14 @@ class BorrowChecker
     when AST::FuncCall, AST::MethodCall
       check_explicit_moves(stmt, stmt.token)
 
-    when AST::IfStatement
-      check_stmts(stmt.then_branch)
-      check_stmts(stmt.else_branch)
-
-    when AST::WhileLoop
-      check_stmts(stmt.do_branch)
-
-    when AST::ForRange, AST::ForEach
-      check_stmts(stmt.body)
-
-    when AST::MatchStatement
-      stmt.cases.each { |c| check_stmts(c.body) }
-      check_stmts(stmt.default_case)
-
-    when AST::DoBlock
-      stmt.branches.each { |b| check_stmts(b[:body]) }
-
     when AST::BgBlock, AST::BgStreamBlock
       # BG resource captures are ownership transfers
       stmt.capture_analysis&.resource_captures&.each do |name|
         check_borrowed_move(name, stmt.token)
       end
-      check_stmts(stmt.body)
+      AST.child_bodies(stmt).each { |body| check_stmts(body) }
+    else
+      AST.child_bodies(stmt).each { |body| check_stmts(body) }
     end
   end
 
@@ -1755,7 +1774,7 @@ class BorrowChecker
     return if source.is_a?(AST::CopyNode)
 
     if source.is_a?(AST::Identifier)
-      return if source.full_type.shared?
+      return if source.full_type!.shared?
       names << source.name.to_s
       return
     end
@@ -1801,15 +1820,15 @@ class BorrowChecker
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owning_field_move?(node)
     return false unless node.is_a?(AST::GetField)
-    ti = Type.from_node(node)
-    ti.is_a?(Type) && ti.indirect?
+    ti = node.full_type!(context: "ownership dataflow field move")
+    Type.indirect_type?(ti)
   rescue
     false
   end
 
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = ident.full_type
+    ti = ident.full_type!
     is_atomic_ptr = ti.atomic_ptr?
     ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end

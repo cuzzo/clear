@@ -84,7 +84,7 @@ class OwnershipGraph
 
   # Declare a new variable or field path.
   sig { params(path: String, kind: Symbol, type_info: Type, scope_depth: Integer, line: Integer).returns(T.nilable(T::Set[String])) }
-  def declare(path, kind: :affine, type_info: Type.new(:Untyped), scope_depth: 0, line: 0)
+  def declare(path, kind: :affine, type_info: Type.new(:Any), scope_depth: 0, line: 0)
     @nodes[path] = Node.new(
       path: path, kind: kind, state: :live,
       type_info: type_info, scope_depth: scope_depth, line: line

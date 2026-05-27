@@ -19,21 +19,19 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # Custom output dir + clean previous run
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
-    # CI gate: full matrix MINUS quarantine (must pass)
+    # CI gate: full matrix; quarantine must be empty
     ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/fuzz --clean
 
-    # Just the quarantined (known-broken) templates
+    # Just the quarantined templates; this must select zero templates
     ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/fuzz --clean
 
 ## Quarantine
 
-`tools/fuzz/quarantine.txt` lists templates with a known compiler bug or
-generator defect. They are excluded from the required CI gate
-(`--skip-quarantined`) and run in a separate non-blocking job
-(`--only-quarantined`). Each line carries the reason; delete a line the
-moment its bug is fixed and the template rejoins the gate. This is what
-stops templates bit-rotting unnoticed — every template either passes the
-gate or is explicitly, visibly quarantined.
+`tools/fuzz/quarantine.txt` must contain zero active template names. The
+runner prints the quarantine skipped count whenever `--skip-quarantined` or
+`--only-quarantined` is used, and quarantined failures are not converted into
+success. A nonzero quarantine count is a visible compiler work item, not a
+green state.
 
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
@@ -81,7 +79,10 @@ configured failure delta over the baseline run.
 
 Each template registers itself with `FuzzGenerator.register(name, cells:) { |params| ... }`,
 declaring its parameter cells (the matrix it owns) and a renderer that turns a
-cell into a complete .cht source string with embedded `ASSERT` oracles.
+cell into a complete `.cht` source string with embedded `ASSERT` oracles. A
+template may also return `{ kind: :mir_checker, source:, error_code: }` for
+malformed-MIR negative cells; those run the checker directly and fail if the
+expected hard error is absent.
 
 ## Current templates
 
@@ -93,8 +94,9 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `nested_loop_escape`        | 12           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 12           | Shape/admission smoke coverage for every collection form named in the surface registry. |
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
+| `escape_mechanism_matrix`   | 7 (+11 in_dev) | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM capture, enclosing assignment, field/index stores, collection stores, call args, and call-return receiver stores. in_dev cells currently surface leaks in list/set/map/pool stores, collection-literal returns, owned function args, TAKES/GIVE, call-return receiver stores, and indexed outer stores. |
 | `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
-| `return_value_modality`     | 8 (+8 in_dev)   | EVERY :cleanup_value_shapes member returned from `FN producer() RETURNS T -> ... END`. Breadth axis complementing heap_ownership_transfer's depth on list/string. in_dev cells gated by #43 (union return), #52 (sharded/soa cleanup), #54 (set/pool return loses contents at runtime). |
+| `return_value_modality`     | 64              | EVERY :cleanup_value_shapes member returned from direct / branch / OR-fallback / call-forward return contexts. Breadth axis complementing heap_ownership_transfer's depth on list/string. |
 | `struct_field_store_modality` | ~30 (+24 in_dev) | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare. Registry-driven (18 shapes including frame_*). in_dev cells gated by #55 (COPY broken across most shapes), #56 (GIVE/bare type mismatches), #57 (String bare annotator quirk). |
 | `list_append_modality`     | ~15 (+39 in_dev / :compile_error) | EVERY :cleanup_value_shapes member appended to `MUTABLE container: T[]@list = []` via GIVE / COPY / bare. Registry-driven. 30 cells marked :compile_error documenting language limits (no list-of-@pool/@set/sharded/soa); 9 :in_dev across #43/#56/#58/#59. |
 | `heap_ownership_transfer`   | 89              | ret_form (ident/literal/call/give/or_rescue) x bind_form (bare/or_raise/or_fallback/discard/discard_or_raise/onward) x decl (T/!T) -- the depth axis for :heap_list and :string returns (ported from origin/register-machine #13 manifest). |
@@ -107,7 +109,8 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `catch_reassign_matrix`    | 8            | Catch/fallback reassignment ownership cells. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
-| `match_matrix`             | 6            | MATCH lowering over union and scalar shapes. |
+| `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
+| `mir_lowering_shape_matrix` | 87          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, loop locals, and node dispatch shapes. |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
@@ -120,6 +123,26 @@ cell into a complete .cht source string with embedded `ASSERT` oracles.
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
 | `cond_or_fallback`          | 8               | `(maybe(...) OR fallback) <cmp> baseline` inside IF / WHILE conditions. Surfaces bug #1 (lower_if hoist ordering) per docs/agents/clear-bug123-forensic.md — `:heap_string` cells fail today, pass once lower_if isolates cond `@pending_stmts`. |
 | `loop_local_method_temp`    | 12              | Method-call result bound as a per-iteration temp inside WHILE / FOR. Surfaces bug #2 (FRAME_NO_REWIND lowering-synthesis gap) per docs/agents/clear-bug123-forensic.md — `:split` cells fail today, pass once `LoopFrameAnalysis.local_frame_decls` recognises stdlib-method frame returns. |
+| `bind_capture_cleanup`      | 2               | Bind-expression capture cleanup for optional/list payloads. |
+| `cleanup_classifier_shapes` | 20              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads. |
+| `cross_fiber_consumer`      | 6               | BG STREAM / observable producer values consumed across fiber boundaries. |
+| `loop_local_cleanup_alloc`  | 4               | Loop-local allocation forms that must be cleaned or promoted consistently. |
+| `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
+| `thunk_recursion_matrix`    | 34              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes. |
+| `fsm_suspension_matrix`     | 28              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, and BG STREAM YIELD. |
+| `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
+| `call_ownership_contract_matrix` | 40         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts. |
+| `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
+| `mir_checker_negative_matrix` | 45            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
+| `or_heap_destination_matrix` | 96             | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations. |
+| `owned_sink_destination_matrix` | 108         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks. |
+| `union_lowering_cleanup_matrix` | 36         | Union helper lowering and recursive cleanup for string/list/map/inline-struct/nested payload variants. |
+| `builtin_emit_matrix`       | 16              | Source-level builtin emission through strings, collections, union active tags, and pipeline terminals. |
+| `bg_capture_transfer_matrix` | 72             | BG / DO / BG STREAM capture-transfer roots across borrow/copy/give/call/nested/field-copy/list-index/returned-handle shapes. |
+| `cast_lowering_matrix`      | 30              | Annotation-driven MIR cast/coercion lowering across var, return, call, list, and branch contexts. |
+| `hoist_edge_matrix`          | 32              | Nested allocating expressions in return, local, field, list, call, branch, OR fallback, and loop contexts. |
+| `access_path_expression_matrix` | 30          | Field/index/optional/map/nested access paths through local, return, call, branch, and loop contexts. |
+| `collection_sink_escape_matrix` | 18          | Owned string/struct/union values stored into list/set/map/pool and collection-literal sinks. |
 
 ### `stream_into_boundary` matrix
 
@@ -366,9 +389,8 @@ Each cell carries an `expected:` annotation:
 - `:compile_error` — must fail compilation (CLEAR-level or Zig-level codegen). Used for
   documented capability boundaries (e.g., `(DO + @local)` — DO branches lower to inner
   Zig fns that don't close over enclosing locals; DO is meant for @shared state).
-- `:in_dev` — emitted as a comment, NOT run. Reserves matrix space for unlanded features
-  (LEND, the @shared sync phases). The matrix count stays stable as features land — flip
-  the cell expectation, no schema churn.
+- `:in_dev` — forbidden in the required matrix. The runner reports the skipped
+  count and exits nonzero if any cell tries to hide here.
 
 The runner reports `UNEXPECTED-PASS` when a `:compile_error` cell compiles successfully —
 that's the signal a feature has landed and the cell should be flipped to `:pass`.

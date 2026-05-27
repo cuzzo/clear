@@ -77,7 +77,7 @@ if ENV["COVERAGE"] == "1"
     # concentrated vs. missing.
     add_group "AST + Parser",      "src/ast"
     add_group "Annotator",         "src/annotator"
-    add_group "Annotator helpers", "src/annotator-helpers"
+    add_group "Annotator helpers", "src/annotator/helpers"
     add_group "MIR",               "src/mir"
     add_group "Backends",          "src/backends"
 
@@ -90,4 +90,25 @@ end
 if defined?(ParallelRSpec) && File.basename($PROGRAM_NAME) == "prspec"
   files = RSpec.configuration.instance_variable_get(:@files_or_directories_to_run)
   RSpec.configuration.files_or_directories_to_run = RSpec.configuration.default_path if files.empty?
+end
+
+module MirPipelineSpecHelper
+  def compile_mir_frontend(src, source_dir: Dir.pwd)
+    require_relative "../src/backends/compiler_frontend"
+    require_relative "../src/backends/importer"
+
+    importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: source_dir)
+    raise "CompilerFrontend returned nil" unless result
+
+    result
+  end
+
+  def run_mir_frontend(src, source_dir: Dir.pwd)
+    compile_mir_frontend(src, source_dir: source_dir).ast
+  end
+end
+
+RSpec.configure do |config|
+  config.include MirPipelineSpecHelper
 end

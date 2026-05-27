@@ -20,15 +20,22 @@
 # WithBlock body or arm, but skip nested WithBlocks (those bubble their
 # own diagnostics). Nodes inside lambdas / nested function defs are
 # similarly ignored — they're separate scopes.
+require_relative "../ast/ast"
+
 module ConcurrencyChecks
   extend T::Sig
   module_function
+
+  FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
+  ErrorHandler = T.type_alias { T.proc.params(arg0: T.untyped, arg1: T.untyped).returns(T.untyped) }
+  SigLookup = T.type_alias { T.proc.params(arg0: String).returns(T.untyped) }
+  LockRanks = T.type_alias { T::Hash[Symbol, Integer] }
 
   # Run every check. Each fn is independent.
   # `lock_ranks` is a Hash {type_sym => rank}; bindings whose declared
   # type appears here participate in the rank-DAG protocol; the rank-cycle
   # analysis owns ordering for those bindings.
-  sig { params(fn_nodes: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).void }
+  sig { params(fn_nodes: FnNodes, sig_lookup: SigLookup, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
   def check_all!(fn_nodes, sig_lookup, error_handler, lock_ranks: {})
     fn_nodes.each_value do |fn|
       next unless fn&.body
@@ -43,7 +50,7 @@ module ConcurrencyChecks
   # this WITH body. The yield property itself is read from the existing
   # annotator-stamped effect set (fn.effects, populated by record_effect
   # at visit_BgBlock / visit_NextExpr and propagated by compute_effects!).
-  sig { params(fn: T.untyped, fn_nodes: T.untyped, error_handler: T.untyped).void }
+  sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, error_handler: ErrorHandler).void }
   def check_hold_across_yield!(fn, fn_nodes, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|
       walk_scope_no_nested_with(scope) do |node|
@@ -84,7 +91,7 @@ module ConcurrencyChecks
   # checks; reentrant detection covers the dangerous case).
   LOCK_HOLDING_CAPABILITIES = T.let(%i[EXCLUSIVE write_locked_read infer].to_set.freeze, T::Set[Symbol])
 
-  sig { params(fn: T.untyped, error_handler: T.untyped, lock_ranks: T.untyped).void }
+  sig { params(fn: AST::FunctionDef, error_handler: ErrorHandler, lock_ranks: LockRanks).void }
   def check_naked_nested_with!(fn, error_handler, lock_ranks = {})
     walk_with_blocks(fn.body) do |outer, outer_scope|
       outer_lock_names = lock_holding_names(outer)
@@ -120,7 +127,7 @@ module ConcurrencyChecks
   # @writeLocked(rank: N) annotation. The rank-DAG check owns ordering
   # correctness for ranked locks.
   # `lock_ranks` is the annotator-built type-rank registry.
-  sig { params(with_block: T.untyped, lock_ranks: T.untyped).returns(T::Boolean) }
+  sig { params(with_block: T.untyped, lock_ranks: LockRanks).returns(T::Boolean) }
   def any_lock_rank?(with_block, lock_ranks)
     return false if lock_ranks.empty?
     (with_block.capabilities || []).any? do |cap|
@@ -145,7 +152,7 @@ module ConcurrencyChecks
 
   # For each WITH on parameter `p`, any call inside whose callee has REQUIRES
   # naming a parameter aliasing `p` reacquires `p`'s lock.
-  sig { params(fn: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
+  sig { params(fn: AST::FunctionDef, sig_lookup: SigLookup, error_handler: ErrorHandler).returns(T.untyped) }
   def check_reentrant!(fn, sig_lookup, error_handler)
     walk_with_blocks(fn.body) do |with_block, scope|
       held_params = collect_held_params(with_block, fn)

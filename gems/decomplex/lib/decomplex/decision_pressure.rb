@@ -32,6 +32,7 @@ module Decomplex
   # Cross-procedure pressure is nil-kill's, by the recorded boundary.
   class DecisionPressure
     GUARD_MIDS = %i[is_a? kind_of? instance_of? nil? respond_to?].freeze
+    TRANSIENT_NOARG_MIDS = %i[pop shift].freeze
     Hit = Struct.new(:contract, :file, :defn, :line, :span,
                      keyword_init: true)
 
@@ -178,7 +179,7 @@ module Decomplex
           key = args && Ast.node?(args) ? args.children.compact.first : nil
           kt = (Ast.node?(key) ? Ast.slice(key, @lines) : key.inspect)
           "[#{kt}]"
-        elsif args.nil? && recv
+        elsif args.nil? && recv && !TRANSIENT_NOARG_MIDS.include?(mid)
           ".#{mid}"            # no-arg accessor: the contract
         end
       when :VCALL

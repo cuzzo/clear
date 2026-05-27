@@ -48,7 +48,7 @@ module CoverageBootstrap
 
       add_group "AST + Parser",      "src/ast"
       add_group "Annotator",         "src/annotator"
-      add_group "Annotator helpers", "src/annotator-helpers"
+      add_group "Annotator helpers", "src/annotator/helpers"
       add_group "MIR",               "src/mir"
       add_group "Backends",          "src/backends"
 
@@ -58,5 +58,10 @@ module CoverageBootstrap
       merge_timeout 3600
     end
     SimpleCov.print_error_status = false
+    # CLI entry points sometimes capture child stdout as generated source
+    # (notably `clear test` capturing `gen.rb --single` Zig). Persist the
+    # resultset, but leave report rendering to spec/collate_coverage.rb so
+    # coverage never contaminates machine-readable stdout.
+    SimpleCov.at_exit { SimpleCov.result }
   end
 end

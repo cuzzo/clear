@@ -20,53 +20,12 @@
 #
 # Lifetime model:
 #
-# CLEAR has one lifetime mechanism on a binding: `lifetime`. The model
-# answers a single question at every use site: "where is this binding
-# allowed to escape to?". Three shapes:
-#
-#   nil               -- no lifetime constraint; the binding can escape
-#                        anywhere (the default for ordinary local
-#                        declarations).
-#   :current_scope    -- the binding is anchored to its declaring
-#                        scope and cannot leave it. Replaces the
-#                        previous `non_escaping = true` flag. Used by
-#                        WITH aliases (EXCLUSIVE / VIEW / RESTRICT /
-#                        BORROWED / SNAPSHOT) and `@observable`
-#                        bindings.
-#   { sources: [SymbolEntry, ...] }
-#                     -- the binding's lifetime is the INTERSECTION of
-#                        every source's lifetime. The destination of
-#                        an escape (struct field assign, list append,
-#                        RETURN, BG capture, etc.) must be inside the
-#                        scope of EVERY entry in `sources`. Two
-#                        producers:
-#
-#                          (a) `RETURNS foo:T` — the returned value
-#                              gets `{ sources: [foo] }`. Whatever
-#                              foo's lifetime is, the returned value
-#                              inherits it. If foo itself has a tied
-#                              lifetime, the chain is followed.
-#                          BG / DO / CONCURRENT capture —
-#                              the spawned handle gets `{ sources:
-#                              [each captured @shared:atomic / borrow
-#                              binding] }`. The handle is free to
-#                              flow into any same-scope or shorter
-#                              destination, but cannot outlive the
-#                              shortest-lived capture.
-#
-# `non_escaping` survives as a backward-compat alias on top of
-# `lifetime == :current_scope`. All v0.1 call sites that wrote
-# `sym.non_escaping = true` keep working; they now write through the
-# unified field. Reading `sym.non_escaping` returns whether the
-# lifetime is exactly `:current_scope` — a tied lifetime
-# (`{ sources: [...] }`) is NOT non-escaping in the v0.1 sense (the
-# binding CAN escape, just not past every source's scope), so the
-# alias correctly returns false there.
-#
-# Helper: `lifetime_sources` returns the Array of source SymbolEntries
-# regardless of shape (`[]` for nil / :current_scope, the source list
-# for tied). Walkers consume that uniform list and compare each
-# source's declaring scope against the destination.
+# CLEAR has one lifetime mechanism on a binding: `lifetime`. It is always a
+# non-nil Array of source SymbolEntries. Empty means no lifetime constraint.
+# `[self]` means the binding is anchored to its declaring scope and cannot
+# leave it. Any other sources mean the binding may escape only as far as every
+# source can escape. Readers never inspect nil/scalar/hash variants; they ask
+# whether the array is empty and then iterate it.
 require "sorbet-runtime"
 # `type=` calls `Type.new` unconditionally (a hard, non-lazy dependency),
 # so Type must be loaded with this file. type.rb -> function_signature.rb
@@ -108,7 +67,6 @@ class SymbolEntry
                                    # auto-fix at the parameter when the body
                                    # mutates it without `MUTABLE`.
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
-                :lifetime,       # nil | :current_scope | { source: SymbolEntry }
                 :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF
                 :sync_families,  # Set of families when bound by REQUIRES disjunction
                 :layout,         # nil | :indirect — heap-pinned cell with stable address
@@ -117,7 +75,7 @@ class SymbolEntry
                 :poly_borrow_target, # address is taken at a universal-polymorphic call site;
                                      # forces mutable Zig storage so the callee can write back.
                 :init_contents_heap  # true when the binding's init expression's heap-bearing
-                                     # fields are all in heap_provenance already (e.g. struct
+                                     # fields are already reflected in storage (e.g. struct
                                      # lit with COPY'd strings). Legacy field; not an escape decision.
                                      # Escape placement is symbol.storage. See docs/agents/
                                      # provenance-collapse.md.
@@ -141,6 +99,14 @@ class SymbolEntry
     @type = val.nil? ? Type.new(:Untyped) : (val.is_a?(Type) ? val : Type.new(val))
   end
 
+  sig { returns(T::Array[SymbolEntry]) }
+  attr_reader :lifetime
+
+  sig { params(value: T.untyped).void }
+  def lifetime=(value)
+    @lifetime = normalize_lifetime(value)
+  end
+
   # A function binding is a Type whose @raw is its FunctionSignature
   # (Type#fn_type?). Readers that need the signature unwrap through
   # here so no site re-derives the Symbol/Type/FunctionSignature split.
@@ -161,7 +127,12 @@ class SymbolEntry
   # across the annotator seam (decomplex #1 Reification-Miss).
   sig { returns(T::Boolean) }
   def atomic?
-    @sync == :atomic
+    self.class.atomic_sync?(@sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.atomic_sync?(sync)
+    sync_matches?(sync, :atomic)
   end
 
   # Mirror of Type#indirect? / Type#atomic_ptr?. The AtomicPtr pair
@@ -180,17 +151,57 @@ class SymbolEntry
   # `sym.sync == :local` reinvented inline (decomplex Reification-Miss).
   sig { returns(T::Boolean) }
   def locked?
-    @sync == :locked
+    self.class.locked_sync?(@sync)
   end
 
   sig { returns(T::Boolean) }
   def local?
-    @sync == :local
+    self.class.local_sync?(@sync)
   end
 
   sig { returns(T::Boolean) }
   def write_locked?
-    @sync == :write_locked
+    self.class.write_locked_sync?(@sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.locked_sync?(sync)
+    sync_matches?(sync, :locked)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.write_locked_sync?(sync)
+    sync_matches?(sync, :write_locked)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.versioned_sync?(sync)
+    sync_matches?(sync, :versioned)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.local_sync?(sync)
+    sync_matches?(sync, :local)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.always_mutable_sync?(sync)
+    sync_matches?(sync, :always_mutable)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.locked_family_sync?(sync)
+    locked_sync?(sync) || write_locked_sync?(sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.cleanup_sync?(sync)
+    locked_sync?(sync) || write_locked_sync?(sync) || always_mutable_sync?(sync) || versioned_sync?(sync)
+  end
+
+  sig { params(sync: T.nilable(Symbol), expected: Symbol).returns(T::Boolean) }
+  def self.sync_matches?(sync, expected)
+    sync == expected
   end
 
   # Binding is Rc/Arc-stored. `storage == :shared || storage == :multiowned`
@@ -199,7 +210,12 @@ class SymbolEntry
   # (ownership axis).
   sig { returns(T::Boolean) }
   def rc_stored?
-    @storage == :shared || @storage == :multiowned
+    self.class.rc_storage?(@storage)
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.rc_storage?(storage)
+    storage == :shared || storage == :multiowned
   end
 
   # Canonical "where does this binding's data live?" accessor — SIMP-13b.
@@ -220,13 +236,13 @@ class SymbolEntry
 
   # Provenance predicates — SIMP-13f. Symbol#storage is the canonical source.
   sig { returns(T::Boolean) }
-  def heap_provenance?
-    @storage == :heap
+  def heap_storage?
+    self.class.heap_storage_value?(@storage)
   end
 
   sig { returns(T::Boolean) }
   def frame_provenance?
-    @storage == :frame
+    self.class.frame_storage_value?(@storage)
   end
 
   sig { returns(T::Boolean) }
@@ -240,45 +256,50 @@ class SymbolEntry
   end
 
   sig { returns(T::Boolean) }
+  def local_storage?
+    self.class.local_storage_value?(@storage)
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.heap_storage_value?(storage)
+    storage == :heap
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.frame_storage_value?(storage)
+    storage == :frame
+  end
+
+  sig { params(storage: T.nilable(Symbol)).returns(T::Boolean) }
+  def self.local_storage_value?(storage)
+    storage == :local
+  end
+
+  sig { returns(T::Boolean) }
   def non_escaping
-    @lifetime == :current_scope
+    @lifetime.length == 1 && @lifetime.first.equal?(self)
   end
 
   sig { params(value: T::Boolean).void }
   def non_escaping=(value)
     if value
-      @lifetime = :current_scope
-    elsif @lifetime == :current_scope
-      @lifetime = nil
+      @lifetime = [self]
+    elsif non_escaping
+      @lifetime = []
     end
   end
 
-  # Uniform accessor for the source list regardless of the lifetime's shape.
-  # Walkers (escape checker, BG-capture lifetime
-  # propagation, RETURN value validation) iterate this without needing
-  # to case on the lifetime variant. Returns:
-  #
-  #   nil               -> []      (unconstrained — no sources to check)
-  #   :current_scope    -> [self]  (the binding's own SymbolEntry
-  #                                 stands in as the source; declaring
-  #                                 scope is the limit)
-  #   { sources: [...] } -> the source list verbatim
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[SymbolEntry]) }
   def lifetime_sources
-    case @lifetime
-    when nil           then []
-    when :current_scope then [self]
-    else
-      @lifetime.is_a?(Hash) && @lifetime[:sources].is_a?(Array) ? @lifetime[:sources] : []
-    end
+    @lifetime
   end
 
   # Build a tied lifetime from source SymbolEntries. Empty / nil input returns
-  # nil so callers can pass collected captures through without a guard.
-  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(T::Hash[Symbol, T::Array[SymbolEntry]])) }
+  # the unconstrained lifetime.
+  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T::Array[SymbolEntry]) }
   def self.tied_lifetime(sources)
-    return nil if sources.nil? || sources.empty?
-    { sources: sources.uniq }
+    return [] if sources.nil? || sources.empty?
+    sources.uniq
   end
 
   sig { params(reg: T.untyped, type: T.untyped, mutable: T.untyped, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
@@ -299,7 +320,7 @@ class SymbolEntry
     @invalid_reason = invalid_reason
     @resource = resource
     @close_zig = close_zig
-    @lifetime = T.let(nil, T.untyped)
+    @lifetime = T.let([], T::Array[SymbolEntry])
     @borrowed_alias = T.let(false, T::Boolean)
     @sync_families = T.let(nil, T.untyped)
     @mutable_ref_target = T.let(false, T::Boolean)
@@ -314,5 +335,27 @@ class SymbolEntry
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
     @init_contents_heap = T.let(false, T::Boolean)
+  end
+
+  private
+
+  sig { params(value: T.untyped).returns(T::Array[SymbolEntry]) }
+  def normalize_lifetime(value)
+    return [] if value.nil?
+    return [self] if value == :current_scope
+
+    sources = if value.is_a?(Hash)
+      value[:sources]
+    else
+      value
+    end
+    return [] if sources.nil?
+
+    Array(sources).map do |source|
+      unless source.is_a?(SymbolEntry)
+        raise TypeError, "SymbolEntry#lifetime sources must be SymbolEntry instances"
+      end
+      source
+    end.uniq
   end
 end

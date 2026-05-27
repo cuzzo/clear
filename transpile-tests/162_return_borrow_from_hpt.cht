@@ -9,7 +9,7 @@ UNION Val {
 
 FN getStr(v: Val) RETURNS String ->
     PARTIAL MATCH v START
-        Val.Str AS s -> RETURN s;,
+        Val.Str AS s -> RETURN COPY s;,
         DEFAULT -> RETURN "nil";
     END
     RETURN "nil";

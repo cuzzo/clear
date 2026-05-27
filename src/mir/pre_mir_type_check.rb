@@ -16,6 +16,8 @@
 # Runs once, right before MIRPass. With PREMIR_SURVEY=1 it collects and
 # prints the distinct offending node classes instead of raising (used
 # to inventory annotator holes); default behavior raises the ICE.
+require_relative "pass_state"
+
 module PreMirTypeCheck
   class InternalTypeResolutionError < StandardError; end
 
@@ -24,9 +26,13 @@ module PreMirTypeCheck
   module_function
 
   def verify!(program)
+    MIRPassState.require!(program, :hoisted, consumer: "PreMirTypeCheck")
     violations = []
     walk(program, violations, {})
-    return if violations.empty?
+    if violations.empty?
+      MIRPassState.for!(program).mark!(:premir_type_checked)
+      return
+    end
 
     if ENV["PREMIR_SURVEY"] == "1"
       by_class = violations.group_by { |v| v[:cls] }
@@ -64,7 +70,7 @@ module PreMirTypeCheck
     return if seen[oid]
     seen[oid] = true
 
-    if node.respond_to?(:full_type) && node.full_type.untyped?
+    if node.is_a?(AST::Locatable) && node.full_type.untyped?
       tok = node.respond_to?(:token) ? node.token : nil
       loc = tok && tok.respond_to?(:line) ? "#{tok.line}:#{tok.column}" : "?"
       violations << { cls: node.class.name.to_s.split("::").last, loc: loc }

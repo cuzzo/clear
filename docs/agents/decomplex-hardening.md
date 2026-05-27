@@ -12,7 +12,7 @@ suppresses. Evidence and the precise fix per detector:
 **Evidence:** the irreducible floor of 18 (docs/agents/reification-floor.md). decomplex
 flags `<expr> == :sym` whenever `:sym` matches a known predicate's body,
 *regardless of what `<expr>` is*. All 18 residual `<expr>` are NOT the
-predicate's class: a passed Symbol param (promotion_plan ×9, escape_analysis),
+predicate's class: a passed Symbol param (cleanup_classifier ×9, escape_analysis),
 a Hash field `info[:sync]` (capabilities ×3), parse-time locals before the
 type exists (parser ×2), a duck-typed `Object` (with_match_check), a dataflow
 Symbol (annotator).

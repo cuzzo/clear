@@ -32,7 +32,7 @@ class StringConcatRewriter
       parts = collect_parts(node)
       if parts.length > 2
         concat = AST::StringConcat.new(node.token, parts)
-        concat.full_type = node.full_type
+        AST.stamp_synthetic_type!(concat, node.full_type!, context: "synthetic AST type")
         concat.storage = node.storage if node.respond_to?(:storage)
         return concat
       end

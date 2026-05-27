@@ -149,7 +149,7 @@ pub export fn __zig_free_segment(current_sp_ptr: usize) callconv(.c) void {
 }
 
 // CHEAT uses VMA Pooling with mprotect and madvise.
-// 2MB is not the per-fiber stack memory usage. It's the limit.
+// 4MB is not the per-fiber stack memory usage. It's the limit.
 // 4KB is the minimum (p95) size.
 pub const StackSize = enum {
     /// Micro: 4 KB total (4 KB stack; arena allocated lazily on first use up to 4 KB)
@@ -160,7 +160,7 @@ pub const StackSize = enum {
     Large,
     /// Xl: 256 KB total (252 KB stack + 4 KB arena)
     Xl,
-    /// Huge: 2 MB total — for tests where __morestack is not available
+    /// Huge: 4 MB total — service stack for stackful interpreter/fallback tasks
     Huge,
 };
 

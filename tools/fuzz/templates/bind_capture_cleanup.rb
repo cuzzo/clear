@@ -6,35 +6,57 @@
 # binding inherits a per-iteration / per-branch cleanup contract.
 #
 # Targets the uncovered each_capture_binding + walk_capture_bindings
-# arms in promotion_plan.rb (the WhileBindLoop / IfBind cases, the
+# arms in cleanup_classifier.rb (the WhileBindLoop / IfBind cases, the
 # wrapped_type extraction, the elem_zig_type fill).
 #
 # `form` axis  : :while drains a list via .pop(); :if takes one .pop().
 # `elem` axis  : the list element type — each is a distinct cleanup shape.
 
-# Only the `:string` element shape ships. Capturing a heavier
-# cleanup-needing payload (struct-with-String, nested @list) from
-# `.pop()` via WHILE-bind / IF-bind currently double-frees ("Invalid
-# free") or leaks -- a real bug in the bind-capture cleanup contract,
-# tracked separately. Re-add `:struct` / `:list` element cells once the
-# captured-binding cleanup is fixed for non-string payloads.
-BIND_CAPTURE_CELLS = [
-  { elem: :string, form: :while },
-  { elem: :string, form: :if },
-]
+BIND_CAPTURE_CELLS = []
+[:string, :struct, :list].each do |elem|
+  [:while, :if].each do |form|
+    BIND_CAPTURE_CELLS << { elem: elem, form: form }
+  end
+end
 
 FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
   # Per-element-type wiring: type_decl (extra STRUCT defs), source_type
   # (the `MUTABLE src: <source_type> = []` annotation), push_vals, and an
   # observation on the captured binding.
   type_decl, source_type, push_vals, observe =
-    ["",
-     "String[]@list",
-     %w["a" "b" "c"],
-     'ASSERT v.length() >= 0_i64, "captured string";']
+    case p[:elem]
+    when :string
+      ["",
+       "String[]@list",
+       ['COPY "a"', 'COPY "b"', 'COPY "c"'],
+       'ASSERT v.length() >= 0_i64, "captured string";']
+    when :struct
+      ["STRUCT Item { name: String }\n\n",
+       "Item[]@list",
+       ['Item{ name: COPY "a" }', 'Item{ name: COPY "b" }', 'Item{ name: COPY "c" }'],
+       'ASSERT v.name.length() >= 0_i64, "captured struct";']
+    when :list
+      ["",
+       "Int64[][]@list",
+       ['bindCaptureList(1_i64)', 'bindCaptureList(2_i64)', 'bindCaptureList(3_i64)'],
+       'ASSERT v.length() == 1_i64, "captured list";']
+    end
+
+  helper = if p[:elem] == :list
+             <<~CHT
+               FN bindCaptureList(n: Int64) RETURNS Int64[]@list ->
+                   MUTABLE xs: Int64[]@list = [];
+                   xs.append(n);
+                   RETURN xs;
+               END
+
+             CHT
+           else
+             ""
+           end
 
   # Build the population block for the source list.
-  populate = push_vals.map { |s| "    src.append(COPY #{s});" }.join("\n")
+  populate = push_vals.map { |s| "    src.append(#{s});" }.join("\n")
 
   drain =
     if p[:form] == :while
@@ -57,7 +79,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
     end
 
   <<~CHT
-    #{type_decl}FN main() RETURNS Void ->
+    #{type_decl}#{helper}FN main() RETURNS Void ->
         MUTABLE src: #{source_type} = [];
     #{populate}
         #{drain}

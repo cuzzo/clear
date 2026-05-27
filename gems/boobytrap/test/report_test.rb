@@ -6,7 +6,7 @@ require "json"
 require "fileutils"
 require_relative "../lib/boobytrap"
 
-class ReportTest < Digest::Test
+class ReportTest < Minitest::Test
   def git(dir, *args, date: nil)
     env = {}
     if date
@@ -101,6 +101,28 @@ class ReportTest < Digest::Test
       assert_includes scoped, "`src/in.rb`"
       refute_includes scoped, "`lib/out.rb`"
       assert_includes scoped, "Scope: `src/`"
+    end
+  end
+
+  def test_deleted_files_are_not_reported_as_unmeasured
+    Dir.mktmpdir do |dir|
+      git(dir, "init", "-q")
+      git(dir, "config", "user.email", "t@t")
+      git(dir, "config", "user.name", "t")
+      FileUtils.mkdir_p("#{dir}/src")
+      File.write("#{dir}/src/deleted.rb", "def gone; end\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Add deleted file", date: "2020-01-01T00:00:00")
+      File.write("#{dir}/src/deleted.rb", "def gone; 1; end\n")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Fix deleted file", date: "2024-01-01T00:00:00")
+      FileUtils.rm("#{dir}/src/deleted.rb")
+      git(dir, "add", "-A")
+      git(dir, "commit", "-qm", "Remove deleted file", date: "2024-02-01T00:00:00")
+
+      md = Boobytrap::Report.new(repo: dir, resultset: "#{dir}/none.json").to_markdown
+      assert_includes md, "## Fixed But Unmeasured (0)"
+      refute_includes md, "`src/deleted.rb`"
     end
   end
 

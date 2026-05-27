@@ -36,6 +36,19 @@ require_relative 'fsm_wrapper_emitter'
 module FsmLowering
     extend T::Sig
 
+  class FsmResultTransferFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target_alloc, Symbol
+    const :move_guarded, T::Boolean
+
+    sig { returns(T::Array[MIR::Stmt]) }
+    def marks
+      MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: target_alloc, move_guarded: move_guarded)
+    end
+  end
+
   # The stackful capture_inits string starts with `.inner = ..., .alloc = ...`
   # followed by user captures. For FSM we pre-set those fields with their
   # explicit values in the struct-literal, so extract just the capture
@@ -59,7 +72,12 @@ module FsmLowering
         "#{$1}#{$2}#{ctx_var}.#{name} = "
       end
       out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
+      out = out.gsub(/\b#{esc}(?:_L\d+)?_moved\b/, "#{ctx_var}.#{name}_moved")
+      out = out.gsub(/\bvar\s+#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*=\s*/, "#{ctx_var}.#{name}_moved = ")
+      out = out.gsub(/@TypeOf\(\s*#{esc}\s*\)/, "@TypeOf(#{ctx_var}.#{name})")
+      out = out.gsub(/&#{esc}\b/, "&#{ctx_var}.#{name}")
       out = out.gsub(/\s*_\s*=\s*&?#{esc}\s*;/, "")
+      out = out.gsub(/\s*_\s*=\s*&#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*;/, "")
     end
     out
   end
@@ -110,9 +128,9 @@ module FsmLowering
 
       result_mir = []
       if last_step
-        expr_type = last_step[:expr].full_type
-        expr_t = expr_type.is_a?(Type) ? expr_type : (Type.new(expr_type) rescue nil)
-        result_alloc = expr_t&.string? ? :heap : nil
+        expr_type = last_step[:expr].full_type!
+        expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
+        result_alloc = escaping_value_alloc(expr_t)
         last_mir = with_decl_alloc(result_alloc) { lower(last_step[:expr]) }
         last_mir = place_value_for_destination(last_mir, last_step[:expr], result_alloc, expr_t) if last_mir
         last_mir = hoist_alloc(last_mir, last_step[:expr], err_cleanup: true) if last_mir && mir_allocates?(last_mir)
@@ -120,8 +138,7 @@ module FsmLowering
         result_mir.concat(last_pending)
 
         last_is_assign = last_step[:expr].is_a?(AST::Assignment)
-        is_step_void = expr_type.nil? || expr_type == :Void ||
-          (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+        is_step_void = ast_void_type?(expr_type)
 
         if last_is_assign || is_step_void
           stmt_mir = wrap_step_as_stmt({ expr: last_step[:expr], binding: nil }, last_mir)
@@ -145,11 +162,91 @@ module FsmLowering
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
           result_mir << MIR::Set.new(target, strip_try(last_mir), false)
+          result_mir.concat(fsm_result_transfer_marks(last_mir, last_step[:expr]))
+          if last_step[:expr].is_a?(AST::Identifier)
+            guard_map = instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
+            guard_name = guard_map&.[](last_step[:expr].name.to_s)
+            if guard_name
+              result_mir << MIR::Set.new(
+                MIR::FieldGet.new(ctx_ident, guard_name),
+                MIR::Lit.new("false"),
+                false,
+              )
+            end
+          end
         end
       end
 
       [pre_mir, result_mir]
     end
+  end
+
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[MIR::Stmt]) }
+  def fsm_result_transfer_marks(result_mir, ast_node)
+    fsm_result_transfer_facts(result_mir, ast_node).flat_map(&:marks)
+  end
+
+  sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[FsmResultTransferFact]) }
+  def fsm_result_transfer_facts(result_mir, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
+    facts = T.let([], T::Array[FsmResultTransferFact])
+    consumed = collect_mir_consumed_roots(result_mir)
+    consumed.concat(fsm_ast_result_consumed_roots(ast_node))
+    consumed.each do |name|
+      safe = zig_safe_name(name.to_s)
+      safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+      entry = @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
+      next unless entry.present?
+      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s) == true
+      facts << FsmResultTransferFact.new(
+        name: safe.to_s,
+        target_alloc: entry.alloc,
+        move_guarded: guarded,
+      )
+    end
+    facts
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def fsm_ast_result_consumed_roots(node)
+    names = T.let([], T::Array[String])
+    case node
+    when AST::MoveNode
+      if node.value.is_a?(AST::Identifier)
+        names << node.value.name.to_s
+      else
+        names.concat(fsm_ast_result_consumed_roots(node.value))
+      end
+    when AST::Identifier
+      names << node.name.to_s if AST.moved?(node)
+    when AST::StructLit, AST::UnionVariantLit
+      node.fields&.each_value do |value|
+        next if value.is_a?(AST::CopyNode)
+        if value.is_a?(AST::Identifier)
+          names << value.name.to_s if fsm_owned_transfer_identifier?(value)
+        else
+          names.concat(fsm_ast_result_consumed_roots(value))
+        end
+      end
+    when AST::ListLit
+      node.items&.each do |item|
+        next if item.is_a?(AST::CopyNode)
+        names.concat(fsm_ast_result_consumed_roots(item))
+      end
+    end
+    names.uniq
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def fsm_owned_transfer_identifier?(node)
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    ti = node.full_type!(context: "FSM owned transfer identifier")
+    return false unless T.unsafe(self).ownership_tracked_transfer_type?(ti)
+    entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
+    (entry.present? && entry.alloc == :heap) || node.symbol&.heap_storage? == true
   end
 
   # Lower one step expression into a list of MIR statements
@@ -190,9 +287,8 @@ module FsmLowering
       return MIR::Let.new(step[:binding], mir, false, nil, nil)
     end
     return mir if mir.respond_to?(:stmt?) && mir.stmt?
-    expr_type = step[:expr].full_type
-    is_void_step = expr_type.nil? || expr_type == :Void ||
-      (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+    expr_type = step[:expr].full_type!
+    is_void_step = ast_void_type?(expr_type)
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
@@ -205,10 +301,15 @@ module FsmLowering
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
+    inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
+    inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
     if no_result
-      render_mir_list(result)
+      render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
     else
-      [render_mir_list(result[0]), render_mir_list(result[1])]
+      [
+        render_mir_list(append_ownership_transfers_for_mir_body(result[0], inherited_allocs, inherited_guards)),
+        render_mir_list(append_ownership_transfers_for_mir_body(result[1], inherited_allocs, inherited_guards)),
+      ]
     end
   end
   sig { params(mir_list: T::Array[T.untyped]).returns(String) }

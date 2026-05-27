@@ -100,17 +100,17 @@ RSpec.describe "P3 effect inference + correctness checks" do
     it "accepts NEXT outside the WITH body" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
-        FN bump(c: Counter, p: ~Int64) RETURNS Void
+        FN bump(c: Counter) RETURNS !Void
           REQUIRES c: LOCKED
         ->
+          p: ~Int64 = BG { 1; };
           v = NEXT p;
           WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + v; }
         END
 
         FN main() RETURNS Void ->
           c = Counter{ value: 0 } @shared:locked;
-          p: ~Int64 = BG { 1; };
-          bump(c, GIVE p);
+          bump(c) OR RAISE;
         END
       CHT
       expect { annotate(src) }.not_to raise_error

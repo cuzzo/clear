@@ -59,6 +59,16 @@ class DecisionPressureTest < Minitest::Test
     assert_equal 1, r.first[:decisions]
   end
 
+  def test_transient_collection_operations_are_not_contracts
+    r = rank(<<~RB)
+      def a(stack)
+        return nil if stack.pop.nil?
+        return nil if stack.shift.nil?
+      end
+    RB
+    assert_empty r
+  end
+
   def test_unresolved_local_is_low_signal_and_sorts_last
     r = rank(<<~RB)
       def a(thing)

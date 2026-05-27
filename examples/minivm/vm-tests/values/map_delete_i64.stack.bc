@@ -24,9 +24,7 @@ instructions:
 0035 POP
 0036 LOAD_SLOT         0
 0038 MAP_LENGTH
-0039 STORE_SLOT        1
-0041 LOAD_SLOT         1
-0043 HALT
+0039 HALT
 consts:
 S:1:a
 I:10

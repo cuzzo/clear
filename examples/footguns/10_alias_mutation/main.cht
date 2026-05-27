@@ -32,14 +32,13 @@ FN demonstrate_ownership() RETURNS !Void ->
   # p2 = GIVE p1;
   # print(p1.x.toString()); -- compile error: p1 was moved
 
-  # Without GIVE, structs in CLEAR are implicitly copied for Copy types.
-  # Point has only Int64 fields (Copy), so assignment copies the value.
-  p2 = p1;
+  # COPY keeps p1 valid and creates a fresh value.
+  p2 = COPY p1;
   # copy: p2 is a fresh copy, p1 is still valid
   # p2.x = 99; -- mutation requires MUTABLE declaration
   print("p2.x = " + p2.x.toString());
 
-  MUTABLE p3 = p1;
+  MUTABLE p3 = COPY p1;
   # mutable copy
   p3.x = 99;
   print("p1.x after p3.x=99: " + p1.x.toString());

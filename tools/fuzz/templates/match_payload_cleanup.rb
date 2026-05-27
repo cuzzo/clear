@@ -5,7 +5,7 @@
 # via `PARTIAL MATCH TAKES`, so the AS-binding inherits a cleanup contract
 # (the source's defer transfers to the binding).
 #
-# Targets the uncovered match_as_entry_for arms in promotion_plan.rb:
+# Targets the uncovered match_as_entry_for arms in cleanup_classifier.rb:
 #   inline-struct variant, slice/list variant, map variant, string variant.
 #
 # `mode` axis: :takes consumes the union (was_moved -> walk_match_as_bindings

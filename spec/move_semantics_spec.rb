@@ -34,9 +34,10 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
     end
 
-    it "marks source as moved after append" do
+    it "transfers the source directly after append" do
       body = fn_body(zig, "clearMain")
-      expect(body).to include("m_moved = true")
+      expect(body).to include("try items.append(rt.heapAlloc(), m)")
+      expect(body).not_to include("CheatLib.dupeValue(CheatLib.StringMap(i64), m")
     end
   end
 
@@ -109,9 +110,10 @@ RSpec.describe "Move semantics for heap-owning types" do
 
     it "eliminates m cleanup when always moved into struct" do
       body = fn_body(zig, "clearMain")
-      # Dataflow sees m is MOVED on all paths → no defer, no _moved guard
-      expect(body).not_to include("m_moved")
+      # The source keeps an error-only moved guard until the transfer point.
+      expect(body).to include("m_moved")
       expect(body).to include("Container{ .data = m }")
+      expect(body).to include("m_moved = true")
     end
   end
 
@@ -187,8 +189,8 @@ RSpec.describe "Move semantics for heap-owning types" do
       body = fn_body(zig, "clearMain")
       # @list is implicit-copied for TAKES: source list is NOT consumed
       # (its defer still fires), and plain Int64 slice data can remain frame-backed.
-      expect(body).to include("CheatLib.dupeValue([]i64")
-      expect(body).to include("rt.frameAlloc()")
+      expect(body).to include("CheatLib.dupeValue(std.ArrayListUnmanaged(i64)")
+      expect(body).to include("rt.heapAlloc()")
       expect(body).not_to include("vals_moved")
     end
   end

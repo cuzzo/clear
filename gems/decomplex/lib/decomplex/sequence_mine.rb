@@ -16,6 +16,13 @@ module Decomplex
   # over calls instead of assigned attributes.
   class SequenceMine
     Call = Struct.new(:mid, :file, :defn, :line, :span, keyword_init: true)
+    DECLARATIVE_MIDS = %w[
+      abstract! alias_method any attr_accessor attr_reader attr_writer bind
+      cast checked enum extend final include interface! let must must_because
+      nilable override overridable params prepend private private_class_method
+      public require require_relative requires_ancestor sealed! sig type_member
+      type_template untyped unsafe void
+    ].freeze
 
     def self.scan(files)
       calls = []
@@ -41,11 +48,13 @@ module Decomplex
       defstack = Ast.def_push(node, defstack)
       if %i[CALL FCALL VCALL].include?(node.type)
         mid = node.children[node.type == :CALL ? 1 : 0]
-        @calls << Call.new(mid: mid.to_s, file: @file,
-                           defn: defstack.last || "(top-level)",
-                           line: node.first_lineno,
-                           span: [node.first_lineno, node.first_column,
-                                  node.last_lineno, node.last_column])
+        unless DECLARATIVE_MIDS.include?(mid.to_s)
+          @calls << Call.new(mid: mid.to_s, file: @file,
+                             defn: defstack.last || "(top-level)",
+                             line: node.first_lineno,
+                             span: [node.first_lineno, node.first_column,
+                                    node.last_lineno, node.last_column])
+        end
       end
       node.children.each { |c| walk(c, defstack) }
     end

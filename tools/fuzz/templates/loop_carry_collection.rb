@@ -14,21 +14,16 @@
 
 LOOP_CARRY_CELLS = []
 
-[:int, :string].each do |elem|
-  [1, 2].each do |depth|
-    [5, 12].each do |outer|
-      LOOP_CARRY_CELLS << { elem: elem, depth: depth, outer: outer,
-                            carrier: :flat, body: :plain }
+[:flat, :nested].each do |carrier|
+  [:int, :string].each do |elem|
+    [1, 2].each do |depth|
+      [5, 12].each do |outer|
+        [:plain, :frame_alloc].each do |body|
+          LOOP_CARRY_CELLS << { elem: elem, depth: depth, outer: outer,
+                                carrier: carrier, body: body }
+        end
+      end
     end
-  end
-end
-
-# Bug regression: nested-@list-field carrier with a frame-allocating
-# non-tight loop body (depth 1 is the minimal triggering shape).
-[:int, :string].each do |elem|
-  [5, 12].each do |outer|
-    LOOP_CARRY_CELLS << { elem: elem, depth: 1, outer: outer,
-                          carrier: :nested, body: :frame_alloc }
   end
 end
 
@@ -46,10 +41,9 @@ FuzzGenerator.register(:loop_carry_collection, cells: LOOP_CARRY_CELLS) do |p|
           MUTABLE lst: H[]@list = [];
           MUTABLE i: Int64 = 0_i64;
           WHILE i < #{p[:outer]}_i64 DO
-              MUTABLE scratch: #{zig_type}[]@list = List[];
-              scratch.append(#{push_expr});
+              #{p[:body] == :frame_alloc ? "MUTABLE scratch: #{zig_type}[]@list = List[];\n            scratch.append(#{push_expr});" : ""}
               lst.append(H{ values: [] });
-              lst[i].values.append(COPY scratch[0]);
+              lst[i].values.append(#{p[:body] == :frame_alloc ? 'COPY scratch[0]' : push_expr});
               i = i + 1_i64;
           END
           MUTABLE total: Int64 = 0_i64;
@@ -62,16 +56,21 @@ FuzzGenerator.register(:loop_carry_collection, cells: LOOP_CARRY_CELLS) do |p|
     CHT
   else
     type_decl = "#{zig_type}[]@list"
+    append_expr = if p[:body] == :frame_alloc
+                    "MUTABLE scratch: #{zig_type}[]@list = List[];\n        scratch.append(#{push_expr});\n        lst.append(#{p[:elem] == :string ? 'COPY scratch[0]' : 'scratch[0]'});"
+                  else
+                    "lst.append(#{push_expr});"
+                  end
     inner = case p[:depth]
     when 1
-      "    FOR i IN (1_i64 ..= #{p[:outer]}_i64) DO\n        lst.append(#{push_expr});\n    END"
+      "    FOR i IN (1_i64 ..= #{p[:outer]}_i64) DO\n        #{append_expr}\n    END"
     when 2
       inner_count = 3
       if p[:elem] == :int
         <<~BODY.chomp
               FOR i IN (1_i64 ..= #{p[:outer]}_i64) DO
                   FOR j IN (1_i64 ..= #{inner_count}_i64) DO
-                      lst.append(i + j);
+                      #{p[:body] == :frame_alloc ? "MUTABLE scratch: Int64[]@list = List[];\n                    scratch.append(i + j);\n                    lst.append(scratch[0]);" : "lst.append(i + j);"}
                   END
               END
         BODY
@@ -79,7 +78,7 @@ FuzzGenerator.register(:loop_carry_collection, cells: LOOP_CARRY_CELLS) do |p|
         <<~BODY.chomp
               FOR i IN (1_i64 ..= #{p[:outer]}_i64) DO
                   FOR j IN (1_i64 ..= #{inner_count}_i64) DO
-                      lst.append(j.toString());
+                      #{p[:body] == :frame_alloc ? "MUTABLE scratch: String[]@list = List[];\n                    scratch.append(j.toString());\n                    lst.append(COPY scratch[0]);" : "lst.append(j.toString());"}
                   END
               END
         BODY

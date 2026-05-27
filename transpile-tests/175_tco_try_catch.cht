@@ -11,7 +11,7 @@ UNION Value {
 
 FN getStr(v: Value) RETURNS String ->
     PARTIAL MATCH v START
-        Value.Str AS s -> RETURN s;,
+        Value.Str AS s -> RETURN COPY s;,
         DEFAULT -> RETURN "";
     END
     RETURN "";
@@ -19,7 +19,7 @@ END
 
 FN getSymName(v: Value) RETURNS String ->
     PARTIAL MATCH v START
-        Value.Symbol AS s -> RETURN s;,
+        Value.Symbol AS s -> RETURN COPY s;,
         DEFAULT -> RETURN "";
     END
     RETURN "";
@@ -67,7 +67,7 @@ FN evalList!(TAKES items: Value[]) RETURNS !Value @reentrant ->
         IF isError?(msg) THEN RETURN msg; END
         kind = eval!(COPY items[2]);
         IF isError?(kind) THEN RETURN kind; END
-        RETURN Value.Error{ errMsg: COPY getStr(msg), errKind: COPY getStr(kind) };
+        RETURN Value.Error{ errMsg: getStr(msg), errKind: getStr(kind) };
 
     ELSE_IF formName == "try" THEN
         MUTABLE tryResult: Value = eval!(COPY items[1]);
@@ -84,7 +84,7 @@ END
 FN prStr(v: Value, readably: Bool) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
-        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
+        Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN COPY s;,
         Value.Error AS e -> RETURN "error:" + e.errMsg;,
         DEFAULT -> RETURN "?";
     END

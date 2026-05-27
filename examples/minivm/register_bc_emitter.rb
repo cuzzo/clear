@@ -630,7 +630,8 @@ class RegisterBcEmitter
     when MIR::Comment, MIR::Suppress, MIR::Noop
       nil
     when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt,
-         MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark
+         MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark,
+         MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedTransfer, MIR::OwnedBorrow, MIR::OwnedStore, MIR::OwnedReturn
       nil
     when MIR::CatchWrapper
       compile_catch_wrapper(stmt)
@@ -713,9 +714,22 @@ class RegisterBcEmitter
       # `call() OR { ... };` at statement position -- run the catch
       # body if the call raised (ECLR first), else fall through.
       compile_try_catch_stmt(stmt)
+    when MIR::AssertStmt
+      compile_assert_stmt(stmt)
     else
       raise Unsupported, "register emitter does not support #{stmt.class.name} yet"
     end
+  end
+
+  def compile_assert_stmt(stmt)
+    cond = compile_bool_expr(stmt.cond)
+    emit(JF, cond, 0)
+    fail_patch = @ops.length - 1
+    emit(JMP, 0)
+    pass_patch = @ops.length - 1
+    @ops[fail_patch] = @ops.length
+    emit(HALT)
+    @ops[pass_patch] = @ops.length
   end
 
   def compile_defer_stmt(stmt)
@@ -5169,9 +5183,10 @@ class RegisterBcEmitter
         end
       end
       tail = body.last
-      pk = bg_body_tail_is_expr?(tail) ? inferred_expr_type(tail) : :other
+      result_tail = bg_body_result_value(tail)
+      pk = result_tail ? inferred_expr_type(result_tail) : :other
       pk = :i64 if pk == :bool
-      void_body = !bg_body_tail_is_expr?(tail) || pk == :void
+      void_body = !result_tail || pk == :void
       kinds = caps.transform_values { |t| cap_kind.call(t) }
       # A cell-backed @shared:locked struct capture (R6.2b) shares by
       # value-id: the cell index marshals as an i64, sharedCells is
@@ -5180,8 +5195,8 @@ class RegisterBcEmitter
       caps.each_key do |n|
         kinds[n] = :cell if kinds[n] == :other && cell_backed_field_cell(@value_by_name[n])
       end
-      if !%i[i64 f64 string].include?(pk) && tail.is_a?(MIR::Ident)
-        bare = tail.name.to_s.split(".").last
+      if !%i[i64 f64 string].include?(pk) && result_tail.is_a?(MIR::Ident)
+        bare = result_tail.name.to_s.split(".").last
         pk = kinds[bare] if kinds.key?(bare)
       end
       name_map = { i64: @ireg_by_name, f64: @freg_by_name, string: @sreg_by_name }
@@ -5220,7 +5235,8 @@ class RegisterBcEmitter
           emit(IRET, z)
         else
           body[0...-1].each { |s| compile_stmt(s) }
-          ret = pk == :i64 ? compile_i64_expr(tail) : pk == :f64 ? compile_f64_expr(tail) : compile_string_expr(tail)
+          ret_expr = T.must(result_tail)
+          ret = pk == :i64 ? compile_i64_expr(ret_expr) : pk == :f64 ? compile_f64_expr(ret_expr) : compile_string_expr(ret_expr)
           emit(pk == :i64 ? IRET : pk == :f64 ? FRET : SRET, ret)
         end
         @bg_ctx_prefixes = saved_pfx
@@ -5249,8 +5265,9 @@ class RegisterBcEmitter
     @bg_ctx_prefixes = (saved_prefixes ? saved_prefixes.dup : []).push("__ctx_")
 
     last = body.last
+    result_tail = bg_body_result_value(last)
 
-    if !bg_body_tail_is_expr?(last)
+    if !result_tail
       # Side-effect-only BG body (no value). Run every stmt as a
       # statement; NEXT on the resulting promise is a no-op.
       body.each { |s| compile_stmt(s) }
@@ -5262,21 +5279,21 @@ class RegisterBcEmitter
     # the tail's type from the now-populated bindings and compile
     # via the matching scalar emitter.
     body[0...-1].each { |s| compile_stmt(s) }
-    type = inferred_expr_type(last)
+    type = inferred_expr_type(result_tail)
     case type
     when :i64, :bool
-      reg = compile_i64_expr(last)
+      reg = compile_i64_expr(result_tail)
       { kind: :bg_promise, payload_kind: :i64, reg: reg }
     when :f64
-      reg = compile_f64_expr(last)
+      reg = compile_f64_expr(result_tail)
       { kind: :bg_promise, payload_kind: :f64, reg: reg }
     when :string
-      reg = compile_string_expr(last)
+      reg = compile_string_expr(result_tail)
       { kind: :bg_promise, payload_kind: :string, reg: reg }
     when :void
       # Tail is an expression with no value (e.g. sleep). Run it
       # as a stmt; the promise carries no payload.
-      compile_stmt(last)
+      compile_stmt(T.must(last))
       { kind: :bg_promise, payload_kind: :void, reg: nil }
     else
       raise Unsupported, "register emitter does not yet support BG body returning #{type.inspect}"
@@ -5305,15 +5322,29 @@ class RegisterBcEmitter
   end
 
   def bg_body_tail_is_expr?(last)
+    !!bg_body_result_value(last)
+  end
+
+  def bg_body_result_value(last)
+    return nil unless last
+    if last.is_a?(MIR::Set) && bg_inner_result_target?(last.target)
+      return last.value
+    end
     case last
     when MIR::Lit, MIR::Ident, MIR::BinOp, MIR::UnaryOp, MIR::Call, MIR::MethodCall,
          MIR::FieldGet, MIR::IndexGet, MIR::Cast, MIR::InlineBc, MIR::Pipeline,
          MIR::TryExpr, MIR::TryCatch, MIR::Orelse, MIR::ConcatStr, MIR::DeepCopy,
          MIR::Deref, MIR::OptionalUnwrap, MIR::BlockExpr
-      true
+      last
     else
-      false
+      nil
     end
+  end
+
+  def bg_inner_result_target?(target)
+    return false unless target.is_a?(MIR::FieldGet) && target.field.to_s == "result"
+    inner = target.object
+    inner.is_a?(MIR::FieldGet) && inner.field.to_s == "inner"
   end
 
   # `Counter{ value: 42 } @multiowned` / `... @shared` on a scalar

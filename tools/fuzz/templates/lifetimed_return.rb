@@ -26,10 +26,10 @@
 LIFETIMED_RETURN_CELLS = []
 
 [:bg, :bg_stream].each do |consumer|
-  [:local, :atomic_int, :locked].each do |ownership|
+  [:local, :atomic_int, :locked, :write_locked, :multiowned, :shared].each do |ownership|
     [:await_in_scope, :return_handle, :store_in_field].each do |escape|
       cell = { consumer: consumer, ownership: ownership, escape: escape }
-      cell[:expected] = (escape == :await_in_scope) ? :pass : :compile_error
+      cell[:expected] = (escape == :await_in_scope || ownership == :shared) ? :pass : :compile_error
       LIFETIMED_RETURN_CELLS << cell
     end
   end
@@ -51,6 +51,12 @@ def lifetime_value_setup(ownership)
     "    MUTABLE c: Int64 = 0_i64 @shared:atomic;"
   when :locked
     "    c = Counter{ value: 0_i64 } @locked;"
+  when :write_locked
+    "    c = Counter{ value: 0_i64 } @writeLocked;"
+  when :multiowned
+    "    c = Counter{ value: 0_i64 } @multiowned;"
+  when :shared
+    "    c = Counter{ value: 0_i64 } @shared;"
   end
 end
 
@@ -58,6 +64,7 @@ def lifetime_bg_value_expr(ownership)
   case ownership
   when :local then "c.value"
   when :atomic_int then "c"
+  when :multiowned, :shared then "c.value"
   end
 end
 
@@ -69,7 +76,7 @@ def lifetime_locked_read_lines(indent)
 end
 
 def lifetime_bg_body(consumer, ownership)
-  if ownership == :locked
+  if [:locked, :write_locked].include?(ownership)
     case consumer
     when :bg
       (lifetime_locked_read_lines("    ") + ["    locked_value;"]).join("\n")
@@ -158,13 +165,13 @@ FuzzGenerator.register(:lifetimed_return, cells: LIFETIMED_RETURN_CELLS) do |p|
       STRUCT Counter { value: Int64 }
       STRUCT Holder { bg: #{bg_decl_type} }
 
-      FN make_holder() RETURNS Holder ->
+      FN make_holder() RETURNS !Holder ->
       #{decl}
           RETURN Holder{ bg: #{bg_lit} };
       END
 
       FN main() RETURNS Void ->
-          h = make_holder();
+          h = make_holder() OR RAISE;
           #{p[:consumer] == :bg ? 'r: Int64 = NEXT h.bg;' : 'a: Int64 = NEXT h.bg;'}
           RETURN;
       END

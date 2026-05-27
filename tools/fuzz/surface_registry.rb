@@ -122,6 +122,28 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:promotion_on_escape],
     },
 
+    escape_mechanism_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      collection_shapes: [:list, :pool, :set, :hash_map],
+      escape_sources: [:frame_local, :loop_local, :function_param, :bg_capture, :bg_stream_capture, :or_expression, :stream_next],
+      escape_sinks: [
+        :return_value,
+        :struct_field_store,
+        :list_append,
+        :set_insert,
+        :map_put,
+        :pool_insert,
+        :collection_literal,
+        :function_arg,
+        :takes_arg,
+        :give_arg,
+        :bg_capture,
+        :bg_stream_capture,
+      ],
+      execution_boundaries: [:bg, :bg_stream],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
+    },
+
     # 89-cell ret_form x bind_form x decl matrix for :heap_list / :string
     # (the deep RET×BIND axis from origin/register-machine #13). The
     # complementary breadth-across-all-shapes axis is return_value_modality.
@@ -344,6 +366,134 @@ module FuzzSurfaceRegistry
     polymorphic_sync_admission: {
       storage_capabilities: [:plain, :local, :multiowned],
       sync_capabilities: [:locked, :write_locked, :versioned],
+    },
+
+    thunk_recursion_matrix: {
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    fsm_suspension_matrix: {
+      escape_sources: [:fsm_suspend, :bg_capture, :bg_stream_capture],
+      execution_boundaries: [:bg, :bg_stream, :fsm_suspend],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind],
+    },
+
+    pipeline_source_shape_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :hash_map],
+      escape_sources: [:stream_next, :or_expression],
+      escape_sinks: [:collection_literal, :function_arg],
+      execution_boundaries: [:stream_pipeline, :future_promise],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
+    },
+
+    call_ownership_contract_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :nested_container],
+      escape_sources: [:function_param, :bg_capture, :stream_next],
+      escape_sinks: [:function_arg, :takes_arg, :give_arg, :return_value, :bg_capture],
+      execution_boundaries: [:bg, :stream_pipeline],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :promotion_on_escape, :cleanup_on_all_paths],
+    },
+
+    collection_iteration_storage_matrix: {
+      cleanup_value_shapes: [:dynamic_array, :heap_list, :set, :hash_map, :pool, :soa_list, :nested_container],
+      collection_shapes: [:dynamic_array, :list, :set, :hash_map, :pool, :soa_list, :nested_collection],
+      escape_sources: [:loop_local],
+      escape_sinks: [:list_append, :return_value],
+      mir_ownership_contracts: [:loop_frame_rewind, :cleanup_on_all_paths, :collection_mutation_visible_to_mir],
+    },
+
+    mir_lowering_shape_matrix: {
+      cleanup_value_shapes: [
+        :string,
+        :dynamic_array,
+        :hash_map,
+        :struct_owned_fields,
+        :union_owned_payload,
+        :option_owned_payload,
+      ],
+      collection_shapes: [:dynamic_array, :hash_map],
+      escape_sources: [:loop_local, :or_expression],
+      escape_sinks: [:return_value, :collection_literal, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind, :error_path_allocator_identity],
+    },
+
+    match_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields, :union_owned_payload],
+      collection_shapes: [:list],
+      escape_sinks: [:return_value],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    mir_checker_negative_matrix: {
+      cleanup_value_shapes: [:string],
+      escape_sinks: [:return_value, :function_arg],
+      mir_ownership_contracts: [
+        :cleanup_on_all_paths,
+        :error_path_allocator_identity,
+        :move_suppresses_cleanup,
+        :non_copy_requires_explicit_move_or_copy,
+      ],
+    },
+
+    or_heap_destination_matrix: {
+      cleanup_value_shapes: [:string, :frame_string_concat, :heap_list, :struct_owned_fields],
+      escape_sources: [:or_expression],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :function_arg],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :error_path_allocator_identity],
+    },
+
+    owned_sink_destination_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :map_put, :takes_arg, :function_arg],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths],
+    },
+
+    union_lowering_cleanup_matrix: {
+      cleanup_value_shapes: [:string, :dynamic_array, :heap_list, :hash_map, :union_owned_payload, :struct_owned_fields, :nested_container],
+      escape_sinks: [:return_value, :struct_field_store, :list_append],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :move_suppresses_cleanup],
+    },
+
+    builtin_emit_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :set, :hash_map, :union_owned_payload],
+      collection_shapes: [:dynamic_array, :list, :set, :hash_map],
+      escape_sources: [:stream_next],
+      escape_sinks: [:function_arg],
+      execution_boundaries: [:stream_pipeline],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    bg_capture_transfer_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      escape_sources: [:bg_capture, :do_capture, :bg_stream_capture],
+      escape_sinks: [:bg_capture, :do_capture, :bg_stream_capture, :bg_handle_return],
+      execution_boundaries: [:bg, :do, :bg_stream],
+      mir_ownership_contracts: [:move_suppresses_cleanup, :cleanup_on_all_paths, :bg_lifetime_enforcement],
+    },
+
+    cast_lowering_matrix: {
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    hoist_edge_matrix: {
+      cleanup_value_shapes: [:string, :frame_string_concat, :heap_list, :struct_owned_fields, :union_owned_payload],
+      escape_sources: [:loop_local, :or_expression],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind, :error_path_allocator_identity],
+    },
+
+    access_path_expression_matrix: {
+      cleanup_value_shapes: [:string, :hash_map, :struct_owned_fields, :nested_container, :option_owned_payload],
+      escape_sources: [:or_expression],
+      escape_sinks: [:return_value, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    collection_sink_escape_matrix: {
+      cleanup_value_shapes: [:string, :struct_owned_fields, :union_owned_payload],
+      collection_shapes: [:list, :set, :hash_map, :pool],
+      escape_sinks: [:list_append, :set_insert, :map_put, :pool_insert, :collection_literal, :return_value],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :collection_mutation_visible_to_mir],
     },
   }.freeze
 

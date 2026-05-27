@@ -11,8 +11,9 @@
 # Constraints (per spec):
 #   - @local | @shared can cross boundaries; @multiowned | @indirect cannot.
 #   - CLONE requires @shared or @split.
-#   - LEND poisons the boundary with the borrow's lifetime — not yet
-#     implemented (TODO.md:41), so LEND cells are tagged :in_dev.
+#   - LEND poisons the boundary with the borrow's lifetime. Until the
+#     parser accepts that surface syntax, those cells are expected hard
+#     compile errors rather than skipped matrix slots.
 #   - Sync wrappers @locked / @writeLocked / @atomic / @versioned apply to
 #     @shared values. @local has no sync.
 #   - @atomic uses bare Atomic on primitives (no Arc wrap, per type.rb:
@@ -74,16 +75,18 @@ CONSUMERS.each do |c|
   end
 end
 
-# Phase C — LEND (in development; TODO.md:41 — keyword not yet parsed).
+# Phase C — LEND (keyword not yet parsed).
 CONSUMERS.each do |c|
   VALUES_PHASE_A.each do |v|
     LEND_MOVES.each do |m|
-      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :local, sync: :none, move: m, value: v, expected: :in_dev }
+      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :local, sync: :none, move: m, value: v,
+                                 expected: :compile_error }
     end
   end
   PHASE_B_VALUE_FOR_SYNC.each do |sync, value|
     LEND_MOVES.each do |m|
-      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :shared, sync: sync, move: m, value: value, expected: :in_dev }
+      STREAM_BOUNDARY_CELLS << { consumer: c, ownership: :shared, sync: sync, move: m, value: value,
+                                 expected: :compile_error }
     end
   end
 end

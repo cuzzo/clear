@@ -1436,17 +1436,7 @@ RSpec.describe SemanticAnnotator do
   describe "Control Flow Validation" do
     # Run full MIRPass pipeline -- LoopFrameAnalysis runs in Phase 2.5 of MIRPass.
     def run_mir(src)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-      mir.transform!(ast)
-      ast
+      run_mir_frontend(src)
     end
 
     context "While Loops (visit_WhileLoop)" do
@@ -1606,8 +1596,8 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN foo() RETURNS !Void ->
             FOR i IN (0_i64 ..< 5) DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(i.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(i);
             END
             RETURN;
           END
@@ -1641,8 +1631,8 @@ RSpec.describe SemanticAnnotator do
           FN foo() RETURNS !Void ->
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             FOR item IN items DO
-              MUTABLE parts: String[]@list = [];
-              parts.append(item.toString());
+              MUTABLE parts: Int64[]@list = [];
+              parts.append(item);
             END
             RETURN;
           END
@@ -1672,7 +1662,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Escape marking for returned collections" do
-      it "sets return_provenance on function returning @list (via MIRPass)" do
+      it "marks returned @list binding heap (via MIRPass)" do
         src = <<~CLEAR
           FN buildList() RETURNS !Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
@@ -1682,12 +1672,13 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         ast = run_mir(src)
         fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
-        expect(fn.return_provenance).to eq(:heap)
+        decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "vals" }
+        expect(decl.symbol.storage).to eq(:heap)
       end
     end
 
-    context "return_provenance for struct/union with implicit COPY fields" do
-      it "sets return_provenance when returning union with implicit-copied @list field" do
+    context "returned struct/union with implicit COPY fields" do
+      it "marks the hoisted implicit-copy aggregate heap without promoting the source" do
         src = <<~CLEAR
           UNION Value { Nil, List: Value[] }
           FN makeList() RETURNS !Value ->
@@ -1699,7 +1690,10 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
-        expect(fn.return_provenance).to eq(:heap)
+        decl = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name == "items" }
+        hoist = fn.body.find { |n| n.is_a?(AST::VarDecl) && n.name.to_s.start_with?("__hoist_") }
+        expect(decl.symbol.storage).to eq(:heap)
+        expect(hoist.symbol.storage).to eq(:heap)
       end
     end
 
@@ -2159,18 +2153,10 @@ RSpec.describe SemanticAnnotator do
   describe "Escape Analysis (Heap Promotion)" do
     # Run annotation + MIRPass; sets @_mir_ast so after-block checks SymbolEntry storage.
     def run_mir_escape(src)
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      @annotator = SemanticAnnotator.new
-      @annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-      fn_nodes = {}
-      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { @annotator.lookup_type_schema(n) })
-      mir.transform!(ast)
-      @_mir_ast = ast
-      ast
+      result = compile_mir_frontend(src)
+      @annotator = result.annotator
+      @_mir_ast = result.ast
+      result.ast
     end
 
     # Walk direct struct-member children of each statement in every function body;
@@ -3658,7 +3644,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.mapKeys(i64, rt.frameAlloc(), m.inner)")
+        expect(out).to include("CheatLib.mapKeys(i64, rt.heapAlloc(), m.inner)")
       end
 
       it "raises when keys receives arguments" do
@@ -3968,8 +3954,9 @@ RSpec.describe SemanticAnnotator do
       expect(zig).not_to include("CheatLib.makeList")
     end
 
-    it "does NOT emit frameAlloc for a stack-fixed array" do
-      expect(zig).not_to include("frameAlloc")
+    it "does NOT emit collection allocation for a stack-fixed array" do
+      expect(zig).not_to include("CheatLib.makeList")
+      expect(zig).not_to include("try rt.frameAlloc().alloc")
     end
 
     it "works for a two-element Float64 array" do

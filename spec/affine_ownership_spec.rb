@@ -572,10 +572,8 @@ RSpec.describe SemanticAnnotator do
         CLEAR
       }
 
-      it "auto-promotes to TAKES when AS extracts non-Copy variant" do
-        # MATCH AS on non-Copy variants auto-consumes source (like Rust's move semantics).
-        # The binding is owned, so storing it in a struct is valid.
-        expect { ast }.not_to raise_error
+      it "keeps plain MATCH AS borrowed; explicit MATCH TAKES is required to own the payload" do
+        expect { ast }.to raise_error(CompilerError, /Cannot store borrowed value/)
       end
     end
 

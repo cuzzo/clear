@@ -54,10 +54,17 @@ module CleanupDims
     end
   end
 
+  def self.outer_list_type(kind)
+    case kind
+    when :heap_list, :frame_list           then "Int64[][]@list"
+    when :heap_string, :frame_string_concat then "String[]@list"
+    end
+  end
+
   # The outer collection's element type when value_dest is :appended_to_outer.
   # Outer is always heap; element matches the inner alloc's type.
   def self.outer_decl_for(kind, varname = "outer")
-    "MUTABLE #{varname}: #{value_type(kind)}[]@list = [];"
+    "MUTABLE #{varname}: #{outer_list_type(kind)} = [];"
   end
 
   def self.outer_append(kind, outer_var, value_var)

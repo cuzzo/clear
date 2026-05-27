@@ -2,7 +2,7 @@ require "rspec"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/mir/escape_graph"
+require_relative "../src/mir/escape_analysis"
 
 # Phase 2 validation: provenance is set correctly during annotation
 # and agrees with existing flags (heap_promoted, location, cleanup_alloc).
@@ -15,7 +15,7 @@ RSpec.describe "Provenance annotation" do
     fn_nodes = ast.statements.each_with_object({}) do |s, h|
       h[s.name] = s if s.is_a?(AST::FunctionDef)
     end
-    EscapeGraph.apply!(fn_nodes)
+    EscapeAnalysis.apply!(fn_nodes)
     [ast, a]
   end
 
@@ -99,7 +99,7 @@ RSpec.describe "Provenance annotation" do
   end
 
   describe "CATCH function returning String" do
-    it "marks function with return_provenance :heap" do
+    it "heap-places caller binding from escaping String result" do
       ast, _ = annotate(<<~CLEAR)
         FN riskyOp(x: String) RETURNS !String -> RETURN "ok"; END
         FN handle(x: String) RETURNS !String ->
@@ -110,8 +110,8 @@ RSpec.describe "Provenance annotation" do
         END
         FN main() RETURNS Void -> s = handle("x"); RETURN; END
       CLEAR
-      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "handle" }
-      expect(fn.return_provenance).to eq(:heap)
+      binding = find_binding(ast, "main", "s")
+      expect(binding.symbol.storage).to eq(:heap)
     end
   end
 

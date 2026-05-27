@@ -55,7 +55,7 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
   # Budget = 5 covers all five helpers; the static parser can't see
   # that `code` always holds a real registry symbol at runtime.
   EXCEPTIONS = {
-    'src/annotator-helpers/fixable_helpers.rb' => 5,
+    'src/annotator/helpers/fixable_helpers.rb' => 5,
   }.freeze
 
   def self.scan_raw_sites

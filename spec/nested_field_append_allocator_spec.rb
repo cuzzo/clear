@@ -64,6 +64,10 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       node.each { |c| each_mir(c, seen, &blk) }
       return
     end
+    if node.is_a?(MIR::Program)
+      each_mir(node.items, seen, &blk)
+      return
+    end
     return unless node.is_a?(Struct) && node.class.name.to_s.start_with?("MIR::")
     blk.call(node)
     node.members.each { |m| each_mir(node[m], seen, &blk) }
@@ -71,7 +75,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
 
   let(:program) { lower_program(NESTED_FIELD_SRC) }
 
-  it "lowers a nested-field append whose root has a :heap AllocMark (path is exercised)" do
+  it "lowers a nested-field append using the root AllocMark placement" do
     alloc_marks = {}
     inline_targeting_handles = []
     each_mir(program) do |n|
@@ -82,7 +86,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
     end
     expect(alloc_marks["handles"]).not_to be_nil
     expect(alloc_marks["handles"].alloc).to eq(:heap),
-      "root container must be heap-promoted by the loop rewind for this guard to be meaningful"
+      "root container placement must come from escape/storage, not loop rewinds"
     expect(inline_targeting_handles.any? { |iz| iz.allocs&.key?(:alloc) }).to be(true)
   end
 

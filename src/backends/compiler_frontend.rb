@@ -16,6 +16,7 @@ require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
 require_relative "../mir/hoist"
+require_relative "../mir/pass_state"
 require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
 
@@ -45,15 +46,18 @@ class CompilerFrontend
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(T.must(ast))
 
-    # Hoist anonymous allocating expressions into temp bindings so escape
-    # analysis only ever sees symbol-bearing declarations.
-    Hoist.apply!(T.must(ast))
-
     PipelineRewriter.new(annotator).rewrite!(ast)
+    MIRPassState.for!(T.must(ast)).mark!(:pipeline_rewritten)
     StringConcatRewriter.new.rewrite!(T.must(ast))
-
+    MIRPassState.for!(T.must(ast)).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
+
+    # Hoist after all annotation-preserving rewrites so escape analysis
+    # only ever sees symbol-bearing declarations, including synthetic
+    # allocation expressions introduced by those rewrites.
+    Hoist.apply!(T.must(ast), schema_lookup: schema_lookup)
+
+    fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     T.must(ast).statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
 
     # Synthesize a FunctionDef wrapper for every TEST THAT body so the
@@ -81,9 +85,13 @@ class CompilerFrontend
     union_schemas = {}
     T.must(ast).statements.each do |stmt|
       case stmt
-      when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.field_decls
+      when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
-      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = stmt.variants
+      when AST::UnionDef  then union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(
+        variants: stmt.variants,
+        type_params: stmt.type_params&.any? ? stmt.type_params.map(&:to_sym) : nil,
+        visibility: stmt.visibility || :package,
+      )
       end
     end
 
@@ -116,8 +124,9 @@ class CompilerFrontend
   # wrapper never reaches code generation -- it only carries enough
   # shape for the analysis passes to walk the body as if it were a
   # real `FN __test_X() RETURNS Void -> ... END`.
-  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, T.untyped]).returns(T::Array[T.untyped]) }
+  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Array[AST::FunctionDef]) }
   def self.synthesize_test_body_wrappers!(ast, fn_nodes)
+    wrappers = T.let([], T::Array[AST::FunctionDef])
     counter = 0
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::TestBlock)
@@ -140,6 +149,7 @@ class CompilerFrontend
             false          # uses_frame
           )
           fn_nodes[synth_name] = synth_fn
+          wrappers << synth_fn
           # Stamp the wrapper onto the AST::TestThat so mir_lowering can
           # reach the cleanup_bindings / promotion when it walks the
           # body. Without this, lower_test_block's @current_bindings
@@ -148,5 +158,6 @@ class CompilerFrontend
         end
       end
     end
+    wrappers
   end
 end

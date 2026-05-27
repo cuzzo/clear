@@ -881,7 +881,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: Int64[]@list, sourceColumns: Int64[]@list, sourcePaths: String[]@list, breakpointIps: Int64[]@list, varNames: RegisterVarName[]@list, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: RegisterValue[]@list) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the

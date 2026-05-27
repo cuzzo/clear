@@ -171,11 +171,23 @@ class ModuleImporter
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
     require_relative "../mir/mir_emitter"
+    require_relative "../mir/hoist"
+    require_relative "../mir/pass_state"
+    require_relative "../mir/pre_mir_type_check"
+    require_relative "pipeline_rewriter"
+    require_relative "string_concat_rewriter"
     require_relative "compiler_frontend"
 
-    # Run MIRPass on the module AST (needed for cleanup stamps in function bodies)
+    PipelineRewriter.new(annotator).rewrite!(ast)
+    MIRPassState.for!(ast).mark!(:pipeline_rewritten)
+    StringConcatRewriter.new.rewrite!(ast)
+    MIRPassState.for!(ast).mark!(:string_concat_rewritten)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    fn_nodes = {}
+    Hoist.apply!(ast, schema_lookup: schema_lookup)
+
+    # Run MIRPass on the module AST (needed for cleanup stamps in function bodies).
+    PreMirTypeCheck.verify!(ast)
+    fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir_pass.transform!(ast)

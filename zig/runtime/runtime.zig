@@ -647,7 +647,9 @@ pub const Runtime = struct {
                  // (puck-clear-bugs.md #3/#12)
                  std.debug.panic("CLEAR fault: out of memory [System/OutOfMemory] — unhandled allocation fault. Recover with `expr OR PASS` / `CATCH` at any call stage.", .{});
             } else {
-                 std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
+                 if (!@import("builtin").is_test) {
+                     std.debug.print("\n[Scheduler] Task Crashed: {}\n", .{err});
+                 }
             }
         }
 

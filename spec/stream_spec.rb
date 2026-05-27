@@ -833,7 +833,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer s.deinit(")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(s), rt.heapAlloc(), &s)")
         expect(out).not_to include("s_moved")
       end
     end

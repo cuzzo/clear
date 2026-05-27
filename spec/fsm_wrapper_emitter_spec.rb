@@ -75,7 +75,7 @@ RSpec.describe FsmWrapperEmitter do
         "CheatLib.Promise(i64)",
         "value: i64,",
         MIR::FsmStep.new(0, 0, "__rt_b1", "_ = &__rt_b1;", [
-          MIR::RawZig.new("__ctx_0.inner.result = __ctx_0.value;", :fsm_body, nil, nil),
+          MIR::RawZig.new("__ctx_0.inner.result = __ctx_0.value;", "fsm_body", MIR::OwnershipContract.empty, nil),
         ]),
       ),
       MIR::FsmSpawnSetup.new(
@@ -206,7 +206,7 @@ RSpec.describe FsmWrapperEmitter do
     it "renders MIR::Let in body_stmts via the standard MIR emitter" do
       bind = MIR::Let.new(
         "content",
-        MIR::RawZig.new("__ctx_0.rf_buf[0..10]", :fsm_bound_expr, nil, nil),
+        MIR::RawZig.new("__ctx_0.rf_buf[0..10]", "fsm_bound_expr", MIR::OwnershipContract.empty, nil),
         false, nil, nil,
       )
       out = FsmWrapperEmitter.render(body(step1_body: [bind]))
@@ -214,7 +214,7 @@ RSpec.describe FsmWrapperEmitter do
     end
 
     it "renders MIR::RawZig in body_stmts" do
-      stmt = MIR::RawZig.new("foo();", :fsm_pre_stmts, nil, nil)
+      stmt = MIR::RawZig.new("foo();", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil)
       out = FsmWrapperEmitter.render(body(step0_body: [stmt]))
       expect(out).to include("foo();")
     end
@@ -226,8 +226,8 @@ RSpec.describe FsmWrapperEmitter do
 
     it "skips empty / nil emissions without leaving stray blanks" do
       stmts = [
-        MIR::RawZig.new("", :fsm_pre_stmts, nil, nil),
-        MIR::RawZig.new("real();", :fsm_pre_stmts, nil, nil),
+        MIR::RawZig.new("", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil),
+        MIR::RawZig.new("real();", "fsm_pre_stmts", MIR::OwnershipContract.empty, nil),
         nil,
       ]
       out = FsmWrapperEmitter.render(body(step0_body: stmts))
