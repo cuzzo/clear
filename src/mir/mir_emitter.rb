@@ -1033,11 +1033,12 @@ class MIREmitter
     "#{alloc_expr(node.alloc)}.destroy(#{emit(node.ptr)})"
   end
 
-  # Accepts either a Symbol (:heap/:frame/:cleanup, resolved via rt) or a MIR
-  # expression node (used as the allocator directly, e.g. a parameter name).
-  sig { params(alloc: T.untyped).returns(T.nilable(String)) }
+  # Allocation-producing MIR nodes carry allocator symbols. Free/destroy nodes
+  # may also carry a MIR allocator expression inside generated destructor
+  # helpers, where the allocator is an explicit parameter.
+  sig { params(alloc: T.any(Symbol, MIR::Emittable)).returns(String) }
   def alloc_expr(alloc)
-    alloc.is_a?(Symbol) ? alloc_zig(alloc) : emit(alloc)
+    alloc.is_a?(Symbol) ? alloc_zig(alloc) : T.must(emit(alloc))
   end
 
   # Emit cleanup for MIR::Cleanup (defer) and MIR::ErrCleanup (errdefer).

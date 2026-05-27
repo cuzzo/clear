@@ -309,8 +309,7 @@ module MIRLoweringVariables
     entry = @current_bindings[node.name.to_s] if @current_bindings
     return nil unless entry&.needs_cleanup?
 
-    alloc = entry.alloc
-    alloc if alloc.is_a?(Symbol)
+    entry.alloc
   end
 
   sig { params(node: AST::VarDecl, has_mir_drop: T::Boolean).returns(String) }

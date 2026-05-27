@@ -2856,7 +2856,7 @@ class MIRLowering
       MIR::DupeSlice.new(value, plan.target_alloc)
     when :deep_copy
       value = MIR::ItemsAccess.new(value, true) if plan.source_slice_view
-      MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, plan.copy_mode, plan.target_alloc)
+      MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, T.must(plan.copy_mode), plan.target_alloc)
     when :dupe_union
       emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::Ident.new(alloc_zig_str(plan.target_alloc))])
     else

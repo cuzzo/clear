@@ -236,6 +236,11 @@ module MIR
     def body_slot(name, body, writer)
       BodySlot.new(name, body || [], writer)
     end
+
+    sig { params(alloc: T.nilable(Symbol), cleanup_kind: Symbol).returns(OwnershipEffect) }
+    def owned_effect_for_alloc(alloc, cleanup_kind: :uniform)
+      OwnershipEffect.owned(alloc: alloc, cleanup_kind: cleanup_kind)
+    end
   end
 
   module Stmt
@@ -349,7 +354,9 @@ module MIR
 
       normalized = T.let({}, T::Hash[T.any(Symbol, String), Symbol])
       value.each do |key, alloc|
-        next unless alloc.is_a?(Symbol)
+        unless alloc.is_a?(Symbol)
+          raise TypeError, "InlineZig allocator metadata must map #{key.inspect} to a Symbol"
+        end
         normalized[T.cast(key, T.any(Symbol, String))] = alloc
       end
       new(normalized)
@@ -1725,59 +1732,76 @@ module MIR
   #     break :blk __p;
   # }
   # Used for: @indirect fields, heap struct literals, capability boxing.
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     extend T::Sig
     include Expr
+    sig { params(zig_type: String, init: T.untyped, alloc: Symbol, label: T.nilable(String)).void }
+    def initialize(zig_type, init, alloc, label = nil)
+      super(zig_type, init, alloc, label)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 
   # Byte slice duplication.
   # Zig: try alloc.dupe(u8, source)
   # Used for: string copies, HPT return dupes, BG captures.
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt.
   DupeSlice = Struct.new(:source, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(source: T.untyped, alloc: Symbol).void }
+    def initialize(source, alloc)
+      super(source, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
+      owned_effect_for_alloc(alloc, cleanup_kind: :heap_string)
     end
   end
 
   # Typed slice allocation (uninitialized).
   # Zig: try alloc.alloc(elem_type, len)
   # Used for: COPY list deep-copy buffer.
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt.
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(elem_type: String, len: T.untyped, alloc: Symbol).void }
+    def initialize(elem_type, len, alloc)
+      super(elem_type, len, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([len])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 
   # Free a slice.
   # Zig: alloc.free(slice)
   # Used for: errdefer cleanup of AllocSlice.
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt, or a MIR allocator
+  # expression in generated destructor helpers where the allocator is a param.
   FreeSlice = Struct.new(:slice, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(slice: T.untyped, alloc: T.any(Symbol, Emittable)).void }
+    def initialize(slice, alloc)
+      super(slice, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([slice])
   end
@@ -1785,11 +1809,16 @@ module MIR
   # Destroy a heap pointer.
   # Zig: alloc.destroy(ptr)
   # Used for: errdefer cleanup of HeapCreate, intermediate cap wrap cleanup.
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt, or a MIR allocator
+  # expression in generated destructor helpers where the allocator is a param.
   DestroyPtr = Struct.new(:ptr, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(ptr: T.untyped, alloc: T.any(Symbol, Emittable)).void }
+    def initialize(ptr, alloc)
+      super(ptr, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([ptr])
   end
@@ -1840,18 +1869,22 @@ module MIR
   #                    ArrayList, struct -> struct. Comptime branches in
   #                    dupeValue dispatch to the right deep-copy.)
   #   :passthrough  -> source (no copy needed, value type)
-  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
-  # expression node (e.g. Ident("alloc")) used directly as the allocator.
+  # alloc: Symbol (:heap, :frame) resolved via rt; nil only for :passthrough.
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
                         :alloc) do
     extend T::Sig
     include Expr
+    sig { params(source: T.untyped, zig_type: T.nilable(String), elem_type: T.nilable(String), strategy: Symbol, alloc: T.nilable(Symbol)).void }
+    def initialize(source, zig_type, elem_type, strategy, alloc)
+      super(source, zig_type, elem_type, strategy, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       return OwnershipEffect.none if strategy == :passthrough
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 
@@ -1870,11 +1903,16 @@ module MIR
                              :capacity) do
     extend T::Sig
     include Expr
+    sig { params(zig_type: String, strategy: Symbol, alloc: T.nilable(Symbol), capacity: T.untyped).void }
+    def initialize(zig_type, strategy, alloc, capacity)
+      super(zig_type, strategy, alloc, capacity)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([capacity])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 
@@ -1894,12 +1932,17 @@ module MIR
                        :alloc) do
     extend T::Sig
     include Expr
+    sig { params(inner: T.untyped, zig_base: String, strategy: Symbol, sync_fn: T.nilable(String), sync_type: T.nilable(String), own_fn: T.nilable(String), alloc: Symbol).void }
+    def initialize(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc)
+      super(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       kind = own_fn ? :rc : :uniform
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: kind)
+      owned_effect_for_alloc(alloc, cleanup_kind: kind)
     end
   end
 
@@ -1908,11 +1951,16 @@ module MIR
   SharePromote = Struct.new(:source, :zig_base, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(source: T.untyped, zig_base: String, alloc: Symbol).void }
+    def initialize(source, zig_base, alloc)
+      super(source, zig_base, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :rc)
+      owned_effect_for_alloc(alloc, cleanup_kind: :rc)
     end
   end
 
@@ -1973,11 +2021,16 @@ module MIR
   MakeList = Struct.new(:elem_type, :items, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(elem_type: String, items: T::Array[T.untyped], alloc: Symbol).void }
+    def initialize(elem_type, items, alloc)
+      super(elem_type, items, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([items])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 
@@ -2192,6 +2245,11 @@ module MIR
   OwnedCreate = Struct.new(:name, :alloc, :type_info, :source) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, alloc: Symbol, type_info: T.nilable(T.any(Type, String)), source: String).void }
+    def initialize(name, alloc, type_info, source)
+      super(name, alloc, type_info, source)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2199,6 +2257,11 @@ module MIR
   OwnedDestroy = Struct.new(:name, :alloc, :source) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, alloc: Symbol, source: String).void }
+    def initialize(name, alloc, source)
+      super(name, alloc, source)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2220,6 +2283,11 @@ module MIR
   OwnedStore = Struct.new(:name, :target, :alloc, :source) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, target: String, alloc: T.nilable(Symbol), source: String).void }
+    def initialize(name, target, alloc, source)
+      super(name, target, alloc, source)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2246,6 +2314,11 @@ module MIR
   TransferMark = Struct.new(:name, :target, :target_alloc) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, target: Symbol, target_alloc: T.nilable(Symbol)).void }
+    def initialize(name, target, target_alloc = nil)
+      super(name, target, target_alloc)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2287,6 +2360,11 @@ module MIR
   ReassignMark = Struct.new(:name, :alloc) do
     extend T::Sig
     include Stmt
+    sig { params(name: String, alloc: Symbol).void }
+    def initialize(name, alloc)
+      super(name, alloc)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2295,6 +2373,11 @@ module MIR
   FieldCleanupMark = Struct.new(:target_name, :field, :alloc) do
     extend T::Sig
     include Stmt
+    sig { params(target_name: String, field: String, alloc: Symbol).void }
+    def initialize(target_name, field, alloc)
+      super(target_name, field, alloc)
+    end
+
     sig { returns(T::Boolean) }
     def stmt?; true; end
   end
@@ -2387,8 +2470,10 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      return OwnershipEffect.none unless owned_result_alloc.is_a?(Symbol)
-      OwnershipEffect.owned(alloc: owned_result_alloc)
+      alloc = owned_result_alloc
+      return OwnershipEffect.none unless alloc
+
+      OwnershipEffect.owned(alloc: alloc)
     end
   end
 
@@ -2550,7 +2635,7 @@ module MIR
       body&.each do |stmt|
         next unless stmt.is_a?(TransferMark)
         next unless stmt.target == :owned_sink || stmt.target == :block_result
-        transferred_allocs << stmt.target_alloc if stmt.target_alloc.is_a?(Symbol)
+        transferred_allocs << stmt.target_alloc if stmt.target_alloc
       end
       unless transferred_allocs.empty?
         uniq = transferred_allocs.uniq
@@ -2569,11 +2654,16 @@ module MIR
   ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
     extend T::Sig
     include Expr
+    sig { params(parts: T::Array[T.untyped], alloc: Symbol, rt_expr: T.nilable(String)).void }
+    def initialize(parts, alloc, rt_expr)
+      super(parts, alloc, rt_expr)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([parts])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :heap_string)
+      owned_effect_for_alloc(alloc, cleanup_kind: :heap_string)
     end
   end
 
@@ -2843,11 +2933,16 @@ module MIR
   OwnedSlice = Struct.new(:expr, :alloc) do
     extend T::Sig
     include Expr
+    sig { params(expr: T.untyped, alloc: Symbol).void }
+    def initialize(expr, alloc)
+      super(expr, alloc)
+    end
+
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.owned(alloc: alloc.is_a?(Symbol) ? alloc : nil, cleanup_kind: :uniform)
+      owned_effect_for_alloc(alloc)
     end
   end
 

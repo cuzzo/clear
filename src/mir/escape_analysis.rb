@@ -466,17 +466,7 @@ module EscapeAnalysis
         changed = true if mark_node_symbol_heap!(root)
         next
       end
-      AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
-      end
+      push_locatable_children!(node, stack)
     end
     changed
   end
@@ -489,6 +479,21 @@ module EscapeAnalysis
       current = current.value
     end
     current
+  end
+
+  sig { params(node: AST::Locatable, stack: T::Array[T.untyped]).void }
+  private_class_method def self.push_locatable_children!(node, stack)
+    AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
+    node.class.members.each do |member|
+      value = node[member]
+      if value.is_a?(Array)
+        value.each { |child| stack << child if child.is_a?(AST::Locatable) }
+      elsif value.is_a?(Hash)
+        value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
+      elsif value.is_a?(AST::Locatable)
+        stack << value
+      end
+    end
   end
 
   sig { params(analysis: T.untyped, bg_heap: T::Set[String]).void }
@@ -918,17 +923,7 @@ module EscapeAnalysis
         names << node.name.to_s
         next
       end
-      AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
-      end
+      push_locatable_children!(node, stack)
     end
   end
 

@@ -480,7 +480,7 @@ module MIRLoweringControlFlow
     return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
     return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
     owned_alloc = T.unsafe(self).mir_owned_alloc(mir)
-    return owned_alloc if owned_alloc.is_a?(Symbol)
+    return owned_alloc if owned_alloc
 
     type_info.cleanup_allocator(@schema_lookup)
   end

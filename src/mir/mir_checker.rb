@@ -374,7 +374,7 @@ class MIRChecker
         end
 
         mark = allocs[name]&.first
-        next unless mark&.alloc.is_a?(Symbol) && sink_alloc.is_a?(Symbol)
+        next unless mark && sink_alloc
         next if mark.alloc == sink_alloc
 
         @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
@@ -580,7 +580,7 @@ class MIRChecker
         "AllocMark appears while prior ownership for the same binding is still active")
     end
     state.owned.add(name)
-    state.alloc_kinds[name] = mark.alloc if mark.alloc.is_a?(Symbol)
+    state.alloc_kinds[name] = mark.alloc
     state.alloc_scopes[name] = mark.scope if mark.scope.is_a?(Symbol)
     state.released.delete(name)
     state.maybe_released.delete(name)
@@ -594,34 +594,32 @@ class MIRChecker
 
   sig { params(name: String, guarded: T::Boolean, state: LinearOwnershipState).void }
   def linear_register_cleanup!(name, guarded, state)
-    if state.released.include?(name)
-      @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
-        "Cleanup registered after ownership for this binding was already transferred")
-    end
-    if state.cleanup_finalizers.include?(name) || state.err_finalizers.include?(name)
-      @errors << error(:OWNERSHIP_DOUBLE_FINALIZER, name,
-        "multiple cleanup strategies registered for one owned binding")
-    end
-    state.cleanup_finalizers.add(name)
+    linear_register_finalizer!(name, "Cleanup", state.cleanup_finalizers, state)
     state.guarded_finalizers.add(name) if guarded
     nil
   end
 
   sig { params(name: String, state: LinearOwnershipState).void }
   def linear_register_err_cleanup!(name, state)
+    linear_register_finalizer!(name, "ErrCleanup", state.err_finalizers, state)
+    nil
+  end
+
+  sig { params(name: String, kind: String, finalizers: T::Set[String], state: LinearOwnershipState).void }
+  def linear_register_finalizer!(name, kind, finalizers, state)
     if state.released.include?(name)
       @errors << error(:OWNERSHIP_DOUBLE_RELEASE, name,
-        "ErrCleanup registered after ownership for this binding was already transferred")
+        "#{kind} registered after ownership for this binding was already transferred")
     end
     if state.cleanup_finalizers.include?(name) || state.err_finalizers.include?(name)
       @errors << error(:OWNERSHIP_DOUBLE_FINALIZER, name,
         "multiple cleanup strategies registered for one owned binding")
     end
-    state.err_finalizers.add(name)
+    finalizers.add(name)
     nil
   end
 
-  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  sig { params(name: String, target: Symbol, target_alloc: T.nilable(Symbol), state: LinearOwnershipState).void }
   def linear_transfer!(name, target, target_alloc, state)
     if target == :return
       state.pending_return_transfers.add(name)
@@ -664,14 +662,14 @@ class MIRChecker
     nil
   end
 
-  sig { params(name: String, target: T.untyped, target_alloc: T.untyped, state: LinearOwnershipState).void }
+  sig { params(name: String, target: Symbol, target_alloc: T.nilable(Symbol), state: LinearOwnershipState).void }
   def linear_release!(name, target, target_alloc, state)
     unless state.owned.include?(name)
       @errors << error(:TRANSFER_WITHOUT_ALLOC, name,
         "ownership release to #{target.inspect} has no active AllocMark")
       return
     end
-    if target == :owned_sink && !target_alloc.is_a?(Symbol)
+    if target == :owned_sink && target_alloc.nil?
       @errors << error(:IMPLICIT_OWNERSHIP_TRANSFER, name,
         "TransferMark(:owned_sink) must carry target_alloc so MIRChecker can prove whether ownership escapes")
     end
@@ -689,9 +687,8 @@ class MIRChecker
     nil
   end
 
-  sig { params(target: T.untyped, target_alloc: T.untyped).returns(T::Boolean) }
+  sig { params(target: Symbol, target_alloc: T.nilable(Symbol)).returns(T::Boolean) }
   def escaping_transfer_target?(target, target_alloc)
-    return false unless target.is_a?(Symbol)
     return target_alloc == :heap if target == :owned_sink
 
     LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS.include?(target)
@@ -1010,7 +1007,7 @@ class MIRChecker
     when MIR::Cast
       check_aggregate_expr!(expr.expr, owner_alloc, alloc_by_name)
     when MIR::MakeList
-      list_alloc = expr.alloc.is_a?(Symbol) ? expr.alloc : owner_alloc
+      list_alloc = expr.alloc
       expr.items&.each { |item| check_aggregate_expr!(item, list_alloc, alloc_by_name) }
     when MIR::StructInit
       expr.fields&.each do |field|
@@ -1818,7 +1815,7 @@ class MIRChecker
           "MIR::Call carries ownership through owned_return/callable_contract. " \
           "Finalize call ownership into OwnedCreate/OwnedTransfer/OwnedReturn facts.")
       when MIR::MethodCall
-        next unless node.owned_result_alloc.is_a?(Symbol) || callable_contract_consumes?(node.callable_contract)
+        next unless node.owned_result_alloc || callable_contract_consumes?(node.callable_contract)
         next if facts_seen && ownership_fact_covers_node?(facts, node)
 
         @errors << error(:OWNERSHIP_FACT_REQUIRED, node.method.to_s,
@@ -1965,7 +1962,7 @@ class MIRChecker
 
     consumes.each do |name|
       mark = allocs[name]&.first
-      next unless mark&.alloc.is_a?(Symbol)
+      next unless mark
       next if mark.alloc == sink_alloc
       @errors << error(:AGGREGATE_CHILD_ALLOC_MISMATCH, name,
         "ownership_contract consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \

@@ -865,13 +865,9 @@ module MIRLoweringExpressions
         elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
         emit_builtin(:setMemberGet, [unwrapped, index, MIR::Ident.new(elem_zig)])
       elsif ti.direct_indexable_collection?
-        direct_index_get(unwrapped, index, node.target, ti) || begin
-          builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
-          emit_builtin(builtin, [unwrapped, index])
-        end
+        lower_direct_or_builtin_index_get(unwrapped, index, node.target, ti)
       else
-        builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
-        emit_builtin(builtin, [unwrapped, index])
+        lower_builtin_index_get(unwrapped, index, ti)
       end
       return MIR::IfOptional.new(inner_mir, "_r", value, MIR::Lit.new("null"))
     end
@@ -944,16 +940,25 @@ module MIRLoweringExpressions
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
     elsif ti.direct_indexable_collection?
-      direct_index_get(target, index, node.target, ti) || begin
-        builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
-        emit_builtin(builtin, [target, index])
-      end
+      lower_direct_or_builtin_index_get(target, index, node.target, ti)
     else
       # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
       # array → getAt, etc.). Falls back to :getAt for unregistered types.
-      builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
-      emit_builtin(builtin, [target, index])
+      lower_builtin_index_get(target, index, ti)
     end
+  end
+
+  sig { params(target: T.untyped, index: T.untyped, ast_node: T.untyped, ti: Type).returns(T.untyped) }
+  def lower_direct_or_builtin_index_get(target, index, ast_node, ti)
+    T.bind(self, MIRLowering) rescue nil
+    direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
+  end
+
+  sig { params(target: T.untyped, index: T.untyped, ti: Type).returns(T.untyped) }
+  def lower_builtin_index_get(target, index, ti)
+    T.bind(self, MIRLowering) rescue nil
+    builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
+    emit_builtin(builtin, [target, index])
   end
 
   # Resolves field-name -> Type for both struct and union schemas. Returns {}
@@ -1163,23 +1168,7 @@ module MIRLoweringExpressions
     # `*T` here, or ordinary RVO/value returns and container inserts break.
     result = init
 
-    # Wrap in BlockExpr if @indirect fields were hoisted, so the AllocMark
-    # nodes are visible to the MIR checker.
-    if hoisted.any?
-      @block_expr_counter += 1
-      label = "__ind_blk_#{@block_expr_counter}"
-      local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
-        names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
-      end
-      result_names = mir_ident_names(result).map(&:to_s).to_set
-      local_alloc_names.intersection(result_names).each do |name|
-        hoisted.concat(ownership_transfer_marks(name, :block_result))
-      end
-      hoisted << MIR::BreakStmt.new(label, result)
-      MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
-    else
-      result
-    end
+    wrap_indirect_field_hoists(hoisted, result)
   end
 
   sig { params(node: AST::UnionVariantLit).returns(T.untyped) }
@@ -1266,21 +1255,26 @@ module MIRLoweringExpressions
       { name: node.variant_name.to_s, value: inner }
     ])
 
-    if hoisted.any?
-      @block_expr_counter += 1
-      label = "__ind_blk_#{@block_expr_counter}"
-      local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
-        names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
-      end
-      result_names = mir_ident_names(result).map(&:to_s).to_set
-      local_alloc_names.intersection(result_names).each do |name|
-        hoisted.concat(ownership_transfer_marks(name, :block_result))
-      end
-      hoisted << MIR::BreakStmt.new(label, result)
-      MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
-    else
-      result
+    wrap_indirect_field_hoists(hoisted, result)
+  end
+
+  sig { params(hoisted: T::Array[T.untyped], result: T.untyped).returns(T.untyped) }
+  def wrap_indirect_field_hoists(hoisted, result)
+    T.bind(self, MIRLowering) rescue nil
+    return result if hoisted.empty?
+
+    @block_expr_counter = T.let(@block_expr_counter, T.untyped)
+    @block_expr_counter += 1
+    label = "__ind_blk_#{@block_expr_counter}"
+    local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
+      names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
+    result_names = mir_ident_names(result).map(&:to_s).to_set
+    local_alloc_names.intersection(result_names).each do |name|
+      hoisted.concat(ownership_transfer_marks(name, :block_result))
+    end
+    hoisted << MIR::BreakStmt.new(label, result)
+    MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
   end
 
   sig { params(node: AST::UnionVariantLit).returns(T::Hash[String, T.untyped]) }
@@ -1830,22 +1824,7 @@ module MIRLoweringExpressions
     if ti.resolved.to_s.match?(/\A[A-Z]\z/) && ti.shared?
       return ti.resolved.to_s
     end
-    payload = Type.new(ti)
-    payload.ownership = :affine
-    payload.provenance = nil
-    payload.instance_variable_set(:@zig_type_cache, nil)
-    if payload.any_sync? && !(payload.map? && payload.striped?)
-      inner = payload.bare_data_type.zig_type
-      inner = "CheatLib.Locked(#{inner})"   if payload.locked?
-      inner = "CheatLib.RwLocked(#{inner})" if payload.write_locked?
-      inner = "CheatLib.RefCell(#{inner})"  if payload.sync == :always_mutable
-      inner = "CheatLib.Versioned(#{inner})" if payload.versioned?
-      if payload.atomic?
-        inner = payload.indirect? ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
-      end
-      return inner
-    end
-    payload.zig_type
+    ::FiberCtxBuilder.rc_payload_zig_type(ti)
   end
 
   sig { params(type: T.untyped).returns(String) }
