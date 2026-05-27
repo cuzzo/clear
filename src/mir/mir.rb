@@ -214,6 +214,8 @@ module MIR
     def ownership_effect; OwnershipEffect.none; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs; []; end
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs; []; end
     sig { returns(T::Array[BodySlot]) }
     def body_slots; []; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
@@ -600,6 +602,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = compact_child_exprs([init])
   end
 
   # Assignment.
@@ -612,6 +616,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, value])
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = compact_child_exprs([value])
   end
 
   # Reassignment with old-value cleanup.
@@ -622,6 +628,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([value])
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = compact_child_exprs([value])
   end
 
   # If statement (not expression).
@@ -651,6 +659,8 @@ module MIR
       exprs = bindings&.map { |binding| binding.is_a?(Hash) ? binding[:expr] : nil } || []
       compact_child_exprs(exprs)
     end
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = child_exprs
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
@@ -666,6 +676,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([cond, update])
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = capture ? compact_child_exprs([cond]) : []
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
@@ -910,6 +922,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def top_level_alloc_exprs = compact_child_exprs([expr])
   end
 
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.

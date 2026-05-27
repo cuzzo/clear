@@ -1490,25 +1490,26 @@ class MIRChecker
   sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
-    effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
-    if effect.produces_owned
-      leaks << error(:HPT_LEAK, ownership_effect_label(node),
-        "owned-result expression not bound to variable (leak)")
-    elsif (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && stdlib_owned_return?(node) &&
-       node.stdlib_def.fixed_return?
-      ret = node.stdlib_def.return_type
-      unless ret.void?
-        label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
-        leaks << error(:HPT_LEAK, node.reason,
-          "#{label} with allocates:true result not bound to variable (leak)")
+
+    MIR.each_surface_node(node) do |expr|
+      effect = expr.ownership_effect
+      if effect.produces_owned
+        leaks << error(:HPT_LEAK, ownership_effect_label(expr),
+          "owned-result expression not bound to variable (leak)")
+        next
+      end
+
+      if (expr.is_a?(MIR::InlineZig) || expr.is_a?(MIR::RawZig)) && stdlib_owned_return?(expr) &&
+         expr.stdlib_def.fixed_return?
+        ret = expr.stdlib_def.return_type
+        unless ret.void?
+          label = expr.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
+          leaks << error(:HPT_LEAK, expr.reason,
+            "#{label} with allocates:true result not bound to variable (leak)")
+        end
       end
     end
-    if node.is_a?(MIR::Call) && node.args
-      node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
-    elsif node.is_a?(MIR::MethodCall)
-      scan_expr_for_hpt_leak!(node.receiver, leaks)
-      node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
-    end
+    nil
   end
 
   sig { params(node: T.untyped).returns(String) }
@@ -2055,16 +2056,9 @@ class MIRChecker
   # Without per-iteration rewind, frame arena grows unboundedly across iterations.
   sig { params(body: T::Array[T.untyped]).returns(T.nilable(T::Array[T.untyped])) }
   def verify_frame_rewind!(body)
-    return unless body.is_a?(Array)
-    check_loop_rewind!(body)
-  end
+    each_frame_rewind_node(body) do |stmt|
+      next unless stmt.is_a?(MIR::WhileStmt) || stmt.is_a?(MIR::ForStmt)
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
-  def check_loop_rewind!(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when MIR::WhileStmt, MIR::ForStmt
         # Structural check: verify the actual DeferStmt(restoreLoopMark) is present,
         # not a flag. This catches lowerer bugs where mark_per_iter is set but the
         # defer was not emitted, and unifies the check with the actual MIR structure.
@@ -2080,58 +2074,36 @@ class MIRChecker
               "loop restore encloses frame allocations not scoped to one iteration")
           end
         end
-        check_loop_rewind!(stmt.body)
-
-      when MIR::IfStmt
-        check_loop_rewind!(stmt.then_body)
-        check_loop_rewind!(stmt.else_body)
-      when MIR::ScopeBlock, MIR::BlockExpr
-        check_loop_rewind!(stmt.body)
-      when MIR::SwitchStmt, MIR::UnionMatchStmt
-        stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
-        check_loop_rewind!(stmt.default_body)
-      when MIR::IfChain
-        stmt.branches&.each { |b| check_loop_rewind!(b[:body]) }
-        check_loop_rewind!(stmt.default_body)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        check_loop_rewind!(stmt.body)
-      when MIR::WithMatchDispatch
-        stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
-      end
     end
+    nil
+  end
+
+  sig { params(root: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
+  def each_frame_rewind_node(root, &block)
+    return unless root
+    if root.is_a?(Array)
+      root.each { |node| each_frame_rewind_node(node, &block) }
+      return
+    end
+    return unless root.is_a?(MIR::Emittable)
+
+    yield root
+    return if root.is_a?(MIR::BgBlock) || root.is_a?(MIR::LambdaExpr)
+
+    root.child_exprs.each { |child| each_frame_rewind_node(child, &block) }
+    root.body_slots.each { |slot| each_frame_rewind_node(slot.body, &block) }
+    nil
   end
 
   # Does this statement list contain a per-iteration loop restore?
-  # Looks for DeferStmt(MethodCall("restoreLoopMark")) -- the actual structure
-  # emitted by the lowerer when mark_per_iter is true.
-  # Uses the same traversal rules as body_has_frame_alloc? and check_loop_rewind!:
-  # recurse into branches/blocks, stop at nested loops (they have their own restore).
   sig { params(stmts: T.nilable(T::Array[T.untyped])).returns(T::Boolean) }
   def body_has_loop_restore?(stmts)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |s|
-      case s
-      when MIR::DeferStmt
-        s.body.is_a?(MIR::MethodCall) && s.body.method == "restoreLoopMark"
-      when MIR::IfStmt
-        body_has_loop_restore?(s.then_body) || body_has_loop_restore?(s.else_body)
-      when MIR::ScopeBlock, MIR::BlockExpr
-        body_has_loop_restore?(s.body)
-      when MIR::SwitchStmt, MIR::UnionMatchStmt
-        (s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }) ||
-          body_has_loop_restore?(s.default_body)
-      when MIR::IfChain
-        (s.branches&.any? { |b| body_has_loop_restore?(b[:body]) }) ||
-          body_has_loop_restore?(s.default_body)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        body_has_loop_restore?(s.body)
-      when MIR::WithMatchDispatch
-        s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }
-      # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops checked independently
-      else
-        false
-      end
+    found = T.let(false, T::Boolean)
+    each_loop_local_node(stmts) do |node|
+      next unless node.is_a?(MIR::DeferStmt)
+      found = true if node.body.is_a?(MIR::MethodCall) && node.body.method == "restoreLoopMark"
     end
+    found
   end
 
   # Does this statement list contain iteration-scoped frame allocations,
@@ -2155,34 +2127,34 @@ class MIRChecker
   # see the same nodes -- no special-cased paths.
   sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
   def body_has_frame_alloc_scope?(stmts, &block)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |s|
-      case s
-      when MIR::AllocMark
-        next false unless s.alloc == :frame
-        scope = T.unsafe(s).scope
-        scope = scope.is_a?(Symbol) ? scope : :unknown
-        block.call(scope)
-      when MIR::IfStmt
-        body_has_frame_alloc_scope?(s.then_body, &block) || body_has_frame_alloc_scope?(s.else_body, &block)
-      when MIR::ScopeBlock, MIR::BlockExpr
-        body_has_frame_alloc_scope?(s.body, &block)
-      when MIR::SwitchStmt, MIR::UnionMatchStmt
-        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) } ||
-          body_has_frame_alloc_scope?(s.default_body, &block)
-      when MIR::IfChain
-        s.branches.any? { |b| body_has_frame_alloc_scope?(b[:body], &block) } ||
-          body_has_frame_alloc_scope?(s.default_body, &block)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        body_has_frame_alloc_scope?(s.body, &block)
-      when MIR::WithMatchDispatch
-        s.arms.any? { |a| body_has_frame_alloc_scope?(a[:body], &block) }
-      # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops are checked independently
-      # MIR::BgBlock, MIR::LambdaExpr: stop -- separate fiber/function frame scopes
-      else
-        false
-      end
+    found = T.let(false, T::Boolean)
+    each_loop_local_node(stmts) do |node|
+      next unless node.is_a?(MIR::AllocMark)
+      next unless node.alloc == :frame
+
+      scope = T.unsafe(node).scope
+      scope = scope.is_a?(Symbol) ? scope : :unknown
+      found ||= block.call(scope)
     end
+    found
+  end
+
+  sig { params(root: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
+  def each_loop_local_node(root, &block)
+    return unless root
+    if root.is_a?(Array)
+      root.each { |node| each_loop_local_node(node, &block) }
+      return
+    end
+    return unless root.is_a?(MIR::Emittable)
+
+    yield root
+    return if root.is_a?(MIR::WhileStmt) || root.is_a?(MIR::ForStmt) ||
+              root.is_a?(MIR::BgBlock) || root.is_a?(MIR::LambdaExpr)
+
+    root.child_exprs.each { |child| each_loop_local_node(child, &block) }
+    root.body_slots.each { |slot| each_loop_local_node(slot.body, &block) }
+    nil
   end
 
   # Does this MIR expression node perform a frame allocation?
@@ -2251,68 +2223,14 @@ class MIRChecker
 
   sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def check_stmt_for_unhoisted(node)
-    return unless node
-    case node
-    when MIR::Let
-      # init is the one allowed position for an allocating expression.
-      # Recurse into sub-expressions of init (nested allocs still flagged).
-      check_expr_for_unhoisted(node.init, allow_top: true)
-    when MIR::Set
-      check_expr_for_unhoisted(node.target, allow_top: false)
-      # Set.value: the receiving variable's Cleanup covers the allocation.
-      check_expr_for_unhoisted(node.value, allow_top: true)
-    when MIR::ReassignWithCleanup
-      # ReassignWithCleanup.value: the emitter wraps this in `const __new_x = value;`
-      # inside a block, so it IS in a named binding. The variable's Cleanup covers it.
-      check_expr_for_unhoisted(node.value, allow_top: true)
-    when MIR::ExprStmt
-      check_expr_for_unhoisted(node.expr, allow_top: false)
-    when MIR::DiscardOwned
-      check_expr_for_unhoisted(node.expr, allow_top: true)
-    when MIR::ReturnStmt
-      check_expr_for_unhoisted(node.value, allow_top: false)
-    when MIR::BreakStmt
-      check_expr_for_unhoisted(node.value, allow_top: false)
-    when MIR::IfStmt
-      check_expr_for_unhoisted(node.cond, allow_top: false)
-      check_stmts_for_unhoisted(node.then_body)
-      check_stmts_for_unhoisted(node.else_body)
-    when MIR::IfBindStmt
-      node.bindings&.each { |binding| check_expr_for_unhoisted(binding[:expr], allow_top: true) }
-      check_stmts_for_unhoisted(node.then_body)
-      check_stmts_for_unhoisted(node.else_body)
-    when MIR::WhileStmt
-      check_expr_for_unhoisted(node.cond, allow_top: node.capture ? true : false)
-      check_stmts_for_unhoisted(node.body)
-    when MIR::ForStmt
-      check_expr_for_unhoisted(node.iter, allow_top: false)
-      check_stmts_for_unhoisted(node.body)
-    when MIR::ScopeBlock, MIR::BlockExpr
-      check_stmts_for_unhoisted(node.body)
-    when MIR::SwitchStmt, MIR::UnionMatchStmt
-      check_expr_for_unhoisted(node.subject, allow_top: false)
-      node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
-      check_stmts_for_unhoisted(node.default_body)
-    when MIR::IfChain
-      node.branches&.each do |b|
-        check_expr_for_unhoisted(b[:cond], allow_top: false)
-        check_stmts_for_unhoisted(b[:body])
-      end
-      check_stmts_for_unhoisted(node.default_body)
-    when MIR::DeferStmt    then check_stmt_for_unhoisted(node.body)
-    when MIR::ErrDeferStmt then check_stmt_for_unhoisted(node.body)
-    when MIR::BatchWindowPush
-      check_expr_for_unhoisted(node.item_expr, allow_top: false)
-      check_expr_for_unhoisted(node.value_expr, allow_top: false)
-    when MIR::BatchWindowFlush
-      check_expr_for_unhoisted(node.value_expr, allow_top: false)
-    when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-      check_stmts_for_unhoisted(node.body)
-    when MIR::WithMatchDispatch
-      node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
-    when MIR::FnDef
-      check_stmts_for_unhoisted(node.body)
+    return unless node.is_a?(MIR::Emittable)
+
+    allowed = T.let(node.top_level_alloc_exprs.map(&:object_id).to_set, T::Set[Integer])
+    node.child_exprs.each do |expr|
+      check_expr_for_unhoisted(expr, allow_top: allowed.include?(expr.object_id))
     end
+    node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
+    nil
   end
 
   # Check expr for allocating nodes in non-Let-init position.
@@ -2333,7 +2251,7 @@ class MIRChecker
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       return
     end
-    if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    if expr.is_a?(MIR::BlockExpr)
       check_stmts_for_unhoisted(expr.body)
       return
     end

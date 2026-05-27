@@ -1917,13 +1917,40 @@ class PipelineHost
     else
       MIR::Ident.new(item_var)
     end
+    value_body = T.let([], T::Array[T.untyped])
+    if @lowering.send(:mir_allocates?, item_value)
+      @pipe_temp_counter += 1
+      value_name = "__idx_item_#{@pipe_temp_counter}"
+      value_alloc = @lowering.send(:mir_owned_alloc, item_value) || alloc
+      @lowering.send(:stamp_allocating_result_target!, item_value, value_name, alloc: value_alloc)
+      mark_type = @lowering.send(:mir_alloc_mark_type_info, item_value, nil,
+        context: "INDEX bucket item")
+      mark = MIR::AllocMark.new(value_name, value_alloc, mark_type)
+      mark.scope = MIR::Placement.alloc_scope(value_alloc)
+      entry = T.unsafe(@lowering).hoist_cleanup_entry(item_value, nil)
+      value_body << mark
+      value_body << MIR::Let.new(value_name, item_value, false, nil, nil)
+      if entry
+        entry[:has_moved_guard] = true
+        value_body << MIR::ErrCleanup.new(value_name, entry)
+      end
+      item_value = MIR::Ident.new(value_name)
+    end
+    insert = MIR::IndexInsert.new(
+      MIR::Ident.new("idx_result"),
+      MIR::Ident.new("idx_key"),
+      item_value,
+      "u8", elem_zig_type, alloc)
+    insert = T.cast(@lowering.send(:with_ownership_consumption,
+      insert,
+      @lowering.send(:mir_ident_names, item_value),
+      "MIR::IndexInsert",
+      :owned_sink,
+      target_alloc: alloc), MIR::IndexInsert)
     body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
-      MIR::IndexInsert.new(
-        MIR::Ident.new("idx_result"),
-        MIR::Ident.new("idx_key"),
-        item_value,
-        "u8", elem_zig_type, alloc)
+      *value_body,
+      insert
     ], T::Array[T.untyped])
     entry = index_key_cleanup_entry(expr_mir, expr_node)
     body << MIR::Cleanup.new("idx_key", entry) if entry

@@ -1516,22 +1516,35 @@ module LoopFrameAnalysis
     end
   end
 
-  # Returns true when expr is a call to a frame-allocating function
-  #.
+  # Returns true when the SHARD key expression can allocate from the current
+  # frame. The decision is expression-shaped, not function-name-shaped: calls,
+  # interpolation, literals, and aggregate constructors all flow through the
+  # same type/uses_frame facts already produced before MIR lowering.
   sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
-    case expr
-    when AST::FuncCall
-      fn = fn_nodes[expr.name]
-      # uses_frame=true means the function frame-allocates internally (e.g. intToString
-      # intermediates). Those intermediate frame allocations accumulate in the caller's frame arena.
-      # The SHARD loop must saveLoopMark/restoreLoopMark to rewind them each iteration.
-      fn&.uses_frame ? true : false
-    when AST::MethodCall
-      false  # method calls on types are not frame-allocating routing keys
-    else
-      false
+    found = T.let(false, T::Boolean)
+    walk_all_nodes(expr) do |node|
+      next unless node.is_a?(AST::Locatable)
+      if node.is_a?(AST::FuncCall)
+        fn = fn_nodes[node.name]
+        found = true if fn&.uses_frame
+      end
+      next unless expression_node_allocates_value?(node)
+
+      storage = node.respond_to?(:storage) ? node.storage : nil
+      found = true if storage == :frame
+      ti = node.full_type!(context: "SHARD frame allocation")
+      found = true if ti.needs_cleanup? && ti.cleanup_allocator == :frame
     end
+    found
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def self.expression_node_allocates_value?(node)
+    return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
+    return false if node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+
+    true
   end
 
 end
