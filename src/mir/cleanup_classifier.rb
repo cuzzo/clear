@@ -62,9 +62,20 @@ module CleanupClassifier
     # 4. WHILE-bind / IF-bind captures from ownership-transferring call results.
     walk_capture_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
 
+    prune_container_borrow_bindings(fn_node.body, bindings)
     stamp_cleanup_scopes!(fn_node.body, bindings)
 
     bindings
+  end
+
+  sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.prune_container_borrow_bindings(body, bindings)
+    AST.each_locatable(body) do |node|
+      next unless (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && binding_container_borrow?(node)
+
+      bindings.delete(node.name.to_s)
+    end
+    nil
   end
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
@@ -578,7 +589,7 @@ module CleanupClassifier
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
-    return nil if node.respond_to?(:container_borrow) && node.container_borrow
+    return nil if binding_container_borrow?(node)
     return nil if !node_sym&.heap_storage? &&
                   (node_sym&.borrow_provenance? ||
                    (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?))
@@ -628,6 +639,19 @@ module CleanupClassifier
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
     finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  private_class_method def self.binding_container_borrow?(node)
+    return true if node.respond_to?(:container_borrow) && node.container_borrow
+
+    value = node.respond_to?(:value) ? node.value : nil
+    return true if value.respond_to?(:container_borrow) && value.container_borrow
+    if value.is_a?(AST::BinaryOp) && (value.op == :OR || value.op == :OR_RESCUE)
+      return true if value.left.respond_to?(:container_borrow) && value.left.container_borrow
+    end
+
+    false
   end
 
   sig { params(entry: T.nilable(CleanupEntry), node: T.untyped, ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -841,6 +865,7 @@ module CleanupClassifier
   sig { params(inner: Type, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.optional_payload_needs_cleanup?(inner, schema_lookup)
     return true if inner.string?
+    return true if inner.recursive_cleanup_shape?(schema_lookup)
     return true if inner.needs_cleanup?(schema_lookup)
     schema = schema_lookup.call(inner.resolved) rescue nil
     return (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) } if Schemas.union?(schema)

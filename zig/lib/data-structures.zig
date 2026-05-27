@@ -356,16 +356,14 @@ pub fn bind(comptime deps: type) type {
     /// before freeing the backing hashmap. For string sets, frees duped keys.
     /// If elements are not ref-counted, comptime eliminates the release loop.
     pub fn deinitSet(comptime ElemT: type, alloc: std.mem.Allocator, set: *Set(ElemT)) void {
-        const is_string = ElemT == []const u8;
         if (comptime refInnerType(ElemT) != null) {
             var it = set.inner.keyIterator();
             while (it.next()) |key_ptr| {
                 releaseOne(ElemT, alloc, key_ptr.*);
             }
-        }
-        if (is_string) {
+        } else if (comptime needsCleanup(ElemT)) {
             var it = set.inner.keyIterator();
-            while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+            while (it.next()) |key_ptr| cleanup(ElemT, alloc, key_ptr);
         }
         set.inner.deinit(alloc);
     }
@@ -2051,19 +2049,38 @@ pub fn bind(comptime deps: type) type {
     // -----------------------------------------------------------------------
     pub fn Set(comptime T: type) type {
         const is_string = T == []const u8;
-        const Map = if (is_string) std.StringHashMapUnmanaged(void) else std.AutoHashMapUnmanaged(T, void);
+        const Context = struct {
+            pub fn hash(_: @This(), key: T) u64 {
+                var hasher = std.hash.Wyhash.init(0);
+                std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
+                return hasher.final();
+            }
+
+            pub fn eql(_: @This(), a: T, b: T) bool {
+                return std.meta.eql(a, b);
+            }
+        };
+        const Map = if (is_string)
+            std.StringHashMapUnmanaged(void)
+        else
+            std.HashMapUnmanaged(T, void, Context, std.hash_map.default_max_load_percentage);
         return struct {
             const Self = @This();
             inner: Map = .{},
 
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {
-                    if (!self.inner.contains(value)) {
-                        const owned = try alloc.dupe(u8, value);
-                        errdefer alloc.free(owned);
-                        try self.inner.put(alloc, owned, {});
+                    if (self.inner.contains(value)) {
+                        alloc.free(value);
+                    } else {
+                        try self.inner.put(alloc, value, {});
                     }
                 } else {
+                    if (self.inner.contains(value)) {
+                        var discarded = value;
+                        if (comptime needsCleanup(T)) cleanup(T, alloc, &discarded);
+                        return;
+                    }
                     try self.inner.put(alloc, value, {});
                 }
             }
@@ -2096,6 +2113,9 @@ pub fn bind(comptime deps: type) type {
                 if (is_string) {
                     var it = self.inner.keyIterator();
                     while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+                } else if (comptime needsCleanup(T)) {
+                    var it = self.inner.keyIterator();
+                    while (it.next()) |key_ptr| cleanup(T, alloc, key_ptr);
                 }
                 self.inner.deinit(alloc);
             }

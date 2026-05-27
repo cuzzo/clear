@@ -173,7 +173,7 @@ module MIRLoweringVariables
       init,
       facts.keyword_mutable,
       facts.annotation,
-      var_decl_suppression(safe_name, node, facts)
+      var_decl_suppression(safe_name, node, facts, init)
     )
     with_ownership_consumption(let_node, mir_ident_names(init), "MIR::Let")
 
@@ -352,8 +352,11 @@ module MIRLoweringVariables
     T.must(safe_name)
   end
 
-  sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts).returns(T.nilable(String)) }
-  def var_decl_suppression(safe_name, node, facts)
+  sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: T.untyped).returns(T.nilable(String)) }
+  def var_decl_suppression(safe_name, node, facts, init)
+    lowering = T.unsafe(self)
+    owned_cleanup_value = (facts.has_mir_drop ||
+                           (lowering.mir_allocates?(init) && lowering.ownership_bearing_type?(facts.ft))) == true
     if facts.keyword_mutable
       if facts.actually_mutated && node.var_used && !facts.forced_var
         nil
@@ -361,7 +364,8 @@ module MIRLoweringVariables
         "_ = &#{safe_name};"
       end
     else
-      (node.var_used || facts.has_mir_drop) ? nil : "_ = #{safe_name};"
+      return nil if node.var_used
+      owned_cleanup_value ? "_ = &#{safe_name};" : "_ = #{safe_name};"
     end
   end
 
@@ -439,6 +443,13 @@ module MIRLoweringVariables
 
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
+      if mir_allocates?(init) && ownership_bearing_type?(ft)
+        cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
+        build_drop_entry!(cleanup_entry, node.full_type!, node)
+        cleanup_entry[:has_moved_guard] = true
+        (@guarded_cleanup_names ||= {})[safe_name] = true
+        return [alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry)]
+      end
       [alloc_mark, let_node]
     elsif mir_allocates?(init) && !generic_id
       mir_alloc = decl_alloc

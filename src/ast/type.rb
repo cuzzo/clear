@@ -1160,8 +1160,8 @@ class Type
     payload.instance_variable_set(:@shard_count, @shard_count) if @shard_count && !payload.shard_count
     payload.instance_variable_set(:@soa, @soa) if @soa && !payload.soa?
     payload.instance_variable_set(:@layout, @layout) if @layout && !payload.layout
-    payload.instance_variable_set(:@ownership, @ownership) if @ownership && !payload.ownership
-    payload.instance_variable_set(:@sync, @sync) if @sync && !payload.sync
+    payload.instance_variable_set(:@ownership, @ownership) if @ownership && @ownership != :affine
+    payload.instance_variable_set(:@sync, @sync) if @sync
     payload.instance_variable_set(:@provenance, @provenance) if @provenance && !payload.provenance
     payload
   end

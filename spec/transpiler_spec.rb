@@ -1255,7 +1255,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # @list COPY routes through CheatLib.dupeValue's slice arm (one path).
-      expect(zig).to match(/dupeValue\(\[\]Value/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Value\)/)
     end
 
     it "implicit-copies @list into struct []T field" do
@@ -1270,7 +1270,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]Value/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Value\)/)
     end
 
     it "does NOT dupe heap string (COPY) in union - already owned" do
@@ -1315,7 +1315,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # Copy union elements - dupeValue's slice arm @memcpy's the buffer.
       expect(zig).not_to include("dupeUnionValue")
-      expect(zig).to match(/dupeValue\(\[\]Num/)
+      expect(zig).to match(/dupeValue\(std\.ArrayListUnmanaged\(Num\)/)
     end
   end
 

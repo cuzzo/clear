@@ -30,6 +30,10 @@ end
   MLSM_CELLS << { family: :return_shape, shape: shape }
 end
 
+%i[unary range copy_node move_node assert_stmt].each do |shape|
+  MLSM_CELLS << { family: :node_dispatch, shape: shape }
+end
+
 def mlsm_list_type(element)
   case element
   when :string then "String[]"
@@ -432,6 +436,56 @@ def mlsm_return_program(shape)
   end
 end
 
+def mlsm_node_dispatch_program(shape)
+  case shape
+  when :unary
+    <<~CHT
+      FN main() RETURNS Void ->
+          x: Int64 = -1_i64;
+          ASSERT x == -1_i64, "unary lowering";
+          RETURN;
+      END
+    CHT
+  when :range
+    <<~CHT
+      FN main() RETURNS Void ->
+          MUTABLE total: Int64 = 0_i64;
+          FOR i IN (1_i64 ..= 3_i64) DO
+              total = total + i;
+          END
+          ASSERT total == 6_i64, "range lowering";
+          RETURN;
+      END
+    CHT
+  when :copy_node
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: String = COPY "abc";
+          t: String = COPY s;
+          ASSERT t.length() == 3_i64, "copy lowering";
+          RETURN;
+      END
+    CHT
+  when :move_node
+    <<~CHT
+      FN consume(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
+
+      FN main() RETURNS Void ->
+          s: String = COPY "abc";
+          ASSERT consume(GIVE s) == 3_i64, "move lowering";
+          RETURN;
+      END
+    CHT
+  when :assert_stmt
+    <<~CHT
+      FN main() RETURNS Void ->
+          ASSERT TRUE, "assert lowering";
+          RETURN;
+      END
+    CHT
+  end
+end
+
 FuzzGenerator.register(:mir_lowering_shape_matrix, cells: MLSM_CELLS) do |p|
   case p[:family]
   when :list_lit
@@ -442,5 +496,7 @@ FuzzGenerator.register(:mir_lowering_shape_matrix, cells: MLSM_CELLS) do |p|
     mlsm_var_decl_program(p.fetch(:decl), p.fetch(:shape))
   when :return_shape
     mlsm_return_program(p.fetch(:shape))
+  when :node_dispatch
+    mlsm_node_dispatch_program(p.fetch(:shape))
   end
 end

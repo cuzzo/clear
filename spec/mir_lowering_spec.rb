@@ -739,8 +739,9 @@ RSpec.describe MIRLowering do
       node.instance_variable_set(:@mode, :decl)
       def node.mode; @mode; end
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Let)
-      expect(result.name).to eq("greeting")
+      let = result.is_a?(Array) ? result.find { |item| item.is_a?(MIR::Let) } : result
+      expect(let).to be_a(MIR::Let)
+      expect(let.name).to eq("greeting")
     end
 
     it "lowers BindExpr in assign mode" do
@@ -1567,7 +1568,7 @@ RSpec.describe MIRLowering do
       node.var_used = true
       mir = lowering.lower(node)
       zig = emit(mir)
-      expect(zig).to eq('const greeting: []const u8 = "world";')
+      expect(zig).to include('const greeting: []const u8 = @as([]const u8, try rt.frameAlloc().dupe(u8, "world"));')
     end
 
     it "lowers and emits an if with binary condition" do
@@ -3071,7 +3072,7 @@ RSpec.describe MIRLowering do
 
       expect(result).to be_a(MIR::BlockExpr)
       expect(zig).to include("materializeNext(rt.frameAlloc())")
-      expect(zig).to include(".destroy(rt.heapAlloc())")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(__collect_acc_1), rt.heapAlloc(), &__collect_acc_1)")
     end
 
     it "raises on unhandled SMOOTH RHS" do

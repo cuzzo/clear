@@ -922,7 +922,7 @@ module MIRLoweringFunctions
     end
 
     if ti.is_a?(Type) && ti.non_string_array? && !ti.pool? &&
-       !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode) &&
+       !a.is_a?(AST::MoveNode) &&
        !callee_param_type.collection?
       return MIR::ItemsAccess.new(arg, true)
     end

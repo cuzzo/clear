@@ -35,6 +35,22 @@ MIR_CHECKER_NEGATIVE_CELLS = [
   { case_name: :transfer_without_alloc, error_code: :TRANSFER_WITHOUT_ALLOC },
   { case_name: :cleanup_without_alloc, error_code: :CLEANUP_WITHOUT_ALLOC },
   { case_name: :alloc_without_cleanup, error_code: :ALLOC_WITHOUT_CLEANUP },
+  { case_name: :errcleanup_without_transfer, error_code: :ERRCLEANUP_WITHOUT_TRANSFER },
+  { case_name: :alloc_cleanup_mismatch, error_code: :ALLOC_CLEANUP_MISMATCH },
+  { case_name: :invalid_allocmark_allocator, error_code: :INVALID_ALLOCATOR_MARK },
+  { case_name: :invalid_allocmark_scope, error_code: :INVALID_ALLOCATOR_MARK },
+  { case_name: :invalid_cleanup_allocator, error_code: :INVALID_ALLOCATOR_MARK },
+  { case_name: :invalid_inline_allocator, error_code: :INVALID_ALLOCATOR_MARK },
+  { case_name: :allocating_let_without_alloc, error_code: :ALLOCATING_LET_WITHOUT_ALLOC },
+  { case_name: :cleanup_for_borrow_field, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
+  { case_name: :cleanup_for_borrow_index, error_code: :OWNERSHIP_CLEANUP_FOR_BORROW },
+  { case_name: :raw_zig_no_contract, error_code: :RAW_NO_CONTRACT },
+  { case_name: :frame_field_store_escape, error_code: :FRAME_ALLOC_ESCAPES },
+  { case_name: :frame_capture_escape, error_code: :FRAME_ALLOC_ESCAPES },
+  { case_name: :frame_aggregate_escape, error_code: :FRAME_ALLOC_ESCAPES },
+  { case_name: :unhoisted_return_concat, error_code: :UNHOISTED_ALLOC },
+  { case_name: :unhoisted_exprstmt_deepcopy, error_code: :UNHOISTED_ALLOC },
+  { case_name: :unhoisted_call_arg_makelist, error_code: :UNHOISTED_ALLOC },
 ].map { |cell| cell.merge(expected: :compile_error) }.freeze
 
 def mir_checker_negative_case(case_name)
@@ -262,6 +278,116 @@ def mir_checker_negative_case(case_name)
     <<~RUBY
       [
         alloc_mark("x", :heap),
+      ]
+    RUBY
+  when :errcleanup_without_transfer
+    <<~RUBY
+      [
+        alloc_mark("x", :heap),
+        MIR::ErrCleanup.new("x", cleanup(:heap, false)),
+      ]
+    RUBY
+  when :alloc_cleanup_mismatch
+    <<~RUBY
+      [
+        alloc_mark("x", :heap),
+        MIR::Cleanup.new("x", cleanup(:frame, false)),
+      ]
+    RUBY
+  when :invalid_allocmark_allocator
+    <<~RUBY
+      [
+        alloc_mark("x", :stack),
+        MIR::Cleanup.new("x", cleanup(:heap, false)),
+      ]
+    RUBY
+  when :invalid_allocmark_scope
+    <<~RUBY
+      [
+        MIR::AllocMark.new("x", :heap, Type.new(:String), :block),
+        MIR::Cleanup.new("x", cleanup(:heap, false)),
+      ]
+    RUBY
+  when :invalid_cleanup_allocator
+    <<~RUBY
+      [
+        alloc_mark("x", :heap),
+        MIR::Cleanup.new("x", cleanup(:stack, false)),
+      ]
+    RUBY
+  when :invalid_inline_allocator
+    <<~RUBY
+      iz = inline_zig("try target.append(alloc, value)", :stack, "items")
+      [
+        alloc_mark("items", :heap),
+        MIR::ExprStmt.new(iz, false),
+      ]
+    RUBY
+  when :allocating_let_without_alloc
+    <<~RUBY
+      [
+        MIR::Let.new("x", MIR::DupeSlice.new(MIR::Lit.new("\\"abc\\""), :heap), false, nil, nil),
+      ]
+    RUBY
+  when :cleanup_for_borrow_field
+    <<~RUBY
+      [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::FieldGet.new(MIR::Ident.new("owner"), "field"), false, nil, nil),
+        MIR::Cleanup.new("x", cleanup(:heap, false)),
+      ]
+    RUBY
+  when :cleanup_for_borrow_index
+    <<~RUBY
+      [
+        alloc_mark("x", :heap),
+        MIR::Let.new("x", MIR::IndexGet.new(MIR::Ident.new("owner"), MIR::Lit.new("0")), false, nil, nil),
+        MIR::Cleanup.new("x", cleanup(:heap, false)),
+      ]
+    RUBY
+  when :raw_zig_no_contract
+    <<~RUBY
+      [
+        MIR::ExprStmt.new(MIR::RawZig.new("CheatLib.dupeValue(T, x, alloc)", "opaque_ownership", MIR::OwnershipContract.empty, nil), false),
+      ]
+    RUBY
+  when :frame_field_store_escape
+    <<~RUBY
+      [
+        alloc_mark("x", :frame),
+        MIR::TransferMark.new("x", :field_store, :heap),
+      ]
+    RUBY
+  when :frame_capture_escape
+    <<~RUBY
+      [
+        alloc_mark("x", :frame),
+        MIR::TransferMark.new("x", :capture, :heap),
+      ]
+    RUBY
+  when :frame_aggregate_escape
+    <<~RUBY
+      [
+        alloc_mark("x", :frame),
+        MIR::TransferMark.new("x", :aggregate_store, :heap),
+      ]
+    RUBY
+  when :unhoisted_return_concat
+    <<~RUBY
+      [
+        MIR::ReturnStmt.new(MIR::ConcatStr.new([MIR::Lit.new("\\"a\\""), MIR::Lit.new("\\"b\\"")], :heap, nil)),
+      ]
+    RUBY
+  when :unhoisted_exprstmt_deepcopy
+    <<~RUBY
+      [
+        MIR::ExprStmt.new(MIR::DeepCopy.new(MIR::Ident.new("x"), "[]const u8", nil, :string, :heap), false),
+      ]
+    RUBY
+  when :unhoisted_call_arg_makelist
+    <<~RUBY
+      [
+        MIR::ExprStmt.new(MIR::Call.new("use", [MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap)], false, false, MIR::CallableContract.no_ownership(1)), false),
       ]
     RUBY
   end

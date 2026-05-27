@@ -474,6 +474,27 @@ module FuzzSurfaceRegistry
     cast_lowering_matrix: {
       mir_ownership_contracts: [:cleanup_on_all_paths],
     },
+
+    hoist_edge_matrix: {
+      cleanup_value_shapes: [:string, :frame_string_concat, :heap_list, :struct_owned_fields, :union_owned_payload],
+      escape_sources: [:loop_local, :or_expression],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :loop_frame_rewind, :error_path_allocator_identity],
+    },
+
+    access_path_expression_matrix: {
+      cleanup_value_shapes: [:string, :hash_map, :struct_owned_fields, :nested_container, :option_owned_payload],
+      escape_sources: [:or_expression],
+      escape_sinks: [:return_value, :function_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths],
+    },
+
+    collection_sink_escape_matrix: {
+      cleanup_value_shapes: [:string, :struct_owned_fields, :union_owned_payload],
+      collection_shapes: [:list, :set, :hash_map, :pool],
+      escape_sinks: [:list_append, :set_insert, :map_put, :pool_insert, :collection_literal, :return_value],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :collection_mutation_visible_to_mir],
+    },
   }.freeze
 
   # Dimensions that are intentionally covered by the union of focused

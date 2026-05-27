@@ -331,6 +331,8 @@ class MIRLowering
       return place_owned_try_catch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
     when :owned_alloc_mismatch
       return place_owned_alloc_mismatch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc), T.must(plan.source_alloc))
+    when :owned_copy
+      return place_owned_branch_value_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
     when :string_or
       return place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
     when :string
@@ -353,7 +355,13 @@ class MIRLowering
     if source_alloc && source_alloc != dest_alloc && ownership_bearing_type?(ti)
       return DestinationPlacementPlan.new(action: :owned_alloc_mismatch, type_info: ti, dest_alloc: dest_alloc, source_alloc: source_alloc)
     end
+    return DestinationPlacementPlan.new(action: :owned_copy, type_info: ti, dest_alloc: dest_alloc) if
+      ownership_bearing_type?(ti) &&
+      borrowed_destination_source?(ast_node) &&
+      !owner_transfer_source?(ast_node) &&
+      !heap_owned_result?(mir, ast_node)
     return DestinationPlacementPlan.new(action: :string_or, type_info: ti, dest_alloc: dest_alloc) if ti.string? && or_binary?(ast_node)
+    return destination_keep_plan(dest_alloc) if ti.symbol?
     return DestinationPlacementPlan.new(action: :string, type_info: ti, dest_alloc: dest_alloc) if ti.string?
 
     destination_keep_plan(dest_alloc)
@@ -373,6 +381,25 @@ class MIRLowering
   sig { params(node: T.untyped).returns(T::Boolean) }
   def or_binary?(node)
     node.is_a?(AST::BinaryOp) && (node.op == :OR_RESCUE || node.op == :OR)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def borrowed_destination_source?(node)
+    return false unless node
+    return borrowed_destination_source?(node.left) if or_binary?(node)
+    return false if node.respond_to?(:container_borrow) && node.container_borrow
+    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def owner_transfer_source?(node)
+    return false unless node
+    return owner_transfer_source?(node.left) if or_binary?(node)
+    return true if AST.moved?(node)
+    return true if node.respond_to?(:indirect_field) && node.indirect_field == true
+    return Type.indirect_type?(node.full_type!(context: "owner transfer source")) if node.is_a?(AST::GetField)
+
+    false
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }

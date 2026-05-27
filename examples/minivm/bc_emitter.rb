@@ -885,10 +885,12 @@ class BcEmitter
   def semantic_ast_nodes(body)
     body.reject { |n|
       # Old-style MIR nodes inserted by MIRPass into the AST
-      n.is_a?(MIR::Alloc) || n.is_a?(MIR::Drop) ||
+      n.is_a?(MIR::AllocMark) || n.is_a?(MIR::Drop) ||
       n.is_a?(MIR::SuppressCleanup) ||
-      n.is_a?(MIR::Return) || n.is_a?(MIR::ReassignCleanup) ||
-      n.is_a?(MIR::FieldCleanup) ||
+      n.is_a?(MIR::Return) || n.is_a?(MIR::ReturnMark) ||
+      n.is_a?(MIR::ReassignCleanup) || n.is_a?(MIR::ReassignMark) ||
+      n.is_a?(MIR::FieldCleanup) || n.is_a?(MIR::FieldCleanupMark) ||
+      n.is_a?(MIR::Cleanup) || n.is_a?(MIR::ErrCleanup) ||
       (n.is_a?(AST::VarDecl) && n.name.to_s =~ /\A__hoist_\d+\z/) ||
       # Bare returns with no value
       (n.is_a?(AST::ReturnNode) && n.value.nil?)
@@ -5722,9 +5724,11 @@ class BcEmitter
   def compile_body_from_ast(stmts)
     stmts = stmts.reject { |s| (s.is_a?(AST::ReturnNode) && s.value.nil?) }
     stmts.reject! { |s|
-      s.is_a?(MIR::Alloc) || s.is_a?(MIR::Drop) || s.is_a?(MIR::SuppressCleanup) ||
-      s.is_a?(MIR::Return) || s.is_a?(MIR::ReassignCleanup) ||
-      s.is_a?(MIR::FieldCleanup)
+      s.is_a?(MIR::AllocMark) || s.is_a?(MIR::Drop) || s.is_a?(MIR::SuppressCleanup) ||
+      s.is_a?(MIR::Return) || s.is_a?(MIR::ReturnMark) ||
+      s.is_a?(MIR::ReassignCleanup) || s.is_a?(MIR::ReassignMark) ||
+      s.is_a?(MIR::FieldCleanup) || s.is_a?(MIR::FieldCleanupMark) ||
+      s.is_a?(MIR::Cleanup) || s.is_a?(MIR::ErrCleanup)
     }
     stmts.each do |stmt|
       compile_ast_stmt(stmt)

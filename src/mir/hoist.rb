@@ -111,15 +111,16 @@ module Hoist
     # escaping value is anonymous and allocating, give it a binding first.
     case stmt
     when AST::ReturnNode
+      return unless stmt.value
       expected = Type.from_node(return_type)
       expected = expected.success_type if expected
-      value_type = Type.from_node(stmt.value)
+      value_type = Type.from_node!(stmt.value, context: "return value hoist")
       expected = value_type if value_type&.collection?
       if stmt.value.is_a?(AST::BinaryOp) && (stmt.value.op == :OR || stmt.value.op == :OR_RESCUE)
-        right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node(stmt.value.right)
+        right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node!(stmt.value.right, context: "return OR right hoist")
         expected = right_type if right_type&.collection?
       end
-      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected) if stmt.value
+      stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected)
     when AST::YieldExpr
       stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
     when AST::Assignment
@@ -144,6 +145,7 @@ module Hoist
   def allocating?(node, schema_lookup)
     return false unless node
     return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
+    return false if ast_access_path?(node)
     return true if concat?(node) || node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
 
     return false unless node.is_a?(AST::Locatable)

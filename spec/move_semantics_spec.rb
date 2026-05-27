@@ -189,8 +189,8 @@ RSpec.describe "Move semantics for heap-owning types" do
       body = fn_body(zig, "clearMain")
       # @list is implicit-copied for TAKES: source list is NOT consumed
       # (its defer still fires), and plain Int64 slice data can remain frame-backed.
-      expect(body).to include("CheatLib.dupeValue([]i64")
-      expect(body).to include("rt.frameAlloc()")
+      expect(body).to include("CheatLib.dupeValue(std.ArrayListUnmanaged(i64)")
+      expect(body).to include("rt.heapAlloc()")
       expect(body).not_to include("vals_moved")
     end
   end

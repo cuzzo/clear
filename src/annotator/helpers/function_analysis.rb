@@ -423,7 +423,7 @@ module FunctionAnalysis
         # `@shared` / `@multiowned` upgrade — irrelevant when the
         # consumer's parameter is plain affine and won't accept a
         # refcounted handle anyway.
-        move_if_not_copyable!(
+        move_if_takes_ownership!(
           inner_node,
           action: is_give ? :give : :takes,
           consumer_param_type: param.type,

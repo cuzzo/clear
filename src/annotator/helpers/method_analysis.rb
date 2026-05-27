@@ -143,10 +143,7 @@ module MethodAnalysis
       defn.emit.takes_args.each do |arg_idx|
         arg_node = node.args[arg_idx]
         next unless arg_node
-        if arg_node.is_a?(AST::Identifier)
-          og_set_moved(arg_node.name, at_token: arg_node.token, action: :takes)
-        end
-        arg_node.was_moved = true
+        move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
       end
     end
 

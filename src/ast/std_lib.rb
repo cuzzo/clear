@@ -1092,8 +1092,8 @@ SET_METHODS = T.let({
     bc: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
-    borrows: :all,  # set dupes strings internally; caller retains ownership
-    args: [:"Any[]", :Any],
+    takes_args: [0],
+    args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type

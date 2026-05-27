@@ -1065,13 +1065,15 @@ module CapabilityHelper
       # the capture might not be registered yet. We don't gate on that;
       # we record every wrapped outer-scope Identifier and let the
       # classifier filter against the eventual captures dict.
-      if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_moved << nm unless locally_bound.include?(nm)
+      if node.is_a?(AST::MoveNode)
+        root = AST.root_identifier(node.value) rescue nil
+        nm = root&.name&.to_s
+        result.site_moved << nm if nm && !locally_bound.include?(nm)
       end
-      if (node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)) && node.value.is_a?(AST::Identifier)
-        nm = node.value.name.to_s
-        result.site_copied << nm unless locally_bound.include?(nm)
+      if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+        root = AST.root_identifier(node.value) rescue nil
+        nm = root&.name&.to_s
+        result.site_copied << nm if nm && !locally_bound.include?(nm)
       end
       # A CopyNode can also carry `was_moved` when its copied result is
       # consumed by a TAKES call. That consumes the copy, not the source

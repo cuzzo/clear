@@ -727,7 +727,7 @@ RSpec.describe SemanticAnnotator do
 
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Cache(CheatLib.Arc(CheatLib.Locked(Box)))")
-        expect(out).to include("get(CheatLib.Arc(CheatLib.Locked(Box)), rt, c)")
+        expect(out).to include("get(CheatLib.Arc(CheatLib.Locked(Box)), c)")
         expect(out).to include("set(CheatLib.Arc(CheatLib.Locked(Box)), rt, &c, got)")
         expect(out).to include("CheatLib.arcRetain(CheatLib.Locked(Box), b)")
       end

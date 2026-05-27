@@ -3304,8 +3304,12 @@ private
 
     if op
       # Registry-driven: type and ownership from INDEX_OPS
-      stamp_type!(node, IntrinsicRegistry.to_return_def(op[:return_type])
-                                        .resolve(target_type_info, [], self))
+      result_type = IntrinsicRegistry.to_return_def(op[:return_type])
+                                    .resolve(target_type_info, [], self)
+      if node.target.is_a?(AST::OptionalUnwrap) && !result_type.optional?
+        result_type = Type.new(:"?#{result_type.resolved}")
+      end
+      stamp_type!(node, result_type)
       node.container_borrow = true if op[:container_borrow]
 
       # Validate key types for maps
@@ -3445,6 +3449,9 @@ private
           field_type = field_type.dup
           field_type.layout = nil
         end
+      end
+      if node.target.is_a?(AST::OptionalUnwrap) && field_type.is_a?(Type) && !field_type.optional?
+        field_type = Type.new(:"?#{field_type.resolved}")
       end
       stamp_type!(node, field_type)
     elsif struct_schema && node.token
@@ -6638,6 +6645,25 @@ private
       if consumer_param_type && existing.move_consumer_param_type.nil?
         existing.move_consumer_param_type = consumer_param_type
       end
+      node.was_moved = true
+      return
+    end
+    og_set_moved(node.name, at_token: node.token, action: action, consumer_param_type: consumer_param_type)
+    node.was_moved = true
+  end
+
+  sig { params(node: T.untyped, action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Boolean)) }
+  def move_if_takes_ownership!(node, action: :takes, consumer_param_type: nil)
+    return unless node.is_a?(AST::Identifier)
+    vt = node.full_type!(context: "TAKES ownership candidate")
+    vt = Type.new(vt) if vt && !vt.is_a?(Type)
+    return unless vt.is_a?(Type)
+    return if current_fn_ctx&.type_params&.include?(vt.resolved)
+    return if vt.primitive? || vt.id_handle?
+
+    existing = @og&.nodes&.[](node.name)
+    if existing && existing.moved? && existing.move_action && existing.move_action != :move
+      existing.move_consumer_param_type = consumer_param_type if consumer_param_type && existing.move_consumer_param_type.nil?
       node.was_moved = true
       return
     end

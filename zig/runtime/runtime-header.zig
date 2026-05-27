@@ -3174,18 +3174,17 @@ pub const CheatLib = struct {
 
         // 6. Set(U)
         if (comptime isSetType(T)) {
-            // Release ref-counted elements
+            // Release owned keys before freeing the backing map.
             const InnerMap = @TypeOf(ptr.inner);
             const inner_info = @typeInfo(InnerMap);
             if (inner_info == .@"struct") {
-                // Iterate keys to release RC elements or free duped strings
                 var it = ptr.inner.keyIterator();
                 while (it.next()) |key_ptr| {
                     const KeyT = @TypeOf(key_ptr.*);
                     if (comptime refInnerType(KeyT) != null) {
                         releaseOne(KeyT, alloc, key_ptr.*);
-                    } else if (KeyT == []const u8) {
-                        alloc.free(key_ptr.*);
+                    } else if (comptime needsCleanup(KeyT)) {
+                        cleanup(KeyT, alloc, key_ptr);
                     }
                 }
             }
@@ -3461,15 +3460,22 @@ pub const CheatLib = struct {
             return result;
         }
 
-        // Set(T): allocate fresh and re-insert each element. Set.insert dupes
-        // string keys internally, so this is correct for both string and
-        // non-string element shapes. (#42 -- COPY of @set into TAKES.)
+        // Set(T): allocate fresh storage and recursively copy owned elements.
+        // insert() takes ownership of its value, so COPY must not re-use
+        // pointers owned by the source set.
         if (comptime isSetType(T)) {
             var result: T = .{};
             errdefer result.deinit(alloc);
             var src_mut = value;
             var it = src_mut.keyIterator();
-            while (it.next()) |k| try result.insert(alloc, k.*);
+            while (it.next()) |k| {
+                const ElemT = @TypeOf(k.*);
+                const copied = if (comptime needsCleanup(ElemT))
+                    try dupeValue(ElemT, k.*, alloc)
+                else
+                    k.*;
+                try result.insert(alloc, copied);
+            }
             return result;
         }
 

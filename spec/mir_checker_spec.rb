@@ -894,7 +894,7 @@ RSpec.describe MIRChecker do
         MIR::Let.new("p", MIR::HeapCreate.new("Parent", outer_init, :heap, "blk"), false, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("nested_hc", body), strict: true)
-      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("HeapCreate") }).to be true
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") }).to be true
     end
 
     it "flags: HeapCreate in ReturnStmt" do

@@ -419,9 +419,12 @@ module MIRLoweringExpressions
       label = "__collect_blk_#{@block_expr_counter}"
       collect_var = "__collect_acc_#{@block_expr_counter}"
       val_var = "__collect_val_#{@block_expr_counter}"
+      collect_cleanup = CleanupEntry.build(:uniform, alloc: :heap,
+        has_moved_guard: false, zig_type: acc_zig)
       return MIR::BlockExpr.new(label, [
         MIR::Let.new(collect_var, left, false,
           acc_zig, nil),
+        MIR::Cleanup.new(collect_var, collect_cleanup),
         # Let Zig infer the View type — observable terminals expose
         # different View shapes per terminal (scalars expose T directly;
         # DISTINCT exposes StreamSetSnapshot(T); etc.). Hardcoding
@@ -435,16 +438,6 @@ module MIRLoweringExpressions
             call
           end,
           false, collect_type.zig_type, nil),
-        MIR::ExprStmt.new(
-          MIR::MethodCall.new(
-            MIR::Ident.new(collect_var),
-            "destroy",
-            [MIR::AllocatorRef.new(:heap)],
-            false,
-            MIR::CallableContract.no_ownership(1)
-          ),
-          false
-        ),
         MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
       ])
     end
@@ -864,6 +857,24 @@ module MIRLoweringExpressions
     target = lower(node.target)
     index = lower(node.index)
     ti = Type.from_node!(node.target, context: "index target")
+
+    if node.target.is_a?(AST::OptionalUnwrap)
+      inner_mir = lower(node.target.target)
+      unwrapped = MIR::Ident.new("_r")
+      value = if ti.set_collection?
+        elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
+        emit_builtin(:setMemberGet, [unwrapped, index, MIR::Ident.new(elem_zig)])
+      elsif ti && direct_indexable_collection_type?(ti)
+        direct_index_get(unwrapped, index, node.target, ti) || begin
+          builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
+          emit_builtin(builtin, [unwrapped, index])
+        end
+      else
+        builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
+        emit_builtin(builtin, [unwrapped, index])
+      end
+      return MIR::IfOptional.new(inner_mir, "_r", value, MIR::Lit.new("null"))
+    end
 
     # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
     # Zig only -- BC has no Arc-wrapping (values are uniformly value-typed
@@ -1575,16 +1586,17 @@ module MIRLoweringExpressions
     if ti.any_rc?
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
+    elsif ti.optional? && ti.needs_cleanup?(@schema_lookup)
+      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
-    elsif sink_type && dst_ti.direct_indexable_collection? && !dst_ti.string?
-      MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
+    elsif sink_type && ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
+      copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
+      MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif dst_ti.collection? && !dst_ti.string?
       MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
     elsif @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
-    elsif ti.optional? && ti.needs_cleanup?(@schema_lookup)
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.any_sync?
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
     elsif ti.collection_value?
@@ -1598,14 +1610,14 @@ module MIRLoweringExpressions
 
   sig { params(source: T.untyped).returns(Type) }
   def copy_source_type_info(source)
+    node_type = Type.from_node!(source, context: "COPY value")
+    return node_type unless node_type.untyped?
+
     if source.is_a?(AST::GetIndex)
-      target_ti = Type.from_node(source.target)
-      elem = target_ti&.element_type
+      target_ti = Type.from_node!(source.target, context: "COPY index target")
+      elem = target_ti.element_type
       return elem.is_a?(Type) ? elem : Type.new(elem) if elem
     end
-
-    node_type = Type.from_node(source)
-    return node_type if node_type && !node_type.untyped?
 
     sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
       source.symbol.type
@@ -1613,6 +1625,15 @@ module MIRLoweringExpressions
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
 
     Type.from_node!(source, context: "COPY value")
+  end
+
+  sig { params(source: T.untyped, source_type: Type, dest_type: Type).returns(String) }
+  def copy_source_zig_type(source, source_type, dest_type)
+    if source_type.non_string_array? && source.is_a?(AST::Identifier) && source.symbol&.is_param
+      return source_type.zig_type(is_param: true)
+    end
+
+    source_type.non_string_array? && dest_type.collection? ? source_type.zig_type : dest_type.zig_type
   end
 
   sig { params(node: AST::CloneNode).returns(MIR::RcRetain) }

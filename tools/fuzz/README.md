@@ -110,7 +110,7 @@ expected hard error is absent.
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
 | `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
-| `mir_lowering_shape_matrix` | 82          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, and loop locals. |
+| `mir_lowering_shape_matrix` | 87          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, loop locals, and node dispatch shapes. |
 | `stream_into_boundary`      | 48 (+18 in_dev) | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 18           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
 | `access_gate`               | 50              | WITH-alias escape rules — 5 alias-perm tuples × 10 patterns |
@@ -131,15 +131,18 @@ expected hard error is absent.
 | `thunk_recursion_matrix`    | 34              | Direct and mutual `REENTRANT:THUNK` recursion across return/argument shapes. |
 | `fsm_suspension_matrix`     | 28              | FSM splitter shapes: NEXT, WHILE/FOR/FOREACH, IF, WITH, and BG STREAM YIELD. |
 | `pipeline_source_shape_matrix` | 33           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
-| `call_ownership_contract_matrix` | 28         | Normal calls, TAKES, owned returns, receiver mutation, BG calls, and pipeline call contracts. |
+| `call_ownership_contract_matrix` | 40         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
-| `mir_checker_negative_matrix` | 29            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig allocator contracts, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
+| `mir_checker_negative_matrix` | 45            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, borrow cleanup, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
 | `or_heap_destination_matrix` | 96             | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations. |
 | `owned_sink_destination_matrix` | 108         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks. |
 | `union_lowering_cleanup_matrix` | 36         | Union helper lowering and recursive cleanup for string/list/map/inline-struct/nested payload variants. |
 | `builtin_emit_matrix`       | 16              | Source-level builtin emission through strings, collections, union active tags, and pipeline terminals. |
-| `bg_capture_transfer_matrix` | 54             | BG / DO / BG STREAM capture-transfer roots across borrow/copy/give/call/nested/returned-handle shapes. |
+| `bg_capture_transfer_matrix` | 72             | BG / DO / BG STREAM capture-transfer roots across borrow/copy/give/call/nested/field-copy/list-index/returned-handle shapes. |
 | `cast_lowering_matrix`      | 30              | Annotation-driven MIR cast/coercion lowering across var, return, call, list, and branch contexts. |
+| `hoist_edge_matrix`          | 32              | Nested allocating expressions in return, local, field, list, call, branch, OR fallback, and loop contexts. |
+| `access_path_expression_matrix` | 30          | Field/index/optional/map/nested access paths through local, return, call, branch, and loop contexts. |
+| `collection_sink_escape_matrix` | 18          | Owned string/struct/union values stored into list/set/map/pool and collection-literal sinks. |
 
 ### `stream_into_boundary` matrix
 

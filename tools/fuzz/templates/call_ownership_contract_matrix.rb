@@ -8,7 +8,8 @@
 CALL_OWNERSHIP_CELLS = []
 
 [:string, :list, :struct_string, :nested_list].each do |shape|
-  [:borrow_arg, :copy_arg, :give_takes, :return_owned, :return_or_fallback,
+  [:borrow_arg, :copy_arg, :bare_takes, :copy_takes, :give_takes,
+   :return_owned, :return_or_fallback, :fallible_arg,
    :receiver_mutation, :bg_call, :pipeline_call].each do |mode|
     next if mode == :receiver_mutation && shape == :string
     next if mode == :pipeline_call && shape != :string
@@ -90,6 +91,19 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       END
     CHT
 
+  when :bare_takes, :copy_takes
+    arg = p[:mode] == :copy_takes ? "COPY v" : "v"
+    <<~CHT
+      #{pre}#{helper_list}
+      FN consume(TAKES x: #{ty}) RETURNS Int64 -> RETURN #{com_len_expr(p[:shape])}; END
+
+      FN main() RETURNS !Void ->
+        #{com_decl(p[:shape])}
+        ASSERT consume(#{arg}) == #{p[:shape] == :string || p[:shape] == :struct_string ? 3 : 1}_i64, "call TAKES modality";
+        RETURN;
+      END
+    CHT
+
   when :give_takes
     <<~CHT
       #{pre}#{helper_list}
@@ -133,6 +147,27 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       FN main() RETURNS !Void ->
         v: #{ty} = maybe(FALSE) OR #{fallback};
         ASSERT #{com_len_expr(p[:shape], "v")} >= 1_i64, "call return fallback";
+        RETURN;
+      END
+    CHT
+
+  when :fallible_arg
+    fallback = case p[:shape]
+               when :string then 'COPY "fallback"'
+               when :list then "mkList() OR RAISE"
+               when :struct_string then 'Box{ name: COPY "fallback" }'
+               when :nested_list then "Nest{ items: mkList() OR RAISE }"
+               end
+    <<~CHT
+      #{pre}#{helper_list}
+      FN maybe(flag: Bool) RETURNS !#{ty} ->
+        IF flag THEN RETURN #{com_literal(p[:shape])}; END
+        RAISE "no";
+      END
+      FN observe(x: #{ty}) RETURNS Int64 -> RETURN #{com_len_expr(p[:shape])}; END
+
+      FN main() RETURNS !Void ->
+        ASSERT observe(maybe(FALSE) OR #{fallback}) >= 1_i64, "fallible call arg";
         RETURN;
       END
     CHT

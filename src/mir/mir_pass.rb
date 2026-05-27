@@ -235,11 +235,28 @@ class MIRPass
       true
     when AST::Assignment
       indexed_assignment_lowers_through_runtime?(node)
+    when AST::CopyNode, AST::CloneNode
+      copy_node_lowers_through_runtime?(node)
     when AST::WithBlock
       with_block_lowers_through_runtime?(node)
     else
       false
     end
+  end
+
+  sig { params(node: T.any(AST::CopyNode, AST::CloneNode)).returns(T::Boolean) }
+  def copy_node_lowers_through_runtime?(node)
+    ti = Type.from_node!(node, context: "COPY runtime requirement").success_type
+    return false if ti.primitive? || ti.id_handle?
+
+    ti.string? ||
+      ti.heap_ptr? ||
+      ti.collection_value? ||
+      ti.collection? ||
+      ti.any_sync? ||
+      ti.optional? && ti.needs_cleanup?(@schema_lookup) ||
+      ti.needs_cleanup?(@schema_lookup) ||
+      ti.recursive_cleanup_shape?(@schema_lookup)
   end
 
   sig { params(node: AST::Assignment).returns(T::Boolean) }
@@ -330,7 +347,10 @@ class MIRPass
 
     return true if node.is_a?(AST::StringConcat)
     return true if node.is_a?(AST::BinaryOp) && node.string_concat == true
-    !!(ti&.string? && !node.is_a?(AST::Literal))
+    !!(ti && !node.is_a?(AST::Literal) &&
+       (ti.string? || ti.heap_ptr? || ti.collection_value? ||
+        ti.collection? || ti.needs_cleanup?(@schema_lookup) ||
+        ti.recursive_cleanup_shape?(@schema_lookup)))
   end
 
   sig { params(expr: T.untyped).returns(T.untyped) }

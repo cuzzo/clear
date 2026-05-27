@@ -626,9 +626,11 @@ class PipelineHost
     T.unsafe(@lowering).instance_variable_get(:@schema_lookup)
   end
 
-  sig { params(value: T.untyped, zig_type: String, alloc: Symbol).returns(MIR::DeepCopy) }
-  def borrowed_pipeline_value(value, zig_type, alloc)
-    MIR::DeepCopy.new(value, zig_type, nil, :full_value, alloc)
+  sig { params(value: T.untyped, type_info: Type, alloc: Symbol).returns(T.untyped) }
+  def borrowed_pipeline_value(value, type_info, alloc)
+    return value unless type_info.recursive_cleanup_shape?(pipeline_schema_lookup) || type_info.heap_ptr?
+
+    MIR::DeepCopy.new(value, type_info.zig_type, nil, :full_value, alloc)
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }
@@ -1227,7 +1229,7 @@ class PipelineHost
           MIR::Let.new("matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
             append_owned_value_stmt("res_list", alloc,
-              borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc))
+              borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -1249,10 +1251,8 @@ class PipelineHost
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("val", expr_mir, false, nil, nil),
-          MIR::ExprStmt.new(MIR::MethodCall.new(
-            MIR::Ident.new("res_list"), "append",
-            [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")], true,
-            MIR::CallableContract.no_ownership(2)), nil)
+          append_owned_value_stmt("res_list", alloc,
+            borrowed_pipeline_value(MIR::Ident.new("val"), Type.new(res_type), alloc))
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -1314,7 +1314,7 @@ class PipelineHost
           "it",
           [
             append_owned_value_stmt("lim_result", alloc,
-              borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc))
+              borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
           ],
           nil
         ),
@@ -1340,7 +1340,7 @@ class PipelineHost
           MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
             [MIR::BreakStmt.new(nil, nil)], nil),
           append_owned_value_stmt("res_list", alloc,
-            borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc))
+            borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -1833,7 +1833,8 @@ class PipelineHost
   def lower_order_by(site, order_node)
     list_node = site.list
     smooth_node = site.options
-    elem_zig = transpile_type(list_node.full_type!.element_type.resolved.to_s)
+    elem_type = list_node.full_type!.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
     key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
     key_b = with_pipeline_context(placeholder: "b") { visit_mir(order_node.expression) }
@@ -1844,7 +1845,7 @@ class PipelineHost
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &#{result_name};"),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           append_owned_value_stmt(result_name, alloc,
-            borrowed_pipeline_value(MIR::Ident.new("it"), elem_zig, alloc))
+            borrowed_pipeline_value(MIR::Ident.new("it"), Type.new(elem_type), alloc))
         ], nil),
         MIR::Sort.new(elem_zig,
           MIR::FieldGet.new(MIR::Ident.new(result_name), "items"),
