@@ -778,12 +778,6 @@ module EscapeAnalysis
     ti = ti.value_payload_type
     return false unless ti
     return false if ti.primitive? || ti.void? || ti.any?
-    if expr.is_a?(AST::Identifier) && expr.symbol
-      symbol = expr.symbol
-      decl = symbol.respond_to?(:reg) ? symbol.reg : nil
-      mutated = decl.respond_to?(:var_mutated) && decl.var_mutated == true
-      return false if symbol&.rodata_provenance? && !mutated
-    end
     if expr.is_a?(AST::Identifier) && symbol_heap?(expr.symbol)
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(schema_lookup)
     end

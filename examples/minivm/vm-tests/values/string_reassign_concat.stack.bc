@@ -14,9 +14,7 @@ instructions:
 0022 LOAD_SLOT         2
 0024 STORE_SLOT        0
 0026 LOAD_SLOT         0
-0028 STORE_SLOT        3
-0030 LOAD_SLOT         3
-0032 HALT
+0028 HALT
 consts:
 S:0:
 S:4:SET=

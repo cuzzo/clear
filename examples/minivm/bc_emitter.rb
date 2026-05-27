@@ -13,6 +13,29 @@ require_relative "../../src/mir/mir"
 class BcEmitter
   class Unimplemented < StandardError; end
 
+  BC_STRUCTURAL_NOOP_MIR_NODES = [
+    MIR::AllocMark,
+    MIR::ReturnMark,
+    MIR::ReassignMark,
+    MIR::TransferMark,
+    MIR::FieldCleanupMark,
+    MIR::OwnedCreate,
+    MIR::OwnedDestroy,
+    MIR::OwnedTransfer,
+    MIR::OwnedBorrow,
+    MIR::OwnedStore,
+    MIR::OwnedReturn,
+    MIR::Cleanup,
+    MIR::ErrCleanup,
+    MIR::FrameSave,
+    MIR::FrameRestore,
+    MIR::Noop,
+    MIR::Comment,
+    MIR::Suppress,
+    MIR::DeferStmt,
+    MIR::ErrDeferStmt,
+  ].freeze
+
   # Opcodes - must match interpreter exec! exactly.
   LOAD_CONST  = 0;  LOAD_NAME   = 1;  STORE_NAME  = 2;  POP         = 3
   ADD         = 4;  SUB         = 5;  MUL         = 6;  DIV         = 7
@@ -797,13 +820,10 @@ class BcEmitter
     @alloc_struct_hints ||= {}
     walk_for_alloc_marks(mir_body)
 
-    # Ownership-only MIR nodes (MoveMark) and synthetic hoisted temps
-    # (__hpt_N / __tmp_N Lets) have no AST counterpart -- the lowering
-    # inserts them for HPT lifting and ownership tracking. Compile them
-    # without consuming an AST stmt so the remaining MIR stmts still
-    # pair 1:1 with AST stmts.
+    # Synthetic hoisted temps have no AST counterpart. Compile them directly
+    # from MIR; the VM backend treats MIR as authoritative and uses AST only
+    # as optional compatibility context for legacy fallback paths.
     synthetic_only = ->(n) {
-      n.is_a?(MIR::MoveMark) ||
       (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp|hoist)_\d+\z/) ||
       # Lowering inserts `MIR::Let name=X init=Ident("_m_X")` at the top of
       # any helper fn body that has a MUTABLE param: it renames the param to
@@ -823,10 +843,7 @@ class BcEmitter
        n.expr.receiver.is_a?(MIR::Ident) &&
        n.expr.receiver.name.to_s == "_guard")
     }
-    mir_paired = mir_stmts.reject(&synthetic_only)
-    if mir_paired.length != ast_stmts.length
-      raise Unimplemented, "MIR/AST length mismatch (#{mir_paired.length} vs #{ast_stmts.length})"
-    end
+    ast_aligned = mir_stmts.reject(&synthetic_only).length == ast_stmts.length
 
     ast_cursor = 0
     mir_stmts.each do |mir_node|
@@ -836,7 +853,8 @@ class BcEmitter
         emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
         next
       end
-      ast_node = ast_stmts[ast_cursor]; ast_cursor += 1
+      ast_node = ast_aligned ? ast_stmts[ast_cursor] : nil
+      ast_cursor += 1 if ast_aligned
       compile_stmt(mir_node, ast_node)
       # Every top-level stmt should leave the vstack balanced. compile_stmt
       # leaves a type-stack entry per stmt; pop it and emit POP if the value
@@ -859,27 +877,23 @@ class BcEmitter
   end
 
   def skip_mir?(n)
-    n.is_a?(MIR::AllocMark)       || n.is_a?(MIR::ReturnMark)      ||
-    n.is_a?(MIR::ReassignMark)    || n.is_a?(MIR::TransferMark)     ||
-    n.is_a?(MIR::FieldCleanupMark) ||
-    n.is_a?(MIR::Cleanup)         || n.is_a?(MIR::ErrCleanup)       ||
+    bc_mir_node_role(n) == :structural_noop
+  end
+
+  def bc_mir_node_role(n)
+    return :structural_noop if BC_STRUCTURAL_NOOP_MIR_NODES.any? { |klass| n.is_a?(klass) }
     # MIR::MoveMark is NOT skipped — it emits MARK_MOVED to release the
     # slot's ownership so the subsequent slot-restore in BC_RET (and any
     # reassignment overwrite) doesn't double-free the heap payload that
     # was moved into the return value / callee argument.
-    n.is_a?(MIR::FrameSave)       || n.is_a?(MIR::FrameRestore)     ||
-    n.is_a?(MIR::Noop)            || n.is_a?(MIR::Comment)          ||
-    n.is_a?(MIR::Suppress)        || n.is_a?(MIR::DeferStmt)        ||
-    n.is_a?(MIR::ErrDeferStmt)    ||
-    # Pure discard expressions produced by the lowering for side-effect tracking
-    (n.is_a?(MIR::ExprStmt) && n.discard && n.expr.is_a?(MIR::Ident)) ||
-    # Zig-only boilerplate added by the lowering — no bytecode equivalent
-    (n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::Call) && n.expr.callee == "@setEvalBranchQuota") ||
-    (n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::MethodCall) &&
-     n.expr.receiver.is_a?(MIR::Ident) && n.expr.receiver.name.to_s == "rt" &&
-     n.expr.method.to_s == "checkYield") ||
-    # Void ReturnStmt (bare RETURN;) — AST already filters it; MIR should too
-    (n.is_a?(MIR::ReturnStmt) && (n.value.nil? || void_expr?(n.value)))
+    return :structural_noop if n.is_a?(MIR::ExprStmt) && n.discard && n.expr.is_a?(MIR::Ident)
+    return :structural_noop if n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::Call) && n.expr.callee == "@setEvalBranchQuota"
+    return :structural_noop if n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::MethodCall) &&
+      n.expr.receiver.is_a?(MIR::Ident) && n.expr.receiver.name.to_s == "rt" &&
+      n.expr.method.to_s == "checkYield"
+    return :structural_noop if n.is_a?(MIR::ReturnStmt) && (n.value.nil? || void_expr?(n.value))
+
+    :compiled
   end
 
   def semantic_ast_nodes(body)
@@ -941,6 +955,8 @@ class BcEmitter
       compile_for(mir_node, ast_node)
     when MIR::SwitchStmt
       compile_switch(mir_node, ast_node)
+    when MIR::UnionMatchStmt
+      compile_union_match(mir_node)
     when MIR::IfChain
       compile_if_chain(mir_node, ast_node)
     when MIR::ReturnStmt
@@ -2365,6 +2381,46 @@ class BcEmitter
     end.compact
     chain = MIR::IfChain.new(branches, node.default_body)
     compile_if_chain(chain, ast_node)
+  end
+
+  def compile_union_match(node)
+    end_jumps = []
+    node.arms.each do |arm|
+      pattern = arm[:pattern].to_s.sub(/\A\./, "")
+      compile_expr_to_value(node.subject)
+      pop_type
+      emit_op(NATIVE_CALL, NATIVES["car"], 1)
+      emit_op(LOAD_CONST, add_const(pattern))
+      emit_op(NATIVE_CALL, NATIVES["eq?"], 2)
+      push_type(:any)
+      pop_type
+      emit_op(JUMP_IF_FALSE)
+      skip_idx = @ops.length
+      emit_op(0)
+
+      payload = arm[:payload]
+      if payload
+        payload_name = payload.to_s
+        compile_expr_to_value(node.subject)
+        pop_type
+        emit_op(NATIVE_CALL, NATIVES["cdr"], 1)
+        alloc_slot(payload_name, :any) unless has_slot?(payload_name)
+        emit_op(STORE_SLOT, @slots[payload_name])
+        emit_op(POP)
+      end
+
+      emit_body_stmts(arm[:body])
+
+      emit_op(JUMP)
+      jump_idx = @ops.length
+      emit_op(0)
+      end_jumps << jump_idx
+      @ops[skip_idx] = @ops.length
+    end
+    default = node.default_body
+    emit_body_stmts(default) if default && !default.empty?
+    end_jumps.each { |idx| @ops[idx] = @ops.length }
+    push_type(:void)
   end
 
   # ================================================================

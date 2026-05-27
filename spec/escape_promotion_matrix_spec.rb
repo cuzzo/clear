@@ -13,7 +13,7 @@ require_relative "../src/backends/transpiler"
 #
 # Expected outcomes:
 #   :int                 - storage :stack, no cleanup (Copy)
-#   :string_rodata       - storage :rodata, no cleanup (literal, static)
+#   :string_rodata       - storage :heap (owned return binding), no cleanup
 #   :string_frame        - storage :heap (concat must promote), cleanup :heap
 #   :list_int            - storage :heap, cleanup :heap
 #   :list_string         - storage :heap, cleanup :heap
@@ -73,7 +73,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     ],
     string_rodata: [
       "FN make() RETURNS !String -> MUTABLE s = \"hi\"; RETURN s; END",
-      "s", :rodata, nil,
+      "s", :heap, nil,
     ],
     string_frame: [
       # Frame-string concat: the function-side decl stays :frame and
