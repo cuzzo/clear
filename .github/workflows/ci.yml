@@ -179,8 +179,8 @@ jobs:
           NO_COLOR: "1"
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
-  tools-fuzz:
-    name: tools/fuzz full matrix (gate, shard ${{ matrix.shard }}/5)
+  tools-fuzz-shard:
+    name: tools/fuzz shard ${{ matrix.shard }}/5
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -218,8 +218,22 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  tools-fuzz:
+    name: tools/fuzz full matrix (gate)
+    runs-on: ubuntu-latest
+    needs: tools-fuzz-shard
+    if: ${{ always() }}
+    steps:
+      - name: Require every fuzz shard
+        run: |
+          if [ "${{ needs.tools-fuzz-shard.result }}" != "success" ]; then
+            echo "tools/fuzz shard matrix result: ${{ needs.tools-fuzz-shard.result }}"
+            exit 1
+          fi
+          echo "all tools/fuzz shards passed"
+
   tools-fuzz-quarantined:
-    name: tools/fuzz quarantined (known-broken, non-blocking, shard ${{ matrix.shard }}/5)
+    name: tools/fuzz quarantined shard ${{ matrix.shard }}/5
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
