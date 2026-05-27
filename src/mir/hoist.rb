@@ -22,6 +22,20 @@ require_relative "placement"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
+module MIRHoistFacts
+  extend T::Sig
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def self.container_borrow_expr?(ast_node)
+    return false unless ast_node
+    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+      return container_borrow_expr?(ast_node.left)
+    end
+
+    ast_node.respond_to?(:container_borrow) && ast_node.container_borrow == true
+  end
+end
+
 module Hoist
   extend T::Sig
   module_function
@@ -166,23 +180,7 @@ module Hoist
   # insert the temp into the wrong scope.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def each_method_call(node, &blk)
-    return if node.nil? || node.is_a?(Array)
-    return unless node.is_a?(Struct)
-    # Separate frames -- their bodies are walked independently.
-    return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
-              node.is_a?(AST::DoBlock)
-    blk.call(node) if node.is_a?(AST::MethodCall)
-    # A body-bearing control-flow node: walk only its condition/subject
-    # expressions, never its statement bodies.
-    children = non_body_exprs(node) || node.to_a
-    children.each do |child|
-      case child
-      when Array then child.each { |c| each_method_call(c, &blk) }
-      when Hash  then child.each_value { |v| each_method_call(v, &blk) }
-      else each_method_call(child, &blk)
-      end
-    end
+    each_call_like(node, ->(candidate) { candidate.is_a?(AST::MethodCall) }, &blk)
   end
 
   # Yield every call reachable inside one statement's own expressions. This
@@ -190,19 +188,44 @@ module Hoist
   # named bindings before escape/cleanup placement runs.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def each_call(node, &blk)
+    each_call_like(node, ->(candidate) { candidate.is_a?(AST::FuncCall) || candidate.is_a?(AST::MethodCall) }, &blk)
+  end
+
+  sig do
+    params(
+      node: T.untyped,
+      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
+      blk: T.proc.params(arg0: T.untyped).void,
+    ).void
+  end
+  def each_call_like(node, matches, &blk)
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
+    # Separate frames -- their bodies are walked independently.
     return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
               node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
               node.is_a?(AST::DoBlock)
-    blk.call(node) if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+    blk.call(node) if matches.call(node)
+    # A body-bearing control-flow node: walk only its condition/subject
+    # expressions, never its statement bodies.
     children = non_body_exprs(node) || node.to_a
     children.each do |child|
-      case child
-      when Array then child.each { |c| each_call(c, &blk) }
-      when Hash  then child.each_value { |v| each_call(v, &blk) }
-      else each_call(child, &blk)
-      end
+      each_call_like_child(child, matches, &blk)
+    end
+  end
+
+  sig do
+    params(
+      child: T.untyped,
+      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
+      blk: T.proc.params(arg0: T.untyped).void,
+    ).void
+  end
+  def each_call_like_child(child, matches, &blk)
+    case child
+    when Array then child.each { |c| each_call_like(c, matches, &blk) }
+    when Hash  then child.each_value { |v| each_call_like(v, matches, &blk) }
+    else each_call_like(child, matches, &blk)
     end
   end
 
@@ -326,17 +349,7 @@ module Hoist
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def ast_container_borrow_expr?(ast_node)
-    return false unless ast_node
-    if ast_node.is_a?(AST::GetIndex)
-      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
-      return ti.indexed_container_borrow?
-    end
-    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
-      return ast_container_borrow_expr?(ast_node.left)
-    end
-    false
-  rescue StandardError
-    false
+    MIRHoistFacts.container_borrow_expr?(ast_node)
   end
 
   sig { params(ast_node: T.untyped, moved: T::Boolean).returns(T::Boolean) }
@@ -517,41 +530,6 @@ module MIRHoistLowering
   sig { params(value: T.untyped).returns(T::Boolean) }
   def mir_expr_child?(value)
     value.respond_to?(:expr?) && value.expr?
-  end
-
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def ownership_borrow_boundary?(node)
-    node.is_a?(MIR::Call) ||
-      node.is_a?(MIR::TailCall) ||
-      node.is_a?(MIR::MethodCall) ||
-      node.is_a?(MIR::FieldGet) ||
-      node.is_a?(MIR::IndexGet) ||
-      node.is_a?(MIR::BinOp) ||
-      node.is_a?(MIR::UnaryOp) ||
-      node.is_a?(MIR::AddressOf) ||
-      node.is_a?(MIR::Deref) ||
-      node.is_a?(MIR::SliceExpr) ||
-      node.is_a?(MIR::IfOptional) ||
-      node.is_a?(MIR::TryExpr) ||
-      node.is_a?(MIR::ListItems) ||
-      node.is_a?(MIR::ListLength) ||
-      node.is_a?(MIR::HasField) ||
-      node.is_a?(MIR::DupeSlice) ||
-      node.is_a?(MIR::OwnedSlice) ||
-      node.is_a?(MIR::ConcatStr) ||
-      node.is_a?(MIR::RangeLit) ||
-      node.is_a?(MIR::DeepCopy) ||
-      node.is_a?(MIR::RcRetain) ||
-      node.is_a?(MIR::RcDowngrade) ||
-      node.is_a?(MIR::WeakUpgrade) ||
-      node.is_a?(MIR::LambdaExpr) ||
-      node.is_a?(MIR::Pipeline) ||
-      node.is_a?(MIR::InlineZig) ||
-      node.is_a?(MIR::RawZig) ||
-      node.is_a?(MIR::InlineBc) ||
-      node.is_a?(MIR::RawBc) ||
-      node.is_a?(MIR::ShardedMapGet) ||
-      node.is_a?(MIR::ShardedMapPut)
   end
 
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
@@ -966,24 +944,9 @@ module MIRHoistLowering
     end.compact
   end
 
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def container_borrow_expr?(ast_node)
-    return false unless ast_node
-    if ast_node.is_a?(AST::GetIndex)
-      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
-      return ti.indexed_container_borrow?
-    end
-    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
-      return container_borrow_expr?(ast_node.left)
-    end
-    false
-  rescue
-    false
-  end
-
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
   def copy_container_borrow_if_needed(expr, ast_node)
-    return expr unless container_borrow_expr?(ast_node)
+    return expr unless MIRHoistFacts.container_borrow_expr?(ast_node)
     return expr if mir_allocates?(expr)
 
     ti = Type.from_node!(ast_node, context: "container borrow copy")
@@ -1154,11 +1117,10 @@ module MIRHoistLowering
         local_names.include?(name.to_s) || transferred_names.include?(name.to_s)
       } : []
     else
-      return [] if ownership_borrow_boundary?(node)
       names = T.let([], T::Array[String])
-      return [] unless node.respond_to?(:child_exprs)
+      return [] unless node.respond_to?(:ownership_source_exprs)
 
-      node.child_exprs.each do |child|
+      node.ownership_source_exprs.each do |child|
         mir_ident_names(child).each { |name| names << name.to_s }
       end
       names.uniq

@@ -215,6 +215,8 @@ module MIR
     sig { returns(T::Array[Emittable]) }
     def child_exprs; []; end
     sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs; []; end
+    sig { returns(T::Array[Emittable]) }
     def top_level_alloc_exprs; []; end
     sig { returns(T::Array[BodySlot]) }
     def body_slots; []; end
@@ -1743,6 +1745,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       owned_effect_for_alloc(alloc)
@@ -1939,6 +1943,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       kind = own_fn ? :rc : :uniform
@@ -1958,6 +1964,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([source])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       owned_effect_for_alloc(alloc, cleanup_kind: :rc)
@@ -2009,6 +2017,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       OwnershipEffect.owned(alloc: :heap, cleanup_kind: :frozen)
@@ -2028,6 +2038,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([items])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       owned_effect_for_alloc(alloc)
@@ -2557,6 +2569,8 @@ module MIR
       end
       compact_child_exprs(values)
     end
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       effects = child_exprs.map { |child| child.respond_to?(:ownership_effect) ? child.ownership_effect : OwnershipEffect.none }
@@ -2576,6 +2590,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([items])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
   end
 
   # Slice expression.
@@ -2676,6 +2692,8 @@ module MIR
     #         :floatFromInt, :truncate, :enumFromInt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       expr.ownership_effect
@@ -2689,6 +2707,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       expr.ownership_effect
@@ -2713,6 +2733,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr, catch_body])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = expr.ownership_effect
@@ -2744,6 +2766,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr, fallback])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = expr.ownership_effect
@@ -2765,6 +2789,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([cond, then_val, else_val])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = compact_child_exprs([then_val, else_val])
   end
 
   # Optional-unwrap conditional expression.
@@ -2784,6 +2810,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([optional, then_expr, else_expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = compact_child_exprs([then_expr, else_expr])
     sig { returns(OwnershipEffect) }
     def ownership_effect
       left = then_expr.ownership_effect
@@ -2802,6 +2830,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
   end
 
   # Semantic union-variant payload access.
@@ -2898,6 +2928,8 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
   end
 
   # Range literal.
@@ -2940,6 +2972,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
       owned_effect_for_alloc(alloc)
