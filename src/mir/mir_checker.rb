@@ -449,6 +449,8 @@ class MIRChecker
          MIR::ReassignMark, MIR::FieldCleanupMark, MIR::ReturnMark
       # Legacy and fact nodes are validated by the ownership-fact passes.
       nil
+    when MIR::Panic
+      state.terminated = true
     when MIR::ReturnStmt
       return_reads = state.pending_return_transfers.dup
       linear_expr_consumed_names(stmt.value).each { |name| return_reads.add(name) }
@@ -463,19 +465,6 @@ class MIRChecker
       end
       state.pending_return_transfers.clear
       state.terminated = true
-    when MIR::Let
-      check_linear_expr_uses!(stmt.init, state)
-    when MIR::Set
-      check_linear_expr_uses!(stmt.target, state)
-      check_linear_expr_uses!(stmt.value, state)
-    when MIR::ReassignWithCleanup
-      check_linear_expr_uses!(stmt.value, state)
-    when MIR::ExprStmt
-      check_linear_expr_uses!(stmt.expr, state)
-    when MIR::AssertStmt
-      check_linear_expr_uses!(stmt.cond, state)
-    when MIR::DiscardOwned
-      check_linear_expr_uses!(stmt.expr, state)
     when MIR::BreakStmt
       block_reads = state.pending_block_transfers.dup
       linear_expr_consumed_names(stmt.value).each { |name| block_reads.add(name) }
@@ -489,6 +478,14 @@ class MIRChecker
           "TransferMark(:block_result) does not match the block break expression")
       end
       state.pending_block_transfers.clear
+    else
+      if stmt.body_slots.empty?
+        check_linear_expr_uses!(stmt, state)
+        return
+      end
+    end
+
+    case stmt
     when MIR::IfStmt
       check_linear_expr_uses!(stmt.cond, state)
       check_linear_branch_join!(stmt.then_body, stmt.else_body, state, "if")
@@ -527,40 +524,14 @@ class MIRChecker
       end
       states << linear_project_branch_state(check_linear_stmts!(stmt.default_body, state.copy), state, "if-chain")
       linear_merge_branch_states!(states, state, "if-chain")
-    when MIR::DeferStmt
-      check_linear_stmt!(stmt.body, state)
-    when MIR::ErrDeferStmt
-      check_linear_stmt!(stmt.body, state)
-    when MIR::BatchWindowPush
-      check_linear_expr_uses!(stmt.item_expr, state)
-      check_linear_expr_uses!(stmt.value_expr, state)
-    when MIR::BatchWindowFlush
-      check_linear_expr_uses!(stmt.value_expr, state)
-    when MIR::IndexInsert
-      check_linear_expr_uses!(stmt.map, state)
-      check_linear_expr_uses!(stmt.key_expr, state)
-      check_linear_expr_uses!(stmt.value_expr, state)
-    when MIR::ShardedMapPut
-      check_linear_expr_uses!(stmt.target, state)
-      check_linear_expr_uses!(stmt.key, state)
-      check_linear_expr_uses!(stmt.value, state)
-      check_linear_expr_uses!(stmt.shard_idx, state)
-      check_linear_expr_uses!(stmt.shard_key, state)
-    when MIR::Sort
-      check_linear_expr_uses!(stmt.items_expr, state)
-      check_linear_expr_uses!(stmt.key_a, state)
-      check_linear_expr_uses!(stmt.key_b, state)
-    when MIR::StreamYield
-      check_linear_expr_uses!(stmt.value, state)
+    when MIR::DeferStmt, MIR::ErrDeferStmt
+      if stmt.body.is_a?(Array)
+        check_linear_stmts!(stmt.body, state)
+      else
+        check_linear_stmt!(stmt.body, state)
+      end
     when MIR::StreamSpawn
       check_linear_stmts!(stmt.body, LinearOwnershipState.new)
-    when MIR::Pipeline
-      check_linear_expr_uses!(stmt.inner, state)
-    when MIR::RawBc
-      stmt.args&.each { |arg| check_linear_expr_uses!(arg, state) }
-      check_linear_expr_uses!(stmt, state)
-    when MIR::RawZig
-      check_linear_expr_uses!(stmt, state)
     when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
       inner = check_linear_stmts!(stmt.body, state.copy)
       linear_exit_scope!(state, inner, stmt.class.name.to_s)
@@ -592,8 +563,6 @@ class MIRChecker
     when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
       ctx = stmt.ctx_struct
       check_linear_stmts!(ctx.run_body, LinearOwnershipState.new) if ctx.respond_to?(:run_body)
-    when MIR::Panic
-      state.terminated = true
     when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
          MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
          MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,

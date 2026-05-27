@@ -62,6 +62,10 @@ stays testable, flagged `⚠dup?` to verify. Deviance is floored at the
 method value so precision never demotes an arm. A ranked candidate,
 not a verdict.
 
+Flay Type-2/Type-3 clone pressure flows through decomplex, not through
+SlopCop directly. SlopCop only correlates decomplex's published spans
+with dark arms.
+
 ## Not a verdict
 
 Categories are ranked candidates (Engler discipline). v0 precision

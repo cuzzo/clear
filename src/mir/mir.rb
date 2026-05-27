@@ -822,7 +822,10 @@ module MIR
   # No allocation; ownership of items unchanged.
   # Zig: std.mem.sort(T, items, {}, struct { fn lessThan(_, a, b) {...} });
   Sort = Struct.new(:elem_type, :items_expr, :key_a, :key_b) do
+    extend T::Sig
     include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([items_expr, key_a, key_b])
   end
 
   # Typed-slice extraction from a Struct-of-Arrays container.
@@ -3031,6 +3034,8 @@ module MIR
     include Stmt
     sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in expression position too
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs(args)
   end
 
   # Sharded HashMap put / get -- structural representation of a write/read

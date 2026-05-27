@@ -156,23 +156,11 @@ class MIRLowering
     end
   end
 
-  class OwnershipFinalizationState < T::Struct
+  class OwnershipFinalizationContext < T::Struct
     extend T::Sig
 
     const :inherited_alloc_names, T::Set[String]
-    const :inherited_guarded_names, T::Set[String]
-    const :guard_inherited_transfer, T.proc.params(name: String).returns(T::Boolean)
-    prop :out, T::Array[T.untyped]
-    prop :visible_alloc_names, T::Set[String]
-    prop :visible_guarded_names, T::Set[String]
-  end
-
-  class BodyAssemblyState < T::Struct
-    extend T::Sig
-
-    const :inherited_alloc_names, T::Set[String]
-    const :inherited_guarded_names, T::Set[String]
-    const :guard_inherited_transfer, T.proc.params(name: String).returns(T::Boolean)
+    const :parent, T.nilable(OwnershipFinalizationContext), default: nil
     prop :out, T::Array[T.untyped]
     prop :visible_alloc_names, T::Set[String]
     prop :visible_guarded_names, T::Set[String]
@@ -753,10 +741,9 @@ class MIRLowering
   def lower_body(stmts)
     return [] unless stmts
 
-    state = BodyAssemblyState.new(
+    state = OwnershipFinalizationContext.new(
       inherited_alloc_names: T.must(@lowered_alloc_names).dup,
-      inherited_guarded_names: T.must(@lowered_guarded_cleanup_names).dup,
-      guard_inherited_transfer: T.let(->(_name) { false }, T.proc.params(name: String).returns(T::Boolean)),
+      parent: nil,
       out: [],
       visible_alloc_names: T.must(@lowered_alloc_names).dup,
       visible_guarded_names: T.must(@lowered_guarded_cleanup_names).dup,
@@ -771,7 +758,7 @@ class MIRLowering
     state.out
   end
 
-  sig { params(state: BodyAssemblyState, packet: LoweredStmtPacket).void }
+  sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
   def append_pending_packet_nodes!(state, packet)
     packet.pending.compact.each do |node|
       append_ownership_finalized_node!(state, node, [node], nil, nil)
@@ -779,7 +766,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(state: BodyAssemblyState, packet: LoweredStmtPacket).void }
+  sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
   def append_lowered_statement_packet!(state, packet)
     if packet.ast_stmt.is_a?(AST::MoveNode)
       append_transfer_marks_to_body!(state, ownership_marks_for_transferred_temp(packet.mir), nil, nil)
@@ -804,7 +791,7 @@ class MIRLowering
 
   sig do
     params(
-      state: BodyAssemblyState,
+      state: OwnershipFinalizationContext,
       node: T.untyped,
       body: T::Array[T.untyped],
       line: T.nilable(Integer),
@@ -812,7 +799,7 @@ class MIRLowering
     ).void
   end
   def append_ownership_finalized_node!(state, node, body, line, col)
-    finalize_nested_mir_bodies!(node, state, state.visible_alloc_names, state.visible_guarded_names)
+    finalize_nested_mir_bodies!(node, state)
     stamp_source_line!(node, line, col)
     append_transfer_marks_to_body!(state, pre_terminator_transfer_marks(node, state.out, body), line, col)
     state.out << node
@@ -828,7 +815,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(state: BodyAssemblyState, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
+  sig { params(state: OwnershipFinalizationContext, marks: T::Array[T.untyped], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
     marks.each_with_index do |mark, idx|
       stamp_source_line!(mark, line, col)
@@ -921,7 +908,7 @@ class MIRLowering
     names
   end
 
-  sig { params(state: BodyAssemblyState, root: T.untyped).void }
+  sig { params(state: OwnershipFinalizationContext, root: T.untyped).void }
   def register_body_visible_names!(state, root)
     MIR.each_surface_node(root) do |node|
       name = ownership_source_name(node)
@@ -947,7 +934,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(state: OwnershipFinalizationState, root: T.untyped).void }
+  sig { params(state: OwnershipFinalizationContext, root: T.untyped).void }
   def register_ownership_finalization_visible_names!(state, root)
     alloc_names, guarded_names = visible_names_in_surface(root)
     state.visible_alloc_names.merge(alloc_names)
@@ -1007,10 +994,9 @@ class MIRLowering
   end
   def append_ownership_transfers_for_mir_body(body, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
     normalized = normalize_allocating_mir_body(body)
-    state = OwnershipFinalizationState.new(
+    state = OwnershipFinalizationContext.new(
       inherited_alloc_names: inherited_alloc_names,
-      inherited_guarded_names: inherited_guarded_names,
-      guard_inherited_transfer: T.let(->(_name) { false }, T.proc.params(name: String).returns(T::Boolean)),
+      parent: nil,
       out: [],
       visible_alloc_names: inherited_alloc_names.dup,
       visible_guarded_names: inherited_guarded_names.dup,
@@ -1026,15 +1012,14 @@ class MIRLowering
       body: T::Array[T.untyped],
       inherited_alloc_names: T::Set[String],
       inherited_guarded_names: T::Set[String],
-      guard_inherited_transfer: T.proc.params(name: String).returns(T::Boolean),
+      parent: OwnershipFinalizationContext,
     ).returns(T::Array[T.untyped])
   end
-  def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, guard_inherited_transfer)
+  def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, parent)
     normalized = normalize_allocating_mir_body(body)
-    state = OwnershipFinalizationState.new(
+    state = OwnershipFinalizationContext.new(
       inherited_alloc_names: inherited_alloc_names,
-      inherited_guarded_names: inherited_guarded_names,
-      guard_inherited_transfer: guard_inherited_transfer,
+      parent: parent,
       out: [],
       visible_alloc_names: inherited_alloc_names.dup,
       visible_guarded_names: inherited_guarded_names.dup,
@@ -1045,7 +1030,7 @@ class MIRLowering
     state.out
   end
 
-  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationState).void }
+  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
   def finalize_ownership_for_mir_node!(node, body, state)
     outer_alloc_names, outer_guarded_names = ownership_visibility_for(node, state)
     finalize_nested_mir_bodies!(node, state, outer_alloc_names, outer_guarded_names)
@@ -1064,7 +1049,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, state: T.any(BodyAssemblyState, OwnershipFinalizationState)).void }
+  sig { params(node: T.untyped, state: OwnershipFinalizationContext).void }
   def append_move_guard_for_transfer_mark!(node, state)
     return unless node.is_a?(MIR::TransferMark)
     return unless node.target == :owned_sink
@@ -1078,7 +1063,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, state: OwnershipFinalizationState).returns([T::Set[String], T::Set[String]]) }
+  sig { params(node: T.untyped, state: OwnershipFinalizationContext).returns([T::Set[String], T::Set[String]]) }
   def ownership_visibility_for(node, state)
     node_alloc_names, node_guarded_names = visible_names_in_surface(node)
     [
@@ -1087,7 +1072,7 @@ class MIRLowering
     ]
   end
 
-  sig { params(node: T.untyped, state: OwnershipFinalizationState).void }
+  sig { params(node: T.untyped, state: OwnershipFinalizationContext).void }
   def append_implicit_alloc_fact!(node, state)
     alloc_mark = implicit_alloc_mark_for_mir_node(node, state.out)
     return unless alloc_mark
@@ -1098,7 +1083,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationState, visible_alloc_names: T::Set[String]).void }
+  sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationContext, visible_alloc_names: T::Set[String]).void }
   def append_block_result_transfer!(node, body, state, visible_alloc_names)
     return unless node.is_a?(MIR::BreakStmt) && node.value.is_a?(MIR::Ident)
 
@@ -1110,7 +1095,7 @@ class MIRLowering
     nil
   end
 
-  sig { params(marks: T::Array[T.untyped], state: OwnershipFinalizationState).void }
+  sig { params(marks: T::Array[T.untyped], state: OwnershipFinalizationContext).void }
   def append_transfer_marks!(marks, state)
     marks.each do |mark|
       state.out << mark
@@ -1302,31 +1287,21 @@ class MIRLowering
   sig do
     params(
       node: MIR::Node,
-      parent_state: T.any(BodyAssemblyState, OwnershipFinalizationState),
+      parent_state: OwnershipFinalizationContext,
       inherited_alloc_names: T::Set[String],
       inherited_guarded_names: T::Set[String],
     ).void
   end
   def finalize_nested_mir_bodies!(node, parent_state, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
-    guard_inherited_transfer = T.let(->(name) do
-      guarded = ensure_transfer_cleanup_guard!(parent_state.out, name)
-      if guarded
-        parent_state.visible_guarded_names.add(name)
-      else
-        guarded = parent_state.guard_inherited_transfer.call(name)
-      end
-      guarded
-    end, T.proc.params(name: String).returns(T::Boolean))
-
     node.child_exprs.each do |child|
-      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, guard_inherited_transfer)
+      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, parent_state)
     end
     node.body_slots.each do |slot|
       slot.replace(append_nested_ownership_transfers_for_mir_body(
         slot.body,
         inherited_alloc_names,
         inherited_guarded_names,
-        guard_inherited_transfer,
+        parent_state,
       ))
     end
     nil
@@ -1337,10 +1312,10 @@ class MIRLowering
       expr: T.nilable(MIR::Node),
       inherited_alloc_names: T::Set[String],
       inherited_guarded_names: T::Set[String],
-      guard_inherited_transfer: T.proc.params(name: String).returns(T::Boolean),
+      parent_state: OwnershipFinalizationContext,
     ).void
   end
-  def finalize_nested_mir_expr_bodies!(expr, inherited_alloc_names, inherited_guarded_names, guard_inherited_transfer)
+  def finalize_nested_mir_expr_bodies!(expr, inherited_alloc_names, inherited_guarded_names, parent_state)
     return unless expr
     return unless expr.expr?
     expr.body_slots.each do |slot|
@@ -1348,11 +1323,11 @@ class MIRLowering
         slot.body,
         inherited_alloc_names,
         inherited_guarded_names,
-        guard_inherited_transfer,
+        parent_state,
       ))
     end
     each_mir_expr_child(expr) do |child|
-      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, guard_inherited_transfer)
+      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, parent_state)
     end
     nil
   end
@@ -1415,7 +1390,7 @@ class MIRLowering
   sig do
     params(
       mir: T.untyped,
-      state: T.any(BodyAssemblyState, OwnershipFinalizationState),
+      state: OwnershipFinalizationContext,
       existing: T::Array[T.untyped],
     ).returns(T::Array[T.untyped])
   end
@@ -1442,10 +1417,12 @@ class MIRLowering
     marks
   end
 
-  sig { params(state: T.any(BodyAssemblyState, OwnershipFinalizationState), nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
+  sig { params(state: OwnershipFinalizationContext, nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
   def ensure_transfer_cleanup_guard_for_name!(state, nodes, name)
     guarded = ensure_transfer_cleanup_guard!(nodes, name)
-    guarded = state.guard_inherited_transfer.call(name) if !guarded && state.inherited_alloc_names.include?(name)
+    if !guarded && state.inherited_alloc_names.include?(name) && state.parent
+      guarded = ensure_transfer_cleanup_guard_for_name!(T.must(state.parent), T.must(state.parent).out, name)
+    end
     state.visible_guarded_names.add(name) if guarded
     guarded
   end

@@ -121,10 +121,13 @@ These are deliberate boundaries, recorded in the design doc:
 neglected condition may be a deliberate, correct special case; triage
 top-down and accept or fix.
 
-**Why not just use Flay/Reek/RuboCop?** Those detect duplicated *code*
-or smells; none mines the *frequency of a decision across sites* or
-*the one site that deviates from a popular decision*. That cross-site
-statistical view is the entire value proposition.
+**Why not just use Flay/Reek/RuboCop?** Decomplex now consumes Flay's
+Type-2/Type-3 similarity signal read-only; it does not reimplement
+broad clone detection. The rest of Decomplex mines the *frequency of a
+decision across sites* or *the one site that deviates from a popular
+decision*. The inconsistent-rename detector is intentionally narrower
+than Flay: it looks for a specific missed-rename bug where the buggy
+copy may be the member that falls out of Flay's clean clone cluster.
 
 **Will it scale to my codebase?** It is single-pass per detector,
 stdlib-AST, zero-dep: ~11s for 50k LOC. It stays this small on purpose.

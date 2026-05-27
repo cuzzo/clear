@@ -27,7 +27,8 @@ module SlopCop
     #   is the "probably-buggy AND untested" amplifier.
     SPURIOUS = ["Missing Abstractions", "Reification Misses",
                 "Semantic Predicate Aliases", "Exact Predicate Aliases",
-                "Type-3 Clones (missed rename)"].freeze
+                "Inconsistent Rename Clones",
+                "Flay Similarity (Type-2/3)"].freeze
     DEVIANCE = ["Neglected Conditions", "Neglected Path Conditions",
                 "Broken Protocols", "Derived-State Staleness",
                 "Decision Pressure", "False Simplicity"].freeze

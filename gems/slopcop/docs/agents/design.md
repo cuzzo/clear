@@ -58,6 +58,12 @@ finding's decision source extent `[fl,fc,ll,lc]`; the join is
 flagged span contains the arm. The hardened policy is asymmetric, by
 the rule *a silently suppressed real gap is the worst failure*:
 
+Flay-backed Type-2/Type-3 similarity is consumed only through
+decomplex's published finding contract. SlopCop never shells out to
+Flay and never interprets clone clusters itself; a precise similarity
+span can classify a gap as `spurious`, while a method-coarse overlap
+only flags `⚠dup?` for human verification.
+
 - **`spurious` (a hard exclude — the arm LEAVES the gap list) is
   returned ONLY on the span-precise path.** A coarse method-join
   duplication signal must never silently delete a test target.
