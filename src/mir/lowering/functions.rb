@@ -1090,7 +1090,7 @@ module MIRLoweringFunctions
       if facts.copy_source
         MIR::DeepCopy.new(lower(T.must(facts.copy_source)), nil, nil, :full_value, :heap)
       else
-        lower(facts.ast_arg)
+        with_expected_type(facts.callee_param_type) { lower(facts.ast_arg) }
       end
     end
     arg = hoist_alloc(raw_arg, facts.ast_arg, err_cleanup: facts.takes, mutable: facts.copy_to_owning)

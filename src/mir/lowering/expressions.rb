@@ -1590,7 +1590,7 @@ module MIRLoweringExpressions
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
-    elsif sink_type && ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
+    elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
       copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif dst_ti.collection? && !dst_ti.string?
