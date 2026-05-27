@@ -18,6 +18,7 @@ require "set"
 require_relative "mir"
 require_relative "cleanup_entry"
 require_relative "pass_state"
+require_relative "placement"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
@@ -451,7 +452,7 @@ module MIRHoistLowering
     ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "lazy allocating expression")
     alloc = mir_owned_alloc(expr) || :heap
     mark = MIR::AllocMark.new(name, alloc, ti)
-    mark.scope = alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(alloc)
     @pending_stmts << mark
     @lowered_alloc_names&.add(name)
     @lowered_alloc_names&.add(name)
@@ -576,7 +577,7 @@ module MIRHoistLowering
     ti = T.unsafe(self).alloc_mark_type_info(expr, ast_node, "MIR allocating hoist")
     alloc = mir_owned_alloc(expr) || :heap
     mark = MIR::AllocMark.new(name, alloc, ti)
-    mark.scope = alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(alloc)
     @pending_stmts << mark
     @lowered_alloc_names&.add(name)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
@@ -690,7 +691,7 @@ module MIRHoistLowering
     name = "__tmp_#{@tmp_counter}"
     alloc = mir_owned_alloc(expr) || :heap
     mark = MIR::AllocMark.new(name, alloc, mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
-    mark.scope = alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(alloc)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
     entry = hoist_cleanup_entry(expr, nil)
     stmts = T.let([mark, MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped])

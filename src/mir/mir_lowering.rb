@@ -347,7 +347,7 @@ class MIRLowering
     return destination_keep_plan(dest_alloc) unless dest_alloc
 
     ti = destination_type(ast_node, dest_type)
-    return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if dest_alloc == :heap && heap_indirect_destination?(mir, ast_node, ti)
+    return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if MIR::Placement.heap?(dest_alloc) && heap_indirect_destination?(mir, ast_node, ti)
     return DestinationPlacementPlan.new(action: :cast_wrapped_or, type_info: ti, dest_alloc: dest_alloc) if cast_wrapped_or?(mir, ast_node)
     return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::Orelse)
     return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::TryCatch)
@@ -455,7 +455,7 @@ class MIRLowering
       success_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
       build_drop_entry!(success_cleanup, ti, nil)
       mark = MIR::AllocMark.new(success, source_alloc, ti)
-      mark.scope = source_alloc == :heap ? :heap : :iteration
+      mark.scope = MIR::Placement.alloc_scope(source_alloc)
       body = [
         mark,
         MIR::Let.new(success, success_try, false, nil, nil),
@@ -480,7 +480,7 @@ class MIRLowering
     cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
     build_drop_entry!(cleanup, ti, nil)
     mark = MIR::AllocMark.new(name, source_alloc, ti)
-    mark.scope = source_alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(source_alloc)
     body = [
       mark,
       MIR::Let.new(name, mir, false, nil, nil),
@@ -597,7 +597,7 @@ class MIRLowering
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
   def heap_owned_result?(mir, ast_node)
     effect = mir.respond_to?(:ownership_effect) ? mir.ownership_effect : MIR::OwnershipEffect.none
-    return true if effect.produces_owned && effect.alloc == :heap
+    return true if effect.produces_owned && MIR::Placement.heap?(effect.alloc)
 
     node = ast_node
     node = node.value if node.is_a?(AST::MoveNode)
@@ -881,7 +881,7 @@ class MIRLowering
     discard_name = "__discard_#{@tmp_counter}"
     alloc = entry.alloc || mir_owned_alloc(mir) || :heap
     mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node!(stmt, context: "discard allocation mark"))
-    mark.scope = alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(alloc)
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
     [
       MIR::ScopeBlock.new([
@@ -1303,7 +1303,7 @@ class MIRLowering
       name: name,
       ownership_effect: effect.produces_owned ? effect.with_target(name) : MIR::OwnershipEffect.owned(alloc: alloc, target_var: name),
       type_info: type_info,
-      scope: alloc == :heap ? :heap : :iteration,
+      scope: MIR::Placement.alloc_scope(alloc),
     )
   end
 
@@ -2609,16 +2609,9 @@ class MIRLowering
     transpile_type(ti.is_a?(Type) ? ti.resolved.to_s : ti.to_s)
   end
 
-  sig { params(type_info: Type).returns(T::Boolean) }
-  def direct_indexable_collection_type?(type_info)
-    ti = Type.new(type_info)
-    ti.direct_indexable_collection?
-  end
-
   sig { params(ast_node: T.untyped, type_info: Type).returns(T::Boolean) }
   def direct_slice_backed_expr?(ast_node, type_info)
-    ti = Type.new(type_info)
-    return true if ti.fixed?
+    return true if type_info.fixed?
     return true if ast_node.is_a?(AST::GetField)
     ast_node.is_a?(AST::Identifier) ? !!@current_fn_param_names&.include?(ast_node.name) : false
   end
@@ -2654,15 +2647,9 @@ class MIRLowering
     return nil if ti.direct_indexable_collection?
 
     recv = lower(recv_ast)
-    len_expr =
-      if ti.string? && !ti.collection? && !ti.array? && !ti.set_collection?
-        MIR::ListLength.new(recv)
-      else
-        nil
-      end
+    return nil unless ti.string?
 
-    return nil unless len_expr
-    MIR::Cast.new(len_expr, "i64", :intCast)
+    MIR::Cast.new(MIR::ListLength.new(recv), "i64", :intCast)
   end
 
   sig { params(node: T.untyped).returns(T.nilable(String)) }

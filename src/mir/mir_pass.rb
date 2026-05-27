@@ -15,6 +15,7 @@ require_relative "escape_analysis"
 require_relative "bg_capture_classifier"
 require_relative "control_flow"
 require_relative "pass_state"
+require_relative "placement"
 
 class MIRPass
     extend T::Sig
@@ -62,7 +63,7 @@ class MIRPass
   sig { params(name: String, alloc: Symbol, type_info: Type).returns(MIR::AllocMark) }
   def alloc_marker(name, alloc, type_info)
     marker = MIR::AllocMark.new(name, alloc, type_info)
-    marker.scope = alloc == :heap ? :heap : :iteration
+    marker.scope = MIR::Placement.alloc_scope(alloc)
     marker
   end
 

@@ -552,7 +552,7 @@ class PipelineHost
       alloc = source_mir.allocs.any_heap? ? :heap : :frame
       @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
       mark = MIR::AllocMark.new("pipe_src_list", alloc, list_node.full_type!)
-      mark.scope = alloc == :heap ? :heap : :iteration
+      mark.scope = MIR::Placement.alloc_scope(alloc)
       source_prefix << mark
       source_cleanup = MIR::Cleanup.new("pipe_src_list",
         CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: list_node.full_type!.zig_type))
@@ -644,7 +644,7 @@ class PipelineHost
   end
   def owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
     mark = MIR::AllocMark.new(name, alloc, type_info)
-    mark.scope = alloc == :heap ? :heap : :iteration
+    mark.scope = MIR::Placement.alloc_scope(alloc)
     entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
     [
       mark,
@@ -697,7 +697,7 @@ class PipelineHost
       mark_type = @lowering.send(:mir_alloc_mark_type_info, value_expr, nil,
         context: "pipeline owned append item")
       mark = MIR::AllocMark.new(temp_name, value_alloc, mark_type)
-      mark.scope = value_alloc == :heap ? :heap : :iteration
+      mark.scope = MIR::Placement.alloc_scope(value_alloc)
       return MIR::ScopeBlock.new([
         mark,
         MIR::Let.new(temp_name, value_expr, false, nil, nil),
@@ -3775,7 +3775,7 @@ class PipelineHost
       key_type = Type.from_node!(ctx[:key_expr], context: "SHARD key binding")
       key_alloc = @lowering.send(:mir_owned_alloc, key_mir) || :heap
       key_mark = MIR::AllocMark.new(key_var, key_alloc, key_type)
-      key_mark.scope = key_alloc == :heap ? :heap : :iteration
+      key_mark.scope = MIR::Placement.alloc_scope(key_alloc)
       inner << key_mark
       inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
       cleanup = @lowering.send(:hoist_cleanup_entry, key_mir, ctx[:key_expr])
@@ -4541,7 +4541,7 @@ class PipelineHost
       alloc = owned_alloc || :heap
       @lowering.send(:stamp_allocating_result_target!, source_mir, "pipe_src_list", alloc: alloc)
       mark = MIR::AllocMark.new("pipe_src_list", alloc, lhs.full_type!)
-      mark.scope = alloc == :heap ? :heap : :iteration
+      mark.scope = MIR::Placement.alloc_scope(alloc)
       source_prefix << mark
       source_cleanup = MIR::Cleanup.new("pipe_src_list",
         CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: false, zig_type: lhs_type.zig_type))

@@ -864,7 +864,7 @@ module MIRLoweringExpressions
       value = if ti.set_collection?
         elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
         emit_builtin(:setMemberGet, [unwrapped, index, MIR::Ident.new(elem_zig)])
-      elsif ti && direct_indexable_collection_type?(ti)
+      elsif ti.direct_indexable_collection?
         direct_index_get(unwrapped, index, node.target, ti) || begin
           builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
           emit_builtin(builtin, [unwrapped, index])
@@ -943,7 +943,7 @@ module MIRLoweringExpressions
       items = MIR::ListItems.new(target)
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
-    elsif ti && direct_indexable_collection_type?(ti)
+    elsif ti.direct_indexable_collection?
       direct_index_get(target, index, node.target, ti) || begin
         builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
         emit_builtin(builtin, [target, index])

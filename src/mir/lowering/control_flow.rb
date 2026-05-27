@@ -170,7 +170,7 @@ module MIRLoweringControlFlow
     stmts.any? do |s|
       case s
       when MIR::AllocMark
-        next false unless s.alloc == :frame
+        next false unless MIR::Placement.frame?(s.alloc)
         scope = T.unsafe(s).scope
         block.call(scope.is_a?(Symbol) ? scope : :unknown)
       when MIR::IfStmt
@@ -199,7 +199,7 @@ module MIRLoweringControlFlow
     stmts.each do |s|
       case s
       when MIR::AllocMark
-        s.scope = :iteration if s.alloc == :frame
+        s.scope = :iteration if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt
         stamp_loop_frame_allocs_iteration!(s.then_body)
         stamp_loop_frame_allocs_iteration!(s.else_body)
@@ -307,7 +307,7 @@ module MIRLoweringControlFlow
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
       mark = MIR::AllocMark.new(source_name, source_alloc, ct)
-      mark.scope = source_alloc == :heap ? :heap : :iteration
+      mark.scope = MIR::Placement.alloc_scope(source_alloc)
       coll.target_var = source_name if coll.is_a?(MIR::InlineZig)
       collection_setup << mark
       collection_setup << MIR::Let.new(source_name, coll, false, nil, nil)

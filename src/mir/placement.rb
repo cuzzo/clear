@@ -36,9 +36,24 @@ module MIR
       default
     end
 
+    sig { params(value: T.nilable(Symbol)).returns(T::Boolean) }
+    def self.heap?(value)
+      alloc(value, :heap) == :heap
+    end
+
+    sig { params(value: T.nilable(Symbol)).returns(T::Boolean) }
+    def self.frame?(value)
+      alloc(value, :heap) == :frame
+    end
+
+    sig { params(value: T.nilable(Symbol)).returns(Symbol) }
+    def self.alloc_scope(value)
+      heap?(value) ? :heap : :iteration
+    end
+
     sig { params(value: T.nilable(Symbol)).returns(Symbol) }
     def self.cleanup_scope(value)
-      alloc(value, :heap) == :heap ? :heap : :iteration
+      heap?(value) ? :heap : :iteration
     end
 
     sig { params(storage: T.nilable(Symbol), cleanup_alloc: T.nilable(Symbol), default: Symbol).returns(Symbol) }
