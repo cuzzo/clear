@@ -180,9 +180,13 @@ jobs:
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
   tools-fuzz:
-    name: tools/fuzz full matrix (gate)
+    name: tools/fuzz full matrix (gate, shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     env:
       COVERAGE: "1"
     steps:
@@ -205,19 +209,23 @@ jobs:
       # Required gate: the FULL template matrix minus quarantine
       # (tools/fuzz/quarantine.txt). Every non-quarantined template must
       # pass -- this is what stops templates bit-rotting unnoticed.
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --out /tmp/clear-fuzz-ci --clean
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean
       - run: bundle exec ruby spec/collate_coverage.rb
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
-          flags: ruby,fuzz
+          flags: ruby,fuzz,fuzz-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
   tools-fuzz-quarantined:
-    name: tools/fuzz quarantined (known-broken, non-blocking)
+    name: tools/fuzz quarantined (known-broken, non-blocking, shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     # Non-blocking: runs the quarantined templates (templates with a
     # known compiler bug or generator defect, listed in
     # tools/fuzz/quarantine.txt). Visible signal without blocking PRs.
@@ -240,7 +248,7 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: bundle exec ruby tools/fuzz/run.rb --matrix --only-quarantined --out /tmp/clear-fuzz-quar --clean
+      - run: bundle exec ruby tools/fuzz/run.rb --matrix --only-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-quar-${{ matrix.shard }} --clean
 
   bc-lower-coverage:
     name: bc-lowering coverage (@target==:bc arms)
