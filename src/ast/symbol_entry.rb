@@ -33,6 +33,7 @@ require "sorbet-runtime"
 # this is acyclic and also makes FunctionSignature available for
 # `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
 require_relative "type"
+require_relative "async_result_shape"
 
 # Scope and SymbolEntry are a mutual back-reference: scope.rb requires
 # this file, so this file cannot require scope.rb. `# typed: strict`
@@ -79,6 +80,11 @@ class SymbolEntry
                                      # lit with COPY'd strings). Legacy field; not an escape decision.
                                      # Escape placement is symbol.storage. See docs/agents/
                                      # provenance-collapse.md.
+
+  # Explicit async handle shape for bindings whose surface Type cannot
+  # distinguish Promise<List<T>> from List<Promise<T>>.
+  sig { returns(T.nilable(AsyncResultShape)) }
+  attr_accessor :async_result_shape
 
   # The binding's type. Single coercing seam: every input is laundered
   # to a Type so no reader needs a Symbol/Type/FunctionSignature/nil
@@ -335,6 +341,7 @@ class SymbolEntry
     @param_decl_token = T.let(nil, T.untyped)
     @link_source = T.let(nil, T.nilable(Symbol))
     @init_contents_heap = T.let(false, T::Boolean)
+    @async_result_shape = T.let(nil, T.nilable(AsyncResultShape))
   end
 
   private

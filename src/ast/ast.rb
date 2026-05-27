@@ -1952,6 +1952,7 @@ module AST
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
+    attr_accessor :async_result_shape # AsyncResultShape: single authority for BG's spawned handle.
     # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
     # on the BG body's transitive call set. Phase A only records this; Phase B
     # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.

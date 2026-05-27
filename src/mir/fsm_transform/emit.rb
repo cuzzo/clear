@@ -196,7 +196,33 @@ module FsmTransform
       )
       spawn_setup = build_spawn_setup(ctx, lowering)
       fsm_body = MIR::FsmGenericBody.new(ctx[:blk_label], ctx_struct, spawn_setup)
-      FsmWrapperEmitter.render(fsm_body)
+      MIR::FsmLoweringResult.new(
+        code: FsmWrapperEmitter.render(fsm_body),
+        structure: build_fsm_structure(ctx, segment_specs, destroy_entries, id),
+      )
+    end
+
+    sig { params(ctx: T.untyped, segment_specs: T.untyped, destroy_entries: T.untyped, id: Integer).returns(MIR::FsmStructure) }
+    def build_fsm_structure(ctx, segment_specs, destroy_entries, id)
+      T.bind(self, T.untyped) rescue nil
+      cleanup_names = destroy_entries.filter_map { |entry|
+        next nil unless entry[:kind] == :capture || entry[:kind] == :body
+        entry[:name]&.to_s
+      }.uniq
+      capture_names = (ctx[:captured] || {}).keys.map(&:to_s)
+      captures = capture_names.filter_map do |name|
+        next nil unless cleanup_names.include?(name)
+        { name: name, cleanup_at: :finalize }
+      end
+      steps = segment_specs.map do |spec|
+        text = Array(spec[:body_stmts]).join("\n")
+        {
+          index: spec[:index],
+          reads: text.scan(/__ctx_#{id}\.([A-Za-z_]\w*)/).flatten.uniq,
+          cleanups: [],
+        }
+      end
+      MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
     end
 
     # Translate a segment's tail into the dispatch arm's tail. Suspend
@@ -407,7 +433,7 @@ module FsmTransform
                     .gsub(/\brt\./, "__ctx_#{id}.rt.")
             "#{tpl};"
           end
-        ctx[:fsm_destroy_lines] << { kind: :capture, zig: zig } if zig
+        ctx[:fsm_destroy_lines] << { kind: :capture, name: name.to_s, zig: zig } if zig
       end
       # FreshHeapCopy cleanups (master's `defer CheatLib.cleanup(...)`
       # forms inside the run fn) lift to destroyTask. The body_cleanup_zig
@@ -416,14 +442,19 @@ module FsmTransform
       # we strip the leading `defer ` and trailing `;` and re-emit as a
       # destroyTask line so it fires once when the FSM ctx tears down,
       # not on each segment return.
-      (ctx[:fresh_heap_cleanups] || "").each_line do |line|
+      fresh_heap_names = Array(ctx[:fresh_heap_cleanup_names])
+      (ctx[:fresh_heap_cleanups] || "").each_line.with_index do |line, cleanup_index|
         line = line.strip
         next if line.empty?
         # Drop the `defer ` prefix; destroy_extra_zig wraps the line at
         # the destroyTask exit anyway, so the unconditional cleanup fires
         # exactly once.
         zig = line.sub(/\Adefer\s+/, "")
-        ctx[:fsm_destroy_lines] << { kind: :capture, zig: zig }
+        ctx[:fsm_destroy_lines] << {
+          kind: :capture,
+          name: fresh_heap_names[cleanup_index]&.to_s,
+          zig: zig,
+        }
       end
 
       # Per-segment lowering. Stmts may be a mix of AST nodes (user
@@ -447,7 +478,6 @@ module FsmTransform
           acc << seg.index
         end
       end
-      seg_result_lines = {}
       owned_result_guards = fsm_owned_result_guards(segments, lowering)
       seg_codes = segments.map do |seg|
         ast_stmts, raw_stmts = seg.stmts.partition { |s| !s.is_a?(String) }
@@ -461,7 +491,7 @@ module FsmTransform
           lowering.instance_variable_set(:@pending_stmts, [])
           prev_fsm_allocs = lowering.instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
           prev_fsm_guards = lowering.instance_variable_get(:@current_fsm_inherited_guarded_names) rescue nil
-          inherited_capture_names = (ctx[:fresh_heap_cleanups] || "").scan(/__ctx_#{id}\.([A-Za-z_]\w*)/).flatten.uniq.map { |name| "__ctx_#{id}.#{name}" }.to_set
+          inherited_capture_names = Array(ctx[:fresh_heap_cleanup_names]).map { |name| "__ctx_#{id}.#{name}" }.to_set
           lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
           lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, inherited_capture_names)
           # Per-segment alias overrides (e.g. WITH's `inner` ->
@@ -489,11 +519,6 @@ module FsmTransform
           lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, prev_fsm_guards)
           lowering.instance_variable_set(:@current_bg_pointer_captures, prev_ptr)
           return nil if lowered.nil?
-          if want_result
-            stmt_code, result_line = lowered
-            seg_result_lines[seg.index] = result_line if result_line && !result_line.strip.empty?
-            lowered = stmt_code
-          end
           # BindExpr(:decl) / VarDecl don't consult the capture_map for
           # their LHS (they always emit `var/const NAME = ...`). For
           # any name that ends up as a ctx field (Liveness +
@@ -563,11 +588,6 @@ module FsmTransform
         body_stmts = Array(seg_codes[i])
         if void_assign_zig && seg.tail.is_a?(Segments::Done)
           body_stmts = body_stmts + [void_assign_zig]
-        elsif (rl = seg_result_lines[seg.index])
-          # emit_step_stmts(no_result: false) returns the trailing
-          # `__ctx.inner.result = <expr>;` assignment as its second
-          # element (already a complete stmt). Just splice it in.
-          body_stmts = body_stmts + [rl]
         end
 
         rt_used = (body_stmts.join("\n") +
@@ -666,6 +686,7 @@ module FsmTransform
         guard = SuspendResolvers.fsm_owned_guard_name(name)
         (ctx[:fsm_destroy_lines] ||= []) << {
           kind: :body,
+          name: name,
           zig: "if (__ctx_#{id}.#{guard}) CheatLib.cleanup(@TypeOf(__ctx_#{id}.#{name}), __ctx_#{id}.rt.heapAlloc(), &__ctx_#{id}.#{name});",
         }
       end
@@ -717,13 +738,13 @@ module FsmTransform
           cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
           cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
           cleanup = ctx_guarded_cleanup(cleanup, name, ctx_ref, ctx)
-          ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
+          ctx[:fsm_destroy_lines] << { kind: :body, name: name, zig: cleanup }
           true
         elsif line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_][\w.]*_moved\)\s+)?CheatLib\.cleanup\([^\n]*&#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
           cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
           cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
           cleanup = ctx_guarded_cleanup(cleanup, name, ctx_ref, ctx)
-          ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
+          ctx[:fsm_destroy_lines] << { kind: :body, name: name, zig: cleanup }
           true
         else
           false
@@ -884,6 +905,7 @@ module FsmTransform
       # final destroy_extra_zig orders locks LIFO of acquisition.
       (ctx[:fsm_destroy_lines] ||= []) << {
         kind: :lock,
+        name: meta[:lock_field_ref].to_s,
         zig:  "if (__ctx_#{id}.__lock_held_#{cap_idx}) #{meta[:lock_field_ref]}.#{meta[:unlock_method]}();",
       }
 

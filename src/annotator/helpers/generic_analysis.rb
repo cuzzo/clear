@@ -531,6 +531,7 @@ module GenericAnalysis
     # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
     if node.value.is_a?(AST::BgBlock) && node.type.shared_promise?
       value_type = node.value.full_type!(context: "BgBlock shared_promise value")
+      T.unsafe(node.value).async_result_shape = AsyncResultShape.promise(value_type.tense_type, shared: true)
       stamp_type!(node.value, Type.new(value_type, ownership: :shared))
     end
   end

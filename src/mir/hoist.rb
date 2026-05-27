@@ -477,9 +477,10 @@ module MIRHoistLowering
     return false unless node
     return true if mir_produces_owned_result?(node)
 
-    mir_result_child_exprs(node).any? do |child|
-      mir_allocates?(child)
-    end
+    return true if mir_result_child_exprs(node).any? { |child| mir_allocates?(child) }
+    return false unless node.respond_to?(:child_exprs)
+
+    node.child_exprs.any? { |child| mir_allocates?(child) }
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

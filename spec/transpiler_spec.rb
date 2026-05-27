@@ -375,7 +375,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("(counts.get(__sh1_key) orelse 0)")
+      expect(zig).to include("(counts.get(__sh1_key) orelse @as(i64, 0))")
       expect(zig).to include("for (0..100) |____sh1_i_usize|")
       expect(zig).to include("const __sh1_i: i64 = @intCast(____sh1_i_usize);")
     end

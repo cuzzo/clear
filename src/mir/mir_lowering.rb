@@ -21,6 +21,7 @@ require_relative "capture_strategy"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
+require_relative "../ast/async_result_shape"
 require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
 require_relative "../backends/pipeline_host"
@@ -1014,18 +1015,60 @@ class MIRLowering
   sig { params(node: T.untyped, body: T::Array[T.untyped], state: OwnershipFinalizationState).void }
   def finalize_ownership_for_mir_node!(node, body, state)
     outer_alloc_names, outer_guarded_names = ownership_visibility_for(node, state)
+    guard_visible_cleanups_for_nested_transfers!(node, state, outer_alloc_names, outer_guarded_names)
     finalize_nested_mir_bodies!(node, outer_alloc_names, outer_guarded_names)
     append_implicit_alloc_fact!(node, state)
     visible_alloc_names, visible_guarded_names = ownership_visibility_for(node, state)
     append_block_result_transfer!(node, body, state, visible_alloc_names)
     append_transfer_marks!(pre_terminator_transfer_marks(node, state.out, body), state)
     state.out << node
+    append_inherited_move_guard_for_transfer!(node, state, visible_guarded_names)
     state.out.concat(ownership_facts_for_mir_surface(node))
     register_ownership_finalization_visible_names!(state, node)
     append_transfer_marks!(
       ownership_transfers_for_mir(node, visible_alloc_names, visible_guarded_names, state.out + body),
       state,
     )
+    nil
+  end
+
+  sig { params(node: T.untyped, state: OwnershipFinalizationState, visible_alloc_names: T::Set[String], visible_guarded_names: T::Set[String]).void }
+  def guard_visible_cleanups_for_nested_transfers!(node, state, visible_alloc_names, visible_guarded_names)
+    nested_transfer_roots(node).each do |name|
+      next unless visible_alloc_names.include?(name)
+
+      if ensure_transfer_cleanup_guard!(state.out, name)
+        visible_guarded_names.add(name)
+        state.visible_guarded_names.add(name)
+      end
+    end
+    nil
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def nested_transfer_roots(node)
+    roots = T.let([], T::Array[String])
+    MIR.nodes(node).each do |child|
+      next if child.equal?(node)
+      if child.is_a?(MIR::TransferMark) && child.target == :owned_sink
+        roots << child.name.to_s
+      else
+        ownership_contract_consumes(child).each { |name| roots << name.to_s }
+        structural_ownership_consumes(child).each { |name| roots << name.to_s }
+      end
+    end
+    roots.uniq
+  end
+
+  sig { params(node: T.untyped, state: OwnershipFinalizationState, visible_guarded_names: T::Set[String]).void }
+  def append_inherited_move_guard_for_transfer!(node, state, visible_guarded_names)
+    return unless node.is_a?(MIR::TransferMark)
+    return unless node.target == :owned_sink
+    return unless visible_guarded_names.include?(node.name.to_s)
+    return if state.out.any? { |prior| prior.is_a?(MIR::MoveMark) && prior.name.to_s == node.name.to_s }
+
+    state.out << MIR::MoveMark.new(node.name.to_s)
+    state.out.concat(ownership_facts_for_structural_node(state.out.last))
     nil
   end
 
@@ -1632,9 +1675,7 @@ class MIRLowering
 
   sig { params(type_info: Type).returns(T::Boolean) }
   def ownership_bearing_type?(type_info)
-    ti = type_info.success_type
-    return false unless ti
-    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
+    type_info.ownership_bearing?(@schema_lookup)
   end
 
   sig { params(arg: T.untyped).returns(T.nilable(String)) }

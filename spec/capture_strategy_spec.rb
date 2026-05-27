@@ -50,15 +50,20 @@ RSpec.describe CaptureStrategy do
   end
 
   # ----------------------------------------------------------------
-  # Refuse — heap-backed / borrow without explicit transfer
+  # FreshHeapCopy — owned aggregate captures get a fiber-owned duplicate
   # ----------------------------------------------------------------
-  describe "Refuse: heap-backed / borrow without COPY or GIVE at capture site" do
-    it "refuses @list local capture" do
+  describe "FreshHeapCopy: owned aggregate captures" do
+    it "classifies @list local capture as FreshHeapCopy" do
       strat = classify(type: t(:"Int64[]", collection: :list))
-      expect(strat).to be_a(CaptureStrategy::Refuse)
-      expect(strat.reason).to eq(:list_borrow_without_transfer)
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.alloc_sym).to eq(:heap)
     end
+  end
 
+  # ----------------------------------------------------------------
+  # Refuse — pointer-passed / borrow without explicit transfer
+  # ----------------------------------------------------------------
+  describe "Refuse: pointer-passed / borrow without COPY or GIVE at capture site" do
     it "refuses @pool local capture" do
       strat = classify(type: t(:"Env[100]", collection: :pool))
       expect(strat).to be_a(CaptureStrategy::Refuse)
@@ -66,10 +71,10 @@ RSpec.describe CaptureStrategy do
       expect(strat.reason).to eq(:pointer_passed_without_transfer)
     end
 
-    it "refuses slice (Int64[]) capture" do
+    it "classifies slice (Int64[]) capture as FreshHeapCopy" do
       strat = classify(type: t(:"Int64[]"))
-      expect(strat).to be_a(CaptureStrategy::Refuse)
-      expect(strat.reason).to eq(:array_borrow_without_transfer)
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.alloc_sym).to eq(:heap)
     end
 
     it "refuses HashMap capture" do

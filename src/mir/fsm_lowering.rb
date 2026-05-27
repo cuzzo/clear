@@ -88,9 +88,10 @@ module FsmLowering
   # types). Mirrors the inner loop of lower_bg_block but exposed as a
   # helper so Phase B2 can call it twice (once for pre-stmts, once for
   # post-stmts).
-  # Lower a list of step statements to MIR. Returns:
-  #   no_result: true  -> [MIR::Stmt]
-  #   no_result: false -> [pre: [MIR::Stmt], result: [MIR::Stmt]]
+  # Lower a list of step statements to one logical MIR body. Value-producing
+  # FSM segments keep the final result assignment in the same body as the
+  # statements that created the value, so ownership finalization sees the
+  # cleanup and the transfer together.
   #
   # The "result" segment for value-producing FSM steps is the
   # final expression's MIR plus any pending hoists, wrapped in a
@@ -161,8 +162,19 @@ module FsmLowering
           # other escaping binding; the promise stores it directly and
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
-          result_mir << MIR::Set.new(target, strip_try(last_mir), false)
-          result_mir.concat(fsm_result_transfer_marks(last_mir, last_step[:expr]))
+          result_set = MIR::Set.new(target, strip_try(last_mir), false)
+          transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
+          transfer_names = transfer_facts.map(&:name).uniq
+          if transfer_names.any?
+            result_set = with_ownership_consumption(
+              result_set,
+              transfer_names,
+              "fsm_result",
+              :owned_sink,
+              target_alloc: uniform_fsm_result_target_alloc(transfer_facts),
+            )
+          end
+          result_mir << result_set
           if last_step[:expr].is_a?(AST::Identifier)
             guard_map = instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
             guard_name = guard_map&.[](last_step[:expr].name.to_s)
@@ -177,8 +189,14 @@ module FsmLowering
         end
       end
 
-      [pre_mir, result_mir]
+      pre_mir + result_mir
     end
+  end
+
+  sig { params(facts: T::Array[FsmResultTransferFact]).returns(T.nilable(Symbol)) }
+  def uniform_fsm_result_target_alloc(facts)
+    allocs = facts.map(&:target_alloc).uniq
+    allocs.length == 1 ? allocs.first : nil
   end
 
   sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[MIR::Stmt]) }
@@ -221,7 +239,7 @@ module FsmLowering
         names.concat(fsm_ast_result_consumed_roots(node.value))
       end
     when AST::Identifier
-      names << node.name.to_s if AST.moved?(node)
+      names << node.name.to_s if AST.moved?(node) || fsm_owned_transfer_identifier?(node)
     when AST::StructLit, AST::UnionVariantLit
       node.fields&.each_value do |value|
         next if value.is_a?(AST::CopyNode)
@@ -292,25 +310,15 @@ module FsmLowering
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
-  # Text-shaped facade over lower_step_stmts. Lowers stmts to MIR
-  # then renders each through MIREmitter. Returns a Zig string for
-  # no_result: true, or a [pre, result] tuple otherwise (where
-  # `result` is the trailing `__ctx.inner.result = <expr>;`
-  # assignment ready for splicing into the dispatch).
+  # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
+  # finalizes ownership once, then renders through MIREmitter.
   sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T.untyped) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
     inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
     inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
-    if no_result
-      render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
-    else
-      [
-        render_mir_list(append_ownership_transfers_for_mir_body(result[0], inherited_allocs, inherited_guards)),
-        render_mir_list(append_ownership_transfers_for_mir_body(result[1], inherited_allocs, inherited_guards)),
-      ]
-    end
+    render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
   end
   sig { params(mir_list: T::Array[T.untyped]).returns(String) }
   def render_mir_list(mir_list)

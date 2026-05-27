@@ -6,6 +6,7 @@ require_relative "../ast/fixable_error"
 require_relative "../ast/scope"
 require_relative "../ast/parser"
 require_relative "../ast/std_lib"
+require_relative "../ast/async_result_shape"
 require_relative "helpers/function_context"
 require_relative "helpers/function_signature"
 require_relative "helpers/function_analysis"
@@ -2795,6 +2796,7 @@ private
       close_zig: resource_close
     )
     node.symbol = current_scope.locals[node.name]
+    node.symbol.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
     # (The late-provenance fold now happens BEFORE declare, above, so the
     # symbol is born with the correct storage -- no post-declare write.)
     # Propagate @link_source from the value type to the scope entry.
@@ -5271,6 +5273,7 @@ private
     if last_type_str.start_with?('!')
       last_type = Type.new(T.must(last_type_str[1..]).to_sym)
     end
+    T.unsafe(node).async_result_shape = AsyncResultShape.promise(last_type)
     stamp_type!(node, Type.new(:"~#{last_type}"))
 
     # @arena implies @pinned — thread-local arena memory can't be stolen.
@@ -5378,7 +5381,15 @@ private
     # NEXT awaits a promise/stream — always a fiber suspension point.
     record_effect(EffectTracker::SUSPENDS)
 
-    if promise_type.promise_list?
+    async_shape = node.expr.is_a?(AST::Identifier) ? node.expr.symbol&.async_result_shape : nil
+
+    if async_shape&.promise?
+      if node.expr.is_a?(AST::Identifier) && !async_shape.shared_promise?
+        og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
+      end
+      stamp_type!(node, async_shape.payload_type)
+      node.storage = :heap if async_next_result_requires_heap?(async_shape.payload_type)
+    elsif promise_type.promise_list?
       # NEXT on ~T[]@list: await all promises, return T[]@list.
       # The promise list is linearly consumed — each inner promise is freed by its next() call.
       if node.expr.is_a?(AST::Identifier)
@@ -5437,6 +5448,13 @@ private
     end
 
     nil
+  end
+
+  sig { params(type_info: Type).returns(T::Boolean) }
+  def async_next_result_requires_heap?(type_info)
+    return false if type_info.id_handle?
+
+    type_info.ownership_bearing?(->(name) { lookup_type_schema(name) })
   end
 
   sig { params(node: T.untyped).returns(T.untyped) }

@@ -1699,6 +1699,18 @@ class Type
     false
   end
 
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def ownership_bearing?(schema_lookup = nil)
+    ti = success_type
+    return false if ti.primitive? || ti.void? || ti.any?
+
+    ti.string? ||
+      ti.heap_ptr? ||
+      ti.collection_value? ||
+      ti.needs_cleanup?(schema_lookup) ||
+      ti.recursive_cleanup_shape?(schema_lookup)
+  end
+
   # Does this type+allocator combination need explicit cleanup at scope exit?
   # For frame-allocated values, only types with heap internals (RC, resources,
   # mutexes) need cleanup -- the frame arena bulk-frees everything else.

@@ -150,7 +150,7 @@ class MIREmitter
     when MIR::TryExpr          then "try #{emit(node.expr)}"
     when MIR::TryCatch         then emit_try_catch(node)
     when MIR::BreakExpr        then emit_break_expr(node)
-    when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
+    when MIR::Orelse           then emit_orelse(node)
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
     when MIR::Comptime         then "comptime #{emit(node.expr)}"
@@ -1364,6 +1364,14 @@ class MIREmitter
     else
       raise "MIREmitter#emit_cast: unknown method :#{node.method}"
     end
+  end
+
+  sig { params(node: MIR::Orelse).returns(String) }
+  def emit_orelse(node)
+    fallback = emit(node.fallback)
+    result_type = node.result_type
+    fallback = "@as(#{result_type.zig_type}, #{fallback})" if result_type
+    "(#{emit(node.expr)} orelse #{fallback})"
   end
 
   sig { params(node: MIR::TryCatch).returns(String) }

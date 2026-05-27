@@ -15,6 +15,14 @@ HOIST_EDGE_CELLS = []
   end
 end
 
+%i[string_concat struct_literal union_literal].each do |shape|
+  %i[collection_literal match_subject nested_aggregate].each do |context|
+    HOIST_EDGE_CELLS << { shape: shape, context: context }
+  end
+end
+HOIST_EDGE_CELLS << { shape: :string_concat, context: :while_condition }
+HOIST_EDGE_CELLS << { shape: :list_call, context: :return_or_fallback }
+
 def hem_prelude(shape)
   case shape
   when :struct_literal
@@ -173,6 +181,70 @@ FuzzGenerator.register(:hoist_edge_matrix, cells: HOIST_EDGE_CELLS) do |p|
               i = i + 1_i64;
           END
           ASSERT total >= 2_i64, "hoist loop";
+          RETURN;
+      END
+    CHT
+  when :collection_literal
+    <<~CHT
+      #{helpers}
+      FN main() RETURNS !Void ->
+          values: #{ty}[] = [#{expr}];
+          ASSERT #{hem_observe(p[:shape], "values[0_i64]")} >= 1_i64, "hoist collection literal";
+          RETURN;
+      END
+    CHT
+  when :match_subject
+    <<~CHT
+      #{helpers}
+      UNION Wrap { Empty, Item: #{ty} }
+
+      FN main() RETURNS !Void ->
+          w = Wrap{ Item: #{expr} };
+          MUTABLE n: Int64 = 0_i64;
+          PARTIAL MATCH w START
+              Wrap.Item AS x -> n = #{hem_observe(p[:shape], "x")};,
+              DEFAULT -> n = 99_i64;
+          END
+          ASSERT n >= 1_i64, "hoist match subject";
+          RETURN;
+      END
+    CHT
+  when :nested_aggregate
+    <<~CHT
+      #{helpers}
+      STRUCT Holder { values: #{ty}[] }
+      FN main() RETURNS !Void ->
+          h = Holder{ values: [#{expr}] };
+          ASSERT #{hem_observe(p[:shape], "h.values[0_i64]")} >= 1_i64, "hoist nested aggregate";
+          RETURN;
+      END
+    CHT
+  when :while_condition
+    <<~CHT
+      FN nonempty(s: String) RETURNS Bool -> RETURN s.length() > 0_i64; END
+
+      FN main() RETURNS !Void ->
+          MUTABLE count: Int64 = 0_i64;
+          WHILE count < 1_i64 && nonempty(COPY "a" + COPY "b") DO
+              count = count + 1_i64;
+          END
+          ASSERT count == 1_i64, "hoist while condition";
+          RETURN;
+      END
+    CHT
+  when :return_or_fallback
+    <<~CHT
+      #{helpers}
+      FN build(flag: Bool) RETURNS !#{ty} ->
+          IF flag THEN
+              RETURN #{expr};
+          END
+          RAISE "no";
+      END
+
+      FN main() RETURNS !Void ->
+          v: #{ty} = build(FALSE) OR #{hem_fallback(p[:shape])};
+          ASSERT #{hem_observe(p[:shape], "v")} >= 1_i64, "hoist return or fallback";
           RETURN;
       END
     CHT

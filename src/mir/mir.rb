@@ -1132,6 +1132,18 @@ module MIR
     include Emittable
   end
 
+  class FsmLoweringResult < T::Struct
+    extend T::Sig
+
+    const :code, String
+    const :structure, FsmStructure
+
+    sig { returns(String) }
+    def to_s
+      code
+    end
+  end
+
   # ================================================================
   # FSM-IO state-machine wrapper (structural)
   # ================================================================

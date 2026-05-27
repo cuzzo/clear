@@ -3109,14 +3109,19 @@ class PipelineHost
       MIR::MethodCall.new(inner_recv, spec.publish_method, T.must(arg), false,
         MIR::CallableContract.no_ownership(T.must(arg).length)), nil)
 
+    item_cleanup = consumed_stream_item_cleanup(p, source_node)
     publish = case spec.gate
-              when :always then [call]
+              when :always
+                [call, *item_cleanup]
               when :pred
                 pred_mir = with_pipeline_context(placeholder: item) {
                   visit_mir(fold_op.expression)
                 }
-                else_body = predicate_miss_cleanup(p, source_node, spec)
-                [MIR::IfStmt.new(pred_mir, [call], else_body)]
+                if spec.transfers_item_on_success
+                  [MIR::IfStmt.new(pred_mir, [call], item_cleanup)]
+                else
+                  [MIR::IfStmt.new(pred_mir, [call], nil), *item_cleanup]
+                end
               end
 
     lower_range_fold_observable(p, smooth_node, label, source_node,
@@ -3132,12 +3137,11 @@ class PipelineHost
       type_info.needs_explicit_cleanup?(:heap, pipeline_schema_lookup)
   end
 
-  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier, spec: PipelinePublishSpec).returns(T.nilable(T::Array[T.untyped])) }
-  def predicate_miss_cleanup(p, source_node, spec)
-    return nil unless spec.transfers_item_on_success
+  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier).returns(T::Array[T.untyped]) }
+  def consumed_stream_item_cleanup(p, source_node)
     src_t = source_node.full_type!(context: "pipeline source cleanup")
     elem_t = src_t.tense_type&.element_type
-    return nil unless elem_t && pipeline_element_owns_heap?(elem_t)
+    return [] unless elem_t && pipeline_element_owns_heap?(elem_t)
 
     [MIR::ExprStmt.new(
       MIR::Call.new("CheatLib.cleanup", [

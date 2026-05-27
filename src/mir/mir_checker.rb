@@ -1878,6 +1878,11 @@ class MIRChecker
       case node
       when MIR::BgBlock
         verify_execution_boundary_fact!(node.boundary_fact, "MIR::BgBlock")
+        if (!node.run_body || node.run_body.empty?) && !node.fsm_structure
+          @errors << error(:BOUNDARY_FACT_REQUIRED, "MIR::BgBlock",
+            "FSM-consumed BG body has no typed FsmStructure; rendered execution-boundary code is unverifiable")
+        end
+        MIRChecker.check_fsm_structure!(node.fsm_structure) if node.fsm_structure
       when MIR::StreamSpawn
         verify_execution_boundary_fact!(node.boundary_fact, "MIR::StreamSpawn")
       when MIR::DoBlock
