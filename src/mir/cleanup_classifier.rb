@@ -69,7 +69,7 @@ module CleanupClassifier
 
   sig { params(body: T::Array[T.untyped], bindings: T::Hash[String, CleanupEntry]).void }
   private_class_method def self.walk_moved_source_guards(body, bindings)
-    AST.walk_body(body) do |node|
+    AST.each_locatable(body) do |node|
       next unless node.is_a?(AST::Identifier)
       next unless AST.moved?(node)
       entry = bindings[node.name.to_s]
@@ -275,7 +275,7 @@ module CleanupClassifier
   sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[T.untyped]) }
   private_class_method def self.walk_bindings(body, promoted_fns, schema_lookup, bindings)
     classify_in_body = ->(b) {
-      AST.walk_body(b) do |node|
+      AST.each_locatable(b) do |node|
         next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
         next if node.is_a?(AST::BindExpr) && node.mode == :assign
 
@@ -283,6 +283,10 @@ module CleanupClassifier
         moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
         cleanup = classify_binding(var_name, node.full_type!, node, promoted_fns, schema_lookup)
         cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
+        if !cleanup && node.respond_to?(:symbol) && node.symbol&.heap_storage?
+          ti = node.full_type!
+          cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
+        end
         if cleanup
           cleanup[:alloc] = moved_alloc if moved_alloc
         else

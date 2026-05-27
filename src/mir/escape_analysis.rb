@@ -239,7 +239,7 @@ module EscapeAnalysis
           mark_heap_return!(fn, node.value)
         end
       when AST::Assignment
-        mark_expr_identifiers_heap!(node.value) if heap_destination?(fn, node.name)
+        mark_expr_identifiers_heap!(node.value) if heap_destination?(fn, node.name, schema_lookup)
       when AST::VarDecl, AST::BindExpr
         if borrow_return_expr?(node.value)
           mark_symbol_borrow!(node.symbol)
@@ -524,22 +524,24 @@ module EscapeAnalysis
 
   sig { params(fn: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
   private_class_method def self.propagate_hoist_dependencies!(fn, schema_lookup)
-    bindings = T.let({}, T::Hash[String, T.untyped])
+    bindings = T.let({}, T::Hash[String, T::Array[T.untyped]])
     walk_body(fn.body) do |node|
       next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
       next unless node.name
-      bindings[node.name.to_s] = node.value
+      (bindings[node.name.to_s] ||= []) << node.value
     end
     symbols = binding_symbol_map(fn)
 
     changed = T.let(true, T::Boolean)
     while changed
       changed = false
-      bindings.each do |name, value|
+      bindings.each do |name, values|
         sym = symbols[name]
         next unless symbol_heap?(sym)
-        next unless heap_binding_carries_sources?(value)
-        changed = true if mark_expr_identifiers_heap!(value)
+        values.each do |value|
+          next unless heap_binding_carries_sources?(value)
+          changed = true if mark_expr_identifiers_heap!(value)
+        end
       end
     end
   end
@@ -580,8 +582,6 @@ module EscapeAnalysis
     return nil unless node.is_a?(AST::Assignment)
     target = unwrap_value(node.name)
     return target.name.to_s if target.is_a?(AST::Identifier)
-    root = AST.root_identifier(target)
-    return root.name.to_s if root
     nil
   end
 
@@ -866,13 +866,19 @@ module EscapeAnalysis
     end
   end
 
-  sig { params(fn: AST::FunctionDef, target: T.untyped).returns(T::Boolean) }
-  private_class_method def self.heap_destination?(fn, target)
+  sig { params(fn: AST::FunctionDef, target: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.heap_destination?(fn, target, schema_lookup)
     root = AST.root_identifier(target)
     return false unless root
     return true if symbol_heap?(root.symbol)
     sym = symbol_for_name(fn, root.name.to_s)
-    symbol_heap?(sym)
+    return true if symbol_heap?(sym)
+    return false if target.is_a?(AST::Identifier)
+
+    ti = root.full_type!(context: "escape destination allocator")
+    ti.cleanup_allocator(schema_lookup) == :heap
+  rescue StandardError
+    false
   end
 
   sig { params(value: T.untyped, fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }

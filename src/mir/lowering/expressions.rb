@@ -586,7 +586,7 @@ module MIRLoweringExpressions
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
-    fallback_type = node.left.full_type!(context: "OR fallback expected type").value_payload_type
+    fallback_type = or_fallback_expected_type(node)
     right = with_expected_type(fallback_type) do
       materialize_or_fallback_value(descend(node, :right), node.right)
     end
@@ -599,6 +599,24 @@ module MIRLoweringExpressions
     out = MIR::Orelse.new(left, right)
     out.result_type = Type.from_node!(node, context: "optional OR result")
     out
+  end
+
+  sig { params(node: AST::BinaryOp).returns(T.untyped) }
+  def or_fallback_expected_type(node)
+    T.bind(self, MIRLowering) rescue nil
+    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    left_type = Type.from_node!(node.left, context: "OR fallback left type")
+    success = left_type.success_type
+    return success if success && !success.any?
+
+    error_union = node.left.respond_to?(:error_union_type) ? node.left.error_union_type : nil
+    if error_union
+      eu_type = Type.new(error_union)
+      eu_success = eu_type.success_type
+      return eu_success if eu_success && !eu_success.any?
+    end
+
+    @current_expected_type || node.full_type!(context: "OR fallback expected type")
   end
 
   sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
@@ -1536,42 +1554,65 @@ module MIRLoweringExpressions
   # Memory / capability expressions
   # ================================================================
 
-  sig { params(node: AST::CopyNode).returns(MIR::DeepCopy) }
+  sig { params(node: AST::CopyNode).returns(T.untyped) }
   def lower_copy(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     @union_schemas = T.let(@union_schemas, T.untyped)
+    @current_sink_type = T.let(@current_sink_type, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.untyped)
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
-    ti = Type.from_node!(node.value, context: "COPY value")
+    ti = copy_source_type_info(node.value)
+    sink_type = @current_sink_type || @current_expected_type
+    dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     # Copy placement is destination-driven. Auto-COPY sites may stamp alloc
     # directly; otherwise the active sink allocator flows through
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = @current_decl_alloc || node.alloc || :heap
 
-    if @union_schemas&.key?(ti.resolved)
+    if ti.any_rc?
+      func = ti.shared? ? "arcRetain" : "rcRetain"
+      MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
+    elsif ti.string?
+      MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
+    elsif sink_type && dst_ti.direct_indexable_collection? && !dst_ti.string?
+      MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
+    elsif dst_ti.collection? && !dst_ti.string?
+      MIR::DeepCopy.new(source, dst_ti.zig_type, nil, :full_value, alloc)
+    elsif @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
     elsif ti.optional? && ti.needs_cleanup?(@schema_lookup)
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.any_sync?
       MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
-    elsif ti.string?
-      MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
-    elsif ti.direct_indexable_collection?
-      # COPY of a list/slice: ItemsAccess produces a []T view; the slice arm of
-      # CheatLib.dupeValue allocates a fresh buffer and per-element dupes when
-      # elements need cleanup (or @memcpy when they don't). Subsumes the old
-      # :list_shallow + :list_deep dispatch. The element T (for the cleanup
-      # type) is stamped so cleanup hoist gets the right []T.
-      elem_zig = transpile_type(ti.element_type)
-      src = MIR::ItemsAccess.new(source, true)
-      MIR::DeepCopy.new(src, "[]#{elem_zig}", elem_zig, :full_value, alloc)
+    elsif ti.collection_value?
+      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.collection? || (ti.struct? && ti.needs_promotion?(@schema_lookup))
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
     end
+  end
+
+  sig { params(source: T.untyped).returns(Type) }
+  def copy_source_type_info(source)
+    if source.is_a?(AST::GetIndex)
+      target_ti = Type.from_node(source.target)
+      elem = target_ti&.element_type
+      return elem.is_a?(Type) ? elem : Type.new(elem) if elem
+    end
+
+    node_type = Type.from_node(source)
+    return node_type if node_type && !node_type.untyped?
+
+    sym_type = if source.is_a?(AST::Identifier) && source.symbol&.respond_to?(:type)
+      source.symbol.type
+    end
+    return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
+
+    Type.from_node!(source, context: "COPY value")
   end
 
   sig { params(node: AST::CloneNode).returns(MIR::RcRetain) }

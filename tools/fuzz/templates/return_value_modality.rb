@@ -132,9 +132,11 @@ RETURN_VALUE_EXPECTED_OVERRIDES = {
   soa_pool: [:pass, "#54"],
 }.freeze
 
-RETURN_VALUE_CELLS = RETURN_VALUE_SHAPE_SPECS.keys.map do |shape|
+RETURN_VALUE_CONTEXTS = %i[direct branch or_fallback call_forward].freeze
+
+RETURN_VALUE_CELLS = RETURN_VALUE_SHAPE_SPECS.keys.product(RETURN_VALUE_CONTEXTS).map do |shape, context|
   override = RETURN_VALUE_EXPECTED_OVERRIDES[shape]
-  { shape: shape, expected: override ? override[0] : :pass }
+  { shape: shape, context: context, expected: override ? override[0] : :pass }
 end
 
 FuzzGenerator.register(:return_value_modality, cells: RETURN_VALUE_CELLS) do |p|
@@ -159,10 +161,41 @@ FuzzGenerator.register(:return_value_modality, cells: RETURN_VALUE_CELLS) do |p|
     else expected_n
     end
 
+  case p[:context]
+  when :direct
+    body = "        #{build}\n        RETURN xs;"
+  when :branch
+    body = "        IF TRUE THEN\n            #{build.gsub("\n", "\n            ")}\n            RETURN xs;\n        ELSE\n            #{build.gsub("\n", "\n            ")}\n            RETURN xs;\n        END"
+  when :or_fallback
+    if p[:shape] == :option_owned_payload
+      body = "        #{build}\n        RETURN xs;"
+    else
+      body = "        #{build}\n        RETURN maybe(FALSE) OR xs;"
+    end
+  when :call_forward
+    body = "        RETURN helper();"
+  end
+
+  helper =
+    if p[:context] == :call_forward || p[:context] == :or_fallback
+      <<~HELPER
+        FN helper() RETURNS #{rtype} ->
+            #{build}
+            RETURN xs;
+        END
+
+        FN maybe(flag: Bool) RETURNS !#{rtype} ->
+            IF flag THEN RETURN helper(); END
+            RAISE "no";
+        END
+      HELPER
+    else
+      ""
+    end
+
   <<~CHT
-    #{prelude}FN producer() RETURNS #{rtype} ->
-        #{build}
-        RETURN xs;
+    #{prelude}#{helper}FN producer() RETURNS #{rtype} ->
+#{body}
     END
 
     FN main() RETURNS Void ->

@@ -113,6 +113,12 @@ module Hoist
     when AST::ReturnNode
       expected = Type.from_node(return_type)
       expected = expected.success_type if expected
+      value_type = Type.from_node(stmt.value)
+      expected = value_type if value_type&.collection?
+      if stmt.value.is_a?(AST::BinaryOp) && (stmt.value.op == :OR || stmt.value.op == :OR_RESCUE)
+        right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node(stmt.value.right)
+        expected = right_type if right_type&.collection?
+      end
       stmt.value = hoist_escape_value!(stmt.value, hoists, ctr, schema_lookup, expected_type: expected) if stmt.value
     when AST::YieldExpr
       stmt.expr = hoist_escape_value!(stmt.expr, hoists, ctr, schema_lookup) if stmt.expr
@@ -161,7 +167,7 @@ module Hoist
     return unless node.is_a?(Struct)
     # Separate frames -- their bodies are walked independently.
     return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::WithBlock) ||
+              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
               node.is_a?(AST::DoBlock)
     blk.call(node) if node.is_a?(AST::MethodCall)
     # A body-bearing control-flow node: walk only its condition/subject
@@ -184,7 +190,7 @@ module Hoist
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
     return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::WithBlock) ||
+              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
               node.is_a?(AST::DoBlock)
     blk.call(node) if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
     children = non_body_exprs(node) || node.to_a
@@ -263,7 +269,7 @@ module Hoist
     name = "__hoist_#{n}"
     tok = concat.respond_to?(:token) ? concat.token : nil
     expected = Type.from_node(expected_type)
-    ti = if concat.is_a?(AST::BgStreamBlock) && expected&.stream?
+    ti = if expected && (concat.is_a?(AST::BgStreamBlock) ? expected.stream? : true)
       expected
     else
       Type.from_node!(concat, context: "AST hoist temp")
@@ -385,11 +391,25 @@ module MIRHoistLowering
     alloc_names = scoped.each_with_object(Set.new) do |stmt, names|
       names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
-    result_names = result.is_a?(MIR::Ident) ? Set[result.name.to_s] : Set.new
+    result_names = Set.new(mir_ident_names(result))
+    alloc_by_name = scoped.each_with_object({}) do |stmt, allocs|
+      allocs[stmt.name.to_s] = stmt.alloc if stmt.is_a?(MIR::AllocMark)
+    end
+    alloc_names.intersection(result_names).each do |name|
+      scoped.each do |stmt|
+        next unless stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)
+        next unless stmt.name.to_s == name
+
+        stmt.cleanup_entry[:has_moved_guard] = true
+        (@guarded_cleanup_names ||= {})[name] = true
+        @lowered_guarded_cleanup_names&.add(name)
+      end
+    end
     transfer_marks = alloc_names.intersection(result_names).flat_map do |name|
-      MIR.ownership_transfer_marks(name, :block_result, move_guarded: !!@guarded_cleanup_names&.[](name))
+      MIR.ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name], move_guarded: !!@guarded_cleanup_names&.[](name))
     end
     block = MIR::BlockExpr.new(label, scoped + transfer_marks + [MIR::BreakStmt.new(label, result)])
+    block.lazy_boundary = true
     block.result_type = Type.new(T.unsafe(result).result_type) if result.respond_to?(:result_type) && T.unsafe(result).result_type
     block
   end
@@ -414,8 +434,7 @@ module MIRHoistLowering
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
       lower_scoped do
-        result = T.unsafe(self).lower(child)
-        hoist_lazy_alloc_result(result, child)
+        T.unsafe(self).lower(child)
       end
     else
       T.unsafe(self).lower(child)
@@ -509,13 +528,11 @@ module MIRHoistLowering
       node.is_a?(MIR::Deref) ||
       node.is_a?(MIR::SliceExpr) ||
       node.is_a?(MIR::IfOptional) ||
-      node.is_a?(MIR::TryCatch) ||
       node.is_a?(MIR::TryExpr) ||
-      node.is_a?(MIR::Orelse) ||
-      node.is_a?(MIR::Conditional) ||
       node.is_a?(MIR::ListItems) ||
       node.is_a?(MIR::ListLength) ||
       node.is_a?(MIR::HasField) ||
+      node.is_a?(MIR::DupeSlice) ||
       node.is_a?(MIR::OwnedSlice) ||
       node.is_a?(MIR::ConcatStr) ||
       node.is_a?(MIR::RangeLit) ||
@@ -549,6 +566,7 @@ module MIRHoistLowering
     ).returns(T.untyped)
   end
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
+    return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
@@ -802,6 +820,8 @@ module MIRHoistLowering
   def normalize_allocating_result_expr!(expr)
     prefix = T.let([], T::Array[T.untyped])
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
+    return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    return prefix if expr.is_a?(MIR::TryCatch)
 
     result_children = T.let(mir_result_child_exprs(expr), T::Array[T.untyped])
     result_children.each do |child|
@@ -828,6 +848,7 @@ module MIRHoistLowering
   def normalize_allocating_used_expr(expr, transfer_on_success: false)
     prefix = T.let([], T::Array[T.untyped])
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
+    return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
 
     if !mutating_receiver_allocator_op?(expr) && mir_produces_owned_result?(expr)
       nested = normalize_allocating_result_expr!(expr)

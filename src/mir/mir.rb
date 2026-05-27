@@ -769,6 +769,17 @@ module MIR
     def child_exprs = compact_child_exprs([value])
   end
 
+  # Break expression.
+  # Zig: break [:label] [value]
+  # Used inside expression-only constructs such as `catch break :blk value`,
+  # where the surrounding expression supplies statement termination.
+  BreakExpr = Struct.new(:label, :value) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([value])
+  end
+
   # Continue statement.
   # Zig: continue;
   ContinueStmt = Struct.new(:unused) do
@@ -2432,6 +2443,15 @@ module MIR
       end
       compact_child_exprs(values)
     end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      effects = child_exprs.map { |child| child.respond_to?(:ownership_effect) ? child.ownership_effect : OwnershipEffect.none }
+      owned = effects.select(&:produces_owned)
+      return OwnershipEffect.none if owned.empty?
+
+      allocs = owned.map(&:alloc).compact.uniq
+      OwnershipEffect.owned(alloc: allocs.one? ? allocs.first : nil, cleanup_kind: :uniform)
+    end
 
   end
 
@@ -2458,6 +2478,16 @@ module MIR
   BlockExpr = Struct.new(:label, :body) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def lazy_boundary
+      @lazy_boundary = T.let(nil, T.nilable(T::Boolean)) unless defined?(@lazy_boundary)
+      @lazy_boundary == true
+    end
+
+    sig { params(value: T::Boolean).void }
+    def lazy_boundary=(value)
+      @lazy_boundary = T.let(value, T.nilable(T::Boolean))
+    end
     # body: [MIR stmt] -- last stmt should be BreakStmt with matching label
     sig { returns(T.nilable(Type)) }
     def result_type
@@ -2490,7 +2520,7 @@ module MIR
       transferred_allocs = T.let([], T::Array[Symbol])
       body&.each do |stmt|
         next unless stmt.is_a?(TransferMark)
-        next unless stmt.target == :owned_sink
+        next unless stmt.target == :owned_sink || stmt.target == :block_result
         transferred_allocs << stmt.target_alloc if stmt.target_alloc.is_a?(Symbol)
       end
       unless transferred_allocs.empty?

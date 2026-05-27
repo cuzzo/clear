@@ -732,6 +732,14 @@ module EffectTracker
         traverse.call(n.value)
       when AST::ReturnNode
         traverse.call(n.value)
+      when AST::Identifier
+        if n.respond_to?(:fn_ref) && n.fn_ref
+          fn = fn_nodes[n.name]
+          if fn
+            fn.fn_value_ref = true
+            fn.can_fail = true
+          end
+        end
       when AST::FunctionDef
         traverse.call(n.body)
       else

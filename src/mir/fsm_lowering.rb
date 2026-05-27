@@ -72,9 +72,12 @@ module FsmLowering
         "#{$1}#{$2}#{ctx_var}.#{name} = "
       end
       out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
+      out = out.gsub(/\b#{esc}(?:_L\d+)?_moved\b/, "#{ctx_var}.#{name}_moved")
+      out = out.gsub(/\bvar\s+#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*=\s*/, "#{ctx_var}.#{name}_moved = ")
       out = out.gsub(/@TypeOf\(\s*#{esc}\s*\)/, "@TypeOf(#{ctx_var}.#{name})")
       out = out.gsub(/&#{esc}\b/, "&#{ctx_var}.#{name}")
       out = out.gsub(/\s*_\s*=\s*&?#{esc}\s*;/, "")
+      out = out.gsub(/\s*_\s*=\s*&#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*;/, "")
     end
     out
   end
@@ -298,10 +301,15 @@ module FsmLowering
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
+    inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
+    inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
     if no_result
-      render_mir_list(result)
+      render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
     else
-      [render_mir_list(result[0]), render_mir_list(result[1])]
+      [
+        render_mir_list(append_ownership_transfers_for_mir_body(result[0], inherited_allocs, inherited_guards)),
+        render_mir_list(append_ownership_transfers_for_mir_body(result[1], inherited_allocs, inherited_guards)),
+      ]
     end
   end
   sig { params(mir_list: T::Array[T.untyped]).returns(String) }

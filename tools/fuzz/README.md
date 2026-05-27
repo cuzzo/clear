@@ -96,7 +96,7 @@ expected hard error is absent.
 | `ownership_surface_smoke`   | 34           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
 | `escape_mechanism_matrix`   | 7 (+11 in_dev) | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM capture, enclosing assignment, field/index stores, collection stores, call args, and call-return receiver stores. in_dev cells currently surface leaks in list/set/map/pool stores, collection-literal returns, owned function args, TAKES/GIVE, call-return receiver stores, and indexed outer stores. |
 | `takes_move_modality`       | 35 (+13 in_dev) | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). 16 shapes x 3 modalities = 48 cells. in_dev cells gated by #43 (union variant store), #51 (struct/rt-missing), #52 (sharded/soa-list cleanup .len), #53 (sharded hash_map COPY segfault); flipping them is those bugs' acceptance test. |
-| `return_value_modality`     | 8 (+8 in_dev)   | EVERY :cleanup_value_shapes member returned from `FN producer() RETURNS T -> ... END`. Breadth axis complementing heap_ownership_transfer's depth on list/string. in_dev cells gated by #43 (union return), #52 (sharded/soa cleanup), #54 (set/pool return loses contents at runtime). |
+| `return_value_modality`     | 64              | EVERY :cleanup_value_shapes member returned from direct / branch / OR-fallback / call-forward return contexts. Breadth axis complementing heap_ownership_transfer's depth on list/string. |
 | `struct_field_store_modality` | ~30 (+24 in_dev) | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare. Registry-driven (18 shapes including frame_*). in_dev cells gated by #55 (COPY broken across most shapes), #56 (GIVE/bare type mismatches), #57 (String bare annotator quirk). |
 | `list_append_modality`     | ~15 (+39 in_dev / :compile_error) | EVERY :cleanup_value_shapes member appended to `MUTABLE container: T[]@list = []` via GIVE / COPY / bare. Registry-driven. 30 cells marked :compile_error documenting language limits (no list-of-@pool/@set/sharded/soa); 9 :in_dev across #43/#56/#58/#59. |
 | `heap_ownership_transfer`   | 89              | ret_form (ident/literal/call/give/or_rescue) x bind_form (bare/or_raise/or_fallback/discard/discard_or_raise/onward) x decl (T/!T) -- the depth axis for :heap_list and :string returns (ported from origin/register-machine #13 manifest). |
@@ -134,6 +134,12 @@ expected hard error is absent.
 | `call_ownership_contract_matrix` | 28         | Normal calls, TAKES, owned returns, receiver mutation, BG calls, and pipeline call contracts. |
 | `collection_iteration_storage_matrix` | 41    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 29            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig allocator contracts, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
+| `or_heap_destination_matrix` | 96             | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations. |
+| `owned_sink_destination_matrix` | 108         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks. |
+| `union_lowering_cleanup_matrix` | 36         | Union helper lowering and recursive cleanup for string/list/map/inline-struct/nested payload variants. |
+| `builtin_emit_matrix`       | 16              | Source-level builtin emission through strings, collections, union active tags, and pipeline terminals. |
+| `bg_capture_transfer_matrix` | 54             | BG / DO / BG STREAM capture-transfer roots across borrow/copy/give/call/nested/returned-handle shapes. |
+| `cast_lowering_matrix`      | 30              | Annotation-driven MIR cast/coercion lowering across var, return, call, list, and branch contexts. |
 
 ### `stream_into_boundary` matrix
 

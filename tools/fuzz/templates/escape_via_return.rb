@@ -45,10 +45,10 @@ end
  :indirect_struct, :indirect_struct_string].each do |shape|
   ESCAPE_VIA_RETURN_CELLS << { return_shape: shape }
 end
-# COPY of a collection field is supported; COPY of a collection index still
-# returns a []T slice that mismatches the ArrayList return type.
+# COPY of collection fields and indexes is supported; COPY always produces a
+# distinct owned value instead of a shallow aggregate alias.
 ESCAPE_VIA_RETURN_CELLS << { return_shape: :field_copy }
-ESCAPE_VIA_RETURN_CELLS << { return_shape: :index_copy, expected: :compile_error }
+ESCAPE_VIA_RETURN_CELLS << { return_shape: :index_copy }
 
 # Axis-2 renderer: one self-contained program per return-expression shape.
 # Each shape is a distinct `return_value_is_heap?` case arm.

@@ -1148,7 +1148,22 @@ class Type
 
   sig { returns(Type) }
   def success_type
-    error_union? ? T.must(payload_type) : self
+    return self unless error_union?
+
+    error_union_payload_with_outer_capabilities
+  end
+
+  sig { returns(Type) }
+  def error_union_payload_with_outer_capabilities
+    payload = Type.new(T.must(payload_type))
+    payload.instance_variable_set(:@collection, @collection) if @collection && !payload.collection
+    payload.instance_variable_set(:@shard_count, @shard_count) if @shard_count && !payload.shard_count
+    payload.instance_variable_set(:@soa, @soa) if @soa && !payload.soa?
+    payload.instance_variable_set(:@layout, @layout) if @layout && !payload.layout
+    payload.instance_variable_set(:@ownership, @ownership) if @ownership && !payload.ownership
+    payload.instance_variable_set(:@sync, @sync) if @sync && !payload.sync
+    payload.instance_variable_set(:@provenance, @provenance) if @provenance && !payload.provenance
+    payload
   end
 
   sig { returns(Type) }
@@ -2223,50 +2238,7 @@ class Type
 
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
-      # The parser stamps storage decorators (heap/frame, ownership
-      # like @multiowned/@shared, sync, layout) on the OUTER
-      # error-union Type, but `payload_type` is built from the bare
-      # base symbol -- so a `RETURNS !User @indirect` payload is `User` (no
-      # heap), and `RETURNS !Node @multiowned` payload is `Node` (no
-      # ownership). Propagate the outer's storage hints so the
-      # payload renders as `*User`, `CheatLib.Rc(Node)`,
-      # `CheatLib.Arc(Node)`, etc. -- matching what the body actually
-      # returns and what zig_type would produce for the bare type.
-      pt = payload_type
-      if pt
-        # Make a copy so we don't mutate the cached payload Type.
-        pt = Type.new(pt) if pt.is_a?(Type)
-        if heap? && pt.respond_to?(:provenance) && pt.provenance != :heap &&
-           pt.respond_to?(:provenance=)
-          pt.provenance = :heap
-        end
-        # Generic ownership propagation: any non-default outer
-        # ownership (multiowned / shared / link / ...) flows to the
-        # payload so the inner zig_type renders the right wrapper
-        # (Rc / Arc / WeakRc / ...).
-        if respond_to?(:ownership) && ownership && ownership != :affine &&
-           pt.respond_to?(:ownership) && (pt.ownership.nil? || pt.ownership == :affine) &&
-           pt.respond_to?(:ownership=)
-          pt.ownership = ownership
-        end
-        if respond_to?(:sync) && sync && pt.respond_to?(:sync) && pt.sync.nil? &&
-           pt.respond_to?(:sync=)
-          pt.sync = sync
-        end
-        if respond_to?(:layout) && layout && pt.respond_to?(:layout) && pt.layout.nil? &&
-           pt.respond_to?(:layout=)
-          pt.layout = layout
-        end
-        if collection? && pt.respond_to?(:collection) && !pt.collection &&
-           pt.respond_to?(:collection=)
-          pt.collection = collection
-        end
-        if shard_count && pt.respond_to?(:shard_count) && !pt.shard_count &&
-           pt.respond_to?(:shard_count=)
-          pt.shard_count = shard_count
-        end
-      end
-      inner_zig = T.must(pt).zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = error_union_payload_with_outer_capabilities.zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
     end
 

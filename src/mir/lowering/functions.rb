@@ -54,6 +54,7 @@ module MIRLoweringFunctions
     const :ast_arg, AST::Node
     const :takes, T::Boolean
     const :coerce_type, T.nilable(Symbol)
+    const :sink_type, T.nilable(Type)
 
     sig { params(arg_zig: String).returns(String) }
     def coerce_zig(arg_zig)
@@ -353,6 +354,14 @@ module MIRLoweringFunctions
       body_mir = takes_mir + pointer_param_mir + pre_checks + T.must(lower_body(node.body))
     end
     body_mir = append_ownership_transfers_for_mir_body(body_mir)
+    if !fn_can_fail && body_has_faulting_alloc?(body_mir)
+      fn_can_fail = true
+      return_type_str = faulting_return_type_str(final_type, node)
+      sig = @fn_sigs[node.name.to_s] || @fn_sigs[node.name.to_sym]
+      sig.can_fail = true if sig.respond_to?(:can_fail=)
+      sig.alloc_fault = true if sig.respond_to?(:alloc_fault=)
+      node.can_fail = true if node.respond_to?(:can_fail=)
+    end
 
     # POST + CATCH is rejected at annotation time (see
     # visit_post_clauses! in capabilities.rb) with a clean CLEAR error,
@@ -422,6 +431,25 @@ module MIRLoweringFunctions
     return node.needs_rt if node.needs_rt == true || node.needs_rt == false
 
     Kernel.raise "function #{node.name} missing finalized needs_rt metadata before MIR lowering"
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
+  def body_has_faulting_alloc?(body)
+    found = T.let(false, T::Boolean)
+    MIR.each_node(body) do |mir|
+      next if found
+      next unless mir.respond_to?(:expr?) && mir.expr?
+      found = true if T.unsafe(self).mir_allocates?(mir)
+    end
+    found
+  end
+
+  sig { params(final_type: String, node: AST::FunctionDef).returns(String) }
+  def faulting_return_type_str(final_type, node)
+    return final_type if final_type.include?("anyerror!") || final_type.include?("error{") || final_type.start_with?("!")
+    return "anyerror!#{final_type}" if node.reentrant == :reentrant
+
+    "!#{final_type}"
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Array[AST::Node]) }
@@ -990,7 +1018,10 @@ module MIRLoweringFunctions
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(StdlibCallFacts) }
   def stdlib_call_facts(node)
-    sig = FunctionSignature.unwrap(node.matched_stdlib_def) if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
+    sig = if node.respond_to?(:matched_stdlib_def) && node.matched_stdlib_def
+      FunctionSignature.unwrap(node.matched_stdlib_def)
+    end
+    sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     return empty_stdlib_call_facts unless sig
 
     ast_args = node.is_a?(AST::MethodCall) ? [node.object] + node.args : node.args
@@ -999,6 +1030,7 @@ module MIRLoweringFunctions
     end
     ownership = call_ownership_facts_for_signature(sig, ast_args)
     facts = T.let([], T::Array[StdlibCallArgFact])
+    receiver_type = node.is_a?(AST::MethodCall) ? intrinsic_receiver_type(node) : nil
     ast_args.each_with_index do |ast_arg, index|
       param = sig.params[index]
       next unless param
@@ -1007,9 +1039,19 @@ module MIRLoweringFunctions
         ast_arg: ast_arg,
         takes: ownership.takes?(index),
         coerce_type: stdlib_coerce_type(param.type),
+        sink_type: stdlib_sink_type_for_arg(receiver_type, index, ownership.takes?(index)),
       )
     end
     StdlibCallFacts.new(args: facts, ownership: ownership)
+  end
+
+  sig { params(receiver_type: T.nilable(Type), index: Integer, takes: T::Boolean).returns(T.nilable(Type)) }
+  def stdlib_sink_type_for_arg(receiver_type, index, takes)
+    return nil unless takes && receiver_type
+    return receiver_type.value_type if receiver_type.map? && index == 2
+    return receiver_type.element_type if receiver_type.linear_collection? && index == 1
+
+    nil
   end
 
   sig { returns(StdlibCallFacts) }
@@ -1193,7 +1235,8 @@ module MIRLoweringFunctions
     end
 
     # Standard UFCS call: method(object, args...)
-    obj_mir = lower(node.object)
+    receiver_type = Type.from_node!(node.object, context: "method receiver")
+    obj_mir = with_expected_type(receiver_type) { lower(node.object) }
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
     args_mir = node.args.each_with_index.map do |a, idx|
@@ -1363,7 +1406,7 @@ module MIRLoweringFunctions
 
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
-      obj_mir = lower(node.object)
+      obj_mir = with_expected_type(receiver_type) { lower(node.object) }
       # Auto-deref Arc/Rc-wrapped receivers: obj.ctrl.data.*
       # Zig only -- BC has no Arc-wrapping. Without the gate, methods on
       # shared collections (e.g. map.contains?, map.count) get rewritten
@@ -1424,7 +1467,7 @@ module MIRLoweringFunctions
       stdlib_facts.args.each do |arg_fact|
         i = arg_fact.index
         next unless ownership_facts.takes?(i)
-        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_fact.ast_arg, sink_alloc)
+        mir_args[i] = materialize_owned_sink_value(mir_args[i], arg_fact.ast_arg, sink_alloc, arg_fact.sink_type)
       end
     end
 

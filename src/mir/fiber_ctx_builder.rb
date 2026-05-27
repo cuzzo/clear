@@ -120,9 +120,9 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String]).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer, source_overrides: T::Hash[String, String], schema_lookup: T.nilable(Proc)).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
-                 fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {})
+                 fresh_heap_alloc: nil, fresh_heap_id: 0, source_overrides: {}, schema_lookup: nil)
     captured = analysis&.captures || {}
     strategies = analysis&.strategies || {}
     pointer_captures = analysis&.pointer_captures || Set.new
@@ -134,15 +134,16 @@ module FiberCtxBuilder
       elsif strat.is_a?(CaptureStrategy::FreshHeapCopy) && fresh_heap_alloc
         dupe_var = "__fc_#{fresh_heap_id}_#{name}"
         source_ref = source_overrides[name] || name
+        needs_cleanup = needs_capture_value_cleanup?(_type_obj, schema_lookup)
         # ctx field type and dupe return type must be the same
         # expression (CapturedValue) so they cannot diverge for a
         # `*const T` borrowed-param source.
-        dupe_decl =
-          "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});\n" \
-          "        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});"
-        body_cleanup =
-          "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
+        dupe_decl = "const #{dupe_var} = try CheatLib.dupeCaptured(@TypeOf(#{source_ref}), #{source_ref}, #{fresh_heap_alloc});"
+        dupe_decl += "\n        errdefer CheatLib.cleanup(@TypeOf(#{dupe_var}), #{fresh_heap_alloc}, &#{dupe_var});" if needs_cleanup
+        body_cleanup = if needs_cleanup
+          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
+        end
         CaptureSpec.new(name, "CheatLib.CapturedValue(@TypeOf(#{source_ref}))", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup, nil, nil, nil)
       elsif strat.is_a?(CaptureStrategy::RcClone)
@@ -156,7 +157,7 @@ module FiberCtxBuilder
         payload_zig = rc_payload_zig_type(ti)
         retain_decl = "const #{retain_var} = CheatLib.#{func}(#{payload_zig}, #{source_ref});"
         body_cleanup =
-          "defer CheatLib.#{release}(#{payload_zig}, std.heap.page_allocator, " \
+          "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.#{release}(#{payload_zig}, std.heap.page_allocator, " \
           "#{body_access_prefix}.#{name});"
         setup_mir = MIR::Let.new(retain_var, MIR::Call.new(
           "CheatLib.#{func}",
@@ -170,8 +171,8 @@ module FiberCtxBuilder
                         setup_mir, release, payload_zig)
       elsif strat.is_a?(CaptureStrategy::MoveInto)
         source_ref = source_overrides[name] || name
-        cleanup = if needs_move_capture_cleanup?(_type_obj)
-                    "defer CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
+        cleanup = if needs_move_capture_cleanup?(_type_obj, schema_lookup)
+                    "defer if (!#{body_access_prefix}.#{name}_moved) CheatLib.cleanup(@TypeOf(#{body_access_prefix}.#{name}), " \
                     "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
                   end
         CaptureSpec.new(name, "@TypeOf(#{source_ref})", source_ref,
@@ -211,11 +212,21 @@ module FiberCtxBuilder
     Result.new(specs, map, analysis&.capture_symbols || {})
   end
 
-  sig { params(type_obj: T.untyped).returns(T::Boolean) }
-  def self.needs_move_capture_cleanup?(type_obj)
+  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.needs_move_capture_cleanup?(type_obj, schema_lookup = nil)
     ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     return false if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
-    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(nil)
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(schema_lookup)
+  rescue StandardError
+    false
+  end
+
+  sig { params(type_obj: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.needs_capture_value_cleanup?(type_obj, schema_lookup = nil)
+    ti = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
+    return false if ti.void? || ti.any? || ti.rodata? || ti.provenance == :borrow
+    needs_move_capture_cleanup?(ti, schema_lookup) ||
+      ti.any_sync? || ti.any_rc? || !!(ti.ownership && ti.ownership != :affine)
   rescue StandardError
     false
   end

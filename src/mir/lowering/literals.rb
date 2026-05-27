@@ -70,7 +70,9 @@ module MIRLoweringLiterals
       end
     items_mir = node.items.map do |i|
       with_decl_alloc(list_alloc) do
-        item_value = materialize_owned_sink_value(lower(i), i, list_alloc)
+        lowered_item = elem_type ? with_expected_type(elem_type) { lower(i) } : lower(i)
+        placed_item = elem_type ? place_value_for_destination(lowered_item, i, list_alloc, elem_type) : lowered_item
+        item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)
         item_alloc = mir_owned_alloc(item_value)
         item = hoist_alloc(item_value, i, err_cleanup: true)
         if elem_needs_owned_storage && !ast_expr_produces_heap?(i) && item_alloc != list_alloc

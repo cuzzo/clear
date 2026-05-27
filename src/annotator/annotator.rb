@@ -1193,6 +1193,10 @@ private
         ft = ftype.is_a?(Type) ? ftype : Type.new(ftype || :Any)
         if ft.indirect?
           deinit_entries << { field: fname, kind: :indirect, zig_type: Type.new(ft.resolved).zig_type }
+        elsif ft.string?
+          deinit_entries << { field: fname, kind: :uniform, zig_type: ft.zig_type }
+        elsif ft.collection?
+          deinit_entries << { field: fname, kind: :uniform, zig_type: ft.zig_type }
         elsif ft.array? && !ft.string?
           deinit_entries << { field: fname, kind: :array, elem_zig_type: Type.new(ft.element_type).zig_type }
         end

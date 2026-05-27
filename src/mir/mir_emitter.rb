@@ -149,6 +149,7 @@ class MIREmitter
     when MIR::Cast             then emit_cast(node)
     when MIR::TryExpr          then "try #{emit(node.expr)}"
     when MIR::TryCatch         then emit_try_catch(node)
+    when MIR::BreakExpr        then emit_break_expr(node)
     when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
@@ -782,6 +783,14 @@ class MIREmitter
     parts << ":#{node.label}" if node.label
     parts << T.must(emit(node.value)) if node.value
     "#{parts.join(' ')};"
+  end
+
+  sig { params(node: MIR::BreakExpr).returns(String) }
+  def emit_break_expr(node)
+    parts = ["break"]
+    parts << ":#{node.label}" if node.label
+    parts << T.must(emit(node.value)) if node.value
+    parts.join(" ")
   end
 
   sig { params(node: MIR::IndexInsert).returns(String) }

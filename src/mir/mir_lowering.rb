@@ -67,6 +67,7 @@ class MIRLowering
     const :action, Symbol
     const :type_info, T.nilable(Type)
     const :dest_alloc, T.nilable(Symbol)
+    const :source_alloc, T.nilable(Symbol), default: nil
 
     sig { returns(T::Boolean) }
     def keep?
@@ -86,6 +87,7 @@ class MIRLowering
     const :target_alloc, Symbol
     const :zig_type, T.nilable(String)
     const :copy_mode, T.nilable(Symbol)
+    const :source_slice_view, T::Boolean, default: false
 
     sig { returns(T::Boolean) }
     def keep?
@@ -243,6 +245,7 @@ class MIRLowering
     @tmp_counter = T.let(0, Integer)
     @current_decl_alloc = T.let(nil, T.nilable(Symbol))
     @current_expected_type = T.let(nil, T.untyped)
+    @current_sink_type = T.let(nil, T.untyped)
     # Allocator of the binding whose value is currently being lowered;
     # an anonymous allocating sub-expression inherits it (with_decl_alloc).
     @current_bindings = T.let({}, T::Hash[String, CleanupEntry])  # set per-function by lower_function_def from fn.cleanup_bindings
@@ -323,9 +326,11 @@ class MIRLowering
       placed = place_value_for_destination(mir.expr, ast_node, dest_alloc, dest_type)
       return MIR::Cast.new(placed, mir.target_type, mir.method)
     when :owned_orelse
-      return place_owned_orelse_for_destination(mir, T.cast(ast_node, AST::BinaryOp), T.must(plan.type_info), T.must(plan.dest_alloc))
+      return place_owned_orelse_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
     when :owned_try_catch
-      return place_owned_try_catch_for_destination(mir, T.cast(ast_node, AST::BinaryOp), T.must(plan.type_info), T.must(plan.dest_alloc))
+      return place_owned_try_catch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc))
+    when :owned_alloc_mismatch
+      return place_owned_alloc_mismatch_for_destination(mir, T.must(plan.type_info), T.must(plan.dest_alloc), T.must(plan.source_alloc))
     when :string_or
       return place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
     when :string
@@ -337,13 +342,17 @@ class MIRLowering
 
   sig { params(mir: T.untyped, ast_node: T.untyped, dest_alloc: T.nilable(Symbol), dest_type: T.untyped).returns(DestinationPlacementPlan) }
   def destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
-    return destination_keep_plan(dest_alloc) unless dest_alloc == :heap
+    return destination_keep_plan(dest_alloc) unless dest_alloc
 
     ti = destination_type(ast_node, dest_type)
-    return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if heap_indirect_destination?(mir, ast_node, ti)
+    return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if dest_alloc == :heap && heap_indirect_destination?(mir, ast_node, ti)
     return DestinationPlacementPlan.new(action: :cast_wrapped_or, type_info: ti, dest_alloc: dest_alloc) if cast_wrapped_or?(mir, ast_node)
     return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::Orelse)
     return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::TryCatch)
+    source_alloc = mir_owned_alloc(mir)
+    if source_alloc && source_alloc != dest_alloc && ownership_bearing_type?(ti)
+      return DestinationPlacementPlan.new(action: :owned_alloc_mismatch, type_info: ti, dest_alloc: dest_alloc, source_alloc: source_alloc)
+    end
     return DestinationPlacementPlan.new(action: :string_or, type_info: ti, dest_alloc: dest_alloc) if ti.string? && or_binary?(ast_node)
     return DestinationPlacementPlan.new(action: :string, type_info: ti, dest_alloc: dest_alloc) if ti.string?
 
@@ -394,8 +403,8 @@ class MIRLowering
     )
   end
 
-  sig { params(mir: MIR::Orelse, ast_node: AST::BinaryOp, ti: Type, dest_alloc: Symbol).returns(MIR::IfOptional) }
-  def place_owned_orelse_for_destination(mir, ast_node, ti, dest_alloc)
+  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::IfOptional) }
+  def place_owned_orelse_for_destination(mir, ti, dest_alloc)
     @tmp_counter += 1
     capture = "__or_val_#{@tmp_counter}"
     left = place_owned_branch_value_for_destination(MIR::Ident.new(capture), ti, dest_alloc)
@@ -405,12 +414,53 @@ class MIRLowering
     out
   end
 
-  sig { params(mir: MIR::TryCatch, ast_node: AST::BinaryOp, ti: Type, dest_alloc: Symbol).returns(MIR::TryCatch) }
-  def place_owned_try_catch_for_destination(mir, ast_node, ti, dest_alloc)
-    right = ti.string? || or_fallback_borrowed_source?(ast_node.right) ?
-      place_owned_branch_value_for_destination(mir.catch_body, ti, dest_alloc) :
-      mir.catch_body
+  sig { params(mir: MIR::TryCatch, ti: Type, dest_alloc: Symbol).returns(T.untyped) }
+  def place_owned_try_catch_for_destination(mir, ti, dest_alloc)
+    right = place_owned_branch_value_for_destination(mir.catch_body, ti, dest_alloc)
+    source_alloc = mir_owned_alloc(mir.expr) || mir_owned_alloc(mir)
+    if source_alloc && source_alloc != dest_alloc
+      @tmp_counter += 1
+      label = "__try_place_#{@tmp_counter}"
+      success = "__try_val_#{@tmp_counter}"
+      catch_break = MIR::BreakExpr.new(label, right)
+      success_try = MIR::TryCatch.new(mir.expr, catch_break, mir.capture)
+      success_try.result_type = Type.new(ti)
+      success_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
+      build_drop_entry!(success_cleanup, ti, nil)
+      mark = MIR::AllocMark.new(success, source_alloc, ti)
+      mark.scope = source_alloc == :heap ? :heap : :iteration
+      body = [
+        mark,
+        MIR::Let.new(success, success_try, false, nil, nil),
+        MIR::Cleanup.new(success, success_cleanup),
+        MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(success), ti, dest_alloc)),
+      ]
+      out_block = MIR::BlockExpr.new(label, body)
+      out_block.result_type = Type.new(ti)
+      return out_block
+    end
+
     out = MIR::TryCatch.new(mir.expr, right, mir.capture)
+    out.result_type = Type.new(ti)
+    out
+  end
+
+  sig { params(mir: T.untyped, ti: Type, dest_alloc: Symbol, source_alloc: Symbol).returns(MIR::BlockExpr) }
+  def place_owned_alloc_mismatch_for_destination(mir, ti, dest_alloc, source_alloc)
+    @tmp_counter += 1
+    label = "__owned_place_#{@tmp_counter}"
+    name = "__owned_val_#{@tmp_counter}"
+    cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
+    build_drop_entry!(cleanup, ti, nil)
+    mark = MIR::AllocMark.new(name, source_alloc, ti)
+    mark.scope = source_alloc == :heap ? :heap : :iteration
+    body = [
+      mark,
+      MIR::Let.new(name, mir, false, nil, nil),
+      MIR::Cleanup.new(name, cleanup),
+      MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(name), ti, dest_alloc)),
+    ]
+    out = MIR::BlockExpr.new(label, body)
     out.result_type = Type.new(ti)
     out
   end
@@ -442,15 +492,12 @@ class MIRLowering
 
   sig { params(mir: T.untyped, dst_ti: Type, dest_alloc: Symbol).returns(T.untyped) }
   def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
-    return mir if mir_allocates?(mir)
+    owned_alloc = mir_owned_alloc(mir)
+    return mir if owned_alloc == dest_alloc
+    return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
     return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
 
     MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
-  end
-
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def or_fallback_borrowed_source?(ast_node)
-    ast_node.is_a?(AST::Identifier) || ast_node.is_a?(AST::GetField) || ast_node.is_a?(AST::GetIndex)
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T.untyped) }
@@ -708,9 +755,14 @@ class MIRLowering
     line = packet.source_line
     col = packet.source_column
     state.out << MIR::Comment.new("CLR:#{line}") if line
+    append_transfer_marks_to_body!(
+      state,
+      dedupe_transfer_marks(ownership_transfers_for_stmt(packet.ast_stmt, state.visible_alloc_names, state.visible_guarded_names)),
+      line,
+      col,
+    )
     mir_nodes.each { |node| append_ownership_finalized_node!(state, node, mir_nodes, line, col) }
-    marks = ownership_transfers_for_stmt(packet.ast_stmt, state.visible_alloc_names, state.visible_guarded_names) +
-            ownership_transfers_for_mir(mir_nodes, state.visible_alloc_names, state.visible_guarded_names, state.out + mir_nodes)
+    marks = ownership_transfers_for_mir(mir_nodes, state.visible_alloc_names, state.visible_guarded_names, state.out + mir_nodes)
     append_transfer_marks_to_body!(state, dedupe_transfer_marks(marks), line, col)
     nil
   end
@@ -1261,13 +1313,30 @@ class MIRLowering
     names.uniq.each do |name|
       next unless visible_alloc_names.include?(name.to_s)
       next if transfer_mark_present?(existing + marks, name.to_s)
+      guarded_names = visible_guarded_names.dup
+      guarded_names << name.to_s if ensure_transfer_cleanup_guard!(existing + nodes, name.to_s)
       target_alloc = transfer_target_alloc_for_consumed_name(mir, name.to_s) ||
                      alloc_mark_for_consumed_name(existing + nodes, name.to_s) ||
                      current_binding_alloc_for_name(name.to_s) || :heap
-      marks.concat(ownership_transfer_plan(name.to_s, :owned_sink, visible_guarded_names,
+      marks.concat(ownership_transfer_plan(name.to_s, :owned_sink, guarded_names,
         target_alloc: target_alloc).marks)
     end
     marks
+  end
+
+  sig { params(nodes: T::Array[T.untyped], name: String).returns(T::Boolean) }
+  def ensure_transfer_cleanup_guard!(nodes, name)
+    guarded = T.let(false, T::Boolean)
+    MIR.each_surface_node(nodes) do |node|
+      next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+      next unless node.name.to_s == name
+
+      node.cleanup_entry[:has_moved_guard] = true
+      guarded = true
+    end
+    (@guarded_cleanup_names ||= {})[name] = true if guarded
+    @lowered_guarded_cleanup_names&.add(name) if guarded
+    guarded
   end
 
   sig { params(mir: T.untyped, name: String).returns(T.nilable(Symbol)) }
@@ -1407,12 +1476,41 @@ class MIRLowering
   def collect_bg_capture_transfer_roots(stmt)
     names = T.let([], T::Array[String])
     AST.each_bg_block_in_stmt(stmt) do |bg|
+      body_names = T.let(Set.new, T::Set[String])
+      AST.each_locatable(bg.body) do |node|
+        body_names << node.name.to_s if node.is_a?(AST::Identifier)
+      end
       (bg.capture_analysis&.move_mark_names || Set.new).each do |name|
+        next unless body_names.include?(name.to_s)
         entry = @current_bindings[name.to_s] || CleanupEntry::NONE
         names << name.to_s if entry.present?
       end
     end
     names.uniq
+  end
+
+  sig { params(node: T.untyped).returns(T::Array[String]) }
+  def collect_explicit_move_roots(node)
+    names = T.let([], T::Array[String])
+    collect = T.let(->(root) do
+      AST.each_locatable(root) do |child|
+        next unless child.is_a?(AST::MoveNode)
+        moved = moved_arg_root(child)
+        names << moved if moved
+      end
+    end, T.proc.params(root: T.untyped).void)
+    collect.call(node)
+    AST.each_bg_block_in_stmt(node) do |bg|
+      collect.call(bg.body) if bg.respond_to?(:body) && bg.body
+    end
+    names.uniq
+  end
+
+  sig { params(stmt: T.untyped).returns(T::Boolean) }
+  def bg_stream_boundary_stmt?(stmt)
+    found = T.let(false, T::Boolean)
+    AST.each_bg_block_in_stmt(stmt) { |bg| found = true if bg.is_a?(AST::BgStreamBlock) }
+    found
   end
 
   sig { params(stmt: T.untyped).returns(T::Array[String]) }
@@ -1681,6 +1779,15 @@ class MIRLowering
     @current_expected_type = prev
   end
 
+  sig { params(type_info: T.untyped, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_sink_type(type_info, &blk)
+    prev = @current_sink_type
+    @current_sink_type = type_info
+    blk.call
+  ensure
+    @current_sink_type = prev
+  end
+
   sig { params(callee_param: T.untyped).returns(Symbol) }
   def allocator_for_takes_param!(callee_param)
     Kernel.raise "TAKES argument allocator requested without a callee parameter" unless callee_param
@@ -1938,6 +2045,17 @@ class MIRLowering
               false
             ),
             MIR::ExprStmt.new(MIR::DestroyPtr.new(self_field, alloc_ref), false),
+          ]
+        when :uniform
+          [
+            MIR::ExprStmt.new(
+              emit_builtin(:cleanup, [
+                MIR::Ident.new(de[:zig_type]),
+                alloc_ref,
+                MIR::AddressOf.new(self_field),
+              ]),
+              false
+            ),
           ]
         when :array
           elem_zig = MIR::Ident.new(de[:elem_zig_type])
@@ -2649,6 +2767,7 @@ class MIRLowering
     when :dupe_slice
       MIR::DupeSlice.new(value, plan.target_alloc)
     when :deep_copy
+      value = MIR::ItemsAccess.new(value, true) if plan.source_slice_view
       MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, plan.copy_mode, plan.target_alloc)
     when :dupe_union
       emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::Ident.new(alloc_zig_str(plan.target_alloc))])
@@ -2659,7 +2778,7 @@ class MIRLowering
 
   sig { params(value: T.untyped, ast_node: T.untyped, sink_alloc: Symbol, sink_type: T.untyped).returns(OwnedSinkPlan) }
   def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
-    ti = Type.from_node!(ast_node, context: "owned sink materialization")
+    ti = ast_node.is_a?(AST::CopyNode) ? T.unsafe(self).copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink materialization")
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     keep = OwnedSinkPlan.new(action: :keep, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
     source = owned_sink_source_fact(value, ast_node, sink_alloc, ti)
@@ -2672,11 +2791,13 @@ class MIRLowering
     if ti.heap_ptr? || ti.collection_value? || ti.recursive_cleanup_shape?(@schema_lookup)
       return keep if source.satisfies_sink?(sink_alloc, ti)
       return keep unless source.existing_owned_source
+      source_slice_view = T.let(!sink_type.nil? && ti.direct_indexable_collection? && !dst_ti.collection?, T::Boolean)
       return OwnedSinkPlan.new(
         action: :deep_copy,
         target_alloc: sink_alloc,
         zig_type: dst_ti.zig_type(is_field: true),
         copy_mode: :full_value,
+        source_slice_view: source_slice_view,
       )
     end
 

@@ -55,6 +55,52 @@ module MIRLoweringConcurrency
     )
   end
 
+  sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String).returns(T::Array[MIR::Stmt]) }
+  def capture_ownership_mirror_nodes(caps, analysis, receiver)
+    captured = T.let(
+      T.cast(analysis&.captures, T.nilable(T::Hash[String, T.any(Type, Symbol, String)])) || {},
+      T::Hash[String, T.any(Type, Symbol, String)],
+    )
+    caps.specs.filter_map do |spec|
+      next nil unless spec.body_cleanup_zig
+
+      raw_type = captured[spec.name]
+      type_info = raw_type.is_a?(Type) ? Type.new(raw_type) : Type.new(raw_type || :Any)
+      type_info = Type.new(:CapturedValue, location: :heap) if spec.field_type_zig.start_with?("CheatLib.CapturedValue(")
+      name = "#{receiver}.#{spec.name}"
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
+      mark = MIR::AllocMark.new(name, :heap, type_info)
+      mark.scope = :heap
+      [mark, MIR::Cleanup.new(name, entry)]
+    end.flatten
+  end
+
+  sig { params(specs: T::Array[FiberCtxBuilder::CaptureSpec]).returns(T::Array[String]) }
+  def capture_moved_guard_fields(specs)
+    specs.filter_map do |spec|
+      next nil unless spec.body_cleanup_zig
+
+      "#{spec.name}_moved: bool = false,"
+    end
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Array[T.untyped]) }
+  def finalized_boundary_body_for_emit(body)
+    prev_alloc_names = T.unsafe(self).instance_variable_get(:@lowered_alloc_names)
+    prev_guarded_names = T.unsafe(self).instance_variable_get(:@lowered_guarded_cleanup_names)
+    T.unsafe(self).append_ownership_transfers_for_mir_body(body)
+  ensure
+    T.unsafe(self).instance_variable_set(:@lowered_alloc_names, prev_alloc_names)
+    T.unsafe(self).instance_variable_set(:@lowered_guarded_cleanup_names, prev_guarded_names)
+  end
+
+  sig { params(node: T.untyped, receiver: String).returns(T::Boolean) }
+  def capture_ownership_mirror_node?(node, receiver)
+    return false unless node.is_a?(MIR::AllocMark) || node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+
+    node.name.to_s.start_with?("#{receiver}.")
+  end
+
   sig { params(name: String, symbol: T.nilable(SymbolEntry)).returns(MIR::BoundaryCaptureFact) }
   def boundary_capture_fact(name, symbol)
     storage = symbol&.storage
@@ -163,9 +209,10 @@ module MIRLoweringConcurrency
       # Capture handling delegated to FiberCtxBuilder -- same builder
       # BG/BG STREAM/CONCURRENT use. DO branches use "ctx" as the body
       # access prefix (no per-id suffix).
-      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx", fresh_heap_id: (id * 1000) + i)
+      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx", fresh_heap_id: (id * 1000) + i, schema_lookup: @schema_lookup)
 
-      capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n    ")
+      capture_fields = (caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," } +
+                        capture_moved_guard_fields(caps.specs)).join("\n    ")
       capture_inits = ([".wg = &#{wg_var}"] +
         caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
       capture_pre_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
@@ -297,7 +344,8 @@ module MIRLoweringConcurrency
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
                                  fresh_heap_id: id,
-                                 source_overrides: outer_capture_map)
+                                 source_overrides: outer_capture_map,
+                                 schema_lookup: @schema_lookup)
 
     # If this BG sits inside an outer fiber/FSM whose capture_map
     # rewrites the surrounding scope's identifiers (e.g. an outer
@@ -315,9 +363,10 @@ module MIRLoweringConcurrency
                 # rewritten scope (e.g. @TypeOf(__ctx_0.x) instead of
                 # @TypeOf(x)).
                 s.field_type_zig.sub(/\(#{Regexp.escape(s.name)}\)/, "(#{outer_capture_map[s.name]})")
-              end
+      end
       "#{s.name}: #{ftype},"
-    }.join("\n        ")
+    }
+    capture_fields = (capture_fields + capture_moved_guard_fields(caps.specs)).join("\n        ")
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
                      caps.specs.map { |s|
                        outer_ref = outer_capture_map[s.name]
@@ -418,7 +467,7 @@ module MIRLoweringConcurrency
         assignment = "__ctx_#{id}.inner.result = #{result_code};"
         pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
       end
-      run_body = body_mir
+      run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "__ctx_#{id}") + body_mir)
       [sc, rl]
     end
     @pending_stmts = prev_fiber_pending
@@ -678,9 +727,11 @@ module MIRLoweringConcurrency
                                  body_access_prefix: "ctx",
                                  promoted_names: promoted_names,
                                  fresh_heap_alloc: alloc_var,
-                                 fresh_heap_id: id)
+                                 fresh_heap_id: id,
+                                 schema_lookup: @schema_lookup)
 
-    capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
+    capture_fields = (caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," } +
+                      capture_moved_guard_fields(caps.specs)).join("\n        ")
     capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
                      caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
@@ -701,8 +752,9 @@ module MIRLoweringConcurrency
         mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
         pending + mir_nodes
       }
-      stream_run_body = body_mir
-      body_mir.filter_map { |mir|
+      stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
+      stream_run_body.filter_map { |mir|
+        next nil if capture_ownership_mirror_node?(mir, "ctx")
         code = emit_expr(mir)
         next nil if code.nil? || code.empty?
         code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")

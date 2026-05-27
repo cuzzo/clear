@@ -2328,6 +2328,10 @@ class MIRChecker
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       return
     end
+    if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+      check_stmts_for_unhoisted(expr.body)
+      return
+    end
     if expr.is_a?(MIR::TryCatch)
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       check_expr_for_unhoisted(expr.catch_body, allow_top: allow_top)

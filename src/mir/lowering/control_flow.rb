@@ -952,8 +952,9 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     ret_alloc = return_destination_alloc(node)
     value = node.value ? with_decl_alloc(ret_alloc) do
-      lowered = with_expected_type(return_destination_type(node)) { lower(node.value) }
-      place_value_for_destination(lowered, node.value, ret_alloc, node.value.full_type!)
+      destination_type = return_value_destination_type(node)
+      lowered = with_expected_type(destination_type) { lower(node.value) }
+      place_value_for_destination(lowered, node.value, ret_alloc, destination_type)
     end : nil
 
     explicit_return_names = returned_binding_names(node.value)
@@ -1006,6 +1007,17 @@ module MIRLoweringControlFlow
     @current_fn_return_type = T.let(@current_fn_return_type, T.untyped)
     ti = Type.from_node(@current_fn_return_type)
     ti&.success_type
+  end
+
+  sig { params(node: AST::ReturnNode).returns(T.nilable(Type)) }
+  def return_value_destination_type(node)
+    declared = return_destination_type(node)
+    return declared unless node.value
+
+    value_type = Type.from_node!(node.value, context: "return destination value")
+    return value_type if value_type.collection?
+
+    declared
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }

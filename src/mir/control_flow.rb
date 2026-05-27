@@ -473,6 +473,7 @@ class OwnershipDataflow
   sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(T::Hash[String, CleanupEntry]) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
+    ambiguous_names = duplicate_binding_names(fn_node.body || [])
 
     # Rule 1: Use-after-move check.
     checker = UseAfterMoveChecker.new(fn_node, self)
@@ -481,7 +482,7 @@ class OwnershipDataflow
       raise "[Ownership Error] #{checker.errors.first}"
     end
 
-    bindings.each do |var, entry|
+    cleanup_entry_pairs(fn_node, bindings).each do |var, entry|
       next unless entry.needs_cleanup?
       block_entry = block_exit_cleanup_summary(var)
       df_entry = if block_entry && !block_entry[:needs_cleanup]
@@ -498,6 +499,8 @@ class OwnershipDataflow
           entry[:has_moved_guard] = true
         elsif MIR::LocalBindingAnalysis.declared_inside_loop?(fn_node.body || [], var)
           entry[:has_moved_guard] = true
+        elsif ambiguous_names.include?(var)
+          entry[:has_moved_guard] = true
         else
           entry[:needs_cleanup] = false
           entry[:has_moved_guard] = false
@@ -510,6 +513,46 @@ class OwnershipDataflow
         # mark the transfer at the consuming statement.
         entry[:has_moved_guard] = true
       end
+    end
+    bindings
+  end
+
+  sig do
+    params(fn_node: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry])
+      .returns(T::Array[[String, CleanupEntry]])
+  end
+  def cleanup_entry_pairs(fn_node, bindings)
+    pairs = T.let([], T::Array[[String, CleanupEntry]])
+    seen = T.let(Set.new, T::Set[Integer])
+
+    AST.each_locatable(fn_node.body || []) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode != :assign)
+      entry = node.mir_binding_entry
+      next unless entry
+
+      pairs << [node.name.to_s, entry]
+      seen << entry.object_id
+    end
+
+    bindings.each do |name, entry|
+      next if seen.include?(entry.object_id)
+
+      pairs << [name, entry]
+    end
+    pairs
+  end
+
+  sig { params(body: T::Array[T.untyped]).returns(T::Set[String]) }
+  def duplicate_binding_names(body)
+    counts = T.let(Hash.new(0), T::Hash[String, Integer])
+    AST.each_locatable(body) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode != :assign)
+
+      name = node.name.to_s
+      counts[name] = T.must(counts[name]) + 1
+    end
+    counts.each_with_object(Set.new) do |(name, count), out|
+      out << name if count > 1
     end
   end
 

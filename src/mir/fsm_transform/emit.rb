@@ -342,7 +342,9 @@ module FsmTransform
       # ctx[:extra_ctx_fields] by FsmTransform.transform; exclude
       # them here to avoid duplicate struct members.
       conservative_names = (ctx[:recursive_promoted_names] || []).each_with_object({}) { |n, h| h[n] = true }
-      promoted_field_decls =
+      fsm_promoted_names = ((liveness && liveness.cross_segment_vars || {}).keys +
+                            (ctx[:recursive_promoted_names] || [])).compact.uniq
+      promoted_value_decls =
         (liveness && liveness.cross_segment_vars || {})
           .reject { |name, _|
             suspend_result_vars.include?(name) ||
@@ -352,6 +354,8 @@ module FsmTransform
             t = info[:type] ? Type.new(info[:type]) : nil
             "#{name}: #{t ? t.zig_type : 'anyopaque'} = undefined,"
           end
+      promoted_guard_decls = fsm_promoted_names.map { |name| "#{name}_moved: bool = false," }
+      promoted_field_decls = promoted_value_decls + promoted_guard_decls
 
       # capture_map: outer captures + promoted locals (liveness +
       # conservative) + suspend result vars. All names that resolve
@@ -376,9 +380,6 @@ module FsmTransform
       end
 
       arena_init_zig = arena_init_flag ? "#{bg_rt}.arena_mode = true;" : ""
-      fsm_promoted_names = ((liveness && liveness.cross_segment_vars || {}).keys +
-                            (ctx[:recursive_promoted_names] || [])).compact.uniq
-
       # FSM destroy pipeline: ONE source of truth for cleanups that
       # must fire when the FSM task ends, regardless of whether the
       # body completes successfully or errors out. Zig `defer` is
@@ -458,6 +459,11 @@ module FsmTransform
           lowering.instance_variable_set(:@current_bg_pointer_captures, pointer_captures)
           prev_pending = lowering.instance_variable_get(:@pending_stmts)
           lowering.instance_variable_set(:@pending_stmts, [])
+          prev_fsm_allocs = lowering.instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
+          prev_fsm_guards = lowering.instance_variable_get(:@current_fsm_inherited_guarded_names) rescue nil
+          inherited_capture_names = (ctx[:fresh_heap_cleanups] || "").scan(/__ctx_#{id}\.([A-Za-z_]\w*)/).flatten.uniq.map { |name| "__ctx_#{id}.#{name}" }.to_set
+          lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
+          lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, inherited_capture_names)
           # Per-segment alias overrides (e.g. WITH's `inner` ->
           # __ctx_<id>.c.ctrl.data.*.data) merged into the rendering
           # capture_map so identifier resolution sees the alias.
@@ -479,6 +485,8 @@ module FsmTransform
             lowering.instance_variable_set(:@current_fsm_owned_result_guards, prev_guard_map)
           end
           lowering.instance_variable_set(:@pending_stmts, prev_pending)
+          lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, prev_fsm_allocs)
+          lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, prev_fsm_guards)
           lowering.instance_variable_set(:@current_bg_pointer_captures, prev_ptr)
           return nil if lowered.nil?
           if want_result
@@ -705,16 +713,16 @@ module FsmTransform
       escaped_ctx = Regexp.escape(ctx_ref)
       escaped_name = Regexp.escape(name)
       text = text.lines.reject do |line|
-        if line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_]\w*_moved\)\s+)?#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
+        if line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_][\w.]*_moved\)\s+)?#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
           cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
-          cleanup = cleanup.sub(/\Aif \(![A-Za-z_]\w*_moved\)\s+/, "")
           cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
+          cleanup = ctx_guarded_cleanup(cleanup, name, ctx_ref, ctx)
           ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
           true
-        elsif line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_]\w*_moved\)\s+)?CheatLib\.cleanup\([^\n]*&#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
+        elsif line =~ /^\s*(?:errdefer|defer)\s+(?:if \(![A-Za-z_][\w.]*_moved\)\s+)?CheatLib\.cleanup\([^\n]*&#{escaped_ctx}\.#{escaped_name}\b.*;\s*$/
           cleanup = line.strip.sub(/\A(?:errdefer|defer)\s+/, "")
-          cleanup = cleanup.sub(/\Aif \(![A-Za-z_]\w*_moved\)\s+/, "")
           cleanup = cleanup.gsub(/__rt_bg\d+\./, "#{ctx_ref}.rt.")
+          cleanup = ctx_guarded_cleanup(cleanup, name, ctx_ref, ctx)
           ctx[:fsm_destroy_lines] << { kind: :body, zig: cleanup }
           true
         else
@@ -722,6 +730,14 @@ module FsmTransform
         end
       end.join
       text
+    end
+
+    sig { params(cleanup: String, name: String, ctx_ref: String, ctx: T::Hash[Symbol, T.untyped]).returns(String) }
+    def ctx_guarded_cleanup(cleanup, name, ctx_ref, ctx)
+      return cleanup unless cleanup =~ /\Aif \(![A-Za-z_][\w.]*_moved\)\s+/
+
+      field = "#{name}_moved"
+      cleanup.sub(/\Aif \(![A-Za-z_][\w.]*_moved\)\s+/, "if (!#{ctx_ref}.#{field}) ")
     end
 
     # Expand ONE LockSuspend spec into the per-cap fan-out.

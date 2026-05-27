@@ -1040,6 +1040,8 @@ when 'test'
     # filter narrows the run; without tags we keep filename filtering
     # as the default.
     cmd_parts = [ZIG, 'test']
+    cmd_parts += ['--cache-dir', File.join(build_dir, '.zig-cache')]
+    cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
     if tag_filters.empty?

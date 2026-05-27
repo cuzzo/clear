@@ -268,7 +268,11 @@ module MIRLoweringVariables
     else
       MIR::OwnershipEffect.none
     end
-    decl_alloc = init_ownership_effect.alloc || base_decl_alloc
+    # Destination placement is authoritative once escape analysis stamped the
+    # binding heap. Source-owned alloc flow is only allowed for non-escaping
+    # bindings; otherwise a frame source can poison a heap-return destination
+    # and the checker quite correctly rejects the transfer.
+    decl_alloc = base_decl_alloc == :heap ? :heap : (init_ownership_effect.alloc || base_decl_alloc)
     # Group 2 (data shape) is constructed against the BARE type — no
     # sync/ownership wrappers. Group 1 wrapping is applied via
     # compose_capability_wrap once the inner is built. This separation is
@@ -396,7 +400,7 @@ module MIRLoweringVariables
       # One allocator per binding: AllocMark, Cleanup, and the init
       # expression all read the classifier's definitive placement.
       init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
-      node_alloc = init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || decl_alloc
+      node_alloc = decl_alloc == :heap ? :heap : (init_effect.alloc || facts.init_ownership_effect.alloc || drop_entry.alloc || decl_alloc)
       drop_entry = drop_entry.with_alloc(node_alloc)
       @current_bindings[node.name.to_s] = drop_entry if @current_bindings
       (@guarded_cleanup_names ||= {})[safe_name] = true if drop_entry.has_moved_guard?
@@ -514,6 +518,7 @@ module MIRLoweringVariables
         return MIR::DeepCopy.new(lower(rhs_unwrapped.value), nil, nil, :full_value, decl_alloc)
       end
       return lower(node.value) unless rhs_unwrapped.is_a?(AST::ListLit)
+      return with_expected_type(ft) { lower(node.value) } unless rhs_unwrapped.items.empty?
       init_kind = ft.capacity.is_a?(Integer) && ft.capacity > 0 ? :list_capacity : :list_empty
       init_capacity = init_kind == :list_capacity ? ft.capacity : nil
       inner = MIR::ContainerInit.new(bare_zig, init_kind, decl_alloc, init_capacity)
@@ -897,7 +902,10 @@ module MIRLoweringVariables
     @shard_context = T.let(@shard_context, T.untyped)
     @target = T.let(@target, T.untyped)
     dispatch = indexed_assignment_dispatch(kind, receiver_type, target_node, node, op, include_val_alloc: false)
-    val = with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
+    sink_type = receiver_type.value_type
+    val = with_sink_type(sink_type) do
+      with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
+    end
 
     # Map keys are duped internally by put -- always frame-allocate the
     # key expression so it's cleaned by arena rewind (no orphaned heap
@@ -961,10 +969,13 @@ module MIRLoweringVariables
       include_val_alloc: owns_transferred_value
     )
 
-    val = with_decl_alloc(dispatch.sink_alloc) { lower(node.value) }
+    sink_type = receiver_type.value_type || value_type_for_transfer
+    val = with_decl_alloc(dispatch.sink_alloc) do
+      with_sink_type(sink_type) { lower(node.value) }
+    end
     consumed_names = T.let([], T::Array[String])
     if op[:takes_value] && owns_transferred_value && !dispatch.shard_direct
-      val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc)
+      val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc, sink_type)
       val = hoist_alloc(val, val_node, err_cleanup: true)
       if val.is_a?(MIR::Ident)
         consumed_names << val.name
@@ -1051,6 +1062,7 @@ module MIRLoweringVariables
     end
     template = op[template_kind].to_s
     resolved_allocs = indexed_assignment_allocs(template, op, target_node, assignment, include_val_alloc: include_val_alloc)
+    receiver_alloc = T.unsafe(self).send(:placement_for_node, target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
       shard_direct: shard_direct,
@@ -1059,7 +1071,7 @@ module MIRLoweringVariables
       key_zig: (kind == :numeric_map ? receiver_type.key_type&.zig_type : nil),
       val_zig: (kind == :numeric_map ? receiver_type.value_type&.zig_type : nil),
       resolved_allocs: resolved_allocs,
-      sink_alloc: resolved_allocs.value_alloc || resolved_allocs.primary || resolved_allocs.shard_alloc || :heap
+      sink_alloc: resolved_allocs.value_alloc || resolved_allocs.primary || resolved_allocs.shard_alloc || receiver_alloc
     )
   end
 

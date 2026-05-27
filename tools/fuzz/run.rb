@@ -296,16 +296,82 @@ def run_mir_checker_negatives(entries)
   [pass, unexpected_pass]
 end
 
+def async_runtime_cell?(entry)
+  src = File.read(entry[:path])
+  src.include?('BG') || src.include?('DO {')
+end
+
+def run_positive_files(entries)
+  return [[], [], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  clear = File.expand_path('../../clear', __dir__)
+  pass, fails, leaks, mir_errors = [], [], [], []
+  workers = [
+    Integer(ENV.fetch('FUZZ_ISOLATED_WORKERS', '8')),
+    entries.size,
+  ].min
+  workers = 1 if workers < 1
+  queue = Queue.new
+  entries.each { |entry| queue << entry }
+  mutex = Mutex.new
+
+  threads = workers.times.map do
+    Thread.new do
+      loop do
+        entry = queue.pop(true) rescue nil
+        break unless entry
+
+        path = entry[:path]
+        out, status = Open3.capture2e(clear, 'test', path)
+        compile_error = out.include?('MIR ownership verification failed') ||
+                        out.include?('[Compiler Error]') ||
+                        out.include?('Transpilation failed') ||
+                        out =~ /\.zig:\d+:\d+: error:/
+        leak = out =~ /MEMORY LEAKS:\s*[1-9]/ ||
+               out.include?('[DebugAllocator] (err)') ||
+               out.include?('[gpa] (err)') ||
+               out =~ /\d+ tests leaked memory/
+
+        mutex.synchronize do
+          if compile_error
+            mir_errors << [path, out]
+          elsif leak
+            leaks << [path, out]
+          elsif !status.success?
+            fails << [path, out]
+          else
+            pass << path
+          end
+        end
+      end
+    end
+  end
+  threads.each(&:join)
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] isolated async positives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
+  [pass, fails, mir_errors, leaks]
+end
+
 def hybrid_run(emitted, out_dir)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
-  pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
+  isolated_pass_entries, bundled_pass_entries = pass_entries.partition { |entry| async_runtime_cell?(entry) }
+  pass_ok, fails, mir_errors, leaks = run_pass_bundle(bundled_pass_entries, out_dir)
+  iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir)
   mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
 
-  [pass_ok + negative_ok + mir_negative_ok, fails, leaks, mir_errors, unexpected_pass + mir_unexpected_pass]
+  [
+    pass_ok + iso_ok + negative_ok + mir_negative_ok,
+    fails + iso_fails,
+    leaks + iso_leaks,
+    mir_errors + iso_mir_errors,
+    unexpected_pass + mir_unexpected_pass,
+  ]
 end
 
 def per_file_run(emitted)
