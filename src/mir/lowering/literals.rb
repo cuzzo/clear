@@ -7,21 +7,58 @@ module MIRLoweringLiterals
 
   requires_ancestor { MIRLowering }
 
+  class ListLiteralPlan < T::Struct
+    extend T::Sig
+
+    const :type_info, Type
+    const :alloc, Symbol
+    const :element_type, T.nilable(Type)
+    const :element_zig, String
+    const :element_needs_owned_storage, T::Boolean
+
+    sig { returns(T::Boolean) }
+    def bounded_stream?
+      type_info.bounded_stream?
+    end
+
+    sig { params(node: AST::ListLit).returns(T::Boolean) }
+    def fixed_stack_or_frame?(node)
+      type_info.fixed? && node.stack_or_frame_storage?
+    end
+
+    sig { returns(T::Boolean) }
+    def list_collection?
+      type_info.list_collection?
+    end
+  end
+
+  class HashLiteralPlan < T::Struct
+    extend T::Sig
+
+    const :type_info, Type
+    const :alloc, Symbol
+    const :alloc_zig, String
+    const :zig_type, String
+    const :arc_wrapped, T::Boolean
+    const :rc_wrapped, T::Boolean
+
+    sig { returns(T::Boolean) }
+    def capability_wrapped?
+      arc_wrapped || rc_wrapped
+    end
+  end
+
   sig { params(node: AST::ListLit).returns(T.untyped) }
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
     @current_expected_type = T.let(@current_expected_type, T.untyped)
     @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
-    expected_ti = Type.from_node(@current_expected_type)
-    ti = if expected_ti&.collection?
-      expected_ti
-    else
-      node.coerced_type_info || node.full_type!
-    end
+    plan = list_literal_plan(node)
+    ti = plan.type_info
 
     # Bounded stream: ~T[N] - emit BoundedStream struct with Promise items
-    if ti.respond_to?(:bounded_stream?) && ti.bounded_stream?
+    if plan.bounded_stream?
       # BC backend: there's no Promise/BoundedStream runtime; with the
       # synchronous BG_SPAWN the items are already concrete values, so
       # treat the literal as a plain list. NEXT on the bound slot pops
@@ -65,16 +102,9 @@ module MIRLoweringLiterals
       return block
     end
 
-    list_alloc = @current_decl_alloc || alloc_for_node(node)
-    elem_type = ti.element_type if ti.respond_to?(:element_type)
-    elem_zig = elem_type ? transpile_type(elem_type) : "u8"
-    elem_needs_owned_storage =
-      if elem_type
-        et = elem_type.is_a?(Type) ? elem_type : Type.new(elem_type)
-        et.recursive_cleanup_shape?(mir_schema_lookup)
-      else
-        false
-      end
+    list_alloc = plan.alloc
+    elem_type = plan.element_type
+    elem_zig = plan.element_zig
     items_mir = node.items.map do |i|
       with_decl_alloc(list_alloc) do
         lowered_item = elem_type ? with_expected_type(elem_type) { lower(i) } : lower(i)
@@ -82,7 +112,7 @@ module MIRLoweringLiterals
         item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)
         item_alloc = mir_owned_alloc(item_value)
         item = hoist_alloc(item_value, i, err_cleanup: true)
-        if elem_needs_owned_storage && !ast_expr_produces_heap?(i) && item_alloc != list_alloc
+        if plan.element_needs_owned_storage && !ast_expr_produces_heap?(i) && item_alloc != list_alloc
           hoist_alloc(MIR::DeepCopy.new(item, elem_zig, nil, :full_value, list_alloc), i, err_cleanup: true)
         else
           item
@@ -90,8 +120,7 @@ module MIRLoweringLiterals
       end
     end
 
-    if ti.respond_to?(:fixed?) && ti.fixed? &&
-       node.stack_or_frame_storage?
+    if plan.fixed_stack_or_frame?(node)
       # Raw fixed-size array (`T[N] = [...]`). Always lowers to a Zig
       # `[N]T{...}` literal regardless of CLEAR's storage classification:
       # the size > 128 slot threshold in finalize_storage promotes large
@@ -114,7 +143,7 @@ module MIRLoweringLiterals
 
     if node.items.empty?
       # Empty list: MIR expression depends on collection type
-      if ti.respond_to?(:list_collection?) && ti.list_collection?
+      if plan.list_collection?
         zig_t = transpile_type(ti)
         return MIR::ContainerInit.new(zig_t, :list_empty, list_alloc, nil)
       end
@@ -139,15 +168,14 @@ module MIRLoweringLiterals
     T.bind(self, MIRLowering) rescue nil
     @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
-    ti = node.coerced_type_info || node.full_type!
+    plan = hash_literal_plan(node)
+    ti = plan.type_info
     rt_name = runtime_binding_name
-    map_alloc = @current_decl_alloc || alloc_for_node(node)
-    alloc_str = "#{rt_name}.#{map_alloc == :heap ? "heapAlloc" : "frameAlloc"}()"
+    map_alloc = plan.alloc
+    alloc_str = plan.alloc_zig
 
     # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap
-    is_arc = ti.shared?
-    is_rc = ti.multiowned?
-    if is_arc || is_rc
+    if plan.capability_wrapped?
       # Sharded maps have their sync mode built into the Zig type
       # (e.g. MutexShardedStringMap), so they need the legacy direct-
       # composition path that preserves shard_count + sync on bare_ft.
@@ -166,7 +194,7 @@ module MIRLoweringLiterals
           MIR::StructInit.new(zig_t, [])
         end
 
-        wrap_fn = is_arc ? "arcCreate" : "rcCreate"
+        wrap_fn = plan.arc_wrapped ? "arcCreate" : "rcCreate"
         inner = T.cast(
           with_ownership_consumption(
             MIR::CapWrap.new(inner, zig_t, :own_only, nil, nil, wrap_fn, :heap),
@@ -181,8 +209,7 @@ module MIRLoweringLiterals
         bare_ft = ti.bare_data_type
         zig_t = bare_ft.zig_type
 
-        needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
-                      (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
+        needs_alloc = bare_ft.map_init_needs_alloc?
         inner = if needs_alloc
           MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
         else
@@ -195,7 +222,7 @@ module MIRLoweringLiterals
       end
     end
 
-    zig_t = transpile_type(ti)
+    zig_t = plan.zig_type
 
     if node.pairs.empty?
       # PartitionedStringMap, PartitionedNumericMap, and NumericMapType don't have an .alloc field
@@ -227,5 +254,42 @@ module MIRLoweringLiterals
     block = MIR::BlockExpr.new("__hm_blk", append_ownership_transfers_for_mir_body(items))
     block.result_type = Type.new(ti)
     block
+  end
+
+  sig { params(node: AST::ListLit).returns(ListLiteralPlan) }
+  def list_literal_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    expected_ti = Type.from_node(@current_expected_type)
+    ti = if expected_ti&.collection?
+      expected_ti
+    else
+      node.coerced_type_info || node.full_type!
+    end
+    type_info = Type.new(ti)
+    elem_type = type_info.element_type
+    elem_ti = elem_type ? Type.new(elem_type) : nil
+    ListLiteralPlan.new(
+      type_info: type_info,
+      alloc: @current_decl_alloc || alloc_for_node(node),
+      element_type: elem_ti,
+      element_zig: elem_ti ? transpile_type(elem_ti) : "u8",
+      element_needs_owned_storage: elem_ti ? elem_ti.recursive_cleanup_shape?(mir_schema_lookup) : false,
+    )
+  end
+
+  sig { params(node: AST::HashLit).returns(HashLiteralPlan) }
+  def hash_literal_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    ti = Type.new(node.coerced_type_info || node.full_type!)
+    map_alloc = @current_decl_alloc || alloc_for_node(node)
+    rt_name = runtime_binding_name
+    HashLiteralPlan.new(
+      type_info: ti,
+      alloc: map_alloc,
+      alloc_zig: "#{rt_name}.#{map_alloc == :heap ? "heapAlloc" : "frameAlloc"}()",
+      zig_type: transpile_type(ti),
+      arc_wrapped: ti.shared?,
+      rc_wrapped: ti.multiowned?,
+    )
   end
 end

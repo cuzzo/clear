@@ -189,6 +189,14 @@ class MIRLowering
     const :include_transfer_contract, T::Boolean
   end
 
+  class OwnershipTransferTarget < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
+  end
+
   include ZigTypeMapper
   include FsmLowering
   include TestLowering
@@ -1429,30 +1437,38 @@ class MIRLowering
 
     marks = T.let([], T::Array[T.untyped])
     ownership_transfer_operands_for_node(node, existing).each do |operand_target|
-      name = operand_target[:name].to_s
+      name = operand_target.name
       next if name.empty?
       next if transfer_mark_present?(existing + marks, name)
 
-      marks.concat(ownership_transfer_plan(name, operand_target[:target], state.guarded_cleanup_names,
-        target_alloc: operand_target[:target_alloc]).marks)
+      marks.concat(ownership_transfer_plan(name, operand_target.target, state.guarded_cleanup_names,
+        target_alloc: operand_target.target_alloc).marks)
     end
     marks
   end
 
-  sig { params(node: T.untyped, existing: T::Array[T.untyped]).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  sig { params(node: T.untyped, existing: T::Array[T.untyped]).returns(T::Array[OwnershipTransferTarget]) }
   def ownership_transfer_operands_for_node(node, existing = [])
-    operands = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    operands = T.let([], T::Array[OwnershipTransferTarget])
     MIR.surface_nodes(node).each do |surface_node|
       fact = ownership_consumption_for_node(surface_node)
       if fact.is_a?(MIR::OwnershipConsumptionFact)
         fact.operands.each do |operand|
           next if operand.borrowed || operand.name.nil?
-          operands << { name: T.must(operand.name), target: fact.target, target_alloc: operand.target_alloc || fact.target_alloc }
+          operands << OwnershipTransferTarget.new(
+            name: T.must(operand.name),
+            target: fact.target,
+            target_alloc: operand.target_alloc || fact.target_alloc,
+          )
         end
       elsif surface_node.is_a?(MIR::CapWrap)
         mir_ident_names(surface_node.inner).each do |name|
           next unless alloc_mark_present?(existing, name.to_s) || owned_binding_visible?(name.to_s)
-          operands << { name: name.to_s, target: :owned_sink, target_alloc: surface_node.alloc }
+          operands << OwnershipTransferTarget.new(
+            name: name.to_s,
+            target: :owned_sink,
+            target_alloc: surface_node.alloc,
+          )
         end
       end
 
@@ -1460,7 +1476,11 @@ class MIRLowering
       if contract
         contract.operands.each do |operand|
           next if operand.borrowed || operand.name.nil?
-          operands << { name: T.must(operand.name), target: :owned_sink, target_alloc: operand.target_alloc }
+          operands << OwnershipTransferTarget.new(
+            name: T.must(operand.name),
+            target: :owned_sink,
+            target_alloc: operand.target_alloc,
+          )
         end
       end
     end
@@ -1619,50 +1639,45 @@ class MIRLowering
 
   sig { params(value_mir: T.untyped, ast_value: T.untyped, source: String, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
   def ownership_operands_for_value(value_mir, ast_value, source, target_alloc = nil)
-    ti = if ast_value.respond_to?(:full_type!)
-      Type.new(ast_value.full_type!(context: "ownership operand"))
-    else
-      Type.new(:Any)
-    end
-
-    explicit_fact = value_mir.respond_to?(:ownership_consumption) ? value_mir.ownership_consumption : nil
-    if explicit_fact.is_a?(MIR::OwnershipConsumptionFact)
-      return retarget_ownership_operands(explicit_fact.operands, target_alloc)
-    end
-
-    if value_mir.is_a?(MIR::Ident) && owned_binding_visible?(value_mir.name.to_s)
-      return [MIR::OwnershipOperandFact.owned_binding(value_mir.name.to_s, ti, source, target_alloc)]
-    end
-
-    return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)
-    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
-
-    if borrowed_ownership_ast?(ast_value)
-      return [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, source, target_alloc)]
-    end
-
-    root = ownership_root_name(ast_value)
-    if root && (@current_bindings[root] || CleanupEntry::NONE).present?
-      return [MIR::OwnershipOperandFact.owned_binding(transfer_binding_name(root), ti, source, target_alloc)]
-    end
-
-    []
+    ti = ownership_operand_type(ast_value, "ownership operand")
+    ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned: false)
   end
 
   sig { params(value_mir: T.untyped, ast_value: AST::Node, source: String, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
   def ownership_operands_for_lowered_takes_arg(value_mir, ast_value, source, target_alloc)
+    ti = Type.from_node!(ast_value, context: "ownership sink argument")
+    ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned: true)
+  end
+
+  sig { params(ast_value: T.untyped, context: String).returns(Type) }
+  def ownership_operand_type(ast_value, context)
+    return Type.new(:Any) unless ast_value.respond_to?(:full_type!)
+
+    Type.new(ast_value.full_type!(context: context))
+  end
+
+  sig do
+    params(
+      value_mir: T.untyped,
+      ast_value: T.untyped,
+      ti: Type,
+      source: String,
+      target_alloc: T.nilable(Symbol),
+      require_visible_owned: T::Boolean,
+    ).returns(T::Array[MIR::OwnershipOperandFact])
+  end
+  def ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned:)
     explicit_fact = value_mir.respond_to?(:ownership_consumption) ? value_mir.ownership_consumption : nil
     if explicit_fact.is_a?(MIR::OwnershipConsumptionFact)
       return retarget_ownership_operands(explicit_fact.operands, target_alloc)
     end
 
-    ti = Type.from_node!(ast_value, context: "ownership sink argument")
-    return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)
-    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
-
     if value_mir.is_a?(MIR::Ident) && owned_binding_visible?(value_mir.name.to_s)
       return [MIR::OwnershipOperandFact.owned_binding(value_mir.name.to_s, ti, source, target_alloc)]
     end
+
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
 
     if borrowed_ownership_ast?(ast_value)
       return [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, source, target_alloc)]
@@ -1671,10 +1686,12 @@ class MIRLowering
     root = ownership_root_name(ast_value)
     if root
       mapped = transfer_binding_name(root)
-      if owned_binding_visible?(mapped) || (@current_bindings[root] || CleanupEntry::NONE).present?
+      if owned_binding_visible?(mapped) || (!require_visible_owned && (@current_bindings[root] || CleanupEntry::NONE).present?)
         return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
       end
     end
+
+    return [] unless require_visible_owned
 
     [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, "#{source} missing owned binding", target_alloc)]
   end

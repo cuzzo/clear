@@ -33,6 +33,69 @@ module MIRLoweringExpressions
     const :variant_name, String
   end
 
+  class FieldAccessPlan < T::Struct
+    extend T::Sig
+
+    const :target, MIR::Node
+    const :field, String
+    const :path, Symbol
+    const :union_payload, T::Boolean
+    const :union_payload_zig, T.nilable(String)
+    const :indirect, T::Boolean
+
+    sig { returns(T::Boolean) }
+    def union_payload?
+      union_payload
+    end
+
+    sig { returns(MIR::Node) }
+    def value
+      value_for(target)
+    end
+
+    sig { params(root: MIR::Node).returns(MIR::Node) }
+    def value_for(root)
+      result = if union_payload?
+        MIR::UnionVariantGet.new(root, field, T.must(union_payload_zig))
+      else
+        MIR::FieldGet.new(field_root(root), field)
+      end
+      indirect ? MIR::Deref.new(result) : result
+    end
+
+    private
+
+    sig { params(root: MIR::Node).returns(MIR::Node) }
+    def field_root(root)
+      case path
+      when :ctrl_data
+        MIR::FieldGet.new(MIR::FieldGet.new(root, "ctrl"), "data")
+      when :data
+        MIR::FieldGet.new(root, "data")
+      else
+        root
+      end
+    end
+  end
+
+  class IndexAccessPlan < T::Struct
+    extend T::Sig
+
+    const :target, MIR::Node
+    const :index, MIR::Node
+    const :optional, T::Boolean
+    const :optional_source, T.nilable(MIR::Node)
+    const :target_ast, AST::Node
+    const :type_info, Type
+    const :target_name, T.nilable(String)
+    const :needs_mut_ref, T::Boolean
+
+    sig { returns(T::Boolean) }
+    def optional?
+      optional
+    end
+  end
+
   INTEGER_LITERAL_CASTS = T.let({
     INT8: "i8",
     INT16: "i16",
@@ -689,88 +752,93 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @union_schemas = T.let(@union_schemas, T.untyped)
-    # Union unit-variant constructor: Type{ .Variant = {} }
-    if node.target.is_a?(AST::Identifier)
-      schema = @union_schemas&.dig(node.target.name.to_sym)
-      if schema.is_a?(Schemas::UnionSchema)
-        var_data = schema.variants[node.field]
-        unless Schemas.inline_struct?(var_data)
-          return MIR::StructInit.new(node.target.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
-        end
-      end
-    end
+    constructor = unit_variant_constructor(node)
+    return constructor if constructor
 
+    target_node = node.target
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
-    if node.target.is_a?(AST::OptionalUnwrap)
-      inner_ti = Type.from_node!(node.target, context: "optional field target")  # T (unwrapped)
-      inner_mir = lower(node.target.target)
-      inner_sync = node.target.target.symbol&.sync
-      field_expr = if inner_ti.multiowned? || inner_ti.shared? ||
-                       inner_sync == :locked || inner_sync == :write_locked
-        "_r.ctrl.data.#{node.field}"
-      elsif inner_ti.frozen?
-        "_r.#{node.field}"
-      elsif inner_sync == :always_mutable
-        "_r.data.#{node.field}"
-      else
-        "_r.#{node.field}"
-      end
+    if target_node.is_a?(AST::OptionalUnwrap)
+      inner_mir = lower(target_node.target)
+      plan = field_access_plan(node, MIR::Ident.new("_r"))
       return MIR::IfOptional.new(
         inner_mir, "_r",
-        MIR::Ident.new(field_expr),
+        plan.value,
         MIR::Lit.new("null")
       )
     end
 
     target = lower(node.target)
-    ti = Type.from_node!(node.target, context: "field target")
+    field_access_plan(node, T.cast(target, MIR::Node)).value
+  end
 
-    # Rc/Arc: unwrap through .ctrl.data
+  sig { params(node: AST::GetField).returns(T.nilable(MIR::StructInit)) }
+  def unit_variant_constructor(node)
+    T.bind(self, MIRLowering) rescue nil
+    @union_schemas = T.let(@union_schemas, T.untyped)
+    target_node = node.target
+    return nil unless target_node.is_a?(AST::Identifier)
+
+    schema = @union_schemas.dig(target_node.name.to_sym)
+    return nil unless schema.is_a?(Schemas::UnionSchema)
+
+    var_data = schema.variants[node.field]
+    return nil if Schemas.inline_struct?(var_data)
+
+    MIR::StructInit.new(target_node.name, [{ name: node.field.to_s, value: MIR::Lit.new("{}") }])
+  end
+
+  sig { params(node: AST::GetField, target: MIR::Node).returns(FieldAccessPlan) }
+  def field_access_plan(node, target)
+    T.bind(self, MIRLowering) rescue nil
+    @union_schemas = T.let(@union_schemas, T.untyped)
+
+    target_node = node.target
+    ti = Type.from_node!(target_node, context: "field target")
+
     rc_map = @rc_unwrap_map || {}
     locked_map = @locked_unwrap_map || {}
-    is_rc_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
-    is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
+    is_rc_unwrapped = target_node.is_a?(AST::Identifier) && rc_map.key?(target_node.name)
+    is_locked_unwrapped = target_node.is_a?(AST::Identifier) && locked_map.key?(target_node.name)
 
-    target_sync = node.target.symbol&.sync
-    if (ti.multiowned? || ti.shared?) && !is_rc_unwrapped
-      # target.ctrl.data.field
-      ctrl = MIR::FieldGet.new(target, "ctrl")
-      data = MIR::FieldGet.new(ctrl, "data")
-      return MIR::FieldGet.new(data, node.field.to_s)
-    elsif ti.frozen?
-      # *const T auto-derefs in Zig — no _root needed
-      return MIR::FieldGet.new(target, node.field.to_s)
-    elsif (target_sync == :locked || target_sync == :write_locked) && !is_locked_unwrapped
-      # target.ctrl.data.field
-      ctrl = MIR::FieldGet.new(target, "ctrl")
-      data = MIR::FieldGet.new(ctrl, "data")
-      return MIR::FieldGet.new(data, node.field.to_s)
-    elsif target_sync == :always_mutable && !is_locked_unwrapped
-      # target.data.field
-      data = MIR::FieldGet.new(target, "data")
-      return MIR::FieldGet.new(data, node.field.to_s)
+    target_sync = if target_node.is_a?(AST::OptionalUnwrap)
+      target_node.target.symbol&.sync
+    else
+      target_node.symbol&.sync
     end
+    path = field_access_path(ti, target_sync, is_rc_unwrapped, is_locked_unwrapped)
 
-    # Detect union-variant payload access: target has a union type and the
-    # field name matches a declared variant. Emit MIR::UnionVariantGet so
-    # bc_emitter / checker can dispatch on node class rather than name
-    # matching (vs. plain struct-field access).
     target_type_sym = ti.resolved.to_s.to_sym
-    union_schema = @union_schemas&.dig(target_type_sym)
+    union_schema = @union_schemas.dig(target_type_sym)
     union_variants = Schemas.union?(union_schema) ? union_schema.variants : nil
     field_str = node.field.to_s
-    if union_variants && (union_variants.key?(node.field) ||
-                          union_variants.key?(field_str) ||
-                          union_variants.key?(field_str.to_sym))
-      return MIR::UnionVariantGet.new(target, field_str, ti.zig_type)
-    end
+    union_payload = union_variants && (union_variants.key?(node.field) ||
+                                       union_variants.key?(field_str) ||
+                                       union_variants.key?(field_str.to_sym))
 
-    result = MIR::FieldGet.new(target, field_str)
+    FieldAccessPlan.new(
+      target: target,
+      field: field_str,
+      path: path,
+      union_payload: union_payload == true,
+      union_payload_zig: union_payload ? ti.zig_type : nil,
+      indirect: node.indirect_field == true,
+    )
+  end
 
-    return MIR::Deref.new(result) if node.is_a?(AST::GetField) && node.indirect_field
-
-    result
+  sig do
+    params(
+      type_info: Type,
+      target_sync: T.nilable(Symbol),
+      is_rc_unwrapped: T::Boolean,
+      is_locked_unwrapped: T::Boolean
+    ).returns(Symbol)
+  end
+  def field_access_path(type_info, target_sync, is_rc_unwrapped, is_locked_unwrapped)
+    return :ctrl_data if (type_info.multiowned? || type_info.shared?) && !is_rc_unwrapped
+    return :ctrl_data if (target_sync == :locked || target_sync == :write_locked) && !is_locked_unwrapped
+    return :data if target_sync == :always_mutable && !is_locked_unwrapped
+    :direct
   end
 
   sig { params(ex: AST::OrExit, line: T.untyped).returns(OrExitFacts) }
@@ -877,26 +945,39 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetIndex).returns(T.untyped) }
   def lower_get_index(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
+    plan = index_access_plan(node)
+    value = index_access_value(plan)
+    return MIR::IfOptional.new(T.must(plan.optional_source), "_r", value, MIR::Lit.new("null")) if plan.optional?
+
+    value
+  end
+
+  sig { params(node: AST::GetIndex).returns(IndexAccessPlan) }
+  def index_access_plan(node)
+    T.bind(self, MIRLowering) rescue nil
+    target_node = node.target
+    target_ast = T.cast(target_node, AST::Node)
+    optional = target_node.is_a?(AST::OptionalUnwrap)
+    optional_source = optional ? T.cast(lower(target_node.target), MIR::Node) : nil
+    target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
+
+    IndexAccessPlan.new(
+      target: target,
+      index: T.cast(lower(node.index), MIR::Node),
+      optional: optional,
+      optional_source: optional_source,
+      target_ast: target_ast,
+      type_info: Type.from_node!(target_node, context: "index target"),
+      target_name: target_node.is_a?(AST::Identifier) ? target_node.name : nil,
+      needs_mut_ref: node.needs_mut_ref == true,
+    )
+  end
+
+  sig { params(plan: IndexAccessPlan).returns(T.untyped) }
+  def index_access_value(plan)
+    T.bind(self, MIRLowering) rescue nil
     @shard_context = T.let(@shard_context, T.untyped)
     @target = T.let(@target, T.untyped)
-    target = lower(node.target)
-    index = lower(node.index)
-    ti = Type.from_node!(node.target, context: "index target")
-
-    if node.target.is_a?(AST::OptionalUnwrap)
-      inner_mir = lower(node.target.target)
-      unwrapped = MIR::Ident.new("_r")
-      value = if ti.set_collection?
-        elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
-        emit_builtin(:setMemberGet, [unwrapped, index, MIR::Ident.new(elem_zig)])
-      elsif ti.direct_indexable_collection?
-        lower_direct_or_builtin_index_get(unwrapped, index, node.target, ti)
-      else
-        lower_builtin_index_get(unwrapped, index, ti)
-      end
-      return MIR::IfOptional.new(inner_mir, "_r", value, MIR::Lit.new("null"))
-    end
 
     # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
     # Zig only -- BC has no Arc-wrapping (values are uniformly value-typed
@@ -904,13 +985,17 @@ module MIRLoweringExpressions
     # PUT path (which short-circuits the Arc deref for BC) and the GET
     # path use different identifiers; PUTs land in `map` while GETs read
     # from `Deref(map.ctrl.data)` and miss every entry.
+    target = plan.target
+    index = plan.index
+    ti = plan.type_info
     if ti.map? && (ti.shared? || ti.multiowned?) && @target != :bc
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
-    if node.target.metatype == :hashmap
-      target_var = node.target.is_a?(AST::Identifier) ? node.target.name : nil
-      map_ft = Type.new(node.target.full_type!)
+    return index_collection_value(target, index, plan) if plan.optional?
+
+    if plan.target_ast.metatype == :hashmap
+      map_ft = Type.from_node!(plan.target_ast, context: "hashmap index target")
       kind = map_ft.numeric_map? ? :numeric_map : :string_map
       op = INDEX_OPS.dig(kind, :get)
 
@@ -920,7 +1005,7 @@ module MIRLoweringExpressions
       # only inside a SHARD pipeline body where the shard index var
       # is computed by the surrounding loop -- direct dispatch skips
       # routing.
-      shard_direct = @shard_context && target_var == @shard_context[:map]
+      shard_direct = @shard_context && plan.target_name == @shard_context[:map]
       template_kind = if shard_direct then :shard_direct_zig
                       elsif (map_ft.sharded? || map_ft.striped?) && op[:sharded_zig]
                         :sharded_zig
@@ -929,9 +1014,9 @@ module MIRLoweringExpressions
       template = op[template_kind]
       resolved_allocs = T.let({}, T::Hash[Symbol, Symbol])
       [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
-        next unless template&.include?("{#{alloc_key}}")
+        next unless template.include?("{#{alloc_key}}")
         sym = op[alloc_key] || :heap
-        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, node.target, node)
+        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, plan.target_ast, plan.target_ast)
       end
       alloc_metadata = MIR::InlineAllocMetadata.new(resolved_allocs)
       key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
@@ -956,31 +1041,37 @@ module MIRLoweringExpressions
       pool_get_def.emit = (pool_get_def.emit ? pool_get_def.emit.dup : IntrinsicEmit.new)
       pool_get_def.emit.elem = elem_name
       return MIR::InlineBc.new(:get, [target, index], pool_get_def)
-    elsif ti.set_collection?
-      # @set[item]: membership check — returns ?T (item if present, null otherwise)
-      elem_zig = T.must((ti.is_a?(Type) ? ti : Type.new(ti)).element_type).zig_type
-      emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
-    elsif node.needs_mut_ref
+    elsif plan.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
       items = MIR::ListItems.new(target)
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
-    elsif ti.direct_indexable_collection?
-      lower_direct_or_builtin_index_get(target, index, node.target, ti)
     else
-      # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
-      # array → getAt, etc.). Falls back to :getAt for unregistered types.
+      index_collection_value(target, index, plan)
+    end
+  end
+
+  sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(T.untyped) }
+  def index_collection_value(target, index, plan)
+    T.bind(self, MIRLowering) rescue nil
+    ti = plan.type_info
+    if ti.set_collection?
+      elem_zig = T.must(ti.element_type).zig_type
+      emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
+    elsif ti.direct_indexable_collection?
+      lower_direct_or_builtin_index_get(target, index, plan.target_ast, ti)
+    else
       lower_builtin_index_get(target, index, ti)
     end
   end
 
-  sig { params(target: T.untyped, index: T.untyped, ast_node: T.untyped, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, ti: Type).returns(T.untyped) }
   def lower_direct_or_builtin_index_get(target, index, ast_node, ti)
     T.bind(self, MIRLowering) rescue nil
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: T.untyped, index: T.untyped, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.untyped) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1234,7 +1325,7 @@ module MIRLoweringExpressions
         # Borrowed field access has no owned local to transfer, so the
         # indirect cell needs an independent copy. Identifier payloads move
         # into the cell and are guarded by ordinary ownership transfer marks.
-        needs_deep_cleanup = @union_schemas&.key?(field_sym) && v.is_a?(AST::GetField)
+        needs_deep_cleanup = @union_schemas.key?(field_sym) && v.is_a?(AST::GetField)
         if needs_deep_cleanup
           val = MIR::DeepCopy.new(val, zig_t, nil, :full_value, :heap)
         end

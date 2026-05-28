@@ -493,7 +493,6 @@ module MIRHoistLowering
     return false unless node
     return true if mir_produces_owned_result?(node)
 
-    return true if mir_result_child_exprs(node).any? { |child| mir_allocates?(child) }
     return false unless node.respond_to?(:child_exprs)
 
     node.child_exprs.any? { |child| mir_allocates?(child) }
@@ -840,7 +839,7 @@ module MIRHoistLowering
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
 
-    result_children = T.let(mir_result_child_exprs(expr), T::Array[T.untyped])
+    result_children = T.let(expr.ownership_source_exprs, T::Array[T.untyped])
     result_children.each do |child|
       if mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
         child_prefix = normalize_allocating_result_expr!(child)
@@ -988,34 +987,12 @@ module MIRHoistLowering
          expr.respond_to?(:alloc=)
         expr.alloc = alloc
       end
-      mir_result_child_exprs(expr).each do |child|
+      expr.ownership_source_exprs.each do |child|
         has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
         stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)
       end
     end
     nil
-  end
-
-  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
-  def mir_result_child_exprs(node)
-    case node
-    when MIR::Cast, MIR::TryExpr, MIR::OptionalUnwrap
-      [node.expr]
-    when MIR::TryCatch
-      [node.expr, node.catch_body]
-    when MIR::Orelse
-      [node.expr, node.fallback]
-    when MIR::Conditional
-      [node.then_val, node.else_val]
-    when MIR::IfOptional
-      [node.then_expr, node.else_expr]
-    when MIR::Comptime
-      [node.expr]
-    when MIR::Pipeline
-      [node.inner]
-    else
-      []
-    end.compact
   end
 
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }

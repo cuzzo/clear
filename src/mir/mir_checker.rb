@@ -2213,19 +2213,12 @@ class MIRChecker
 
   sig { params(root: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def each_frame_rewind_node(root, &block)
-    return unless root
-    if root.is_a?(Array)
-      root.each { |node| each_frame_rewind_node(node, &block) }
-      return
-    end
-    return unless root.is_a?(MIR::Emittable)
+    MIR.each_node_until(root, ->(node) { frame_rewind_boundary?(node) }, &block)
+  end
 
-    yield root
-    return if root.is_a?(MIR::BgBlock) || root.is_a?(MIR::LambdaExpr)
-
-    root.child_exprs.each { |child| each_frame_rewind_node(child, &block) }
-    root.body_slots.each { |slot| each_frame_rewind_node(slot.body, &block) }
-    nil
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def frame_rewind_boundary?(node)
+    node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr)
   end
 
   # Does this statement list contain a per-iteration loop restore?
@@ -2274,20 +2267,13 @@ class MIRChecker
 
   sig { params(root: T.nilable(MIR::NodeRoot), block: T.proc.params(arg0: MIR::Node).void).void }
   def each_loop_local_node(root, &block)
-    return unless root
-    if root.is_a?(Array)
-      root.each { |node| each_loop_local_node(node, &block) }
-      return
-    end
-    return unless root.is_a?(MIR::Emittable)
+    MIR.each_node_until(root, ->(node) { loop_local_boundary?(node) }, &block)
+  end
 
-    yield root
-    return if root.is_a?(MIR::WhileStmt) || root.is_a?(MIR::ForStmt) ||
-              root.is_a?(MIR::BgBlock) || root.is_a?(MIR::LambdaExpr)
-
-    root.child_exprs.each { |child| each_loop_local_node(child, &block) }
-    root.body_slots.each { |slot| each_loop_local_node(slot.body, &block) }
-    nil
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def loop_local_boundary?(node)
+    node.is_a?(MIR::WhileStmt) || node.is_a?(MIR::ForStmt) ||
+      node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr)
   end
 
   # Does this MIR expression node perform a frame allocation?

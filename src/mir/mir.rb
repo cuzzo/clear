@@ -337,6 +337,11 @@ module MIR
     each_node_inner(root, stop_at_block_expr: false, &blk)
   end
 
+  sig { params(root: T.nilable(NodeRoot), stop: T.proc.params(arg0: Node).returns(T::Boolean), blk: T.proc.params(arg0: Node).void).void }
+  def self.each_node_until(root, stop, &blk)
+    each_node_inner(root, stop_at_block_expr: false, stop: stop, &blk)
+  end
+
   sig { params(root: T.nilable(NodeRoot)).returns(T::Array[Node]) }
   def self.nodes(root)
     out = T.let([], T::Array[Node])
@@ -356,20 +361,21 @@ module MIR
     out
   end
 
-  sig { params(root: T.nilable(NodeRoot), stop_at_block_expr: T::Boolean, blk: T.proc.params(arg0: Node).void).void }
-  def self.each_node_inner(root, stop_at_block_expr:, &blk)
+  sig { params(root: T.nilable(NodeRoot), stop_at_block_expr: T::Boolean, stop: T.nilable(T.proc.params(arg0: Node).returns(T::Boolean)), blk: T.proc.params(arg0: Node).void).void }
+  def self.each_node_inner(root, stop_at_block_expr:, stop: nil, &blk)
     return unless root
 
     if root.is_a?(Array)
-      root.each { |node| each_node_inner(node, stop_at_block_expr: stop_at_block_expr, &blk) }
+      root.each { |node| each_node_inner(node, stop_at_block_expr: stop_at_block_expr, stop: stop, &blk) }
       return
     end
 
     yield root
     return if stop_at_block_expr && root.is_a?(BlockExpr)
+    return if stop&.call(root)
 
-    root.child_exprs.each { |child| each_node_inner(child, stop_at_block_expr: stop_at_block_expr, &blk) }
-    root.body_slots.each { |slot| each_node_inner(slot.body, stop_at_block_expr: stop_at_block_expr, &blk) }
+    root.child_exprs.each { |child| each_node_inner(child, stop_at_block_expr: stop_at_block_expr, stop: stop, &blk) }
+    root.body_slots.each { |slot| each_node_inner(slot.body, stop_at_block_expr: stop_at_block_expr, stop: stop, &blk) }
     nil
   end
 
@@ -3113,6 +3119,8 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([inner])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
