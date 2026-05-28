@@ -114,7 +114,7 @@ module MIRLoweringVariables
   # `alloc`        : :heap | :frame | :static — used by arcCreate/rcCreate.
   #
   # Returns the wrapped MIR node (typically MIR::CapWrap).
-  sig { params(inner_mir: T.any(MIR::ContainerInit, MIR::StructInit), bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.any(MIR::CapWrap, MIR::ContainerInit, MIR::StructInit)) }
+  sig { params(inner_mir: T.untyped, bare_zig_t: String, ft: Type, alloc: Symbol).returns(T.untyped) }
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
     T.bind(self, MIRLowering) rescue nil
     # AtomicPtr and primitive Atomic use distinct constructors.
@@ -127,25 +127,12 @@ module MIRLoweringVariables
               when :shared      then (ft.atomic? ? nil : "arcCreate")
               when :multiowned  then (ft.atomic? ? nil : "rcCreate")
               end
-
     if sync_fn && own_fn
-      T.cast(with_ownership_consumption(
-        MIR::CapWrap.new(inner_mir, bare_zig_t, :both, sync_fn, sync_t, own_fn, alloc),
-        mir_ident_names(inner_mir),
-        "MIR::CapWrap",
-      ), MIR::CapWrap)
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :both, sync_fn, sync_t, own_fn, alloc)
     elsif sync_fn
-      T.cast(with_ownership_consumption(
-        MIR::CapWrap.new(inner_mir, bare_zig_t, :sync_only, sync_fn, sync_t, nil, alloc),
-        mir_ident_names(inner_mir),
-        "MIR::CapWrap",
-      ), MIR::CapWrap)
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :sync_only, sync_fn, sync_t, nil, alloc)
     elsif own_fn
-      T.cast(with_ownership_consumption(
-        MIR::CapWrap.new(inner_mir, bare_zig_t, :own_only, nil, nil, own_fn, alloc),
-        mir_ident_names(inner_mir),
-        "MIR::CapWrap",
-      ), MIR::CapWrap)
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :own_only, nil, nil, own_fn, alloc)
     else
       inner_mir
     end
@@ -166,6 +153,8 @@ module MIRLoweringVariables
     init = ensure_cleanup_binding_owns_string_init(init, facts, node.value)
 
     safe_name = var_decl_safe_name(node, facts.has_mir_drop)
+    @current_binding_types = T.let(@current_binding_types, T.untyped)
+    @current_binding_types[safe_name] = facts.ft
     stamp_var_decl_init_target!(init, safe_name, facts.decl_alloc)
 
     let_node = MIR::Let.new(
@@ -175,7 +164,38 @@ module MIRLoweringVariables
       facts.annotation,
       var_decl_suppression(safe_name, node, facts, init)
     )
-    with_ownership_consumption(let_node, mir_ident_names(init), "MIR::Let")
+    init_effect = init.respond_to?(:ownership_effect) ? init.ownership_effect : MIR::OwnershipEffect.none
+    if (node.respond_to?(:container_borrow) && node.container_borrow) || node.symbol&.borrow_provenance?
+      # Borrowed container views never transfer ownership into the binding.
+    elsif ownership_tracked_transfer_type?(facts.ft) && !init_effect.produces_owned
+      let_node = T.cast(with_ownership_consumption_for_value(
+        let_node,
+        init,
+        node.value,
+        "var init",
+        :owned_sink,
+        target_alloc: facts.decl_alloc,
+      ), MIR::Let)
+    elsif owned_binding_source_alloc(node.value)
+      let_node = T.cast(with_ownership_consumption_for_value(
+        let_node,
+        init,
+        node.value,
+        "var init",
+        :owned_sink,
+        target_alloc: facts.decl_alloc,
+      ), MIR::Let)
+    elsif init.is_a?(MIR::Ident) &&
+          ownership_tracked_transfer_type?(facts.ft) &&
+          owned_binding_visible?(init.name.to_s)
+      let_node = T.cast(with_ownership_consumption(
+        let_node,
+        [init.name.to_s],
+        "var init",
+        :owned_sink,
+        target_alloc: facts.decl_alloc,
+      ), MIR::Let)
+    end
 
     nodes = build_var_decl_nodes(node, facts, safe_name, init, let_node)
 
@@ -220,9 +240,11 @@ module MIRLoweringVariables
     node_entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
     decl_name = node.name.to_s
     binding_entry = node_entry || @current_bindings[decl_name] || CleanupEntry::NONE
+    empty_optional_init = optional_nil_initializer?(ft, node.value)
+    binding_entry = CleanupEntry::NONE if empty_optional_init
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
     @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s) == true
+    heap_return_var = !empty_optional_init && @current_fn_heap_carry_return_vars&.include?(node.name.to_s) == true
     heap_return_binding_allocates = (heap_return_var && escaping_value_alloc(ft) == :heap) == true
     placement = binding_placement_fact(node, ft, binding_entry, heap_return_var, heap_return_binding_allocates)
 
@@ -278,7 +300,7 @@ module MIRLoweringVariables
     # compose_capability_wrap once the inner is built. This separation is
     # what makes "@<shape>:<sync>:<ownership>" combinations compose without
     # per-shape × per-cap glue.
-    has_caps = (ft.any_sync? || ft.ownership != :affine) == true
+    has_caps = !!((ft.any_sync? || ft.ownership != :affine) && !ft.striped?)
     bare_ft = has_caps ? ft.bare_data_type : ft
     bare_zig = transpile_type(bare_ft)
 
@@ -299,12 +321,22 @@ module MIRLoweringVariables
     )
   end
 
+  sig { params(type_info: Type, value: T.untyped).returns(T::Boolean) }
+  def optional_nil_initializer?(type_info, value)
+    return false unless type_info.optional?
+    node = T.let(value, T.untyped)
+    node = node.value while node.is_a?(AST::Cast)
+    node.is_a?(AST::Literal) && node.type == :NIL ? true : false
+  end
+
   sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
   def owned_binding_source_alloc(value)
     T.bind(self, MIRLowering) rescue nil
     return nil if value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
     node = value.is_a?(AST::MoveNode) ? value.value : value
     return nil unless node.is_a?(AST::Identifier)
+    ti = Type.from_node!(node, context: "owned binding source")
+    return nil unless ownership_tracked_transfer_type?(ti)
 
     entry = @current_bindings[node.name.to_s] if @current_bindings
     return nil unless entry&.needs_cleanup?
@@ -334,10 +366,10 @@ module MIRLoweringVariables
     # name-keyed allocs dict conflates them; appending the source line makes
     # the names unique so the checker sees independent containers.
     original_safe = safe_name
-    if has_mir_drop && @fn_alloc_marked_names&.key?(safe_name)
+    if @fn_alloc_marked_names&.key?(safe_name)
       safe_name = "#{safe_name}_L#{node.line}"
     end
-    if has_mir_drop && @fn_alloc_marked_names
+    if @fn_alloc_marked_names
       @fn_alloc_marked_names[safe_name] = true
       @decl_zig_name_map[node.object_id] = safe_name
       # Name-keyed view used by AST markers lowered later (see
@@ -442,8 +474,8 @@ module MIRLoweringVariables
 
       mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
-      if mir_allocates?(init) && ownership_bearing_type?(ft)
-        cleanup_entry = hoist_cleanup_entry(init, node) || CleanupEntry.build(:uniform, alloc: mir_alloc, has_moved_guard: true)
+      if ownership_bearing_type?(ft)
+        cleanup_entry = CleanupEntry.build(ft.string? ? :heap_string : :uniform, alloc: mir_alloc, has_moved_guard: true)
         build_drop_entry!(cleanup_entry, node.full_type!, node)
         cleanup_entry[:has_moved_guard] = true
         (@guarded_cleanup_names ||= {})[safe_name] = true
@@ -451,7 +483,7 @@ module MIRLoweringVariables
       end
       [alloc_mark, let_node]
     elsif mir_allocates?(init) && !generic_id
-      mir_alloc = decl_alloc
+      mir_alloc = mir_owned_alloc(init) || decl_alloc
       alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, node.full_type!, binding_entry)
       if binding_entry.present? && !binding_entry.needs_cleanup?
         next_nodes = T.let([alloc_mark, let_node], T::Array[T.untyped])
@@ -525,7 +557,7 @@ module MIRLoweringVariables
       return lower_next_expr(rhs_unwrapped, decl_alloc) if rhs_unwrapped.is_a?(AST::NextExpr)
       return lower(node.value) if AST.call?(rhs_unwrapped)
       if list_collection_copy?(rhs_unwrapped)
-        return MIR::DeepCopy.new(lower(rhs_unwrapped.value), nil, nil, :full_value, decl_alloc)
+        return MIR::DeepCopy.new(lower(rhs_unwrapped.value), ft.zig_type, nil, :full_value, decl_alloc)
       end
       return lower(node.value) unless rhs_unwrapped.is_a?(AST::ListLit)
       return with_expected_type(ft) { lower(node.value) } unless rhs_unwrapped.items.empty?
@@ -544,7 +576,26 @@ module MIRLoweringVariables
     return make_rc_retain(retain_source) if node.value.was_moved != true && rc_retain_needed?(retain_source)
 
     placed = with_expected_type(ft) { lower(node.value) }
-    place_value_for_destination(placed, node.value, decl_alloc, ft)
+    placed = place_value_for_destination(placed, node.value, decl_alloc, ft)
+    if has_caps && !placed.is_a?(MIR::CapWrap) && !source_already_has_declared_capability?(node.value, ft)
+      compose_capability_wrap(placed, bare_zig, ft, decl_alloc)
+    else
+      placed
+    end
+  end
+
+  sig { params(source_node: T.untyped, target_type: Type).returns(T::Boolean) }
+  def source_already_has_declared_capability?(source_node, target_type)
+    node = T.let(source_node, T.untyped)
+    node = node.value while node.is_a?(AST::Cast)
+    return false if node.is_a?(AST::CapabilityWrap)
+
+    source_type = Type.from_node!(node, context: "capability source type")
+    return false unless source_type.ownership == target_type.ownership
+    return false unless source_type.sync == target_type.sync
+    return false unless source_type.layout == target_type.layout
+    return false unless source_type.shard_count == target_type.shard_count
+    true
   end
 
   sig { params(rhs: T.untyped).returns(T::Boolean) }
@@ -627,6 +678,7 @@ module MIRLoweringVariables
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig
       proxy.var_used = node.var_used
+      proxy.container_borrow = node.container_borrow if node.respond_to?(:container_borrow) && proxy.respond_to?(:container_borrow=)
       proxy.symbol = node.symbol if node.respond_to?(:symbol) && proxy.respond_to?(:symbol=)
       proxy.mir_binding_entry = node.mir_binding_entry if node.respond_to?(:mir_binding_entry) && proxy.respond_to?(:mir_binding_entry=)
       result = lower_var_decl(proxy)
@@ -682,7 +734,7 @@ module MIRLoweringVariables
       else
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
       end
-      with_ownership_consumption(result, mir_ident_names(value), result.class.name.to_s,
+      result = with_ownership_consumption_for_value(result, value, node.value, result.class.name.to_s,
         target_alloc: result.is_a?(MIR::ReassignWithCleanup) ? result.alloc : assign_alloc)
       result
     end
@@ -780,7 +832,7 @@ module MIRLoweringVariables
     value = lower(node.value)
     value = copy_container_borrow_if_needed(value, node.value)
     result = MIR::Set.new(target, value)
-    with_ownership_consumption(result, mir_ident_names(value), "MIR::Set")
+    with_ownership_consumption_for_value(result, value, node.value, "MIR::Set")
 
     # Detect field assignments where old value needs cleanup but no pre-cleanup exists.
     if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
@@ -892,7 +944,7 @@ module MIRLoweringVariables
       val = hoist_alloc(val, node.value, err_cleanup: true) if mir_allocates?(val)
     end
     set = MIR::Set.new(MIR::IndexGet.new(target, idx), val)
-    with_ownership_consumption(set, mir_ident_names(val), "MIR::Set", target_alloc: target_alloc)
+    with_ownership_consumption_for_value(set, val, node.value, "MIR::Set", target_alloc: target_alloc)
     set
   end
 
@@ -936,19 +988,23 @@ module MIRLoweringVariables
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
     if dispatch.shard_direct
-      return T.cast(with_ownership_consumption(
+      return T.cast(with_ownership_consumption_for_value(
         MIR::ShardedMapPut.new(target, idx, val,
           MIR::Ident.new(@shard_context[:idx]),
           MIR::Ident.new(@shard_context[:key]),
           kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind),
-        mir_ident_names(val),
+        val,
+        node.value,
         "MIR::ShardedMapPut",
+        target_alloc: dispatch.sink_alloc,
       ), MIR::ShardedMapPut)
     end
-    T.cast(with_ownership_consumption(
+    T.cast(with_ownership_consumption_for_value(
       MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, dispatch.key_zig, dispatch.val_zig, dispatch.resolved_allocs, dispatch.template_kind),
-      mir_ident_names(val),
+      val,
+      node.value,
       "MIR::ShardedMapPut",
+      target_alloc: dispatch.sink_alloc,
     ), MIR::ShardedMapPut)
   end
 
@@ -983,15 +1039,26 @@ module MIRLoweringVariables
     val = with_decl_alloc(dispatch.sink_alloc) do
       with_sink_type(sink_type) { lower(node.value) }
     end
-    consumed_names = T.let([], T::Array[String])
     if op[:takes_value] && owns_transferred_value && !dispatch.shard_direct
       val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc, sink_type)
       val = hoist_alloc(val, val_node, err_cleanup: true)
       if val.is_a?(MIR::Ident)
-        consumed_names << val.name
         move_mark_field!(val_node)
       end
     end
+    ownership_operands = T.let([], T::Array[MIR::OwnershipOperandFact])
+    if op[:takes_value]
+      ownership_operands = ownership_operands_for_value(
+        val,
+        val_node,
+        "indexed assignment",
+        dispatch.sink_alloc,
+      )
+    end
+    consumed_names = T.let(ownership_operands.filter_map { |operand|
+      next nil unless operand.kind == :owned_binding
+      operand.name
+    }, T::Array[String])
 
     # Substitute non-allocator placeholders into the pattern
     target_zig = T.must(emit_expr(target))
@@ -1019,7 +1086,9 @@ module MIRLoweringVariables
     iz = MIR::InlineZig.new(pattern, "index_set")
     iz.stdlib_def = op
     iz.allocs = dispatch.resolved_allocs unless dispatch.resolved_allocs.empty?
-    iz.ownership_contract = MIR::OwnershipContract.consumes(consumed_names) if op[:takes_value]
+    if op[:takes_value]
+      iz.ownership_contract = MIR::OwnershipContract.consume_operands(ownership_operands)
+    end
     # Store target variable name for checker cross-reference with AllocMark.
     iz.target_var = extract_root_var_name(target_node)
     setAt_stmt = MIR::ExprStmt.new(iz, false)
@@ -1134,7 +1203,7 @@ module MIRLoweringVariables
       type_expr, alloc, MIR::AddressOf.new(field_get)
     ], false, false, MIR::CallableContract.no_ownership(3))
     assign = MIR::Set.new(field_get, value)
-    with_ownership_consumption(assign, mir_ident_names(value), "MIR::Set", target_alloc: alloc_sym)
+    with_ownership_consumption_for_value(assign, value, node.value, "MIR::Set", target_alloc: alloc_sym)
     MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body([MIR::ExprStmt.new(cleanup_call, false), assign]))
   end
 
@@ -1163,13 +1232,14 @@ module MIRLoweringVariables
         stmts = T.let([
           *value_pending,
           MIR::Let.new("__old", get_field, false, nil, nil),
-          T.cast(with_ownership_consumption(MIR::Set.new(get_field, value), mir_ident_names(value), "MIR::Set"), MIR::Set),
+          T.cast(with_ownership_consumption_for_value(MIR::Set.new(get_field, value), value, node.value, "MIR::Set",
+            target_alloc: facts.alloc_sym), MIR::Set),
         ], T::Array[T.untyped])
         stmts << len_guard.call("__old", facts.cleanup_alloc)
         return MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body(stmts))
       else
         set = MIR::Set.new(get_field, value)
-        with_ownership_consumption(set, mir_ident_names(value), "MIR::Set")
+        with_ownership_consumption_for_value(set, value, node.value, "MIR::Set", target_alloc: facts.alloc_sym)
         return set
       end
     end
@@ -1192,10 +1262,12 @@ module MIRLoweringVariables
     ], T::Array[T.untyped])
     if facts.cleanup_alloc
       stmts << MIR::Let.new("__old", alias_field, false, nil, nil)
-      stmts << T.cast(with_ownership_consumption(MIR::Set.new(alias_field, value), mir_ident_names(value), "MIR::Set"), MIR::Set)
+      stmts << T.cast(with_ownership_consumption_for_value(MIR::Set.new(alias_field, value), value, node.value, "MIR::Set",
+        target_alloc: facts.alloc_sym), MIR::Set)
       stmts << len_guard.call("__old", facts.cleanup_alloc)
     else
-      stmts << T.cast(with_ownership_consumption(MIR::Set.new(alias_field, value), mir_ident_names(value), "MIR::Set"), MIR::Set)
+      stmts << T.cast(with_ownership_consumption_for_value(MIR::Set.new(alias_field, value), value, node.value, "MIR::Set",
+        target_alloc: facts.alloc_sym), MIR::Set)
     end
     MIR::ScopeBlock.new(append_ownership_transfers_for_mir_body(stmts))
   end

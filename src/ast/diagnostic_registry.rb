@@ -2120,6 +2120,27 @@ module DiagnosticRegistry
       cause: "Copying and consuming are different ownership events. A deep copy leaves the source owned by the current scope; a consuming TAKES transfer removes local ownership. Treating both as the same event causes leaks or double-frees.",
       fix_hint: "Lowering bug — either pass the original binding and transfer it, or deep-copy into a separate owned temporary and consume that temporary while keeping the source cleanup.",
     },
+    OWNERSHIP_CONSUMPTION_FACT_MISSING: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A consuming MIR operation has no typed ownership operand fact.",
+      cause: "MIRChecker cannot prove ownership safety from node shape, Zig text, or inferred names. Every consuming edge must carry explicit operand provenance from lowering.",
+      fix_hint: "Lowering bug — emit a MIR::OwnershipConsumptionFact with typed MIR::OwnershipOperandFact entries at the consuming edge.",
+    },
+    OWNERSHIP_CONSUMPTION_OPERAND_MISSING: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A consuming MIR operation has an empty ownership operand fact.",
+      cause: "The lowered node claims to consume ownership but does not identify a concrete operand whose ownership can be tracked linearly.",
+      fix_hint: "Lowering bug — attach the concrete owned operand, or mark the call as covering consuming params with no ownership only when every TAKES argument is non-owning/copyable.",
+    },
+    OWNERSHIP_CONSUMPTION_BORROWED_OPERAND: {
+      severity: :error, category: :mir,
+      template: "%{message}",
+      summary:  "A borrowed operand was passed to an owning MIR sink.",
+      cause: "Field/index access borrows from an owner. A borrowed access cannot be consumed because local cleanup still belongs to the container/root owner.",
+      fix_hint: "Lowering bug or source error — consume an owned binding, use GIVE/remove to transfer ownership, or COPY to create an owned temporary.",
+    },
     # Tranche 6: remaining ad-hoc strings — added in one big sweep
     TIGHT_CALLS_EXTERN_FN: {
       severity: :error, category: :reentrance,
@@ -2319,6 +2340,11 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Cannot pass container index access to TAKES parameter. Index access returns a borrow. Use .remove(i) to take ownership, or COPY to deep-copy.",
       summary:  "TAKES parameter needs ownership; container[i] is a borrow.",
+    },
+    TAKES_NEEDS_OWNED_BORROW: {
+      severity: :error, category: :ownership,
+      template: "Cannot pass borrowed access to TAKES parameter. Use COPY for an explicit deep-copy or move an owned binding.",
+      summary:  "TAKES parameter needs ownership; borrowed access paths are borrows.",
     },
     LINK_NEEDS_RESOLVE_FOR_CALL: {
       severity: :error, category: :ownership,

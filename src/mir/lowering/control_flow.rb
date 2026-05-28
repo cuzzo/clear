@@ -76,10 +76,16 @@ module MIRLoweringControlFlow
       names
         .select do |name|
           transfer_required_names.include?(name) ||
-            converted_cleanup_names.include?(name)
+            converted_cleanup_names.include?(name) ||
+            visible_guarded_names.include?(name)
         end
         .flat_map do |name|
-          MIR.ownership_transfer_marks(name, :return, move_guarded: visible_guarded_names.include?(name))
+          MIR::OwnershipTransferPlan.new(
+            name: name,
+            target: :return,
+            target_alloc: nil,
+            move_guarded: visible_guarded_names.include?(name),
+          ).marks
         end
     end
   end
@@ -100,13 +106,24 @@ module MIRLoweringControlFlow
     MIR::BlockExpr.new(label, body + [MIR::BreakStmt.new(label, cond)])
   end
 
+  sig { params(ast_node: T.untyped, transfers_to_capture: T::Boolean).returns(T.untyped) }
+  def lower_control_condition(ast_node, transfers_to_capture: false)
+    lowerer = T.unsafe(self)
+    lowered = lowerer.lower(ast_node)
+    if lowerer.mir_allocates?(lowered)
+      lowerer.hoist_alloc(lowered, ast_node, err_cleanup: transfers_to_capture)
+    else
+      lowered
+    end
+  end
+
   sig { params(node: AST::IfStatement).returns(T.untyped) }
   def lower_if(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     @enum_schemas = T.let(@enum_schemas, T.untyped)
-    cond, cond_pending = lower_head { lower(node.condition) }
+    cond, cond_pending = lower_head { lower_control_condition(node.condition) }
     if node.expr_mode
       @block_expr_counter += 1
       label = "__if_#{@block_expr_counter}"
@@ -125,7 +142,8 @@ module MIRLoweringControlFlow
   def lower_if_bind(node)
     T.bind(self, MIRLowering) rescue nil
     mir_bindings = node.bindings.map do |b|
-      { expr: lower(b.expr), capture: b.name }
+      expr, pending = lower_head { lower_control_condition(b.expr, transfers_to_capture: true) }
+      { expr: loop_condition_expr(expr, pending), capture: b.name }
     end
     then_body = lower_body(node.then_branch)
 
@@ -227,7 +245,7 @@ module MIRLoweringControlFlow
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
-    cond, cond_pending = lower_head { lower(node.condition) }
+    cond, cond_pending = lower_head { lower_control_condition(node.condition) }
     b = node.do_branch
     body = b.is_a?(Array) ? lower_body(b) : []
     stamp_loop_frame_allocs_iteration!(body)
@@ -249,7 +267,7 @@ module MIRLoweringControlFlow
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rt = MIR::Ident.new(@rt_name)
-    cond, cond_pending = lower_head { lower(node.condition) }
+    cond, cond_pending = lower_head { lower_control_condition(node.condition, transfers_to_capture: true) }
     body = lower_body(node.do_branch)
     stamp_loop_frame_allocs_iteration!(body)
 
@@ -863,12 +881,13 @@ module MIRLoweringControlFlow
     # Rc/Arc return of a local cleanup binding transfers that binding's
     # existing strong ref. Borrowed/non-local identifiers still retain.
     if node.value && rc_retain_needed?(node.value) && !return_transfers_heap_binding?(node.value)
-      return return_with_transfer_marks(plan, value, MIR::ReturnStmt.new(make_rc_retain(node.value)))
+      retained = hoist_alloc(make_rc_retain(node.value), node.value, err_cleanup: true)
+      return return_with_transfer_marks(plan, retained, MIR::ReturnStmt.new(retained))
     else
       # Hoist allocating expressions to a named Let so the checker sees the
       # allocation in the only verifier-visible ownership position.
       # ErrCleanup: the caller takes ownership on success.
-      value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value
+      value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value && !value.is_a?(MIR::Ident)
       return return_with_transfer_marks(plan, value, MIR::ReturnStmt.new(value))
     end
   end
@@ -893,6 +912,7 @@ module MIRLoweringControlFlow
       MIR::HeapCreate.new(bare_ret, value, :heap, "ret"),
       mir_ident_names(value),
       "MIR::HeapCreate",
+      target_alloc: :heap,
     )
   end
 
@@ -929,7 +949,11 @@ module MIRLoweringControlFlow
   sig { params(plan: ReturnOwnershipPlan, value: T.untyped, ret: MIR::ReturnStmt).returns(T.untyped) }
   def return_with_transfer_marks(plan, value, ret)
     T.bind(self, MIRLowering) rescue nil
-    marks = plan.transfer_marks_for(mir_ident_names(value).map(&:to_s).to_set, @lowered_guarded_cleanup_names || Set.new)
+    names = plan.returned_names
+    if value.is_a?(MIR::Ident)
+      names = names.include?(value.name.to_s) ? names.dup : Set[value.name.to_s]
+    end
+    marks = plan.transfer_marks_for(names, @lowered_guarded_cleanup_names || Set.new)
     marks.empty? ? ret : marks + [ret]
   end
 
@@ -957,17 +981,15 @@ module MIRLoweringControlFlow
       place_value_for_destination(lowered, node.value, ret_alloc, destination_type)
     end : nil
 
-    explicit_return_names = returned_binding_names(node.value)
+    explicit_return_names = T.let(
+      node.value && !aggregate_return_literal?(node.value) ? returned_binding_names(node.value) : Set.new,
+      T::Set[String],
+    )
     moved_root_names = T.let(Set.new, T::Set[String])
-    collect_moved_arg_roots(node).each { |name| moved_root_names << name.to_s }
     consumed_root_names = T.let(Set.new, T::Set[String])
-    collect_stdlib_consumed_roots(node).each { |name| consumed_root_names << name.to_s }
     direct_value_names = T.let(Set.new, T::Set[String])
     if value.is_a?(MIR::Ident)
       direct_value_names << value.name
-    end
-    if node.value.is_a?(AST::StructLit) || node.value.is_a?(AST::UnionVariantLit)
-      mir_ident_names(value).each { |name| direct_value_names << name.to_s }
     end
     returned_names = T.let(Set.new, T::Set[String])
     [explicit_return_names, moved_root_names, consumed_root_names, direct_value_names].each do |set|
@@ -989,10 +1011,19 @@ module MIRLoweringControlFlow
   # Helpers
   # ================================================================
 
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def aggregate_return_literal?(expr)
+    node = T.let(expr, T.untyped)
+    node = node.value while node.is_a?(AST::Cast)
+    node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) || node.is_a?(AST::ListLit)
+  end
+
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def return_transfers_heap_binding?(ast_node)
     node = T.let(ast_node, T.untyped)
     node = node.value while node.is_a?(AST::Cast) || node.is_a?(AST::MoveNode)
+    return false if node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+
     root = AST.root_identifier(node) rescue nil
     @current_bindings = T.let(@current_bindings, T.untyped)
     entry = root ? @current_bindings[root.name] : nil
@@ -1047,8 +1078,8 @@ module MIRLoweringControlFlow
     names.each do |name|
       if @guarded_cleanup_names&.[](name) ||
          returned_hoist_binding?(name) ||
-         returned_no_cleanup_binding?(name) ||
-         returned_takes_param?(name)
+         returned_takes_param?(name) ||
+         returned_owned_binding?(name)
         out << name
       end
     end
@@ -1068,6 +1099,15 @@ module MIRLoweringControlFlow
     @current_bindings = T.let(@current_bindings, T.untyped)
     entry = @current_bindings[name] if @current_bindings.respond_to?(:[])
     entry.respond_to?(:present?) && entry.present?
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def returned_owned_binding?(name)
+    return true if T.unsafe(self).owned_binding_visible?(name)
+
+    @current_bindings = T.let(@current_bindings, T.untyped)
+    entry = @current_bindings[name] if @current_bindings.respond_to?(:[])
+    entry.respond_to?(:needs_cleanup?) && entry.needs_cleanup?
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -1095,9 +1135,11 @@ module MIRLoweringControlFlow
     return unless expr
     case expr
     when AST::Identifier
-      name = zig_safe_name(expr.name)
+      @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
+      decl = expr.symbol&.reg
+      name = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || zig_safe_name(expr.name)
       names << name if name
-    when AST::MoveNode, AST::ShareNode
+    when AST::Cast, AST::MoveNode, AST::ShareNode
       collect_returned_binding_names(expr.value, names)
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       return
@@ -1106,9 +1148,12 @@ module MIRLoweringControlFlow
     when AST::ListLit
       expr.items.each { |v| collect_returned_binding_names(v, names) }
     when AST::BinaryOp
-      collect_returned_binding_names(expr.left, names) if expr.op == :OR_RESCUE
+      if expr.op == :OR_RESCUE
+        collect_returned_binding_names(expr.left, names)
+        collect_returned_binding_names(expr.right, names)
+      end
     when AST::GetField, AST::GetIndex
-      collect_returned_binding_names(expr.target, names)
+      return
     end
     nil
   end

@@ -30,8 +30,8 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    # f is MOVED on all paths (returned) → no defer, no _moved guard
-    expect(zig).not_to include("f_moved")
+    # f is returned through an explicit transfer mark visible to MIRChecker.
+    expect(zig).to include("f_moved = true")
     expect(zig).not_to include("f.close()")
     expect(zig).to include("return f;")
   end
@@ -45,8 +45,8 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    # f is MOVED on all paths → no defer, no _moved guard for f
-    expect(zig).not_to include("f_moved")
+    # f is transferred to g; the guard makes that transfer explicit to MIRChecker.
+    expect(zig).to include("f_moved = true")
     # g takes ownership → g gets its own defer
     expect(zig).to include("g.close()")
   end
@@ -60,8 +60,8 @@ RSpec.describe "Resource RAII Transpilation" do
       END
     CLEAR
     zig = transpile(src)
-    # f is MOVED on all paths (GIVEn) → no defer, no _moved guard
-    expect(zig).not_to include("f_moved")
+    # GIVE is an explicit ownership transfer visible to MIRChecker.
+    expect(zig).to include("f_moved = true")
   end
 
   it "emits recursive cleanup for structs containing resources" do

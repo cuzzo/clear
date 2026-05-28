@@ -22,6 +22,8 @@ module FsmTransform
     extend T::Sig
     module_function
 
+    FsmStructureSource = T.type_alias { T.any(MIR::Node, String) }
+
     # ================================================================
     # Unified FSM emit (kind-agnostic, shape-agnostic)
     # ================================================================
@@ -177,6 +179,23 @@ module FsmTransform
         extra_field_decls.concat(d.ctx_field_decls || [])
       end
       extra_field_decls.concat(ctx[:extra_ctx_fields] || [])
+      extra_field_decls.uniq!
+      capture_field_names = ctx[:capture_fields].to_s.lines.each_with_object({}) do |decl, names|
+        name = decl.to_s.split(":").first&.strip
+        names[name] = true if name && !name.empty?
+      end
+      extra_field_decls = extra_field_decls.reject do |decl|
+        name = decl.to_s.split(":").first&.strip
+        name && capture_field_names[name]
+      end
+      extra_field_names = extra_field_decls.each_with_object(capture_field_names.dup) do |decl, names|
+        name = decl.to_s.split(":").first&.strip
+        names[name] = true if name && !name.empty?
+      end
+      promoted_field_decls = promoted_field_decls.reject do |decl|
+        name = decl.to_s.split(":").first&.strip
+        name && extra_field_names[name]
+      end
 
       # 4. Wrap in FsmGenericCtxStruct + spawn_setup + FsmGenericBody.
       # Assemble destroy_extra_zig from the unified fsm_destroy_lines
@@ -214,15 +233,155 @@ module FsmTransform
         next nil unless cleanup_names.include?(name)
         { name: name, cleanup_at: :finalize }
       end
+      structure_sources = fsm_structure_sources(segment_specs)
       steps = segment_specs.map do |spec|
-        text = Array(spec[:body_stmts]).join("\n")
+        step_sources = fsm_structure_sources_for_spec(spec)
+        text = fsm_structure_text(step_sources)
         {
           index: spec[:index],
-          reads: text.scan(/__ctx_#{id}\.([A-Za-z_]\w*)/).flatten.uniq,
+          reads: (
+            collect_ctx_field_reads(step_sources, id) +
+            text.scan(/__ctx_#{id}\.([A-Za-z_]\w*)/).flatten
+          ).uniq,
           cleanups: [],
         }
       end
-      MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
+      structure = MIR::FsmStructure.new(captures, [], steps, cleanup_names, id, nil)
+      all_text = fsm_structure_text(structure_sources)
+      structure.move_guard_writes =
+        (
+          collect_move_guard_writes(structure_sources, id) +
+          all_text.scan(/__ctx_#{id}\.([A-Za-z_]\w*)_moved\s*=\s*true\b/).flatten +
+          all_text.scan(/(?<!\.)\b([A-Za-z_]\w*)_moved\s*=\s*true\b/).flatten
+        ).uniq
+      result_names = collect_result_names(structure_sources, id)
+      text_facts = result_names.uniq.map do |name|
+        MIR::FsmOwnershipFact.new(name: name, target: :result, target_alloc: :heap, move_guarded: true)
+      end
+      structured_facts = segment_specs.flat_map do |spec|
+        Array(spec[:fsm_result_transfer_facts]).filter_map do |fact|
+          guard_name = fsm_fact_guard_name(fact.name)
+          next nil if guard_name.empty?
+
+          MIR::FsmOwnershipFact.new(
+            name: guard_name,
+            target: :result,
+            target_alloc: fact.target_alloc,
+            move_guarded: fact.move_guarded,
+          )
+        end
+      end
+      structure.ownership_facts = (structured_facts + text_facts).uniq do |fact|
+        [fact.name, fact.target, fact.target_alloc, fact.move_guarded]
+      end
+      structure
+    end
+
+    sig { params(segment_specs: T::Array[T.untyped]).returns(T::Array[FsmStructureSource]) }
+    def fsm_structure_sources(segment_specs)
+      segment_specs.flat_map { |spec| fsm_structure_sources_for_spec(spec) }
+    end
+
+    sig { params(spec: T.untyped).returns(T::Array[FsmStructureSource]) }
+    def fsm_structure_sources_for_spec(spec)
+      out = T.let([], T::Array[FsmStructureSource])
+      out.concat(fsm_structure_source_array(spec[:prologue_stmts]))
+      out.concat(fsm_structure_source_array(spec[:body_stmts]))
+      descriptor = spec[:descriptor]
+      if descriptor
+        out.concat(fsm_structure_source_array(descriptor.setup_stmts))
+        out.concat(fsm_structure_source_array(descriptor.bind_stmts))
+      end
+      out
+    end
+
+    sig { params(value: T.untyped).returns(T::Array[FsmStructureSource]) }
+    def fsm_structure_source_array(value)
+      Kernel.Array(value).filter_map do |item|
+        next item if item.is_a?(String)
+        next item if item.is_a?(MIR::Emittable)
+        nil
+      end
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource]).returns(String) }
+    def fsm_structure_text(sources)
+      sources.select { |source| source.is_a?(String) }.join("\n")
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
+    def collect_move_guard_writes(sources, id)
+      collect_fsm_nodes(sources).filter_map do |node|
+        next nil unless node.is_a?(MIR::Set)
+        next nil unless true_literal?(node.value)
+        field = ctx_field_name(node.target, id)
+        next nil unless field&.end_with?("_moved")
+        field.delete_suffix("_moved")
+      end.uniq
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
+    def collect_result_names(sources, id)
+      collect_fsm_nodes(sources).filter_map do |node|
+        next nil unless node.is_a?(MIR::Set)
+        next nil unless ctx_inner_result_target?(node.target, id)
+        result_source_name(node.value, id)
+      end.uniq
+    end
+
+    sig { params(name: String).returns(String) }
+    def fsm_fact_guard_name(name)
+      return "" if name.match?(/\A__ctx_\d+\z/)
+      name.sub(/\A__ctx_\d+\./, "")
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource], id: Integer).returns(T::Array[String]) }
+    def collect_ctx_field_reads(sources, id)
+      collect_fsm_nodes(sources).filter_map do |node|
+        ctx_field_name(node, id)
+      end.uniq
+    end
+
+    sig { params(sources: T::Array[FsmStructureSource]).returns(T::Array[MIR::Node]) }
+    def collect_fsm_nodes(sources)
+      roots = sources.reject { |source| source.is_a?(String) }
+      out = T.let([], T::Array[MIR::Node])
+      MIR.each_node(roots) { |node| out << node }
+      out
+    end
+
+    sig { params(expr: MIR::Node, id: Integer).returns(T.nilable(String)) }
+    def ctx_field_name(expr, id)
+      return nil unless expr.is_a?(MIR::FieldGet)
+      object = expr.object
+      return nil unless object.is_a?(MIR::Ident)
+      return nil unless object.name.to_s == "__ctx_#{id}"
+      expr.field.to_s
+    end
+
+    sig { params(expr: MIR::Node, id: Integer).returns(T::Boolean) }
+    def ctx_inner_result_target?(expr, id)
+      return false unless expr.is_a?(MIR::FieldGet)
+      return false unless expr.field.to_s == "result"
+      inner = expr.object
+      return false unless inner.is_a?(MIR::FieldGet)
+      return false unless inner.field.to_s == "inner"
+      object = inner.object
+      object.is_a?(MIR::Ident) && object.name.to_s == "__ctx_#{id}"
+    end
+
+    sig { params(expr: MIR::Node, id: Integer).returns(T.nilable(String)) }
+    def result_source_name(expr, id)
+      if expr.is_a?(MIR::Ident)
+        expr.name.to_s
+      else
+        ctx_field_name(expr, id)
+      end
+    end
+
+    sig { params(expr: MIR::Node).returns(T::Boolean) }
+    def true_literal?(expr)
+      expr.is_a?(MIR::Lit) && expr.value.to_s == "true"
     end
 
     # Translate a segment's tail into the dispatch arm's tail. Suspend
@@ -479,6 +638,7 @@ module FsmTransform
         end
       end
       owned_result_guards = fsm_owned_result_guards(segments, lowering)
+      seg_result_facts = {}
       seg_codes = segments.map do |seg|
         ast_stmts, raw_stmts = seg.stmts.partition { |s| !s.is_a?(String) }
         if ast_stmts.empty?
@@ -491,7 +651,12 @@ module FsmTransform
           lowering.instance_variable_set(:@pending_stmts, [])
           prev_fsm_allocs = lowering.instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
           prev_fsm_guards = lowering.instance_variable_get(:@current_fsm_inherited_guarded_names) rescue nil
-          inherited_capture_names = Array(ctx[:fresh_heap_cleanup_names]).map { |name| "__ctx_#{id}.#{name}" }.to_set
+          inherited_capture_names = Array(ctx[:fsm_destroy_lines]).filter_map do |entry|
+            next nil unless entry[:kind] == :capture || entry[:kind] == :body
+            name = entry[:name]
+            name ? "__ctx_#{id}.#{name}" : nil
+          end.to_set
+          (ctx[:captured] || {}).keys.each { |name| inherited_capture_names << "__ctx_#{id}.#{name}" }
           lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
           lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, inherited_capture_names)
           # Per-segment alias overrides (e.g. WITH's `inner` ->
@@ -514,6 +679,8 @@ module FsmTransform
           ensure
             lowering.instance_variable_set(:@current_fsm_owned_result_guards, prev_guard_map)
           end
+          facts = lowering.instance_variable_get(:@last_fsm_result_transfer_facts) || []
+          seg_result_facts[seg.index] = facts
           lowering.instance_variable_set(:@pending_stmts, prev_pending)
           lowering.instance_variable_set(:@current_fsm_inherited_alloc_names, prev_fsm_allocs)
           lowering.instance_variable_set(:@current_fsm_inherited_guarded_names, prev_fsm_guards)
@@ -525,7 +692,7 @@ module FsmTransform
           # conservative + suspend result vars) we rewrite those
           # decl forms into ctx-field assignments after rendering.
           # Mirrors the legacy promote_fsm_decls_to_fields path.
-              all_promoted = fsm_promoted_names
+              all_promoted = fsm_promoted_names + (ctx[:captured] || {}).keys.map(&:to_s)
           if all_promoted.any?
             promoted_names = all_promoted.uniq
             lowered = lowering.promote_fsm_decls_to_fields(
@@ -601,6 +768,7 @@ module FsmTransform
           body_stmts:      body_stmts,
           tail:            seg.tail,
           descriptor:      descriptor,
+          fsm_result_transfer_facts: seg_result_facts[seg.index] || [],
           fn_name:         "runSeg#{seg.index}",
           rt_suppress:     rt_suppress,
         }

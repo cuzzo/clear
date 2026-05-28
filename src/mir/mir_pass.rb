@@ -845,9 +845,8 @@ class MIRPass
   # escaped vars don't need local cleanup.
   sig { params(result: T::Array[T.untyped], ret_node: AST::ReturnNode, bindings: T::Hash[String, CleanupEntry], fn_node: T.nilable(AST::FunctionDef)).returns(T.nilable(T::Array[String])) }
   def insert_return!(result, ret_node, bindings, fn_node: nil)
-    escaped = collect_return_escapes(ret_node, bindings, fn_node: fn_node)
-    return if escaped.empty?
-    result << MIR::Return.new(ret_node.token, escaped)
+    _ = [result, ret_node, bindings, fn_node]
+    nil
   end
 
   # Walk a return expression and collect variable names whose ownership
@@ -859,10 +858,11 @@ class MIRPass
     ids = collect_escaping_ids(ret_node.value)
     ids.select { |id|
         n = id.name.to_s
-        (bindings[n]&.dig(:has_moved_guard) && bindings[n]&.dig(:needs_cleanup)) ||
+        entry = id.symbol&.reg&.respond_to?(:mir_binding_entry) ? id.symbol.reg.mir_binding_entry : bindings[n]
+        (entry&.dig(:has_moved_guard) && entry&.dig(:needs_cleanup)) ||
           (n.start_with?("__hoist_") &&
             AST.moved?(id) &&
-            bindings[n]&.dig(:needs_cleanup))
+            entry&.dig(:needs_cleanup))
       }
       .map { |id| id.name.to_s }
        .uniq

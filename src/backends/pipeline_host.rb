@@ -706,7 +706,12 @@ class PipelineHost
           MIR::MethodCall.new(MIR::Ident.new(receiver), "append",
             [MIR::AllocatorRef.new(alloc), MIR::Ident.new(temp_name)], true,
             MIR::CallableContract.no_ownership(2)), false),
-        *MIR.ownership_transfer_marks(temp_name, :owned_sink, target_alloc: alloc, move_guarded: true),
+        *MIR::OwnershipTransferPlan.new(
+          name: temp_name,
+          target: :owned_sink,
+          target_alloc: alloc,
+          move_guarded: true,
+        ).marks,
       ])
     end
 
@@ -1878,7 +1883,7 @@ class PipelineHost
       end
       elem_zig = transpile_type(elem_sym.to_s)
       map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
-      return lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
+      return lower_stream_index(range_chain, expr_node, elem_zig, Type.new(elem_sym), alloc, map_type, Type.from_node!(smooth_node, context: "INDEX result"))
     end
 
     elem_zig = transpile_type(list_node.full_type!.element_type.resolved.to_s)
@@ -1894,6 +1899,7 @@ class PipelineHost
           "it",
           build_index_gop_body(expr_mir, alloc, "it",
             expr_node: expr_node,
+            item_type: Type.new(list_node.full_type!.element_type),
             value_ownership: :borrowed),
           nil
         ),
@@ -1908,17 +1914,22 @@ class PipelineHost
   # APPEND/MAKE_LIST + MAP_PUT.
   sig do
     params(expr_mir: T.untyped, alloc: Symbol, item_var: String,
-           expr_node: T.untyped, value_ownership: Symbol).returns(T::Array[T.untyped])
+           expr_node: T.untyped, item_type: T.nilable(Type), value_ownership: Symbol).returns(T::Array[T.untyped])
   end
-  def build_index_gop_body(expr_mir, alloc, item_var, expr_node: nil, value_ownership: :owned)
+  def build_index_gop_body(expr_mir, alloc, item_var, expr_node: nil, item_type: nil, value_ownership: :owned)
     elem_zig_type = "@TypeOf(#{item_var})"
+    item_owns = item_type ? cleanup_bearing_type?(item_type) : true
     item_value = if value_ownership == :borrowed
       MIR::DeepCopy.new(MIR::Ident.new(item_var), elem_zig_type, nil, :full_value, alloc)
     else
       MIR::Ident.new(item_var)
     end
     value_body = T.let([], T::Array[T.untyped])
-    if @lowering.send(:mir_allocates?, item_value)
+    if value_ownership == :owned && item_owns
+      mark = MIR::AllocMark.new(item_var, alloc, item_type || Type.new(:Any))
+      mark.scope = MIR::Placement.alloc_scope(alloc)
+      value_body << mark
+    elsif @lowering.send(:mir_allocates?, item_value)
       @pipe_temp_counter += 1
       value_name = "__idx_item_#{@pipe_temp_counter}"
       value_alloc = @lowering.send(:mir_owned_alloc, item_value) || alloc
@@ -1941,12 +1952,15 @@ class PipelineHost
       MIR::Ident.new("idx_key"),
       item_value,
       "u8", elem_zig_type, alloc)
-    insert = T.cast(@lowering.send(:with_ownership_consumption,
-      insert,
-      @lowering.send(:mir_ident_names, item_value),
-      "MIR::IndexInsert",
-      :owned_sink,
-      target_alloc: alloc), MIR::IndexInsert)
+    if item_owns || @lowering.send(:mir_allocates?, item_value)
+      insert = T.cast(@lowering.send(:with_ownership_consumption,
+        insert,
+        @lowering.send(:mir_ident_names, item_value),
+        "MIR::IndexInsert",
+        :owned_sink,
+        target_alloc: alloc,
+        require_visible: false), MIR::IndexInsert)
+    end
     body = T.let([
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
       *value_body,
@@ -1963,8 +1977,8 @@ class PipelineHost
     T.unsafe(@lowering).hoist_cleanup_entry(expr_mir, expr_node)
   end
 
-  sig { params(range_chain: T::Hash[T.untyped, T.untyped], expr_node: T.untyped, elem_zig: String, alloc: Symbol, map_type: String).returns(MIR::BlockExpr) }
-  def lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
+  sig { params(range_chain: T::Hash[T.untyped, T.untyped], expr_node: T.untyped, elem_zig: String, elem_type: Type, alloc: Symbol, map_type: String, result_type: Type).returns(MIR::BlockExpr) }
+  def lower_stream_index(range_chain, expr_node, elem_zig, elem_type, alloc, map_type, result_type)
     # Filtered-out items must have their heap sub-fields freed; comptime no-op
     # for primitives. CheatLib.cleanup takes a comptime Type as its first arg;
     # we encode it as MIR::Ident(zig_type_str), matching mir_lowering's other
@@ -2002,7 +2016,7 @@ class PipelineHost
                nil
              end
       if iter
-        return MIR::BlockExpr.new(label, [
+        block = MIR::BlockExpr.new(label, [
           *p[:outer_stmts],
           MIR::Let.new("idx_result",
             MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
@@ -2011,14 +2025,17 @@ class PipelineHost
             *p[:stage_stmts],
             *build_index_gop_body(expr_mir, :heap, item_var,
               expr_node: expr_node,
+              item_type: elem_type,
               value_ownership: :owned)
           ], nil),
           MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
         ])
+        block.result_type = result_type
+        return block
       end
     end
 
-    MIR::BlockExpr.new(label, [
+    block = MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("idx_result",
         MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
@@ -2028,10 +2045,13 @@ class PipelineHost
         *p[:stage_stmts],
         *build_index_gop_body(expr_mir, :heap, item_var,
           expr_node: expr_node,
+          item_type: elem_type,
           value_ownership: :owned)
       ], p[:initial_capture], nil, nil, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
     ])
+    block.result_type = result_type
+    block
   end
 
   sig { params(site: PipelineHost::PipelineSite, join_node: AST::JoinOp).returns(MIR::BlockExpr) }
@@ -2073,12 +2093,20 @@ class PipelineHost
     right_value = MIR::Ident.new("__match")
     after_append = []
     if left_owns
-      after_append.concat(MIR.ownership_transfer_marks("__jl_owned", :owned_sink,
-        target_alloc: pipeline_result_alloc, move_guarded: true))
+      after_append.concat(MIR::OwnershipTransferPlan.new(
+        name: "__jl_owned",
+        target: :owned_sink,
+        target_alloc: pipeline_result_alloc,
+        move_guarded: true,
+      ).marks)
     end
     if right_owns
-      after_append.concat(MIR.ownership_transfer_marks("__match", :owned_sink,
-        target_alloc: pipeline_result_alloc, move_guarded: true))
+      after_append.concat(MIR::OwnershipTransferPlan.new(
+        name: "__match",
+        target: :owned_sink,
+        target_alloc: pipeline_result_alloc,
+        move_guarded: true,
+      ).marks)
     end
 
     MIR::BlockExpr.new(label, [
@@ -2954,6 +2982,8 @@ class PipelineHost
     # makes the heap touch explicit instead of slipping past INV-12.
     acc_alloc = MIR::InlineZig.new(acc_alloc_zig, "obs_alloc")
     acc_alloc.stdlib_def = ALLOCATING_DEF
+    acc_alloc.allocs = MIR.inline_alloc_metadata(alloc: :heap)
+    acc_alloc.target_var = "__obs_acc"
     wg_init = MIR::HeapCreate.new(
       "CheatHeader.WaitGroup",
       MIR::InlineZig.new("CheatHeader.WaitGroup.init(#{rt_name}.getSched())", "obs_wg_init", MIR::OwnershipContract.empty, ALLOC_REF_DEF),
@@ -2966,12 +2996,17 @@ class PipelineHost
     # setCompletion mutates __obs_acc to take ownership of __obs_wg; no
     # net allocation here. Borrows both pointers.
     set_completion.stdlib_def = ALLOC_REF_DEF
-    set_completion.ownership_contract = MIR::OwnershipContract.consumes(["__obs_wg"])
+    set_completion.ownership_contract = MIR::OwnershipContract.consume_operands([
+      MIR::OwnershipOperandFact.owned_binding("__obs_wg", Type.new(:"CheatHeader.WaitGroup", layout: :indirect), "observable completion", :heap),
+    ])
     wg_alloc_mark = MIR::AllocMark.new("__obs_wg", :heap,
       Type.new(:"CheatHeader.WaitGroup", layout: :indirect))
     wg_alloc_mark.scope = :heap
+    acc_alloc_mark = MIR::AllocMark.new("__obs_acc", :heap, Type.new(obs_zig))
+    acc_alloc_mark.scope = :heap
     acc_init_stmts = [
       *([p[:range_let]].compact), *p[:outer_stmts],
+      acc_alloc_mark,
       MIR::Let.new("__obs_acc", acc_alloc, false, obs_zig, nil),
       wg_alloc_mark,
       MIR::Let.new("__obs_wg", wg_init,
@@ -3077,7 +3112,9 @@ class PipelineHost
     # within this block. From outside, it's a no-net-allocation effect:
     # mark as borrowing the allocator + ctx-init args. (H9)
     spawn_inline.stdlib_def = ALLOC_REF_DEF
-    spawn_inline.ownership_contract = MIR::OwnershipContract.consumes([p[:source_name].to_s])
+    spawn_inline.ownership_contract = MIR::OwnershipContract.consume_operands([
+      MIR::OwnershipOperandFact.owned_binding(p[:source_name].to_s, Type.new(:Any), "observable consumer spawn", :heap),
+    ])
 
     MIR::BlockExpr.new(label, [
       *acc_init_stmts,
@@ -3115,6 +3152,7 @@ class PipelineHost
   sig { params(p: T::Hash[T.untyped, T.untyped], fold_op: T.untyped, smooth_node: AST::BinaryOp, label: String, source_node: AST::Identifier, terminal: Symbol).returns(MIR::BlockExpr) }
   def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:)
     spec  = PUBLISH_SPEC.fetch(terminal)
+    source_elem = source_node.full_type!(context: "observable pipeline source").tense_type&.element_type
     item  = p[:item_var]
     inner_recv = MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner")
 
@@ -3132,10 +3170,23 @@ class PipelineHost
             []
           end
 
+    callable_contract = if spec.transfers_item_on_success && source_elem && pipeline_element_owns_heap?(source_elem)
+      MIR::CallableContract.new(
+        FunctionSignature.new(params: [
+          AST::Param.new(name: "item", type: source_elem, takes: true),
+        ], return_type: Type.new(:Void)),
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(item.to_s, source_elem, "observable publish item", :heap),
+        ]),
+        1,
+      )
+    else
+      MIR::CallableContract.no_ownership(T.must(arg).length)
+    end
     call = MIR::ExprStmt.new(
-      MIR::MethodCall.new(inner_recv, spec.publish_method, T.must(arg), false,
-        MIR::CallableContract.no_ownership(T.must(arg).length)), nil)
+      MIR::MethodCall.new(inner_recv, spec.publish_method, T.must(arg), false, callable_contract), nil)
 
+    source_type = source_node.full_type!(context: "observable pipeline source cleanup")
     item_cleanup = consumed_stream_item_cleanup(p, source_node)
     publish = case spec.gate
               when :always
@@ -3170,12 +3221,23 @@ class PipelineHost
     elem_t = src_t.tense_type&.element_type
     return [] unless elem_t && pipeline_element_owns_heap?(elem_t)
 
+    contract = MIR::CallableContract.new(
+      FunctionSignature.new(params: [
+        AST::Param.new(name: "__type", type: Type.new(:Any)),
+        AST::Param.new(name: "__alloc", type: Type.new(:Any)),
+        AST::Param.new(name: "__ptr", type: Type.new(:Any)),
+      ], return_type: Type.new(:Void)),
+      MIR::OwnershipContract.consume_operands([
+        MIR::OwnershipOperandFact.owned_binding(p[:item_var].to_s, elem_t, "pipeline item cleanup", :heap),
+      ]),
+      3,
+    )
     [MIR::ExprStmt.new(
       MIR::Call.new("CheatLib.cleanup", [
         MIR::Ident.new("@TypeOf(#{p[:item_var]})"),
         MIR::AllocatorRef.new(:heap),
         MIR::AddressOf.new(MIR::Ident.new(p[:item_var])),
-      ], false, false, MIR::CallableContract.no_ownership(3)),
+      ], false, false, contract),
       nil,
     )]
   end
@@ -4302,7 +4364,12 @@ class PipelineHost
     name = lhs.name.to_s
     guarded = @lowering.instance_variable_get(:@guarded_cleanup_names)&.[](name)
     return [] unless guarded
-    MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: :heap, move_guarded: true)
+    MIR::OwnershipTransferPlan.new(
+      name: name,
+      target: :owned_sink,
+      target_alloc: :heap,
+      move_guarded: true,
+    ).marks
   end
 
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }

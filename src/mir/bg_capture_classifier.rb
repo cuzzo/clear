@@ -124,6 +124,7 @@ module BgCaptureClassifier
     when :multiowned then base.ownership = :multiowned unless base.ownership && base.ownership != :affine
     when :shared     then base.ownership = :shared     unless base.ownership && base.ownership != :affine
     end
+    base.provenance = :borrow if sym.borrowed_alias
     base.sync = sym.sync if sym.sync && !base.sync
     base
   end

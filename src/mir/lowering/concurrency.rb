@@ -286,7 +286,9 @@ module MIRLoweringConcurrency
       name = "__discard_bg_#{@tmp_counter}"
       next_contract = MIR::CallableContract.new(
         MIR::CallableContract.no_ownership(0).signature,
-        MIR::OwnershipContract.consumes([name]),
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(name, Type.new(:Any), "DO branch BG discard", :heap),
+        ]),
         0,
       )
       return [
@@ -647,6 +649,11 @@ module MIRLoweringConcurrency
     end
     bg_code = transform_result.code
     fsm_structure = transform_result.structure
+    moved_captures = (analysis&.move_mark_names || Set.new).map(&:to_s) & captured.keys.map(&:to_s)
+    fsm_structure.required_move_guards = moved_captures
+    result_type = Type.from_node!(node, context: "FSM BG result").tense_type
+    fsm_structure.owned_result_required =
+      !!(result_type && T.unsafe(self).ownership_tracked_transfer_type?(result_type))
     MIRChecker.check_fsm_structure!(fsm_structure, source: node)
     # The fiber body is consumed into the FSM state machine. Exposing it again
     # through run_body would double-walk ownership and manufacture diagnostics.
@@ -831,12 +838,14 @@ module MIRLoweringConcurrency
       place_value_for_destination(value, node.expr, :heap, node.expr.full_type!)
     end
     lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if lowered && mir_allocates?(lowered)
+    transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
     # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
     # never reaches this branch (it sets @current_stream_is_inf only for
     # the materializing path; @target check guards against confusion).
     if @target == :bc && @current_stream_is_inf
-      return MIR::StreamYield.new(lowered)
+      stream_yield = MIR::StreamYield.new(lowered)
+      return transfer_marks.empty? ? stream_yield : MIR::ScopeBlock.new([*transfer_marks, stream_yield])
     end
     # The yielded value is a hoisted, escape-placed binding (Hoist lifts
     # anonymous YIELD operands; escape analysis marks it heap because it
@@ -844,7 +853,6 @@ module MIRLoweringConcurrency
     # dupe -- one allocation, placed by escape analysis.
     push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true,
       MIR::CallableContract.no_ownership(1))
-    transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # YIELD transfers ownership to the stream at the push boundary. InfStream
     # owns and cleans the value even if push returns StreamClosed, so the local
     # error cleanup must be disarmed before the fallible call.

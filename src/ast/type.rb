@@ -1601,6 +1601,7 @@ class Type
       if Schemas.struct?(schema)
         all_copy = schema.fields.all? do |_, v|
           ft = v.is_a?(Type) ? v : (v.is_a?(AST::StructField) ? Type.new(v.type || :Any) : Type.new(v || :Any))
+          ft = substitute_generic_schema_field_type(ft, schema)
           ft.implicitly_copyable?(resolver)
         end
         return true if all_copy
@@ -1620,7 +1621,7 @@ class Type
 
     return false if provenance == :borrow
     return wrapped_type&.recursive_cleanup_shape?(schema_lookup, seen) || false if optional?
-    return true if string? || any_rc? || link? || collection? || indirect?
+    return true if string? || any_rc? || link? || collection? || indirect? || future?
 
     if array?
       return true unless fixed?
@@ -1647,7 +1648,8 @@ class Type
       return schema.fields.any? do |_, field|
         next false if field.is_a?(AST::StructField) && field.borrowed
         ft = field.is_a?(AST::StructField) ? field.type : field
-        Type.from_node(ft || :Any)&.recursive_cleanup_shape?(schema_lookup, seen) || false
+        field_type = substitute_generic_schema_field_type(Type.from_node(ft || :Any) || Type.new(:Any), schema)
+        field_type.recursive_cleanup_shape?(schema_lookup, seen)
       end
     end
 
@@ -1681,11 +1683,20 @@ class Type
   # Plus: RC, NumericMap, Pool, Set.
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_cleanup?(schema_lookup = nil)
+    return false if provenance == :borrow
     if optional?
       inner = wrapped_type
       return inner ? (inner.needs_cleanup?(schema_lookup) || inner.string?) : false
     end
-    return true if any_rc? || link? || collection_value? || (string? && heap?) ||
+    if array? && !string?
+      return true unless fixed?
+      et = element_type
+      return false unless et
+      elem_t = Type.from_node(et)
+      return !!(elem_t && elem_t.needs_cleanup?(schema_lookup))
+    end
+
+    return true if any_rc? || link? || resource? || collection? || future? || (string? && heap?) ||
                    any_sync? ||
                    (respond_to?(:indirect?) && indirect?)
     if schema_lookup
@@ -1693,7 +1704,7 @@ class Type
       if schema.is_a?(Schemas::UnionSchema) || (Schemas.union?(schema))
         return schema_union_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
       elsif Schemas.struct?(schema)
-        return schema_struct_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
+        return schema_struct_any?(schema) { |t| substitute_generic_schema_field_type(t, schema).needs_cleanup?(schema_lookup) }
       end
     end
     false
@@ -1701,12 +1712,13 @@ class Type
 
   sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def ownership_bearing?(schema_lookup = nil)
-    ti = success_type
+    ti = success_type || self
     return false if ti.primitive? || ti.void? || ti.any?
 
     ti.string? ||
+      ti.future? ||
+      ti.stream? ||
       ti.heap_ptr? ||
-      ti.collection_value? ||
       ti.needs_cleanup?(schema_lookup) ||
       ti.recursive_cleanup_shape?(schema_lookup)
   end
@@ -1745,7 +1757,10 @@ class Type
       if Schemas.union?(schema)
         return (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       elsif Schemas.struct?(schema)
-        return schema_struct_any?(schema) { |t| t.any_rc? || t.link? || t.any_sync? || t.resource? }
+        return schema_struct_any?(schema) do |t|
+          ft = substitute_generic_schema_field_type(t, schema)
+          ft.any_rc? || ft.link? || ft.any_sync? || ft.resource?
+        end
       end
     end
 
@@ -1913,6 +1928,22 @@ class Type
 
   private
 
+  sig { params(field_type: Type, schema: T.untyped).returns(Type) }
+  def substitute_generic_schema_field_type(field_type, schema)
+    return field_type unless generic_instance?
+    params = schema.respond_to?(:type_params) ? schema.type_params : nil
+    args = generic_args
+    return field_type unless params.respond_to?(:zip) && args
+
+    subst = T.let({}, T::Hash[Symbol, Type])
+    params.zip(args).each do |param, arg|
+      next unless param && arg
+
+      subst[param.to_sym] = arg.is_a?(Type) ? arg : Type.new(arg)
+    end
+    subst[field_type.resolved] || field_type
+  end
+
   # True if any struct field in schema satisfies the block (block receives Type).
   # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
   sig { params(schema: T.untyped, blk: T.proc.params(t: Type).returns(T::Boolean)).returns(T::Boolean) }
@@ -1922,6 +1953,10 @@ class Type
       ft = v.is_a?(AST::StructField) ? v.type : v
       t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
       next false unless t
+      if v.is_a?(AST::StructField) && v.borrowed
+        t = Type.new(t)
+        t.provenance = :borrow
+      end
       blk.call(t)
     }
   end

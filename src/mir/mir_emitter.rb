@@ -1115,11 +1115,11 @@ class MIREmitter
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
-      type_arg = node.zig_type || "@TypeOf(#{src})"
+      type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
       if type_arg.start_with?("[]")
         "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
       else
-        pointer_type_arg = node.zig_type || "@TypeOf(__copy_src)"
+        pointer_type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
         pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
         "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
       end

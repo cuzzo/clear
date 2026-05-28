@@ -1860,9 +1860,9 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       # Fiber takes ownership and closes the resource.
       expect(out).to include("socketClose(__ctx_0.client)")
-      # Unconditional BG: resource always moved, no outer defer needed.
-      expect(out).not_to include("client_moved = true")
-      expect(out).not_to include("defer if (!client_moved)")
+      # Unconditional BG: ownership transfer is explicit for MIRChecker.
+      expect(out).to include("client_moved = true")
+      expect(out).to include("defer if (!client_moved)")
     end
 
     it "emits defer file.close() for File captured by BG" do
@@ -1886,9 +1886,9 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
       CLEAR
-      # Dataflow detects resource is always moved to BG fiber.
-      # No outer cleanup needed - fiber owns and closes the resource.
-      expect(out).not_to include("client_moved")
+      # Dataflow detects resource is always moved to BG fiber; the move
+      # guard records that transfer for MIRChecker.
+      expect(out).to include("client_moved = true")
     end
 
     it "emits guarded defer + suppress for resource captured by BG inside while loop" do

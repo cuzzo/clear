@@ -369,7 +369,9 @@ module MIRLoweringExpressions
       if mir_result.is_a?(MIR::BlockExpr)
         mir_result.body = append_ownership_transfers_for_mir_body(mir_result.body)
       end
-      return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, nil) if mir_result
+      result_type = Type.from_node!(node, context: "pipeline result ownership")
+      sink_alloc = ownership_tracked_transfer_type?(result_type) ? (@current_decl_alloc || placement_for_node(node)) : nil
+      return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
 
       raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
     end
@@ -419,7 +421,9 @@ module MIRLoweringExpressions
       label = "__collect_blk_#{@block_expr_counter}"
       collect_var = "__collect_acc_#{@block_expr_counter}"
       val_var = "__collect_val_#{@block_expr_counter}"
-      collect_cleanup = CleanupEntry.build(:uniform, alloc: :heap,
+      left_effect = left.respond_to?(:ownership_effect) ? left.ownership_effect : MIR::OwnershipEffect.none
+      observable_alloc = left_effect.produces_owned ? (left_effect.alloc || :heap) : :heap
+      collect_cleanup = CleanupEntry.build(:uniform, alloc: observable_alloc,
         has_moved_guard: false, zig_type: acc_zig)
       return MIR::BlockExpr.new(label, [
         MIR::Let.new(collect_var, left, false,
@@ -580,8 +584,10 @@ module MIRLoweringExpressions
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
     fallback_type = or_fallback_expected_type(node)
-    right = with_expected_type(fallback_type) do
-      materialize_or_fallback_value(descend(node, :right), node.right)
+    right = lower_scoped do
+      with_expected_type(fallback_type) do
+        materialize_or_fallback_value(lower(node.right), node.right)
+      end
     end
 
     if facts.left_is_error
@@ -615,6 +621,7 @@ module MIRLoweringExpressions
   sig { params(value: T.untyped, ast_node: T.untyped).returns(T.untyped) }
   def materialize_or_fallback_value(value, ast_node)
     T.bind(self, MIRLowering) rescue nil
+    return hoist_alloc(value, ast_node, err_cleanup: false) if mir_allocates?(value)
     return value unless or_fallback_access_path?(ast_node)
 
     return value unless ast_node.is_a?(AST::Locatable)
@@ -622,7 +629,8 @@ module MIRLoweringExpressions
     return value unless ti.string? || ti.recursive_cleanup_shape?(@schema_lookup) || ti.needs_cleanup?(@schema_lookup)
 
     alloc = @current_decl_alloc || :heap
-    MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
+    copied = MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
+    hoist_alloc(copied, ast_node, err_cleanup: false)
   end
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
@@ -1070,14 +1078,16 @@ module MIRLoweringExpressions
     ft.array? && ft.dynamic? && !ft.collection? && !ft.string?
   end
 
-  sig { params(val: T.untyped, ft: T.untyped, borrowed_field: T::Boolean, sink_alloc: Symbol).returns(T.untyped) }
-  def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc)
+  sig { params(val: T.untyped, ft: T.untyped, borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.untyped).returns(T.untyped) }
+  def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc, ast_node = nil)
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
+    source = T.unsafe(self).mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
+      T.unsafe(self).hoist_alloc(val, ast_node, err_cleanup: true) : val
     T.cast(T.unsafe(self).with_ownership_consumption(
-      MIR::OwnedSlice.new(val, sink_alloc),
-      T.unsafe(self).mir_ident_names(val),
+      MIR::OwnedSlice.new(source, sink_alloc),
+      T.unsafe(self).mir_ident_names(source),
       "MIR::OwnedSlice",
       target_alloc: sink_alloc,
     ), MIR::OwnedSlice)
@@ -1101,16 +1111,16 @@ module MIRLoweringExpressions
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(ft) do
         if borrowed_field
-          aggregate_dynamic_slice_field_value(lower(field_node), ft, true, field_sink_alloc)
+          aggregate_dynamic_slice_field_value(lower(field_node), ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
-          make_rc_retain(field_node)
+          hoist_alloc(make_rc_retain(field_node), field_node, err_cleanup: true)
         elsif field_node.is_a?(AST::CopyNode) && ft.is_a?(Type) && ft.collection?
-          hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), nil, nil, :full_value, field_sink_alloc),
+          hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
         else
           field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, ft)
           if struct_field_wants_slice?(ft, k, node)
-            field_value = aggregate_dynamic_slice_field_value(field_value, ft, borrowed_field, field_sink_alloc)
+            field_value = aggregate_dynamic_slice_field_value(field_value, ft, borrowed_field, field_sink_alloc, field_node)
           end
           field_alloc = mir_owned_alloc(field_value)
           lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
@@ -1130,10 +1140,12 @@ module MIRLoweringExpressions
         zig_t = transpile_type(v.full_type!.resolved.to_s)
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
-        hc = T.cast(with_ownership_consumption(
+        hc = T.cast(with_ownership_consumption_for_value(
           MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
-          mir_ident_names(val),
+          val,
+          field_node,
           "MIR::HeapCreate",
+          target_alloc: :heap,
         ), MIR::HeapCreate)
         mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect struct field allocation"))
         mark.scope = :heap
@@ -1191,7 +1203,7 @@ module MIRLoweringExpressions
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(ft) do
         materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
-        materialized = aggregate_dynamic_slice_field_value(materialized, ft, false, field_sink_alloc)
+        materialized = aggregate_dynamic_slice_field_value(materialized, ft, false, field_sink_alloc, v)
         hoist_alloc(materialized, v, err_cleanup: true)
         end
       end
@@ -1201,23 +1213,21 @@ module MIRLoweringExpressions
         field_sym = Type.from_node!(v, context: "indirect union field").resolved
         zig_t = transpile_type(field_sym.to_s)
         # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
-        # If the field holds a union value, deep-copy so the new allocation's
-        # internal heap pointers are independent of the source binding's cleanup.
-        # Deep-copy only when source is an existing binding (GetField / Identifier):
-        # those have independent cleanup that would free the same heap data, causing
-        # UAF in the new allocation. Fresh literals (StructLit, FuncCall, COPY, etc.)
-        # transfer ownership naturally via HeapCreate and need no extra copy.
-        source_is_binding = v.is_a?(AST::GetField) || v.is_a?(AST::Identifier)
-        needs_deep_cleanup = @union_schemas&.key?(field_sym) && source_is_binding
+        # Borrowed field access has no owned local to transfer, so the
+        # indirect cell needs an independent copy. Identifier payloads move
+        # into the cell and are guarded by ordinary ownership transfer marks.
+        needs_deep_cleanup = @union_schemas&.key?(field_sym) && v.is_a?(AST::GetField)
         if needs_deep_cleanup
           val = MIR::DeepCopy.new(val, zig_t, nil, :full_value, :heap)
         end
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
-        hc = T.cast(with_ownership_consumption(
+        hc = T.cast(with_ownership_consumption_for_value(
           MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
-          mir_ident_names(val),
+          val,
+          v,
           "MIR::HeapCreate",
+          target_alloc: :heap,
         ), MIR::HeapCreate)
         mark = MIR::AllocMark.new(temp, :heap, v.full_type!(context: "indirect union field allocation"))
         mark.scope = :heap
@@ -1251,9 +1261,14 @@ module MIRLoweringExpressions
       "MIR::StructInit",
       target_alloc: variant_alloc,
     ), MIR::StructInit)
-    result = MIR::StructInit.new(node.union_name.to_s, [
-      { name: node.variant_name.to_s, value: inner }
-    ])
+    result = T.cast(with_ownership_consumption(
+      MIR::StructInit.new(node.union_name.to_s, [
+        { name: node.variant_name.to_s, value: inner }
+      ]),
+      mir_ident_names(inner),
+      "MIR::StructInit",
+      target_alloc: variant_alloc,
+    ), MIR::StructInit)
 
     wrap_indirect_field_hoists(hoisted, result)
   end
@@ -1269,12 +1284,23 @@ module MIRLoweringExpressions
     local_alloc_names = hoisted.each_with_object(Set.new) do |stmt, names|
       names << stmt.name.to_s if stmt.is_a?(MIR::AllocMark)
     end
+    alloc_by_name = hoisted.each_with_object({}) do |stmt, allocs|
+      allocs[stmt.name.to_s] = stmt.alloc if stmt.is_a?(MIR::AllocMark)
+    end
     result_names = mir_ident_names(result).map(&:to_s).to_set
     local_alloc_names.intersection(result_names).each do |name|
-      hoisted.concat(ownership_transfer_marks(name, :block_result))
+      hoisted.concat(ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name]))
     end
     hoisted << MIR::BreakStmt.new(label, result)
-    MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(hoisted))
+    @lowered_alloc_names = T.let(@lowered_alloc_names, T.untyped)
+    @lowered_guarded_cleanup_names = T.let(@lowered_guarded_cleanup_names, T.untyped)
+    inherited_alloc_names = (@lowered_alloc_names || Set.new).dup
+    inherited_guarded_names = (@lowered_guarded_cleanup_names || Set.new).dup
+    MIR::BlockExpr.new(label, append_ownership_transfers_for_mir_body(
+      hoisted,
+      inherited_alloc_names,
+      inherited_guarded_names,
+    ))
   end
 
   sig { params(node: AST::UnionVariantLit).returns(T::Hash[String, T.untyped]) }
@@ -1413,7 +1439,6 @@ module MIRLoweringExpressions
       return eq_lowering
     end
 
-    mark_explicit_moves_for_cleanup(node.condition)
     cond = lower(node.condition)
     # Parser's optional-pattern slot pushes the symbol :Any when no message
     # follows the assertion's condition. Normalize to "assertion failed"
@@ -1592,7 +1617,7 @@ module MIRLoweringExpressions
     elsif @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :full_value, alloc)
     elsif ti.any_sync?
-      MIR::DeepCopy.new(source, nil, nil, :full_value, alloc)
+      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.collection_value?
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.collection? || (ti.struct? && ti.needs_promotion?(@schema_lookup))
@@ -1645,30 +1670,6 @@ module MIRLoweringExpressions
     end
     zig_base = ti.split_open_stream? ? ti.zig_type : rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(node.value), zig_base, func)
-  end
-
-  sig { params(node: T.untyped).void }
-  def mark_explicit_moves_for_cleanup(node)
-    T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @current_bindings = T.let(@current_bindings, T.untyped)
-    @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
-    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
-    @pending_stmts = T.let(@pending_stmts, T.untyped)
-    return unless node
-    if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
-      ident_name = zig_safe_name(node.value.name)
-      ident_name = @fn_name_rename_map[ident_name] if @fn_name_rename_map&.key?(ident_name)
-      entry = @current_bindings[node.value.name.to_s] || CleanupEntry::NONE
-      guarded = entry.needs_cleanup? && (entry.has_moved_guard? || @guarded_cleanup_names&.[](ident_name))
-      @pending_stmts << MIR::MoveMark.new(ident_name) if guarded
-      return
-    end
-    mark_explicit_moves_for_cleanup(node.value) if node.respond_to?(:value)
-    mark_explicit_moves_for_cleanup(node.left) if node.respond_to?(:left)
-    mark_explicit_moves_for_cleanup(node.right) if node.respond_to?(:right)
-    mark_explicit_moves_for_cleanup(node.condition) if node.respond_to?(:condition) && !node.is_a?(AST::IfStatement)
-    node.args&.each { |a| mark_explicit_moves_for_cleanup(a) } if node.respond_to?(:args)
   end
 
   # A struct/union literal field store is a consuming site: a moved
@@ -1732,6 +1733,7 @@ module MIRLoweringExpressions
         MIR::SharePromote.new(source, zig_base, :heap),
         mir_ident_names(source),
         "MIR::SharePromote",
+        target_alloc: :heap,
       ), MIR::SharePromote)
     end
 
@@ -1740,6 +1742,7 @@ module MIRLoweringExpressions
       MIR::CapWrap.new(source, zig_base, :own_only, nil, nil, "arcCreate", :heap),
       mir_ident_names(source),
       "MIR::CapWrap",
+      target_alloc: :heap,
     ), MIR::CapWrap)
   end
 
@@ -1782,6 +1785,7 @@ module MIRLoweringExpressions
       MIR::CapWrap.new(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc),
       mir_ident_names(inner),
       "MIR::CapWrap",
+      target_alloc: alloc,
     ), MIR::CapWrap)
   end
 

@@ -23,28 +23,59 @@ require_relative "pass_state"
 module MIR
   extend T::Sig
 
+  class OwnershipOperandFact < T::Struct
+    extend T::Sig
+
+    const :kind, Symbol
+    const :name, T.nilable(String)
+    const :borrowed, T::Boolean
+    const :type_info, Type
+    const :source, String
+    const :target_alloc, T.nilable(Symbol), default: nil
+
+    sig { params(name: String, type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
+    def self.owned_binding(name, type_info, source, target_alloc = nil)
+      new(kind: :owned_binding, name: name, borrowed: false, type_info: type_info, source: source, target_alloc: target_alloc)
+    end
+
+    sig { params(name: T.nilable(String), type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
+    def self.borrowed_access(name, type_info, source, target_alloc = nil)
+      new(kind: :borrowed_access, name: name, borrowed: true, type_info: type_info, source: source, target_alloc: target_alloc)
+    end
+
+    sig { params(type_info: Type, source: String).returns(OwnershipOperandFact) }
+    def self.non_owning(type_info, source)
+      new(kind: :non_owning, name: nil, borrowed: false, type_info: type_info, source: source, target_alloc: nil)
+    end
+  end
+
   class OwnershipContract
     extend T::Sig
 
-    sig { returns(T::Array[String]) }
-    attr_reader :consumes
     sig { returns(T::Array[String]) }
     attr_reader :produces
     sig { returns(T::Array[String]) }
     attr_reader :borrows
     sig { returns(T::Boolean) }
     attr_reader :covers_consuming_params
+    sig { returns(T::Array[OwnershipOperandFact]) }
+    attr_reader :operands
 
     sig do
       params(
         consumes: T::Array[String],
+        operands: T::Array[OwnershipOperandFact],
         produces: T::Array[String],
         borrows: T::Array[String],
         covers_consuming_params: T::Boolean,
       ).void
     end
-    def initialize(consumes: [], produces: [], borrows: [], covers_consuming_params: false)
-      @consumes = T.let(normalize_names(consumes).freeze, T::Array[String])
+    def initialize(consumes: [], operands: [], produces: [], borrows: [], covers_consuming_params: false)
+      normalized_operands = operands.dup
+      consumes.map(&:to_s).reject(&:empty?).uniq.each do |name|
+        normalized_operands << OwnershipOperandFact.owned_binding(name, Type.new(:Any), "legacy ownership contract")
+      end
+      @operands = T.let(normalized_operands.freeze, T::Array[OwnershipOperandFact])
       @produces = T.let(normalize_names(produces).freeze, T::Array[String])
       @borrows = T.let(normalize_names(borrows).freeze, T::Array[String])
       @covers_consuming_params = T.let(covers_consuming_params, T::Boolean)
@@ -60,9 +91,19 @@ module MIR
       new(consumes: consumes, covers_consuming_params: true)
     end
 
+    sig { params(operands: T::Array[OwnershipOperandFact]).returns(OwnershipContract) }
+    def self.consume_operands(operands)
+      new(operands: operands, covers_consuming_params: true)
+    end
+
+    sig { returns(T::Array[String]) }
+    def consumes
+      @operands.reject(&:borrowed).filter_map(&:name).map(&:to_s).reject(&:empty?).uniq.freeze
+    end
+
     sig { returns(T::Boolean) }
     def empty?
-      @consumes.empty? && @produces.empty? && @borrows.empty? && !@covers_consuming_params
+      @operands.empty? && @produces.empty? && @borrows.empty? && !@covers_consuming_params
     end
 
     private
@@ -168,13 +209,28 @@ module MIR
     const :captures, T::Array[BoundaryCaptureFact]
   end
 
+  class FsmOwnershipFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
+    const :move_guarded, T::Boolean
+  end
+
   class OwnershipConsumptionFact < T::Struct
     extend T::Sig
 
-    const :names, T::Array[String]
+    const :operands, T::Array[OwnershipOperandFact]
     const :target, Symbol
     const :target_alloc, T.nilable(Symbol)
     const :source, String
+    const :covers_consuming_params, T::Boolean, default: false
+
+    sig { returns(T::Array[String]) }
+    def names
+      operands.filter_map(&:name).map(&:to_s).reject(&:empty?).uniq
+    end
   end
 
   class BodySlot
@@ -216,8 +272,6 @@ module MIR
     def child_exprs; []; end
     sig { returns(T::Array[Emittable]) }
     def ownership_source_exprs; []; end
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs; []; end
     sig { returns(T::Array[BodySlot]) }
     def body_slots; []; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
@@ -611,8 +665,6 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = compact_child_exprs([init])
   end
 
   # Assignment.
@@ -625,8 +677,6 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([target, value])
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = compact_child_exprs([value])
   end
 
   # Reassignment with old-value cleanup.
@@ -637,8 +687,6 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([value])
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = compact_child_exprs([value])
   end
 
   # If statement (not expression).
@@ -668,8 +716,6 @@ module MIR
       exprs = bindings&.map { |binding| binding.is_a?(Hash) ? binding[:expr] : nil } || []
       compact_child_exprs(exprs)
     end
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = child_exprs
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
@@ -685,8 +731,6 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([cond, update])
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = capture ? compact_child_exprs([cond]) : []
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
   end
@@ -934,8 +978,6 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
-    sig { returns(T::Array[Emittable]) }
-    def top_level_alloc_exprs = compact_child_exprs([expr])
   end
 
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
@@ -1155,7 +1197,52 @@ module MIR
     :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
     :result_aliases_finalized
   ) do
+    extend T::Sig
     include Emittable
+
+    sig { returns(T::Array[String]) }
+    def required_move_guards
+      @required_move_guards = T.let(@required_move_guards, T.nilable(T::Array[String]))
+      @required_move_guards ||= []
+    end
+
+    sig { params(value: T::Array[String]).returns(T::Array[String]) }
+    def required_move_guards=(value)
+      @required_move_guards = value
+    end
+
+    sig { returns(T::Array[String]) }
+    def move_guard_writes
+      @move_guard_writes = T.let(@move_guard_writes, T.nilable(T::Array[String]))
+      @move_guard_writes ||= []
+    end
+
+    sig { params(value: T::Array[String]).returns(T::Array[String]) }
+    def move_guard_writes=(value)
+      @move_guard_writes = value
+    end
+
+    sig { returns(T::Array[FsmOwnershipFact]) }
+    def ownership_facts
+      @ownership_facts = T.let(@ownership_facts, T.nilable(T::Array[FsmOwnershipFact]))
+      @ownership_facts ||= []
+    end
+
+    sig { params(value: T::Array[FsmOwnershipFact]).returns(T::Array[FsmOwnershipFact]) }
+    def ownership_facts=(value)
+      @ownership_facts = value
+    end
+
+    sig { returns(T::Boolean) }
+    def owned_result_required
+      @owned_result_required = T.let(@owned_result_required, T.nilable(T::Boolean))
+      @owned_result_required == true
+    end
+
+    sig { params(value: T::Boolean).returns(T::Boolean) }
+    def owned_result_required=(value)
+      @owned_result_required = value
+    end
   end
 
   class FsmLoweringResult < T::Struct
@@ -1982,7 +2069,7 @@ module MIR
     def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.none
+      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :rc)
     end
   end
 
@@ -1993,7 +2080,7 @@ module MIR
     include Expr
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.none
+      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :rc)
     end
   end
 
@@ -2419,10 +2506,21 @@ module MIR
     sig { params(callee: String, args: T::Array[T.untyped], try_wrap: T::Boolean, owned_return: T::Boolean, callable_contract: T.nilable(CallableContract)).void }
     def initialize(callee, args, try_wrap, owned_return = false, callable_contract = nil)
       super(callee, args, try_wrap, owned_return, callable_contract)
+      @never_success = T.let(false, T::Boolean)
     end
 
     sig { returns(T::Boolean) }
     def owned_return? = owned_return == true
+
+    sig { returns(T::Boolean) }
+    def never_success
+      @never_success
+    end
+
+    sig { params(value: T::Boolean).void }
+    def never_success=(value)
+      @never_success = value
+    end
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([args])
@@ -2745,6 +2843,7 @@ module MIR
 
       return left if left.produces_owned && result_type&.needs_cleanup?(nil)
       return left if left.produces_owned && catch_body.is_a?(Lit)
+      return right if right.produces_owned && expr.respond_to?(:never_success) && expr.never_success
 
       OwnershipEffect.none
     end
@@ -2939,6 +3038,10 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([start, end_val])
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: :frame, cleanup_kind: :uniform, requires_hoist: false)
+    end
   end
 
   # Comptime has-field check.
@@ -3013,9 +3116,11 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      return OwnershipEffect.none unless inner.respond_to?(:ownership_effect)
+      inner_effect = inner.respond_to?(:ownership_effect) ? inner.ownership_effect : OwnershipEffect.none
+      return inner_effect if inner_effect.produces_owned
 
-      inner.ownership_effect
+      return OwnershipEffect.owned(alloc: sink_alloc) if sink_alloc
+      OwnershipEffect.none
     end
   end
 
@@ -3058,6 +3163,24 @@ module MIR
     extend T::Sig
     include Expr
 
+    sig { returns(T.nilable(Type)) }
+    def result_type
+      @result_type = T.let(nil, T.nilable(Type)) unless defined?(@result_type)
+      @result_type
+    end
+    sig { params(value: T.nilable(Type)).returns(T.nilable(Type)) }
+    def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
+    sig { returns(T.nilable(T::Boolean)) }
+    def result_ownership_bearing
+      @result_ownership_bearing = T.let(nil, T.nilable(T::Boolean)) unless defined?(@result_ownership_bearing)
+      @result_ownership_bearing
+    end
+    sig { params(value: T::Boolean).returns(T::Boolean) }
+    def result_ownership_bearing=(value)
+      @result_ownership_bearing = T.let(value, T.nilable(T::Boolean))
+      value
+    end
+
     sig { params(code: String, reason: T.nilable(String), ownership_contract: OwnershipContract, stdlib_def: T.untyped, allocs: T.untyped, target_var: T.nilable(String)).void }
     def initialize(code, reason, ownership_contract = OwnershipContract.empty, stdlib_def = nil, allocs = nil, target_var = nil)
       super(code, reason, ownership_contract, stdlib_def, InlineAllocMetadata.from(allocs), target_var)
@@ -3084,9 +3207,13 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      return OwnershipEffect.none unless stdlib_def&.emits_allocating?
-      return OwnershipEffect.none if stdlib_def&.mutates_receiver?
-      return OwnershipEffect.none if stdlib_def&.fixed_return? && stdlib_def.return_type.void?
+      return OwnershipEffect.none unless stdlib_def&.emits_allocating? || stdlib_def&.heap_return_alloc?
+      return OwnershipEffect.none if stdlib_def&.fixed_return? && stdlib_def.return_type.void? && !has_alloc_metadata?
+      return OwnershipEffect.none if stdlib_def&.mutates_receiver? && !stdlib_def&.heap_return_alloc?
+      result_owns = result_ownership_bearing
+      return OwnershipEffect.none if stdlib_def&.heap_return_alloc? && result_owns == false
+      return OwnershipEffect.none if stdlib_def&.heap_return_alloc? && result_owns.nil? &&
+        result_type && !owned_result_type?(T.must(result_type))
       alloc = if stdlib_def&.heap_return_alloc?
         :heap
       elsif allocs.is_a?(InlineAllocMetadata)
@@ -3096,6 +3223,13 @@ module MIR
       end
       return OwnershipEffect.none unless alloc || stdlib_def&.heap_return_alloc?
       OwnershipEffect.owned(alloc: alloc, target_var: target_var)
+    end
+
+    sig { params(type_info: Type).returns(T::Boolean) }
+    def owned_result_type?(type_info)
+      ti = type_info.success_type || type_info
+      ti = ti.wrapped_type || ti if ti.optional?
+      ti.ownership_bearing?
     end
 
     sig { returns(T::Boolean) }

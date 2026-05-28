@@ -52,6 +52,13 @@ module MIRLoweringLiterals
       stream_value = MIR::StructInit.new(stream_zig, [
         { name: "items", value: MIR::ArrayInit.new(promise_zig, n.to_s, item_idents) }
       ])
+      stream_value = with_ownership_consumption(
+        stream_value,
+        item_idents.flat_map { |item| mir_ident_names(item) },
+        "MIR::BoundedStream",
+        target_alloc: :heap,
+        require_visible: false,
+      )
       body << MIR::BreakStmt.new(label, stream_value)
       block = MIR::BlockExpr.new(label, body)
       block.result_type = Type.new(ti)
@@ -94,7 +101,15 @@ module MIRLoweringLiterals
       # KB fixed arrays fine. Falling through to MakeList here would
       # produce an ArrayList whose Zig type doesn't match the variable's
       # declared `[N]T`, so the assignment fails to compile.
-      return MIR::ArrayInit.new(elem_zig, node.items.length.to_s, items_mir)
+      return T.cast(
+        with_ownership_consumption(
+          MIR::ArrayInit.new(elem_zig, node.items.length.to_s, items_mir),
+          items_mir.flat_map { |item| mir_ident_names(item) },
+          "MIR::ArrayInit",
+          target_alloc: list_alloc,
+        ),
+        MIR::ArrayInit,
+      )
     end
 
     if node.items.empty?
@@ -157,6 +172,7 @@ module MIRLoweringLiterals
             MIR::CapWrap.new(inner, zig_t, :own_only, nil, nil, wrap_fn, :heap),
             mir_ident_names(inner),
             "MIR::CapWrap",
+            target_alloc: :heap,
           ),
           MIR::CapWrap,
         )
@@ -196,11 +212,12 @@ module MIRLoweringLiterals
       k = lower(key_node)
       raw_v = with_decl_alloc(map_alloc) { materialize_owned_sink_value(lower(val_node), val_node, map_alloc) }
       v = hoist_alloc(raw_v, val_node, err_cleanup: true)
-      consumed = (mir_ident_names(k) + mir_ident_names(v)).uniq
+      operands = ownership_operands_for_value(k, key_node, "hash literal key", map_alloc) +
+        ownership_operands_for_value(v, val_node, "hash literal value", map_alloc)
       base_contract = MIR::CallableContract.no_ownership(4)
       put_contract = MIR::CallableContract.new(
         base_contract.signature,
-        MIR::OwnershipContract.consumes(consumed),
+        MIR::OwnershipContract.consume_operands(operands),
         4,
       )
       put_call = MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, k, v], true, put_contract)

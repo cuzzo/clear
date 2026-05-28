@@ -26,7 +26,7 @@
 #
 #   INV-EXPLICIT-OWNERSHIP: Any stdlib/RawZig node that transfers
 #     ownership must declare the concrete binding names in
-#     ownership_contract.consumes. Registry metadata says the call shape
+  #     typed ownership operands. Registry metadata says the call shape
 #     can consume; the contract says this lowered call does consume `x`.
 #     Each consumed binding must have a matching MIR::TransferMark.
 #
@@ -309,6 +309,7 @@ class MIRChecker
     verify_aggregate_owned_children!(fn_def.body, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names, transfers)
     verify_zig_contracts!(all_zig_nodes)
+    verify_ownership_consumption_operands!(structural_ownership_nodes)
     verify_call_contracts!(fn_def.body, transfers, allocs)
     verify_structural_ownership_contracts!(structural_ownership_nodes, transfers, allocs)
     verify_explicit_ownership_contracts!(all_zig_nodes, transfers, allocs)
@@ -384,10 +385,35 @@ class MIRChecker
     end
   end
 
+  sig { params(nodes: T::Array[T.untyped]).void }
+  def verify_ownership_consumption_operands!(nodes)
+    nodes.uniq.each do |node|
+      fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+      unless fact.is_a?(MIR::OwnershipConsumptionFact)
+        @errors << error(:OWNERSHIP_CONSUMPTION_FACT_MISSING, ownership_node_name(node),
+          "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")
+        next
+      end
+      if fact.operands.empty?
+        @errors << error(:OWNERSHIP_CONSUMPTION_OPERAND_MISSING, ownership_node_name(node),
+          "ownership-consuming MIR node has no operand provenance")
+        next
+      end
+      fact.operands.each do |operand|
+        next if operand.kind == :non_owning
+        next unless operand.borrowed
+
+        @errors << error(:OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, operand.name || fact.source,
+          "ownership-consuming MIR node tries to consume borrowed operand from #{operand.source}")
+      end
+    end
+    nil
+  end
+
   sig { params(node: T.untyped).returns(T::Array[String]) }
   def structural_consumed_names(node)
     fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
-    return fact.names.map(&:to_s).uniq if fact.is_a?(MIR::OwnershipConsumptionFact)
+    return ownership_consumption_operand_names(fact) if fact.is_a?(MIR::OwnershipConsumptionFact)
     return [] unless stdlib_takes_ownership?(node)
 
     value = node.respond_to?(:value) ? node.value : nil
@@ -397,6 +423,11 @@ class MIRChecker
         "structural ownership sink takes a value, but the source owner is not a named MIR binding")
     end
     []
+  end
+
+  sig { params(fact: MIR::OwnershipConsumptionFact).returns(T::Array[String]) }
+  def ownership_consumption_operand_names(fact)
+    fact.operands.filter_map(&:name).map(&:to_s).reject(&:empty?).uniq
   end
 
   sig { params(body: T::Array[T.untyped]).void }
@@ -821,6 +852,22 @@ class MIRChecker
       @errors << error(:OWNERSHIP_USE_AFTER_TRANSFER, name,
         "binding read after ownership was transferred")
     end
+    check_nested_linear_expr_bodies!(expr, state)
+    nil
+  end
+
+  sig { params(expr: T.untyped, state: LinearOwnershipState).void }
+  def check_nested_linear_expr_bodies!(expr, state)
+    return unless expr.is_a?(MIR::Emittable)
+
+    each_sub_expr(expr) do |sub|
+      if sub.is_a?(MIR::BlockExpr)
+        inner = check_linear_stmts!(sub.body, state.copy)
+        linear_exit_scope!(state, inner, "block-expr")
+      else
+        check_nested_linear_expr_bodies!(sub, state)
+      end
+    end
     nil
   end
 
@@ -829,7 +876,7 @@ class MIRChecker
     names = T.let(Set.new, T::Set[String])
     walk_mir_node(expr) do |node|
       if node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)
-        node.ownership_contract.consumes.each { |name| names.add(name.to_s) }
+        ownership_contract_consumes(node.ownership_contract).each { |name| names.add(name.to_s) }
       end
       if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
         collect_linear_expr_ident_names(node, names)
@@ -1113,7 +1160,7 @@ class MIRChecker
   def owned_return_init?(init)
     return true if init.is_a?(MIR::Call) && init.owned_return?
 
-    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig)
+    if init.is_a?(MIR::InlineZig) || init.is_a?(MIR::RawZig) || init.is_a?(MIR::InlineBc)
       return false unless stdlib_owned_return?(init)
       # Receiver-dependent (Proc-resolved) returns -- collection
       # intrinsics like pool.insert/get -- are not a static owned-
@@ -1121,8 +1168,9 @@ class MIRChecker
       # allocates/borrows, handled elsewhere. Only a static return
       # type counts here (matches pre-FS behavior, which read only
       # the static `:return` key).
-      return false unless init.stdlib_def.fixed_return?
-      ret = init.stdlib_def.return_type
+      sig = FunctionSignature.unwrap(init.stdlib_def)
+      return false unless sig&.fixed_return?
+      ret = sig.return_type
       return !ret.void?
     end
     false
@@ -1140,44 +1188,48 @@ class MIRChecker
     ).void
   end
   def verify_cleanup_sources_own_values!(body, cleanups, err_cleanups)
-    cleanup_by_name = T.let({}, T::Hash[String, T.any(MIR::Cleanup, MIR::ErrCleanup)])
-    cleanups.each do |name, nodes|
-      first = nodes.first
-      cleanup_by_name[name] = first if first
-    end
-    err_cleanups.each do |name, nodes|
-      first = nodes.first
-      cleanup_by_name[name] = first if first
-    end
-    return if cleanup_by_name.empty?
+    return if cleanups.empty? && err_cleanups.empty?
 
-    owned_creates = T.let(Set.new, T::Set[String])
-    walk_mir(body) do |node|
-      owned_creates << node.name.to_s if node.is_a?(MIR::OwnedCreate)
-    end
+    verify_cleanup_sources_in_scope!(body || [])
+    nil
+  end
 
-    walk_mir(body) do |node|
-      next unless node.is_a?(MIR::Let)
-      cleanup = cleanup_by_name[node.name.to_s]
-      next unless cleanup
-      next if cleanup_source_owns_value?(node, cleanup, owned_creates)
+  sig { params(body: T::Array[T.untyped]).void }
+  def verify_cleanup_sources_in_scope!(body)
+    lets = T.let({}, T::Hash[String, MIR::Let])
+    body.each do |node|
+      next unless node.is_a?(MIR::Emittable)
 
-      @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, node.name,
-        "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; " \
-        "MIRChecker cannot prove this binding owns memory")
+      lets[node.name.to_s] = node if node.is_a?(MIR::Let)
+      if node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+        let = lets[node.name.to_s]
+        if let && !cleanup_source_owns_value?(let, node)
+          @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, node.name,
+            "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; " \
+            "MIRChecker cannot prove this binding owns memory")
+        end
+      end
+      node.body_slots.each { |slot| verify_cleanup_sources_in_scope!(slot.body) }
     end
     nil
   end
 
-  sig { params(node: MIR::Let, cleanup: T.any(MIR::Cleanup, MIR::ErrCleanup), owned_creates: T::Set[String]).returns(T::Boolean) }
-  def cleanup_source_owns_value?(node, cleanup, owned_creates)
-    init = node.init
+  sig { params(node: MIR::Let, cleanup: T.any(MIR::Cleanup, MIR::ErrCleanup)).returns(T::Boolean) }
+  def cleanup_source_owns_value?(node, cleanup)
+    init = ownership_source_expr(node.init)
     return true if cleanup.cleanup_entry.match_as?
-    return true if owned_creates.include?(node.name.to_s)
     return true if allocating_expr?(init)
+    return true if value_constructor_expr?(init)
+    return true if init.respond_to?(:ownership_effect) && init.ownership_effect.produces_owned
     return true if owned_return_init?(init)
     return true if expr_owned_result_alloc(init)
     return true if structural_consumed_names(node).any?
+    node_fact = node.ownership_consumption
+    return true if node_fact.is_a?(MIR::OwnershipConsumptionFact) &&
+                   node_fact.operands.any? { |operand|
+                     name = operand.name
+                     !name.nil? && !name.empty?
+                   }
     return true if init.respond_to?(:ownership_consumption) &&
                    init.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact) &&
                    !init.ownership_consumption.names.empty?
@@ -1186,9 +1238,28 @@ class MIRChecker
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
+  def value_constructor_expr?(node)
+    node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
+  end
+
+  sig { params(node: T.untyped).returns(T.untyped) }
+  def ownership_source_expr(node)
+    current = T.let(node, T.untyped)
+    while current.respond_to?(:expr) &&
+        (current.is_a?(MIR::Cast) || current.is_a?(MIR::TryExpr))
+      current = current.expr
+    end
+    current
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def stdlib_owned_return?(node)
-    return false unless node.stdlib_def&.emits_allocating?
-    return true if node.stdlib_def&.heap_return_alloc?
+    sig = FunctionSignature.unwrap(node.stdlib_def)
+    ret = sig&.return_type
+    ret_type = ret.is_a?(Type) ? ret : (ret ? Type.new(ret) : nil)
+    return true if ret_type&.resource?
+    return false unless sig&.emits_allocating?
+    return true if sig.heap_return_alloc?
     return false unless node.is_a?(MIR::InlineZig)
 
     node.allocs&.any_heap? == true
@@ -1214,7 +1285,10 @@ class MIRChecker
   sig { params(init: T.untyped).returns(T.nilable(Symbol)) }
   def expr_owned_result_alloc(init)
     return nil unless init && init.respond_to?(:ownership_effect)
-    init.ownership_effect.alloc
+    effect = init.ownership_effect
+    return nil unless effect.requires_hoist
+
+    effect.alloc
   end
 
   sig { params(lets: T::Array[MIR::Let], allocs: T::Hash[String, T::Array[T.untyped]]).returns(T.nilable(T::Array[T.untyped])) }
@@ -1356,10 +1430,57 @@ class MIRChecker
       )
     end
 
+    # INV-FSM-TRANSFER-GUARD-WRITTEN
+    # A captured ctx field consumed inside the FSM must write its ctx-owned
+    # move guard before transferring ownership. Otherwise destroyTask still
+    # cleans the field and the consumer cleans it again.
+    required_guards = structure.respond_to?(:required_move_guards) ? structure.required_move_guards : []
+    guard_writes = structure.respond_to?(:move_guard_writes) ? structure.move_guard_writes : []
+    required_guards.each do |name|
+      next if guard_writes.include?(name)
+
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-TRANSFER-GUARD-WRITTEN",
+        "captured ctx field '#{name}' is transferred out of the FSM but no " \
+        "`#{name}_moved = true` write is present in the FSM structure. " \
+        "destroyTask would run the finalizer after ownership moved -> double free.",
+        source,
+      )
+    end
+
+    # INV-FSM-OWNED-RESULT-TRANSFER
+    # Owned BG results cross the scheduler boundary through inner.result. The
+    # structure must expose a result ownership fact so future result shapes do
+    # not silently fall back to raw Zig assignment.
+    if structure.respond_to?(:owned_result_required) && structure.owned_result_required
+      facts = structure.respond_to?(:ownership_facts) ? structure.ownership_facts : []
+      result_facts = facts.select { |fact| fact.target == :result }
+      unless result_facts.any?
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-OWNED-RESULT-TRANSFER",
+          "FSM BG returns an owned result but the structure has no result " \
+          "ownership fact. Raw inner.result assignment is unverifiable.",
+          source,
+        )
+      end
+      result_facts.each do |fact|
+        next unless fact.move_guarded
+        next if guard_writes.include?(fact.name)
+
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-OWNED-RESULT-GUARD-WRITTEN",
+          "FSM BG transfers owned result '#{fact.name}' but no matching move " \
+          "guard write is present. The segment-local cleanup would free the " \
+          "value before the promise consumer receives it.",
+          source,
+        )
+      end
+    end
+
     nil
   end
 
-  sig { params(invariant: String, message: String, source: NilClass).returns(String) }
+  sig { params(invariant: String, message: String, source: T.untyped).returns(String) }
   def self.format_fsm_error(invariant, message, source)
     loc = source&.line ? " at line #{source.line}" : ""
     "[FSM checker]#{loc} #{invariant}: #{message}"
@@ -1735,13 +1856,49 @@ class MIRChecker
         "#{node_kind} target declares TAKES/consuming params but concrete consumed bindings are absent")
     end
 
-    ownership.consumes.each do |name|
+    verify_ownership_contract_operands!(
+      ownership,
+      "#{node_kind} ownership_contract",
+      transfers,
+      require_operands: function_signature_takes_ownership?(sig, contract.checked_arg_count),
+    )
+    check_consumed_allocators_match_sink!(contract, ownership.consumes, allocs)
+    nil
+  end
+
+  sig { params(contract: MIR::OwnershipContract, label: String, transfers: T::Set[T.untyped], require_operands: T::Boolean).void }
+  def verify_ownership_contract_operands!(contract, label, transfers, require_operands: false)
+    if contract.operands.empty?
+      if require_operands
+        @errors << error(:OWNERSHIP_CONSUMPTION_OPERAND_MISSING, label,
+          "#{label} covers a consuming call but has no operand provenance")
+      end
+      return
+    end
+
+    contract.operands.each do |operand|
+      next if operand.kind == :non_owning
+
+      if operand.borrowed
+        if require_operands
+          @errors << error(:OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, operand.name || label,
+            "#{label} tries to consume borrowed operand from #{operand.source}")
+        end
+        next
+      end
+
+      name = operand.name
+      if name.nil? || name.empty?
+        @errors << error(:OWNERSHIP_CONSUMPTION_OPERAND_MISSING, label,
+          "#{label} has an ownership operand with no tracked binding")
+        next
+      end
+
       unless transfers.include?(name)
         @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
-          "#{node_kind} ownership_contract consumes '#{name}' but no MIR::TransferMark exists for that binding")
+          "#{label} consumes '#{name}' but no MIR::TransferMark exists for that binding")
       end
     end
-    check_consumed_allocators_match_sink!(contract, ownership.consumes, allocs)
     nil
   end
 
@@ -1772,12 +1929,13 @@ class MIRChecker
           "MIRChecker cannot prove whether this call consumes an owned binding")
       end
 
+      verify_ownership_contract_operands!(
+        node.ownership_contract,
+        "ownership_contract",
+        transfers,
+        require_operands: stdlib_takes_ownership?(node),
+      )
       consumes.each do |name|
-        unless transfers.include?(name)
-          @errors << error(:OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, name,
-            "ownership_contract consumes '#{name}' but no MIR::TransferMark exists for that binding")
-        end
-
         next unless copying_consumed_binding?(node, name)
         @errors << error(:OWNERSHIP_TRANSFER_COPIED, name,
           "ownership_contract consumes '#{name}', but emitted Zig deep-copies it; " \
@@ -1823,6 +1981,7 @@ class MIRChecker
           "Finalize method ownership into OwnedCreate/OwnedTransfer/OwnedStore facts.")
       when MIR::ShardedMapPut, MIR::ReassignWithCleanup
         next unless stdlib_takes_ownership?(node)
+        next if ownership_consumption_has_no_owned_operands?(node)
         next if facts_seen && ownership_fact_covers_node?(facts, node)
 
         @errors << error(:OWNERSHIP_FACT_REQUIRED, ownership_node_name(node),
@@ -1909,7 +2068,7 @@ class MIRChecker
     return true if stdlib_takes_ownership?(node)
     return false unless node.ownership_contract.is_a?(MIR::OwnershipContract)
 
-    !node.ownership_contract.consumes.empty? || !node.ownership_contract.produces.empty?
+    !ownership_contract_consumes(node.ownership_contract).empty? || !node.ownership_contract.produces.empty?
   end
 
   sig { params(node: MIR::InlineZig).returns(T::Boolean) }
@@ -1937,7 +2096,7 @@ class MIRChecker
   sig { params(contract: T.untyped).returns(T::Boolean) }
   def callable_contract_consumes?(contract)
     return false unless contract.is_a?(MIR::CallableContract)
-    !contract.ownership_contract.consumes.empty?
+    !ownership_contract_consumes(contract.ownership_contract).empty?
   end
 
   sig { params(facts: T::Array[T.untyped], node: T.untyped).returns(T::Boolean) }
@@ -1968,6 +2127,14 @@ class MIRChecker
         "ownership_contract consumes :#{mark.alloc} binding '#{name}' into :#{sink_alloc} sink; " \
         "owned transfer allocator is incoherent")
     end
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def ownership_consumption_has_no_owned_operands?(node)
+    fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+    return false unless fact.is_a?(MIR::OwnershipConsumptionFact)
+
+    fact.operands.none? { |operand| operand.kind == :owned_binding && operand.name }
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -2191,30 +2358,105 @@ class MIRChecker
   def check_stmt_for_unhoisted(node)
     return unless node.is_a?(MIR::Emittable)
 
-    allowed = T.let(node.top_level_alloc_exprs.map(&:object_id).to_set, T::Set[Integer])
-    node.child_exprs.each do |expr|
-      check_expr_for_unhoisted(expr, allow_top: allowed.include?(expr.object_id))
+    case node
+    when MIR::Let
+      check_owned_expr_position_for_unhoisted(node.init, "Let initializer")
+    when MIR::ReassignWithCleanup
+      check_owned_expr_position_for_unhoisted(node.value, "ReassignWithCleanup value")
+    when MIR::DiscardOwned
+      check_owned_expr_position_for_unhoisted(node.expr, "DiscardOwned expression")
+    when MIR::IfBindStmt
+      node.bindings&.each do |binding|
+        next unless binding.is_a?(Hash)
+        expr = binding[:expr]
+        capture = binding[:capture]
+        if capture && binder_capture_cleanup?(node.then_body, capture.to_s)
+          check_owned_expr_position_for_unhoisted(expr, "IfBind capture")
+        else
+          check_expr_for_unhoisted(expr)
+        end
+      end
+      node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
+      return
+    when MIR::WhileStmt
+      if node.capture && binder_capture_cleanup?(node.body, node.capture.to_s)
+        check_owned_expr_position_for_unhoisted(node.cond, "While capture")
+      else
+        check_expr_for_unhoisted(node.cond)
+      end
+      check_expr_for_unhoisted(node.update) if node.update
+      node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
+      return
+    else
+      node.child_exprs.each { |expr| check_expr_for_unhoisted(expr) }
     end
     node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
     nil
   end
 
-  # Check expr for allocating nodes in non-Let-init position.
-  # allow_top: true  => expr itself may be an allocating node (it IS the Let.init)
-  # allow_top: false => flag expr if it is an allocating node
-  # In both cases, recurse into sub-expressions with allow_top: false.
-  sig { params(expr: T.untyped, allow_top: T::Boolean).returns(T.nilable(T::Array[T.untyped])) }
-  def check_expr_for_unhoisted(expr, allow_top:)
+  sig { params(body: T.nilable(T::Array[T.untyped]), name: String).returns(T::Boolean) }
+  def binder_capture_cleanup?(body, name)
+    return false unless body.is_a?(Array)
+    body.any? { |stmt| stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == name }
+  end
+
+  sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }
+  def check_owned_expr_position_for_unhoisted(expr, context)
     return unless expr
-    # Cast is a transparent wrapper (no allocation itself). Propagate allow_top so
-    # an allocating expr (e.g. MakeList) inside a Cast in Let-init position is not
-    # flagged. lower() wraps MakeList in Cast for element-type coercions.
+    check_owned_expr_children_for_unhoisted(expr, context)
+  end
+
+  sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }
+  def check_owned_expr_children_for_unhoisted(expr, context)
+    return unless expr
+    if expr.is_a?(MIR::Cast) || expr.is_a?(MIR::TryExpr)
+      check_owned_expr_children_for_unhoisted(expr.expr, context)
+      return
+    end
+    if expr.is_a?(MIR::TryCatch)
+      check_owned_expr_children_for_unhoisted(expr.expr, context)
+      check_owned_expr_children_for_unhoisted(expr.catch_body, context)
+      return
+    end
+    if expr.is_a?(MIR::Orelse)
+      check_owned_expr_children_for_unhoisted(expr.expr, context)
+      check_owned_expr_children_for_unhoisted(expr.fallback, context)
+      return
+    end
+    if expr.is_a?(MIR::IfOptional)
+      check_expr_for_unhoisted(expr.optional)
+      check_owned_expr_children_for_unhoisted(expr.then_expr, context)
+      check_owned_expr_children_for_unhoisted(expr.else_expr, context)
+      return
+    end
+    if expr.is_a?(MIR::BlockExpr)
+      check_stmts_for_unhoisted(expr.body)
+      return
+    end
+    if expr.is_a?(MIR::Pipeline)
+      check_owned_expr_children_for_unhoisted(expr.inner, context)
+      return
+    end
+    if expr.is_a?(MIR::CapWrap)
+      check_owned_expr_children_for_unhoisted(expr.inner, context) if expr.inner
+      return
+    end
+    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub) }
+    nil
+  end
+
+  # Check expr for allocating nodes outside an explicit ownership-binding
+  # position. Direct owned positions are verified by
+  # `check_owned_expr_position_for_unhoisted`, not by node-provided exemptions.
+  sig { params(expr: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  def check_expr_for_unhoisted(expr)
+    return unless expr
     if expr.is_a?(MIR::Cast)
-      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.expr)
       return
     end
     if expr.is_a?(MIR::TryExpr)
-      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.expr)
       return
     end
     if expr.is_a?(MIR::BlockExpr)
@@ -2222,52 +2464,46 @@ class MIRChecker
       return
     end
     if expr.is_a?(MIR::TryCatch)
-      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
-      check_expr_for_unhoisted(expr.catch_body, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.expr)
+      check_expr_for_unhoisted(expr.catch_body)
       return
     end
     if expr.is_a?(MIR::Orelse)
-      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
-      check_expr_for_unhoisted(expr.fallback, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.expr)
+      check_expr_for_unhoisted(expr.fallback)
       return
     end
     if expr.is_a?(MIR::IfOptional)
-      check_expr_for_unhoisted(expr.optional, allow_top: false)
-      check_expr_for_unhoisted(expr.then_expr, allow_top: allow_top)
-      check_expr_for_unhoisted(expr.else_expr, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.optional)
+      check_expr_for_unhoisted(expr.then_expr)
+      check_expr_for_unhoisted(expr.else_expr)
       return
     end
     if expr.is_a?(MIR::Pipeline)
-      if !allow_top && allocating_expr?(expr)
+      if allocating_expr?(expr)
         @errors << error(:UNHOISTED_ALLOC, @fn_name,
           "Pipeline in non-Let-init position (must be hoisted to a named variable)")
         return
       end
-      check_expr_for_unhoisted(expr.inner, allow_top: allow_top)
+      check_expr_for_unhoisted(expr.inner)
       return
     end
-    # CapWrap composes a sync/ownership layer around an inner data-shape
-    # allocation. The outer CapWrap is the alloc-tracked node (AllocMark);
-    # the inner ContainerInit's lifetime is owned by the wrapper. Treat
-    # CapWrap.inner as if it were in Let-init position so the inner
-    # ContainerInit is not flagged as unhoisted.
     if expr.is_a?(MIR::CapWrap)
-      # Top-level CapWrap is also subject to the allow_top check.
-      if !allow_top && allocating_expr?(expr)
+      if allocating_expr?(expr)
         @errors << error(:UNHOISTED_ALLOC, @fn_name,
           "CapWrap in non-Let-init position (must be hoisted to a named variable)")
         return
       end
-      check_expr_for_unhoisted(expr.inner, allow_top: true) if expr.inner
+      check_expr_for_unhoisted(expr.inner) if expr.inner
       return
     end
-    if !allow_top && allocating_expr?(expr)
+    if allocating_expr?(expr)
       kind = expr.class.name.split("::").last
       @errors << error(:UNHOISTED_ALLOC, @fn_name,
         "#{kind} in non-Let-init position (must be hoisted to a named variable)")
       return  # one error per site -- don't recurse into nested allocs
     end
-    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub, allow_top: false) }
+    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub) }
     nil
   end
 
@@ -2284,7 +2520,7 @@ class MIRChecker
   def allocating_expr?(expr)
     return false unless expr && expr.respond_to?(:ownership_effect)
     effect = expr.ownership_effect
-    effect.produces_owned && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
+    effect.produces_owned && effect.requires_hoist && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
   end
 
   # Yield each immediate sub-expression of expr.

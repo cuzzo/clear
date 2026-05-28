@@ -240,6 +240,235 @@ RSpec.describe "architecture invariants: MIR pass order" do
   end
 end
 
+RSpec.describe "architecture invariants: fail-closed MIR ownership facts" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  def source_lines(rel)
+    source(rel).lines.each_with_index
+  end
+
+  OWNERSHIP_SOURCE_FILES = [
+    "src/mir/mir_lowering.rb",
+    "src/mir/hoist.rb",
+    "src/mir/fsm_lowering.rb",
+    "src/backends/pipeline_host.rb",
+  ].freeze
+
+  OWNERSHIP_LOWERING_GLOBS = [
+    "src/mir/mir_lowering.rb",
+    "src/mir/lowering/**/*.rb",
+    "src/mir/fsm_lowering.rb",
+    "src/backends/pipeline_host.rb",
+  ].freeze
+
+  def ownership_lowering_files
+    OWNERSHIP_LOWERING_GLOBS.flat_map { |glob| Dir[File.join(ARCH_ROOT, glob)] }.uniq.sort
+  end
+
+  def ownership_context?(line)
+    line.match?(/ownership|consum|consume|transfer|MoveMark|TransferMark|owned_sink|target_alloc/)
+  end
+
+  it "does not provide MIR allocation whitelist APIs" do
+    forbidden = /
+      top_level_alloc_exprs|
+      allow_top
+    /x
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(forbidden)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIRChecker must verify explicit ownership positions; MIR nodes must not expose " \
+      "allocation whitelist APIs that let untracked allocations bypass verification:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not infer ownership transfers by walking arbitrary MIR subtrees" do
+    forbidden_defs = %w[
+      collect_mir_consumed_roots
+      ownership_transfers_for_mir
+    ]
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/mir/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless forbidden_defs.any? { |name| line.match?(/\bdef\s+#{Regexp.escape(name)}\b/) }
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR ownership transfer facts must be emitted at the consuming edge, not inferred later by MIR walkers:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not derive ownership-consuming operands from structural MIR/name traversal" do
+    structural_extractors = /
+      mir_ident_names|
+      ownership_source_exprs|
+      child_exprs|
+      each_node|
+      each_surface_node|
+      surface_nodes|
+      collect_mir_|
+      walk_expr
+    /x
+
+    offenders = ownership_lowering_files.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless ownership_context?(line)
+        next unless line.match?(structural_extractors)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Ownership-consuming operands must be produced as explicit facts at the consuming edge; " \
+      "structural MIR/name traversal cannot be ownership authority:\n#{offenders.join("\n")}"
+  end
+
+  it "does not use owner-name arrays as the ownership consumption protocol" do
+    offenders = ownership_lowering_files.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        direct_names_protocol =
+          line.match?(/\bwith_ownership_consumption\([^,\n]+,\s*(?:mir_ident_names|\w+_names|\w*consumed\w*)/) ||
+          line.match?(/OwnershipContract\.consumes\((?:\[[^\]]*\]|\w*names|\w*consum)/) ||
+          line.match?(/ownership_consumption\s*=\s*MIR::OwnershipConsumptionFact\.new\([^)]*names:/)
+        next unless direct_names_protocol
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Ownership consumption must be an operand-fact protocol, not a list of inferred owner names:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not emit transfer/move markers outside the fact-to-marker boundary" do
+    allowed = [
+      %r{\Asrc/mir/mir\.rb\z},
+    ]
+
+    offenders = ownership_lowering_files.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      next [] if allowed.any? { |pattern| pattern.match?(rel) }
+
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.match?(/MIR::(?:TransferMark|MoveMark)\.new|MIR\.ownership_transfer_marks/)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "TransferMark/MoveMark must be emitted only by the typed ownership-fact finalizer, " \
+      "not by local lowering paths:\n#{offenders.join("\n")}"
+  end
+
+  it "does not use mir_ident_names as an ownership-consumption source" do
+    ownership_context = /
+      with_ownership_consumption|
+      ownership_transfer|
+      TransferMark|
+      collect_mir_consumed_roots|
+      consumed|
+      consumes
+    /x
+
+    offenders = Dir[File.join(ARCH_ROOT, "src/**/*.rb")].sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("mir_ident_names")
+        next unless line.match?(ownership_context)
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "mir_ident_names is structural inspection; it must not decide ownership consumption/transfer:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "does not synthesize transfer marks from AllocMark/name visibility fallbacks" do
+    forbidden = [
+      "visible_alloc_names",
+      "current_binding_alloc_for_name",
+      "alloc_mark_for_consumed_name",
+      "transfer_target_alloc_for_consumed_name",
+      "ensure_transfer_cleanup_guard_for_name!",
+    ]
+
+    offenders = ["src/mir/mir_lowering.rb", "src/mir/hoist.rb"].flat_map do |rel|
+      source_lines(rel).filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless forbidden.any? { |term| line.include?(term) }
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "Ownership transfer validity must come from explicit operand facts, not name visibility / allocator fallback state:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "requires ownership consumption facts to carry explicit operand provenance" do
+    mir = source("src/mir/mir.rb")
+    expect(mir).to include("class OwnershipOperandFact")
+    expect(mir).to include("const :kind, Symbol")
+    expect(mir).to include("const :name, T.nilable(String)")
+    expect(mir).to include("const :borrowed, T::Boolean")
+    expect(mir).to include("const :type_info, Type")
+    expect(mir).to include("const :operands, T::Array[OwnershipOperandFact]")
+    expect(mir).not_to include("const :names, T::Array[String]")
+  end
+
+  it "requires MIRChecker to reject missing or borrowed ownership operands" do
+    checker = source("src/mir/mir_checker.rb")
+    expect(checker).to include("OWNERSHIP_CONSUMPTION_FACT_MISSING")
+    expect(checker).to include("OWNERSHIP_CONSUMPTION_OPERAND_MISSING")
+    expect(checker).to include("OWNERSHIP_CONSUMPTION_BORROWED_OPERAND")
+    expect(checker).to include("verify_ownership_consumption_operands!")
+    expect(checker).not_to match(/fact\.names|ownership_contract\.consumes\.each/)
+    expect(checker).not_to include("contract.operands.empty? && contract.covers_consuming_params")
+  end
+
+  it "does not exempt specific owned result classes from consuming-sink err cleanup" do
+    offenders = source("src/mir/hoist.rb").lines.each_with_index.filter_map do |line, idx|
+      next unless line.include?("effective_err_cleanup")
+      next unless line.match?(/RcDowngrade|RcRetain|WeakUpgrade|expr\.is_a\?/)
+
+      "src/mir/hoist.rb:#{idx + 1}: #{line.strip}"
+    end
+
+    expect(offenders).to be_empty,
+      "consuming-sink err cleanup must be uniform for every owned result class:\n#{offenders.join("\n")}"
+  end
+
+  it "has negative coverage for borrowed access paths into every owned sink family" do
+    fuzz = source("tools/fuzz/templates/owned_sink_destination_matrix.rb")
+    expect(fuzz).to include("field_borrow")
+    expect(fuzz).to include("index_borrow")
+    expect(fuzz).to include("expected = %i[field_borrow index_borrow].include?(source) && sink == :takes_arg ? :compile_error : :pass")
+    expect(fuzz).to include("expected = :compile_error if source == :index_borrow && sink == :struct_field")
+  end
+end
+
 RSpec.describe "architecture invariants: post-annotation type access" do
   def source(rel)
     File.read(File.join(ARCH_ROOT, rel))
@@ -784,16 +1013,9 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
     expect(source).to include("def return_with_transfer_marks")
     expect(source).to include("def synthetic_return_ownership_plan")
 
-    direct_return_transfers = source.lines.each_with_index.filter_map do |line, idx|
-      next if line.strip.start_with?("#")
-      next unless line.include?("MIR.ownership_transfer_marks") && line.include?(":return")
-
-      "#{idx + 1}: #{line.strip}"
-    end
-
-    expect(direct_return_transfers).to eq([
-      "82: MIR.ownership_transfer_marks(name, :return, move_guarded: visible_guarded_names.include?(name))",
-    ])
+    expect(source).to include("MIR::OwnershipTransferPlan.new")
+    expect(source).to include("target: :return")
+    expect(source).not_to include("MIR.ownership_transfer_marks(name, :return")
   end
 
   it "keeps owned-sink source shape behind one typed source fact" do

@@ -16,6 +16,16 @@ OWNED_SINK_DESTINATION_CELLS = []
   end
 end
 
+%i[field_borrow index_borrow].each do |source|
+  %i[return_value struct_field takes_arg normal_arg].each do |sink|
+    %i[string struct_owned].each do |shape|
+      expected = %i[field_borrow index_borrow].include?(source) && sink == :takes_arg ? :compile_error : :pass
+      expected = :compile_error if source == :index_borrow && sink == :struct_field
+      OWNED_SINK_DESTINATION_CELLS << { source: source, sink: sink, shape: shape, expected: expected }
+    end
+  end
+end
+
 def osd_prelude(shape)
   shape == :struct_owned ? "STRUCT Box { label: String }\n" : ""
 end
@@ -71,6 +81,10 @@ def osd_source_setup(source, shape)
              when :list_owned then "v = mkList();"
              end
     ["#{init}\n    IF TRUE THEN #{assign} END", "v"]
+  when :field_borrow
+    ["src: SrcHolder = SrcHolder{ value: #{osd_return_expr(shape)} };", "src.value"]
+  when :index_borrow
+    ["MUTABLE srcs: #{osd_type(shape)}[]@list = [];\n    srcs.append(#{osd_return_expr(shape)});", "srcs[0_i64]"]
   end
 end
 
@@ -97,6 +111,8 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
   CHT
   helpers = <<~CHT
     #{prelude}#{list_helper}
+    STRUCT SrcHolder { value: #{ty} }
+
     FN make() RETURNS !#{ty} ->
         RETURN #{osd_return_expr(p[:shape])};
     END

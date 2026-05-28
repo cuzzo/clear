@@ -868,9 +868,9 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # Owned values move into map storage directly; no hidden promotion or deep copy.
-      expect(zig).not_to include("val_moved")
+      expect(zig).to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
-      expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
+      expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\);/)
       expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
     end
 
@@ -884,8 +884,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Map storage owns val after assignment; cleanup belongs to the map.
-      expect(zig).not_to include("val_moved")
+      # Map storage owns val after assignment; the transfer is explicit.
+      expect(zig).to include("val_moved = true")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
       expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')

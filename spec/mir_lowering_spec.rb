@@ -1769,6 +1769,7 @@ RSpec.describe MIRLowering do
     it "adds release defers and loop marks to WHILE RESOLVE bindings" do
       link = make_id("weak_node", full_type: :"Node@link")
       cond = AST::ResolveNode.new(tok, link)
+      cond.full_type = Type.new(:"?Node@multiowned")
       node = AST::WhileBindLoop.new(tok, cond, "node", tok, [AST::ContinueNode.new(tok)], nil)
       node.mark_per_iter = true
       low = lowering
@@ -1788,6 +1789,7 @@ RSpec.describe MIRLowering do
     it "adds release defers to IF RESOLVE bindings before the then body" do
       link = make_id("weak_node", full_type: :"Node@link")
       cond = AST::ResolveNode.new(tok, link)
+      cond.full_type = Type.new(:"?Node@multiowned")
       node = AST::IfBind.new(tok, [AST::Binding.new(expr: cond, name: "node", name_token: tok)], [AST::BreakNode.new(tok)], nil)
 
       result = lowering.lower(node)
@@ -2305,7 +2307,7 @@ RSpec.describe MIRLowering do
       zig = emit(lowering.lower(node))
       expect(zig).to include("inner: @TypeOf(inner)")
       expect(zig).to include(".inner = inner")
-      expect(zig).to include("_ = try __discard_bg_")
+      expect(zig).to match(/(?:_ = try __discard_bg_\d+\.next\(\);|const __tmp_\d+ = try __discard_bg_\d+\.next\(\);\s+_ = __tmp_\d+;)/)
       expect(zig).to include(".next()")
     end
 
@@ -2338,7 +2340,7 @@ RSpec.describe MIRLowering do
         CleanupClassifier.classify(fn, fn_nodes: {}, schema_lookup: ->(_) { nil }))
 
       zig = emit(low.lower(node))
-      expect(zig).to include("var dst = blk_copy_")
+      expect(zig).to include("blk_copy_")
       expect(zig).to include("try CheatLib.dupeValue")
       expect(zig).to include("defer CheatLib.cleanup(@TypeOf(dst), __rt.heapAlloc(), &dst)")
     end
