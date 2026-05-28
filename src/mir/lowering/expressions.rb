@@ -28,6 +28,38 @@ module MIRLoweringExpressions
     const :has_float_coercion, T::Boolean
   end
 
+  class UnitVariantAccess < T::Struct
+    const :type_name, Symbol
+    const :variant_name, String
+  end
+
+  INTEGER_LITERAL_CASTS = T.let({
+    INT8: "i8",
+    INT16: "i16",
+    INT32: "i32",
+    UINT16: "u16",
+    UINT32: "u32",
+    UINT64: "u64"
+  }.freeze, T::Hash[Symbol, String])
+
+  WRAPPING_BUILTINS = T.let({
+    WRAP_ADD: :wrapAdd,
+    WRAP_SUB: :wrapSub,
+    WRAP_MUL: :wrapMul
+  }.freeze, T::Hash[Symbol, Symbol])
+
+  CHECKED_BUILTINS = T.let({
+    CHECK_ADD: :checkAdd,
+    CHECK_SUB: :checkSub,
+    CHECK_MUL: :checkMul
+  }.freeze, T::Hash[Symbol, Symbol])
+
+  INTEGER_ARITHMETIC_BUILTINS = T.let({
+    ADD: :intAdd,
+    SUB: :intSub,
+    MUL: :intMul
+  }.freeze, T::Hash[Symbol, Symbol])
+
   sig { params(node: AST::Literal).returns(T.untyped) }
   def lower_literal(node)
     T.bind(self, MIRLowering) rescue nil
@@ -50,26 +82,24 @@ module MIRLoweringExpressions
       if node.coerced_type == :Int64
         MIR::Lit.new(node.value.to_i.to_s)
       else
-        s = node.value.to_s
-        s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
-        MIR::Lit.new(s)
+        MIR::Lit.new(float_literal_text(node.value))
       end
     when :INT64    then MIR::Lit.new(node.value.to_s)
-    when :INT8     then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "i8", :as)
-    when :INT16    then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "i16", :as)
-    when :INT32    then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "i32", :as)
-    when :UINT16   then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "u16", :as)
-    when :UINT32   then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "u32", :as)
-    when :UINT64   then MIR::Cast.new(MIR::Lit.new(node.value.to_s), "u64", :as)
+    when :INT8, :INT16, :INT32, :UINT16, :UINT32, :UINT64
+      MIR::Cast.new(MIR::Lit.new(node.value.to_s), INTEGER_LITERAL_CASTS.fetch(node.type), :as)
     when :FLOAT32
-      s = node.value.to_s
-      s = "#{s}.0" if node.value == node.value.to_i && !s.include?('.')
-      MIR::Cast.new(MIR::Lit.new(s), "f32", :as)
+      MIR::Cast.new(MIR::Lit.new(float_literal_text(node.value)), "f32", :as)
     when :BOOLEAN  then MIR::Lit.new(node.value.to_s)
     when :NIL      then MIR::Lit.new("null")
     else
       MIR::Lit.new(node.value.to_s)
     end
+  end
+
+  sig { params(value: T.untyped).returns(String) }
+  def float_literal_text(value)
+    s = value.to_s
+    value == value.to_i && !s.include?('.') ? "#{s}.0" : s
   end
 
   sig { params(node: AST::Identifier).returns(T.untyped) }
@@ -178,9 +208,7 @@ module MIRLoweringExpressions
 
     # Power operator
     if node.op == :POW
-      left_type = node.left.full_type!
-      resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
-      type_arg = resolved == :Int64 ? "i64" : "f64"
+      type_arg = Type.from_node!(node.left, context: "power lhs").resolved == :Int64 ? "i64" : "f64"
       return MIR::Call.new(
         "std.math.pow",
         [MIR::Ident.new(type_arg), left, right],
@@ -194,17 +222,15 @@ module MIRLoweringExpressions
     # target can dispatch to MOD_I64 via MIR::InlineBc instead of parsing a
     # "@mod" callee string at codegen time.
     if node.op == :MOD
-      left_type = node.left.full_type!
-      resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
-      if resolved == :Int64
+      if Type.from_node!(node.left, context: "mod lhs").resolved == :Int64
         return emit_builtin(:intMod, [left, right])
       end
     end
 
     # String comparison
-    if Type.new(node.left.full_type!).string? || Type.new(node.right.full_type!).string?
-      left_ti  = Type.new(node.left.full_type!)
-      right_ti = Type.new(node.right.full_type!)
+    left_ti = Type.from_node!(node.left, context: "binary lhs")
+    right_ti = Type.from_node!(node.right, context: "binary rhs")
+    if left_ti.string? || right_ti.string?
 
       # Symbol == symbol: O(1) pointer+length comparison. No allocation possible,
       # so no hoist_alloc needed. Falls through to content comparison if either
@@ -236,31 +262,24 @@ module MIRLoweringExpressions
 
     # Integer division — same rationale as :MOD above (registry instead of
     # raw "@divTrunc" callee string).
-    if node.op == :DIV
-      left_ti = node.left.full_type!
-      right_ti = node.right.full_type!
-      if left_ti&.integer? && right_ti&.integer?
-        return emit_builtin(:intDiv, [left, right])
-      end
+    if node.op == :DIV && left_ti.integer? && right_ti.integer?
+      return emit_builtin(:intDiv, [left, right])
     end
 
     # Wrapping operators
-    if %i[WRAP_ADD WRAP_SUB WRAP_MUL].include?(node.op)
-      fn = { WRAP_ADD: :wrapAdd, WRAP_SUB: :wrapSub, WRAP_MUL: :wrapMul }[node.op]
+    if (fn = WRAPPING_BUILTINS[node.op])
       return emit_builtin(fn, [left, right])
     end
 
     # Checked operators
-    if %i[CHECK_ADD CHECK_SUB CHECK_MUL].include?(node.op)
-      fn = { CHECK_ADD: :checkAdd, CHECK_SUB: :checkSub, CHECK_MUL: :checkMul }[node.op]
+    if (fn = CHECKED_BUILTINS[node.op])
       return emit_builtin(fn, [left, right])
     end
 
     # Default integer arithmetic: checked in debug
-    if %i[ADD SUB MUL].include?(node.op)
+    if (fn = INTEGER_ARITHMETIC_BUILTINS[node.op])
       int_facts = binary_int_arithmetic_facts(node)
       if int_facts.both_int && !int_facts.has_comptime_number_literal && !int_facts.has_float_coercion
-        fn = { ADD: :intAdd, SUB: :intSub, MUL: :intMul }[node.op]
         return emit_builtin(fn, [left, right])
       end
     end
@@ -276,11 +295,11 @@ module MIRLoweringExpressions
       if lhs_uv && !rhs_uv
         op_str = node.op == :EQ ? "==" : "!="
         tag_call = active_tag_call(right)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv[1]}"))
+        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv.variant_name}"))
       elsif rhs_uv && !lhs_uv
         op_str = node.op == :EQ ? "==" : "!="
         tag_call = active_tag_call(left)
-        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv[1]}"))
+        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv.variant_name}"))
       end
     end
 
@@ -291,12 +310,10 @@ module MIRLoweringExpressions
     # type and pointing at MATCH (the canonical CLEAR pattern for
     # discriminating tagged values).
     if %i[EQ NEQ].include?(node.op)
-      left_ti = node.left.full_type!
-      right_ti = node.right.full_type!
-      left_resolved = left_ti.is_a?(Type) ? left_ti.resolved : (left_ti && Type.new(left_ti.to_s).resolved)
-      right_resolved = right_ti.is_a?(Type) ? right_ti.resolved : (right_ti && Type.new(right_ti.to_s).resolved)
-      union_lhs = left_resolved && @union_schemas&.key?(left_resolved)
-      union_rhs = right_resolved && @union_schemas&.key?(right_resolved)
+      left_resolved = left_ti.resolved
+      right_resolved = right_ti.resolved
+      union_lhs = @union_schemas&.key?(left_resolved)
+      union_rhs = @union_schemas&.key?(right_resolved)
       if union_lhs || union_rhs
         type_name = union_lhs ? left_resolved : right_resolved
         raise "BinaryOp #{node.op} on union '#{type_name}': Zig `==` does not " \
@@ -318,7 +335,7 @@ module MIRLoweringExpressions
   # access on a known union (e.g. `Status.Active` -> [:Status, "Active"]),
   # otherwise nil. Used by lower_binary_op to lower
   # `union_value == Type.Variant` to std.meta.activeTag.
-  sig { params(node: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(node: T.untyped).returns(T.nilable(UnitVariantAccess)) }
   def unit_variant_access(node)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
@@ -339,7 +356,7 @@ module MIRLoweringExpressions
     # GetField on a payload-having variant is invalid CLEAR (annotator
     # would have raised).
     return nil if Schemas.inline_struct?(var_data)
-    [type_name, node.field]
+    UnitVariantAccess.new(type_name: type_name, variant_name: node.field)
   end
 
   # ================================================================
@@ -352,6 +369,7 @@ module MIRLoweringExpressions
     # mir-lowering strict ivars
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
     @current_fn_has_catch = T.let(@current_fn_has_catch, T.untyped)
+    @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rhs = node.right
 
@@ -460,7 +478,7 @@ module MIRLoweringExpressions
 
     # Capture snapshot for CATCH blocks: store LHS before the failable call
     snapshot_stmts = nil
-    if @current_fn_has_catch
+    if @current_fn_has_catch && @current_fn_snapshot_types&.size == 1
       lhs_type = node.left.full_type!
       if lhs_type
         t = Type.new(lhs_type)

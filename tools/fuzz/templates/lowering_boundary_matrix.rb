@@ -17,7 +17,12 @@ end
   LBM_CELLS << { family: :with_block, mode: mode }
 end
 
-%i[bg_value bg_return_handle do_two_tasks next_owned_string next_stream_string pipeline_collect pipeline_index].each do |mode|
+%i[
+  bg_value bg_return_handle do_two_tasks next_owned_string next_stream_string
+  pipeline_collect pipeline_collect_inline pipeline_collect_distinct
+  pipeline_recover_success pipeline_recover_fallback
+  pipeline_catch_identifier pipeline_catch_func_call pipeline_index
+].each do |mode|
   LBM_CELLS << { family: :execution, mode: mode }
 end
 
@@ -159,6 +164,91 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
       %(FN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD COPY "abc"; END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
     when :pipeline_collect
       %(FN main() RETURNS Void ->\n    s: ~Int64[] = 1_i64 ..< 5_i64;\n    total = s |> SELECT _ * 2_i64 |> SUM _;\n    ASSERT total == 20_i64, "pipeline collect";\n    RETURN;\nEND\n)
+    when :pipeline_collect_inline
+      <<~CHT
+        FN main() RETURNS Void ->
+            total = (BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END } |> SUM _) |> COLLECT;
+            ASSERT total == 10_i64, "pipeline inline collect";
+            RETURN;
+        END
+      CHT
+    when :pipeline_collect_distinct
+      <<~CHT
+        FN main() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM {
+                YIELD 1_i64;
+                YIELD 2_i64;
+                YIELD 1_i64;
+            };
+            out = s |> DISTINCT _ |> COLLECT;
+            ASSERT out.length() == 2_i64, "pipeline distinct collect";
+            RETURN;
+        END
+      CHT
+    when :pipeline_recover_success
+      <<~CHT
+        FN risky(flag: Bool) RETURNS !String ->
+            IF flag THEN RAISE Input; END
+            RETURN COPY "ok";
+        END
+
+        FN main() RETURNS Void ->
+            s = risky(FALSE) |> RECOVER("fallback");
+            ASSERT s == "ok", "pipeline recover success";
+            RETURN;
+        END
+      CHT
+    when :pipeline_recover_fallback
+      <<~CHT
+        FN risky(flag: Bool) RETURNS !String ->
+            IF flag THEN RAISE Input; END
+            RETURN COPY "ok";
+        END
+
+        FN main() RETURNS Void ->
+            s = risky(TRUE) |> RECOVER("fallback");
+            ASSERT s == "fallback", "pipeline recover fallback";
+            RETURN;
+        END
+      CHT
+    when :pipeline_catch_identifier
+      <<~CHT
+        FN risky(x: Int64) RETURNS !Int64 ->
+            IF x < 0_i64 THEN RAISE Input; END
+            RETURN x + 1_i64;
+        END
+
+        FN wrap(x: Int64) RETURNS !Int64 ->
+            out = (x |> risky) OR RAISE;
+            RETURN out;
+        CATCH Input
+            RETURN -1_i64;
+        END
+
+        FN main() RETURNS Void ->
+            ASSERT wrap(4_i64) == 5_i64, "pipeline catch identifier";
+            RETURN;
+        END
+      CHT
+    when :pipeline_catch_func_call
+      <<~CHT
+        FN risky_add(x: Int64, y: Int64) RETURNS !Int64 ->
+            IF x < 0_i64 THEN RAISE Input; END
+            RETURN x + y;
+        END
+
+        FN wrap(x: Int64) RETURNS !Int64 ->
+            out = (x |> risky_add(3_i64)) OR RAISE;
+            RETURN out;
+        CATCH Input
+            RETURN -1_i64;
+        END
+
+        FN main() RETURNS Void ->
+            ASSERT wrap(4_i64) == 7_i64, "pipeline catch func call";
+            RETURN;
+        END
+      CHT
     when :pipeline_index
       <<~CHT
         STRUCT Item { key: String, value: Int64 }

@@ -836,13 +836,15 @@ private
       # registry and rejects kind mismatches.
       node.catch_clauses.each { |c| resolve_catch_clause!(c) }
 
-      # Collect snapshot types from pipeline steps for typed snapshot access
       snap_types = Set.new
-      collect_pipe_input_types(node.body, snap_types)
-      node.snapshot_types = snap_types
-
       all_catch_bodies = node.catch_clauses.map { |c| c.body }
       all_catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
+      # Snapshot capture is only meaningful when a CATCH body reads
+      # `snapshot`. Otherwise every successful pipeline call in a catchable
+      # function allocates dead snapshot state that no handler can observe.
+      collect_pipe_input_types(node.body, snap_types) if catch_bodies_reference_snapshot?(all_catch_bodies)
+      node.snapshot_types = snap_types
+
       all_catch_bodies.compact.each do |clause_body|
         with_new_scope do
           # Declare __error as a struct-like type accessible in CATCH
@@ -1098,12 +1100,23 @@ private
   sig { params(body: T::Array[T.untyped], types: T::Set[T.untyped]).returns(T::Array[T.untyped]) }
   def collect_pipe_input_types(body, types)
     body.each do |stmt|
-      walk_ast(stmt) do |node|
+      AST.each_locatable(stmt) do |node|
         if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
           t = node.left.full_type!(context: "pipe input type")
           types << t.resolved.to_s unless t.void? || t.error_union?
         end
       end
+    end
+  end
+
+  sig { params(bodies: T::Array[T.untyped]).returns(T::Boolean) }
+  def catch_bodies_reference_snapshot?(bodies)
+    bodies.compact.any? do |body|
+      found = T.let(false, T::Boolean)
+      AST.each_locatable(body) do |node|
+        found = true if node.is_a?(AST::Identifier) && node.name == "snapshot"
+      end
+      found
     end
   end
 

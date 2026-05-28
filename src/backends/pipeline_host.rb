@@ -2951,7 +2951,7 @@ class PipelineHost
   #     does not expose `add`/`inc`/`submit`/`update` -- consumers go
   #     through `acc.inner` so ObservableTerminal stays per-terminal
   #     surface-free.
-  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Identifier, acc_alloc_zig: String, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, acc_alloc_zig: String, publish_stmts: T::Array[T.untyped]).returns(MIR::BlockExpr) }
   def lower_range_fold_observable(p, smooth_node, label, source_node,
                                   acc_alloc_zig:, publish_stmts:)
     range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true, MIR::CallableContract.no_ownership(0))
@@ -3149,7 +3149,7 @@ class PipelineHost
   # Single shared lowering for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND.
   # REDUCE and DISTINCT need seeded inits or inline CAS, so they keep
   # dedicated helpers below.
-  sig { params(p: T::Hash[T.untyped, T.untyped], fold_op: T.untyped, smooth_node: AST::BinaryOp, label: String, source_node: AST::Identifier, terminal: Symbol).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], fold_op: T.untyped, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, terminal: Symbol).returns(MIR::BlockExpr) }
   def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:)
     spec  = PUBLISH_SPEC.fetch(terminal)
     source_elem = source_node.full_type!(context: "observable pipeline source").tense_type&.element_type
@@ -3215,7 +3215,7 @@ class PipelineHost
       type_info.needs_explicit_cleanup?(:heap, pipeline_schema_lookup)
   end
 
-  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Identifier).returns(T::Array[T.untyped]) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], source_node: AST::Node).returns(T::Array[T.untyped]) }
   def consumed_stream_item_cleanup(p, source_node)
     src_t = source_node.full_type!(context: "pipeline source cleanup")
     elem_t = src_t.tense_type&.element_type
@@ -3250,7 +3250,7 @@ class PipelineHost
   #
   # Wrapper: `*ObservableReduce(T)` -- the Inner is `AtomicReduce(T)`
   # which needs a seeded init(initial). Caller passes `newWith(...)`.
-  sig { params(p: T::Hash[T.untyped, T.untyped], reduce_op: AST::ReduceOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Identifier).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], reduce_op: AST::ReduceOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_range_reduce_observable(p, reduce_op, smooth_node, label, source_node)
     inner_zig = transpile_type(smooth_node.full_type!.tense_type)
     init_mir  = visit_mir(reduce_op.initial_value)
@@ -3315,7 +3315,7 @@ class PipelineHost
   # Per-item publish:
   #   - dynamic:  `_ = acc.inner.submit(item) catch unreachable`  (fallible: grow can fail)
   #   - bounded:  `_ = acc.inner.submit(item)`                    (infallible: no grow path)
-  sig { params(p: T::Hash[T.untyped, T.untyped], distinct_op: AST::DistinctOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Identifier).returns(MIR::BlockExpr) }
+  sig { params(p: T::Hash[T.untyped, T.untyped], distinct_op: AST::DistinctOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node).returns(MIR::BlockExpr) }
   def lower_range_fold_observable_distinct(p, distinct_op, smooth_node, label, source_node)
     key_expr_mir = with_pipeline_context(placeholder: p[:item_var]) {
       visit_mir(distinct_op.expression)

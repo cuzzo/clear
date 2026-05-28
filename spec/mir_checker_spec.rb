@@ -36,6 +36,23 @@ RSpec.describe MIRChecker do
     MIR::Call.new(name, [MIR::Ident.new("rt")], false, true)
   end
 
+  def boundary_fact(kind: :bg, dispatch: :local, captures: [])
+    MIR::ExecutionBoundaryFact.new(kind: kind, dispatch: dispatch, captures: captures)
+  end
+
+  def boundary_capture(name, parallel_safe: true, forbidden_reason: nil)
+    MIR::BoundaryCaptureFact.new(
+      name: name,
+      storage: :heap,
+      sync: nil,
+      ownership: nil,
+      parallel_safe: parallel_safe,
+      scheduler_affine: !parallel_safe,
+      requires_pinned: !parallel_safe,
+      forbidden_reason: forbidden_reason,
+    )
+  end
+
   describe "OWNERSHIP_CLEANUP_FOR_BORROW" do
     it "rejects cleanup for an indexed borrow alias" do
       body = [
@@ -1124,6 +1141,45 @@ RSpec.describe MIRChecker do
       ])
       program = checked_program([fn1])
       errors = checker.check_program!(program)
+      expect(errors).to be_empty
+    end
+  end
+
+  describe "execution boundary facts" do
+    it "rejects BgBlock without a typed boundary fact" do
+      bg = MIR::BgBlock.new("{}", {}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
+
+      errors = checker.check_fn!(fn_def("missing_bg_fact", [bg]))
+
+      expect(errors.any? { |e| e.include?("BOUNDARY_FACT_REQUIRED") && e.include?("MIR::BgBlock") }).to be true
+    end
+
+    it "rejects DoBlock when fact count does not match branch bodies" do
+      do_block = MIR::DoBlock.new("{}", [[MIR::ExprStmt.new(MIR::Lit.new("1"), false)]])
+      do_block.boundary_facts = []
+
+      errors = checker.check_fn!(fn_def("bad_do_fact_count", [do_block]))
+
+      expect(errors.any? { |e| e.include?("BOUNDARY_FACT_REQUIRED") && e.include?("0 boundary facts for 1 branch bodies") }).to be true
+    end
+
+    it "rejects parallel boundary captures not proven parallel safe" do
+      bg = MIR::BgBlock.new("{}", {}, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)])
+      bg.boundary_fact = boundary_fact(
+        dispatch: :parallel,
+        captures: [boundary_capture("x", parallel_safe: false, forbidden_reason: :affine_locked)],
+      )
+
+      errors = checker.check_fn!(fn_def("unsafe_parallel_capture", [bg]))
+
+      expect(errors.any? { |e| e.include?("BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE") && e.include?("x") }).to be true
+    end
+  end
+
+  describe "ownership registry invariants" do
+    it "has no unregistered ownership-significant MIR node classes" do
+      errors = checker.ownership_registry_errors
+
       expect(errors).to be_empty
     end
   end

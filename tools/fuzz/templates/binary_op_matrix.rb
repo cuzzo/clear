@@ -3,9 +3,10 @@
 # Targets src/mir/mir_lowering.rb#lower_binary_op + #lower_or_rescue.
 # The cell set is the dispatch's OWN discriminant set read from the
 # source: the string-compare `case node.op` has arms
-# {EQ,NEQ,LT,LTE,GT,GTE}; POW (**), MOD, concat (+), OR (OR_RESCUE)
-# are the other op branches. Every comparison arm x every operand
-# type is emitted -- exhaustive by construction, not a guessed axis.
+# {EQ,NEQ,LT,LTE,GT,GTE}; POW (**), DIV, MOD, wrapping/checked integer
+# arithmetic, concat (+), OR (OR_RESCUE) are the other op branches. Every
+# comparison arm x every operand type is emitted -- exhaustive by construction,
+# not a guessed axis.
 #
 # Surface syntax confirmed from lexer/transpile-tests:
 #   == != < <= > >=  ;  **=POW  ;  MOD  ;  + (concat)  ;  OR (rescue).
@@ -27,8 +28,12 @@ BOM_CMP.each do |op|
 end
 # Non-comparison op branches, each at its valid operand type(s).
 BOM_CELLS << { op: :mod,    type: :int }
+BOM_CELLS << { op: :div,    type: :int }
 BOM_CELLS << { op: :pow,    type: :int }
 BOM_CELLS << { op: :pow,    type: :float }
+%i[wrap_add wrap_sub wrap_mul check_add check_sub check_mul].each do |op|
+  BOM_CELLS << { op: op, type: :int }
+end
 BOM_CELLS << { op: :concat, type: :str_lit }
 BOM_CELLS << { op: :concat, type: :heap_str }
 BOM_CELLS << { op: :or_fallback, type: :heap_str }
@@ -56,9 +61,16 @@ def bom_body(op, t)
   when :gt   then "    ASSERT (#{l} > #{r}) == FALSE, \"gt #{t}\";"
   when :gte  then "    ASSERT (#{l} >= #{r}) == FALSE, \"gte #{t}\";"
   when :mod  then "    ASSERT (10_i64 MOD 3_i64) == 1_i64, \"mod\";"
+  when :div  then "    ASSERT (10_i64 / 3_i64) == 3_i64, \"div\";"
   when :pow
     t == :int ? "    ASSERT (2_i64 ** 3_i64) == 8_i64, \"pow int\";" \
               : "    ASSERT (2.0 ** 3.0) == 8.0, \"pow float\";"
+  when :wrap_add then "    ASSERT (7_i64 %+ 5_i64) == 12_i64, \"wrap add\";"
+  when :wrap_sub then "    ASSERT (7_i64 %- 5_i64) == 2_i64, \"wrap sub\";"
+  when :wrap_mul then "    ASSERT (7_i64 %* 5_i64) == 35_i64, \"wrap mul\";"
+  when :check_add then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !+ b) == 12_i64, \"check add\";"
+  when :check_sub then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !- b) == 2_i64, \"check sub\";"
+  when :check_mul then "    a: Int64 = 7_i64;\n    b: Int64 = 5_i64;\n    ASSERT (a !* b) == 35_i64, \"check mul\";"
   when :concat
     "    t: String = #{l} + #{r};\n    ASSERT t.length() == 6_i64, \"concat #{t}\";"
   when :or_fallback

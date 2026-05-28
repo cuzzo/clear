@@ -360,7 +360,7 @@ module MIRLoweringFunctions
     catch_clauses = function_catch_clauses(node)
     has_catch = catch_clauses.any?
     @current_fn_has_catch = has_catch
-    @current_fn_snapshot_types = Set.new if has_catch
+    @current_fn_snapshot_types = has_catch && node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
     # Trampoline bodies are synthesized directly while preserving the
     # normal function signature seen by callers.
     if node.thunk_plan

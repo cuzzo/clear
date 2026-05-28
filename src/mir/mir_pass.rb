@@ -154,7 +154,7 @@ class MIRPass
         fn.needs_rt = true
         next
       end
-      walk_ast_nodes(fn.body) do |n|
+      AST.each_locatable(fn.body) do |n|
         if ((n.is_a?(AST::VarDecl) || n.is_a?(AST::BindExpr)) && n.symbol&.storage == :heap) ||
            ast_node_lowers_through_runtime?(n)
           fn.needs_rt = true
@@ -292,32 +292,8 @@ class MIRPass
 
   sig { params(node: T.untyped, acc: T::Set[String]).void }
   def collect_callees(node, acc)
-    return if node.nil?
-    if node.is_a?(Array)
-      node.each { |c| collect_callees(c, acc) }
-      return
-    end
-    return unless node.is_a?(Struct)
-    acc << node.name.to_s if (node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)) && node.name
-    node.to_a.each { |c| collect_callees(c, acc) }
-  end
-
-  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.proc.params(arg0: T.untyped).void).void }
-  def walk_ast_nodes(nodes, visited = Set.new, &block)
-    return unless nodes
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each do |node|
-      case node
-      when AST::Locatable
-        next unless visited.add?(node.object_id)
-        block.call(node)
-        next unless node.is_a?(Struct)
-        node.class.members.each { |member| walk_ast_nodes(node[member], visited, &block) }
-      when Array
-        walk_ast_nodes(node, visited, &block)
-      when Hash
-        node.each_value { |value| walk_ast_nodes(value, visited, &block) }
-      end
+    AST.each_locatable(node) do |child|
+      acc << child.name.to_s if AST.call?(child) && child.name
     end
   end
 
@@ -325,7 +301,7 @@ class MIRPass
   def return_path_needs_allocator?(fn)
     return false unless fn.heap_carry_return
     found = T.let(false, T::Boolean)
-    walk_ast_nodes(fn.body) do |node|
+    AST.each_locatable(fn.body) do |node|
       next if found
       next unless node.is_a?(AST::ReturnNode) && node.value
       found = return_expr_needs_allocator?(fn, node.value)
@@ -418,42 +394,16 @@ class MIRPass
   # snapshot and the binding's current state.
   sig { params(fn: AST::FunctionDef, bindings: T::Hash[String, CleanupEntry]).returns(T::Array[T.untyped]) }
   def pre_mark_bg_resource_captures!(fn, bindings)
-    T.must(walk_for_bg_captures(fn.body, bindings))
-  end
+    AST.each_bg_block(fn.body) do |bg|
+      resource_captures = bg.capture_analysis&.resource_captures
+      next unless resource_captures&.any?
 
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
-  def walk_for_bg_captures(stmts, bindings)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      AST.each_bg_block_in_stmt(stmt) do |bg|
-        resource_captures = bg.capture_analysis&.resource_captures
-        next unless resource_captures&.any?
-        resource_captures.each do |name|
-          entry = live_cleanup_entry(bindings, name)
-          next unless entry
-          entry[:has_moved_guard] = true
-        end
-      end
-      # Recurse into nested control flow.
-      case stmt
-      when AST::IfStatement
-        walk_for_bg_captures(stmt.then_branch, bindings)
-        walk_for_bg_captures(stmt.else_branch, bindings)
-      when AST::WhileLoop
-        walk_for_bg_captures(stmt.do_branch, bindings)
-      when AST::ForRange, AST::ForEach
-        walk_for_bg_captures(stmt.body, bindings)
-      when AST::MatchStatement
-        stmt.cases.each { |c| walk_for_bg_captures(c.body, bindings) }
-        walk_for_bg_captures(stmt.default_case, bindings)
-      when AST::WithBlock
-        walk_for_bg_captures(stmt.body, bindings)
-      when AST::DoBlock
-        stmt.branches.each { |b| walk_for_bg_captures(b[:body], bindings) }
-      when AST::BgBlock, AST::BgStreamBlock
-        walk_for_bg_captures(stmt.body, bindings)
+      resource_captures.each do |name|
+        entry = live_cleanup_entry(bindings, name)
+        entry[:has_moved_guard] = true if entry
       end
     end
+    fn.body
   end
 
   # Recursively transform a statement list, inserting MIR nodes.
@@ -824,7 +774,7 @@ class MIRPass
     return unless fn.body
 
     returned = T.let(Set.new, T::Set[String])
-    walk_ast_nodes(fn.body) do |node|
+    AST.each_locatable(fn.body) do |node|
       next unless node.is_a?(AST::ReturnNode) && node.value
       collect_escaping_ids(node.value).each { |id| returned << id.name.to_s }
     end
