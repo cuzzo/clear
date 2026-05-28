@@ -1578,11 +1578,8 @@ class BorrowChecker
   # Check explicit moves (was_moved) in function/method call arguments.
   sig { params(stmt: T.untyped, token: Lexer::Token).void }
   def check_explicit_moves(stmt, token)
-    walk_expr_node(stmt, skip_copy: true) do |expr|
-      next unless expr.is_a?(AST::Identifier) && expr.was_moved
-      next if copy_type?(expr)
-      check_borrowed_move(expr.name.to_s, expr.token || token)
-    end
+    state = synthetic_owner_state
+    transfer_collector.send(:collect_explicit_moves, stmt, state).each { |name| check_borrowed_move(name, token) }
   end
 
   sig { params(name: String, token: Lexer::Token).returns(T.nilable(T::Array[String])) }
@@ -1598,103 +1595,37 @@ class BorrowChecker
   # Non-Copy identifiers in ownership-transferring positions are moves.
   sig { params(node: T.untyped).returns(T::Set[String]) }
   def collect_moved_names(node)
-    names = Set.new
-    _collect_moves(node, names)
-    names
+    Set.new(transfer_collector.send(:collect_binding_moves, node, synthetic_owner_state))
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
-  def _collect_moves(node, names)
-    return unless node
-    case node
-    when AST::Identifier
-      return if copy_type?(node)
-      names << node.name.to_s
-    when AST::StructLit
-      node.fields&.each_value { |v| _collect_moves(v, names) }
-    when AST::MethodCall
-      # Union constructors (TYPE_ID): payload transfers ownership.
-      # Regular method calls: only was_moved args.
-      if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
-        node.args.each { |a| _collect_moves(a, names) }
-      else
-        _collect_was_moved(node, names)
-      end
-    when AST::FuncCall
-      _collect_was_moved(node, names)
-    when AST::ListLit
-      node.items.each { |i| _collect_moves(i, names) }
-    when AST::GetField
-      if owning_field_move?(node)
-        root = AST.root_identifier(node)
-        names << root.name.to_s if root
-      else
-        _collect_was_moved(node, names)
-      end
-    when AST::MoveNode
-      inner = node.value
-      names << inner.name.to_s if inner.is_a?(AST::Identifier)
-    when AST::ShareNode
-      _collect_share_moves(node, names)
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # COPY/FREEZE does NOT move the source.
-    when AST::CapabilityWrap
-      # Unwrap: S{ field: x } @shared still consumes x.
-      _collect_moves(node.value, names)
-    when AST::BgBlock, AST::BgStreamBlock
-      node.capture_analysis&.resource_captures&.each { |n| names << n }
+  sig { returns(OwnershipDataflow) }
+  def transfer_collector
+    fn_node = if @fn_node.is_a?(AST::FunctionDef)
+      @fn_node
     else
-      _collect_was_moved(node, names)
+      token = Lexer::Token.new(:VAR_ID, @fn_name, 1, 1)
+      AST::FunctionDef.new(token, @fn_name, [], [], :Void, nil, @fn_node.respond_to?(:body) ? @fn_node.body : [], [], nil, :private, [], false)
     end
+    @transfer_collector ||= T.let(
+      OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node, schema_lookup: @schema_lookup),
+      T.nilable(OwnershipDataflow),
+    )
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
-  def _collect_was_moved(node, names)
-    walk_expr_node(node, skip_copy: true) do |expr|
-      next unless expr.is_a?(AST::Identifier) && expr.was_moved
-      next if copy_type?(expr)
-      names << expr.name.to_s
-    end
+  sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
+  def synthetic_owner_state
+    default_entry = OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)
+    T.let(Hash.new(default_entry), T::Hash[String, OwnershipDataflow::OwnerEntry])
   end
 
   sig { params(node: T.untyped, blk: T.proc.params(node: T.untyped).void).void }
   def walk_for_was_moved(node, &blk)
-    walk_expr_node(node, skip_copy: true) do |expr|
-      next unless expr.is_a?(AST::Identifier) && expr.was_moved
-      next if copy_type?(expr)
-      blk.call(expr)
+    moved = transfer_collector.send(:collect_explicit_moves, node, synthetic_owner_state).to_set
+    AST.each_locatable(node) do |expr|
+      blk.call(expr) if expr.is_a?(AST::Identifier) && moved.include?(expr.name.to_s)
     end
   end
 
-  sig { params(node: AST::ShareNode, names: T::Set[T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-  def _collect_share_moves(node, names)
-    source = node.value
-    return if source.is_a?(AST::CopyNode)
-
-    if source.is_a?(AST::Identifier)
-      return if source.full_type!.shared?
-      names << source.name.to_s
-      return
-    end
-
-    _collect_moves(source, names)
-  end
-
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def owning_field_move?(node)
-    return false unless node.is_a?(AST::GetField)
-    ti = node.full_type!(context: "ownership dataflow field move")
-    Type.indirect_type?(ti)
-  rescue
-    false
-  end
-
-  sig { params(ident: AST::Identifier).returns(T::Boolean) }
-  def copy_type?(ident)
-    ti = ident.full_type!
-    is_atomic_ptr = ti.atomic_ptr?
-    ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
-  end
 end
 
 

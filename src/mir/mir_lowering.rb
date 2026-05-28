@@ -424,13 +424,11 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_destination_node?(node)
-    return false unless node
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def owner_transfer_node?(node)
-    return false unless node
     return true if AST.moved?(node)
     return true if node.respond_to?(:indirect_field) && node.indirect_field == true
     return Type.indirect_type?(node.full_type!(context: "owner transfer source")) if node.is_a?(AST::GetField)

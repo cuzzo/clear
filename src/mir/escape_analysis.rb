@@ -857,7 +857,7 @@ module EscapeAnalysis
   private_class_method def self.returned_call_result?(expr)
     node = unwrap_value(expr)
     node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+    AST.call?(node)
   end
 
   sig { params(body: T::Array[T.untyped], names: T::Set[String]).void }
@@ -910,7 +910,7 @@ module EscapeAnalysis
   private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup)
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
-    return false unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
+    return false unless AST.call?(call)
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
     return call_result_is_heap_for_callee?(call, callee, schema_lookup) if callee
