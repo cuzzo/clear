@@ -1256,7 +1256,7 @@ class UseAfterMoveChecker
 
     case st
     when OwnershipDataflow::MOVED
-      loc = token ? " (line #{token[:line]})" : ""
+      loc = " (line #{token[:line]})"
       @errors << "[USE_AFTER_MOVE] #{@fn_node.name}::#{name} -- used after being moved#{loc}"
     # NOTE: :maybe_moved reads are NOT errors -- the variable might still be live.
     # Rust allows reads of maybe_moved values (it inserts runtime checks only for drops).

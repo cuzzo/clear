@@ -2800,7 +2800,7 @@ class MIRLowering
 
   sig { params(name: String).returns(T::Boolean) }
   def callee_can_fail?(name)
-    return true if false || name.to_s.empty?
+    return true if name.to_s.empty?
     sig = fn_sig_for(name)
     sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end
