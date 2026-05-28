@@ -34,6 +34,10 @@ end
 
 class AST::BgBlock
   sig { returns(T.untyped) }
+  def async_result_shape; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def async_result_shape=(value); end
+  sig { returns(T.untyped) }
   def can_smash_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_smash_token=(value); end
@@ -745,6 +749,10 @@ class BasicBlock
 end
 
 class BgBlock
+  sig { returns(T.untyped) }
+  def async_result_shape; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def async_result_shape=(value); end
   sig { returns(T.untyped) }
   def can_smash_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1511,10 +1519,10 @@ end
 class MIR::OwnershipContract
   sig { returns(T::Array[String]) }
   def borrows; end
-  sig { returns(T::Array[String]) }
-  def consumes; end
   sig { returns(T::Boolean) }
   def covers_consuming_params; end
+  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  def operands; end
   sig { returns(T::Array[String]) }
   def produces; end
 end
@@ -1653,10 +1661,10 @@ end
 class OwnershipContract
   sig { returns(T::Array[String]) }
   def borrows; end
-  sig { returns(T::Array[String]) }
-  def consumes; end
   sig { returns(T::Boolean) }
   def covers_consuming_params; end
+  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  def operands; end
   sig { returns(T::Array[String]) }
   def produces; end
 end
@@ -1880,6 +1888,10 @@ class StructSchema
 end
 
 class SymbolEntry
+  sig { returns(T.nilable(AsyncResultShape)) }
+  def async_result_shape; end
+  sig { params(value: T.nilable(AsyncResultShape)).returns(T.nilable(AsyncResultShape)) }
+  def async_result_shape=(value); end
   sig { returns(T::Boolean) }
   def borrowed_alias; end
   sig { params(value: T::Boolean).returns(T::Boolean) }

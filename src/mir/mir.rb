@@ -58,13 +58,13 @@ module MIR
     attr_reader :borrows
     sig { returns(T::Boolean) }
     attr_reader :covers_consuming_params
-    sig { returns(T::Array[OwnershipOperandFact]) }
+    sig { returns(T::Array[MIR::OwnershipOperandFact]) }
     attr_reader :operands
 
     sig do
       params(
         consumes: T::Array[String],
-        operands: T::Array[OwnershipOperandFact],
+        operands: T::Array[MIR::OwnershipOperandFact],
         produces: T::Array[String],
         borrows: T::Array[String],
         covers_consuming_params: T::Boolean,
@@ -75,7 +75,7 @@ module MIR
       consumes.map(&:to_s).reject(&:empty?).uniq.each do |name|
         normalized_operands << OwnershipOperandFact.owned_binding(name, Type.new(:Any), "legacy ownership contract")
       end
-      @operands = T.let(normalized_operands.freeze, T::Array[OwnershipOperandFact])
+      @operands = T.let(normalized_operands.freeze, T::Array[MIR::OwnershipOperandFact])
       @produces = T.let(normalize_names(produces).freeze, T::Array[String])
       @borrows = T.let(normalize_names(borrows).freeze, T::Array[String])
       @covers_consuming_params = T.let(covers_consuming_params, T::Boolean)
@@ -91,7 +91,7 @@ module MIR
       new(consumes: consumes, covers_consuming_params: true)
     end
 
-    sig { params(operands: T::Array[OwnershipOperandFact]).returns(OwnershipContract) }
+    sig { params(operands: T::Array[MIR::OwnershipOperandFact]).returns(OwnershipContract) }
     def self.consume_operands(operands)
       new(operands: operands, covers_consuming_params: true)
     end
