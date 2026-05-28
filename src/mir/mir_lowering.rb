@@ -195,6 +195,19 @@ class MIRLowering
     const :target_alloc, T.nilable(Symbol)
   end
 
+  class ZigConstBlock < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :kind, T.nilable(String)
+    const :lines, T::Array[String]
+
+    sig { returns(String) }
+    def text
+      lines.join
+    end
+  end
+
   include ZigTypeMapper
   include FsmLowering
   include TestLowering
@@ -1501,18 +1514,7 @@ class MIRLowering
 
   sig { params(node: T.untyped).returns(T.nilable(MIR::OwnershipContract)) }
   def ownership_contract_for_node(node)
-    case node
-    when MIR::Let
-      ownership_contract_for_node(node.init)
-    when MIR::ExprStmt
-      ownership_contract_for_node(node.expr)
-    when MIR::InlineZig, MIR::RawZig
-      node.ownership_contract
-    when MIR::Call, MIR::TailCall, MIR::MethodCall
-      node.callable_contract&.ownership_contract
-    else
-      nil
-    end
+    node.is_a?(MIR::Emittable) ? node.explicit_ownership_contract : nil
   end
 
   sig do
@@ -1544,14 +1546,7 @@ class MIRLowering
 
   sig { params(node: MIR::Node).returns(T::Array[String]) }
   def ownership_contract_consumes(node)
-    contract = case node
-    when MIR::InlineZig, MIR::RawZig
-      node.ownership_contract
-    when MIR::Call, MIR::TailCall, MIR::MethodCall
-      node.callable_contract&.ownership_contract
-    else
-      nil
-    end
+    contract = node.explicit_ownership_contract
     return [] unless contract
     contract.consumes.map(&:to_s)
   end
@@ -2635,55 +2630,54 @@ class MIRLowering
 
   sig { params(body: String).returns(String) }
   def strip_all_type_defs(body)
-    lines = body.lines
-    result = []
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if line =~ /\Aconst (\w+)\s*=\s*(struct|union\(enum\)|enum)\s*[\{(]/
-        depth = T.must(line).count('{') - T.must(line).count('}')
-        i += 1
-        while i < lines.length && depth > 0
-          depth += T.must(lines[i]).count('{') - T.must(lines[i]).count('}')
-          i += 1
-        end
-        i += 1 if i < lines.length && lines[i]&.strip == '};'
-      else
-        result << line
-        i += 1
-      end
-    end
-    result.join
+    result = body.dup
+    zig_const_blocks(body).each { |block| result.sub!(block.text, "") if block.kind }
+    result
   end
 
   sig { params(source: String, names: T::Set[String]).returns(String) }
   def filter_zig_blocks(source, names)
+    keep_zig_const_blocks(source, names)
+  end
+
+  sig { params(source: String).returns(T::Array[ZigConstBlock]) }
+  def zig_const_blocks(source)
     lines = source.lines
-    result = []
-    i = 0
+    blocks = T.let([], T::Array[ZigConstBlock])
+    i = T.let(0, Integer)
     while i < lines.length
       line = lines[i]
-      if line =~ /\Aconst (\w+)\s*=/
-        name = $1
-        is_target = names.include?(name)
-        block_lines = [line]
-        depth = T.must(line).count('{') - T.must(line).count('}')
+      if line =~ /\Aconst (\w+)\s*=\s*(?:(struct|union\(enum\)|enum)\s*[\{(])?/
+        name = T.must(Regexp.last_match(1))
+        kind = Regexp.last_match(2)
+        block_lines = T.let([T.must(line)], T::Array[String])
+        depth = brace_depth(T.must(line))
         i += 1
         while i < lines.length && depth > 0
-          block_lines << lines[i]
-          depth += T.must(lines[i]).count('{') - T.must(lines[i]).count('}')
+          block_lines << T.must(lines[i])
+          depth += brace_depth(T.must(lines[i]))
           i += 1
         end
         if i < lines.length && lines[i]&.strip == '};'
-          block_lines << lines[i]
+          block_lines << T.must(lines[i])
           i += 1
         end
-        result.concat(block_lines) if is_target
+        blocks << ZigConstBlock.new(name: name, kind: kind, lines: block_lines)
       else
         i += 1
       end
     end
-    result.join
+    blocks
+  end
+
+  sig { params(source: String, names: T::Set[String]).returns(String) }
+  def keep_zig_const_blocks(source, names)
+    zig_const_blocks(source).filter_map { |block| block.text if names.include?(block.name) }.join
+  end
+
+  sig { params(line: String).returns(Integer) }
+  def brace_depth(line)
+    line.count("{") - line.count("}")
   end
 
   # ================================================================
@@ -2924,33 +2918,7 @@ class MIRLowering
 
   sig { params(mir_node: T.untyped).returns(T.untyped) }
   def strip_try(mir_node)
-    case mir_node
-    when MIR::Call
-      out = MIR::Call.new(mir_node.callee, mir_node.args, false, mir_node.owned_return, mir_node.callable_contract)
-      out.never_success = mir_node.never_success
-      out.result_type = Type.new(mir_node.result_type) if mir_node.result_type
-      out
-    when MIR::MethodCall
-      out = MIR::MethodCall.new(mir_node.receiver, mir_node.method, mir_node.args, false,
-        mir_node.callable_contract, mir_node.owned_result_alloc)
-      out.result_type = Type.new(mir_node.result_type) if mir_node.result_type
-      out
-    when MIR::TryExpr
-      mir_node.expr
-    when MIR::InlineZig
-      code = mir_node.code.sub(/\Atry /, '')
-      iz = MIR::InlineZig.new(code, mir_node.reason, mir_node.ownership_contract, mir_node.stdlib_def,
-        mir_node.allocs, mir_node.target_var)
-      result_owns = mir_node.result_ownership_bearing
-      iz.result_ownership_bearing = result_owns unless result_owns.nil?
-      iz.result_type = Type.new(mir_node.result_type) if mir_node.result_type
-      iz
-    when MIR::RawZig
-      code = mir_node.code.sub(/\Atry /, '')
-      MIR::RawZig.new(code, mir_node.reason)
-    else
-      mir_node
-    end
+    mir_node.respond_to?(:without_try) ? mir_node.without_try : mir_node
   end
 
   # Emit a list of MIR statements as Zig body text, adding semicolons

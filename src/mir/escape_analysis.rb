@@ -379,11 +379,11 @@ module EscapeAnalysis
     if t.collection? || (t.array? && !t.string?)
       elem = t.element_type
       return false unless elem.is_a?(Type)
-      return type_contains_cleanup_payload?(elem, schema_lookup)
+      return elem.ownership_bearing?(schema_lookup)
     end
 
     return false if t.string? || t.heap_ptr?
-    type_contains_cleanup_payload?(t, schema_lookup)
+    t.ownership_bearing?(schema_lookup)
   rescue StandardError
     false
   end
@@ -700,41 +700,9 @@ module EscapeAnalysis
     t = ti.value_payload_type
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
-    return true if t.string?
-    t.heap_ptr? ||
-      t.recursive_cleanup_shape?(schema_lookup) ||
-      t.needs_explicit_cleanup?(:heap, schema_lookup) ||
-      type_contains_cleanup_payload?(t, schema_lookup)
+    t.ownership_bearing?(schema_lookup)
   rescue StandardError
     false
-  end
-
-  sig { params(ti: Type, schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
-  private_class_method def self.type_contains_cleanup_payload?(ti, schema_lookup, seen = nil)
-    t = ti.success_type
-    return false unless t
-    return true if t.string? && !t.rodata? && t.provenance != :borrow
-    return true if t.needs_explicit_cleanup?(:heap, schema_lookup)
-    if t.array? && !t.string?
-      elem = t.element_type
-      return false unless elem.is_a?(Type)
-      return type_contains_cleanup_payload?(elem, schema_lookup, seen)
-    end
-    return false unless schema_lookup
-    key = t.resolved.to_s
-    seen ||= Set.new
-    return false unless seen.add?(key)
-    schema = schema_lookup.call(t.resolved) rescue nil
-    if Schemas.union?(schema)
-      return (schema.variants || {}).any? do |_name, vt|
-        vt.is_a?(Type) && type_contains_cleanup_payload?(vt, schema_lookup, seen)
-      end
-    end
-    return false unless Schemas.field_bearing?(schema)
-    schema.fields.any? do |_name, field|
-      ft = field.is_a?(AST::StructField) ? field.type : field
-      ft.is_a?(Type) && type_contains_cleanup_payload?(ft, schema_lookup, seen)
-    end
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
@@ -861,11 +829,7 @@ module EscapeAnalysis
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
     return false if ti.rodata? || ti.provenance == :borrow
-    ti.string? || top_heap_ptr || ti.heap_ptr? || ti.resource? || ti.ownership != :affine ||
-      ti.recursive_cleanup_shape?(schema_lookup) ||
-      ti.needs_cleanup?(schema_lookup) ||
-      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
-      type_contains_cleanup_payload?(ti, schema_lookup)
+    top_heap_ptr || ti.ownership != :affine || ti.ownership_bearing?(schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }

@@ -276,6 +276,10 @@ module MIR
     def owned_position_source_exprs; []; end
     sig { returns(T::Array[BodySlot]) }
     def body_slots; []; end
+    sig { returns(Emittable) }
+    def without_try; self; end
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract; nil; end
     sig { returns(T.nilable(OwnershipConsumptionFact)) }
     attr_accessor :ownership_consumption
 
@@ -673,6 +677,10 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([init])
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      init.is_a?(Emittable) ? init.explicit_ownership_contract : nil
+    end
   end
 
   # Assignment.
@@ -977,6 +985,10 @@ module MIR
     # discard: true -> emit `_ = expr;`
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([expr])
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      expr.is_a?(Emittable) ? expr.explicit_ownership_contract : nil
+    end
   end
 
   # Owning expression used as a statement.
@@ -1032,6 +1044,16 @@ module MIR
 
     sig { returns(T::Boolean) }
     def expr?; true; end  # can appear in expression position too
+
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      ownership_contract
+    end
+
+    sig { returns(RawZig) }
+    def without_try
+      RawZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def)
+    end
 
     private
 
@@ -2533,6 +2555,19 @@ module MIR
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([args])
 
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      callable_contract&.ownership_contract
+    end
+
+    sig { returns(Call) }
+    def without_try
+      out = Call.new(callee, args, false, owned_return, callable_contract)
+      out.never_success = never_success
+      out.result_type = Type.new(result_type) if result_type
+      out
+    end
+
     sig { returns(OwnershipEffect) }
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
@@ -2553,6 +2588,11 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([args])
+
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      callable_contract&.ownership_contract
+    end
   end
 
   # Method call.
@@ -2585,6 +2625,18 @@ module MIR
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([receiver, args])
+
+    sig { returns(T.nilable(OwnershipContract)) }
+    def explicit_ownership_contract
+      callable_contract&.ownership_contract
+    end
+
+    sig { returns(MethodCall) }
+    def without_try
+      out = MethodCall.new(receiver, method, args, false, callable_contract, owned_result_alloc)
+      out.result_type = Type.new(result_type) if result_type
+      out
+    end
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
@@ -2805,6 +2857,11 @@ module MIR
     sig { returns(OwnershipEffect) }
     def ownership_effect
       expr.ownership_effect
+    end
+
+    sig { returns(Emittable) }
+    def without_try
+      expr
     end
   end
 
@@ -3273,6 +3330,20 @@ module MIR
     sig { returns(T::Boolean) }
     def assignable_allocating_result?
       stdlib_def&.emits_allocating? && !stdlib_def&.mutates_receiver?
+    end
+
+    sig { returns(OwnershipContract) }
+    def explicit_ownership_contract
+      ownership_contract
+    end
+
+    sig { returns(InlineZig) }
+    def without_try
+      out = InlineZig.new(code.sub(/\Atry /, ""), reason, ownership_contract, stdlib_def, allocs, target_var)
+      owns = result_ownership_bearing
+      out.result_ownership_bearing = owns unless owns.nil?
+      out.result_type = Type.new(result_type) if result_type
+      out
     end
 
     private
