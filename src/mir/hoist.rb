@@ -551,6 +551,9 @@ module MIRHoistLowering
   end
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    if expr.respond_to?(:expr?) && expr.expr?
+      @pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
+    end
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
@@ -729,7 +732,7 @@ module MIRHoistLowering
     prefix = T.let([], T::Array[T.untyped])
     case stmt
     when MIR::Let
-      prefix.concat(normalize_allocating_result_expr!(stmt.init))
+      prefix.concat(normalize_allocating_result_expr!(stmt.init, owned_position: true))
     when MIR::Set
       prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
@@ -832,28 +835,51 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
-  def normalize_allocating_result_expr!(expr)
+  sig { params(expr: T.untyped, transfer_on_success: T::Boolean, owned_position: T::Boolean).returns(T::Array[T.untyped]) }
+  def normalize_allocating_result_expr!(expr, transfer_on_success: false, owned_position: false)
     prefix = T.let([], T::Array[T.untyped])
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
 
     result_children = T.let(expr.ownership_source_exprs, T::Array[T.untyped])
+    owned_sources = T.let(expr.owned_position_source_exprs.to_set, T::Set[MIR::Emittable])
     result_children.each do |child|
-      if mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-        child_prefix = normalize_allocating_result_expr!(child)
-        prefix.concat(child_prefix)
+      if owned_position && owned_sources.include?(child)
+        prefix.concat(normalize_allocating_result_expr!(
+          child,
+          transfer_on_success: transfer_on_success,
+          owned_position: true,
+        ))
         next
       end
-      used_prefix, normalized = normalize_allocating_used_expr(child, transfer_on_success: consumes_owned_children?(expr))
+      if mir_produces_owned_result?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+        used_prefix, normalized = normalize_allocating_used_expr(
+          child,
+          transfer_on_success: consumes_owned_children?(expr),
+        )
+        replace_mir_expr_child!(expr, child, normalized)
+        prefix.concat(used_prefix)
+        next
+      end
+      if mir_allocates?(child)
+        prefix.concat(normalize_allocating_result_expr!(child, transfer_on_success: transfer_on_success))
+        next
+      end
+      used_prefix, normalized = normalize_allocating_used_expr(
+        child,
+        transfer_on_success: consumes_owned_children?(expr),
+      )
       replace_mir_expr_child!(expr, child, normalized)
       prefix.concat(used_prefix)
     end
     each_mir_expr_child(expr) do |child|
       next if result_children.any? { |result_child| result_child.equal?(child) }
 
-      used_prefix, normalized = normalize_allocating_used_expr(child, transfer_on_success: consumes_owned_children?(expr))
+      used_prefix, normalized = normalize_allocating_used_expr(
+        child,
+        transfer_on_success: consumes_owned_children?(expr),
+      )
       replace_mir_expr_child!(expr, child, normalized)
       prefix.concat(used_prefix)
     end
@@ -867,7 +893,7 @@ module MIRHoistLowering
     return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
 
     if !mutating_receiver_allocator_op?(expr) && mir_produces_owned_result?(expr)
-      nested = normalize_allocating_result_expr!(expr)
+      nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
       hoisted, ident = hoist_normalized_alloc_expr(expr, transfer_on_success: transfer_on_success)
       prefix.concat(hoisted)
@@ -875,7 +901,7 @@ module MIRHoistLowering
     end
 
     if mir_consumes_owned_operands?(expr)
-      nested = normalize_allocating_result_expr!(expr)
+      nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
       hoisted, ident = hoist_normalized_value_expr(expr)
       prefix.concat(hoisted)

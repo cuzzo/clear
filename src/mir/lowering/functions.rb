@@ -7,6 +7,23 @@ module MIRLoweringFunctions
 
   requires_ancestor { MIRLowering }
 
+  class FunctionParamFact < T::Struct
+    extend T::Sig
+
+    const :param, AST::Param
+    const :name, String
+    const :mir_name, String
+    const :zig_type, String
+    const :mutable_scalar, T::Boolean
+    const :collection_param, T::Boolean
+    const :pointer_passed, T::Boolean
+
+    sig { returns(MIR::Param) }
+    def to_mir_param
+      MIR::Param.new(mir_name, zig_type, pointer_passed)
+    end
+  end
+
   class CallArgFacts < T::Struct
     const :ast_arg, AST::Node
     const :copy_source, T.nilable(AST::Node)
@@ -196,13 +213,7 @@ module MIRLoweringFunctions
     end
     final_type = transpile_type(ret_type)
 
-    fn_needs_rt = finalized_needs_rt!(node)
-    # Synthesized trampolines allocate child frames, so they need rt even
-    # when the user body does not otherwise mention it.
-    fn_needs_rt = true if node.thunk_plan
-    # Mutual trampolines call rt.checkYield() each iteration.
-    fn_needs_rt = true if node.mutual_thunk_plan
-    fn_needs_rt = true if function_return_retains_shared_handle?(node)
+    fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node)
     if fn_needs_rt
       sig = @fn_sigs[node.name.to_s] || @fn_sigs[node.name.to_sym]
       sig.needs_rt = true if sig.respond_to?(:needs_rt=)
@@ -246,13 +257,8 @@ module MIRLoweringFunctions
     # incorrectly received the `_m_` rename. The rename then masked the
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
-    mutable_scalar_params = node.params.select { |p|
-      next false unless p.mutable
-      p_type_obj = p.type || Type.new(:Any)
-      next false if p_type_obj && (p_type_obj.collection? ||
-                                    (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
-      !transpile_type(p.type, is_param: true).start_with?("[]", "*")
-    }.map { |p| p.name }.to_set
+    param_facts = function_param_facts(node.params)
+    mutable_scalar_params = param_facts.select(&:mutable_scalar).map(&:name).to_set
     @current_fn_mutable_scalar_params = T.let(mutable_scalar_params, T.nilable(T::Set[T.untyped]))
 
     # Collection params: already passed by pointer, skip & at recursive
@@ -261,11 +267,7 @@ module MIRLoweringFunctions
     # forwarding a `MUTABLE @list` param to another `MUTABLE @list`
     # callee adds a second `&`, producing `**ArrayList` which Zig's
     # one-level method auto-deref can't unwrap.
-    @current_fn_collection_params = node.params.select { |p|
-      p_type_obj = p.type || Type.new(:Any)
-      p_type_obj.needs_pointer_passing? ||
-        (p.mutable && p_type_obj.list_collection?)
-    }.map { |p| p.name }.to_set
+    @current_fn_collection_params = param_facts.select(&:collection_param).map(&:name).to_set
     @current_fn_collection_params.each do |name|
       @current_bindings[name.to_s] ||= CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
     end
@@ -275,38 +277,7 @@ module MIRLoweringFunctions
     @current_fn_takes_param_names = node.params.select { |p| p.takes }.map { |p| p.name }.to_set
 
     # Build param list
-    params_mir = T.let(node.params.map { |param|
-      p_name = mutable_scalar_params.include?(param.name) ? "_m_#{param.name}" : param.name
-      p_type_sym = param.type&.resolved
-      p_type_obj = param.type || Type.new(:Any)
-      is_user_struct = @struct_schemas&.key?(p_type_sym)
-      # Atomic params need `anytype` so call sites pass the cell itself,
-      # allowing WITH MATCH comptime probes to dispatch by actual family.
-      sym = param.symbol
-      atomic_sync = sym && (sym.atomic? ||
-                            (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
-      zig_t = if p_type_obj.shared? && p_type_obj.resolved.to_s.match?(/\A[A-Z]\z/)
-        "CheatLib.Arc(#{p_type_obj.resolved})"
-      elsif is_user_struct
-        "anytype"
-      elsif p_type_obj.collection?
-        "anytype"
-      elsif atomic_sync
-        "anytype"
-      else
-        transpile_type(param.type, is_param: true)
-      end
-      zig_t = "*#{zig_t}" if mutable_scalar_params.include?(param.name) && zig_t != "anytype"
-      # `pointer_passed`: this param's receiver is a pointer-to-T at the
-      # Zig level, so allocations made inside this function on its behalf
-      # outlive the function. Mirrors `@current_fn_collection_params`'s
-      # criteria so the MIR checker can independently verify the
-      # allocator-routing decision (see INV-CROSS-FRAME-PARAM-ALLOC).
-      pointer_passed = p_type_obj.needs_pointer_passing? ||
-                       (param.mutable && p_type_obj.list_collection?) ||
-                       mutable_scalar_params.include?(param.name)
-      MIR::Param.new(p_name, zig_t, pointer_passed)
-    }, T::Array[MIR::Param])
+    params_mir = T.let(param_facts.map(&:to_mir_param), T::Array[MIR::Param])
 
     # Prepend rt param
     if fn_needs_rt
@@ -464,6 +435,50 @@ module MIRLoweringFunctions
         !lowerer.__send__(:return_transfers_heap_binding?, child.value)
     end
     found
+  end
+
+  sig { params(params: T::Array[AST::Param]).returns(T::Array[FunctionParamFact]) }
+  def function_param_facts(params)
+    params.map { |param| function_param_fact(param) }
+  end
+
+  sig { params(param: AST::Param).returns(FunctionParamFact) }
+  def function_param_fact(param)
+    T.bind(self, MIRLowering) rescue nil
+    type_info = param.type || Type.new(:Any)
+    base_zig = transpile_type(param.type, is_param: true)
+    collection_param = !!(type_info.needs_pointer_passing? ||
+                          (param.mutable && type_info.list_collection?))
+    mutable_scalar = !!(param.mutable &&
+                     !type_info.collection? &&
+                     !type_info.needs_pointer_passing? &&
+                     !base_zig.start_with?("[]", "*"))
+    zig_type = function_param_zig_type(param, type_info, base_zig)
+    zig_type = "*#{zig_type}" if mutable_scalar && zig_type != "anytype"
+
+    FunctionParamFact.new(
+      param: param,
+      name: param.name.to_s,
+      mir_name: mutable_scalar ? "_m_#{param.name}" : param.name.to_s,
+      zig_type: zig_type,
+      mutable_scalar: mutable_scalar,
+      collection_param: collection_param,
+      pointer_passed: collection_param || mutable_scalar,
+    )
+  end
+
+  sig { params(param: AST::Param, type_info: Type, base_zig: String).returns(String) }
+  def function_param_zig_type(param, type_info, base_zig)
+    T.bind(self, MIRLowering) rescue nil
+    type_sym = param.type&.resolved
+    is_user_struct = !!(@struct_schemas&.key?(type_sym))
+    sym = param.symbol
+    atomic_sync = sym && (sym.atomic? ||
+                          (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
+    return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.resolved.to_s.match?(/\A[A-Z]\z/)
+    return "anytype" if is_user_struct || type_info.collection? || atomic_sync
+
+    base_zig
   end
 
   sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }

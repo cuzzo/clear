@@ -30,40 +30,7 @@ module MIRControlFlowExpr
 
   sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
   def self.children(node, skip_copy: false)
-    return [] unless node
-
-    case node
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      skip_copy ? [] : [node.value].compact
-    when AST::MoveNode, AST::ShareNode, AST::CapabilityWrap, AST::Cast
-      [node.value].compact
-    when AST::BinaryOp
-      [node.left, node.right].compact
-    when AST::UnaryOp
-      [node.right].compact
-    when AST::FuncCall, AST::StaticCall
-      node.args.compact
-    when AST::MethodCall
-      [node.object, *node.args].compact
-    when AST::GetField
-      [node.target].compact
-    when AST::GetIndex
-      [node.target, node.index].compact
-    when AST::StructLit, AST::UnionVariantLit
-      (node.fields&.values || []).compact
-    when AST::ListLit
-      node.items.compact
-    when AST::HashLit
-      node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
-    when AST::ReturnNode
-      [node.value].compact
-    when AST::Assert
-      [node.condition].compact
-    when AST::Assignment, AST::VarDecl, AST::BindExpr
-      [node.value].compact
-    else
-      []
-    end
+    AST.expression_children(node, skip_copy: skip_copy)
   end
 
   sig { params(node: T.untyped, skip_copy: T::Boolean, block: T.untyped).returns(T.untyped) }
@@ -1395,25 +1362,11 @@ module LoopFrameAnalysis
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
   sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
-    return unless nodes
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each do |node|
-      case node
-      when AST::Locatable
-        next unless visited.add?(node.object_id)
-        yield node
-        next unless node.class.respond_to?(:members)
-        node.class.members.each do |m|
-          child = node.send(m) rescue next
-          walk_all_nodes(child, visited, &block) if child
-        end
-      when Array
-        walk_all_nodes(node, visited, &block)
-      when Hash
-        # DoBlock branches: { label:, body: [...] } and similar hash-wrapped bodies
-        node.each_value { |v| walk_all_nodes(v, visited, &block) if v }
-      end
+    AST.each_locatable(nodes, descend_functions: true) do |node|
+      next unless visited.add?(node.object_id)
+      yield node
     end
+    nil
   end
 
   # Walk for pipeline nodes that carry a shard_context and update

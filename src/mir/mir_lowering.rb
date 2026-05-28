@@ -127,14 +127,12 @@ class MIRLowering
     sig { params(sink_alloc: Symbol, ti: Type).returns(T::Boolean) }
     def satisfies_sink?(sink_alloc, ti)
       same_alloc = source_alloc == sink_alloc
-      return true if moved_without_copy && same_alloc && (!ti.string? || !ti.rodata?)
-      return true if owned_parameter
-      return true if needs_heap_create
-      return true if same_alloc && same_alloc_verifiable
-      return true if same_alloc && same_alloc_transfer_source
-      return true if transfer_without_local_cleanup
-
-      already_owned_value
+      same_alloc_satisfies = same_alloc &&
+                             ((moved_without_copy && (!ti.string? || !ti.rodata?)) ||
+                              same_alloc_verifiable ||
+                              same_alloc_transfer_source)
+      same_alloc_satisfies || owned_parameter || needs_heap_create ||
+        transfer_without_local_cleanup || already_owned_value
     end
   end
 
@@ -1558,14 +1556,6 @@ class MIRLowering
     contract.consumes.map(&:to_s)
   end
 
-  sig { params(node: MIR::Node).returns(T::Array[String]) }
-  def structural_ownership_consumes(node)
-    fact = node.ownership_consumption
-    return [] unless fact
-
-    fact.names
-  end
-
   sig do
     params(
       node: MIR::Node,
@@ -1592,6 +1582,7 @@ class MIRLowering
 
   sig { params(node: MIR::Node).returns(T::Boolean) }
   def ownership_consumer_requires_fact?(node)
+    return true if node.is_a?(MIR::ReassignWithCleanup)
     return false unless node.respond_to?(:stdlib_def)
 
     sig = T.unsafe(node).stdlib_def
@@ -1674,6 +1665,10 @@ class MIRLowering
 
     if value_mir.is_a?(MIR::Ident) && owned_binding_visible?(value_mir.name.to_s)
       return [MIR::OwnershipOperandFact.owned_binding(value_mir.name.to_s, ti, source, target_alloc)]
+    end
+    visible_name = mir_ident_names(value_mir).find { |name| owned_binding_visible?(name.to_s) }
+    if visible_name
+      return [MIR::OwnershipOperandFact.owned_binding(visible_name.to_s, ti, source, target_alloc)]
     end
 
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)

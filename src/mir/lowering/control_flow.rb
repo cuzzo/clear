@@ -167,7 +167,7 @@ module MIRLoweringControlFlow
     @loop_mark_counter = T.let(@loop_mark_counter, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     suffix = after_mark + body
-    needs_mark = mark_per_iter || lowered_loop_body_needs_mark?(suffix)
+    needs_mark = mark_per_iter == true
     return suffix unless !tight && needs_mark && @current_fn_has_rt
     rt = MIR::Ident.new(@rt_name)
     @loop_mark_counter = (@loop_mark_counter || 0) + 1
@@ -177,65 +177,36 @@ module MIRLoweringControlFlow
     [save, restore] + suffix
   end
 
-  sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
-  def lowered_loop_body_needs_mark?(body)
-    lowered_loop_body_has_frame_scope?(body) { |scope| scope == :iteration }
-  end
-
-  sig { params(stmts: T.nilable(T::Array[T.untyped]), block: T.proc.params(arg0: Symbol).returns(T::Boolean)).returns(T::Boolean) }
-  def lowered_loop_body_has_frame_scope?(stmts, &block)
-    return false unless stmts.is_a?(Array)
-    stmts.any? do |s|
-      case s
-      when MIR::AllocMark
-        next false unless MIR::Placement.frame?(s.alloc)
-        scope = T.unsafe(s).scope
-        block.call(scope.is_a?(Symbol) ? scope : :unknown)
-      when MIR::IfStmt
-        lowered_loop_body_has_frame_scope?(s.then_body, &block) || lowered_loop_body_has_frame_scope?(s.else_body, &block)
-      when MIR::ScopeBlock, MIR::BlockExpr
-        lowered_loop_body_has_frame_scope?(s.body, &block)
-      when MIR::SwitchStmt
-        s.arms.any? { |a| lowered_loop_body_has_frame_scope?(a[:body], &block) } ||
-          lowered_loop_body_has_frame_scope?(s.default_body, &block)
-      when MIR::IfChain
-        s.branches.any? { |b| lowered_loop_body_has_frame_scope?(b[:body], &block) } ||
-          lowered_loop_body_has_frame_scope?(s.default_body, &block)
-      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        lowered_loop_body_has_frame_scope?(s.body, &block)
-      when MIR::WithMatchDispatch
-        s.arms.any? { |a| lowered_loop_body_has_frame_scope?(a[:body], &block) }
-      else
-        false
-      end
-    end
-  end
-
-  sig { params(stmts: T.nilable(T::Array[T.untyped])).void }
-  def stamp_loop_frame_allocs_iteration!(stmts)
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), scope: Symbol).void }
+  def stamp_loop_frame_alloc_scopes!(stmts, scope)
     return unless stmts.is_a?(Array)
     stmts.each do |s|
       case s
       when MIR::AllocMark
-        s.scope = :iteration if MIR::Placement.frame?(s.alloc)
+        s.scope = scope if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt
-        stamp_loop_frame_allocs_iteration!(s.then_body)
-        stamp_loop_frame_allocs_iteration!(s.else_body)
+        stamp_loop_frame_alloc_scopes!(s.then_body, scope)
+        stamp_loop_frame_alloc_scopes!(s.else_body, scope)
       when MIR::ScopeBlock, MIR::BlockExpr
-        stamp_loop_frame_allocs_iteration!(s.body)
+        stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
-        s.arms&.each { |a| stamp_loop_frame_allocs_iteration!(a[:body]) }
-        stamp_loop_frame_allocs_iteration!(s.default_body)
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
+        stamp_loop_frame_alloc_scopes!(s.default_body, scope)
       when MIR::IfChain
-        s.branches&.each { |b| stamp_loop_frame_allocs_iteration!(b[:body]) }
-        stamp_loop_frame_allocs_iteration!(s.default_body)
+        s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b[:body], scope) }
+        stamp_loop_frame_alloc_scopes!(s.default_body, scope)
       when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        stamp_loop_frame_allocs_iteration!(s.body)
+        stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::WithMatchDispatch
-        s.arms&.each { |a| stamp_loop_frame_allocs_iteration!(a[:body]) }
+        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a[:body], scope) }
       end
     end
     nil
+  end
+
+  sig { params(stmts: T.nilable(T::Array[T.untyped]), mark_per_iter: T.untyped).void }
+  def finalize_loop_frame_alloc_scopes!(stmts, mark_per_iter)
+    stamp_loop_frame_alloc_scopes!(stmts, mark_per_iter == true ? :iteration : :function)
   end
 
   sig { params(node: AST::WhileLoop).returns(T.untyped) }
@@ -248,7 +219,7 @@ module MIRLoweringControlFlow
     cond, cond_pending = lower_head { lower_control_condition(node.condition) }
     b = node.do_branch
     body = b.is_a?(Array) ? lower_body(b) : []
-    stamp_loop_frame_allocs_iteration!(body)
+    finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
@@ -269,7 +240,7 @@ module MIRLoweringControlFlow
     rt = MIR::Ident.new(@rt_name)
     cond, cond_pending = lower_head { lower_control_condition(node.condition, transfers_to_capture: true) }
     body = lower_body(node.do_branch)
-    stamp_loop_frame_allocs_iteration!(body)
+    finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: node.tight)
 
@@ -312,7 +283,7 @@ module MIRLoweringControlFlow
     @tmp_counter = T.let(@tmp_counter, T.untyped)
     var = T.must(zig_safe_name(node.var_name))
     body = lower_body(node.body)
-    stamp_loop_frame_allocs_iteration!(body)
+    finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)
     coll = lower(node.collection)
     coll_type = node.collection.full_type!
@@ -533,7 +504,7 @@ module MIRLoweringControlFlow
     end_val = lower(node.end_expr)
     var = T.must(zig_safe_name(node.var_name))
     body = lower_body(node.body)
-    stamp_loop_frame_allocs_iteration!(body)
+    finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(@rt_name)
     cmp = node.inclusive ? "<=" : "<"
     @for_counter = (@for_counter || 0) + 1
@@ -952,6 +923,9 @@ module MIRLoweringControlFlow
     names = plan.returned_names
     if value.is_a?(MIR::Ident)
       names = names.include?(value.name.to_s) ? names.dup : Set[value.name.to_s]
+    elsif value
+      value_names = mir_ident_names(value).to_set
+      names = value_names unless value_names.empty?
     end
     marks = plan.transfer_marks_for(names, @lowered_guarded_cleanup_names || Set.new)
     marks.empty? ? ret : marks + [ret]

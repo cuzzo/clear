@@ -449,33 +449,12 @@ class MIRPass
   # Recurse into control flow branches to transform nested bodies.
   sig { params(stmt: T.untyped, ctx: MIRPass::WalkCtx).returns(T.nilable(T::Array[T.untyped])) }
   def recurse_branches!(stmt, ctx)
-    case stmt
-    when AST::IfStatement
-      stmt.then_branch = transform_body(stmt.then_branch, ctx) if stmt.then_branch
-      stmt.else_branch = transform_body(stmt.else_branch, ctx) if stmt.else_branch
-    when AST::WhileLoop
-      stmt.do_branch = transform_body(stmt.do_branch, ctx) if stmt.do_branch
-    when AST::WhileBindLoop
-      stmt.do_branch = transform_body(stmt.do_branch, ctx) if stmt.do_branch
-    when AST::IfBind
-      stmt.then_branch = transform_body(stmt.then_branch, ctx) if stmt.then_branch
-      stmt.else_branch = transform_body(stmt.else_branch, ctx) if stmt.else_branch && !stmt.else_branch.empty?
-    when AST::ForRange, AST::ForEach
-      stmt.body = transform_body(stmt.body, ctx) if stmt.body
-    when AST::MatchStatement
-      stmt.cases.each { |c| c.body = transform_body(c.body, ctx) if c.body }
-      if stmt.default_case
-        stmt.default_case = transform_body(stmt.default_case, ctx)
-      end
-    when AST::WithBlock
-      stmt.body = transform_body(stmt.body, ctx) if stmt.body
-    when AST::DoBlock
-      stmt.branches.each do |b|
-        b[:body] = transform_body(b[:body], ctx) if b[:body]
-      end
-    when AST::BgBlock, AST::BgStreamBlock
-      stmt.body = transform_body(stmt.body, ctx.with(bindings: bg_inner_bindings(stmt, ctx.bindings))) if stmt.body
+    branch_ctx = if stmt.is_a?(AST::BgBlock) || stmt.is_a?(AST::BgStreamBlock)
+      ctx.with(bindings: bg_inner_bindings(stmt, ctx.bindings))
+    else
+      ctx
     end
+    AST.body_slots(stmt).each { |slot| slot.replace(transform_body(slot.body, branch_ctx)) }
     # Process BgBlock bodies found in expression positions (MethodCall/FuncCall
     # args, VarDecl/BindExpr values). AST.walk_body misses these since it doesn't
     # recurse into call arguments. Only BgBlock (outer consumer fiber) -- not

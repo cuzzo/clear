@@ -860,7 +860,7 @@ class MIRChecker
   def check_nested_linear_expr_bodies!(expr, state)
     return unless expr.is_a?(MIR::Emittable)
 
-    each_sub_expr(expr) do |sub|
+    expr.child_exprs.each do |sub|
       if sub.is_a?(MIR::BlockExpr)
         inner = check_linear_stmts!(sub.body, state.copy)
         linear_exit_scope!(state, inner, "block-expr")
@@ -906,7 +906,7 @@ class MIRChecker
     when MIR::InlineZig, MIR::RawZig, MIR::BlockExpr
       return
     end
-    each_sub_expr(expr) { |sub| collect_linear_expr_ident_names(sub, names) }
+    expr.child_exprs.each { |sub| collect_linear_expr_ident_names(sub, names) } if expr.is_a?(MIR::Emittable)
     nil
   end
 
@@ -1083,7 +1083,7 @@ class MIRChecker
         "owned child is :#{child_alloc} but aggregate owner is :#{owner_alloc}; " \
         "nested ownership placement is implicit/incoherent")
     else
-      each_sub_expr(expr) { |sub| check_aggregate_expr!(sub, nil, alloc_by_name) }
+      expr.child_exprs.each { |sub| check_aggregate_expr!(sub, nil, alloc_by_name) } if expr.is_a?(MIR::Emittable)
     end
     nil
   end
@@ -2389,46 +2389,7 @@ class MIRChecker
   sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }
   def check_owned_expr_position_for_unhoisted(expr, context)
     return unless expr
-    check_owned_expr_children_for_unhoisted(expr, context)
-  end
-
-  sig { params(expr: T.untyped, context: String).returns(T.nilable(T::Array[T.untyped])) }
-  def check_owned_expr_children_for_unhoisted(expr, context)
-    return unless expr
-    if expr.is_a?(MIR::Cast) || expr.is_a?(MIR::TryExpr)
-      check_owned_expr_children_for_unhoisted(expr.expr, context)
-      return
-    end
-    if expr.is_a?(MIR::TryCatch)
-      check_owned_expr_children_for_unhoisted(expr.expr, context)
-      check_owned_expr_children_for_unhoisted(expr.catch_body, context)
-      return
-    end
-    if expr.is_a?(MIR::Orelse)
-      check_owned_expr_children_for_unhoisted(expr.expr, context)
-      check_owned_expr_children_for_unhoisted(expr.fallback, context)
-      return
-    end
-    if expr.is_a?(MIR::IfOptional)
-      check_expr_for_unhoisted(expr.optional)
-      check_owned_expr_children_for_unhoisted(expr.then_expr, context)
-      check_owned_expr_children_for_unhoisted(expr.else_expr, context)
-      return
-    end
-    if expr.is_a?(MIR::BlockExpr)
-      check_stmts_for_unhoisted(expr.body)
-      return
-    end
-    if expr.is_a?(MIR::Pipeline)
-      check_owned_expr_children_for_unhoisted(expr.inner, context)
-      return
-    end
-    if expr.is_a?(MIR::CapWrap)
-      check_owned_expr_children_for_unhoisted(expr.inner, context) if expr.inner
-      return
-    end
-    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub) }
-    nil
+    check_expr_sources_for_unhoisted(expr, context, owned_position: true)
   end
 
   # Check expr for allocating nodes outside an explicit ownership-binding
@@ -2437,85 +2398,38 @@ class MIRChecker
   sig { params(expr: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def check_expr_for_unhoisted(expr)
     return unless expr
-    if expr.is_a?(MIR::Cast)
-      check_expr_for_unhoisted(expr.expr)
+    check_expr_sources_for_unhoisted(expr, "expression", owned_position: false)
+  end
+
+  sig { params(expr: T.untyped, context: String, owned_position: T::Boolean).returns(T.nilable(T::Array[T.untyped])) }
+  def check_expr_sources_for_unhoisted(expr, context, owned_position:)
+    return unless expr
+    unless expr.is_a?(MIR::Emittable)
       return
     end
-    if expr.is_a?(MIR::TryExpr)
-      check_expr_for_unhoisted(expr.expr)
-      return
-    end
-    if expr.is_a?(MIR::BlockExpr)
-      check_stmts_for_unhoisted(expr.body)
-      return
-    end
-    if expr.is_a?(MIR::TryCatch)
-      check_expr_for_unhoisted(expr.expr)
-      check_expr_for_unhoisted(expr.catch_body)
-      return
-    end
-    if expr.is_a?(MIR::Orelse)
-      check_expr_for_unhoisted(expr.expr)
-      check_expr_for_unhoisted(expr.fallback)
-      return
-    end
-    if expr.is_a?(MIR::IfOptional)
-      check_expr_for_unhoisted(expr.optional)
-      check_expr_for_unhoisted(expr.then_expr)
-      check_expr_for_unhoisted(expr.else_expr)
-      return
-    end
-    if expr.is_a?(MIR::Pipeline)
-      if allocating_expr?(expr)
-        @errors << error(:UNHOISTED_ALLOC, @fn_name,
-          "Pipeline in non-Let-init position (must be hoisted to a named variable)")
-        return
-      end
-      check_expr_for_unhoisted(expr.inner)
-      return
-    end
-    if expr.is_a?(MIR::CapWrap)
-      if allocating_expr?(expr)
-        @errors << error(:UNHOISTED_ALLOC, @fn_name,
-          "CapWrap in non-Let-init position (must be hoisted to a named variable)")
-        return
-      end
-      check_expr_for_unhoisted(expr.inner) if expr.inner
-      return
-    end
+
     if allocating_expr?(expr)
-      kind = expr.class.name.split("::").last
-      @errors << error(:UNHOISTED_ALLOC, @fn_name,
-        "#{kind} in non-Let-init position (must be hoisted to a named variable)")
-      return  # one error per site -- don't recurse into nested allocs
+      unless owned_position
+        kind = expr.class.name.split("::").last
+        @errors << error(:UNHOISTED_ALLOC, @fn_name,
+          "#{kind} in non-Let-init position (must be hoisted to a named variable)")
+        return  # one error per site -- don't recurse into nested allocs
+      end
     end
-    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub) }
+
+    owned_sources = T.let(expr.owned_position_source_exprs.to_set, T::Set[MIR::Emittable])
+    expr.child_exprs.each do |child|
+      check_expr_sources_for_unhoisted(child, context, owned_position: owned_sources.include?(child))
+    end
+    expr.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
     nil
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
-  # MIR result nodes whose `allocates?` decision is just "has finalized
-  # allocator placement". Heap allocations need cleanup/transfer; frame
-  # allocations need loop-rewind proof. Either way, unnamed nested allocation is
-  # unverifiable.
-  ALLOC_PLACED_MIR_CLASSES = [
-    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::ConcatStr,
-    MIR::CapWrap, MIR::SharePromote, MIR::ContainerInit,
-  ].freeze
-
   def allocating_expr?(expr)
     return false unless expr && expr.respond_to?(:ownership_effect)
     effect = expr.ownership_effect
     effect.produces_owned && effect.requires_hoist && (!effect.alloc || VALID_ALLOCATORS.include?(effect.alloc))
   end
 
-  # Yield each immediate sub-expression of expr.
-  # Stops at opaque boundaries (RawZig, InlineZig, BgBlock).
-  # BlockExpr bodies are walked separately by check_stmts_for_unhoisted.
-  sig { params(expr: T.untyped, blk: T.untyped).void }
-  def each_sub_expr(expr, &blk)
-    return unless expr.is_a?(MIR::Emittable)
-    expr.child_exprs.each { |child| yield child }
-    nil
-  end
 end
