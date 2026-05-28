@@ -25,6 +25,8 @@
 const std = @import("std");
 const fc = @import("runtime/fiber-core.zig");
 const ownership = @import("lib/ownership.zig");
+const header = @import("runtime/runtime-header.zig");
+const dsv = @import("runtime/data-structures-vopr.zig");
 const va = @import("runtime/vopr-atomic.zig");
 
 pub const SimAtomic = va.SimAtomic;
@@ -276,6 +278,28 @@ const scenarios = [_]Scenario{
     .{ .name = "inspect-accessors", .func = &runInspectAccessors },
 };
 
+fn runRuntimeHeaderArcCoverage(allocator: std.mem.Allocator) !void {
+    const CheatLib = header.CheatLib;
+
+    const arc = try CheatLib.arcCreate(i64, allocator, 5);
+    const retained = CheatLib.arcRetain(i64, arc);
+    const weak = CheatLib.arcDowngrade(i64, arc);
+    if (CheatLib.weakArcUpgrade(i64, weak)) |upgraded| {
+        CheatLib.arcRelease(i64, allocator, upgraded);
+    } else {
+        return error.WeakUpgradeUnexpectedNull;
+    }
+    CheatLib.arcRelease(i64, allocator, retained);
+    CheatLib.arcRelease(i64, allocator, arc);
+    CheatLib.weakArcRelease(i64, weak);
+
+    const arc2 = try CheatLib.arcCreate(i64, allocator, 9);
+    const weak2 = CheatLib.arcDowngrade(i64, arc2);
+    CheatLib.arcRelease(i64, allocator, arc2);
+    if (CheatLib.weakArcUpgrade(i64, weak2) != null) return error.WeakUpgradeUnexpectedLive;
+    CheatLib.weakArcRelease(i64, weak2);
+}
+
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
@@ -289,6 +313,35 @@ pub fn main() !void {
 
     var total_failures: usize = 0;
     const ops_at_start = va.sim_atomic_op_count;
+
+    runRuntimeHeaderArcCoverage(allocator) catch |e| {
+        std.debug.print("runtime-header Arc/WeakArc coverage: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.testPartitionedMapOwnershipLocalOps() catch |e| {
+        std.debug.print("partitioned map ownership coverage: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.checkLeaksAndReset() catch |e| {
+        std.debug.print("partitioned map ownership leak check: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.testPartitionedMapOwnershipWaiters() catch |e| {
+        std.debug.print("partitioned map ownership waiter coverage: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.checkLeaksAndReset() catch |e| {
+        std.debug.print("partitioned map ownership waiter leak check: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.testPartitionedMapRemoteOps() catch |e| {
+        std.debug.print("partitioned map remote coverage: {}\n", .{e});
+        total_failures += 1;
+    };
+    dsv.checkLeaksAndReset() catch |e| {
+        std.debug.print("partitioned map remote leak check: {}\n", .{e});
+        total_failures += 1;
+    };
 
     for (scenarios) |sc| {
         const before = va.sim_atomic_op_count;

@@ -14,6 +14,7 @@
 const std = @import("std");
 
 const ebr_mod = @import("../lib/ebr.zig");
+const compat = @import("../lib/compat.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const sim_atomic = @import("vopr-atomic.zig");
@@ -37,6 +38,10 @@ pub const DataStructures = @import("../lib/data-structures.zig").bind(struct {
     pub fn releaseOne(comptime T: type, alloc: std.mem.Allocator, value: T) void {
         _ = alloc;
         _ = value;
+    }
+    pub fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) !T {
+        _ = alloc;
+        return value;
     }
     pub fn partitionedMapDelayCtxDestroy() bool {
         return false;
@@ -191,4 +196,178 @@ pub fn testStreamSetErrorUnderFault() !void {
 
     const synthetic_after = sim_atomic.sim_swap_synthetic_fault_count;
     if (synthetic_after == synthetic_before) return error.NoSwapFaultInjected;
+}
+
+fn resetSchedulerGlobals(allocator: std.mem.Allocator) void {
+    fp.active_scheduler = undefined;
+    fp.scheduler_running = false;
+    fp.global_registry.deinit(allocator);
+    fp.global_registry = .{};
+}
+
+const RemoteWorkerCtx = struct {
+    allocator: std.mem.Allocator,
+    ebr: *ebr_mod.EbrContext,
+    stack_pool: *fm.StackPool,
+    shutdown: *std.atomic.Value(bool),
+};
+
+fn partitionedMapRemoteWorker(ctx: *RemoteWorkerCtx) void {
+    var sched = fp.Scheduler.init(ctx.allocator, ctx.ebr, ctx.stack_pool) catch return;
+    defer sched.deinit();
+    sched.global_shutdown = ctx.shutdown;
+    sched.shutdown_on_idle = false;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sched.run();
+    fp.scheduler_running = false;
+}
+
+fn keyForStringShard(comptime MapT: type, target_shard: usize, buf: []u8) ![]const u8 {
+    var i: usize = 0;
+    while (i < 10_000) : (i += 1) {
+        const key = try std.fmt.bufPrint(buf, "remote-{d}", .{i});
+        if (MapT.shardIndex(key) == target_shard) return key;
+    }
+    return error.NoStringShardKey;
+}
+
+fn keyForNumericShard(comptime MapT: type, target_shard: usize) !i64 {
+    var i: i64 = 0;
+    while (i < 10_000) : (i += 1) {
+        if (MapT.shardIndex(i) == target_shard) return i;
+    }
+    return error.NoNumericShardKey;
+}
+
+/// Covers the partitioned-map ownership initialization protocol and the
+/// stack-local operation completion flags for string and numeric maps.
+/// The remote scheduler path is exercised by the TSan partitioned-map
+/// suite; this VOPR case keeps the deterministic coverage target to the
+/// ownership_init/owners[] fact setup and local operation contexts.
+pub fn testPartitionedMapOwnershipLocalOps() !void {
+    const allocator = gpa.allocator();
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+        resetSchedulerGlobals(allocator);
+    }
+
+    try fp.global_registry.register(allocator, std.Thread.getCurrentId(), &sched);
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+
+    const StringMap = DataStructures.PartitionedStringMap(i64, 4);
+    var smap: StringMap = .{};
+    defer smap.deinit(allocator, allocator);
+
+    try smap.put(allocator, allocator, "alpha", 11);
+    if (smap.get("alpha") orelse -1 != 11) return error.StringMapGetWrong;
+    if (!smap.contains("alpha")) return error.StringMapMissingKey;
+    smap.remove(allocator, "alpha");
+    if (smap.contains("alpha")) return error.StringMapRemoveFailed;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, i64, 4);
+    var nmap: NumericMap = .{};
+    defer nmap.deinit(allocator, allocator);
+
+    try nmap.put(allocator, allocator, 7, 77);
+    if (nmap.get(7) orelse -1 != 77) return error.NumericMapGetWrong;
+    if (!nmap.contains(7)) return error.NumericMapMissingKey;
+    nmap.remove(allocator, 7);
+    if (nmap.contains(7)) return error.NumericMapRemoveFailed;
+}
+
+fn completeStringOwnershipInit(map: *DataStructures.PartitionedStringMap(i64, 4)) void {
+    compat.sleepNs(std.time.ns_per_ms);
+    map.ownership_init.store(2, .release);
+}
+
+fn completeNumericOwnershipInit(map: *DataStructures.PartitionedNumericMap(i64, i64, 4)) void {
+    compat.sleepNs(std.time.ns_per_ms);
+    map.ownership_init.store(2, .release);
+}
+
+pub fn testPartitionedMapOwnershipWaiters() !void {
+    const StringMap = DataStructures.PartitionedStringMap(i64, 4);
+    var smap: StringMap = .{};
+    smap.ownership_init.store(1, .release);
+    const string_worker = try std.Thread.spawn(.{}, completeStringOwnershipInit, .{&smap});
+    smap.ensureOwnership();
+    string_worker.join();
+    if (smap.ownership_init.load(.acquire) != 2) return error.StringOwnershipInitWaitFailed;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, i64, 4);
+    var nmap: NumericMap = .{};
+    nmap.ownership_init.store(1, .release);
+    const numeric_worker = try std.Thread.spawn(.{}, completeNumericOwnershipInit, .{&nmap});
+    nmap.ensureOwnership();
+    numeric_worker.join();
+    if (nmap.ownership_init.load(.acquire) != 2) return error.NumericOwnershipInitWaitFailed;
+}
+
+/// Covers the remote partitioned-map path: owner selection routes a shard
+/// to another scheduler, the caller sends a RemoteCall through the SPSC
+/// channel, and the completion WaitGroup/finished flag is observed before
+/// the stack-local operation context is destroyed.
+pub fn testPartitionedMapRemoteOps() !void {
+    const allocator = gpa.allocator();
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    var main_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    var shutdown = std.atomic.Value(bool).init(false);
+    var worker_ctx = RemoteWorkerCtx{
+        .allocator = allocator,
+        .ebr = &ebr,
+        .stack_pool = &stack_pool,
+        .shutdown = &shutdown,
+    };
+    var worker: ?std.Thread = null;
+    defer {
+        shutdown.store(true, .release);
+        fp.global_registry.notifyAll();
+        if (worker) |t| t.join();
+        main_sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+        resetSchedulerGlobals(allocator);
+    }
+
+    try fp.global_registry.register(allocator, std.Thread.getCurrentId(), &main_sched);
+    fp.active_scheduler = &main_sched;
+    fp.scheduler_running = true;
+
+    worker = try std.Thread.spawn(.{}, partitionedMapRemoteWorker, .{&worker_ctx});
+    var wait_ms: usize = 0;
+    while (fp.global_registry.count() < 2) : (wait_ms += 1) {
+        if (wait_ms >= 5_000) return error.WorkerRegistrationTimeout;
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+
+    const StringMap = DataStructures.PartitionedStringMap(i64, 4);
+    var smap: StringMap = .{};
+    defer smap.deinit(allocator, allocator);
+    var key_buf: [64]u8 = undefined;
+    const skey = try keyForStringShard(StringMap, 1, &key_buf);
+
+    try smap.put(allocator, allocator, skey, 101);
+    if (smap.get(skey) orelse -1 != 101) return error.RemoteStringMapGetWrong;
+    smap.remove(allocator, skey);
+    if (smap.contains(skey)) return error.RemoteStringMapRemoveFailed;
+
+    const NumericMap = DataStructures.PartitionedNumericMap(i64, i64, 4);
+    var nmap: NumericMap = .{};
+    defer nmap.deinit(allocator, allocator);
+    const nkey = try keyForNumericShard(NumericMap, 1);
+
+    try nmap.put(allocator, allocator, nkey, 202);
+    if (nmap.get(nkey) orelse -1 != 202) return error.RemoteNumericMapGetWrong;
+    nmap.remove(allocator, nkey);
+    if (nmap.contains(nkey)) return error.RemoteNumericMapRemoveFailed;
 }

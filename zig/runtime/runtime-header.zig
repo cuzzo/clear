@@ -2578,8 +2578,9 @@ pub const CheatLib = struct {
     /// Recursively deinit inner data for Arc-wrapped types.
     /// Handles RwLocked(StringMap), Locked(StringMap), and plain StringMap.
     fn arcDeinitInner(comptime T: type, a: std.mem.Allocator, ptr: *T) void {
+        const is_struct = @typeInfo(T) == .@"struct";
         // RwLocked(U) or Locked(U): deinit the inner .data field
-        if (@hasField(T, "data") and @hasField(T, "lock")) {
+        if (is_struct and @hasField(T, "data") and @hasField(T, "lock")) {
             const DataT = @TypeOf(ptr.data);
             if (@hasDecl(DataT, "deinit")) {
                 // StringMap.deinit takes (key_alloc, bucket_alloc) but uses self.alloc internally
@@ -2592,7 +2593,7 @@ pub const CheatLib = struct {
                     ptr.data.deinit();
                 }
             }
-        } else if (@hasDecl(T, "Inner") and @hasDecl(T, "deinitSync")) {
+        } else if (is_struct and @hasDecl(T, "Inner") and @hasDecl(T, "deinitSync")) {
             // B1 fix (2026-04-30): Arc(Versioned(T)). Versioned re-exports
             // `Inner` (the wrapped T) and provides `deinitSync(allocator)`
             // for arc-cleanup contexts that lack a *Runtime. The 3-arg
@@ -2600,7 +2601,7 @@ pub const CheatLib = struct {
             // (Allocator, Allocator) here -- this branch routes around
             // that. See versioned.zig: deinitSync for the safety argument.
             ptr.deinitSync(a);
-        } else if (@hasDecl(T, "deinit")) {
+        } else if (is_struct and @hasDecl(T, "deinit")) {
             const deinit_fn = @typeInfo(@TypeOf(T.deinit)).@"fn";
             if (deinit_fn.params.len == 3) {
                 ptr.deinit(a, a);
