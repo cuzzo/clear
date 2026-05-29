@@ -10,7 +10,7 @@
 ## Table of Contents
 - [Project Prioritization](#project-prioritization)
 - [Cross-Detector Convergence (1373)](#cross-detector-convergence-1373)
-- [Root-Cause Clusters (332)](#root-cause-clusters-332)
+- [Root-Cause Clusters (330)](#root-cause-clusters-330)
 - [Decision Pressure (295)](#decision-pressure-295)
 - [Missing Abstractions (191)](#missing-abstractions-191)
 - [Reification Misses (24)](#reification-misses-24)
@@ -20,9 +20,9 @@
 - [Flay Similarity (Type-2/3) (49)](#flay-similarity-type23-49)
 - [Neglected Updates (1993)](#neglected-updates-1993)
 - [Derived-State Staleness (150)](#derivedstate-staleness-150)
-- [Neglected Conditions (11)](#neglected-conditions-11)
-- [Neglected Path Conditions (1934)](#neglected-path-conditions-1934)
-- [Broken Protocols (1459)](#broken-protocols-1459)
+- [Neglected Conditions (10)](#neglected-conditions-10)
+- [Neglected Path Conditions (1935)](#neglected-path-conditions-1935)
+- [Broken Protocols (1457)](#broken-protocols-1457)
 - [False Simplicity (749)](#false-simplicity-749)
 - [Fat Unions (9)](#fat-unions-9)
 - [Run Summary](#run-summary)
@@ -39,9 +39,9 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 - **[tier 2]** [Derived-State Staleness (150)](#derivedstate-staleness-150): b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug
 - **[tier 2]** [Inconsistent Rename Clones (71)](#inconsistent-rename-clones-71): pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug
 - **[tier 2]** [Flay Similarity (Type-2/3) (49)](#flay-similarity-type23-49): Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict
-- **[tier 2]** [Neglected Conditions (11)](#neglected-conditions-11): dispatch/conjunction minus one element -- *POSSIBLE* bug
-- **[tier 3]** [Neglected Path Conditions (1934)](#neglected-path-conditions-1934): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
-- **[tier 3]** [Broken Protocols (1459)](#broken-protocols-1459): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
+- **[tier 2]** [Neglected Conditions (10)](#neglected-conditions-10): dispatch/conjunction minus one element -- *POSSIBLE* bug
+- **[tier 3]** [Neglected Path Conditions (1935)](#neglected-path-conditions-1935): nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)
+- **[tier 3]** [Broken Protocols (1457)](#broken-protocols-1457): co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)
 - **[tier 3]** [False Simplicity (749)](#false-simplicity-749): looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)
 - **[tier 3]** [Fat Unions (9)](#fat-unions-9): case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*
 
@@ -49,13 +49,13 @@ _Ordered by signal tier (1 = highest signal / lowest FP), then by volume._
 _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest triage signal: agreement outranks any single detector's volume. Tier-weighted (1=3, 2=2, 3=1). **Start here.**_
 
 - `src/mir/lowering/variables.rb:437` (build_var_decl_nodes) -- **7 detectors** [score 13, 101 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/annotator/annotator.rb:5477` (handle_assign_move) -- **7 detectors** [score 13, 54 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/annotator/annotator.rb:5468` (handle_assign_move) -- **7 detectors** [score 13, 54 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/tools/doctor.rb:164` (section_heap) -- **7 detectors** [score 13, 46 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions
 - `src/annotator/annotator.rb:1998` (visit_WhileBindLoop) -- **7 detectors** [score 13, 38 findings]: Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/ast/type.rb:2259` (compute_zig_type) -- **7 detectors** [score 12, 47 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Flay Similarity (Type-2/3), Neglected Path Conditions, Neglected Updates
 - `src/annotator/helpers/function_analysis.rb:182` (resolve_call) -- **6 detectors** [score 12, 110 findings]: Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/ast/parser.rb:2839` (parse_type_annotation) -- **6 detectors** [score 12, 78 findings]: Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
-- `src/annotator/annotator.rb:4752` (visit_WithBlock) -- **6 detectors** [score 11, 89 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
+- `src/annotator/annotator.rb:4743` (visit_WithBlock) -- **6 detectors** [score 11, 88 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/tools/formatter.rb:1358` (expand_if_while_for) -- **6 detectors** [score 11, 76 findings]: Derived-State Staleness, False Simplicity, Inconsistent Rename Clones, Missing Abstractions, Neglected Conditions, Neglected Path Conditions
 - `src/annotator/helpers/pipe_analysis.rb:1541` (analyze_concurrent_op) -- **6 detectors** [score 11, 71 findings]: Broken Protocols, Decision Pressure, False Simplicity, Missing Abstractions, Neglected Path Conditions, Neglected Updates
 - `src/backends/pipeline_host.rb:3534` (lower_range_fold) -- **6 detectors** [score 11, 51 findings]: Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions
@@ -66,8 +66,8 @@ _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest tria
 - `src/annotator/annotator.rb:1569` (visit_MatchStatement) -- **6 detectors** [score 10, 149 findings]: Broken Protocols, Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Neglected Path Conditions, Neglected Updates
 - `src/backends/pipeline_host.rb:308` (substitute_placeholders) -- **6 detectors** [score 10, 79 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/mir/lowering/expressions.rb:484` (lower_smooth) -- **6 detectors** [score 10, 71 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
-- `src/annotator/annotator.rb:3614` (visit_StructLit) -- **6 detectors** [score 10, 70 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
-- `src/annotator/annotator.rb:3412` (visit_GetField) -- **6 detectors** [score 10, 47 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
+- `src/annotator/annotator.rb:3609` (visit_StructLit) -- **6 detectors** [score 10, 70 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
+- `src/annotator/annotator.rb:3408` (visit_GetField) -- **6 detectors** [score 10, 41 findings]: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions, Neglected Updates
 - `src/mir/fsm_lowering.rb:327` (fsm_owned_transfer_identifier?) -- **5 detectors** [score 12, 11 findings]: Decision Pressure, False Simplicity, Missing Abstractions, Neglected Updates, Reification Misses
 - `src/ast/ast.rb:907` (finalize_storage!) -- **5 detectors** [score 11, 55 findings]: Decision Pressure, Derived-State Staleness, False Simplicity, Missing Abstractions, Neglected Updates
 - `src/annotator/helpers/effects.rb:629` (enforce_fallible_returns!) -- **5 detectors** [score 11, 15 findings]: Decision Pressure, False Simplicity, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Updates
@@ -76,7 +76,7 @@ _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest tria
 - ...(+1348 more)
 
 ### By file
-- `src/annotator/annotator.rb` -- 12 detectors across 146 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Conditions, Neglected Path Conditions, Neglected Updates, Reification Misses
+- `src/annotator/annotator.rb` -- 11 detectors across 146 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/ast/ast.rb` -- 11 detectors across 22 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, Exact Predicate Aliases, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates, Semantic Predicate Aliases
 - `src/mir/mir_lowering.rb` -- 9 detectors across 74 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/backends/pipeline_host.rb` -- 9 detectors across 67 method(s): Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Fat Unions, Flay Similarity (Type-2/3), Missing Abstractions, Neglected Path Conditions, Neglected Updates
@@ -92,25 +92,25 @@ _(file, method) units flagged by >=2 INDEPENDENT detectors -- the strongest tria
 - `src/mir/mir_pass.rb` -- 8 detectors across 22 method(s): Broken Protocols, Decision Pressure, False Simplicity, Fat Unions, Missing Abstractions, Neglected Path Conditions, Neglected Updates, Reification Misses
 - `src/annotator/helpers/auto_inference.rb` -- 8 detectors across 18 method(s): Broken Protocols, Decision Pressure, Exact Predicate Aliases, False Simplicity, Fat Unions, Missing Abstractions, Neglected Updates, Semantic Predicate Aliases
 
-## Root-Cause Clusters (332)
+## Root-Cause Clusters (330)
 _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findings are really one invariant'. Convergence says where to look; this says **what one fix collapses the cluster**. Ranked candidate, not a verdict._
 
 - **[name]** `expr` -- **6 detectors** [score 12] across 40 unit(s), 93 findings: Broken Protocols, Decision Pressure, Exact Predicate Aliases, False Simplicity, Neglected Path Conditions, Semantic Predicate Aliases
   - FIX: pair the protocol (RAII / ensure); the unpaired site is the deviant
-  - `src/annotator/annotator.rb:1362` (visit_IfBind) ; `src/annotator/annotator.rb:1569` (visit_MatchStatement) ; `src/annotator/annotator.rb:5360` (visit_NextExpr) ; `src/annotator/annotator.rb:5363` (visit_NextExpr)
+  - `src/annotator/annotator.rb:1362` (visit_IfBind) ; `src/annotator/annotator.rb:1569` (visit_MatchStatement) ; `src/annotator/annotator.rb:5351` (visit_NextExpr) ; `src/annotator/annotator.rb:5354` (visit_NextExpr)
 - **[name]** `sync` -- **5 detectors** [score 10] across 49 unit(s), 103 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates, Reification Misses
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/annotator/annotator.rb:2272` (same_return_capabilities?) ; `src/annotator/annotator.rb:5015` (sync_constrained_cap?) ; `src/annotator/annotator.rb:6212` (bg_capture_independent?) ; `src/annotator/helpers/generic_analysis.rb:447` (generic_type_has_capabilities?)
+  - `src/annotator/annotator.rb:2272` (same_return_capabilities?) ; `src/annotator/annotator.rb:5006` (sync_constrained_cap?) ; `src/annotator/annotator.rb:6203` (bg_capture_independent?) ; `src/annotator/helpers/generic_analysis.rb:447` (generic_type_has_capabilities?)
 - **[name]** `layout` -- **5 detectors** [score 10] across 37 unit(s), 67 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates, Reification Misses
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/annotator/helpers/generic_analysis.rb:448` (generic_type_has_capabilities?) ; `src/ast/parser.rb:2936` (parse_type_annotation) ; `src/annotator/annotator.rb:1649` (visit_MatchStatement) ; `src/annotator/annotator.rb:3477` (visit_GetField)
+  - `src/annotator/helpers/generic_analysis.rb:448` (generic_type_has_capabilities?) ; `src/ast/parser.rb:2936` (parse_type_annotation) ; `src/annotator/annotator.rb:1649` (visit_MatchStatement) ; `src/annotator/annotator.rb:3472` (visit_GetField)
 - **[name]** `line` -- **5 detectors** [score 9] across 9 unit(s), 18 findings: Broken Protocols, Decision Pressure, Derived-State Staleness, Neglected Path Conditions, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/tools/doctor.rb:607` (task_site_metadata) ; `src/tools/doctor.rb:620` (source_line) ; `src/ast/lexer.rb:40` (initialize) ; `src/ast/lexer.rb:311` (advance_pos)
 - **[name]** `value` -- **5 detectors** [score 8] across 84 unit(s), 30 findings: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/annotator/annotator.rb:2116` (visit_ReturnNode) ; `src/annotator/annotator.rb:2157` (visit_ReturnNode) ; `src/annotator/annotator.rb:2159` (visit_ReturnNode) ; `src/annotator/annotator.rb:2161` (visit_ReturnNode)
-- **[name]** `symbol` -- **5 detectors** [score 8] across 82 unit(s), 6 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Conditions, Neglected Path Conditions
+- **[name]** `symbol` -- **5 detectors** [score 8] across 81 unit(s), 6 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Conditions, Neglected Path Conditions
   - FIX: pair the protocol (RAII / ensure); the unpaired site is the deviant
   - `src/annotator/annotator.rb:308` (flush_deferred_with_validations!) ; `src/annotator/annotator.rb:312` (flush_deferred_with_validations!) ; `src/annotator/annotator.rb:1384` (visit_IfBind) ; `src/annotator/annotator.rb:2157` (visit_ReturnNode)
 - **[name]** `current` -- **5 detectors** [score 8] across 12 unit(s), 15 findings: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity, Neglected Path Conditions
@@ -118,7 +118,7 @@ _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findi
   - `src/ast/parser.rb:2525` (peek_generic_angle_params?) ; `src/mir/mir_lowering.rb:1115` (owner_cleanup_for_transfer) ; `src/ast/parser.rb:1364` (parse_function_def) ; `src/ast/parser.rb:31` (stmt)
 - **[name]** `state` -- **5 detectors** [score 8] across 9 unit(s), 16 findings: Broken Protocols, False Simplicity, Neglected Path Conditions, Neglected Updates, Reification Misses
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/annotator/annotator.rb:1287` (analyze_control_flow_branches) ; `src/annotator/annotator.rb:6689` (og_set_live) ; `src/mir/ownership_graph.rb:164` (drop) ; `src/mir/ownership_graph.rb:330` (record_move_site)
+  - `src/annotator/annotator.rb:1287` (analyze_control_flow_branches) ; `src/annotator/annotator.rb:6680` (og_set_live) ; `src/mir/ownership_graph.rb:164` (drop) ; `src/mir/ownership_graph.rb:330` (record_move_site)
 - **[name]** `stmt` -- **4 detectors** [score 9] across 16 unit(s), 17 findings: Derived-State Staleness, Exact Predicate Aliases, Neglected Path Conditions, Semantic Predicate Aliases
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/ast/schemas.rb:34` (enum?) ; `src/ast/schemas.rb:67` (resource?) ; `src/ast/schemas.rb:123` (union?) ; `src/ast/schemas.rb:169` (struct?)
@@ -145,24 +145,24 @@ _Findings across >=2 INDEPENDENT detectors that name the SAME entity -- 'N findi
   - `src/mir/lowering/expressions.rb:941` (float_coercion?) ; `src/annotator/annotator.rb:1311` (visit_BlockExpr) ; `src/annotator/annotator.rb:1665` (visit_MatchStatement) ; `src/annotator/annotator.rb:2620` (visit_VarDecl)
 - **[name]** `left` -- **4 detectors** [score 7] across 46 unit(s), 40 findings: Broken Protocols, Decision Pressure, Derived-State Staleness, False Simplicity
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/annotator/annotator.rb:3981` (visit_OrRescue) ; `src/annotator/helpers/pipe_analysis.rb:72` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:78` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:263` (analyze_collect_op)
+  - `src/annotator/annotator.rb:3976` (visit_OrRescue) ; `src/annotator/helpers/pipe_analysis.rb:72` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:78` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:263` (analyze_collect_op)
 - **[name]** `emit` -- **4 detectors** [score 7] across 39 unit(s), 16 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/annotator/annotator.rb:2383` (visit_StaticCall) ; `src/annotator/annotator.rb:2387` (visit_StaticCall) ; `src/annotator/annotator.rb:2388` (visit_StaticCall) ; `src/annotator/annotator.rb:2390` (visit_StaticCall)
 - **[name]** `ownership` -- **4 detectors** [score 7] across 38 unit(s), 104 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
-  - `src/ast/type.rb:2301` (compute_zig_type) ; `src/annotator/annotator.rb:1363` (visit_IfBind) ; `src/annotator/annotator.rb:1961` (visit_WhileBindLoop) ; `src/annotator/annotator.rb:4393` (visit_LinkNode)
+  - `src/ast/type.rb:2301` (compute_zig_type) ; `src/annotator/annotator.rb:1363` (visit_IfBind) ; `src/annotator/annotator.rb:1961` (visit_WhileBindLoop) ; `src/annotator/annotator.rb:4388` (visit_LinkNode)
 - **[name]** `allocs` -- **4 detectors** [score 7] across 31 unit(s), 28 findings: Broken Protocols, Decision Pressure, False Simplicity, Neglected Updates
   - FIX: single-source this state (one stamp, or recompute on write) -- the invariant-#16 desync shape
   - `src/mir/lowering/variables.rb:652` (owned_return_transfer_binding?) ; `src/mir/mir.rb:3308` (ownership_effect) ; `src/mir/mir.rb:3326` (has_alloc_metadata?) ; `src/mir/mir_checker.rb:1265` (stdlib_owned_return?)
-- ...(+312 more)
+- ...(+310 more)
 
 ## Decision Pressure (295)
 _ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)_
 
 - `.value` -- ELIMINABLE guard-pressure **141** across 64 method(s) -> tighten contract / nil-kill: DELETE  (+11 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:2116` (visit_ReturnNode) ; `src/annotator/annotator.rb:2157` (visit_ReturnNode) ; `src/annotator/annotator.rb:2159` (visit_ReturnNode) ; `src/annotator/annotator.rb:2161` (visit_ReturnNode)
-- `.symbol` -- ELIMINABLE guard-pressure **97** across 73 method(s) -> tighten contract / nil-kill: DELETE  (+17 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
+- `.symbol` -- ELIMINABLE guard-pressure **96** across 72 method(s) -> tighten contract / nil-kill: DELETE  (+17 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:308` (flush_deferred_with_validations!) ; `src/annotator/annotator.rb:312` (flush_deferred_with_validations!) ; `src/annotator/annotator.rb:1384` (visit_IfBind) ; `src/annotator/annotator.rb:2157` (visit_ReturnNode)
 - `.emit` -- ELIMINABLE guard-pressure **72** across 22 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator/annotator.rb:2383` (visit_StaticCall) ; `src/annotator/annotator.rb:2387` (visit_StaticCall) ; `src/annotator/annotator.rb:2388` (visit_StaticCall) ; `src/annotator/annotator.rb:2390` (visit_StaticCall)
@@ -173,31 +173,31 @@ _ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/re
 - `.full_type!` -- ELIMINABLE guard-pressure **55** across 17 method(s) -> tighten contract / nil-kill: DELETE  (+44 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/backends/pipeline_host.rb:488` (lower_pipeline) ; `src/backends/pipeline_host.rb:488` (lower_pipeline) ; `src/backends/pipeline_host.rb:488` (lower_pipeline) ; `src/backends/pipeline_host.rb:488` (lower_pipeline)
 - `.left` -- ELIMINABLE guard-pressure **43** across 20 method(s) -> tighten contract / nil-kill: DELETE  (+3 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:3981` (visit_OrRescue) ; `src/annotator/helpers/pipe_analysis.rb:72` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:78` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:263` (analyze_collect_op)
+  - `src/annotator/annotator.rb:3976` (visit_OrRescue) ; `src/annotator/helpers/pipe_analysis.rb:72` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:78` (stamp_observable_terminal!) ; `src/annotator/helpers/pipe_analysis.rb:263` (analyze_collect_op)
 - `.expr` -- ELIMINABLE guard-pressure **38** across 21 method(s) -> tighten contract / nil-kill: DELETE  (+2 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:1362` (visit_IfBind) ; `src/annotator/annotator.rb:1569` (visit_MatchStatement) ; `src/annotator/annotator.rb:5360` (visit_NextExpr) ; `src/annotator/annotator.rb:5363` (visit_NextExpr)
+  - `src/annotator/annotator.rb:1362` (visit_IfBind) ; `src/annotator/annotator.rb:1569` (visit_MatchStatement) ; `src/annotator/annotator.rb:5351` (visit_NextExpr) ; `src/annotator/annotator.rb:5354` (visit_NextExpr)
 - `.right` -- ELIMINABLE guard-pressure **35** across 17 method(s) -> tighten contract / nil-kill: DELETE
-  - `src/annotator/annotator.rb:3990` (visit_OrRescue) ; `src/annotator/annotator.rb:4000` (visit_OrRescue) ; `src/annotator/annotator.rb:4012` (visit_OrRescue) ; `src/annotator/annotator.rb:4023` (visit_OrRescue)
+  - `src/annotator/annotator.rb:3985` (visit_OrRescue) ; `src/annotator/annotator.rb:3995` (visit_OrRescue) ; `src/annotator/annotator.rb:4007` (visit_OrRescue) ; `src/annotator/annotator.rb:4018` (visit_OrRescue)
 - `.current_fn_ctx` -- ELIMINABLE guard-pressure **32** across 23 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator/annotator.rb:2022` (visit_BreakNode) ; `src/annotator/annotator.rb:2030` (visit_ContinueNode) ; `src/annotator/annotator.rb:2432` (visit_FuncCall) ; `src/annotator/annotator.rb:2448` (visit_FuncCall)
 - `.type` -- ELIMINABLE guard-pressure **30** across 24 method(s) -> tighten contract / nil-kill: DELETE  (+29 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:291` (program_has_auto?) ; `src/annotator/annotator.rb:294` (program_has_auto?) ; `src/annotator/annotator.rb:633` (pre_register_function) ; `src/annotator/annotator.rb:707` (visit_FunctionDef)
 - `.body` -- ELIMINABLE guard-pressure **30** across 21 method(s) -> tighten contract / nil-kill: DELETE  (+4 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:6096` (init_value_contents_heap?) ; `src/annotator/annotator.rb:6098` (init_value_contents_heap?) ; `src/annotator/helpers/capabilities.rb:1228` (_unified_capture_walk) ; `src/backends/pipeline_rewriter.rb:70` (rewrite_children!)
+  - `src/annotator/annotator.rb:6087` (init_value_contents_heap?) ; `src/annotator/annotator.rb:6089` (init_value_contents_heap?) ; `src/annotator/helpers/capabilities.rb:1228` (_unified_capture_walk) ; `src/backends/pipeline_rewriter.rb:70` (rewrite_children!)
 - `[name]` -- ELIMINABLE guard-pressure **29** across 27 method(s) -> tighten contract / nil-kill: DELETE  (+9 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:195` (annotate!) ; `src/annotator/annotator.rb:207` (annotate!) ; `src/annotator/annotator.rb:1922` (visit_WhileLoop) ; `src/annotator/annotator.rb:1998` (visit_WhileBindLoop)
 - `.last` -- ELIMINABLE guard-pressure **25** across 6 method(s) -> tighten contract / nil-kill: DELETE  (+2 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:5642` (expr_result_type) ; `src/annotator/annotator.rb:5645` (expr_result_type) ; `src/annotator/annotator.rb:5649` (expr_result_type) ; `src/annotator/annotator.rb:5649` (expr_result_type)
+  - `src/annotator/annotator.rb:5633` (expr_result_type) ; `src/annotator/annotator.rb:5636` (expr_result_type) ; `src/annotator/annotator.rb:5640` (expr_result_type) ; `src/annotator/annotator.rb:5640` (expr_result_type)
 - `.token` -- ELIMINABLE guard-pressure **22** across 19 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator/helpers/capabilities.rb:1353` (record_capability_binding) ; `src/annotator/helpers/capabilities.rb:1354` (record_capability_binding) ; `src/annotator/helpers/function_analysis.rb:533` (borrowed_takes_argument?) ; `src/mir/concurrency_checks.rb:80` (check_hold_across_yield!)
 - `.element_type` -- ELIMINABLE guard-pressure **21** across 17 method(s) -> tighten contract / nil-kill: DELETE  (+6 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:4351` (infer_element_type) ; `src/annotator/annotator.rb:4359` (infer_optional_element_type) ; `src/annotator/helpers/function_return.rb:83` (resolve) ; `src/annotator/helpers/generic_analysis.rb:184` (validate_type_annotation!)
+  - `src/annotator/annotator.rb:4346` (infer_element_type) ; `src/annotator/annotator.rb:4354` (infer_optional_element_type) ; `src/annotator/helpers/function_return.rb:83` (resolve) ; `src/annotator/helpers/generic_analysis.rb:184` (validate_type_annotation!)
 - `.return_type` -- ELIMINABLE guard-pressure **19** across 12 method(s) -> tighten contract / nil-kill: DELETE  (+13 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:292` (program_has_auto?) ; `src/annotator/annotator.rb:678` (visit_FunctionDef) ; `src/annotator/annotator.rb:2121` (visit_ReturnNode) ; `src/annotator/annotator.rb:2122` (visit_ReturnNode)
 - `.stdlib_def` -- ELIMINABLE guard-pressure **19** across 8 method(s) -> tighten contract / nil-kill: DELETE  (+2 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/mir/lowering/variables.rb:648` (owned_return_transfer_binding?) ; `src/mir/lowering/variables.rb:649` (owned_return_transfer_binding?) ; `src/mir/mir.rb:3299` (ownership_effect) ; `src/mir/mir.rb:3299` (ownership_effect)
 - `[:var_node]` -- ELIMINABLE guard-pressure **18** across 12 method(s) -> tighten contract / nil-kill: DELETE  (+2 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:4558` (visit_WithBlock) ; `src/annotator/annotator.rb:4562` (visit_WithBlock) ; `src/annotator/annotator.rb:4608` (visit_WithBlock) ; `src/annotator/annotator.rb:4750` (visit_WithBlock)
+  - `src/annotator/annotator.rb:4553` (visit_WithBlock) ; `src/annotator/annotator.rb:4557` (visit_WithBlock) ; `src/annotator/annotator.rb:4603` (visit_WithBlock) ; `src/annotator/annotator.rb:4741` (visit_WithBlock)
 - `.type_params` -- ELIMINABLE guard-pressure **17** across 12 method(s) -> tighten contract / nil-kill: DELETE  (+1 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:1153` (visit_StructDef) ; `src/annotator/annotator.rb:1169` (visit_StructDef) ; `src/annotator/annotator.rb:1189` (visit_UnionDef) ; `src/annotator/annotator.rb:1192` (visit_UnionDef)
 - `.capture_analysis` -- ELIMINABLE guard-pressure **15** across 10 method(s) -> tighten contract / nil-kill: DELETE
@@ -205,11 +205,11 @@ _ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/re
 - `@og` -- ELIMINABLE guard-pressure **15** across 7 method(s) -> tighten contract / nil-kill: DELETE  (+6 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
   - `src/annotator/annotator.rb:1253` (analyze_control_flow_branches) ; `src/annotator/annotator.rb:1260` (analyze_control_flow_branches) ; `src/annotator/annotator.rb:1266` (analyze_control_flow_branches) ; `src/annotator/annotator.rb:1277` (analyze_control_flow_branches)
 - `.arms` -- ELIMINABLE guard-pressure **14** across 8 method(s) -> tighten contract / nil-kill: DELETE  (+2 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:4584` (visit_WithBlock) ; `src/annotator/annotator.rb:4738` (visit_WithBlock) ; `src/annotator/helpers/capabilities.rb:1231` (_unified_capture_walk) ; `src/annotator/helpers/effects.rb:1363` (scan_for_raises)
+  - `src/annotator/annotator.rb:4579` (visit_WithBlock) ; `src/annotator/annotator.rb:4729` (visit_WithBlock) ; `src/annotator/helpers/capabilities.rb:1231` (_unified_capture_walk) ; `src/annotator/helpers/effects.rb:1363` (scan_for_raises)
 - `.object` -- ELIMINABLE guard-pressure **13** across 11 method(s) -> tighten contract / nil-kill: DELETE
   - `src/annotator/annotator.rb:1975` (visit_WhileBindLoop) ; `src/annotator/helpers/auto_inference.rb:791` (record_method_call) ; `src/annotator/helpers/function_analysis.rb:270` (receiver_container_alloc) ; `src/annotator/helpers/method_analysis.rb:133` (resolve_typed_method)
 - `.first` -- ELIMINABLE guard-pressure **13** across 9 method(s) -> tighten contract / nil-kill: DELETE  (+4 essential dispatch on this contract -- legitimate; leave unless Fat-Union/Missing-Abstractions says re-derived)
-  - `src/annotator/annotator.rb:4350` (infer_element_type) ; `src/annotator/annotator.rb:4358` (infer_optional_element_type) ; `src/annotator/helpers/lock_helper.rb:454` (report_lock_cycle!) ; `src/mir/escape_analysis.rb:536` (mark_method_takes_heap!)
+  - `src/annotator/annotator.rb:4345` (infer_element_type) ; `src/annotator/annotator.rb:4353` (infer_optional_element_type) ; `src/annotator/helpers/lock_helper.rb:454` (report_lock_cycle!) ; `src/mir/escape_analysis.rb:536` (mark_method_takes_heap!)
 - ...(+270 more)
 
 ## Missing Abstractions (191)
@@ -259,19 +259,16 @@ _guard tuple recomputed across >=2 decision units_
   - `src/annotator/annotator.rb:268` (emit_auto_shape_resolved_findings!) ; `src/annotator/helpers/fixable_helpers.rb:1461` (emit_auto_resolved_finding!) ; `src/annotator/helpers/fixable_helpers.rb:1623` (auto_slot_label)
 - **[case_dispatch]** support=3 scatter=3 rank=9
   - tuple: `:block | :exit`
-  - `src/annotator/annotator.rb:1024` (visit_SyncPolicyDecl) ; `src/annotator/annotator.rb:5074` (validate_snapshot_match_arms!) ; `src/mir/lowering/capabilities.rb:529` (build_fallible_clause_mir)
-- **[case_dispatch]** support=3 scatter=3 rank=9
-  - tuple: `:ATOMIC | :LOCKED | :VERSIONED`
-  - `src/annotator/annotator.rb:4656` (visit_WithBlock) ; `src/mir/lowering/capabilities.rb:571` (with_match_probe_for_family) ; `src/mir/lowering/capabilities.rb:636` (with_match_arm_prelude)
+  - `src/annotator/annotator.rb:1024` (visit_SyncPolicyDecl) ; `src/annotator/annotator.rb:5065` (validate_snapshot_match_arms!) ; `src/mir/lowering/capabilities.rb:529` (build_fallible_clause_mir)
 - **[conjunction]** support=3 scatter=3 rank=9
   - tuple: `sym.indirect? | sym.respond_to?(:layout)`
-  - `src/annotator/annotator.rb:4955` (reject_bare_atomic_ptr_mutation!) ; `src/annotator/helpers/function_analysis.rb:544` (atomic_cell_to_bare_value_param?) ; `src/annotator/helpers/function_analysis.rb:574` (atomic_cell_arg?)
+  - `src/annotator/annotator.rb:4946` (reject_bare_atomic_ptr_mutation!) ; `src/annotator/helpers/function_analysis.rb:544` (atomic_cell_to_bare_value_param?) ; `src/annotator/helpers/function_analysis.rb:574` (atomic_cell_arg?)
 - **[case_dispatch]** support=3 scatter=3 rank=9
   - tuple: `:kind | :type`
-  - `src/annotator/annotator.rb:5102` (resolve_error_selectors!) ; `src/annotator/helpers/lock_helper.rb:414` (verify_handler_reachability!) ; `src/annotator/helpers/with_match_check.rb:420` (handled_error_set)
+  - `src/annotator/annotator.rb:5093` (resolve_error_selectors!) ; `src/annotator/helpers/lock_helper.rb:414` (verify_handler_reachability!) ; `src/annotator/helpers/with_match_check.rb:420` (handled_error_set)
 - **[conjunction]** support=3 scatter=3 rank=9
   - tuple: `node.is_a?(AST::FuncCall) | node.name == fn_name`
-  - `src/annotator/annotator.rb:6355` (contains_self_call?) ; `src/mir/thunk_transform/recursive_splitter.rb:259` (direct_self_call) ; `src/mir/thunk_transform/recursive_splitter.rb:269` (contains_self_call?)
+  - `src/annotator/annotator.rb:6346` (contains_self_call?) ; `src/mir/thunk_transform/recursive_splitter.rb:259` (direct_self_call) ; `src/mir/thunk_transform/recursive_splitter.rb:269` (contains_self_call?)
 - **[case_dispatch]** support=3 scatter=3 rank=9
   - tuple: `:local | :param | :return`
   - `src/annotator/helpers/auto_inference.rb:634` (stamp_slot!) ; `src/annotator/helpers/fixable_helpers.rb:1589` (slot_id_for) ; `src/annotator/helpers/fixable_helpers.rb:1632` (auto_slot_label)
@@ -290,6 +287,9 @@ _guard tuple recomputed across >=2 decision units_
 - **[case_dispatch]** support=3 scatter=3 rank=9
   - tuple: `AST::LimitOp | AST::SelectOp | AST::SkipOp | AST::TakeWhileOp | AST::TapOp | AST::WhereOp`
   - `src/ast/ast.rb:1803` (pipeline_fusible_stage?) ; `src/backends/pipeline_host.rb:2765` (build_lazy_range_prefix) ; `src/backends/pipeline_rewriter.rb:509` (build_recursive_body)
+- **[conjunction]** support=3 scatter=3 rank=9
+  - tuple: `atomic? | indirect?`
+  - `src/ast/ast.rb:1902` (atomic_ptr?) ; `src/ast/symbol_entry.rb:153` (atomic_ptr?) ; `src/ast/type.rb:705` (atomic_ptr?)
 - ...(+166 more)
 
 ## Reification Misses (24)
@@ -340,7 +340,7 @@ _identical one-line predicate body under >=2 names_
 - `wildcard? = union? = struct? = resource? = enum? = needs_capture_site_annotation? = stmt? = expr?` == `false`
   - `src/ast/ast.rb:1398` (wildcard?) ; `src/ast/ast.rb:1542` (wildcard?) ; `src/ast/ast.rb:1557` (wildcard?) ; `src/ast/schemas.rb:36` (union?) ; `src/ast/schemas.rb:38` (struct?) ; `src/ast/schemas.rb:40` (resource?) ; `src/ast/schemas.rb:69` (union?) ; `src/ast/schemas.rb:71` (enum?) ; `src/ast/schemas.rb:73` (struct?) ; `src/ast/schemas.rb:125` (enum?) ; `src/ast/schemas.rb:127` (struct?) ; `src/ast/schemas.rb:129` (resource?) ; `src/ast/schemas.rb:171` (union?) ; `src/ast/schemas.rb:173` (enum?) ; `src/ast/schemas.rb:175` (resource?) ; `src/mir/capture_strategy.rb:51` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:64` (needs_capture_site_annotation?) ; `src/mir/capture_strategy.rb:108` (needs_capture_site_annotation?) ; `src/mir/mir.rb:266` (stmt?) ; `src/mir/mir.rb:268` (expr?)
 - `visit_PassStmt = visit_OrRaise = visit_OrBreak = visit_OrPass = visit_OrPrune` == `stamp_type!(node, :Void)`
-  - `src/annotator/annotator.rb:1544` (visit_PassStmt) ; `src/annotator/annotator.rb:4096` (visit_OrRaise) ; `src/annotator/annotator.rb:4101` (visit_OrBreak) ; `src/annotator/annotator.rb:4106` (visit_OrPass) ; `src/annotator/annotator.rb:4113` (visit_OrPrune)
+  - `src/annotator/annotator.rb:1544` (visit_PassStmt) ; `src/annotator/annotator.rb:4091` (visit_OrRaise) ; `src/annotator/annotator.rb:4096` (visit_OrBreak) ; `src/annotator/annotator.rb:4101` (visit_OrPass) ; `src/annotator/annotator.rb:4108` (visit_OrPrune)
 - `emit_rc_retain = emit_rc_downgrade = emit_weak_upgrade` == `"CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"`
   - `src/mir/mir_emitter.rb:1195` (emit_rc_retain) ; `src/mir/mir_emitter.rb:1200` (emit_rc_downgrade) ; `src/mir/mir_emitter.rb:1205` (emit_weak_upgrade)
 - `auto? = auto_type?` == `t.is_a?(Type) && t.auto?`
@@ -390,7 +390,7 @@ _Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -
 - *POSSIBLE* [type2] mass=188 node=`iter` `src/ast/parser.rb:372` ((top-level)) ; `src/ast/parser.rb:381` ((top-level)) ; `src/ast/parser.rb:390` ((top-level)) ; `src/ast/parser.rb:399` ((top-level))
 - *POSSIBLE* [type2] mass=180 node=`defn` `src/annotator/helpers/pipe_analysis.rb:1062` (analyze_min_op) ; `src/annotator/helpers/pipe_analysis.rb:1085` (analyze_max_op)
 - *POSSIBLE* [type2] mass=166 node=`when` `src/backends/pipeline_host.rb:987` (build_soa_scalar_fold_block) ; `src/backends/pipeline_host.rb:994` (build_soa_scalar_fold_block)
-- *POSSIBLE* [type2] mass=158 node=`or` `src/annotator/annotator.rb:5649` (expr_result_type) ; `src/annotator/helpers/pipe_analysis.rb:157` (higher_order_list_op?)
+- *POSSIBLE* [type2] mass=158 node=`or` `src/annotator/annotator.rb:5640` (expr_result_type) ; `src/annotator/helpers/pipe_analysis.rb:157` (higher_order_list_op?)
 - *POSSIBLE* [type2] mass=152 node=`when` `src/backends/pipeline_host.rb:2640` (lower_binding_fold) ; `src/backends/pipeline_host.rb:2650` (lower_binding_fold)
 - *POSSIBLE* [type2] mass=152 node=`cdecl` `src/mir/mir.rb:776` ((top-level)) ; `src/mir/mir.rb:797` ((top-level))
 - *POSSIBLE* [type2] mass=148 node=`defn` `src/mir/thunk_transform/recursive_splitter.rb:168` (match_mutual_base_case) ; `src/mir/thunk_transform/recursive_splitter.rb:214` (match_base_case)
@@ -468,7 +468,7 @@ _b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug_
 - *POSSIBLE* `src/tools/formatter.rb:1638` (expand_concurrent_drops): `paren_open` derived from `i` (line 1638); `i` reassigned line 1655, `paren_open` not recomputed
 - ...(+125 more)
 
-## Neglected Conditions (11)
+## Neglected Conditions (10)
 _dispatch/conjunction minus one element -- *POSSIBLE* bug_
 
 - *POSSIBLE* (support=5) `src/tools/formatter.rb:1260` (one_liner_end) -- MISSING `'START'` from `'END' | 'FN' | 'FOR' | 'IF' | 'START' | 'TEST' | 'WHEN' | 'WHILE'`
@@ -477,13 +477,12 @@ _dispatch/conjunction minus one element -- *POSSIBLE* bug_
 - *POSSIBLE* (support=4) `src/mir/local_binding_facts.rb:90` (binding_entry) -- MISSING `AST::Assignment` from `AST::Assignment | AST::BindExpr | AST::VarDecl`
 - *POSSIBLE* (support=4) `src/tools/atomic_migration_suggester.rb:129` (stmt_eligible?) -- MISSING `AST::VarDecl` from `AST::Assignment | AST::BindExpr | AST::VarDecl`
 - *POSSIBLE* (support=4) `src/tools/atomic_ptr_migration_suggester.rb:120` (stmt_eligible?) -- MISSING `AST::VarDecl` from `AST::Assignment | AST::BindExpr | AST::VarDecl`
-- *POSSIBLE* (support=3) `src/annotator/annotator.rb:5052` (validate_snapshot_match_arms!) -- MISSING `:LOCKED` from `:ATOMIC | :LOCKED | :VERSIONED`
 - *POSSIBLE* (support=3) `src/mir/cleanup_classifier.rb:675` (finalize_alloc_from_storage!) -- MISSING `decl.symbol` from `decl | decl.respond_to?(:symbol) | decl.symbol`
 - *POSSIBLE* (support=3) `src/mir/cleanup_classifier.rb:802` (container_alloc_from) -- MISSING `decl.symbol` from `decl | decl.respond_to?(:symbol) | decl.symbol`
 - *POSSIBLE* (support=3) `src/mir/fsm_transform/recursive_splitter.rb:373` (emit_pivot) -- MISSING `AST::CatchBlock` from `AST::CatchBlock | AST::ForEach | AST::ForRange | AST::IfStatement | AST::WhileBindLoop | AST::WhileLoop | AST::WithBlock`
 - *POSSIBLE* (support=3) `src/mir/lowering/capabilities.rb:154` (build_field_path_zig) -- MISSING `AST::GetIndex` from `AST::GetField | AST::GetIndex | AST::Identifier`
 
-## Neglected Path Conditions (1934)
+## Neglected Path Conditions (1935)
 _nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)_
 
 - *POSSIBLE* (support=36) `src/tools/formatter.rb:507` (match_block_start?) -- MISSING `!bracket_open?(t.raw)` from `!bracket_open?(t.raw) | bracket_close?(t.raw) | t.type == :SYM`
@@ -511,9 +510,9 @@ _nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* (support=36) `src/tools/formatter.rb:2208` (bg_body_has_strategy_arrow?) -- MISSING `bracket_close?(t.raw)` from `!bracket_open?(t.raw) | bracket_close?(t.raw) | t.type == :SYM`
 - *POSSIBLE* (support=36) `src/tools/formatter.rb:2208` (bg_body_has_strategy_arrow?) -- MISSING `bracket_close?(t.raw)` from `!bracket_open?(t.raw) | bracket_close?(t.raw) | t.type == :SYM`
 - *POSSIBLE* (support=27) `src/annotator/helpers/capabilities.rb:858` (declare_capability_scope!) -- MISSING `cap[:capability] == :SNAPSHOT` from `!cap[:capability] == :RESTRICT | !cap[:capability] == :VIEW || cap[:capability] == :MATERIALIZED_VIEW | cap[:capability] == :SNAPSHOT`
-- ...(+1909 more)
+- ...(+1910 more)
 
-## Broken Protocols (1459)
+## Broken Protocols (1457)
 _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 
 - *POSSIBLE* conf=0.98 support=48 `src/ast/ast.rb:699` (column) does `column` without `line`
@@ -526,7 +525,7 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* conf=0.95 support=36 `src/ast/parser.rb:3560` (parse_error_selectors) does `match!` without `consume`
 - *POSSIBLE* conf=0.95 support=36 `src/backends/pipeline_host.rb:197` (visit) does `visit_mir` without `new`
 - *POSSIBLE* conf=0.95 support=36 `src/backends/pipeline_host.rb:866` (visit_pipeline_expr_mir) does `visit_mir` without `new`
-- *POSSIBLE* conf=0.95 support=20 `src/annotator/annotator.rb:5666` (promote_to_expr_if!) does `else_branch` without `then_branch`
+- *POSSIBLE* conf=0.95 support=20 `src/annotator/annotator.rb:5657` (promote_to_expr_if!) does `else_branch` without `then_branch`
 - *POSSIBLE* conf=0.95 support=20 `src/mir/mir_pass.rb:737` (stamp_if_bind_cleanup!) does `then_branch` without `else_branch`
 - *POSSIBLE* conf=0.95 support=18 `src/annotator/annotator.rb:1127` (walk_ast) does `members` without `[]`
 - *POSSIBLE* conf=0.95 support=18 `src/annotator/helpers/pipe_analysis.rb:45` (finite_stream_source?) does `dynamic_stream?` without `inf_stream?`
@@ -541,7 +540,7 @@ _co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)_
 - *POSSIBLE* conf=0.94 support=17 `src/mir/lowering/variables.rb:1295` (auto_lock_assignment_value) does `with_decl_alloc` without `new`
 - *POSSIBLE* conf=0.94 support=16 `src/annotator/helpers/intrinsic_emit.rb:21` ((top-level)) does `type_alias` without `returns`
 - *POSSIBLE* conf=0.94 support=16 `src/annotator/helpers/pipe_analysis.rb:1430` (numeric_literal_value) does `to_f` without `[]`
-- ...(+1434 more)
+- ...(+1432 more)
 
 ## False Simplicity (749)
 _looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprogramming/monkeypatch -- *POSSIBLE* (noisy)_
@@ -551,7 +550,7 @@ _looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprog
 - *POSSIBLE* [hidden_mutation] scatter=246 support=502 `[]=` -- `src/annotator/annotator.rb:270` (emit_auto_shape_resolved_findings!) (+500 more)
 - *POSSIBLE* [hidden_mutation] scatter=210 support=406 `error!` -- `src/annotator/annotator.rb:192` (annotate!) (+405 more)
 - *POSSIBLE* [hidden_mutation] scatter=128 support=203 `stamp_type!` -- `src/annotator/annotator.rb:501` (visit_Program) (+202 more)
-- *POSSIBLE* [hidden_mutation] scatter=78 support=88 `from_node!` -- `src/annotator/annotator.rb:4331` (visit_CopyNode) (+87 more)
+- *POSSIBLE* [hidden_mutation] scatter=78 support=88 `from_node!` -- `src/annotator/annotator.rb:4326` (visit_CopyNode) (+87 more)
 - *POSSIBLE* [hidden_mutation] scatter=73 support=127 `op-assign` -- `src/annotator/annotator.rb:92` (with_conditional_context) (+126 more)
 - *POSSIBLE* [hidden_mutation] scatter=63 support=92 `storage=` -- `src/annotator/annotator.rb:1311` (visit_BlockExpr) (+91 more)
 - *POSSIBLE* [hidden_mutation] scatter=48 support=50 `fixable!` -- `src/annotator/annotator.rb:2760` (finalize_decl_node!) (+49 more)
@@ -570,7 +569,7 @@ _looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/metaprog
 - *POSSIBLE* [dynamic_dispatch] scatter=20 support=21 `blk.call` -- `src/annotator/annotator.rb:94` (with_conditional_context) (+20 more)
 - *POSSIBLE* [hidden_mutation] scatter=19 support=25 `emit_typo_suggestion!` -- `src/annotator/annotator.rb:1427` (annotate_struct_pattern!) (+24 more)
 - *POSSIBLE* [hidden_mutation] scatter=18 support=28 `ownership=` -- `src/annotator/annotator.rb:1363` (visit_IfBind) (+27 more)
-- *POSSIBLE* [hidden_mutation] scatter=18 support=23 `provenance=` -- `src/annotator/annotator.rb:3758` (visit_ListLit) (+22 more)
+- *POSSIBLE* [hidden_mutation] scatter=18 support=23 `provenance=` -- `src/annotator/annotator.rb:3753` (visit_ListLit) (+22 more)
 - ...(+724 more)
 
 ## Fat Unions (9)
@@ -599,6 +598,6 @@ _case dispatch over class consts whose arms read mostly variant-invariant member
 - Files analyzed: 111
 - Detectors: 14 (all shipped, self-tested)
 - Convergence: 1373 unit(s) flagged by >=2 independent detectors
-- Root-cause clusters: 332 (one fix collapses each)
-- Total candidates: 6945
+- Root-cause clusters: 330 (one fix collapses each)
+- Total candidates: 6943
 - Method: stdlib AST only, intra-procedural, zero deps, no CFG / no points-to; Flay similarity is an optional external signal consumed read-only (see docs/agents/design.md)

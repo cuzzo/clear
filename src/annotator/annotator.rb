@@ -3408,8 +3408,6 @@ private
     if node.target.is_a?(AST::Identifier) && !node.is_assignment_lhs
       sym = node.target.symbol
       if sym
-        sync   = sym.sync
-        layout = sym.respond_to?(:layout) ? sym.layout : nil
         # Skip when this read is the RHS of an auto-locked assignment
         # against the same binding — `c.val = c.val + 1` on `@locked`
         # is fine because the LHS write's auto-lock covers the read.
@@ -3419,18 +3417,15 @@ private
         # alias whose own symbol is plain, or via the no-AS form
         # which auto-unwraps the original name).
         in_with_block = (@with_block_depth || 0) > 0
-        if sym.locked? && !in_auto_lock && !in_with_block
+        cap_error = [
+          [sym.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
+          [sym.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
+          [sym.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
+        ].find { |candidate| candidate[0] }
+        if cap_error && !in_auto_lock && !in_with_block
           emit_cap_field_needs_with!(node,
-            :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
-            name: node.target.name, field: node.field, cap: "@locked")
-        elsif sym.write_locked? && !in_auto_lock && !in_with_block
-          emit_cap_field_needs_with!(node,
-            :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
-            name: node.target.name, field: node.field, cap: "@writeLocked")
-        elsif sym.atomic_ptr? && !in_with_block && !in_auto_lock
-          emit_cap_field_needs_with!(node,
-            :CAP_FIELD_NEEDS_WITH_SNAPSHOT, perm: "SNAPSHOT",
-            name: node.target.name, field: node.field, cap: "@indirect:atomic")
+            cap_error[1], perm: cap_error[2],
+            name: node.target.name, field: node.field, cap: cap_error[3])
         end
       end
     end
@@ -3456,7 +3451,7 @@ private
         struct_schema.type_params.zip(type_obj.generic_args).each do |param, arg|
           subst[param] = arg.resolved
         end
-        field_type = apply_type_subst(field_type, subst) if subst.any?
+        field_type = apply_type_subst(field_type, subst)
       end
       if field_type.is_a?(Type) && field_type.indirect?
         # A struct-pointee @indirect field is an owned heap pointer that
@@ -4653,16 +4648,12 @@ private
           # (CONTENTION); ATOMIC binds the alias to the cell ref so any
           # subsequent body access contends on the cache line (CONTENTION,
           # no BLOCKING — atomics never park).
-          case arm[:family]
-          when :LOCKED
-            record_effect(EffectTracker::BLOCKING)
-            record_effect(EffectTracker::CONTENTION)
-            record_effect(EffectTracker::SUSPENDS)
-          when :VERSIONED
-            record_effect(EffectTracker::CONTENTION)
-          when :ATOMIC
-            record_effect(EffectTracker::CONTENTION)
-          end
+          family_effects = {
+            LOCKED: [EffectTracker::BLOCKING, EffectTracker::CONTENTION, EffectTracker::SUSPENDS],
+            VERSIONED: [EffectTracker::CONTENTION],
+            ATOMIC: [EffectTracker::CONTENTION],
+          }
+          family_effects.fetch(arm[:family], []).each { |effect| record_effect(effect) }
           with_new_scope(current_scope) do
             visit_stmts(arm[:body])
             finalize_scope(node)

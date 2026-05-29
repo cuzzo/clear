@@ -766,19 +766,15 @@ module FunctionAnalysis
         if families
           # Polymorphic family seeds are only defaults; visible callers
           # override them during caller-sync propagation.
-          if families.include?(:LOCKED)
-            param_sync = :locked
-          elsif families.include?(:VERSIONED)
-            param_sync = :versioned
-          elsif families.include?(:ATOMIC)
-            param_sync = :atomic
-          elsif families.include?(:SNAPSHOTTED)
-            param_sync = :versioned
-          elsif families.include?(:LOCAL)
-            # LOCAL admits @local, @multiowned, and plain T; seed :local so
-            # deferred WITH POLYMORPHIC validation can proceed.
-            param_sync = :local
-          end
+          sync_by_family = {
+            LOCKED: :locked,
+            VERSIONED: :versioned,
+            ATOMIC: :atomic,
+            SNAPSHOTTED: :versioned,
+            LOCAL: :local,
+          }
+          family = sync_by_family.keys.find { |candidate| families.include?(candidate) }
+          param_sync = sync_by_family[family] if family
         end
       end
       # Struct ATOMIC params are AtomicPtr cells; primitive ATOMIC params use

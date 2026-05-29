@@ -46,7 +46,7 @@ _normalized fix-churn x branch-gap; highest = most likely defect source._
 | 24 | `src/mir/lowering/functions.rb` | 0.0138 | 0.05 | 27.4% | 181/661 |
 | 25 | `src/mir/fsm_transform/suspend_resolvers.rb` | 0.0134 | 0.034 | 38.8% | 19/49 |
 | 26 | `src/mir/lowering/capabilities.rb` | 0.0114 | 0.052 | 22.1% | 57/258 |
-| 27 | `src/annotator/helpers/function_analysis.rb` | 0.0111 | 0.05 | 22.0% | 100/454 |
+| 27 | `src/annotator/helpers/function_analysis.rb` | 0.0113 | 0.05 | 22.4% | 100/446 |
 | 28 | `src/ast/diagnostic_buckets.rb` | 0.0111 | 0.011 | 100.0% | 8/8 |
 | 29 | `src/mir/fiber_ctx_builder.rb` | 0.0109 | 0.046 | 23.5% | 16/68 |
 | 30 | `src/ast/scope.rb` | 0.0089 | 0.035 | 25.4% | 16/63 |
@@ -56,7 +56,7 @@ _normalized fix-churn x branch-gap; highest = most likely defect source._
 | 34 | `src/annotator/helpers/capabilities.rb` | 0.0069 | 0.025 | 28.1% | 154/549 |
 | 35 | `src/mir/lowering/concurrency.rb` | 0.0066 | 0.052 | 12.8% | 29/226 |
 | 36 | `src/mir/lowering/control_flow.rb` | 0.0063 | 0.026 | 24.5% | 87/355 |
-| 37 | `src/annotator/annotator.rb` | 0.0059 | 0.025 | 24.0% | 581/2423 |
+| 37 | `src/annotator/annotator.rb` | 0.0059 | 0.025 | 23.9% | 576/2411 |
 | 38 | `src/backends/pipeline_rewriter.rb` | 0.0059 | 0.024 | 24.6% | 45/183 |
 | 39 | `src/mir/capture_strategy.rb` | 0.0059 | 0.018 | 31.7% | 19/60 |
 | 40 | `src/mir/test_lowering.rb` | 0.0056 | 0.033 | 17.0% | 8/47 |
