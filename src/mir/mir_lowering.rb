@@ -905,13 +905,12 @@ class MIRLowering
       next if marks[idx + 1].is_a?(MIR::MoveMark) && marks[idx + 1].name.to_s == mark.name.to_s
       next unless emitted_guarded_cleanup_for_name?(state.out, mark.name.to_s)
 
-      move = MIR::OwnershipTransferPlan.new(
+      move = T.must(MIR::OwnershipTransferPlan.new(
         name: mark.name.to_s,
         target: mark.target,
         target_alloc: mark.target_alloc,
         move_guarded: true,
-      ).marks.last
-      next unless move
+      ).marks.last)
 
       stamp_source_line!(move, line, col)
       state.out << move
@@ -1097,13 +1096,12 @@ class MIRLowering
     return unless guarded
     return if state.out.any? { |prior| prior.is_a?(MIR::MoveMark) && prior.name.to_s == node.name.to_s }
 
-    move = MIR::OwnershipTransferPlan.new(
+    move = T.must(MIR::OwnershipTransferPlan.new(
       name: node.name.to_s,
       target: node.target,
       target_alloc: node.target_alloc,
       move_guarded: true,
-    ).marks.last
-    return unless move
+    ).marks.last)
 
     state.out << move
     state.out.concat(ownership_facts_for_structural_node(state.out.last))

@@ -192,7 +192,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(low.destination_placement_plan(MIR::HeapCreate.new("[]const u8", MIR::Ident.new("s"), :heap), source, :heap, direct).action).not_to eq(:heap_indirect)
 
     shared = id("rc", type: :String, storage: :heap)
-    rc_type = Type.new(:String)
+    rc_type = Type.new(:Payload)
     rc_type.ownership = :shared
     shared.full_type = rc_type
     expect(low.send(:rc_retain_needed?, shared)).to eq(true)
@@ -308,6 +308,128 @@ RSpec.describe "MIR gap-burn characterization" do
         expect(result).to be(value)
       end
     end
+  end
+
+  it "covers remaining high-rank MIR lowering helper variants compactly" do
+    low = lowering
+
+    stdlib_alloc = double(emits_allocating?: true, heap_return_alloc?: true,
+      fixed_return?: false, mutates_receiver?: true)
+    mutating_alloc = MIR::InlineZig.new("append()", "test", MIR::OwnershipContract.empty,
+      stdlib_alloc, { alloc: :heap })
+    mutating_alloc.result_ownership_bearing = true
+    expect(low.send(:implicit_allocating_result_fact,
+      MIR::Let.new("receiver", mutating_alloc, false, Type.new(:String), nil), [])).to be_nil
+
+    nested_alloc = Struct.new(:child) do
+      include MIR::Expr
+      def child_exprs = [child]
+      def ownership_source_exprs = [child]
+      def ownership_effect = MIR::OwnershipEffect.none
+    end.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))
+    nested_fact = low.send(:implicit_allocating_result_fact,
+      MIR::Let.new("nested", nested_alloc, false, Type.new(:String), nil), [])
+    expect(nested_fact.ownership_effect.target_var).to eq("nested")
+
+    if_bind = MIR::IfBindStmt.new([
+      { capture: nil, expr: MIR::Ident.new("a") },
+      { capture: "b", expr: nil },
+    ], [], nil)
+    expect(low.send(:if_bind_ownership_fact_targets, if_bind)).to eq([])
+
+    low.instance_variable_set(:@current_bindings, {})
+    bg_missing_body = AST::BgBlock.new(tok, [id("other")], nil, nil, false, false, nil, false)
+    bg_missing_body.capture_analysis = double(move_mark_names: Set["missing"])
+    expect(low.send(:ownership_transfers_for_stmt, bg_missing_body, Set.new)).to eq([])
+
+    bg_missing_entry = AST::BgBlock.new(tok, [id("given")], nil, nil, false, false, nil, false)
+    bg_missing_entry.capture_analysis = double(move_mark_names: Set["given"])
+    expect(low.send(:collect_bg_capture_transfer_roots, bg_missing_entry)).to eq([])
+    low.instance_variable_set(:@current_bindings, { "given" => CleanupEntry.build(:uniform, alloc: :heap) })
+    low.instance_variable_set(:@fn_name_rename_map, { "given" => "renamed_given" })
+    expect(low.send(:ownership_transfers_for_stmt, bg_missing_entry, Set.new).first.name).to eq("renamed_given")
+    missing_entry_low = Class.new(MIRLowering) do
+      def collect_bg_capture_transfer_roots(_stmt) = ["missing_entry"]
+    end.new
+    missing_entry_low.instance_variable_set(:@current_bindings, {})
+    expect(missing_entry_low.send(:ownership_transfers_for_stmt, bg_missing_entry, Set.new)).to eq([])
+
+    empty_target_lowering = Class.new(MIRLowering) do
+      def ownership_transfer_operands_for_node(_node, _existing = [])
+        [MIRLowering::OwnershipTransferTarget.new(name: "", target: :owned_sink, target_alloc: :heap)]
+      end
+    end.new
+    expect(empty_target_lowering.send(:ownership_transfers_for_node,
+      MIR::ExprStmt.new(MIR::Ident.new("x"), false),
+      MIRLowering::OwnershipFinalizationContext.new(inherited_alloc_names: Set.new, out: [], guarded_cleanup_names: Set.new))).to eq([])
+
+    low.instance_variable_set(:@current_bindings, nil)
+    expect(low.send(:ownership_consumed_name_operands, ["hidden"], "src", :heap)).to eq([])
+    visibility_low = lowering
+    visibility_low.instance_variable_set(:@current_bindings, {})
+    visibility_low.instance_variable_set(:@lowered_alloc_names, nil)
+    expect(visibility_low.send(:owned_binding_visible?, "hidden")).to eq(false)
+
+    prog = AST::Program.new(tok, [])
+    MIRPassState::ORDER.take_while { |stage| stage != :mir_lowered }.each { |stage| MIRPassState.for!(prog).mark!(stage) }
+    debug_program = low.send(:lower_program, prog, use_debug_allocator: true)
+    expect(debug_program.items).to include(an_object_having_attributes(name: "USE_DEBUG_ALLOCATOR"))
+
+    items = []
+    low.send(:append_lowered_items!, MIRLowering::LoweredItemTarget.new(items: items, line: 7), nil)
+    expect(items).to eq([])
+
+    fn_sig = FunctionSignature.new(params: [], return_type: Type.new(:Void))
+    expect(low.send(:mir_cast, MIR::Ident.new("fn"), Type.new(fn_sig), Type.new(:Any))).to be_a(MIR::Cast)
+    expect(low.send(:mir_cast, MIR::Ident.new("err"), Type.new(:Int64), Type.new(:"!String"))).to be_a(MIR::Cast)
+    expect(low.send(:ast_void_type?, nil)).to eq(true)
+    expect(low.send(:implicit_allocating_result_fact, MIR::Ident.new("not_let"), [])).to be_nil
+    borrowed_field = AST::GetField.new(tok, id("owner", type: :String, storage: :heap), "field")
+    borrowed_field.full_type = Type.new(:String)
+    expect(low.send(:return_destination_alloc, AST::ReturnNode.new(tok, borrowed_field))).to eq(:heap)
+
+    generic_field = AST::StructField.new(type: :Int64, default: lit(1, type: :Int64))
+    generic_struct = AST::StructDef.new(tok, "Box", { value: generic_field }, :pub, ["T"])
+    expect(low.lower(generic_struct)).to be_a(MIR::FnDef)
+
+    inline_variant = Schemas::InlineStructVariant.new(fields: { value: :String })
+    generic_union = AST::UnionDef.new(tok, "Choice", { Item: inline_variant }, :pub)
+    generic_union.type_params = ["T"]
+    expect(low.lower(generic_union)).to all(satisfy { |node| node.is_a?(MIR::StructDef) || node.is_a?(MIR::FnDef) })
+
+    expect(low.send(:lower_direct_length, AST::FuncCall.new(tok, "len", []))).to be_nil
+    missing_ast_mod = ModuleImporter::CompiledModule.new(nil, nil, nil, nil, nil, nil, nil, "const Hidden = struct {};", nil)
+    expect(low.send(:visible_type_defs, missing_ast_mod)).to be_nil
+    ptr_type = Type.new(:Payload)
+    ptr_type.layout = :indirect
+    expect(low.send(:bare_zig_type, ptr_type)).not_to start_with("*")
+
+    rc_type = Type.new(:Payload)
+    rc_type.ownership = :shared
+    rc_ast = id("rc_value", type: rc_type, storage: :frame)
+    expect(low.send(:owned_sink_plan, MIR::Ident.new("rc_value"), rc_ast, :heap, rc_type).action).to eq(:rc_retain)
+    multi_type = Type.new(:Payload)
+    multi_type.ownership = :multiowned
+    multi_ast = id("multi_value", type: multi_type, storage: :frame)
+    expect(low.send(:owned_sink_plan, MIR::Ident.new("multi_value"), multi_ast, :heap, multi_type).rc_func).to eq("rcRetain")
+
+    borrowed_union_low = Class.new(MIRLowering) do
+      def owned_sink_source_fact(_value, _ast_node, _sink_alloc, _ti)
+        MIRLowering::OwnedSinkSourceFact.new(
+          source_alloc: nil,
+          moved_without_copy: false,
+          owned_parameter: false,
+          needs_heap_create: false,
+          same_alloc_verifiable: false,
+          same_alloc_transfer_source: false,
+          transfer_without_local_cleanup: false,
+          already_owned_value: false,
+          existing_owned_source: false,
+          borrowed_union_sink: true,
+        )
+      end
+    end.new
+    expect(borrowed_union_low.send(:owned_sink_plan, MIR::Ident.new("borrowed_union"), id("borrowed_union", type: :Int64), :heap, Type.new(:Int64)).action).to eq(:dupe_union)
   end
 
   it "covers ownership transfer collection through AST structural children" do
