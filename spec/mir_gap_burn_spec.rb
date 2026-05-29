@@ -432,6 +432,163 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(borrowed_union_low.send(:owned_sink_plan, MIR::Ident.new("borrowed_union"), id("borrowed_union", type: :Int64), :heap, Type.new(:Int64)).action).to eq(:dupe_union)
   end
 
+  it "covers hardened MIR hoist helper fallbacks directly" do
+    low = lowering
+
+    expect(MIRHoistFacts.container_borrow_expr?(nil)).to eq(false)
+    borrow_left = id("borrowed_left", storage: :heap)
+    borrow_left.container_borrow = true
+    expect(MIRHoistFacts.container_borrow_expr?(AST::BinaryOp.new(tok, borrow_left, :OR, lit("fallback")))).to eq(true)
+    expect(low.send(:mir_allocates?, Object.new)).to eq(false)
+    expect(low.send(:hoist_alloc, MIR::Ident.new("plain"), nil)).to be_a(MIR::Ident)
+    passthrough = Object.new
+    expect(low.send(:hoist_alloc, passthrough, nil)).to be(passthrough)
+
+    pipeline_ast = lit("pipeline", type: :String)
+    typed_pipeline = MIR::Pipeline.new(pipeline_ast, nil, nil, [], nil, nil)
+    expect(low.send(:mir_alloc_mark_type_info, typed_pipeline).resolved).to eq(:String)
+
+    inner_pipeline = MIR::Pipeline.new(nil, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), nil, [], nil, nil)
+    expect(low.send(:mir_alloc_mark_type_info, inner_pipeline).resolved).to eq(:String)
+
+    untyped_pipeline = MIR::Pipeline.new(nil, MIR::Ident.new("s"), nil, [], nil, nil)
+    expect { low.send(:mir_alloc_mark_type_info, untyped_pipeline) }.to raise_error(/Pipeline has no typed result/)
+
+    owned_stmt = MIR::ExprStmt.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), false)
+    expect(low.send(:normalize_allocating_mir_stmt!, owned_stmt)).not_to be_empty
+    expect(low.send(:normalize_stmt_child_exprs!, Object.new)).to eq([])
+    expect(low.send(:normalize_stmt_child_exprs!, MIR::ExprStmt.new(MIR::Ident.new("plain"), false))).to eq([])
+
+    old_child = MIR::Ident.new("old")
+    new_child = MIR::Ident.new("new")
+    array_parent = MIR::ArrayInit.new("i64", nil, [[old_child]])
+    low.send(:replace_mir_expr_child!, array_parent, old_child, new_child)
+    expect(array_parent.items.first.first).to be(new_child)
+
+    hash_parent = MIR::StructInit.new("Box", { nested: { value: old_child } })
+    low.send(:replace_mir_expr_child!, hash_parent, old_child, new_child)
+    expect(hash_parent.fields[:nested][:value]).to be(new_child)
+
+    expect(low.send(:replace_mir_expr_in_value!, [MIR::Ident.new("other")], old_child, new_child)).to eq(false)
+    expect(low.send(:replace_mir_expr_in_value!, { nested: [MIR::Ident.new("other")] }, old_child, new_child)).to eq(false)
+    expect(low.send(:replace_mir_expr_in_value!, { nested: [old_child] }, old_child, new_child)).to eq(true)
+
+    mixed_parent = MIR::StructInit.new("Box", { misses: [MIR::Ident.new("other")], hit: old_child })
+    low.send(:replace_mir_expr_child!, mixed_parent, old_child, new_child)
+    expect(mixed_parent.fields[:hit]).to be(new_child)
+    array_miss = MIR::ArrayInit.new("i64", nil, [MIR::Ident.new("other")])
+    low.send(:replace_mir_expr_child!, array_miss, old_child, new_child)
+    expect(array_miss.items.first.name).to eq("other")
+    hash_miss = MIR::StructInit.new("Box", { miss: MIR::Ident.new("other") })
+    low.send(:replace_mir_expr_child!, hash_miss, old_child, new_child)
+    expect(hash_miss.fields[:miss].name).to eq("other")
+
+    call = MIR::Call.new("make", [], false, true)
+    call.result_type = Type.new(:String)
+    expect(low.send(:cleanup_entry_for_ownership_effect, call, alloc: :heap).kind).to eq(:uniform)
+    untyped_call = MIR::Call.new("make", [], false, true)
+    expect { low.send(:cleanup_entry_for_ownership_effect, untyped_call, alloc: :heap) }.to raise_error(/no typed cleanup result/)
+
+    expect(low.send(:mir_ident_names, Object.new)).to eq([])
+    expect(low.send(:mir_ident_names, MIR::ArrayInit.new("i64", nil, [MIR::Ident.new("a"), MIR::Ident.new("b")]))).to eq(["a", "b"])
+  end
+
+  it "covers hardened MIR ownership finalization fallbacks directly" do
+    low = lowering
+
+    state = MIRLowering::OwnershipFinalizationContext.new(
+      inherited_alloc_names: Set.new,
+      out: [MIR::MoveMark.new("owned")],
+      guarded_cleanup_names: Set["owned"],
+    )
+    low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), state)
+    expect(state.out.count { |stmt| stmt.is_a?(MIR::MoveMark) && stmt.name == "owned" }).to eq(1)
+    unmarked_state = MIRLowering::OwnershipFinalizationContext.new(
+      inherited_alloc_names: Set.new,
+      out: [],
+      guarded_cleanup_names: Set["owned"],
+    )
+    low.send(:append_move_guard_for_transfer_mark!, MIR::TransferMark.new("owned", :owned_sink, :heap), unmarked_state)
+    expect(unmarked_state.out).to include(an_instance_of(MIR::MoveMark))
+
+    fact = MIR::OwnershipConsumptionFact.new(
+      operands: [MIR::OwnershipOperandFact.owned_binding("x", Type.new(:String), "spec", :heap)],
+      target: :owned_sink,
+      target_alloc: :heap,
+      source: "spec",
+      covers_consuming_params: true,
+    )
+    expr = MIR::Call.new("consume", [], false, false)
+    expr.ownership_consumption = fact
+    expect(low.send(:ownership_consumption_for_node, MIR::Ident.new("plain"))).to be_nil
+    expect(low.send(:ownership_consumption_for_node, expr)).to be(fact)
+    expect(low.send(:ownership_consumption_for_node, MIR::ExprStmt.new(expr, false))).to be(fact)
+    expect(low.send(:ownership_contract_for_node, Object.new)).to be_nil
+    expect(low.send(:ownership_contract_for_node, MIR::Call.new("plain", [], false, false))).to be_nil
+
+    expect(low.send(:ownership_consumer_requires_fact?, MIR::Ident.new("plain"))).to eq(false)
+    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec"))).to eq(false)
+    no_params_sig = Struct.new(:return_type).new(Type.new(:Void))
+    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, no_params_sig))).to eq(false)
+    taking_sig = FunctionSignature.new(params: [param("taken", takes: true)], return_type: Type.new(:Void))
+    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, taking_sig))).to eq(true)
+    non_taking_sig = FunctionSignature.new(params: [param("kept")], return_type: Type.new(:Void))
+    expect(low.send(:ownership_consumer_requires_fact?, MIR::InlineZig.new("x", "spec", MIR::OwnershipContract.empty, non_taking_sig))).to eq(false)
+
+    try_catch = MIR::TryCatch.new(MIR::Ident.new("fallible"), MIR::Ident.new("fallback"), nil)
+    expect(low.send(:place_owned_try_catch_for_destination, try_catch, Type.new(:String), :heap)).to be_a(MIR::TryCatch)
+    plain_try_catch = MIR::TryCatch.new(MIR::Ident.new("fallible"), MIR::Ident.new("fallback"), nil)
+    expect(low.send(:place_owned_try_catch_for_destination, plain_try_catch, Type.new(:Int64), :heap)).to be_a(MIR::TryCatch)
+
+    low.instance_variable_set(:@current_bindings, {})
+    low.instance_variable_set(:@lowered_alloc_names, Set["lowered"])
+    expect(low.send(:ownership_consumed_name_operands, ["lowered"], "spec", :heap).first.name).to eq("lowered")
+    low.instance_variable_set(:@lowered_alloc_names, nil)
+    expect(low.send(:ownership_consumed_name_operands, ["hidden"], "spec", :heap)).to eq([])
+    expect(low.send(:ownership_operand_type, Object.new, "spec").resolved).to eq(:Any)
+    expect(low.send(:ownership_operand_type, lit("typed", type: :String), "spec").resolved).to eq(:String)
+
+    low.instance_variable_set(:@current_bindings, {})
+    low.instance_variable_set(:@pending_stmts, [MIR::AllocMark.new("pending", :heap, Type.new(:String))])
+    expect(low.send(:owned_binding_visible?, "pending")).to eq(true)
+    low.instance_variable_set(:@pending_stmts, nil)
+    low.instance_variable_set(:@lowered_alloc_names, Set.new)
+    expect(low.send(:owned_binding_visible?, "missing")).to eq(false)
+
+    expect(low.send(:borrowed_ownership_ast?, nil)).to eq(false)
+    expect(low.send(:borrowed_ownership_ast?, AST::CopyNode.new(tok, AST::GetIndex.new(tok, id("items"), lit(0, type: :Int64))))).to eq(true)
+    borrowed = id("borrowed", storage: :heap)
+    borrowed.container_borrow = true
+    expect(low.send(:borrowed_ownership_ast?, borrowed)).to eq(true)
+    expect(low.send(:borrowed_ownership_ast?, lit("x", type: :String))).to eq(false)
+
+    type_root = id("TypeName")
+    type_root.token = Lexer::Token.new(:TYPE_ID, "TypeName", 1, 1)
+    type_field = AST::GetField.new(tok, type_root, "field")
+    type_field.full_type = Type.new(:Int64)
+    expect(low.send(:borrowed_ownership_ast?, type_field)).to eq(false)
+    literal_field = AST::GetField.new(tok, lit("root", type: :String), "field")
+    literal_field.full_type = Type.new(:Int64)
+    expect(low.send(:borrowed_ownership_ast?, literal_field)).to eq(false)
+    owner_field = AST::GetField.new(tok, id("owner", storage: :heap), "field")
+    owner_field.full_type = Type.new(:Int64)
+    expect(low.send(:borrowed_ownership_ast?, owner_field)).to eq(true)
+
+    expect(low.send(:ownership_operands_for_sink_value,
+      MIR::Ident.new("borrowed"), owner_field,
+      Type.new(:String), "spec", :heap, require_visible_owned: true).first.borrowed).to eq(true)
+    expect(low.send(:ownership_operands_for_sink_value,
+      MIR::Ident.new("missing"), lit("missing", type: :String),
+      Type.new(:String), "spec", :heap, require_visible_owned: false)).to eq([])
+    no_fact_call = MIR::Call.new("read", [], false, false)
+    expect(low.send(:ownership_operands_for_sink_value,
+      no_fact_call, lit("missing", type: :String),
+      Type.new(:String), "spec", :heap, require_visible_owned: false)).to eq([])
+
+    expect(low.send(:strip_try, MIR::Ident.new("plain")).name).to eq("plain")
+    expect(low.send(:strip_try, MIR::Call.new("fallible", [], true, false)).try_wrap).to eq(false)
+  end
+
   it "covers ownership transfer collection through AST structural children" do
     dataflow = OwnershipDataflow.new(FunctionCFG.build(fn([])), fn([]), schema_lookup: nil)
     state = owner_state("a", "b", "c", "d", "e", "f", "g")
