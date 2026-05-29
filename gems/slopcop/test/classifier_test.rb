@@ -46,11 +46,56 @@ class ClassifierTest < Minitest::Test
     assert_equal :genuine, C.categorize("m", :case, node("foo(1)"), true)
   end
 
-  def test_non_decision_coverage_artifact_is_defensive_not_dead
+  def test_non_decision_coverage_artifact_is_noise_not_defensive
     pnode = RubyVM::AbstractSyntaxTree.parse("class C; end").children.last
-    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], pnode)
-    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], nil, "end")
-    assert_equal :defensive, C.categorize("m", :if, nil, false, nil, [], nil, "sig { returns(T::Boolean) }")
+    assert_nil C.categorize("m", :if, nil, false, nil, [], pnode)
+    assert_nil C.categorize("m", :if, nil, false, nil, [], nil, "end")
+    assert_nil C.categorize("m", :if, nil, false, nil, [], nil, "sig { returns(T::Boolean) }")
+    assert_nil C.categorize("m", :if, nil, true, nil, [], nil, "")
+    assert_nil C.categorize("m", :if, nil, true, nil, [], nil, "def shape(x)")
+    assert_nil C.categorize("m", :if, nil, true, nil, [], nil, "include Expr")
+  end
+
+  def test_private_class_method_defs_are_attributed_to_method_body
+    lines = <<~RB.lines
+      module M
+        private_class_method def self.shape(x = {})
+          if x
+            1
+          else
+            2
+          end
+        end
+      end
+    RB
+    idx = C.method_index(lines)
+    assert_equal "shape", idx[3]
+    assert_equal "shape", idx[6]
+  end
+
+  def test_endless_defs_do_not_leak_method_attribution
+    lines = <<~RB.lines
+      def one = 1
+      if x
+        1
+      end
+    RB
+    idx = C.method_index(lines)
+    assert_equal "(top-level)", idx[2]
+  end
+
+  def test_sorbet_declaration_lines_are_noise
+    lines = <<~RB.lines
+      sig do
+        params(
+          value: String,
+        ).returns(Integer)
+      end
+      const :value, String
+      prop :out, T::Array[String]
+    RB
+    noise = C.declaration_noise_lines(lines)
+    assert_equal Set.new(1..7), noise
   end
 
   # Real resultset via stdlib Coverage (same branch-tuple shape SimpleCov

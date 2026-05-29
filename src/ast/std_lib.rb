@@ -1039,6 +1039,7 @@ POOL_METHODS = T.let({
     bc: true,
     zig: "{0}.get({1})",
     return_type: :r_optional_element,
+    container_borrow: true,
     borrows: :all,  # returns borrowed pointer into pool storage,
     is_method: true,
   },
@@ -1365,7 +1366,7 @@ INDEX_OPS = T.let({
     get: {
       zig: "{target}.get({index})",
       return_type: :r_optional_element,
-      container_borrow: false,
+      container_borrow: true,
     },
     set: {
       zig: "try {target}.insert({alloc}, {value})",

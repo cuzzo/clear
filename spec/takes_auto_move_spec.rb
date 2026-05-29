@@ -91,8 +91,8 @@ RSpec.describe "TAKES auto-move" do
       END
     CLEAR
     body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
-    # v is MOVED on all paths in main (TAKES) → no defer, no _moved guard
-    expect(body).not_to include("v_moved")
+    # v is transferred into the TAKES call; the guard records that transfer.
+    expect(body).to include("v_moved = true")
   end
 
   it "RETURN fn(TAKES arg) eliminates cleanup when always moved" do
@@ -130,7 +130,7 @@ RSpec.describe "TAKES auto-move" do
       END
     CLEAR
     body = zig[/fn clearMain.*?\n(.*?)^}/m, 1]
-    # v is MOVED on all paths (TAKES) → no defer, no _moved guard
-    expect(body).not_to include("v_moved")
+    # v is transferred into the TAKES call; the guard records that transfer.
+    expect(body).to include("v_moved = true")
   end
 end

@@ -22,6 +22,20 @@ require_relative "placement"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
+module MIRHoistFacts
+  extend T::Sig
+
+  sig { params(ast_node: T.untyped).returns(T::Boolean) }
+  def self.container_borrow_expr?(ast_node)
+    return false unless ast_node
+    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
+      return container_borrow_expr?(ast_node.left)
+    end
+
+    ast_node.respond_to?(:container_borrow) && ast_node.container_borrow == true
+  end
+end
+
 module Hoist
   extend T::Sig
   module_function
@@ -92,6 +106,7 @@ module Hoist
     each_call(stmt) do |call|
       next if call.is_a?(AST::MethodCall) && ELEMENT_STORE.include?(call.name.to_s)
       call.args.each_with_index do |arg, idx|
+        next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
         call.args[idx] = make_temp!(arg, hoists, ctr, moved: moved_arg?(arg), schema_lookup: schema_lookup)
       end
@@ -133,6 +148,7 @@ module Hoist
 
   sig { params(value: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], schema_lookup: T.nilable(Proc), expected_type: T.untyped).returns(T.untyped) }
   def hoist_escape_value!(value, hoists, ctr, schema_lookup, expected_type: nil)
+    return value if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
     return make_temp!(value, hoists, ctr, expected_type: expected_type) if allocating?(value, schema_lookup)
     if value.is_a?(AST::StructLit) || value.is_a?(AST::UnionVariantLit) || value.is_a?(AST::ListLit)
       hoist_concats_within!(value, hoists, ctr)
@@ -166,23 +182,7 @@ module Hoist
   # insert the temp into the wrong scope.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def each_method_call(node, &blk)
-    return if node.nil? || node.is_a?(Array)
-    return unless node.is_a?(Struct)
-    # Separate frames -- their bodies are walked independently.
-    return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
-              node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
-              node.is_a?(AST::DoBlock)
-    blk.call(node) if node.is_a?(AST::MethodCall)
-    # A body-bearing control-flow node: walk only its condition/subject
-    # expressions, never its statement bodies.
-    children = non_body_exprs(node) || node.to_a
-    children.each do |child|
-      case child
-      when Array then child.each { |c| each_method_call(c, &blk) }
-      when Hash  then child.each_value { |v| each_method_call(v, &blk) }
-      else each_method_call(child, &blk)
-      end
-    end
+    each_call_like(node, ->(candidate) { candidate.is_a?(AST::MethodCall) }, &blk)
   end
 
   # Yield every call reachable inside one statement's own expressions. This
@@ -190,19 +190,44 @@ module Hoist
   # named bindings before escape/cleanup placement runs.
   sig { params(node: T.untyped, blk: T.proc.params(arg0: T.untyped).void).void }
   def each_call(node, &blk)
+    each_call_like(node, ->(candidate) { candidate.is_a?(AST::FuncCall) || candidate.is_a?(AST::MethodCall) }, &blk)
+  end
+
+  sig do
+    params(
+      node: T.untyped,
+      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
+      blk: T.proc.params(arg0: T.untyped).void,
+    ).void
+  end
+  def each_call_like(node, matches, &blk)
     return if node.nil? || node.is_a?(Array)
     return unless node.is_a?(Struct)
+    # Separate frames -- their bodies are walked independently.
     return if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit) ||
               node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::WithBlock) ||
               node.is_a?(AST::DoBlock)
-    blk.call(node) if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+    blk.call(node) if matches.call(node)
+    # A body-bearing control-flow node: walk only its condition/subject
+    # expressions, never its statement bodies.
     children = non_body_exprs(node) || node.to_a
     children.each do |child|
-      case child
-      when Array then child.each { |c| each_call(c, &blk) }
-      when Hash  then child.each_value { |v| each_call(v, &blk) }
-      else each_call(child, &blk)
-      end
+      each_call_like_child(child, matches, &blk)
+    end
+  end
+
+  sig do
+    params(
+      child: T.untyped,
+      matches: T.proc.params(candidate: T.untyped).returns(T::Boolean),
+      blk: T.proc.params(arg0: T.untyped).void,
+    ).void
+  end
+  def each_call_like_child(child, matches, &blk)
+    case child
+    when Array then child.each { |c| each_call_like(c, matches, &blk) }
+    when Hash  then child.each_value { |v| each_call_like(v, matches, &blk) }
+    else each_call_like(child, matches, &blk)
     end
   end
 
@@ -326,17 +351,7 @@ module Hoist
 
   sig { params(ast_node: T.untyped).returns(T::Boolean) }
   def ast_container_borrow_expr?(ast_node)
-    return false unless ast_node
-    if ast_node.is_a?(AST::GetIndex)
-      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
-      return ti.indexed_container_borrow?
-    end
-    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
-      return ast_container_borrow_expr?(ast_node.left)
-    end
-    false
-  rescue StandardError
-    false
+    MIRHoistFacts.container_borrow_expr?(ast_node)
   end
 
   sig { params(ast_node: T.untyped, moved: T::Boolean).returns(T::Boolean) }
@@ -371,7 +386,8 @@ module MIRHoistLowering
   # whether placement selected heap or frame.
   ALLOC_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
-    MIR::SharePromote, MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
+    MIR::SharePromote, MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade,
+    MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
   ].freeze
 
   sig { returns(T::Array[T.untyped]) }
@@ -465,7 +481,7 @@ module MIRHoistLowering
   def mir_produces_owned_result?(node)
     return false unless node
     effect = node.respond_to?(:ownership_effect) ? node.ownership_effect : MIR::OwnershipEffect.none
-    return true if effect.produces_owned
+    return true if effect.produces_owned && effect.requires_hoist
     return true if node.is_a?(MIR::BgBlock)
     return true if node.is_a?(MIR::Call) && node.owned_return?
 
@@ -477,9 +493,9 @@ module MIRHoistLowering
     return false unless node
     return true if mir_produces_owned_result?(node)
 
-    mir_result_child_exprs(node).any? do |child|
-      mir_allocates?(child)
-    end
+    return false unless node.respond_to?(:child_exprs)
+
+    node.child_exprs.any? { |child| mir_allocates?(child) }
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -518,41 +534,6 @@ module MIRHoistLowering
     value.respond_to?(:expr?) && value.expr?
   end
 
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def ownership_borrow_boundary?(node)
-    node.is_a?(MIR::Call) ||
-      node.is_a?(MIR::TailCall) ||
-      node.is_a?(MIR::MethodCall) ||
-      node.is_a?(MIR::FieldGet) ||
-      node.is_a?(MIR::IndexGet) ||
-      node.is_a?(MIR::BinOp) ||
-      node.is_a?(MIR::UnaryOp) ||
-      node.is_a?(MIR::AddressOf) ||
-      node.is_a?(MIR::Deref) ||
-      node.is_a?(MIR::SliceExpr) ||
-      node.is_a?(MIR::IfOptional) ||
-      node.is_a?(MIR::TryExpr) ||
-      node.is_a?(MIR::ListItems) ||
-      node.is_a?(MIR::ListLength) ||
-      node.is_a?(MIR::HasField) ||
-      node.is_a?(MIR::DupeSlice) ||
-      node.is_a?(MIR::OwnedSlice) ||
-      node.is_a?(MIR::ConcatStr) ||
-      node.is_a?(MIR::RangeLit) ||
-      node.is_a?(MIR::DeepCopy) ||
-      node.is_a?(MIR::RcRetain) ||
-      node.is_a?(MIR::RcDowngrade) ||
-      node.is_a?(MIR::WeakUpgrade) ||
-      node.is_a?(MIR::LambdaExpr) ||
-      node.is_a?(MIR::Pipeline) ||
-      node.is_a?(MIR::InlineZig) ||
-      node.is_a?(MIR::RawZig) ||
-      node.is_a?(MIR::InlineBc) ||
-      node.is_a?(MIR::RawBc) ||
-      node.is_a?(MIR::ShardedMapGet) ||
-      node.is_a?(MIR::ShardedMapPut)
-  end
-
   sig { params(node: T.untyped, ft: T.untyped, binding_entry: CleanupEntry, init: T.untyped, decl_alloc: Symbol).returns(Symbol) }
   def pick_node_alloc(node, ft, binding_entry, init, decl_alloc)
     return :heap if mir_allocates?(init)
@@ -570,6 +551,9 @@ module MIRHoistLowering
   end
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    if expr.respond_to?(:expr?) && expr.expr?
+      @pending_stmts.concat(normalize_allocating_result_expr!(expr, transfer_on_success: err_cleanup == true))
+    end
     return expr unless mir_produces_owned_result?(expr) ||
                        T.unsafe(self).send(:call_union_return_needs_hoist?, expr, ast_node)
     @tmp_counter += 1
@@ -584,8 +568,7 @@ module MIRHoistLowering
     @pending_stmts << MIR::Let.new(name, expr, mutable, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
-      effective_err_cleanup = err_cleanup && !expr.is_a?(MIR::RcRetain) &&
-        !expr.is_a?(MIR::RcDowngrade) && !expr.is_a?(MIR::WeakUpgrade)
+      effective_err_cleanup = err_cleanup
       entry[:has_moved_guard] = true if effective_err_cleanup
       cleanup = effective_err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
       @pending_stmts << cleanup
@@ -641,6 +624,14 @@ module MIRHoistLowering
       raise "#{context}: allocating MIR::BgBlock has no result type" unless mir.result_type
 
       Type.new(T.must(mir.result_type))
+    when MIR::Pipeline
+      if mir.ast_node
+        Type.from_node!(mir.ast_node, context: context)
+      elsif mir.inner && mir_allocates?(mir.inner)
+        mir_alloc_mark_type_info(mir.inner, nil, context: context)
+      else
+        raise "#{context}: allocating MIR::Pipeline has no typed result"
+      end
     when MIR::TryCatch
       raise "#{context}: allocating MIR::TryCatch has no result type" unless mir.result_type
 
@@ -685,19 +676,21 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(expr: T.untyped, transfer_on_success: T::Boolean).returns([T::Array[T.untyped], MIR::Ident]) }
-  def hoist_normalized_alloc_expr(expr, transfer_on_success: false)
+  sig do
+    params(expr: T.untyped, transfer_on_success: T::Boolean,
+           type_info: T.nilable(Type), cleanup_entry: T.nilable(CleanupEntry)).returns([T::Array[T.untyped], MIR::Ident])
+  end
+  def hoist_normalized_alloc_expr(expr, transfer_on_success: false, type_info: nil, cleanup_entry: nil)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
+    mark = MIR::AllocMark.new(name, alloc, type_info || mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
     mark.scope = MIR::Placement.alloc_scope(alloc)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
-    entry = hoist_cleanup_entry(expr, nil)
+    entry = cleanup_entry || hoist_cleanup_entry(expr, nil)
     stmts = T.let([mark, MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped])
     if entry
-      effective_transfer = transfer_on_success && !expr.is_a?(MIR::RcRetain) &&
-        !expr.is_a?(MIR::RcDowngrade) && !expr.is_a?(MIR::WeakUpgrade)
+      effective_transfer = transfer_on_success
       if effective_transfer
         entry[:has_moved_guard] = true
         stmts << MIR::ErrCleanup.new(name, entry)
@@ -710,6 +703,13 @@ module MIRHoistLowering
     end
     @lowered_alloc_names&.add(name)
     [stmts, MIR::Ident.new(name)]
+  end
+
+  sig { params(expr: T.untyped).returns([T::Array[T.untyped], MIR::Ident]) }
+  def hoist_normalized_value_expr(expr)
+    @tmp_counter += 1
+    name = "__tmp_#{@tmp_counter}"
+    [T.let([MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped]), MIR::Ident.new(name)]
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -735,7 +735,7 @@ module MIRHoistLowering
     prefix = T.let([], T::Array[T.untyped])
     case stmt
     when MIR::Let
-      prefix.concat(normalize_allocating_result_expr!(stmt.init))
+      prefix.concat(normalize_allocating_result_expr!(stmt.init, owned_position: true))
     when MIR::Set
       prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
@@ -744,7 +744,11 @@ module MIRHoistLowering
         prefix.concat(normalize_used_expr_attr!(stmt, :value))
       end
     when MIR::ExprStmt
-      prefix.concat(normalize_used_expr_attr!(stmt, :expr))
+      if mir_produces_owned_result?(stmt.expr)
+        prefix.concat(normalize_used_expr_attr!(stmt, :expr))
+      else
+        prefix.concat(normalize_allocating_result_expr!(stmt.expr))
+      end
     when MIR::ReturnStmt, MIR::BreakStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :value, transfer_on_success: true))
     when MIR::IfStmt
@@ -752,12 +756,12 @@ module MIRHoistLowering
     when MIR::IfBindStmt
       stmt.bindings.each do |binding|
         expr = binding[:expr]
-        expr_prefix, normalized = normalize_allocating_used_expr(expr, transfer_on_success: true)
+        capture = binding[:capture].to_s
+        capture_cleanup = stmt.then_body.find { |child| child.is_a?(MIR::Cleanup) && child.name.to_s == capture }
+        expr_prefix, normalized = normalize_allocating_used_expr(expr, transfer_on_success: capture_cleanup.is_a?(MIR::Cleanup))
         binding[:expr] = normalized
         prefix.concat(expr_prefix)
-        capture = binding[:capture].to_s
         next unless normalized.is_a?(MIR::Ident)
-        capture_cleanup = stmt.then_body.find { |child| child.is_a?(MIR::Cleanup) && child.name.to_s == capture }
         next unless capture_cleanup.is_a?(MIR::Cleanup)
         next if if_bind_transfer_present?(stmt, normalized.name.to_s)
 
@@ -769,7 +773,7 @@ module MIRHoistLowering
         stmt.else_body = else_marks + stmt.else_body
       end
     when MIR::WhileStmt
-      prefix.concat(normalize_used_expr_attr!(stmt, :cond))
+      prefix.concat(normalize_used_expr_attr!(stmt, :cond)) unless stmt.capture
       prefix.concat(normalize_used_expr_attr!(stmt, :update)) if stmt.update
     when MIR::ForStmt
       prefix.concat(normalize_used_expr_attr!(stmt, :iter))
@@ -789,6 +793,21 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :value_expr))
     when MIR::BatchWindowFlush
       prefix.concat(normalize_used_expr_attr!(stmt, :value_expr))
+    else
+      prefix.concat(normalize_stmt_child_exprs!(stmt))
+    end
+    prefix
+  end
+
+  sig { params(stmt: T.untyped).returns(T::Array[T.untyped]) }
+  def normalize_stmt_child_exprs!(stmt)
+    prefix = T.let([], T::Array[T.untyped])
+    return prefix unless stmt.respond_to?(:child_exprs)
+
+    stmt.child_exprs.each do |child|
+      child_prefix, normalized = normalize_allocating_used_expr(child)
+      replace_mir_expr_child!(stmt, child, normalized)
+      prefix.concat(child_prefix)
     end
     prefix
   end
@@ -819,30 +838,70 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(expr: T.untyped).returns(T::Array[T.untyped]) }
-  def normalize_allocating_result_expr!(expr)
+  sig { params(expr: T.untyped, transfer_on_success: T::Boolean, owned_position: T::Boolean).returns(T::Array[T.untyped]) }
+  def normalize_allocating_result_expr!(expr, transfer_on_success: false, owned_position: false)
     prefix = T.let([], T::Array[T.untyped])
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
+    if expr.is_a?(MIR::IfOptional)
+      optional_pair = normalize_allocating_used_expr(
+        expr.optional,
+        transfer_on_success: false,
+      )
+      optional_prefix = T.let(optional_pair[0], T::Array[T.untyped])
+      optional_normalized = optional_pair[1]
+      replace_mir_expr_child!(expr, expr.optional, optional_normalized)
+      prefix.concat(optional_prefix)
+      return prefix
+    end
 
-    result_children = T.let(mir_result_child_exprs(expr), T::Array[T.untyped])
+    result_children = T.let(expr.ownership_source_exprs, T::Array[T.untyped])
+    owned_sources = T.let(expr.owned_position_source_exprs.to_set, T::Set[MIR::Emittable])
     result_children.each do |child|
-      if mir_allocates?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-        child_prefix = normalize_allocating_result_expr!(child)
-        prefix.concat(child_prefix)
+      if owned_position && owned_sources.include?(child)
+        prefix.concat(normalize_allocating_result_expr!(
+          child,
+          transfer_on_success: transfer_on_success,
+          owned_position: true,
+        ))
         next
       end
-      used_prefix, normalized = normalize_allocating_used_expr(child, transfer_on_success: consumes_owned_children?(expr))
-      replace_mir_expr_child!(expr, child, normalized)
-      prefix.concat(used_prefix)
+      if mir_produces_owned_result?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
+        owned_pair = normalize_allocating_used_expr(
+          child,
+          transfer_on_success: consumes_owned_children?(expr),
+        )
+        owned_prefix = T.let(owned_pair[0], T::Array[T.untyped])
+        owned_normalized = owned_pair[1]
+        replace_mir_expr_child!(expr, child, owned_normalized)
+        prefix.concat(owned_prefix)
+        next
+      end
+      if mir_allocates?(child)
+        prefix.concat(normalize_allocating_result_expr!(child, transfer_on_success: transfer_on_success))
+        next
+      end
+      used_pair = normalize_allocating_used_expr(
+        child,
+        transfer_on_success: consumes_owned_children?(expr),
+      )
+      child_prefix = T.let(used_pair[0], T::Array[T.untyped])
+      child_normalized = used_pair[1]
+      replace_mir_expr_child!(expr, child, child_normalized)
+      prefix.concat(child_prefix)
     end
     each_mir_expr_child(expr) do |child|
       next if result_children.any? { |result_child| result_child.equal?(child) }
 
-      used_prefix, normalized = normalize_allocating_used_expr(child, transfer_on_success: consumes_owned_children?(expr))
-      replace_mir_expr_child!(expr, child, normalized)
-      prefix.concat(used_prefix)
+      child_pair = normalize_allocating_used_expr(
+        child,
+        transfer_on_success: consumes_owned_children?(expr),
+      )
+      other_prefix = T.let(child_pair[0], T::Array[T.untyped])
+      other_normalized = child_pair[1]
+      replace_mir_expr_child!(expr, child, other_normalized)
+      prefix.concat(other_prefix)
     end
     prefix
   end
@@ -851,12 +910,29 @@ module MIRHoistLowering
   def normalize_allocating_used_expr(expr, transfer_on_success: false)
     prefix = T.let([], T::Array[T.untyped])
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
+    return [prefix, expr] if expr.is_a?(MIR::Ident)
     return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
 
     if !mutating_receiver_allocator_op?(expr) && mir_produces_owned_result?(expr)
-      nested = normalize_allocating_result_expr!(expr)
+      type_info = mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation")
+      cleanup_entry = hoist_cleanup_entry(expr, nil)
+      nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
-      hoisted, ident = hoist_normalized_alloc_expr(expr, transfer_on_success: transfer_on_success)
+      return [prefix, expr] if normalized_alloc_wrapper_alias?(expr)
+      hoisted, ident = hoist_normalized_alloc_expr(
+        expr,
+        transfer_on_success: transfer_on_success,
+        type_info: type_info,
+        cleanup_entry: cleanup_entry,
+      )
+      prefix.concat(hoisted)
+      return [prefix, ident]
+    end
+
+    if mir_consumes_owned_operands?(expr)
+      nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
+      prefix.concat(nested)
+      hoisted, ident = hoist_normalized_value_expr(expr)
       prefix.concat(hoisted)
       return [prefix, ident]
     end
@@ -867,6 +943,24 @@ module MIRHoistLowering
       prefix.concat(child_prefix)
     end
     [prefix, expr]
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def normalized_alloc_wrapper_alias?(expr)
+    case expr
+    when MIR::TryExpr, MIR::Cast
+      expr.expr.is_a?(MIR::Ident)
+    else
+      false
+    end
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def mir_consumes_owned_operands?(expr)
+    contract = T.unsafe(self).ownership_contract_for_node(expr)
+    return false unless contract.is_a?(MIR::OwnershipContract)
+
+    contract.operands.any? { |operand| !operand.borrowed && operand.name }
   end
 
   sig { params(parent: T.untyped, old_child: T.untyped, new_child: T.untyped).void }
@@ -882,22 +976,42 @@ module MIRHoistLowering
         refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
         return
       elsif value.is_a?(Array)
-        idx = value.index { |item| item.equal?(old_child) }
-        if idx
-          value[idx] = new_child
+        if replace_mir_expr_in_value!(value, old_child, new_child)
           refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
           return
         end
       elsif value.is_a?(Hash)
-        key = value.keys.find { |k| value[k].equal?(old_child) }
-        if key
-          value[key] = new_child
+        if replace_mir_expr_in_value!(value, old_child, new_child)
           refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
           return
         end
       end
     end
     nil
+  end
+
+  sig { params(value: T.untyped, old_child: T.untyped, new_child: T.untyped).returns(T::Boolean) }
+  def replace_mir_expr_in_value!(value, old_child, new_child)
+    case value
+    when Array
+      value.each_with_index do |item, idx|
+        if item.equal?(old_child)
+          value[idx] = new_child
+          return true
+        end
+        return true if replace_mir_expr_in_value!(item, old_child, new_child)
+      end
+    when Hash
+      value.each_key do |key|
+        item = value[key]
+        if item.equal?(old_child)
+          value[key] = new_child
+          return true
+        end
+        return true if replace_mir_expr_in_value!(item, old_child, new_child)
+      end
+    end
+    false
   end
 
   sig { params(parent: T.untyped, old_child: T.untyped, new_child: T.untyped).void }
@@ -908,13 +1022,16 @@ module MIRHoistLowering
 
     old_names = mir_ident_names(old_child).map(&:to_s).to_set
     new_names = mir_ident_names(new_child).map(&:to_s)
-    names = fact.names.reject { |name| old_names.include?(name.to_s) }
-    names.concat(new_names)
+    operands = fact.operands.reject { |operand| operand.name && old_names.include?(operand.name.to_s) }
+    new_names.each do |name|
+      operands << MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "hoist replacement", fact.target_alloc)
+    end
     parent.ownership_consumption = MIR::OwnershipConsumptionFact.new(
-      names: names.map(&:to_s).reject(&:empty?).uniq,
+      operands: operands,
       target: fact.target,
       target_alloc: fact.target_alloc,
       source: fact.source,
+      covers_consuming_params: fact.covers_consuming_params,
     )
     nil
   end
@@ -935,7 +1052,7 @@ module MIRHoistLowering
          expr.respond_to?(:alloc=)
         expr.alloc = alloc
       end
-      mir_result_child_exprs(expr).each do |child|
+      expr.ownership_source_exprs.each do |child|
         has_alloc_metadata = child.is_a?(MIR::InlineZig) && child.has_alloc_metadata?
         stamp_allocating_result_target!(child, name, alloc: alloc) if has_alloc_metadata || mir_allocates?(child)
       end
@@ -943,46 +1060,9 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(node: T.untyped).returns(T::Array[T.untyped]) }
-  def mir_result_child_exprs(node)
-    case node
-    when MIR::Cast, MIR::TryExpr, MIR::OptionalUnwrap
-      [node.expr]
-    when MIR::TryCatch
-      [node.expr, node.catch_body]
-    when MIR::Orelse
-      [node.expr, node.fallback]
-    when MIR::Conditional
-      [node.then_val, node.else_val]
-    when MIR::IfOptional
-      [node.then_expr, node.else_expr]
-    when MIR::Comptime
-      [node.expr]
-    when MIR::Pipeline
-      [node.inner]
-    else
-      []
-    end.compact
-  end
-
-  sig { params(ast_node: T.untyped).returns(T::Boolean) }
-  def container_borrow_expr?(ast_node)
-    return false unless ast_node
-    if ast_node.is_a?(AST::GetIndex)
-      ti = Type.from_node!(ast_node.target, context: "container borrow expression")
-      return ti.indexed_container_borrow?
-    end
-    if ast_node.is_a?(AST::BinaryOp) && (ast_node.op == :OR || ast_node.op == :OR_RESCUE)
-      return container_borrow_expr?(ast_node.left)
-    end
-    false
-  rescue
-    false
-  end
-
   sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
   def copy_container_borrow_if_needed(expr, ast_node)
-    return expr unless container_borrow_expr?(ast_node)
+    return expr unless MIRHoistFacts.container_borrow_expr?(ast_node)
     return expr if mir_allocates?(expr)
 
     ti = Type.from_node!(ast_node, context: "container borrow copy")
@@ -1122,6 +1202,10 @@ module MIRHoistLowering
     when :heap_string
       heap_string_entry(alloc: alloc)
     when :uniform
+      if mir.respond_to?(:result_type) && T.unsafe(mir).result_type
+        typed = Type.new(T.must(T.unsafe(mir).result_type))
+        return uniform_cleanup_entry(typed.zig_type, alloc: alloc)
+      end
       typed = mir.is_a?(MIR::BlockExpr) ? block_expr_result_type(mir) : nil
       return uniform_cleanup_entry(typed.zig_type, alloc: alloc) if typed
 
@@ -1153,11 +1237,10 @@ module MIRHoistLowering
         local_names.include?(name.to_s) || transferred_names.include?(name.to_s)
       } : []
     else
-      return [] if ownership_borrow_boundary?(node)
       names = T.let([], T::Array[String])
-      return [] unless node.respond_to?(:child_exprs)
+      return [] unless node.respond_to?(:ownership_source_exprs)
 
-      node.child_exprs.each do |child|
+      node.ownership_source_exprs.each do |child|
         mir_ident_names(child).each { |name| names << name.to_s }
       end
       names.uniq

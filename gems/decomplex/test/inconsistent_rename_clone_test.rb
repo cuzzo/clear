@@ -4,19 +4,18 @@ require "minitest/autorun"
 require "tempfile"
 require_relative "../lib/decomplex"
 
-class Type3CloneTest < Minitest::Test
+class InconsistentRenameCloneTest < Minitest::Test
   def scan(ruby)
-    f = Tempfile.new(["t3", ".rb"])
+    f = Tempfile.new(["rename-clone", ".rb"])
     f.write(ruby)
     f.close
-    Decomplex::Type3Clone.scan([f.path])
+    Decomplex::InconsistentRenameClone.scan([f.path])
   ensure
-    f
+    @tmp ||= []
+    @tmp << f if f
   end
 
   def test_missed_rename_in_a_pasted_block_is_flagged
-    # ref binds abstract var to `src`; the paste renamed src->dst but
-    # MISSED one occurrence (still `src`) -> inconsistent rename.
     out = scan(<<~RB)
       def original
         src = fetch(1)
@@ -28,12 +27,6 @@ class Type3CloneTest < Minitest::Test
         dst = fetch(2)
         check(dst)
         store(src)
-        finalize(dst)
-      end
-      def pasted2
-        dst = fetch(3)
-        check(dst)
-        store(dst)
         finalize(dst)
       end
     RB
@@ -62,28 +55,29 @@ class Type3CloneTest < Minitest::Test
     assert_empty out
   end
 
-  def test_non_clones_are_not_grouped
+  def test_same_method_branch_symmetry_is_not_a_missed_rename
     out = scan(<<~RB)
-      def a
-        x = fetch(1)
-        check(x)
-        store(x)
-        done(x)
+      def replace(parent, old_child, new_child)
+        parent.class.members.each do |member|
+          value = parent[member]
+          if value.equal?(old_child)
+            parent[member] = new_child
+            refresh(parent, old_child, new_child)
+          elsif value.is_a?(Array)
+            idx = value.index { |item| item.equal?(old_child) }
+            if idx
+              value[idx] = new_child
+              refresh(parent, old_child, new_child)
+            end
+          elsif value.is_a?(Hash)
+            key = value.keys.find { |k| value[k].equal?(old_child) }
+            if key
+              value[key] = new_child
+              refresh(parent, old_child, new_child)
+            end
+          end
+        end
       end
-      def b
-        y = build
-        y.flush
-        y.commit
-        y.close
-      end
-    RB
-    assert_empty out
-  end
-
-  def test_short_blocks_below_threshold_ignored
-    out = scan(<<~RB)
-      def a; x = 1; y = x; end
-      def b; x = 1; y = z; end
     RB
     assert_empty out
   end

@@ -155,6 +155,17 @@ module FsmTransform
       setup_stmts = [
         MIR::Set.new(MIR::FieldGet.new(ctx_ident, sp_field), promise_expr_mir, false),
       ]
+      captured_promise_guard_name = T.let(nil, T.nilable(String))
+      captured_names = (ctx[:captured] || {}).keys.map(&:to_s)
+      promise_root = AST.root_identifier(next_tail.promise_ast) rescue nil
+      if promise_root && captured_names.include?(promise_root.name.to_s)
+        captured_promise_guard_name = "#{promise_root.name}_moved"
+        setup_stmts << MIR::Set.new(
+          MIR::FieldGet.new(ctx_ident, captured_promise_guard_name),
+          MIR::Lit.new("true"),
+          false,
+        )
+      end
 
       # `task` is a `*FsmTask` (slab-allocated by allocFsmTask; ctx
       # holds the pointer), so pass directly — no `&` wrapper.
@@ -208,6 +219,7 @@ module FsmTransform
         end
 
       ctx_field_decls = ["#{sp_field}: #{sp_zig} = undefined,"]
+      ctx_field_decls << "#{captured_promise_guard_name}: bool = false," if captured_promise_guard_name
       if result_var && inner_zig
         ctx_field_decls << "#{result_var}: #{inner_zig} = undefined,"
         ctx_field_decls << fsm_owned_guard_decl(result_var) if result_needs_cleanup

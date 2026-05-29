@@ -88,6 +88,7 @@ module MethodAnalysis
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
     stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
+    node.container_borrow = true if defn.emit&.container_borrow
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the

@@ -12,15 +12,15 @@
 #
 # Usage:
 #   COVERAGE=1 ruby tools/bc_lower_coverage.rb
+#   COVERAGE=1 ruby tools/bc_lower_coverage.rb --jobs 32
 #   bundle exec ruby spec/collate_coverage.rb
 #   ruby tools/branch_gap_triage.rb
 
 require 'bundler/setup'
+require 'fileutils'
+require 'json'
 require 'optparse'
-require_relative '../spec/coverage_bootstrap'
-CoverageBootstrap.start('bc-lower')
-
-require_relative '../src/backends/transpiler'
+require 'rbconfig'
 
 ROOT = File.expand_path('..', __dir__)
 DEFAULT_MAX_LINES = 1_000
@@ -28,7 +28,12 @@ DEFAULT_MAX_LINES = 1_000
 shard = nil
 total_shards = nil
 max_lines = DEFAULT_MAX_LINES
+jobs = nil
 OptionParser.new do |opts|
+  opts.on('--jobs N', Integer, 'Run N local shards in parallel and merge their SimpleCov resultsets') do |value|
+    jobs = value
+    abort "--jobs must be > 0" unless jobs.positive?
+  end
   opts.on('--shard SHARD', 'Run one shard as N/M') do |value|
     parts = value.split('/', 2).map(&:to_i)
     abort "--shard must be N/M" unless parts.size == 2
@@ -42,6 +47,83 @@ OptionParser.new do |opts|
     max_lines = nil
   end
 end.parse!
+
+if jobs
+  abort "--jobs cannot be combined with --shard" if shard || total_shards
+
+  coverage_root = File.expand_path(ENV.fetch("COVERAGE_DIR", "coverage"), ROOT)
+  shard_root = File.join(coverage_root, "bc-lower-shards")
+  FileUtils.rm_rf(shard_root)
+  FileUtils.mkdir_p(shard_root)
+
+  children = jobs.times.map do |index|
+    shard_dir = File.join(shard_root, index.to_s)
+    log_path = File.join(shard_root, "shard-#{index}.log")
+    FileUtils.mkdir_p(shard_dir)
+
+    env = ENV.to_h.merge(
+      "COVERAGE" => "1",
+      "COVERAGE_DIR" => shard_dir
+    )
+    args = [
+      RbConfig.ruby,
+      __FILE__,
+      "--shard", "#{index}/#{jobs}"
+    ]
+    args << "--include-large" unless max_lines
+
+    out = File.open(log_path, "w")
+    pid = Process.spawn(env, *args, out: out, err: out, chdir: ROOT)
+    out.close
+    [index, pid, log_path, File.join(shard_dir, ".resultset.json")]
+  end
+
+  failures = []
+  children.each do |index, pid, log_path, _resultset|
+    _, status = Process.wait2(pid)
+    unless status.success?
+      failures << [index, status.exitstatus, log_path]
+      warn "bc-lower coverage shard #{index}/#{jobs} failed; see #{log_path}"
+    end
+  end
+  unless failures.empty?
+    failures.each do |index, status, log_path|
+      warn "=== bc-lower shard #{index}/#{jobs} status #{status} ==="
+      warn File.read(log_path).lines.last(80).join if File.exist?(log_path)
+    end
+    exit 1
+  end
+
+  FileUtils.mkdir_p(coverage_root)
+  merged_path = File.join(coverage_root, ".resultset.json")
+  merged = File.exist?(merged_path) ? JSON.parse(File.read(merged_path)) : {}
+  children.each do |_index, _pid, _log_path, resultset|
+    abort "missing shard coverage resultset: #{resultset}" unless File.exist?(resultset)
+
+    JSON.parse(File.read(resultset)).each do |key, value|
+      unique_key = key
+      suffix = 1
+      while merged.key?(unique_key)
+        suffix += 1
+        unique_key = "#{key}-#{suffix}"
+      end
+      merged[unique_key] = value
+    end
+  end
+  File.write(merged_path, JSON.pretty_generate(merged))
+
+  children.each do |index, _pid, log_path, _resultset|
+    summary = File.exist?(log_path) ? File.read(log_path).lines.grep(/^bc-lower coverage shard /).last : nil
+    puts(summary || "bc-lower coverage shard #{index}/#{jobs}: completed")
+  end
+  puts "bc-lower coverage: merged #{children.size} shard resultsets into #{merged_path}"
+  exit 0
+end
+
+require_relative '../spec/coverage_bootstrap'
+CoverageBootstrap.start('bc-lower')
+
+require_relative '../src/backends/transpiler'
 
 def line_count(path)
   count = 0

@@ -187,7 +187,17 @@ module CaptureStrategy
     #    schema_lookup).
     return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
 
-    # 6. Anything else (heap-backed, borrow, pointer-passed) requires
+    # 6. Owned aggregate values that are safe to duplicate get a fresh
+    #    fiber-owned copy. The predicate is type-driven and recursive:
+    #    structs/unions/lists are admitted only through Type's cleanup
+    #    shape knowledge, so field additions do not require capture
+    #    classifier edits.
+    if deep_copy_capture?(type, schema_lookup)
+      alloc_sym = fiber_copy_alloc_for(type)
+      return FreshHeapCopy.new(zig_t, name, alloc_sym)
+    end
+
+    # 7. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
     Refuse.new(refuse_reason_for(type), name)
   end
@@ -225,6 +235,15 @@ module CaptureStrategy
     end
     return true if type.respond_to?(:copyable?) && type.copyable?
     false
+  end
+
+  sig { params(type: Type, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  def self.deep_copy_capture?(type, schema_lookup = nil)
+    return false if type.needs_pointer_passing?
+    return false if type.future? || type.any_sync? || type.any_rc? || type.resource?
+    return false if type.provenance == :borrow
+
+    type.ownership_bearing?(schema_lookup)
   end
 
   # True iff the capture can be cloned (Rc/Arc retain) into the fiber's

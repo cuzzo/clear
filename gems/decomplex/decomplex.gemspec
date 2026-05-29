@@ -12,8 +12,9 @@ Gem::Specification.new do |s|
     support x scatter; (b) a site whose dispatch is a Hamming-1 subset
     of a high-support pattern -- a neglected condition, i.e. a likely
     bug. Line-clone detectors (Flay) and complexity counters (McCabe)
-    do not see this; it is the decision-level analog. Zero runtime
-    dependencies: stdlib RubyVM::AbstractSyntaxTree only.
+    do not see this; it is the decision-level analog. Flay is consumed
+    read-only when available for broad Type-2/Type-3 similarity; core
+    detectors remain stdlib RubyVM::AbstractSyntaxTree only.
   DESC
   s.authors     = ["CLEAR"]
   s.license     = "PolyForm-Noncommercial-1.0.0"

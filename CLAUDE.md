@@ -35,7 +35,7 @@ Default build has Zig safety checks (bounds/overflow/null) but no `__morestack` 
 
 **Benchmarks:** `ruby benchmarks/runner.rb [--smoke|--fast|--release] [path | --sequential | --concurrent | --server | --all]`. See `benchmarks/README.md`.
 
-**Coverage / quality:** SimpleCov + Flog + Reek + Flay aggregated by RubyCritic. Pipeline: run specs, then `COVERAGE=1 ./clear test transpile-tests/`, then `bundle exec ruby spec/collate_coverage.rb`, then `bundle exec rubycritic src/`. Standalone: `bundle exec reek|flog|flay|debride src/`. For `debride`, always pass every dir that requires src/ (`src/ examples/minivm/ transpile-tests/`) — omitting one yields false positives.
+**Coverage / quality:** SimpleCov + Flog + Reek + Flay aggregated by RubyCritic. Pipeline: run specs, then `COVERAGE=1 bundle exec ruby transpile-tests/gen.rb`, then `COVERAGE=1 bundle exec ruby tools/bc_lower_coverage.rb --jobs 32` locally (CI shards this), then `bundle exec ruby spec/collate_coverage.rb`, then `bundle exec rubycritic src/`. Runtime transpile verification remains `./clear test transpile-tests/` without coverage. Standalone: `bundle exec reek|flog|flay|debride src/`. For `debride`, always pass every dir that requires src/ (`src/ examples/minivm/ transpile-tests/`) — omitting one yields false positives.
 
 **Profiling:** see `docs/profiling.md`. `clear doctor` reports Heap (per-site allocs w/ line numbers), CPU (lock fns, memcpy), Syscalls (futex/write/mmap), Hardware counters (IPC, cache, branch). Patterns: `pthread_rwlock_*` >10% → swap `@writeLocked` for `@locked`; `charAtCodepoint` hot → use `indexOf`/`substr`; `smartAlloc` dominant → frame arena overflowing.
 

@@ -9,11 +9,8 @@ BG_CAPTURE_TRANSFER_CELLS = []
   %i[string struct_owned list_owned].each do |shape|
     %i[borrow copy give nested_field field_copy list_index_copy call_arg returned_handle].each do |mode|
       expected = :pass
-      expected = :compile_error if mode == :returned_handle && shape != :string && boundary != :do
-      expected = :compile_error if %i[borrow nested_field call_arg].include?(mode) && shape != :string && boundary != :do
       expected = :compile_error if mode == :field_copy && shape != :struct_owned
       expected = :compile_error if mode == :list_index_copy && shape != :list_owned
-      expected = :compile_error if mode == :list_index_copy && boundary != :do
       expected = :compile_error if mode == :give && boundary == :do
       BG_CAPTURE_TRANSFER_CELLS << { boundary: boundary, shape: shape, mode: mode, expected: expected }
     end
@@ -86,7 +83,8 @@ FuzzGenerator.register(:bg_capture_transfer_matrix, cells: BG_CAPTURE_TRANSFER_C
         #{prelude}#{helper}
         FN make() RETURNS ~Int64 ->
             #{bct_decl(p[:shape])}
-            RETURN BG { #{bct_observe(p[:shape], "v")}; };
+            h: ~Int64 = BG { #{bct_observe(p[:shape], "v")}; };
+            RETURN GIVE h;
         END
         FN main() RETURNS Void ->
             h: ~Int64 = make();

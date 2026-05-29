@@ -31,7 +31,12 @@ module Decomplex
       sm      = SequenceMine.scan(@files)
       @broken = sm.broken_protocol
       @derived = DerivedState.scan(@files)
-      @clones  = Type3Clone.scan(@files)
+      @rename_clones = InconsistentRenameClone.scan(@files)
+      @similarity = FlaySimilarity.scan(
+        @files,
+        mass: Integer(ENV.fetch("DECOMPLEX_FLAY_MASS", FlaySimilarity::DEFAULT_MASS)),
+        fuzzy: Integer(ENV.fetch("DECOMPLEX_FLAY_FUZZY", FlaySimilarity::DEFAULT_FUZZY))
+      )
       @pressure = DecisionPressure.scan(@files).ranked
       @fsimple = FalseSimplicity.scan(@files).findings
       @fatu = FatUnion.scan(@files).fat_unions
@@ -53,7 +58,8 @@ module Decomplex
       ["Reification Misses",     :@reif,   1, "an existing predicate reinvented inline -- invariant #16"],
       ["Semantic Predicate Aliases", :@salias, 1, "one decision, multiple names (receiver/polarity folded)"],
       ["Exact Predicate Aliases", :@palias, 1, "identical one-line predicate body under >=2 names"],
-      ["Type-3 Clones (missed rename)", :@clones, 2, "pasted block, one identifier inconsistently renamed -- *POSSIBLE* bug"],
+      ["Inconsistent Rename Clones", :@rename_clones, 2, "pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug"],
+      ["Flay Similarity (Type-2/3)", :@similarity, 2, "Flay structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict"],
       ["Neglected Updates",      :@negu,   2, "co-written state, one write missing -- *POSSIBLE* redundant-state desync"],
       ["Derived-State Staleness", :@derived, 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug"],
       ["Neglected Conditions",   :@negc,   2, "dispatch/conjunction minus one element -- *POSSIBLE* bug"],
@@ -226,7 +232,8 @@ module Decomplex
       total = SECTIONS.sum { |_, iv, _| instance_variable_get(iv).size }
       out << "- Total candidates: #{total}\n"
       out << "- Method: stdlib AST only, intra-procedural, zero deps, " \
-             "no CFG / no points-to (see docs/agents/design.md)\n"
+             "no CFG / no points-to; Flay similarity is an optional " \
+             "external signal consumed read-only (see docs/agents/design.md)\n"
       out
     end
 
@@ -276,9 +283,13 @@ module Decomplex
                  "`#{h[:source]}` (line #{h[:derived_at]}); `#{h[:source]}` " \
                  "reassigned line #{h[:source_reassigned_at]}, `#{h[:derived]}` " \
                  "not recomputed\n"
-               when "Type-3 Clones (missed rename)"
+               when "Inconsistent Rename Clones"
                  "- *POSSIBLE* #{nav(h[:at])} clone of #{nav(h[:ref_at])}: ref var " \
                  "`#{h[:ref_name]}` spelled #{h[:divergent].inspect} here\n"
+               when "Flay Similarity (Type-2/3)"
+                 "- *POSSIBLE* [#{h[:clone_type]}] mass=#{h[:mass]} node=`#{h[:node]}` " \
+                 "#{h[:sites].first(4).map { |s| nav(s) }.join(' ; ')}" \
+                 "#{h[:sites].size > 4 ? " (+#{h[:sites].size - 4} more)" : ''}\n"
                end
       end
       out << "- ...(+#{v.size - 25} more)\n" if v.size > 25

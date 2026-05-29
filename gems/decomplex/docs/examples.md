@@ -115,10 +115,11 @@ Clean: any difference in the body text (then see Semantic Aliases).
 
 # Tier 2 — POSSIBLE bug, moderate false-positive
 
-## Type-3 Clones (missed rename)
+## Inconsistent Rename Clones
 
-A block pasted and its variable renamed, but one occurrence missed.
-Needs >= 3 statements and >= 8 structural tokens.
+A pasted block whose identifier mapping is inconsistent. This is the
+specific missed-rename bug detector; Flay owns the broader Type-2/3
+similarity signal.
 
 ```ruby
 def original
@@ -147,6 +148,30 @@ def b
   dst = fetch(2); check(dst); store(dst); finalize(dst)
 end
 ```
+
+## Flay Similarity (Type-2/3)
+
+Flay-backed structural clone pressure. Decomplex consumes Flay's clone
+clusters read-only and reports Type-2 renamed clones and Type-3 fuzzy
+clones in its normal finding format so SlopCop can correlate them with
+uncovered branch gaps.
+
+```ruby
+def a(node)
+  return false unless node.respond_to?(:type)
+  node.type == :heap || node.type == :frame
+end
+def b(entry)
+  return false unless entry.respond_to?(:kind)
+  entry.kind == :heap || entry.kind == :frame
+end
+```
+
+Reports: ``*POSSIBLE* [type2] mass=... node=`defn` file:1 (a) ; file:5 (b)``
+
+Clean: extract the shared predicate or collapse the duplicated node
+shape. Exact Type-1 clones are intentionally left to raw Flay output;
+this Decomplex section focuses on Type-2/3 similarity.
 
 ## Neglected Updates
 

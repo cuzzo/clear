@@ -150,7 +150,7 @@ class MIREmitter
     when MIR::TryExpr          then "try #{emit(node.expr)}"
     when MIR::TryCatch         then emit_try_catch(node)
     when MIR::BreakExpr        then emit_break_expr(node)
-    when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
+    when MIR::Orelse           then emit_orelse(node)
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
     when MIR::Comptime         then "comptime #{emit(node.expr)}"
@@ -1033,11 +1033,12 @@ class MIREmitter
     "#{alloc_expr(node.alloc)}.destroy(#{emit(node.ptr)})"
   end
 
-  # Accepts either a Symbol (:heap/:frame/:cleanup, resolved via rt) or a MIR
-  # expression node (used as the allocator directly, e.g. a parameter name).
-  sig { params(alloc: T.untyped).returns(T.nilable(String)) }
+  # Allocation-producing MIR nodes carry allocator symbols. Free/destroy nodes
+  # may also carry a MIR allocator expression inside generated destructor
+  # helpers, where the allocator is an explicit parameter.
+  sig { params(alloc: T.any(Symbol, MIR::Emittable)).returns(String) }
   def alloc_expr(alloc)
-    alloc.is_a?(Symbol) ? alloc_zig(alloc) : emit(alloc)
+    alloc.is_a?(Symbol) ? alloc_zig(alloc) : T.must(emit(alloc))
   end
 
   # Emit cleanup for MIR::Cleanup (defer) and MIR::ErrCleanup (errdefer).
@@ -1114,11 +1115,11 @@ class MIREmitter
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
       "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
     when :full_value
-      type_arg = node.zig_type || "@TypeOf(#{src})"
+      type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
       if type_arg.start_with?("[]")
         "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
       else
-        pointer_type_arg = node.zig_type || "@TypeOf(__copy_src)"
+        pointer_type_arg = node.zig_type&.start_with?("*") ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
         pointer_value = node.zig_type && !node.zig_type.start_with?("*") ? "__copy_src.*" : "__copy_src"
         "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
       end
@@ -1364,6 +1365,14 @@ class MIREmitter
     else
       raise "MIREmitter#emit_cast: unknown method :#{node.method}"
     end
+  end
+
+  sig { params(node: MIR::Orelse).returns(String) }
+  def emit_orelse(node)
+    fallback = emit(node.fallback)
+    result_type = node.result_type
+    fallback = "@as(#{result_type.zig_type}, #{fallback})" if result_type
+    "(#{emit(node.expr)} orelse #{fallback})"
   end
 
   sig { params(node: MIR::TryCatch).returns(String) }

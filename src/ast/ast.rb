@@ -9,7 +9,26 @@ require_relative "../annotator/helpers/intrinsic_registry"
 # AST
 # ==========================================
 module AST
+  extend T::Sig
+
+  class BodySlot
     extend T::Sig
+
+    sig { returns(T::Array[T.untyped]) }
+    attr_reader :body
+
+    sig { params(body: T::Array[T.untyped], writer: T.proc.params(body: T::Array[T.untyped]).void).void }
+    def initialize(body, writer)
+      @body = T.let(body, T::Array[T.untyped])
+      @writer = T.let(writer, T.proc.params(body: T::Array[T.untyped]).void)
+    end
+
+    sig { params(body: T::Array[T.untyped]).void }
+    def replace(body)
+      @body = body
+      @writer.call(body)
+    end
+  end
 
   SyntheticTypeInput = T.type_alias { T.any(Type, Symbol, FunctionSignature) }
 
@@ -332,6 +351,14 @@ module AST
     until stack.empty?
       node = stack.pop
       next unless node
+      if node.is_a?(Array)
+        node.reverse_each { |child| stack << child }
+        next
+      end
+      if node.is_a?(Hash)
+        node.each_value { |child| stack << child }
+        next
+      end
       yield node if node.is_a?(Locatable)
       next if node.is_a?(FunctionDef) && !descend_functions
       next unless node.is_a?(Struct)
@@ -339,9 +366,9 @@ module AST
       node.class.members.reverse_each do |member|
         value = node[member]
         if value.is_a?(Array)
-          value.reverse_each { |child| stack << child if child.is_a?(Struct) }
+          stack << value
         elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(Struct) }
+          stack << value
         elsif value.is_a?(Struct)
           stack << value
         end
@@ -396,6 +423,28 @@ module AST
     node.is_a?(AST::HasBodies) ? node.child_bodies : []
   end
 
+  sig { params(node: T.untyped).returns(T::Array[BodySlot]) }
+  def self.body_slots(node)
+    slots = T.let([], T::Array[BodySlot])
+    case node
+    when IfStatement, IfBind
+      slots << BodySlot.new(node.then_branch, ->(body) { node.then_branch = body }) if node.then_branch
+      slots << BodySlot.new(node.else_branch, ->(body) { node.else_branch = body }) if node.else_branch && !node.else_branch.empty?
+    when WhileLoop, WhileBindLoop
+      slots << BodySlot.new(node.do_branch, ->(body) { node.do_branch = body }) if node.do_branch
+    when ForRange, ForEach, WithBlock, BgBlock, BgStreamBlock
+      slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
+    when MatchStatement
+      node.cases.each { |match_case| slots << BodySlot.new(match_case.body, ->(body) { match_case.body = body }) if match_case.body }
+      slots << BodySlot.new(node.default_case, ->(body) { node.default_case = body }) if node.default_case
+    when DoBlock
+      node.branches.each do |branch|
+        slots << BodySlot.new(branch[:body], ->(body) { branch[:body] = body }) if branch[:body]
+      end
+    end
+    slots
+  end
+
   # Canonical recursion-yield policy: non-tight recursive functions that can
   # run arbitrarily long must thread rt so MIR can inject checkYield().
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
@@ -429,6 +478,46 @@ module AST
     when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
          FreezeNode, CapabilityWrap
       expr.value ? [expr.value] : []
+    else
+      []
+    end
+  end
+
+  # Immediate expression children for semantic expression walks. This excludes
+  # statement bodies; callers that need bodies should use child_bodies/walk_body.
+  sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
+  def self.expression_children(node, skip_copy: false)
+    return [] unless node
+
+    case node
+    when CopyNode, CloneNode, FreezeNode
+      skip_copy ? [] : [node.value].compact
+    when MoveNode, ShareNode, CapabilityWrap, Cast
+      [node.value].compact
+    when BinaryOp
+      [node.left, node.right].compact
+    when UnaryOp
+      [node.right].compact
+    when FuncCall, StaticCall
+      node.args.compact
+    when MethodCall
+      [node.object, *node.args].compact
+    when GetField
+      [node.target].compact
+    when GetIndex
+      [node.target, node.index].compact
+    when StructLit, UnionVariantLit
+      (node.fields&.values || []).compact
+    when ListLit
+      node.items.compact
+    when HashLit
+      node.pairs.flat_map { |pair| pair.is_a?(Array) ? pair.compact : [pair] }.compact
+    when ReturnNode
+      [node.value].compact
+    when Assert
+      [node.condition].compact
+    when Assignment, VarDecl, BindExpr
+      [node.value].compact
     else
       []
     end
@@ -1952,6 +2041,7 @@ module AST
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
+    attr_accessor :async_result_shape # AsyncResultShape: single authority for BG's spawned handle.
     # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
     # on the BG body's transitive call set. Phase A only records this; Phase B
     # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.

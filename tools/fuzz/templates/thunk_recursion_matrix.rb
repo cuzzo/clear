@@ -23,6 +23,12 @@ end
   end
 end
 
+[:owned_string_acc, :struct_return, :mutual_struct_arg].each do |shape|
+  [0, 1, 6].each do |depth|
+    THUNK_RECURSION_CELLS << { family: :owned_variant, shape: shape, depth: depth }
+  end
+end
+
 FuzzGenerator.register(:thunk_recursion_matrix, cells: THUNK_RECURSION_CELLS) do |p|
   n = p[:depth]
 
@@ -182,6 +188,65 @@ FuzzGenerator.register(:thunk_recursion_matrix, cells: THUNK_RECURSION_CELLS) do
 
       FN main() RETURNS Void ->
         ASSERT flip(#{n}_i64) == #{expected}, "logical thunk";
+        RETURN;
+      END
+    CHT
+  when :owned_string_acc
+    expected = n
+    <<~CHT
+      FN repeat(n: Int64, acc: String) RETURNS String
+        EFFECTS REENTRANT:THUNK ->
+        IF n <= 0_i64 -> RETURN acc;
+        RETURN repeat(n - 1_i64, acc + COPY "x");
+      END
+
+      FN main() RETURNS Void ->
+        s: String = repeat(#{n}_i64, COPY "");
+        ASSERT s.length() == #{expected}_i64, "thunk owned string acc";
+        RETURN;
+      END
+    CHT
+
+  when :struct_return
+    expected = n
+    <<~CHT
+      STRUCT Box { label: String, count: Int64 }
+
+      FN build(n: Int64, b: Box) RETURNS Box
+        EFFECTS REENTRANT:THUNK ->
+        IF n <= 0_i64 -> RETURN b;
+        RETURN build(n - 1_i64, Box{ label: COPY b.label, count: b.count + 1_i64 });
+      END
+
+      FN main() RETURNS Void ->
+        seed = Box{ label: COPY "abc", count: 0_i64 };
+        b: Box = build(#{n}_i64, seed);
+        ASSERT b.count == #{expected}_i64, "thunk struct return count";
+        ASSERT b.label.length() == 3_i64, "thunk struct return label";
+        RETURN;
+      END
+    CHT
+
+  when :mutual_struct_arg
+    expected = n
+    <<~CHT
+      STRUCT Box { step: Int64 }
+
+      FN a(n: Int64, b: Box) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        IF n <= 0_i64 -> RETURN b.step;
+        RETURN bfn(n - 1_i64, b);
+      END
+
+      FN bfn(n: Int64, b: Box) RETURNS Int64
+        EFFECTS REENTRANT:THUNK ->
+        IF n <= 0_i64 -> RETURN b.step;
+        RETURN a(n - 1_i64, b);
+      END
+
+      FN main() RETURNS Void ->
+        b = Box{ step: 1_i64 };
+        ASSERT a(#{n}_i64, b) == 1_i64, "thunk mutual struct arg";
         RETURN;
       END
     CHT

@@ -495,6 +495,25 @@ module FuzzSurfaceRegistry
       escape_sinks: [:list_append, :set_insert, :map_put, :pool_insert, :collection_literal, :return_value],
       mir_ownership_contracts: [:cleanup_on_all_paths, :collection_mutation_visible_to_mir],
     },
+
+    cleanup_control_matrix: {
+      cleanup_value_shapes: [
+        :string, :heap_list, :hash_map, :struct_owned_fields,
+        :union_owned_payload, :option_owned_payload, :nested_container,
+      ],
+      escape_sources: [:or_expression, :loop_local],
+      escape_sinks: [:return_value, :takes_arg, :give_arg],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity, :move_suppresses_cleanup],
+    },
+
+    lowering_boundary_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      sync_capabilities: [:locked, :versioned],
+      escape_sources: [:function_param, :bg_capture, :stream_next],
+      escape_sinks: [:return_value, :list_append, :takes_arg, :give_arg, :function_arg],
+      execution_boundaries: [:bg, :do, :bg_stream, :stream_pipeline, :future_promise],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :move_suppresses_cleanup, :collection_mutation_visible_to_mir],
+    },
   }.freeze
 
   # Dimensions that are intentionally covered by the union of focused

@@ -45,7 +45,12 @@ module FsmLowering
 
     sig { returns(T::Array[MIR::Stmt]) }
     def marks
-      MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: target_alloc, move_guarded: move_guarded)
+      MIR::OwnershipTransferPlan.new(
+        name: name,
+        target: :owned_sink,
+        target_alloc: target_alloc,
+        move_guarded: move_guarded,
+      ).marks
     end
   end
 
@@ -72,7 +77,7 @@ module FsmLowering
         "#{$1}#{$2}#{ctx_var}.#{name} = "
       end
       out = out.gsub(/\b#{esc}_L\d+\b/, "#{ctx_var}.#{name}")
-      out = out.gsub(/\b#{esc}(?:_L\d+)?_moved\b/, "#{ctx_var}.#{name}_moved")
+      out = out.gsub(/(?<!\.)\b#{esc}(?:_L\d+)?_moved\b/, "#{ctx_var}.#{name}_moved")
       out = out.gsub(/\bvar\s+#{Regexp.escape(ctx_var)}\.#{esc}_moved\s*=\s*/, "#{ctx_var}.#{name}_moved = ")
       out = out.gsub(/@TypeOf\(\s*#{esc}\s*\)/, "@TypeOf(#{ctx_var}.#{name})")
       out = out.gsub(/&#{esc}\b/, "&#{ctx_var}.#{name}")
@@ -88,9 +93,10 @@ module FsmLowering
   # types). Mirrors the inner loop of lower_bg_block but exposed as a
   # helper so Phase B2 can call it twice (once for pre-stmts, once for
   # post-stmts).
-  # Lower a list of step statements to MIR. Returns:
-  #   no_result: true  -> [MIR::Stmt]
-  #   no_result: false -> [pre: [MIR::Stmt], result: [MIR::Stmt]]
+  # Lower a list of step statements to one logical MIR body. Value-producing
+  # FSM segments keep the final result assignment in the same body as the
+  # statements that created the value, so ownership finalization sees the
+  # cleanup and the transfer together.
   #
   # The "result" segment for value-producing FSM steps is the
   # final expression's MIR plus any pending hoists, wrapped in a
@@ -161,8 +167,23 @@ module FsmLowering
           # other escaping binding; the promise stores it directly and
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
-          result_mir << MIR::Set.new(target, strip_try(last_mir), false)
-          result_mir.concat(fsm_result_transfer_marks(last_mir, last_step[:expr]))
+          result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
+          result_set = MIR::Set.new(target, result_value, false)
+          transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
+          (@last_fsm_result_transfer_facts ||= []).concat(transfer_facts)
+          guard_fsm_result_cleanup!(result_mir, transfer_facts)
+          transfer_names = transfer_facts.map(&:name).uniq
+          if transfer_names.any?
+            result_set = with_ownership_consumption(
+              result_set,
+              transfer_names,
+              "fsm_result",
+              :owned_sink,
+              target_alloc: uniform_fsm_result_target_alloc(transfer_facts),
+            )
+          end
+          result_mir << result_set
+          result_mir.concat(transfer_facts.flat_map(&:marks))
           if last_step[:expr].is_a?(AST::Identifier)
             guard_map = instance_variable_get(:@current_fsm_owned_result_guards) rescue nil
             guard_name = guard_map&.[](last_step[:expr].name.to_s)
@@ -177,8 +198,40 @@ module FsmLowering
         end
       end
 
-      [pre_mir, result_mir]
+      pre_mir + result_mir
     end
+  end
+
+  sig { params(facts: T::Array[FsmResultTransferFact]).returns(T.nilable(Symbol)) }
+  def uniform_fsm_result_target_alloc(facts)
+    allocs = facts.map(&:target_alloc).uniq
+    allocs.length == 1 ? allocs.first : nil
+  end
+
+  sig { params(value: T.untyped, result_type: Type).returns(T.untyped) }
+  def coerce_fsm_result_value(value, result_type)
+    return value unless result_type.integer?
+    return value if value.is_a?(MIR::Cast)
+
+    MIR::Cast.new(value, result_type.zig_type, :intCast)
+  end
+
+  sig { params(body: T::Array[T.untyped], facts: T::Array[FsmResultTransferFact]).void }
+  def guard_fsm_result_cleanup!(body, facts)
+    @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
+    facts.each do |fact|
+      next unless fact.move_guarded
+      body.each do |node|
+        next unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+        node_name = node.name.to_s
+        rendered_name = @fn_name_rename_map&.[](node_name) || node_name
+        next unless node_name == fact.name || rendered_name == fact.name
+
+        node.cleanup_entry[:has_moved_guard] = true
+        (@guarded_cleanup_names ||= {})[fact.name] = true
+      end
+    end
+    nil
   end
 
   sig { params(result_mir: T.untyped, ast_node: T.untyped).returns(T::Array[MIR::Stmt]) }
@@ -193,17 +246,40 @@ module FsmLowering
     @current_bindings = T.let(@current_bindings, T.untyped)
     @guarded_cleanup_names = T.let(@guarded_cleanup_names, T.untyped)
     facts = T.let([], T::Array[FsmResultTransferFact])
-    consumed = collect_mir_consumed_roots(result_mir)
-    consumed.concat(fsm_ast_result_consumed_roots(ast_node))
+    result_owner = T.let(result_mir, T.untyped)
+    while result_owner.respond_to?(:expr) &&
+        (result_owner.is_a?(MIR::TryExpr) || result_owner.is_a?(MIR::Cast))
+      result_owner = result_owner.expr
+    end
+    result_type = ast_node.respond_to?(:full_type!) ? Type.from_node!(ast_node, context: "FSM result owner") : Type.new(:Any)
+    if result_owner.is_a?(MIR::Ident) && T.unsafe(self).ownership_tracked_transfer_type?(result_type)
+      owner_name = result_owner.name.to_s
+      owner_name = @fn_name_rename_map[owner_name] if @fn_name_rename_map&.key?(owner_name)
+      mir_entry = @current_bindings[result_owner.name.to_s] || @current_bindings[owner_name] || CleanupEntry::NONE
+      if mir_entry.present?
+        mir_entry[:has_moved_guard] = true
+        (@guarded_cleanup_names ||= {})[owner_name] = true
+      end
+      facts << FsmResultTransferFact.new(
+        name: owner_name,
+        target_alloc: mir_entry.present? ? mir_entry.alloc : :heap,
+        move_guarded: true,
+      )
+      return facts
+    end
+    consumed = fsm_ast_result_consumed_roots(ast_node)
     consumed.each do |name|
       safe = zig_safe_name(name.to_s)
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
-      entry = @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
-      next unless entry.present?
-      guarded = entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s) == true
+      binding_entry = T.let(
+        @current_bindings[name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE,
+        T.untyped,
+      )
+      next unless binding_entry.present?
+      guarded = binding_entry.has_moved_guard? || @guarded_cleanup_names&.[](safe.to_s) == true
       facts << FsmResultTransferFact.new(
         name: safe.to_s,
-        target_alloc: entry.alloc,
+        target_alloc: binding_entry.alloc,
         move_guarded: guarded,
       )
     end
@@ -221,7 +297,7 @@ module FsmLowering
         names.concat(fsm_ast_result_consumed_roots(node.value))
       end
     when AST::Identifier
-      names << node.name.to_s if AST.moved?(node)
+      names << node.name.to_s if AST.moved?(node) || fsm_owned_transfer_identifier?(node)
     when AST::StructLit, AST::UnionVariantLit
       node.fields&.each_value do |value|
         next if value.is_a?(AST::CopyNode)
@@ -245,7 +321,9 @@ module FsmLowering
     @current_bindings = T.let(@current_bindings, T.untyped)
     ti = node.full_type!(context: "FSM owned transfer identifier")
     return false unless T.unsafe(self).ownership_tracked_transfer_type?(ti)
-    entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
+    safe = T.unsafe(self).__send__(:zig_safe_name, node.name.to_s)
+    safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+    entry = @current_bindings[node.name.to_s] || @current_bindings[safe.to_s] || CleanupEntry::NONE
     (entry.present? && entry.alloc == :heap) || node.symbol&.heap_storage? == true
   end
 
@@ -292,25 +370,16 @@ module FsmLowering
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
-  # Text-shaped facade over lower_step_stmts. Lowers stmts to MIR
-  # then renders each through MIREmitter. Returns a Zig string for
-  # no_result: true, or a [pre, result] tuple otherwise (where
-  # `result` is the trailing `__ctx.inner.result = <expr>;`
-  # assignment ready for splicing into the dispatch).
+  # Text-shaped facade over lower_step_stmts. Lowers a segment to one MIR body,
+  # finalizes ownership once, then renders through MIREmitter.
   sig { params(stmts: T::Array[T.untyped], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T.untyped) }
   def emit_step_stmts(stmts, no_result:, ctx_id: nil)
     T.bind(self, MIRLowering) rescue {}
+    @last_fsm_result_transfer_facts = T.let([], T.untyped)
     result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
     inherited_allocs = T.let(instance_variable_get(:@current_fsm_inherited_alloc_names) || Set.new, T::Set[String])
     inherited_guards = T.let(instance_variable_get(:@current_fsm_inherited_guarded_names) || Set.new, T::Set[String])
-    if no_result
-      render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
-    else
-      [
-        render_mir_list(append_ownership_transfers_for_mir_body(result[0], inherited_allocs, inherited_guards)),
-        render_mir_list(append_ownership_transfers_for_mir_body(result[1], inherited_allocs, inherited_guards)),
-      ]
-    end
+    render_mir_list(append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards))
   end
   sig { params(mir_list: T::Array[T.untyped]).returns(String) }
   def render_mir_list(mir_list)

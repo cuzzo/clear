@@ -19,6 +19,7 @@ const tests = [_]Test{
     .{ .name = "GAP-B gate: SimClock + SimRandom active under this executable",         .func = &gate.assertGapBActive },
     .{ .name = "mvcc-vopr: update retry-body fires under SimAtomic fault injection",   .func = &vv.testMvccRetryBodyUnderFault },
     .{ .name = "mvcc-vopr: updateFlow retry-body fires under SimAtomic fault injection", .func = &vv.testMvccUpdateFlowRetryBodyUnderFault },
+    .{ .name = "mvcc-vopr: updateFlow no-commit branches clean candidates",            .func = &vv.testMvccUpdateFlowNoCommitBranches },
     .{ .name = "mvcc-vopr: update tag-spin retry body fires under load-tag injection", .func = &vv.testMvccTagSpinRetryBody },
     .{ .name = "mvcc-vopr: update bounded-retry exhaustion at 100% fault",              .func = &vv.testMvccRetryExhaustionUnderFault },
     .{ .name = "mvcc-vopr: updateMulti tagged contention rolls back and retries",       .func = &vv.testMvccUpdateMultiTaggedContentionRetry },

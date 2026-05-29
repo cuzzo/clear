@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "set"
 
 module SlopCop
   # Classifies every never-taken branch arm in a target file into ONE
@@ -54,10 +55,10 @@ module SlopCop
       stack = []
       lines.each_with_index do |raw, i|
         ln = i + 1
-        if (mm = raw.match(/^(\s*)def\s+(self\.)?([A-Za-z0-9_?!]+)/))
+        if (mm = raw.match(/^(\s*)(?:(?:private|public|protected)_class_method\s+)?def\s+(?:(?:self|[A-Z][A-Za-z0-9_]*)\.)?([A-Za-z0-9_?!]+)/))
           ind = mm[1].length
           stack.pop while stack.any? && stack.last[0] >= ind
-          stack.push([ind, mm[3], ln])
+          stack.push([ind, mm[2], ln]) unless endless_def_line?(raw)
         elsif (e = raw.match(/^(\s*)end\b/))
           ind = e[1].length
           stack.pop if stack.any? && stack.last[0] == ind
@@ -65,6 +66,13 @@ module SlopCop
         idx[ln] = stack.last ? stack.last[1] : "(top-level)"
       end
       idx
+    end
+
+    def endless_def_line?(raw)
+      stripped = raw.strip
+      return false unless stripped.start_with?("def ", "private_class_method def ", "public_class_method def ", "protected_class_method def ")
+
+      stripped.match?(/\)\s*=/) || stripped.match?(/\A(?:private_class_method |public_class_method |protected_class_method )?def\s+(?:(?:self|[A-Z][A-Za-z0-9_]*)\.)?[A-Za-z0-9_?!]+\s*=/)
     end
 
     def ast_nodes(abspath)
@@ -127,6 +135,7 @@ module SlopCop
 
       lines = File.readlines(abspath)
       midx = method_index(lines)
+      noise_lines = declaration_noise_lines(lines)
       nodes = ast_nodes(abspath)
       out = []
 
@@ -150,21 +159,22 @@ module SlopCop
           meth = midx[sl] || "(top-level)"
           anode = node_for(nodes, sl, sc, el, ec)
           source_line = sl > lines.length ? "" : lines[sl - 1]
-          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary, pnode, source_line)
+          cat = categorize(meth, pkind, anode, any_taken, cond, ffi_boundary, pnode, source_line, noise_lines.include?(sl))
+          next if cat.nil?
+
           out << Arm.new(file: abspath, defn: meth, line: sl, category: cat)
         end
       end
       out
     end
 
-    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil)
+    def categorize(method, pkind, anode, sibling_taken, cond = nil, ffi_boundary = [], pnode = nil, source_line = nil, declaration_noise = false)
+      return nil if coverage_noise?(pnode, sibling_taken, source_line, declaration_noise)
       return :ffi if ffi_boundary.include?(method)
       return :diagnostic if anode && subtree(anode, mids: DIAGNOSTIC_MIDS)
       # type/nil guard family: check the decision's CONDITION and the
       # arm body -> the decomplex DecisionPressure class.
       return :type_norm if (cond && type_guard?(cond)) || (anode && type_guard?(anode))
-      return :defensive if !sibling_taken && coverage_artifact_source?(source_line)
-      return :defensive if pnode && !decision_node?(pnode) && !sibling_taken
       return :dead unless sibling_taken          # decision never executes
       return :defensive if trivial?(anode)
 
@@ -179,10 +189,50 @@ module SlopCop
       %i[IF UNLESS WHILE UNTIL CASE].include?(node.type)
     end
 
+    def coverage_noise?(pnode, sibling_taken, source_line, declaration_noise = false)
+      return true if declaration_noise
+      return true if coverage_artifact_source?(source_line)
+      return true if pnode && !decision_node?(pnode) && !sibling_taken
+
+      false
+    end
+
+    def declaration_noise_lines(lines)
+      noise = Set.new
+      sig_depth = nil
+      lines.each_with_index do |raw, i|
+        ln = i + 1
+        stripped = raw.strip
+        if sig_depth
+          noise << ln
+          sig_depth = nil if stripped == "end"
+          next
+        end
+
+        if stripped == "sig do"
+          noise << ln
+          sig_depth = true
+          next
+        end
+
+        noise << ln if declaration_source?(stripped)
+      end
+      noise
+    end
+
     def coverage_artifact_source?(source_line)
       return false if source_line.nil?
       stripped = source_line.to_s.strip
-      stripped.empty? || stripped == "end" || stripped.start_with?("sig {")
+      stripped.empty? || stripped == "end" || declaration_source?(stripped)
+    end
+
+    def declaration_source?(stripped)
+      stripped.start_with?(
+        "sig {", "def ", "private_class_method def ",
+        "public_class_method def ", "protected_class_method def ",
+        "class ", "module ", "include ", "extend ", "attr_",
+        "const :", "prop :", "params(", ").returns", ").void", "VALID_"
+      )
     end
 
     def type_guard?(node)

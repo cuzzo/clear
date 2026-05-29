@@ -34,6 +34,10 @@ end
 
 class AST::BgBlock
   sig { returns(T.untyped) }
+  def async_result_shape; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def async_result_shape=(value); end
+  sig { returns(T.untyped) }
   def can_smash_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_smash_token=(value); end
@@ -138,6 +142,11 @@ class AST::BindExpr
   def reassign_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reassign_cleanup=(value); end
+end
+
+class AST::BodySlot
+  sig { returns(T::Array[T.untyped]) }
+  def body; end
 end
 
 class AST::CapabilityWrap
@@ -746,6 +755,10 @@ end
 
 class BgBlock
   sig { returns(T.untyped) }
+  def async_result_shape; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def async_result_shape=(value); end
+  sig { returns(T.untyped) }
   def can_smash_token; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def can_smash_token=(value); end
@@ -853,7 +866,7 @@ class BindExpr
 end
 
 class BodySlot
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def body; end
   sig { returns(T.untyped) }
   def name; end
@@ -1511,10 +1524,10 @@ end
 class MIR::OwnershipContract
   sig { returns(T::Array[String]) }
   def borrows; end
-  sig { returns(T::Array[String]) }
-  def consumes; end
   sig { returns(T::Boolean) }
   def covers_consuming_params; end
+  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  def operands; end
   sig { returns(T::Array[String]) }
   def produces; end
 end
@@ -1653,10 +1666,10 @@ end
 class OwnershipContract
   sig { returns(T::Array[String]) }
   def borrows; end
-  sig { returns(T::Array[String]) }
-  def consumes; end
   sig { returns(T::Boolean) }
   def covers_consuming_params; end
+  sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+  def operands; end
   sig { returns(T::Array[String]) }
   def produces; end
 end
@@ -1880,6 +1893,10 @@ class StructSchema
 end
 
 class SymbolEntry
+  sig { returns(T.nilable(AsyncResultShape)) }
+  def async_result_shape; end
+  sig { params(value: T.nilable(AsyncResultShape)).returns(T.nilable(AsyncResultShape)) }
+  def async_result_shape=(value); end
   sig { returns(T::Boolean) }
   def borrowed_alias; end
   sig { params(value: T::Boolean).returns(T::Boolean) }

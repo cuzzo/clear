@@ -358,10 +358,9 @@ pub fn build(b: *std.Build) void {
     // --strip-path trims the repo root so paths come out repo-relative
     // (zig/runtime/foo.zig). build_root is `.../zig`; its parent is the
     // repo root.
-    const runtime_dir_abs = b.path("runtime").getPath(b);
-    const lib_dir_abs = b.path("lib").getPath(b);
+    const zig_dir_abs = b.path(".").getPath(b);
     const repo_root = std.fs.path.dirname(b.build_root.path orelse ".") orelse ".";
-    const kcov_include_arg = b.fmt("--include-path={s},{s}", .{ runtime_dir_abs, lib_dir_abs });
+    const kcov_include_arg = b.fmt("--include-path={s}", .{zig_dir_abs});
     const kcov_strip_arg = b.fmt("--strip-path={s}/", .{repo_root});
 
     // build_options module exposing `coverage` and `tsan` to test code.
@@ -775,6 +774,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .ReleaseFast,
         }),
+        .use_llvm = if (coverage) true else null,
     });
     // Loom needs the fiber switch + onRoot assembly because it actually
     // runs scheduler/fiber code (unlike VOPR which simulates the queue
@@ -784,6 +784,24 @@ pub fn build(b: *std.Build) void {
     loom_exe.root_module.link_libc = true;
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
+    if (coverage and shard_index == 0) {
+        const loom_kcov_dir = "zig-out/coverage/loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", loom_kcov_dir });
+        const run_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            loom_kcov_dir,
+        });
+        run_loom_kcov.addArtifactArg(loom_exe);
+        run_loom_kcov.stdio = .inherit;
+        run_loom_kcov.setCwd(b.path("."));
+        run_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_loom_kcov.step);
+        merge_cmd.?.addArg(loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_loom_kcov.step);
+    }
     loom_step.dependOn(&run_loom.step);
 
     // parking-lot-loom — built as an executable so `@import("root")` from
@@ -807,7 +825,7 @@ pub fn build(b: *std.Build) void {
         // Same reason as the unit-test path: stage2 emits limited DWARF
         // and kcov sees only the embedded .S files. Force LLVM under
         // -Dcoverage-loom so project .zig sources land in the report.
-        .use_llvm = if (coverage_loom) true else null,
+        .use_llvm = if (coverage or coverage_loom) true else null,
     });
     pl_loom_exe.root_module.addImport("build_options", build_options_mod);
     pl_loom_exe.root_module.addAssemblyFile(switch_s);
@@ -886,7 +904,7 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .optimize = optimize,
             }),
-            .use_llvm = if (coverage_vopr) true else null,
+            .use_llvm = if (coverage or coverage_vopr) true else null,
         });
         exe.root_module.addImport("build_options", build_options_mod);
         exe.root_module.addAssemblyFile(switch_s);
@@ -897,6 +915,24 @@ pub fn build(b: *std.Build) void {
         run_exe.stdio = .inherit;
         if (!coverage_vopr and shard_index == 0) {
             test_loom_vopr_step.dependOn(&run_exe.step);
+        }
+        if (coverage and shard_index == 0) {
+            const kcov_dir = b.fmt("zig-out/coverage/{s}", .{ve.name});
+            const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
+            const run_kcov = b.addSystemCommand(&.{
+                "kcov",
+                "--clean",
+                kcov_include_arg,
+                kcov_strip_arg,
+                kcov_dir,
+            });
+            run_kcov.addArtifactArg(exe);
+            run_kcov.stdio = .inherit;
+            run_kcov.setCwd(b.path("."));
+            run_kcov.step.dependOn(&mkdir_cmd.step);
+            test_step.dependOn(&run_kcov.step);
+            merge_cmd.?.addArg(kcov_dir);
+            merge_cmd.?.step.dependOn(&run_kcov.step);
         }
         if (coverage_vopr and shard_index == 0) {
             const kcov_dir = b.fmt("zig-out/coverage-vopr/{s}", .{ve.name});
@@ -925,6 +961,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .use_llvm = if (coverage or coverage_loom) true else null,
     });
     versioned_loom_exe.root_module.addAssemblyFile(switch_s);
     versioned_loom_exe.root_module.addAssemblyFile(onroot_s);
@@ -934,6 +971,24 @@ pub fn build(b: *std.Build) void {
     run_versioned_loom.stdio = .inherit;
     if (shard_index == 0) {
         test_loom_vopr_step.dependOn(&run_versioned_loom.step);
+    }
+    if (coverage and shard_index == 0) {
+        const versioned_loom_kcov_dir = "zig-out/coverage/versioned-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", versioned_loom_kcov_dir });
+        const run_versioned_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            versioned_loom_kcov_dir,
+        });
+        run_versioned_loom_kcov.addArtifactArg(versioned_loom_exe);
+        run_versioned_loom_kcov.stdio = .inherit;
+        run_versioned_loom_kcov.setCwd(b.path("."));
+        run_versioned_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_versioned_loom_kcov.step);
+        merge_cmd.?.addArg(versioned_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_versioned_loom_kcov.step);
     }
     loom_step.dependOn(&run_versioned_loom.step);
 
@@ -950,7 +1005,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
-        .use_llvm = if (coverage_loom) true else null,
+        .use_llvm = if (coverage or coverage_loom) true else null,
     });
     vm_loom_exe.root_module.addAssemblyFile(switch_s);
     vm_loom_exe.root_module.addAssemblyFile(onroot_s);
@@ -962,6 +1017,24 @@ pub fn build(b: *std.Build) void {
         test_loom_vopr_step.dependOn(&run_vm_loom.step);
     }
     loom_step.dependOn(&run_vm_loom.step);
+    if (coverage and shard_index == 0) {
+        const vm_loom_kcov_dir = "zig-out/coverage/versioned-multi-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", vm_loom_kcov_dir });
+        const run_vm_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            vm_loom_kcov_dir,
+        });
+        run_vm_loom_kcov.addArtifactArg(vm_loom_exe);
+        run_vm_loom_kcov.stdio = .inherit;
+        run_vm_loom_kcov.setCwd(b.path("."));
+        run_vm_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_vm_loom_kcov.step);
+        merge_cmd.?.addArg(vm_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_vm_loom_kcov.step);
+    }
     if (coverage_loom and shard_index == 0) {
         const vm_loom_kcov_dir = "zig-out/coverage-loom/versioned-multi-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", vm_loom_kcov_dir });
@@ -993,7 +1066,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
-        .use_llvm = if (coverage_loom) true else null,
+        .use_llvm = if (coverage or coverage_loom) true else null,
     });
     ow_loom_exe.root_module.addAssemblyFile(switch_s);
     ow_loom_exe.root_module.addAssemblyFile(onroot_s);
@@ -1005,6 +1078,24 @@ pub fn build(b: *std.Build) void {
         test_loom_vopr_step.dependOn(&run_ow_loom.step);
     }
     loom_step.dependOn(&run_ow_loom.step);
+    if (coverage and shard_index == 0) {
+        const ow_loom_kcov_dir = "zig-out/coverage/ownership-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", ow_loom_kcov_dir });
+        const run_ow_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            ow_loom_kcov_dir,
+        });
+        run_ow_loom_kcov.addArtifactArg(ow_loom_exe);
+        run_ow_loom_kcov.stdio = .inherit;
+        run_ow_loom_kcov.setCwd(b.path("."));
+        run_ow_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_ow_loom_kcov.step);
+        merge_cmd.?.addArg(ow_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_ow_loom_kcov.step);
+    }
     if (coverage_loom and shard_index == 0) {
         const ow_loom_kcov_dir = "zig-out/coverage-loom/ownership-loom";
         const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", ow_loom_kcov_dir });

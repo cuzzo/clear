@@ -25,6 +25,25 @@ require_relative "../annotator/helpers/function_signature"
 require_relative "cleanup_entry"
 require_relative "local_binding_facts"
 
+module MIRControlFlowExpr
+  extend T::Sig
+
+  sig { params(node: T.untyped, skip_copy: T::Boolean).returns(T::Array[T.untyped]) }
+  def self.children(node, skip_copy: false)
+    AST.expression_children(node, skip_copy: skip_copy)
+  end
+
+  sig { params(node: T.untyped, skip_copy: T::Boolean, block: T.untyped).returns(T.untyped) }
+  def walk_expr_node(node, skip_copy: false, &block)
+    return unless node
+    yield node
+    MIRControlFlowExpr.children(node, skip_copy: skip_copy).each do |child|
+      walk_expr_node(child, skip_copy: skip_copy, &block)
+    end
+    nil
+  end
+end
+
 # ==========================================
 # CFG - Control Flow Graph (analysis only)
 # ==========================================
@@ -258,46 +277,15 @@ class FunctionCFG
   sig { params(node: T.untyped, can_fail_fns: T::Set[String]).returns(T::Boolean) }
   def self.stmt_can_fail?(node, can_fail_fns)
     return false unless node
-    case node
-    when AST::FuncCall
+
+    if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
       return true if node.can_fail
       return true if can_fail_fns.include?(node.name)
-      node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
-    when AST::MethodCall
-      return true if node.can_fail
-      return true if can_fail_fns.include?(node.name)
-      stmt_can_fail?(node.object, can_fail_fns) ||
-        node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
-    when AST::StaticCall
-      return true if node.can_fail
-      node.args.any? { |a| stmt_can_fail?(a, can_fail_fns) }
-    when AST::VarDecl, AST::BindExpr
-      stmt_can_fail?(node.value, can_fail_fns)
-    when AST::Assignment
-      stmt_can_fail?(node.value, can_fail_fns)
-    when AST::BinaryOp
-      stmt_can_fail?(node.left, can_fail_fns) || stmt_can_fail?(node.right, can_fail_fns)
-    when AST::UnaryOp
-      stmt_can_fail?(node.right, can_fail_fns)
-    when AST::CopyNode, AST::CloneNode, AST::MoveNode, AST::Cast
-      stmt_can_fail?(node.value, can_fail_fns)
-    when AST::FreezeNode
-      true  # freeze() always returns an error union (OOM / Cycle)
-    when AST::GetField
-      stmt_can_fail?(node.target, can_fail_fns)
-    when AST::GetIndex
-      stmt_can_fail?(node.target, can_fail_fns) || stmt_can_fail?(node.index, can_fail_fns)
-    when AST::StructLit, AST::UnionVariantLit
-      node.fields.any? { |_, v| stmt_can_fail?(v, can_fail_fns) }
-    when AST::ListLit
-      node.items.any? { |v| stmt_can_fail?(v, can_fail_fns) }
-    when AST::ReturnNode
-      stmt_can_fail?(node.value, can_fail_fns)
-    when AST::Raise, AST::OrRaise
-      true
-    else
-      false
     end
+    return true if node.is_a?(AST::StaticCall) && node.can_fail
+    return true if node.is_a?(AST::FreezeNode) || node.is_a?(AST::Raise) || node.is_a?(AST::OrRaise)
+
+    MIRControlFlowExpr.children(node).any? { |child| stmt_can_fail?(child, can_fail_fns) }
   end
 end
 
@@ -320,6 +308,7 @@ end
 
 class OwnershipDataflow
     extend T::Sig
+  include MIRControlFlowExpr
 
   UNINIT      = :uninit
   OWNED       = :owned
@@ -904,7 +893,7 @@ class OwnershipDataflow
   # source is NOT consumed (the copy is what transfers ownership).
   sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
   def collect_explicit_in(node, step)
-    walk_expr_skip_copy(node) do |n|
+    walk_expr_node(node, skip_copy: true) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
       next unless step.state[name]
@@ -920,7 +909,7 @@ class OwnershipDataflow
   def collect_explicit_moves(node, state)
     return [] unless node
     step = DataflowStep.new(state: state, consumed: Set.new)
-    walk_expr_skip_copy(node) do |n|
+    walk_expr_node(node, skip_copy: true) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
       next unless step.state[name]
@@ -938,7 +927,7 @@ class OwnershipDataflow
 
   sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
   def collect_share_transfers_in(node, step)
-    walk_expr(node) do |n|
+    walk_expr_node(node) do |n|
       collect_share_transfer(n, step) if n.is_a?(AST::ShareNode)
     end
   end
@@ -967,28 +956,17 @@ class OwnershipDataflow
     consumed = []
     args = stmt.args || []
     args.each do |arg|
-      _walk_bg_captures_in_expr(arg, state, consumed)
+      walk_expr_node(arg) do |expr|
+        next unless expr.is_a?(AST::BgBlock) || expr.is_a?(AST::BgStreamBlock)
+        resource_captures(expr).each do |name|
+          consumed << name if state[name]
+        end
+        collect_bg_body_gives(expr).each do |name|
+          consumed << name if state[name]
+        end
+      end
     end
     consumed
-  end
-
-  sig { params(expr: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry], consumed: T::Array[String]).returns(T.nilable(T::Array[T.untyped])) }
-  def _walk_bg_captures_in_expr(expr, state, consumed)
-    return unless expr
-    case expr
-    when AST::BgBlock, AST::BgStreamBlock
-      resource_captures(expr).each do |name|
-        consumed << name if state[name]
-      end
-      collect_bg_body_gives(expr).each do |name|
-        consumed << name if state[name]
-      end
-    when AST::FuncCall
-      expr.args.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
-    when AST::MethodCall
-      _walk_bg_captures_in_expr(expr.object, state, consumed)
-      expr.args.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
-    end
   end
 
   # Walks the BG body looking for `GIVE capture` (MoveNode wrapping an
@@ -1038,98 +1016,6 @@ class OwnershipDataflow
     false
   end
 
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
-  def walk_expr(node, &block)
-    return unless node
-    yield node
-    case node
-    when AST::BinaryOp
-      walk_expr(node.left, &block)
-      walk_expr(node.right, &block)
-    when AST::UnaryOp
-      walk_expr(node.right, &block)
-    when AST::FuncCall
-      node.args.each { |a| walk_expr(a, &block) }
-    when AST::MethodCall
-      walk_expr(node.object, &block)
-      node.args.each { |a| walk_expr(a, &block) }
-    when AST::GetField
-      walk_expr(node.target, &block)
-    when AST::GetIndex
-      walk_expr(node.target, &block)
-      walk_expr(node.index, &block)
-    when AST::StructLit
-      node.fields&.each_value { |v| walk_expr(v, &block) }
-    when AST::ListLit
-      node.items.each { |i| walk_expr(i, &block) }
-    when AST::HashLit
-      node.pairs.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      walk_expr(node.value, &block)
-    when AST::ShareNode
-      walk_expr(node.value, &block)
-    when AST::MoveNode
-      walk_expr(node.value, &block)
-    when AST::CapabilityWrap
-      walk_expr(node.value, &block)
-    when AST::ReturnNode
-      walk_expr(node.value, &block)
-    when AST::Assert
-      walk_expr(node.condition, &block)
-    when AST::Assignment
-      walk_expr(node.value, &block)
-    when AST::VarDecl, AST::BindExpr
-      walk_expr(node.value, &block)
-    end
-  end
-
-  # Like walk_expr but does NOT recurse into CopyNode. CopyNode wraps
-  # was_moved identifiers for implicit copies -- the source is NOT consumed.
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
-  def walk_expr_skip_copy(node, &block)
-    return unless node
-    yield node
-    case node
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # Do not recurse: COPY/FREEZE does not consume the source.
-    when AST::ShareNode
-      walk_expr_skip_copy(node.value, &block)
-    when AST::BinaryOp
-      walk_expr_skip_copy(node.left, &block)
-      walk_expr_skip_copy(node.right, &block)
-    when AST::UnaryOp
-      walk_expr_skip_copy(node.right, &block)
-    when AST::FuncCall
-      node.args.each { |a| walk_expr_skip_copy(a, &block) }
-    when AST::MethodCall
-      walk_expr_skip_copy(node.object, &block)
-      node.args.each { |a| walk_expr_skip_copy(a, &block) }
-    when AST::GetField
-      walk_expr_skip_copy(node.target, &block)
-    when AST::GetIndex
-      walk_expr_skip_copy(node.target, &block)
-      walk_expr_skip_copy(node.index, &block)
-    when AST::StructLit
-      node.fields&.each_value { |v| walk_expr_skip_copy(v, &block) }
-    when AST::ListLit
-      node.items.each { |i| walk_expr_skip_copy(i, &block) }
-    when AST::HashLit
-      node.pairs.each { |_k, v| walk_expr_skip_copy(v.is_a?(Array) ? v[1] : v, &block) }
-    when AST::MoveNode
-      walk_expr_skip_copy(node.value, &block)
-    when AST::CapabilityWrap
-      walk_expr_skip_copy(node.value, &block)
-    when AST::ReturnNode
-      walk_expr_skip_copy(node.value, &block)
-    when AST::Assert
-      walk_expr_skip_copy(node.condition, &block)
-    when AST::Assignment
-      walk_expr_skip_copy(node.value, &block)
-    when AST::VarDecl, AST::BindExpr
-      walk_expr_skip_copy(node.value, &block)
-    end
-  end
-
   sig { params(state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def dup_state(state)
     state.dup
@@ -1150,6 +1036,7 @@ end
 
 class UseAfterMoveChecker
     extend T::Sig
+  include MIRControlFlowExpr
 
   attr_reader :errors
 
@@ -1369,7 +1256,7 @@ class UseAfterMoveChecker
 
     case st
     when OwnershipDataflow::MOVED
-      loc = token ? " (line #{token[:line]})" : ""
+      loc = " (line #{token[:line]})"
       @errors << "[USE_AFTER_MOVE] #{@fn_node.name}::#{name} -- used after being moved#{loc}"
     # NOTE: :maybe_moved reads are NOT errors -- the variable might still be live.
     # Rust allows reads of maybe_moved values (it inserts runtime checks only for drops).
@@ -1475,25 +1362,11 @@ module LoopFrameAnalysis
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
   sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.nilable(T::Array[T.untyped])) }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
-    return unless nodes
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each do |node|
-      case node
-      when AST::Locatable
-        next unless visited.add?(node.object_id)
-        yield node
-        next unless node.class.respond_to?(:members)
-        node.class.members.each do |m|
-          child = node.send(m) rescue next
-          walk_all_nodes(child, visited, &block) if child
-        end
-      when Array
-        walk_all_nodes(node, visited, &block)
-      when Hash
-        # DoBlock branches: { label:, body: [...] } and similar hash-wrapped bodies
-        node.each_value { |v| walk_all_nodes(v, visited, &block) if v }
-      end
+    AST.each_locatable(nodes, descend_functions: true) do |node|
+      next unless visited.add?(node.object_id)
+      yield node
     end
+    nil
   end
 
   # Walk for pipeline nodes that carry a shard_context and update
@@ -1516,22 +1389,35 @@ module LoopFrameAnalysis
     end
   end
 
-  # Returns true when expr is a call to a frame-allocating function
-  #.
+  # Returns true when the SHARD key expression can allocate from the current
+  # frame. The decision is expression-shaped, not function-name-shaped: calls,
+  # interpolation, literals, and aggregate constructors all flow through the
+  # same type/uses_frame facts already produced before MIR lowering.
   sig { params(expr: T.untyped, fn_nodes: FnNodes).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
-    case expr
-    when AST::FuncCall
-      fn = fn_nodes[expr.name]
-      # uses_frame=true means the function frame-allocates internally (e.g. intToString
-      # intermediates). Those intermediate frame allocations accumulate in the caller's frame arena.
-      # The SHARD loop must saveLoopMark/restoreLoopMark to rewind them each iteration.
-      fn&.uses_frame ? true : false
-    when AST::MethodCall
-      false  # method calls on types are not frame-allocating routing keys
-    else
-      false
+    found = T.let(false, T::Boolean)
+    walk_all_nodes(expr) do |node|
+      next unless node.is_a?(AST::Locatable)
+      if node.is_a?(AST::FuncCall)
+        fn = fn_nodes[node.name]
+        found = true if fn&.uses_frame
+      end
+      next unless expression_node_allocates_value?(node)
+
+      storage = node.respond_to?(:storage) ? node.storage : nil
+      found = true if storage == :frame
+      ti = node.full_type!(context: "SHARD frame allocation")
+      found = true if ti.needs_cleanup? && ti.cleanup_allocator == :frame
     end
+    found
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def self.expression_node_allocates_value?(node)
+    return false if node.is_a?(AST::Identifier) || node.is_a?(AST::Literal)
+    return false if node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+
+    true
   end
 
 end
@@ -1557,6 +1443,7 @@ end
 # shared, and write_locked_read use runtime protection (locks / Rc / Arc).
 class BorrowChecker
     extend T::Sig
+  include MIRControlFlowExpr
 
   attr_reader :errors
 
@@ -1689,12 +1576,10 @@ class BorrowChecker
   end
 
   # Check explicit moves (was_moved) in function/method call arguments.
-  sig { params(stmt: T.untyped, token: Lexer::Token).returns(T::Array[T.untyped]) }
+  sig { params(stmt: T.untyped, token: Lexer::Token).void }
   def check_explicit_moves(stmt, token)
-    walk_for_was_moved(stmt) do |ident|
-      next if copy_type?(ident)
-      check_borrowed_move(ident.name.to_s, ident.token || token)
-    end
+    state = synthetic_owner_state
+    transfer_collector.send(:collect_explicit_moves, stmt, state).each { |name| check_borrowed_move(name, token) }
   end
 
   sig { params(name: String, token: Lexer::Token).returns(T.nilable(T::Array[String])) }
@@ -1710,128 +1595,37 @@ class BorrowChecker
   # Non-Copy identifiers in ownership-transferring positions are moves.
   sig { params(node: T.untyped).returns(T::Set[String]) }
   def collect_moved_names(node)
-    names = Set.new
-    _collect_moves(node, names)
-    names
+    Set.new(transfer_collector.send(:collect_binding_moves, node, synthetic_owner_state))
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
-  def _collect_moves(node, names)
-    return unless node
-    case node
-    when AST::Identifier
-      return if copy_type?(node)
-      names << node.name.to_s
-    when AST::StructLit
-      node.fields&.each_value { |v| _collect_moves(v, names) }
-    when AST::MethodCall
-      # Union constructors (TYPE_ID): payload transfers ownership.
-      # Regular method calls: only was_moved args.
-      if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
-        node.args.each { |a| _collect_moves(a, names) }
-      else
-        _collect_was_moved(node, names)
-      end
-    when AST::FuncCall
-      _collect_was_moved(node, names)
-    when AST::ListLit
-      node.items.each { |i| _collect_moves(i, names) }
-    when AST::GetField
-      if owning_field_move?(node)
-        root = AST.root_identifier(node)
-        names << root.name.to_s if root
-      else
-        _collect_was_moved(node, names)
-      end
-    when AST::MoveNode
-      inner = node.value
-      names << inner.name.to_s if inner.is_a?(AST::Identifier)
-    when AST::ShareNode
-      _collect_share_moves(node, names)
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # COPY/FREEZE does NOT move the source.
-    when AST::CapabilityWrap
-      # Unwrap: S{ field: x } @shared still consumes x.
-      _collect_moves(node.value, names)
-    when AST::BgBlock, AST::BgStreamBlock
-      node.capture_analysis&.resource_captures&.each { |n| names << n }
+  sig { returns(OwnershipDataflow) }
+  def transfer_collector
+    fn_node = if @fn_node.is_a?(AST::FunctionDef)
+      @fn_node
     else
-      _collect_was_moved(node, names)
+      token = Lexer::Token.new(:VAR_ID, @fn_name, 1, 1)
+      AST::FunctionDef.new(token, @fn_name, [], [], :Void, nil, @fn_node.respond_to?(:body) ? @fn_node.body : [], [], nil, :private, [], false)
+    end
+    @transfer_collector ||= T.let(
+      OwnershipDataflow.new(FunctionCFG.build(fn_node), fn_node, schema_lookup: @schema_lookup),
+      T.nilable(OwnershipDataflow),
+    )
+  end
+
+  sig { returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
+  def synthetic_owner_state
+    default_entry = OwnershipDataflow::OwnerEntry.new(state: OwnershipDataflow::OWNED, allocator: :heap, needs_cleanup: true)
+    T.let(Hash.new(default_entry), T::Hash[String, OwnershipDataflow::OwnerEntry])
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(node: T.untyped).void).void }
+  def walk_for_was_moved(node, &blk)
+    moved = transfer_collector.send(:collect_explicit_moves, node, synthetic_owner_state).to_set
+    AST.each_locatable(node) do |expr|
+      blk.call(expr) if expr.is_a?(AST::Identifier) && moved.include?(expr.name.to_s)
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
-  def _collect_was_moved(node, names)
-    walk_for_was_moved(node) do |ident|
-      next if copy_type?(ident)
-      names << ident.name.to_s
-    end
-  end
-
-  sig { params(node: AST::ShareNode, names: T::Set[T.untyped]).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
-  def _collect_share_moves(node, names)
-    source = node.value
-    return if source.is_a?(AST::CopyNode)
-
-    if source.is_a?(AST::Identifier)
-      return if source.full_type!.shared?
-      names << source.name.to_s
-      return
-    end
-
-    _collect_moves(source, names)
-  end
-
-  # Walk expression tree for was_moved identifiers, skipping CopyNode.
-  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
-  def walk_for_was_moved(node, &block)
-    return unless node
-    case node
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode then return
-    when AST::Identifier then yield node if node.was_moved
-    when AST::BinaryOp
-      walk_for_was_moved(node.left, &block)
-      walk_for_was_moved(node.right, &block)
-    when AST::UnaryOp
-      walk_for_was_moved(node.right, &block)
-    when AST::FuncCall
-      node.args.each { |a| walk_for_was_moved(a, &block) }
-    when AST::MethodCall
-      walk_for_was_moved(node.object, &block)
-      node.args.each { |a| walk_for_was_moved(a, &block) }
-    when AST::GetField
-      walk_for_was_moved(node.target, &block)
-    when AST::GetIndex
-      walk_for_was_moved(node.target, &block)
-      walk_for_was_moved(node.index, &block)
-    when AST::StructLit
-      node.fields&.each_value { |v| walk_for_was_moved(v, &block) }
-    when AST::ListLit
-      node.items.each { |i| walk_for_was_moved(i, &block) }
-    when AST::MoveNode
-      walk_for_was_moved(node.value, &block)
-    when AST::ShareNode
-      walk_for_was_moved(node.value, &block)
-    when AST::CapabilityWrap
-      walk_for_was_moved(node.value, &block)
-    end
-  end
-
-  sig { params(node: T.untyped).returns(T::Boolean) }
-  def owning_field_move?(node)
-    return false unless node.is_a?(AST::GetField)
-    ti = node.full_type!(context: "ownership dataflow field move")
-    Type.indirect_type?(ti)
-  rescue
-    false
-  end
-
-  sig { params(ident: AST::Identifier).returns(T::Boolean) }
-  def copy_type?(ident)
-    ti = ident.full_type!
-    is_atomic_ptr = ti.atomic_ptr?
-    ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
-  end
 end
 
 

@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "optparse"
 require "rexml/document"
 require "set"
 
@@ -11,8 +12,19 @@ def sh(*args)
   IO.popen(args, chdir: ROOT, err: [:child, :out], &:read)
 end
 
-def base_ref
-  ARGV[0] || (system("git", "rev-parse", "--verify", "origin/master", out: File::NULL, err: File::NULL) ? "origin/master" : "master")
+def parse_options(argv)
+  options = { format: "text" }
+  OptionParser.new do |parser|
+    parser.banner = "Usage: ruby tools/diff_bucket_summary.rb [BASE] [--format text|markdown]"
+    parser.on("--format FORMAT", %w[text markdown], "Output format") { |value| options[:format] = value }
+  end.parse!(argv)
+  options[:base] = argv.shift
+  abort "unexpected arguments: #{argv.join(" ")}" unless argv.empty?
+  options
+end
+
+def default_base_ref
+  system("git", "rev-parse", "--verify", "origin/master", out: File::NULL, err: File::NULL) ? "origin/master" : "master"
 end
 
 def numstat(base)
@@ -30,11 +42,11 @@ end
 
 def bucket_for(path)
   return :src_rb if path.start_with?("src/") && path.end_with?(".rb")
+  return :zig_tests if path.start_with?("zig/") && (path.end_with?("test.zig") || path.end_with?("-vopr.zig"))
   return :zig_src if path.start_with?("zig/") && path.end_with?(".zig") && !path.end_with?("test.zig")
   return :spec if path.start_with?("spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
-  return :zig_tests if path.start_with?("zig/") && path.end_with?("test.zig")
   return :md if path.end_with?(".md")
 
   :other
@@ -71,8 +83,22 @@ def added_lines(base)
   adds
 end
 
-def stale?(coverage_path, paths)
-  return :missing unless File.exist?(coverage_path)
+def coverage_paths(env_name, default_paths)
+  raw = ENV[env_name].to_s
+  return Array(default_paths).map { |path| File.join(ROOT, path) } if raw.empty?
+
+  raw.split(/[#{Regexp.escape(File::PATH_SEPARATOR)},]/).map(&:strip).reject(&:empty?).map do |path|
+    File.expand_path(path, ROOT)
+  end
+end
+
+def explicit_coverage_paths?(env_name)
+  !ENV[env_name].to_s.empty?
+end
+
+def stale?(coverage_paths, paths)
+  existing = coverage_paths.select { |path| File.exist?(path) }
+  return :missing if existing.empty?
 
   newest_source = paths.filter_map do |path|
     full = File.join(ROOT, path)
@@ -80,7 +106,15 @@ def stale?(coverage_path, paths)
   end.max
   return false unless newest_source
 
-  File.mtime(coverage_path) < newest_source
+  existing.map { |path| File.mtime(path) }.max < newest_source
+end
+
+def coverage_state(env_name, cov_paths, paths)
+  if explicit_coverage_paths?(env_name)
+    cov_paths.any? { |path| File.exist?(path) } ? false : :missing
+  else
+    stale?(cov_paths, paths)
+  end
 end
 
 def pct(covered, total)
@@ -89,15 +123,17 @@ def pct(covered, total)
   format("%.1f%%", (covered.to_f / total) * 100.0)
 end
 
-def parse_simplecov(path)
+def merge_simplecov_file!(coverage, path)
   payload = JSON.parse(File.read(path))
-  coverage = {}
   payload.each_value do |entry|
     (entry["coverage"] || {}).each do |file, cov|
       rel = file.start_with?(ROOT) ? file.delete_prefix("#{ROOT}/") : file
       existing = coverage[rel]
       unless existing
-        coverage[rel] = cov
+        coverage[rel] = {
+          "lines" => (cov["lines"] || []).dup,
+          "branches" => JSON.parse(JSON.generate(cov["branches"] || {})),
+        }
         next
       end
       lines = cov["lines"] || []
@@ -107,10 +143,21 @@ def parse_simplecov(path)
         vals = [existing["lines"][i], lines[i]].compact
         vals.empty? ? nil : vals.max
       end
-      existing["branches"] = (existing["branches"] || {}).merge(cov["branches"] || {})
+      existing["branches"] ||= {}
+      (cov["branches"] || {}).each do |parent, children|
+        existing["branches"][parent] ||= {}
+        children.each do |tuple, hits|
+          prior = existing["branches"][parent][tuple]
+          existing["branches"][parent][tuple] = [prior, hits].compact.map(&:to_i).max
+        end
+      end
     end
   end
   coverage
+end
+
+def parse_simplecov(paths)
+  paths.each_with_object({}) { |path, coverage| merge_simplecov_file!(coverage, path) if File.exist?(path) }
 end
 
 def tuple_line(tuple)
@@ -118,11 +165,13 @@ def tuple_line(tuple)
 end
 
 def ruby_added_coverage(adds, paths)
-  cov_path = File.join(ROOT, "coverage/.resultset.json")
-  state = stale?(cov_path, paths)
+  return ["", ""] if paths.empty?
+
+  cov_paths = coverage_paths("RUBY_COVERAGE_PATHS", "coverage/.resultset.json")
+  state = coverage_state("RUBY_COVERAGE_PATHS", cov_paths, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
-  coverage = parse_simplecov(cov_path)
+  coverage = parse_simplecov(cov_paths)
   line_total = line_hit = branch_total = branch_hit = 0
   paths.each do |path|
     cov = coverage[path]
@@ -170,15 +219,46 @@ def parse_cobertura(path)
   files
 end
 
+def parse_coberturas(paths)
+  paths.each_with_object({}) do |path, merged|
+    next unless File.exist?(path)
+
+    parse_cobertura(path).each do |filename, cov|
+      existing = merged[filename]
+      unless existing
+        merged[filename] = cov
+        next
+      end
+      cov[:lines].each do |line, hits|
+        existing[:lines][line] = [existing[:lines][line], hits].compact.max
+      end
+      cov[:branches].each do |line, counts|
+        prior = existing[:branches][line]
+        existing[:branches][line] = if prior
+                                      [[prior[0], counts[0]].max, [prior[1], counts[1]].max]
+                                    else
+                                      counts
+                                    end
+      end
+    end
+  end
+end
+
 def zig_added_coverage(adds, paths)
-  cov_path = File.join(ROOT, "zig/zig-out/coverage/merged/kcov-merged/cobertura.xml")
-  state = stale?(cov_path, paths)
+  return ["", ""] if paths.empty?
+
+  cov_paths = coverage_paths("ZIG_COVERAGE_PATHS", [
+    "zig/zig-out/coverage/merged/cobertura.xml",
+    "zig/zig-out/coverage/merged/kcov-merged/cobertura.xml",
+  ])
+  state = coverage_state("ZIG_COVERAGE_PATHS", cov_paths, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
-  coverage = parse_cobertura(cov_path)
+  coverage = parse_coberturas(cov_paths)
   line_total = line_hit = branch_total = branch_hit = 0
   paths.each do |path|
-    cov = coverage[path] || coverage["./#{path}"] || coverage[File.join(ROOT, path)]
+    zig_relative = path.delete_prefix("zig/")
+    cov = coverage[path] || coverage["./#{path}"] || coverage[zig_relative] || coverage["./#{zig_relative}"] || coverage[File.join(ROOT, path)]
     next unless cov
 
     adds[path].each do |line|
@@ -204,18 +284,36 @@ def print_table(rows)
   end
 end
 
-base = base_ref
+def markdown_escape(value)
+  value.to_s.gsub("|", "\\|")
+end
+
+def print_markdown(base, rows)
+  puts "## Diff Coverage Buckets"
+  puts
+  puts "**Diff base:** `#{base}...HEAD`"
+  puts
+  rows.each_with_index do |row, idx|
+    puts "| #{row.map { |cell| markdown_escape(cell) }.join(" | ")} |"
+    next unless idx.zero?
+
+    puts "| #{row.map.with_index { |_cell, i| i.between?(1, 3) ? "---:" : "---" }.join(" | ")} |"
+  end
+end
+
+options = parse_options(ARGV)
+base = options[:base] || default_base_ref
 stats = numstat(base)
 adds_by_path = added_lines(base)
 
 bucket_order = [
   [:total, "total"],
   [:src_rb, "src/**/*.rb"],
-  [:zig_src, "zig/**/*.zig !*test.zig"],
+  [:zig_src, "zig/**/*.zig !(*test.zig|*-vopr.zig)"],
   [:spec, "spec/"],
   [:transpile_tests, "transpile-tests/"],
   [:tools, "tools/"],
-  [:zig_tests, "zig/**/*test.zig"],
+  [:zig_tests, "zig/**/*test.zig + *-vopr.zig"],
   [:md, "*.md"],
   [:other, "other"],
 ]
@@ -226,8 +324,10 @@ grouped[:total] = stats
 
 src_paths = grouped[:src_rb].map { |e| e[:path] }
 zig_paths = grouped[:zig_src].map { |e| e[:path] }
+zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
 src_cov = ruby_added_coverage(adds_by_path, src_paths)
 zig_cov = zig_added_coverage(adds_by_path, zig_paths)
+zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
 
 rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
 bucket_order.each do |key, label|
@@ -237,10 +337,16 @@ bucket_order.each do |key, label|
   coverage = case key
              when :src_rb then src_cov
              when :zig_src then zig_cov
+             when :zig_tests then zig_test_cov
+             when :spec, :tools then ["not tracked", "not tracked"]
              else ["", ""]
              end
   rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
 end
 
-puts "Diff base: #{base}...HEAD"
-print_table(rows)
+if options[:format] == "markdown"
+  print_markdown(base, rows)
+else
+  puts "Diff base: #{base}...HEAD"
+  print_table(rows)
+end

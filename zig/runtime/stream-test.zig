@@ -783,6 +783,9 @@ const SplitParallelSubscriberState = struct {
 
 fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*SplitParallelSubscriberState, @ptrCast(@alignCast(raw_args.?)));
+    defer {
+        _ = state.completed.fetchAdd(1, .acq_rel);
+    }
     defer state.stream.deinit();
 
     _ = state.ready.fetchAdd(1, .acq_rel);
@@ -798,7 +801,6 @@ fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
 
     state.total = total;
     state.count = count;
-    _ = state.completed.fetchAdd(1, .acq_rel);
 }
 
 const SplitParallelProducerState = struct {
@@ -809,6 +811,9 @@ const SplitParallelProducerState = struct {
 
 fn splitParallelProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*SplitParallelProducerState, @ptrCast(@alignCast(raw_args.?)));
+    defer {
+        _ = state.completed.fetchAdd(1, .acq_rel);
+    }
     defer state.stream.close();
 
     var i: usize = 0;
@@ -816,7 +821,6 @@ fn splitParallelProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
         try state.stream.push(@as(i64, @intCast(i)));
         if ((i & 63) == 0) rt.checkYield();
     }
-    _ = state.completed.fetchAdd(1, .acq_rel);
 }
 
 test "SplitStream preserves order across two OS-thread consumers" {

@@ -5,7 +5,7 @@
 
 ACCESS_PATH_EXPRESSION_CELLS = []
 
-%i[field index optional_field optional_index map_index nested_field].each do |access|
+%i[field index optional_field optional_index map_index set_index nested_field].each do |access|
   %i[local return_value fn_arg branch loop].each do |context|
     ACCESS_PATH_EXPRESSION_CELLS << { access: access, context: context }
   end
@@ -32,6 +32,8 @@ def apx_setup(access)
     'maybe: ?String[] = [COPY "abc", COPY "de"];'
   when :map_index
     'm: HashMap<String> = {"a": COPY "abc"};'
+  when :set_index
+    'MUTABLE s: String[]@set = Set[]; s.insert("abc");'
   when :nested_field
     'w: Wrap = Wrap{ box: Box{ label: COPY "abc" } };'
   end
@@ -39,7 +41,7 @@ end
 
 def apx_type(access)
   case access
-  when :optional_field, :optional_index, :map_index then "?String"
+  when :optional_field, :optional_index, :map_index, :set_index then "?String"
   else "String"
   end
 end
@@ -51,16 +53,17 @@ def apx_expr(access)
   when :optional_field then "maybe?.label"
   when :optional_index then "maybe?[0_i64]"
   when :map_index then "m[\"a\"]"
+  when :set_index then "s[\"abc\"]"
   when :nested_field then "w.box.label"
   end
 end
 
 def apx_return_expr(access)
-  access == :map_index ? 'COPY (m["a"] OR COPY "")' : "COPY #{apx_expr(access)}"
+  %i[map_index set_index].include?(access) ? "COPY (#{apx_expr(access)} OR COPY \"\")" : "COPY #{apx_expr(access)}"
 end
 
 def apx_observe(access, name)
-  %i[optional_field optional_index map_index].include?(access) ? "(#{name} OR COPY \"\").length()" : "#{name}.length()"
+  %i[optional_field optional_index map_index set_index].include?(access) ? "(#{name} OR COPY \"\").length()" : "#{name}.length()"
 end
 
 FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRESSION_CELLS) do |p|
@@ -94,7 +97,7 @@ FuzzGenerator.register(:access_path_expression_matrix, cells: ACCESS_PATH_EXPRES
       END
     CHT
   when :fn_arg
-    optional_access = %i[optional_field optional_index map_index].include?(p[:access])
+    optional_access = %i[optional_field optional_index map_index set_index].include?(p[:access])
     arg_type = optional_access ? "?String" : "String"
     <<~CHT
       #{prelude}FN observe(x: #{arg_type}) RETURNS Int64 ->

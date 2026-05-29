@@ -24,6 +24,18 @@ ESCAPE_MECHANISM_CELLS = [
   { mechanism: :give_arg },
   { mechanism: :call_return_receiver },
   { mechanism: :or_rescue_return_receiver },
+  { mechanism: :return_nested_struct_list },
+  { mechanism: :return_recursive_union_payload },
+  { mechanism: :outer_store_nested_array },
+  { mechanism: :bg_capture_recursive_aggregate },
+  { mechanism: :do_capture_string },
+  { mechanism: :takes_recursive_aggregate },
+  { mechanism: :loop_carry_nested_map },
+  { mechanism: :return_union_with_list_payload },
+  { mechanism: :outer_map_store_union_payload },
+  { mechanism: :takes_union_with_struct_payload },
+  { mechanism: :bg_capture_optional_struct },
+  { mechanism: :loop_carry_union_array_combo },
 ].freeze
 
 FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) do |p|
@@ -269,6 +281,212 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           out: String = mk() OR COPY "fallback";
           xs.append(out);
           ASSERT xs[0_i64].length() == 3_i64, "or rescue return receiver";
+          RETURN;
+      END
+    CHT
+  when :return_nested_struct_list
+    <<~CHT
+      STRUCT Inner { name: String }
+      STRUCT Outer { items: Inner[]@list }
+
+      FN mk() RETURNS !Outer ->
+          MUTABLE xs: Inner[]@list = [];
+          xs.append(Inner{ name: COPY "abc" });
+          out = Outer{ items: xs };
+          RETURN out;
+      END
+
+      FN main() RETURNS Void ->
+          out: Outer = mk() OR RAISE;
+          ASSERT out.items[0_i64].name.length() == 3_i64, "return nested struct list";
+          RETURN;
+      END
+    CHT
+
+  when :return_recursive_union_payload
+    <<~CHT
+      UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+
+      FN mk() RETURNS !Node ->
+          left = Node{ One: COPY "a" };
+          right = Node{ One: COPY "b" };
+          RETURN Node.Pair{ left: left, right: right };
+      END
+
+      FN main() RETURNS Void ->
+          n: Node = mk() OR RAISE;
+          PARTIAL MATCH n START
+              Node.Pair AS p -> ASSERT TRUE, "recursive pair returned";,
+              DEFAULT -> ASSERT FALSE, "expected recursive pair";
+          END
+          RETURN;
+      END
+    CHT
+
+  when :outer_store_nested_array
+    <<~CHT
+      STRUCT Box { vals: String[] }
+
+      FN main() RETURNS Void ->
+          MUTABLE out: Box[]@list = [];
+          FOR i IN (1_i64 ..= 3_i64) DO
+              s: String = i.toString();
+              b = Box{ vals: [s] };
+              out.append(b);
+          END
+          ASSERT out[2_i64].vals[0_i64].length() == 1_i64, "outer store nested array";
+          RETURN;
+      END
+    CHT
+
+  when :bg_capture_recursive_aggregate
+    <<~CHT
+      STRUCT Item { label: String }
+      STRUCT Holder { items: Item[]@list }
+
+      FN main() RETURNS Void ->
+          MUTABLE xs: Item[]@list = [];
+          xs.append(Item{ label: COPY "abc" });
+          h = Holder{ items: xs };
+          f: ~Int64 = BG { h.items[0_i64].label.length(); };
+          ASSERT (NEXT f) == 3_i64, "bg capture recursive aggregate";
+          RETURN;
+      END
+    CHT
+
+  when :do_capture_string
+    <<~CHT
+      FN touch(n: Int64) RETURNS Void -> RETURN; END
+
+      FN main() RETURNS Void ->
+          s: String = COPY "abc";
+          DO {
+              touch(s.length()),
+              touch((COPY s).length())
+          }
+          RETURN;
+      END
+    CHT
+
+  when :takes_recursive_aggregate
+    <<~CHT
+      STRUCT Item { label: String }
+      STRUCT Holder { items: Item[]@list }
+
+      FN consume(TAKES h: Holder) RETURNS Int64 ->
+          RETURN h.items[0_i64].label.length();
+      END
+
+      FN main() RETURNS Void ->
+          MUTABLE xs: Item[]@list = [];
+          xs.append(Item{ label: COPY "abc" });
+          h = Holder{ items: xs };
+          ASSERT consume(GIVE h) == 3_i64, "takes recursive aggregate";
+          RETURN;
+      END
+    CHT
+
+  when :loop_carry_nested_map
+    <<~CHT
+      STRUCT Holder { table: HashMap<String> }
+
+      FN main() RETURNS Void ->
+          MUTABLE out: Holder[]@list = [];
+          FOR i IN (1_i64 ..= 3_i64) DO
+              s: String = i.toString();
+              h = Holder{ table: { "k": s } };
+              out.append(h);
+          END
+          ASSERT (out[1_i64].table["k"] OR "").length() == 1_i64, "loop carry nested map";
+          RETURN;
+      END
+    CHT
+
+  when :return_union_with_list_payload
+    <<~CHT
+      UNION Payload { Empty, Items: String[]@list }
+
+      FN mk() RETURNS !Payload ->
+          MUTABLE xs: String[]@list = [];
+          s: String = COPY "abc";
+          xs.append(s);
+          RETURN Payload{ Items: xs };
+      END
+
+      FN main() RETURNS Void ->
+          p: Payload = mk() OR RAISE;
+          MUTABLE n: Int64 = 0_i64;
+          PARTIAL MATCH p START
+              Payload.Items AS xs -> n = xs[0_i64].length();,
+              DEFAULT -> n = 0_i64;
+          END
+          ASSERT n == 3_i64, "return union with list payload";
+          RETURN;
+      END
+    CHT
+
+  when :outer_map_store_union_payload
+    <<~CHT
+      UNION Cell { Empty, Text: String }
+
+      FN main() RETURNS Void ->
+          MUTABLE out: HashMap<Cell> = {};
+          FOR i IN (1_i64 ..= 3_i64) DO
+              s: String = i.toString();
+              out[i.toString()] = Cell{ Text: COPY s };
+          END
+          ASSERT out.count() == 3_i64, "outer map store union payload";
+          RETURN;
+      END
+    CHT
+
+  when :takes_union_with_struct_payload
+    <<~CHT
+      STRUCT Item { label: String }
+      UNION Payload { Empty, Item: Item }
+
+      FN consume(TAKES p: Payload) RETURNS Int64 ->
+          MUTABLE n: Int64 = 0_i64;
+          PARTIAL MATCH p START
+              Payload.Item AS item -> n = item.label.length();,
+              DEFAULT -> n = 0_i64;
+          END
+          RETURN n;
+      END
+
+      FN main() RETURNS Void ->
+          p: Payload = Payload{ Item: Item{ label: COPY "abc" } };
+          ASSERT consume(GIVE p) == 3_i64, "takes union with struct payload";
+          RETURN;
+      END
+    CHT
+
+  when :bg_capture_optional_struct
+    <<~CHT
+      STRUCT Holder { label: String }
+
+      FN main() RETURNS Void ->
+          h: ?Holder = Holder{ label: COPY "abc" };
+          f: ~Int64 = BG { (h OR Holder{ label: COPY "" }).label.length(); };
+          ASSERT (NEXT f) == 3_i64, "bg capture optional struct";
+          RETURN;
+      END
+    CHT
+
+  when :loop_carry_union_array_combo
+    <<~CHT
+      STRUCT Item { label: String }
+      UNION Payload { Empty, Items: Item[]@list }
+
+      FN main() RETURNS Void ->
+          MUTABLE out: Payload[]@list = [];
+          FOR i IN (1_i64 ..= 3_i64) DO
+              s: String = i.toString();
+              MUTABLE items: Item[]@list = [];
+              items.append(Item{ label: COPY s });
+              out.append(Payload{ Items: items });
+          END
+          ASSERT out.length() == 3_i64, "loop carry union array combo";
           RETURN;
       END
     CHT

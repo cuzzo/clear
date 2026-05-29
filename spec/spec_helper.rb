@@ -53,6 +53,7 @@ if ENV["COVERAGE"] == "1"
   end
 
   SimpleCov.start do
+    coverage_dir ENV.fetch("COVERAGE_DIR", "coverage")
     enable_coverage :branch
 
     if cobertura_available

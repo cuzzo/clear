@@ -7,6 +7,23 @@ module MIRLoweringFunctions
 
   requires_ancestor { MIRLowering }
 
+  class FunctionParamFact < T::Struct
+    extend T::Sig
+
+    const :param, AST::Param
+    const :name, String
+    const :mir_name, String
+    const :zig_type, String
+    const :mutable_scalar, T::Boolean
+    const :collection_param, T::Boolean
+    const :pointer_passed, T::Boolean
+
+    sig { returns(MIR::Param) }
+    def to_mir_param
+      MIR::Param.new(mir_name, zig_type, pointer_passed)
+    end
+  end
+
   class CallArgFacts < T::Struct
     const :ast_arg, AST::Node
     const :copy_source, T.nilable(AST::Node)
@@ -25,6 +42,7 @@ module MIRLoweringFunctions
 
     const :takes_indices, T::Set[Integer]
     const :consumed_names, T::Array[String]
+    const :consumed_operands, T::Array[MIR::OwnershipOperandFact], default: []
 
     sig { params(index: Integer).returns(T::Boolean) }
     def takes?(index)
@@ -38,7 +56,16 @@ module MIRLoweringFunctions
 
     sig { returns(MIR::OwnershipContract) }
     def ownership_contract
-      MIR::OwnershipContract.consumes(consumed_names)
+      MIR::OwnershipContract.consume_operands(operands)
+    end
+
+    sig { returns(T::Array[MIR::OwnershipOperandFact]) }
+    def operands
+      return consumed_operands unless consumed_operands.empty?
+
+      consumed_names.map do |name|
+        MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "call ownership")
+      end
     end
   end
 
@@ -158,6 +185,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @current_bindings = T.let(@current_bindings, T.untyped)
+    @current_binding_types = T.let(@current_binding_types, T.untyped)
     @current_fn_collection_params = T.let(@current_fn_collection_params, T.untyped)
     @current_fn_has_catch = T.let(@current_fn_has_catch, T.untyped)
     @current_fn_has_rt = T.let(@current_fn_has_rt, T.untyped)
@@ -185,12 +213,12 @@ module MIRLoweringFunctions
     end
     final_type = transpile_type(ret_type)
 
-    fn_needs_rt = finalized_needs_rt!(node)
-    # Synthesized trampolines allocate child frames, so they need rt even
-    # when the user body does not otherwise mention it.
-    fn_needs_rt = true if node.thunk_plan
-    # Mutual trampolines call rt.checkYield() each iteration.
-    fn_needs_rt = true if node.mutual_thunk_plan
+    fn_needs_rt = finalized_needs_rt!(node) || function_return_retains_shared_handle?(node)
+    if fn_needs_rt
+      sig = @fn_sigs[node.name.to_s] || @fn_sigs[node.name.to_sym]
+      sig.needs_rt = true if sig.respond_to?(:needs_rt=)
+      node.needs_rt = true if node.respond_to?(:needs_rt=)
+    end
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
@@ -203,6 +231,7 @@ module MIRLoweringFunctions
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
+    @current_binding_types = {}
     # Per-function name disambiguation: when two variables share the same Zig
     # name but have different allocators (different scopes), the MIR checker's
     # flat name-keyed allocs dict would conflate them.  Track which names have
@@ -228,13 +257,8 @@ module MIRLoweringFunctions
     # incorrectly received the `_m_` rename. The rename then masked the
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
-    mutable_scalar_params = node.params.select { |p|
-      next false unless p.mutable
-      p_type_obj = p.type || Type.new(:Any)
-      next false if p_type_obj && (p_type_obj.collection? ||
-                                    (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
-      !transpile_type(p.type, is_param: true).start_with?("[]", "*")
-    }.map { |p| p.name }.to_set
+    param_facts = function_param_facts(node.params)
+    mutable_scalar_params = param_facts.select(&:mutable_scalar).map(&:name).to_set
     @current_fn_mutable_scalar_params = T.let(mutable_scalar_params, T.nilable(T::Set[T.untyped]))
 
     # Collection params: already passed by pointer, skip & at recursive
@@ -243,11 +267,7 @@ module MIRLoweringFunctions
     # forwarding a `MUTABLE @list` param to another `MUTABLE @list`
     # callee adds a second `&`, producing `**ArrayList` which Zig's
     # one-level method auto-deref can't unwrap.
-    @current_fn_collection_params = node.params.select { |p|
-      p_type_obj = p.type || Type.new(:Any)
-      p_type_obj.needs_pointer_passing? ||
-        (p.mutable && p_type_obj.list_collection?)
-    }.map { |p| p.name }.to_set
+    @current_fn_collection_params = param_facts.select(&:collection_param).map(&:name).to_set
     @current_fn_collection_params.each do |name|
       @current_bindings[name.to_s] ||= CleanupEntry.no_cleanup(alloc: :heap, scope: :heap)
     end
@@ -257,38 +277,7 @@ module MIRLoweringFunctions
     @current_fn_takes_param_names = node.params.select { |p| p.takes }.map { |p| p.name }.to_set
 
     # Build param list
-    params_mir = T.let(node.params.map { |param|
-      p_name = mutable_scalar_params.include?(param.name) ? "_m_#{param.name}" : param.name
-      p_type_sym = param.type&.resolved
-      p_type_obj = param.type || Type.new(:Any)
-      is_user_struct = @struct_schemas&.key?(p_type_sym)
-      # Atomic params need `anytype` so call sites pass the cell itself,
-      # allowing WITH MATCH comptime probes to dispatch by actual family.
-      sym = param.symbol
-      atomic_sync = sym && (sym.atomic? ||
-                            (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
-      zig_t = if p_type_obj.shared? && p_type_obj.resolved.to_s.match?(/\A[A-Z]\z/)
-        "CheatLib.Arc(#{p_type_obj.resolved})"
-      elsif is_user_struct
-        "anytype"
-      elsif p_type_obj.collection?
-        "anytype"
-      elsif atomic_sync
-        "anytype"
-      else
-        transpile_type(param.type, is_param: true)
-      end
-      zig_t = "*#{zig_t}" if mutable_scalar_params.include?(param.name) && zig_t != "anytype"
-      # `pointer_passed`: this param's receiver is a pointer-to-T at the
-      # Zig level, so allocations made inside this function on its behalf
-      # outlive the function. Mirrors `@current_fn_collection_params`'s
-      # criteria so the MIR checker can independently verify the
-      # allocator-routing decision (see INV-CROSS-FRAME-PARAM-ALLOC).
-      pointer_passed = p_type_obj.needs_pointer_passing? ||
-                       (param.mutable && p_type_obj.list_collection?) ||
-                       mutable_scalar_params.include?(param.name)
-      MIR::Param.new(p_name, zig_t, pointer_passed)
-    }, T::Array[MIR::Param])
+    params_mir = T.let(param_facts.map(&:to_mir_param), T::Array[MIR::Param])
 
     # Prepend rt param
     if fn_needs_rt
@@ -342,7 +331,7 @@ module MIRLoweringFunctions
     catch_clauses = function_catch_clauses(node)
     has_catch = catch_clauses.any?
     @current_fn_has_catch = has_catch
-    @current_fn_snapshot_types = Set.new if has_catch
+    @current_fn_snapshot_types = has_catch && node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
     # Trampoline bodies are synthesized directly while preserving the
     # normal function signature seen by callers.
     if node.thunk_plan
@@ -431,6 +420,65 @@ module MIRLoweringFunctions
     return node.needs_rt if node.needs_rt == true || node.needs_rt == false
 
     Kernel.raise "function #{node.name} missing finalized needs_rt metadata before MIR lowering"
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_return_retains_shared_handle?(node)
+    ret = node.return_type
+    return false unless ret.respond_to?(:any_rc?) && ret.any_rc?
+
+    found = T.let(false, T::Boolean)
+    AST.each_locatable(node.body) do |child|
+      next unless child.is_a?(AST::ReturnNode) && child.value
+      lowerer = T.unsafe(self)
+      found = true if lowerer.__send__(:rc_retain_needed?, child.value) &&
+        !lowerer.__send__(:return_transfers_heap_binding?, child.value)
+    end
+    found
+  end
+
+  sig { params(params: T::Array[AST::Param]).returns(T::Array[FunctionParamFact]) }
+  def function_param_facts(params)
+    params.map { |param| function_param_fact(param) }
+  end
+
+  sig { params(param: AST::Param).returns(FunctionParamFact) }
+  def function_param_fact(param)
+    T.bind(self, MIRLowering) rescue nil
+    type_info = param.type || Type.new(:Any)
+    base_zig = transpile_type(param.type, is_param: true)
+    collection_param = !!(type_info.needs_pointer_passing? ||
+                          (param.mutable && type_info.list_collection?))
+    mutable_scalar = !!(param.mutable &&
+                     !type_info.collection? &&
+                     !type_info.needs_pointer_passing? &&
+                     !base_zig.start_with?("[]", "*"))
+    zig_type = function_param_zig_type(param, type_info, base_zig)
+    zig_type = "*#{zig_type}" if mutable_scalar && zig_type != "anytype"
+
+    FunctionParamFact.new(
+      param: param,
+      name: param.name.to_s,
+      mir_name: mutable_scalar ? "_m_#{param.name}" : param.name.to_s,
+      zig_type: zig_type,
+      mutable_scalar: mutable_scalar,
+      collection_param: collection_param,
+      pointer_passed: collection_param || mutable_scalar,
+    )
+  end
+
+  sig { params(param: AST::Param, type_info: Type, base_zig: String).returns(String) }
+  def function_param_zig_type(param, type_info, base_zig)
+    T.bind(self, MIRLowering) rescue nil
+    type_sym = param.type&.resolved
+    is_user_struct = !!(@struct_schemas&.key?(type_sym))
+    sym = param.symbol
+    atomic_sync = sym && (sym.atomic? ||
+                          (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
+    return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.resolved.to_s.match?(/\A[A-Z]\z/)
+    return "anytype" if is_user_struct || type_info.collection? || atomic_sync
+
+    base_zig
   end
 
   sig { params(body: T::Array[T.untyped]).returns(T::Boolean) }
@@ -948,14 +996,27 @@ module MIRLoweringFunctions
 
     takes_indices = T.let(Set.new, T::Set[Integer])
     consumed = T.let([], T::Array[String])
+    operands = T.let([], T::Array[MIR::OwnershipOperandFact])
     ast_args.each_with_index do |arg, idx|
       param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, param)
       takes_indices << idx
-      next unless ownership_tracked_transfer_type?(Type.from_node!(arg, context: "lowered call ownership argument"))
+      arg_type = Type.from_node!(arg, context: "lowered call ownership argument")
+      unless ownership_tracked_transfer_type?(arg_type)
+        operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
+        next
+      end
+      sink_alloc = allocator_for_takes_param!(param)
+      if borrowed_ownership_operand?(arg)
+        operands << MIR::OwnershipOperandFact.borrowed_access(moved_arg_root(arg), arg_type, "call argument #{idx}", sink_alloc)
+        next
+      end
       ownership_consumed_arg_names(mir_args[idx]).each { |name| consumed << name.to_s }
+      ownership_consumed_arg_names(mir_args[idx]).each do |name|
+        operands << MIR::OwnershipOperandFact.owned_binding(name.to_s, arg_type, "call argument #{idx}", sink_alloc)
+      end
     end
-    facts = CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq)
+    facts = CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq, consumed_operands: operands)
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
@@ -1002,18 +1063,38 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     takes_indices = T.let(Set.new, T::Set[Integer])
     consumed = T.let([], T::Array[String])
+    operands = T.let([], T::Array[MIR::OwnershipOperandFact])
     ast_args.each_with_index do |arg, idx|
       callee_param = sig.params[idx]
       next unless call_arg_consumes_ownership?(arg, callee_param)
       takes_indices << idx
-      next unless ownership_tracked_transfer_type?(Type.from_node!(arg, context: "call ownership argument"))
+      arg_type = Type.from_node!(arg, context: "call ownership argument")
+      unless ownership_tracked_transfer_type?(arg_type)
+        operands << MIR::OwnershipOperandFact.non_owning(arg_type, "call argument #{idx}")
+        next
+      end
+      sink_alloc = allocator_for_takes_param!(callee_param)
+      if borrowed_ownership_operand?(arg)
+        operands << MIR::OwnershipOperandFact.borrowed_access(moved_arg_root(arg), arg_type, "call argument #{idx}", sink_alloc)
+        next
+      end
       root = moved_arg_root(arg)
       next unless root
       entry = @current_bindings[root] || CleanupEntry::NONE
       next unless entry.present?
       consumed << transfer_binding_name(root)
+      operands << MIR::OwnershipOperandFact.owned_binding(transfer_binding_name(root), arg_type, "call argument #{idx}", sink_alloc)
     end
-    CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq)
+    CallOwnershipFacts.new(takes_indices: takes_indices, consumed_names: consumed.uniq, consumed_operands: operands)
+  end
+
+  sig { params(arg: T.untyped).returns(T::Boolean) }
+  def borrowed_ownership_operand?(arg)
+    return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
+
+    node = arg
+    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ||
+      !!(node.respond_to?(:container_borrow) && node.container_borrow)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(StdlibCallFacts) }
@@ -1088,7 +1169,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     raw_arg = with_decl_alloc(facts.arg_alloc) do
       if facts.copy_source
-        MIR::DeepCopy.new(lower(T.must(facts.copy_source)), nil, nil, :full_value, :heap)
+        copy_type = facts.callee_param_type.is_a?(Type) ? facts.callee_param_type.zig_type : nil
+        MIR::DeepCopy.new(lower(T.must(facts.copy_source)), copy_type, nil, :full_value, :heap)
       else
         with_expected_type(facts.callee_param_type) { lower(facts.ast_arg) }
       end
@@ -1115,14 +1197,43 @@ module MIRLoweringFunctions
       can_fail: T::Boolean,
       owned_return: T::Boolean,
       contract: T.nilable(MIR::CallableContract),
+      ast_args: T::Array[T.untyped],
+      mir_args: T::Array[T.untyped],
     ).returns(T.untyped)
   end
-  def finalize_call_result(node, callee, args, can_fail, owned_return, contract)
+  def finalize_call_result(node, callee, args, can_fail, owned_return, contract, ast_args = [], mir_args = [])
     call = MIR::Call.new(callee, args, can_fail, owned_return, contract)
+    call.never_success = call_never_returns_success?(node)
+    if node.respond_to?(:full_type!)
+      call.result_type = Type.from_node!(node, context: "call result")
+    end
+    attach_explicit_move_consumption!(call, ast_args, mir_args, "call explicit move")
     return call unless node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     return call if owned_return
 
     MIR::DupeSlice.new(call, :heap)
+  end
+
+  sig { params(call: MIR::Call, ast_args: T::Array[T.untyped], mir_args: T::Array[T.untyped], source: String).void }
+  def attach_explicit_move_consumption!(call, ast_args, mir_args, source)
+    T.bind(self, MIRLowering) rescue nil
+    operands = T.let([], T::Array[MIR::OwnershipOperandFact])
+    ast_args.each_with_index do |ast_arg, idx|
+      next unless ast_arg.is_a?(AST::MoveNode) || AST.moved?(ast_arg)
+      mir_arg = mir_args[idx]
+      next unless mir_arg
+      operands.concat(ownership_operands_for_lowered_takes_arg(mir_arg, ast_arg, source, :heap))
+    end
+    operands.reject! { |operand| operand.kind == :non_owning }
+    return if operands.empty?
+
+    call.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+      operands: operands,
+      target: :owned_sink,
+      target_alloc: :heap,
+      source: source,
+      covers_consuming_params: true,
+    )
   end
 
   sig do
@@ -1209,7 +1320,12 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for_lowered_args(callee_sig, node.args, args_mir))
+    finalize_call_result(
+      node, fn_zig, all_args, can_fail, owned_return,
+      callable_contract_for_lowered_args(callee_sig, node.args, args_mir),
+      node.args,
+      args_mir,
+    )
   end
 
   sig { params(node: AST::MethodCall).returns(T.untyped) }
@@ -1260,7 +1376,12 @@ module MIRLoweringFunctions
 
     owned_return = call_owned_return?(node)
 
-    finalize_call_result(node, fn_zig, all_args, can_fail, owned_return, callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir))
+    finalize_call_result(
+      node, fn_zig, all_args, can_fail, owned_return,
+      callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir),
+      [node.object] + node.args,
+      [obj_mir] + args_mir,
+    )
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
@@ -1281,6 +1402,34 @@ module MIRLoweringFunctions
     call_type_owned_return?(ti, sig)
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def call_never_returns_success?(node)
+    return false unless node.respond_to?(:name)
+    @fn_nodes = T.let(@fn_nodes, T.untyped)
+    fn = @fn_nodes&.[](node.name.to_s)
+    return false unless fn.is_a?(AST::FunctionDef)
+    fn_ret = Type.from_node(fn.return_type)
+    return false unless fn_ret&.error_union?
+
+    !function_body_has_value_return?(fn.body)
+  end
+
+  sig { params(nodes: T::Array[T.untyped]).returns(T::Boolean) }
+  def function_body_has_value_return?(nodes)
+    nodes.any? do |stmt|
+      if stmt.is_a?(AST::ReturnNode)
+        !stmt.value.nil?
+      elsif stmt.respond_to?(:body) && stmt.body.is_a?(Array)
+        function_body_has_value_return?(stmt.body)
+      elsif stmt.respond_to?(:then_body) || stmt.respond_to?(:else_body)
+        function_body_has_value_return?(Kernel.Array(stmt.respond_to?(:then_body) ? stmt.then_body : [])) ||
+          function_body_has_value_return?(Kernel.Array(stmt.respond_to?(:else_body) ? stmt.else_body : []))
+      else
+        false
+      end
+    end
+  end
+
   sig { params(ti: Type, sig_obj: T.untyped).returns(T::Boolean) }
   def concrete_call_type_owned_return?(ti, sig_obj)
     call_type_owned_return?(ti, sig_obj)
@@ -1289,8 +1438,7 @@ module MIRLoweringFunctions
   sig { params(ti: T.nilable(Type), sig_obj: T.untyped).returns(T::Boolean) }
   def call_type_owned_return?(ti, sig_obj)
     return false unless ti
-    ti = ti.success_type
-    return false unless ti
+    ti = ti.success_type || ti
     if ti.string?
       return false if ti.symbol? || ti.raw?
       return true if sig_obj&.heap_carry_return == true
@@ -1299,7 +1447,8 @@ module MIRLoweringFunctions
       return ti.heap?
     end
     schema_lookup = T.unsafe(self).instance_variable_get(:@schema_lookup)
-    ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
+    ti.ownership_bearing?(schema_lookup) ||
+      ti.indirect? || ti.collection? || ti.any_rc? || ti.any_sync? ||
       ti.resource? || ti.recursive_cleanup_shape?(schema_lookup)
   end
 
@@ -1480,20 +1629,24 @@ module MIRLoweringFunctions
         hoist_alloc(arg_mir, stdlib_facts.ast_arg(i), err_cleanup: ownership_facts.takes?(i))
       end
     end
-    consumed_names = ownership_facts.consumed_names.dup
+    consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
+    consumed_operands = ownership_facts.takes_any? ? [] : ownership_facts.consumed_operands.dup
     if ownership_facts.takes_any?
       @pending_stmts = T.let(@pending_stmts, T.untyped)
       mir_args.each_with_index do |arg_mir, i|
         next unless ownership_facts.takes?(i)
-        arg_mir = mir_args[i]
-        if arg_mir.is_a?(MIR::Ident)
-          if @guarded_cleanup_names&.[](arg_mir.name.to_s)
-            consumed_names << arg_mir.name
-          end
-        else
-          mir_ident_names(arg_mir).each do |name|
-            consumed_names << name if @guarded_cleanup_names&.[](name.to_s)
-          end
+
+        operands = ownership_operands_for_lowered_takes_arg(
+          mir_args[i],
+          stdlib_facts.ast_arg(i),
+          "stdlib argument #{i}",
+          sink_alloc,
+        )
+        consumed_operands.concat(operands)
+        operands.each do |operand|
+          next unless operand.kind == :owned_binding && operand.name
+
+          consumed_names << T.must(operand.name)
         end
       end
       consumed_names.uniq!
@@ -1545,13 +1698,19 @@ module MIRLoweringFunctions
     args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}") { val } }
 
     iz = MIR::InlineZig.new(pattern, "intrinsic")
+    result_type = Type.from_node!(node, context: "intrinsic result")
+    iz.result_type = result_type
+    iz.result_ownership_bearing = intrinsic_result_ownership_bearing?(result_type)
     # zig_pattern was set by the annotator together with matched_stdlib_def
     # (src/annotator.rb). Both are always present together.
     iz.stdlib_def = node.matched_stdlib_def
     alloc_metadata = MIR.inline_alloc_metadata(alloc: alloc_placeholder, val_alloc: val_alloc_placeholder)
     iz.allocs = alloc_metadata unless alloc_metadata.empty?
     if ownership_facts.takes_any?
-      iz.ownership_contract = MIR::OwnershipContract.consumes(consumed_names)
+      operands = consumed_operands.empty? ? consumed_names.map { |name|
+        MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "stdlib ownership", val_alloc_placeholder || alloc_placeholder || pre_resolved_alloc || :heap)
+      } : consumed_operands
+      iz.ownership_contract = MIR::OwnershipContract.consume_operands(operands)
     end
     # Store target variable name for checker cross-reference with AllocMark.
     # Use extract_root_var_name so renamed variables (same-name collision fix)
@@ -1564,6 +1723,15 @@ module MIRLoweringFunctions
       iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
+  end
+
+  sig { params(type_info: Type).returns(T::Boolean) }
+  def intrinsic_result_ownership_bearing?(type_info)
+    T.bind(self, MIRLowering) rescue nil
+    @schema_lookup = T.let(@schema_lookup, T.untyped)
+    ti = type_info.success_type || type_info
+    ti = ti.wrapped_type || ti if ti.optional?
+    ti.ownership_bearing?(@schema_lookup)
   end
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(Type)) }
@@ -1785,8 +1953,11 @@ module MIRLoweringFunctions
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
     pt = payload_t.is_a?(Type) ? payload_t : (Type.new(payload_t) rescue nil)
-    is_heap = (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) || !!pt&.heap?
+    is_heap = alloc_kind == :heap ||
+      (ast_node.respond_to?(:symbol) && ast_node.symbol&.heap_storage? == true) ||
+      !!pt&.heap?
     iz.stdlib_def = is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
+    iz.allocs = MIR.inline_alloc_metadata(alloc: alloc_kind) if is_heap && alloc_kind
     iz
   end
 

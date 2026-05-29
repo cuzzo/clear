@@ -18,6 +18,11 @@ require_relative '../src/mir/fsm_transform/emit'
 # dispatch from segment tails, and wrap in FsmGenericBody.
 
 RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
+  def fsm_code(result)
+    expect(result).to be_a(MIR::FsmLoweringResult)
+    result.code
+  end
+
   let(:lowering_double) {
     Class.new {
       def capture_inits_fsm(_); ""; end
@@ -86,37 +91,36 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     it "produces rendered Zig text" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
-      expect(out).to be_a(String)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("__bg0: {")
     end
 
     it "concatenates the descriptor's setup_stmts onto seg 0's body" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       runstep0 = out[/fn runStep0.*?fn runStep1/m]
       expect(runstep0).to include("preStmt()")
       expect(runstep0).to include("registerWaiter()")
     end
 
     it "concatenates the descriptor's bind_stmts onto seg 1's body" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       runstep1 = out[/fn runStep1.*?fn resumeFn/m]
       expect(runstep1).to include("__waiter.result")
       expect(runstep1).to include("postStmt()")
     end
 
     it "places suspend ctx_field_decls in the ctx struct" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("rf_fd: i32 = -1,")
     end
 
     it "emits dispatch with FsmTailYield and FsmTailDone" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       # Arm 0 yields WaitForLock with step=1.
       expect(out).to match(/0 => \{[\s\S]*?step = 1;[\s\S]*?return \.\{ \.WaitForLock = \{\} \}/)
       # Arm 1 emits Done.
@@ -158,8 +162,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     }
 
     it "emits N+1 dispatch arms with RegisterYield tails on the suspends" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("if (register_sp_1())")
       expect(out).to include("if (register_sp_2())")
       expect(out).to include("0 => {")
@@ -168,8 +172,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "places each suspend's ctx_field_decls in the ctx struct" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       expect(out).to include("sp_1: P = undefined,")
       expect(out).to include("sp_2: P = undefined,")
     end
@@ -228,8 +232,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "emits CondJump for the cond head and LoopBack for the back-edge" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       # arm 1 is the cond branch
       expect(out).to match(/1 => \{[\s\S]*?if \(hasNext\)/)
       # arm 3 jumps back to step 1
@@ -237,8 +241,8 @@ RSpec.describe "FsmTransform::Emit.build_fsm_unified" do
     end
 
     it "concatenates bind_stmts onto runLoopPost (after suspend)" do
-      out = FsmTransform::Emit.build_fsm_unified(
-        base_ctx, segment_specs, [], lowering_double)
+      out = fsm_code(FsmTransform::Emit.build_fsm_unified(
+        base_ctx, segment_specs, [], lowering_double))
       runlooppost = out[/fn runLoopPost.*?fn runPost/m]
       expect(runlooppost).to include("bindNext()")
       expect(runlooppost).to include("runLoopPost()")

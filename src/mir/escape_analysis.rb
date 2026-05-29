@@ -18,10 +18,32 @@ module EscapeAnalysis
   HeapResult = T.type_alias { [T::Set[String], T::Set[String]] }
   EscapeHandlerRegistry = T.type_alias { T::Hash[Symbol, T::Array[Symbol]] }
 
+  class EscapeContext < T::Struct
+    const :fn, AST::FunctionDef
+    const :fn_nodes, FnNodes
+    const :bg_heap, T::Set[String]
+    const :schema_lookup, T.nilable(Proc)
+  end
+
+  class EscapeSink < T::Struct
+    extend T::Sig
+
+    const :name, Symbol
+    const :node_classes, T::Array[T.untyped]
+    const :handler, Symbol
+
+    sig { params(node: T.untyped).returns(T::Boolean) }
+    def matches?(node)
+      node_classes.any? { |klass| node.is_a?(klass) }
+    end
+  end
+
   ESCAPE_SINK_HANDLERS = T.let({
     owning_return: [:mark_heap_return_facts!, :mark_body_escapes!].freeze,
     enclosing_scope_store: [:mark_body_escapes!].freeze,
+    binding_result: [:mark_body_escapes!].freeze,
     execution_boundary_capture: [:mark_body_escapes!].freeze,
+    lambda_capture: [:mark_body_escapes!].freeze,
     takes_or_mutable_arg: [:mark_body_escapes!].freeze,
     receiver_backing_storage: [
       :mark_param_receiver_allocations_heap!,
@@ -35,10 +57,21 @@ module EscapeAnalysis
     hoist_dependency: [:propagate_hoist_dependencies!].freeze,
   }.freeze, EscapeHandlerRegistry)
 
+  ESCAPE_SINKS = T.let([
+    EscapeSink.new(name: :owning_return, node_classes: [AST::ReturnNode], handler: :apply_return_escape_sink!),
+    EscapeSink.new(name: :enclosing_scope_store, node_classes: [AST::Assignment], handler: :apply_assignment_escape_sink!),
+    EscapeSink.new(name: :binding_result, node_classes: [AST::VarDecl, AST::BindExpr], handler: :apply_binding_escape_sink!),
+    EscapeSink.new(name: :execution_boundary_capture, node_classes: [AST::BgBlock, AST::BgStreamBlock], handler: :apply_execution_boundary_escape_sink!),
+    EscapeSink.new(name: :lambda_capture, node_classes: [AST::LambdaLit], handler: :apply_lambda_escape_sink!),
+    EscapeSink.new(name: :takes_or_mutable_arg, node_classes: [AST::FuncCall], handler: :apply_func_call_escape_sink!),
+    EscapeSink.new(name: :takes_or_mutable_arg, node_classes: [AST::MethodCall], handler: :apply_method_call_escape_sink!),
+  ].freeze, T::Array[EscapeSink])
+
   sig { params(fn_nodes: FnNodes, schema_lookup: T.nilable(Proc)).returns(HeapResult) }
   def self.apply!(fn_nodes, schema_lookup = nil)
     validate_escape_sink_handlers!
     validate_derived_placement_handlers!
+    validate_escape_sinks!
     propagate_caller_sync!(fn_nodes)
 
     heap_fns = T.let(Set.new, T::Set[String])
@@ -69,6 +102,18 @@ module EscapeAnalysis
   sig { void }
   def self.validate_escape_sink_handlers!
     validate_handler_registry!("EscapeAnalysis sink registry", ESCAPE_SINK_HANDLERS)
+  end
+
+  sig { void }
+  def self.validate_escape_sinks!
+    missing = T.let([], T::Array[String])
+    ESCAPE_SINKS.each do |sink|
+      missing << sink.name.to_s unless ESCAPE_SINK_HANDLERS.key?(sink.name)
+      missing << sink.handler.to_s unless respond_to?(sink.handler, true)
+    end
+    return if missing.empty?
+
+    raise "EscapeAnalysis executable sink registry is incomplete: #{missing.sort.join(", ")}"
   end
 
   sig { void }
@@ -231,32 +276,59 @@ module EscapeAnalysis
 
   sig { params(fn: AST::FunctionDef, fn_nodes: FnNodes, bg_heap: T::Set[String], schema_lookup: T.nilable(Proc)).void }
   private_class_method def self.mark_body_escapes!(fn, fn_nodes, bg_heap, schema_lookup)
+    context = EscapeContext.new(fn: fn, fn_nodes: fn_nodes, bg_heap: bg_heap, schema_lookup: schema_lookup)
     walk_body(fn.body) do |node|
-      case node
-      when AST::ReturnNode
-        if owning_return_needs_heap_placement?(fn, node.value, schema_lookup)
-          mark_expr_identifiers_heap!(node.value) unless returned_call_result?(node.value)
-          mark_heap_return!(fn, node.value)
-        end
-      when AST::Assignment
-        mark_expr_identifiers_heap!(node.value) if heap_destination?(fn, node.name, schema_lookup)
-      when AST::VarDecl, AST::BindExpr
-        if borrow_return_expr?(node.value)
-          mark_symbol_borrow!(node.symbol)
-        elsif call_result_is_heap?(node.value, fn_nodes, schema_lookup)
-          mark_symbol_heap!(node.symbol)
-        end
-      when AST::BgBlock, AST::BgStreamBlock
-        mark_capture_analysis_heap!(node.capture_analysis, bg_heap)
-        mark_fsm_ctx_locals_heap!(node, schema_lookup) if node.is_a?(AST::BgBlock)
-      when AST::LambdaLit
-        mark_lambda_captures_heap!(node, bg_heap)
-      when AST::FuncCall
-        mark_takes_args_heap!(node.args, params_for_call(node, fn_nodes), schema_lookup)
-      when AST::MethodCall
-        mark_method_takes_heap!(node, params_for_method_call(node), fn_nodes, schema_lookup)
-      end
+      ESCAPE_SINKS.each { |sink| apply_escape_sink!(sink, node, context) if sink.matches?(node) }
     end
+  end
+
+  sig { params(sink: EscapeSink, node: T.untyped, context: EscapeContext).void }
+  private_class_method def self.apply_escape_sink!(sink, node, context)
+    send(sink.handler, node, context)
+    nil
+  end
+
+  sig { params(node: AST::ReturnNode, context: EscapeContext).void }
+  private_class_method def self.apply_return_escape_sink!(node, context)
+    return unless owning_return_needs_heap_placement?(context.fn, node.value, context.schema_lookup)
+
+    mark_expr_identifiers_heap!(node.value) unless returned_call_result?(node.value)
+    mark_heap_return!(context.fn, node.value)
+  end
+
+  sig { params(node: AST::Assignment, context: EscapeContext).void }
+  private_class_method def self.apply_assignment_escape_sink!(node, context)
+    mark_expr_identifiers_heap!(node.value) if heap_destination?(context.fn, node.name, context.schema_lookup)
+  end
+
+  sig { params(node: T.any(AST::VarDecl, AST::BindExpr), context: EscapeContext).void }
+  private_class_method def self.apply_binding_escape_sink!(node, context)
+    if borrow_return_expr?(node.value)
+      mark_symbol_borrow!(node.symbol)
+    elsif call_result_is_heap?(node.value, context.fn_nodes, context.schema_lookup)
+      mark_symbol_heap!(node.symbol)
+    end
+  end
+
+  sig { params(node: T.any(AST::BgBlock, AST::BgStreamBlock), context: EscapeContext).void }
+  private_class_method def self.apply_execution_boundary_escape_sink!(node, context)
+    mark_capture_analysis_heap!(node.capture_analysis, context.bg_heap)
+    mark_fsm_ctx_locals_heap!(node, context.schema_lookup) if node.is_a?(AST::BgBlock)
+  end
+
+  sig { params(node: AST::LambdaLit, context: EscapeContext).void }
+  private_class_method def self.apply_lambda_escape_sink!(node, context)
+    mark_lambda_captures_heap!(node, context.bg_heap)
+  end
+
+  sig { params(node: AST::FuncCall, context: EscapeContext).void }
+  private_class_method def self.apply_func_call_escape_sink!(node, context)
+    mark_takes_args_heap!(node.args, params_for_call(node, context.fn_nodes), context.schema_lookup)
+  end
+
+  sig { params(node: AST::MethodCall, context: EscapeContext).void }
+  private_class_method def self.apply_method_call_escape_sink!(node, context)
+    mark_method_takes_heap!(node, params_for_method_call(node), context.fn_nodes, context.schema_lookup)
   end
 
   sig { params(body: T::Array[T.untyped]).void }
@@ -307,11 +379,11 @@ module EscapeAnalysis
     if t.collection? || (t.array? && !t.string?)
       elem = t.element_type
       return false unless elem.is_a?(Type)
-      return type_contains_cleanup_payload?(elem, schema_lookup)
+      return elem.ownership_bearing?(schema_lookup)
     end
 
     return false if t.string? || t.heap_ptr?
-    type_contains_cleanup_payload?(t, schema_lookup)
+    t.ownership_bearing?(schema_lookup)
   rescue StandardError
     false
   end
@@ -394,17 +466,7 @@ module EscapeAnalysis
         changed = true if mark_node_symbol_heap!(root)
         next
       end
-      AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
-      end
+      push_locatable_children!(node, stack)
     end
     changed
   end
@@ -417,6 +479,21 @@ module EscapeAnalysis
       current = current.value
     end
     current
+  end
+
+  sig { params(node: AST::Locatable, stack: T::Array[T.untyped]).void }
+  private_class_method def self.push_locatable_children!(node, stack)
+    AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
+    node.class.members.each do |member|
+      value = node[member]
+      if value.is_a?(Array)
+        value.each { |child| stack << child if child.is_a?(AST::Locatable) }
+      elsif value.is_a?(Hash)
+        value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
+      elsif value.is_a?(AST::Locatable)
+        stack << value
+      end
+    end
   end
 
   sig { params(analysis: T.untyped, bg_heap: T::Set[String]).void }
@@ -623,41 +700,9 @@ module EscapeAnalysis
     t = ti.value_payload_type
     return false unless t
     return false if t.rodata? || t.provenance == :borrow
-    return true if t.string?
-    t.heap_ptr? ||
-      t.recursive_cleanup_shape?(schema_lookup) ||
-      t.needs_explicit_cleanup?(:heap, schema_lookup) ||
-      type_contains_cleanup_payload?(t, schema_lookup)
+    t.ownership_bearing?(schema_lookup)
   rescue StandardError
     false
-  end
-
-  sig { params(ti: Type, schema_lookup: T.nilable(Proc), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
-  private_class_method def self.type_contains_cleanup_payload?(ti, schema_lookup, seen = nil)
-    t = ti.success_type
-    return false unless t
-    return true if t.string? && !t.rodata? && t.provenance != :borrow
-    return true if t.needs_explicit_cleanup?(:heap, schema_lookup)
-    if t.array? && !t.string?
-      elem = t.element_type
-      return false unless elem.is_a?(Type)
-      return type_contains_cleanup_payload?(elem, schema_lookup, seen)
-    end
-    return false unless schema_lookup
-    key = t.resolved.to_s
-    seen ||= Set.new
-    return false unless seen.add?(key)
-    schema = schema_lookup.call(t.resolved) rescue nil
-    if Schemas.union?(schema)
-      return (schema.variants || {}).any? do |_name, vt|
-        vt.is_a?(Type) && type_contains_cleanup_payload?(vt, schema_lookup, seen)
-      end
-    end
-    return false unless Schemas.field_bearing?(schema)
-    schema.fields.any? do |_name, field|
-      ft = field.is_a?(AST::StructField) ? field.type : field
-      ft.is_a?(Type) && type_contains_cleanup_payload?(ft, schema_lookup, seen)
-    end
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }
@@ -784,11 +829,7 @@ module EscapeAnalysis
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
     return false if ti.rodata? || ti.provenance == :borrow
-    ti.string? || top_heap_ptr || ti.heap_ptr? || ti.resource? || ti.ownership != :affine ||
-      ti.recursive_cleanup_shape?(schema_lookup) ||
-      ti.needs_cleanup?(schema_lookup) ||
-      ti.needs_explicit_cleanup?(:heap, schema_lookup) ||
-      type_contains_cleanup_payload?(ti, schema_lookup)
+    top_heap_ptr || ti.ownership != :affine || ti.ownership_bearing?(schema_lookup)
   end
 
   sig { params(fn: AST::FunctionDef, expr: T.untyped).returns(T.nilable(Type)) }
@@ -816,7 +857,7 @@ module EscapeAnalysis
   private_class_method def self.returned_call_result?(expr)
     node = unwrap_value(expr)
     node = unwrap_value(node.left) if node.is_a?(AST::BinaryOp) && node.op == :OR_RESCUE
-    node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+    AST.call?(node)
   end
 
   sig { params(body: T::Array[T.untyped], names: T::Set[String]).void }
@@ -846,17 +887,7 @@ module EscapeAnalysis
         names << node.name.to_s
         next
       end
-      AST.wrapped_children(node).each { |child| stack << child if child.is_a?(AST::Locatable) }
-      node.class.members.each do |member|
-        value = node[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(Hash)
-          value.each_value { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
-      end
+      push_locatable_children!(node, stack)
     end
   end
 
@@ -879,7 +910,7 @@ module EscapeAnalysis
   private_class_method def self.call_result_is_heap?(value, fn_nodes, schema_lookup)
     call = unwrap_value(value)
     call = unwrap_value(call.left) if call.is_a?(AST::BinaryOp) && call.op == :OR_RESCUE
-    return false unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
+    return false unless AST.call?(call)
     callee = fn_nodes[call.name.to_s]
     return false if callee && function_def_has_return_lifetime?(callee)
     return call_result_is_heap_for_callee?(call, callee, schema_lookup) if callee

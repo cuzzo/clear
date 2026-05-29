@@ -53,6 +53,21 @@ fn flowIncrement(p: *i64, flow: *Flow) void {
     flow.kind = .cont_commit;
 }
 
+fn flowSkipNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 111;
+    flow.kind = .skip_no_commit;
+}
+
+fn flowRetNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 222;
+    flow.kind = .ret_no_commit;
+}
+
+fn flowRaiseNoCommit(p: *i64, flow: *Flow) void {
+    p.* = 333;
+    flow.kind = .raise_no_commit;
+}
+
 fn writePair(views: anytype, a: i64, b: i64) !void {
     views[0].* = a;
     views[1].* = b;
@@ -278,6 +293,45 @@ pub fn testMvccUpdateFlowRetryBodyUnderFault() !void {
     var g = s.read(&rt);
     defer g.release();
     if (g.get().* != 16) return error.MvccUpdateFlowValueWrong;
+}
+
+pub fn testMvccUpdateFlowNoCommitBranches() !void {
+    const allocator = vopr_alloc();
+
+    var ctx = ebr_mod.EbrContext{};
+    defer ctx.deinit(allocator);
+
+    var frame: [2048]u8 = undefined;
+    var rt = try Runtime.initFromSlice(&frame, &ctx, allocator, 0);
+    defer rt.deinit();
+    try ctx.register(allocator, rt.ebr);
+    defer ctx.unregister(rt.ebr);
+
+    var s = try versioned.Versioned(i64).init(allocator, 10);
+    defer {
+        s.deinit(&rt, allocator) catch unreachable;
+        var i: usize = 0;
+        while (i < 6) : (i += 1) {
+            ctx.reclaim(allocator);
+            rt.ebr.reclaimLocal(allocator);
+        }
+    }
+
+    var skip = Flow{};
+    try s.updateFlow(&rt, allocator, flowSkipNoCommit, .{&skip});
+    if (skip.kind != .skip_no_commit) return error.FlowKindUnexpected;
+
+    var ret = Flow{};
+    try s.updateFlow(&rt, allocator, flowRetNoCommit, .{&ret});
+    if (ret.kind != .ret_no_commit) return error.FlowKindUnexpected;
+
+    var raised = Flow{};
+    try s.updateFlow(&rt, allocator, flowRaiseNoCommit, .{&raised});
+    if (raised.kind != .raise_no_commit) return error.FlowKindUnexpected;
+
+    var g = s.read(&rt);
+    defer g.release();
+    if (g.get().* != 10) return error.NoCommitMutatedCell;
 }
 
 /// Drives Versioned.update's tag-spin retry body at versioned.zig:315.

@@ -1,6 +1,7 @@
 # Regression tests for compiler bugs documented in docs/agents/vm-bugs.md.
-# All bugs in the "dangling-pointer family" are now caught at lowering
-# time via CaptureStrategy::Refuse. These tests pin the current behavior
+# Bugs in the dangling-pointer family are now handled by the closed
+# CaptureStrategy decision: captures either receive a verifier-visible owned
+# transfer/copy plan or fail at lowering time. These tests pin that behavior
 # so regressions show up immediately.
 
 require "tempfile"
@@ -57,8 +58,8 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     end
   end
 
-  describe "Bug #3 (FIXED via CaptureStrategy::Refuse): slice borrow from @list into BG" do
-    # Was a silent UAF. CaptureStrategy now Refuses at lowering time.
+  describe "Bug #3 (FIXED): slice borrow from @list into BG" do
+    # Was a silent UAF. CaptureStrategy now gives the fiber an owned copy.
     let(:src) { <<~CHT }
       FN work(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
@@ -76,10 +77,9 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       END
     CHT
 
-    it "refuses at compile time with a CLEAR-level diagnostic" do
-      result = compile(src)
-      expect(result[:ok]).to be(false), "expected compile refusal, got success"
-      expect(result[:output]).to match(/cannot safely cross the fiber boundary/i)
+    it "compiles and runs with a verifier-visible owned capture" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
 
@@ -111,18 +111,16 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       END
     CHT
 
-    it "refuses at compile time with a CLEAR-level diagnostic" do
-      result = compile(src)
-      expect(result[:ok]).to be(false)
-      expect(result[:output]).to match(/cannot safely cross the fiber boundary/i)
+    it "compiles and runs with a verifier-visible owned capture" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
 
-  describe "Bug #4 (FIXED as side effect of Refuse): COPY'd union literal + BG" do
-    # The cryptic "expected *T, found T" Zig error was a downstream
-    # symptom of the same missing ownership transfer. With CaptureStrategy::
-    # Refuse firing, the program is rejected at CLEAR level before the
-    # bad Zig ever gets generated.
+  describe "Bug #4 (FIXED): COPY'd union literal + BG" do
+    # The cryptic "expected *T, found T" Zig error was a downstream symptom
+    # of missing ownership transfer data. The capture plan now gives the BG
+    # body an owned value instead of producing bad Zig.
     let(:src) { <<~CHT }
       UNION V { Nil, IntV: Int64, Vec: V[] }
 
@@ -148,12 +146,9 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       END
     CHT
 
-    it "produces a CLEAR-level diagnostic, not a Zig type error" do
-      result = compile(src)
-      expect(result[:ok]).to be(false)
-      expect(result[:output]).to match(/cannot safely cross the fiber boundary/i)
-      # The old, cryptic Zig diagnostic must NOT surface anymore:
-      expect(result[:output]).not_to match(/expected type '\*T', found 'T'/i)
+    it "compiles and runs without the old Zig type error" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
 

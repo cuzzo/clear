@@ -531,6 +531,7 @@ module GenericAnalysis
     # Propagate @shared ownership into BgBlock for SharedPromise.spawn().
     if node.value.is_a?(AST::BgBlock) && node.type.shared_promise?
       value_type = node.value.full_type!(context: "BgBlock shared_promise value")
+      T.unsafe(node.value).async_result_shape = AsyncResultShape.promise(value_type.tense_type, shared: true)
       stamp_type!(node.value, Type.new(value_type, ownership: :shared))
     end
   end
@@ -594,7 +595,10 @@ module GenericAnalysis
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
     @og = T.let(@og, T.untyped)
     @og[var_name]&.kind = :borrowed
+    node.symbol.borrowed_alias = true if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
+    node.storage = :borrow if node.respond_to?(:storage=)
+    true
   end
 
   # Walk through OR/OR_RESCUE to find the root container/struct variable name.
@@ -606,11 +610,19 @@ module GenericAnalysis
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
+    if expr.respond_to?(:container_borrow) && expr.container_borrow
+      receiver = expr.respond_to?(:object) ? expr.object : (expr.respond_to?(:target) ? expr.target : nil)
+      return root_variable_name(receiver) if receiver
+    end
     if expr.is_a?(AST::GetIndex)
       ti = expr.target.full_type!(context: "container source")
       if ti.collection_value?
         return root_variable_name(expr.target)
       end
+    end
+    if expr.is_a?(AST::Slice)
+      ti = expr.target.full_type!(context: "slice container source")
+      return root_variable_name(expr.target) if ti.array?
     end
     # Non-Copy field extraction from a struct is a borrow of the parent.
     # Without this, the extracted variable gets its own cleanup defer while

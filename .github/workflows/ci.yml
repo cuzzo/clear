@@ -37,6 +37,12 @@ jobs:
       # entry into coverage/.resultset.json; collate_coverage merges them
       # back into one entry that the Cobertura formatter understands).
       - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-unit
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
@@ -124,6 +130,12 @@ jobs:
       # uploads use `flags: ruby` so Codecov merges them server-side
       # into one Ruby coverage view.
       - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-integration
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
@@ -132,7 +144,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   transpile-tests:
-    name: transpile-tests/ (.cht via clear test)
+    name: transpile-tests/ coverage (.cht via gen.rb)
     runs-on: ubuntu-latest
     env:
       COVERAGE: "1"
@@ -145,8 +157,9 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      # Same cache as ruby-integration -- both jobs hammer ./clear build
-      # and benefit from a warm clear-cache + transpile-cache across runs.
+      # Coverage only needs Ruby compile/lowering/emission. Runtime execution
+      # is covered by non-coverage clear-test gates; running it here fans out
+      # hundreds of SimpleCov clear-cli resultsets.
       - uses: actions/cache@v4
         with:
           path: |
@@ -155,8 +168,14 @@ jobs:
           key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: ./clear test transpile-tests/
+      - run: bundle exec ruby transpile-tests/gen.rb
       - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-transpile-tests
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
@@ -180,7 +199,7 @@ jobs:
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
   tools-fuzz-shard:
-    name: tools/fuzz shard ${{ matrix.shard }}/5
+    name: tools/fuzz coverage shard ${{ matrix.shard }}/5
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -206,11 +225,17 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      # Required gate: the FULL template matrix minus quarantine
-      # (tools/fuzz/quarantine.txt). Every non-quarantined template must
-      # pass -- this is what stops templates bit-rotting unnoticed.
+      # Coverage mode is compile/lower/emit only. Runtime/leak fuzz gates run
+      # without COVERAGE so SimpleCov does not fan out through every child
+      # `clear test` / `clear build` process.
       - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean
       - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-fuzz-${{ matrix.shard }}
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
@@ -286,6 +311,12 @@ jobs:
       # is never executed).
       - run: bundle exec ruby tools/bc_lower_coverage.rb --shard ${{ matrix.shard }}/5
       - run: bundle exec ruby spec/collate_coverage.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruby-coverage-bc-lower-${{ matrix.shard }}
+          path: coverage/.resultset.json
+          include-hidden-files: true
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage.xml
@@ -637,9 +668,92 @@ jobs:
           kcov --version
       - working-directory: zig
         run: zig build test -Dcoverage -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zig-coverage-${{ matrix.shard }}
+          path: zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
+          retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
-          files: ./zig/zig-out/coverage/merged/cobertura.xml
+          files: ./zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
           flags: zig
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  diff-coverage-comment:
+    name: Diff coverage bucket PR comment
+    runs-on: ubuntu-latest
+    needs:
+      - ruby-unit
+      - ruby-integration
+      - transpile-tests
+      - tools-fuzz-shard
+      - bc-lower-coverage-shard
+      - zig-coverage
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+      - name: Download Ruby coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ruby-coverage-*
+          path: tmp/ruby-coverage-artifacts
+      - name: Download Zig coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/zig-coverage-artifacts
+      - name: Generate diff coverage bucket markdown
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          mkdir -p tmp
+          ruby_paths="$(find tmp/ruby-coverage-artifacts -name .resultset.json -type f | sort | paste -sd: -)"
+          zig_paths="$(find tmp/zig-coverage-artifacts -name cobertura.xml -type f | sort | paste -sd: -)"
+          RUBY_COVERAGE_PATHS="$ruby_paths" \
+          ZIG_COVERAGE_PATHS="$zig_paths" \
+            ruby tools/diff_bucket_summary.rb "origin/${{ github.event.pull_request.base.ref }}" --format markdown \
+            > tmp/diff-bucket-summary.md
+      - name: Update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- clear-diff-coverage-buckets -->';
+            const report = fs.readFileSync('tmp/diff-bucket-summary.md', 'utf8').trim();
+            const body = `${marker}\n${report}\n`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

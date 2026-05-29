@@ -96,11 +96,14 @@ module MIRLoweringCapabilities
   def with_cap_zig_target(var_node, var_name)
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
+    @decl_zig_name_map = T.let(@decl_zig_name_map, T.untyped)
     @do_capture_map = T.let(@do_capture_map, T.untyped)
     if var_node.is_a?(AST::GetField)
       build_field_path_zig(var_node)
     else
-      @do_capture_map&.dig(var_name) || var_name
+      decl = var_node.respond_to?(:symbol) ? var_node.symbol&.reg : nil
+      mapped = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || nil
+      @do_capture_map&.dig(var_name) || mapped || var_name
     end
   end
 
@@ -122,7 +125,7 @@ module MIRLoweringCapabilities
   sig { params(zig_var: String).returns(String) }
   def comptime_arc_unwrap_expr(zig_var)
     T.bind(self, MIRLowering) rescue nil
-    "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
+    "#{with_match_unwrap_value(zig_var)}.*"
   end
 
   sig { params(lock_expr: String, var_sync: T.nilable(Symbol), fallible: T::Boolean).returns(String) }
@@ -406,13 +409,14 @@ module MIRLoweringCapabilities
         source_zig = emit_expr(lower(cap[:var_node]))
         safe_alias = zig_safe_name(alias_name)
         rt = resolved.is_a?(Type) ? resolved : Type.new(resolved)
-        is_collection = rt.future? && rt.tense_type&.array?
+        is_collection = rt.observable_array_future? || rt.array?
         materialize = MIR::MethodCall.new(
           MIR::Ident.new(source_zig),
           "materialize",
           [MIR::AllocatorRef.new(:heap)],
           true,
-          MIR::CallableContract.no_ownership(1)
+          MIR::CallableContract.no_ownership(1),
+          is_collection ? :heap : nil,
         )
         if is_collection
           mark = MIR::AllocMark.new(T.must(safe_alias), :heap, rt.tense_type)

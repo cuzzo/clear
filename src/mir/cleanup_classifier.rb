@@ -74,6 +74,7 @@ module CleanupClassifier
       next unless (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && binding_container_borrow?(node)
 
       bindings.delete(node.name.to_s)
+      node.mir_binding_entry = nil if node.respond_to?(:mir_binding_entry=)
     end
     nil
   end
@@ -294,7 +295,8 @@ module CleanupClassifier
         moved_alloc = moved_payload_alloc(node.respond_to?(:value) ? node.value : nil, bindings)
         cleanup = classify_binding(var_name, node.full_type!, node, promoted_fns, schema_lookup)
         cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
-        if !cleanup && node.respond_to?(:symbol) && node.symbol&.heap_storage?
+        if !cleanup && node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
+            !optional_empty_initializer?(node.respond_to?(:value) ? node.value : nil)
           ti = node.full_type!
           cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, schema_lookup)
         end
@@ -411,7 +413,7 @@ module CleanupClassifier
       return entry(:resource, resource_close_zig: schema.close_zig)
     end
     if Schemas.union?(schema)
-      has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      has_heap = union_variants_need_cleanup?(schema, schema_lookup)
       return has_heap ? entry(:takes_union) : nil
     end
 
@@ -495,21 +497,20 @@ module CleanupClassifier
   end
 
   # Classify ownership-transferring captures from WHILE-bind / IF-bind nodes.
-  # Both shapes carry the same contract: a binding name + an expression whose
-  # ownership transfers when the call returns Some(T). Only MethodCall/FuncCall
-  # results are considered -- variable/field access is a borrow and the
-  # original binding retains cleanup responsibility. RESOLVE is handled
-  # separately (rcRelease in lower_*_bind).
+  # Both shapes carry the same contract: a binding name + an optional-producing
+  # expression whose successful capture creates a new owner. Plain
+  # variable/field optional access is a borrow and remains the source owner's
+  # cleanup responsibility.
   sig { params(body: T::Array[T.untyped], promoted_fns: T::Set[String], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).returns(T.nilable(T::Array[T.untyped])) }
   private_class_method def self.walk_capture_bindings(body, promoted_fns, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
-      next unless AST.call?(expr)
-      next if expr.is_a?(AST::ResolveNode)
+      next unless capture_expr_owns_result?(expr)
       expr_ti = Type.from_node!(expr, context: "capture binding")
       inner_ti = expr_ti.wrapped_type
       next unless inner_ti
       e = classify_binding(name, inner_ti, anchor_node, promoted_fns, schema_lookup)
       e ||= entry(:heap_string, has_moved_guard: true) if inner_ti.string?
+      e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, schema_lookup)
       next unless e
       e[:alloc] = :heap if capture_expr_heap?(expr, promoted_fns, schema_lookup)
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
@@ -520,9 +521,16 @@ module CleanupClassifier
     end
   end
 
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  private_class_method def self.capture_expr_owns_result?(expr)
+    AST.call?(expr) || expr.is_a?(AST::MethodCall) || expr.is_a?(AST::ResolveNode)
+  end
+
   sig { params(expr: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.capture_expr_heap?(expr, promoted_fns, schema_lookup)
     case expr
+    when AST::ResolveNode
+      true
     when AST::FuncCall
       return false if call_has_return_lifetime?(expr)
       call_returns_heap_owned?(expr, schema_lookup) ||
@@ -589,7 +597,11 @@ module CleanupClassifier
   sig { params(name: String, ti: Type, node: T.untyped, promoted_fns: T::Set[String], schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     node_sym = node.respond_to?(:symbol) ? node.symbol : nil
+    value = node.respond_to?(:value) ? node.value : nil
     return nil if binding_container_borrow?(node)
+    return nil if ti.optional? && optional_empty_initializer?(value) &&
+                  !(node.is_a?(AST::VarDecl) && node.mutable == true &&
+                    node.respond_to?(:var_mutated) && node.var_mutated)
     return nil if !node_sym&.heap_storage? &&
                   (node_sym&.borrow_provenance? ||
                    (node.respond_to?(:borrow_provenance?) && node.borrow_provenance?))
@@ -868,7 +880,7 @@ module CleanupClassifier
     return true if inner.recursive_cleanup_shape?(schema_lookup)
     return true if inner.needs_cleanup?(schema_lookup)
     schema = schema_lookup.call(inner.resolved) rescue nil
-    return (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) } if Schemas.union?(schema)
+    return union_variants_need_cleanup?(schema, schema_lookup) if Schemas.union?(schema)
     return elem_has_string_fields?(schema) if Schemas.field_bearing?(schema)
     false
   end
@@ -906,7 +918,7 @@ module CleanupClassifier
 
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)
-      has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      has_heap = union_variants_need_cleanup?(schema, schema_lookup)
       return entry(:uniform) if has_heap
     end
     if Schemas.field_bearing?(schema)
@@ -941,7 +953,7 @@ module CleanupClassifier
 
     schema = schema_lookup.call(ti.resolved) rescue nil
     if Schemas.union?(schema)
-      has_heap = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      has_heap = union_variants_need_cleanup?(schema, schema_lookup)
       return entry(:uniform) if has_heap
     end
     if Schemas.field_bearing?(schema)
@@ -1019,7 +1031,7 @@ module CleanupClassifier
     return nil unless Schemas.union?(schema)
     is_copy = ti.implicitly_copyable? { |t| schema_lookup.call(t) rescue nil } rescue true
     return nil if is_copy
-    has_heap_variants = (schema.variants || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    has_heap_variants = union_variants_need_cleanup?(schema, schema_lookup)
     alloc = has_heap_variants ? :heap : (ti.provenance_alloc || :frame)
     e = entry(:uniform, alloc: alloc)
     e[:fixed_alloc] = true if has_heap_variants
@@ -1071,7 +1083,7 @@ module CleanupClassifier
 
   sig { params(schema: T.untyped, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.elem_has_cleanup_fields?(schema, schema_lookup)
-    return false unless Schemas.field_bearing?(schema)
+    return false unless Schemas.field_bearing?(schema) || Schemas.inline_struct?(schema)
     borrowed = schema.respond_to?(:borrowed_fields) ? schema.borrowed_fields : Set.new
     schema.fields.any? do |name, v|
       next false if borrowed.include?(name.to_s)
@@ -1081,8 +1093,10 @@ module CleanupClassifier
       t.string? ||
         t.non_string_array? ||
         t.collection? ||
+        t.indirect? ||
         t.any_rc? ||
         t.link? ||
+        (schema_lookup && t.recursive_cleanup_shape?(schema_lookup)) ||
         (schema_lookup && t.needs_cleanup?(schema_lookup))
     end
   end

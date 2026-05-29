@@ -386,14 +386,18 @@ module FunctionAnalysis
         # Container index access (arr[i], map[key]) returns a borrow -
         # you cannot take ownership of data inside a container.
         # Use .remove(i) or COPY arr[i] instead.
-        if inner_node.container_borrow
+        if borrowed_takes_argument?(inner_node)
           arg_ti = inner_node.full_type!(context: "TAKES index argument")
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti.is_a?(Type) ?
             (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
             true
           unless is_copy
-            error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
+            if inner_node.is_a?(AST::GetIndex)
+              error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
+            else
+              error!(inner_node, :TAKES_NEEDS_OWNED_BORROW)
+            end
           end
         end
 
@@ -551,6 +555,19 @@ module FunctionAnalysis
     end
 
     warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def borrowed_takes_argument?(node)
+    return false unless node
+    return true if node.respond_to?(:container_borrow) && node.container_borrow
+    return true if node.is_a?(AST::GetIndex)
+    return false unless node.is_a?(AST::GetField)
+
+    root = AST.root_identifier(node)
+    return false if root&.token&.type == :TYPE_ID
+    sym = root&.symbol
+    !!(sym && (sym.is_param || sym.reg))
   end
 
   sig { params(arg_node: T.untyped, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }

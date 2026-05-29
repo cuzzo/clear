@@ -12,6 +12,7 @@ module MIRLoweringConcurrency
 
     const :source_kind, Symbol
     const :promise_type, Type
+    const :async_result_shape, T.nilable(AsyncResultShape)
     const :result_type, Type
     const :result_alloc, T.nilable(Symbol)
     const :inner, MIR::Node
@@ -218,38 +219,21 @@ module MIRLoweringConcurrency
       capture_pre_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
       capture_body_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                ")
 
-      # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
+      # Lower branch body to MIR nodes, finalize ownership once, then emit from
+      # that same finalized body. Branch-local allocating temporaries must not
+      # be hidden inside already-rendered Zig.
       branch_mir = T.let(nil, T.untyped)
       body_code = with_fiber_capture_map(caps.capture_map,
                                          capture_symbols: caps.capture_symbols,
                                          rt_override: "__rt") do
-        pairs = branch[:body].flat_map { |e|
+        body_stmts = branch[:body].flat_map { |e|
           mir = lower(e)
-          nodes = mir.is_a?(Array) ? mir.compact : [mir]
-          nodes.map { |m| [e, m] }
+          pending = flush_pending
+          nodes = mir.is_a?(Array) ? mir.compact : do_branch_stmt_nodes(e, mir)
+          pending + nodes.compact
         }
-        body_stmts = pairs.map(&:last)
-        branch_mir = body_stmts
-        pairs.filter_map { |expr, mir|
-          code = emit_expr(mir)
-          next nil if code.nil? || code.empty?
-          code = if code.strip.match?(/\A__bg\d+:/)
-            @tmp_counter += 1
-            discard_name = "__discard_bg_#{@tmp_counter}"
-            "const #{discard_name} = #{code};\n        _ = try #{discard_name}.next();"
-          elsif code.strip.end_with?(";")
-            code
-          elsif code.strip.end_with?("}")
-            expr_type = expr.full_type!
-            is_void_expr = ast_void_type?(expr_type)
-            is_void_expr = false if mir.is_a?(MIR::BgBlock)
-            is_void_expr = false if code.strip.match?(/\A__bg\d+:/)
-            is_void_expr ? code : "_ = #{code};"
-          else
-            code + ";"
-          end
-          code
-        }.join("\n        ")
+        branch_mir = finalized_boundary_body_for_emit(body_stmts)
+        render_mir_list(branch_mir).gsub("\n", "\n        ")
       end
       all_branch_bodies << (branch_mir || [])
 
@@ -295,6 +279,31 @@ module MIRLoweringConcurrency
     do_block
   end
 
+  sig { params(expr: T.untyped, mir: T.untyped).returns(T::Array[T.untyped]) }
+  def do_branch_stmt_nodes(expr, mir)
+    T.bind(self, MIRLowering) rescue nil
+    if mir.is_a?(MIR::BgBlock)
+      @tmp_counter += 1
+      name = "__discard_bg_#{@tmp_counter}"
+      next_contract = MIR::CallableContract.new(
+        MIR::CallableContract.no_ownership(0).signature,
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(name, Type.new(:Any), "DO branch BG discard", :heap),
+        ]),
+        0,
+      )
+      return [
+        MIR::Let.new(name, mir, false, nil, nil),
+        MIR::ExprStmt.new(
+          MIR::MethodCall.new(MIR::Ident.new(name), "next", [], true, next_contract),
+          true,
+        ),
+      ]
+    end
+
+    [wrap_step_as_stmt({ expr: expr, binding: nil }, mir)]
+  end
+
   sig { params(node: AST::BgBlock).returns(MIR::BgBlock) }
   def lower_bg_block(node)
     T.bind(self, MIRLowering) rescue nil
@@ -308,9 +317,10 @@ module MIRLoweringConcurrency
     id = @bg_block_counter - 1
 
     tense_t = Type.new(node.full_type!)
-    inner_t = Type.new(tense_t.tense_type)
+    async_shape = T.unsafe(node).async_result_shape || AsyncResultShape.promise(tense_t.tense_type, shared: tense_t.shared_promise?)
+    inner_t = Type.new(async_shape.payload_type)
     inner_zig = inner_t.zig_type
-    promise_zig = tense_t.zig_type
+    promise_zig = async_shape.handle_zig_type
     is_void = inner_zig == "void"
 
     ctx_type = "__BgCtx#{id}"
@@ -379,6 +389,7 @@ module MIRLoweringConcurrency
                      }).join(", ")
     fresh_heap_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
     fresh_heap_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                    ")
+    fresh_heap_cleanup_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? spec.name : nil }
 
     # Flatten ThenChain + lower body
     flat_steps = []
@@ -526,6 +537,7 @@ module MIRLoweringConcurrency
         # return. Thread them separately from capture_frees so the
         # transform can emit them as destroy lines (see emit.rb).
         fresh_heap_cleanups: fresh_heap_cleanups,
+        fresh_heap_cleanup_names: fresh_heap_cleanup_names,
         is_void: is_void, alloc_var: alloc_var, promise_var: promise_var,
         ctx_var: ctx_var, promoted_decls: promoted_decls,
         capture_inits: capture_inits, rt_name: rt_name, pin_mode: pin_mode,
@@ -633,8 +645,17 @@ module MIRLoweringConcurrency
     ).returns(MIR::BgBlock)
   end
   def fsm_bg_block_from_transform!(node, transform_result, captured, analysis)
-    bg_code, fsm_structure = transform_result
-    MIRChecker.check_fsm_structure!(fsm_structure, source: node) if fsm_structure
+    unless transform_result.is_a?(MIR::FsmLoweringResult)
+      Kernel.raise "FSM lowering must return MIR::FsmLoweringResult; rendered Zig without typed FSM structure is unverifiable"
+    end
+    bg_code = transform_result.code
+    fsm_structure = transform_result.structure
+    moved_captures = (analysis&.move_mark_names || Set.new).map(&:to_s) & captured.keys.map(&:to_s)
+    fsm_structure.required_move_guards = moved_captures
+    result_type = Type.from_node!(node, context: "FSM BG result").tense_type
+    fsm_structure.owned_result_required =
+      !!(result_type && T.unsafe(self).ownership_tracked_transfer_type?(result_type))
+    MIRChecker.check_fsm_structure!(fsm_structure, source: node)
     # The fiber body is consumed into the FSM state machine. Exposing it again
     # through run_body would double-walk ownership and manufacture diagnostics.
     bg = MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
@@ -743,23 +764,30 @@ module MIRLoweringConcurrency
 
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = T.let(nil, T.untyped)
-    body_code = with_fiber_capture_map(caps.capture_map,
-                                       capture_symbols: caps.capture_symbols,
-                                       rt_override: "__rt") do
-      body_mir = node.body.flat_map { |expr|
-        mir = lower(expr)
-        pending = flush_pending
-        mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-        pending + mir_nodes
-      }
-      stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
-      stream_run_body.filter_map { |mir|
-        next nil if capture_ownership_mirror_node?(mir, "ctx")
-        code = emit_expr(mir)
-        next nil if code.nil? || code.empty?
-        code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-        code
-      }.join("\n            ")
+    inherited_capture_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? "ctx.#{spec.name}" : nil }.to_set
+    prev_stream_inherited_allocs = instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
+    body_code = begin
+      instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
+      with_fiber_capture_map(caps.capture_map,
+                             capture_symbols: caps.capture_symbols,
+                             rt_override: "__rt") do
+        body_mir = node.body.flat_map { |expr|
+          mir = lower(expr)
+          pending = flush_pending
+          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+          pending + mir_nodes
+        }
+        stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
+        stream_run_body.filter_map { |mir|
+          next nil if capture_ownership_mirror_node?(mir, "ctx")
+          code = emit_expr(mir)
+          next nil if code.nil? || code.empty?
+          code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code
+        }.join("\n            ")
+      end
+    ensure
+      instance_variable_set(:@current_fsm_inherited_alloc_names, prev_stream_inherited_allocs)
     end
 
     @current_stream_local = prev_stream_local
@@ -818,12 +846,14 @@ module MIRLoweringConcurrency
       place_value_for_destination(value, node.expr, :heap, node.expr.full_type!)
     end
     lowered = hoist_alloc(lowered, node.expr, err_cleanup: true) if lowered && mir_allocates?(lowered)
+    transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
     # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
     # never reaches this branch (it sets @current_stream_is_inf only for
     # the materializing path; @target check guards against confusion).
     if @target == :bc && @current_stream_is_inf
-      return MIR::StreamYield.new(lowered)
+      stream_yield = MIR::StreamYield.new(lowered)
+      return transfer_marks.empty? ? stream_yield : MIR::ScopeBlock.new([*transfer_marks, stream_yield])
     end
     # The yielded value is a hoisted, escape-placed binding (Hoist lifts
     # anonymous YIELD operands; escape analysis marks it heap because it
@@ -831,7 +861,6 @@ module MIRLoweringConcurrency
     # dupe -- one allocation, placed by escape analysis.
     push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true,
       MIR::CallableContract.no_ownership(1))
-    transfer_marks = ownership_marks_for_transferred_temp(lowered, target_alloc: :heap)
     # YIELD transfers ownership to the stream at the push boundary. InfStream
     # owns and cleans the value even if push returns StreamClosed, so the local
     # error cleanup must be disarmed before the fallible call.
@@ -854,7 +883,10 @@ module MIRLoweringConcurrency
     T.bind(self, MIRLowering) rescue nil
     promise_type = Type.new(node.expr.full_type!)
     result_type = node.full_type!(context: "NEXT result")
-    source_kind = if promise_type.promise_list?
+    async_shape = node.expr.is_a?(AST::Identifier) ? node.expr.symbol&.async_result_shape : nil
+    source_kind = if async_shape&.promise?
+      async_shape.shared_promise? ? :shared_promise : :plain
+    elsif promise_type.promise_list?
       :promise_list
     elsif promise_type.observable_array_future?
       :observable_list
@@ -866,6 +898,7 @@ module MIRLoweringConcurrency
     NextExprPlan.new(
       source_kind: source_kind,
       promise_type: promise_type,
+      async_result_shape: async_shape,
       result_type: result_type,
       result_alloc: next_result_owned_alloc(promise_type, result_type, alloc_sym),
       inner: T.cast(lower(node.expr), MIR::Node),
