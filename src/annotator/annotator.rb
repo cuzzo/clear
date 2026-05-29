@@ -1467,6 +1467,79 @@ private
     nil # sig: returns(T.nilable(T::Array[...])) — don't leak the Type
   end
 
+  sig { params(pattern: T.untyped).returns(T.untyped) }
+  def match_variant_name(pattern)
+    case pattern
+    when AST::GetField   then pattern.field
+    when AST::MethodCall then pattern.name
+    end
+  end
+
+  sig { params(arm: T.untyped).returns(T::Array[T.untyped]) }
+  def match_variant_names(arm)
+    [arm.value, *(arm.extra_values || [])].filter_map { |pattern| match_variant_name(pattern) }
+  end
+
+  sig { params(payload: T.untyped, union_subst: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  def normalized_match_payload(payload, union_subst)
+    return apply_type_subst(payload, union_subst).resolved if payload.is_a?(Type)
+    return union_subst.fetch(payload, payload) if payload.is_a?(Symbol)
+
+    payload
+  end
+
+  sig do
+    params(
+      node: AST::MatchStatement,
+      arm: T.untyped,
+      schema: T.untyped,
+      variant_name: T.untyped,
+      union_subst: T::Hash[Symbol, T.untyped],
+      kind: String,
+      name: String
+    ).void
+  end
+  def verify_match_multi_arm_payloads!(node, arm, schema, variant_name, union_subst, kind:, name:)
+    return unless variant_name
+
+    head_payload = normalized_match_payload(schema.variants[variant_name], union_subst)
+    match_variant_names(arm).drop(1).each do |extra_name|
+      extra_payload = normalized_match_payload(schema.variants[extra_name], union_subst)
+      next if head_payload == extra_payload
+
+      error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
+        head: variant_name, other: extra_name, kind: kind, name: name)
+    end
+  end
+
+  sig { params(node: AST::StructLit, schema: T.untyped).returns(T::Hash[Symbol, Symbol]) }
+  def literal_type_substitution!(node, schema)
+    type_params = schema.type_params
+    subst = {}
+    if node.type_args&.any?
+      if type_params.nil? || type_params.empty?
+        error!(node, :GENERIC_NOT_GENERIC, type: node.name)
+      end
+      if node.type_args.length != type_params.length
+        error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
+      end
+      type_params.zip(node.type_args).each { |param, arg| subst[param] = arg.to_sym }
+    elsif type_params&.any?
+      params_hint = type_params.map(&:to_s).join(', ')
+      error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
+    end
+    subst
+  end
+
+  sig { params(node: AST::StructLit).returns(Symbol) }
+  def literal_instance_type(node)
+    if node.type_args&.any?
+      :"#{node.name}<#{node.type_args.join(',')}>"
+    else
+      node.name.to_sym
+    end
+  end
+
   sig { params(node: AST::PassStmt).returns(Symbol) }
   def visit_PassStmt(node)
     stamp_type!(node, :Void)
@@ -1553,39 +1626,14 @@ private
             if is_enum
               error!(node, :MATCH_ENUM_CAPTURE, binding: c.binding)
             elsif is_union
-              variant_name = case c.value
-                             when AST::GetField   then c.value.field
-                             when AST::MethodCall then c.value.name
-                             end
+              variant_name = match_variant_name(c.value)
               # Verify each extra variant's payload matches the head's.
               # Apply union_subst before comparing so generic instances
               # (`Mixed<Int64>` where one variant is `T` and another is
               # `Int64`) compare equal post-substitution. Variants are
               # typically stored as Type instances; normalize through
               # `.resolved` to produce a Symbol that can be compared.
-              normalize_payload = ->(p) {
-                if p.is_a?(Type)
-                  sub = union_subst.any? ? apply_type_subst(p, union_subst) : p
-                  sub.respond_to?(:resolved) ? sub.resolved : sub
-                elsif p.is_a?(Symbol) && union_subst[p]
-                  union_subst[p]
-                else
-                  p
-                end
-              }
-              c.extra_values&.each do |ev|
-                ev_name = case ev
-                          when AST::GetField   then ev.field
-                          when AST::MethodCall then ev.name
-                          end
-                next unless ev_name && variant_name
-                head_payload = normalize_payload.call(schema.variants[variant_name])
-                ev_payload   = normalize_payload.call(schema.variants[ev_name])
-                if head_payload != ev_payload
-                  error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
-                    head: variant_name, other: ev_name, kind: 'AS', name: c.binding)
-                end
-              end
+              verify_match_multi_arm_payloads!(node, c, schema, variant_name, union_subst, kind: 'AS', name: c.binding)
               if variant_name
                 raw_payload = schema.variants[variant_name]
                 if raw_payload.nil?
@@ -1599,13 +1647,13 @@ private
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                   inner_type = raw_payload.dup
                   inner_type.layout = nil
-                  inner_type = union_subst.any? ? apply_type_subst(inner_type, union_subst) : inner_type
+                  inner_type = apply_type_subst(inner_type, union_subst)
                   current_scope.declare(c.binding, nil, inner_type, false, false, nil, :stack)
                   og_declare(c.binding, nil, inner_type)
                   classify_ownership!(current_scope.locals[c.binding])
                   c.indirect_payload_as = true  # transpiler must emit subject.Variant.* (deref *T)
                 else
-                  payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
+                  payload_type = apply_type_subst(raw_payload, union_subst)
                   current_scope.declare(c.binding, nil, payload_type, false, false, nil, :stack)
                   og_declare(c.binding, nil, payload_type)
                   classify_ownership!(current_scope.locals[c.binding])
@@ -1631,31 +1679,8 @@ private
             # annotate_struct_pattern!; not a guess. Binds are declared
             # below; this only types the pattern node itself.
             stamp_type!(c.destructure, node.expr.full_type!(context: "union destructure subject"))
-            variant_name = case c.value
-                           when AST::GetField   then c.value.field
-                           when AST::MethodCall then c.value.name
-                           end
-            normalize_payload_d = ->(p) {
-              if p.is_a?(Type)
-                sub = union_subst.any? ? apply_type_subst(p, union_subst) : p
-                sub.respond_to?(:resolved) ? sub.resolved : sub
-              elsif p.is_a?(Symbol) && union_subst[p]
-                union_subst[p]
-              else
-                p
-              end
-            }
-            c.extra_values&.each do |ev|
-              ev_name = case ev
-                        when AST::GetField   then ev.field
-                        when AST::MethodCall then ev.name
-                        end
-              next unless ev_name && variant_name
-              if normalize_payload_d.call(schema.variants[variant_name]) != normalize_payload_d.call(schema.variants[ev_name])
-                error!(node, :MATCH_MULTI_ARM_PAYLOAD_MISMATCH,
-                  head: variant_name, other: ev_name, kind: 'destructure', name: '{ ... }')
-              end
-            end
+            variant_name = match_variant_name(c.value)
+            verify_match_multi_arm_payloads!(node, c, schema, variant_name, union_subst, kind: 'destructure', name: '{ ... }')
             if variant_name
               raw_payload = schema.variants[variant_name]
               # Resolve the payload's field schema (inline struct or named type)
@@ -1664,7 +1689,7 @@ private
                   fields: raw_payload.fields.transform_values { |t| AST::StructField.new(type: t) })
               else
                 payload_type_sym = raw_payload.is_a?(Type) ? raw_payload.resolved : raw_payload
-                payload_type_sym = union_subst[payload_type_sym] if union_subst[payload_type_sym]
+                payload_type_sym = union_subst.fetch(payload_type_sym, payload_type_sym)
                 lookup_type_schema(payload_type_sym)
               end
 
@@ -1722,12 +1747,7 @@ private
       seen = {}
       node.cases.each do |c|
         next if c.kind == :when || c.kind == :struct_pattern
-        [c.value, *(c.extra_values || [])].each do |pat|
-          name = case pat
-                 when AST::GetField   then pat.field
-                 when AST::MethodCall then pat.name
-                 end
-          next unless name
+        match_variant_names(c).each do |name|
           if seen[name]
             error!(node, :MATCH_DUPLICATE_PATTERN, variant: name)
           end
@@ -1765,15 +1785,7 @@ private
       # contribute one entry per pattern so they count toward
       # exhaustiveness like single arms would.
       covered = node.cases.flat_map do |c|
-        names = []
-        [c.value, *(c.extra_values || [])].each do |pat|
-          name = case pat
-                 when AST::GetField   then pat.field
-                 when AST::MethodCall then pat.name
-                 end
-          names << name if name
-        end
-        names
+        match_variant_names(c)
       end.to_set
 
       all_variants = is_enum ? schema.variants : schema.variants.keys.to_set
@@ -3582,21 +3594,7 @@ private
         error!(node, :UNION_LITERAL_VARIANT_COUNT, name: node.name, got: node.fields.length)
       end
 
-      # Build type param substitution for generic unions
-      union_type_params = schema.type_params
-      union_subst = {}
-      if node.type_args&.any?
-        if union_type_params.nil? || union_type_params.empty?
-          error!(node, :GENERIC_NOT_GENERIC, type: node.name)
-        end
-        if node.type_args.length != union_type_params.length
-          error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: union_type_params.length, got: node.type_args.length)
-        end
-        union_type_params.zip(node.type_args).each { |p, a| union_subst[p] = a.to_sym }
-      elsif union_type_params&.any?
-        params_hint = union_type_params.map(&:to_s).join(', ')
-        error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
-      end
+      union_subst = literal_type_substitution!(node, schema)
 
       variant_name, val_node = node.fields.first
       unless schema.variants.key?(variant_name)
@@ -3630,7 +3628,7 @@ private
                         raw_expected
                       end
       # Apply type param substitution (e.g. T → Number for generic unions)
-      expected_type = T.let(union_subst.any? ? apply_type_subst(raw_for_check, union_subst) : raw_for_check, Type)
+      expected_type = T.let(apply_type_subst(raw_for_check, union_subst), Type)
       visit(val_node)
       reject_borrowed_value!(val_node, "#{node.name}.#{variant_name}")
       # Ensure value is owned data (implicit COPY for @list/rodata strings).
@@ -3648,12 +3646,7 @@ private
         error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
       end
       move_if_not_copyable!(val_node)
-      struct_lit_type = if node.type_args&.any?
-        :"#{node.name}<#{node.type_args.join(',')}>"
-      else
-        node.name.to_sym
-      end
-      stamp_type!(node, struct_lit_type)
+      stamp_type!(node, literal_instance_type(node))
       return
     end
 
@@ -3673,22 +3666,7 @@ private
 
     # Build type param substitution map for generic struct instantiation.
     # e.g. Pair<Number>{ first: 1.0 } → { :T => :Float64 }
-    type_params = schema.type_params
-    type_subst = {}
-    if node.type_args&.any?
-      if type_params.nil? || type_params.empty?
-        error!(node, :GENERIC_NOT_GENERIC, type: node.name)
-      end
-      if node.type_args.length != type_params.length
-        error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
-      end
-      type_params.zip(node.type_args).each do |param, arg|
-        type_subst[param] = arg.to_sym
-      end
-    elsif type_params&.any?
-      params_hint = type_params.map(&:to_s).join(', ')
-      error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
-    end
+    type_subst = literal_type_substitution!(node, schema)
 
     # Iterate Fields (Validation)
     node.fields.each do |field_name, val_node|
@@ -3714,11 +3692,7 @@ private
       field_is_borrowed = schema.borrowed_fields&.include?(field_name)
 
       # Apply type param substitution (e.g., T → Number, T[] → String[])
-      expected_type = T.let(if type_subst.any?
-        apply_type_subst(raw_expected, type_subst)
-      else
-        raw_expected
-      end, T.untyped)
+      expected_type = T.let(apply_type_subst(raw_expected, type_subst), T.untyped)
 
       # BORROWED fields accept borrowed values — skip ownership checks.
       # Non-borrowed fields require owned data.
@@ -3752,13 +3726,7 @@ private
     node.borrowed_field_names = schema.borrowed_fields
     node.instance_variable_set(:@has_borrowed_fields, true) if schema.borrowed_fields&.any?
 
-    # Set full_type to the generic instance name or plain struct name
-    struct_lit_type = if node.type_args&.any?
-      :"#{node.name}<#{node.type_args.join(',')}>"
-    else
-      node.name.to_sym
-    end
-    stamp_type!(node, struct_lit_type)
+    stamp_type!(node, literal_instance_type(node))
   end
 
   sig { params(node: AST::ListLit).returns(T.nilable(T.any(Symbol, Type))) }
@@ -4717,17 +4685,12 @@ private
           all_union = per_arm_effects.reduce(Set.new, :|)
           maybe_set = all_union - concrete
           concrete.each { |eff| @fn_direct_effects[fn_ctx_name].add(eff) }
-          if maybe_set.include?(EffectTracker::CONTENTION)
-            @fn_direct_effects[fn_ctx_name].add(EffectTracker::CONTENTION_MAYBE)
-          end
-          if maybe_set.include?(EffectTracker::BLOCKING)
-            @fn_direct_effects[fn_ctx_name].add(EffectTracker::BLOCKING_MAYBE)
-          end
-          # Effects orthogonal to the contention axis (heap, yield, io,
-          # etc.) that appear in some-but-not-all arms get added as
-          # concrete — the fn will incur them on at least one path.
-          (maybe_set - [EffectTracker::CONTENTION, EffectTracker::BLOCKING]).each do |eff|
-            @fn_direct_effects[fn_ctx_name].add(eff)
+          maybe_projection = {
+            EffectTracker::CONTENTION => EffectTracker::CONTENTION_MAYBE,
+            EffectTracker::BLOCKING => EffectTracker::BLOCKING_MAYBE,
+          }
+          maybe_set.each do |eff|
+            @fn_direct_effects[fn_ctx_name].add(maybe_projection.fetch(eff, eff))
           end
         end
       end
