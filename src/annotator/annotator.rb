@@ -1861,7 +1861,7 @@ private
     elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
 
     # 2. Analyze body with loop variable
-    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
+    current_fn_ctx.loop_depth += 1
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
@@ -1873,7 +1873,7 @@ private
         node.deferred_drops
       }
     ], merge_to_parent: false)
-    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+    current_fn_ctx.loop_depth -= 1
 
     stamp_type!(node, :Void)
   end
@@ -1964,7 +1964,7 @@ private
       unwrapped.link_source = ti.link_source
     end
 
-    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
+    current_fn_ctx.loop_depth += 1
 
     pre_loop_states = @og&.fork_lightweight
 
@@ -2010,7 +2010,7 @@ private
       }
     ], merge_to_parent: false)
 
-    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+    current_fn_ctx.loop_depth -= 1
 
     node.mark_per_iter = false
     stamp_type!(node, :Void)
@@ -2202,7 +2202,7 @@ private
 
     # Auto returns are resolved after the body walk, so strict equality here
     # would reject valid programs before the unifier has run.
-    actual_is_auto = actual_full.respond_to?(:auto?) && actual_full.auto?
+    actual_is_auto = actual_full.auto?
     expected_is_auto = expected.auto?
 
     if !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
@@ -2224,12 +2224,7 @@ private
       # the FunctionSignature seam coerces nil -> Void.)
       value_is_fallible =
         (node.value.respond_to?(:error_union_type) && node.value.error_union_type) ||
-        (begin
-           rt = node.value.respond_to?(:resolved_type) ? node.value.resolved_type : nil
-           rt ? Type.new(rt).error_union? : false
-         rescue StandardError
-           false
-         end)
+        actual_full.error_union?
       coerce_target =
         if !value_is_fallible && expected.respond_to?(:error_union?) && expected.error_union? &&
            expected.respond_to?(:payload_type) && expected.payload_type
@@ -2243,9 +2238,7 @@ private
 
     stamp_type!(node, actual)
 
-    if current_fn_ctx
-      current_fn_ctx.returns << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
-    end
+    current_fn_ctx.returns << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
 
     @branch_terminated = true
   end

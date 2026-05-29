@@ -19,9 +19,16 @@ CWM_CELLS = %i[
 
 %i[
   locked_direct_field write_locked_direct_field atomic_ptr_direct_field
-  snapshot_plain borrowed_shared materialized_plain view_plain
+  snapshot_plain borrowed_shared borrowed_write_locked
+  materialized_plain view_plain
 ].each do |m|
   CWM_CELLS << { mode: m, expected: :compile_error }
+end
+
+%i[
+  restrict_plain materialized_distinct
+].each do |m|
+  CWM_CELLS << { mode: m }
 end
 
 FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
@@ -168,6 +175,15 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           RETURN;
       END
     CHT
+  when :restrict_plain
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE c = Counter{ value: 1_i64 };
+          WITH RESTRICT c AS MUTABLE r { r.value = 2_i64; }
+          RETURN;
+      END
+    CHT
   when :snapshot_plain
     <<~CHT
       STRUCT Counter { value: Int64 }
@@ -186,6 +202,15 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           RETURN;
       END
     CHT
+  when :borrowed_write_locked
+    <<~CHT
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS Void ->
+          c = Counter{ value: 1_i64 } @writeLocked;
+          WITH BORROWED c AS r { _ = r.value; }
+          RETURN;
+      END
+    CHT
   when :materialized_plain
     <<~CHT
       FN main() RETURNS Void ->
@@ -199,6 +224,15 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
       FN main() RETURNS Void ->
           n: Int64 = 1_i64;
           WITH VIEW n AS snap { _ = snap; }
+          RETURN;
+      END
+    CHT
+  when :materialized_distinct
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 1_i64; YIELD 2_i64; };
+          vals: ~Int64[]@set:observable = s |> DISTINCT _;
+          WITH MATERIALIZED VIEW vals AS snap { _ = snap.length(); }
           RETURN;
       END
     CHT
