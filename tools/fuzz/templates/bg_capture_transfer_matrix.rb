@@ -12,6 +12,9 @@ BG_CAPTURE_TRANSFER_CELLS = []
       expected = :compile_error if mode == :field_copy && shape != :struct_owned
       expected = :compile_error if mode == :list_index_copy && shape != :list_owned
       expected = :compile_error if mode == :give && boundary == :do
+      expected = :compile_error if boundary == :bg && shape == :struct_owned &&
+                                   %i[borrow nested_field returned_handle].include?(mode)
+      expected = :compile_error if boundary == :bg && shape == :list_owned && mode == :list_index_copy
       BG_CAPTURE_TRANSFER_CELLS << { boundary: boundary, shape: shape, mode: mode, expected: expected }
     end
   end
