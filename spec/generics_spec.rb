@@ -505,6 +505,29 @@ RSpec.describe SemanticAnnotator do
         expect(substituted.elem_sync).to eq(:atomic)
       end
 
+      it "substitutes nested generic instances and array suffixes" do
+        annotator = SemanticAnnotator.new
+
+        nested = annotator.send(:apply_type_subst, Type.new(:"Cache<T>"), { T: :Box })
+        array = annotator.send(:apply_type_subst, Type.new(:"T[]"), { T: :Box })
+
+        expect(nested.resolved).to eq(:"Cache<Box>")
+        expect(array.resolved).to eq(:"Box[]")
+      end
+
+      it "preserves declared sharding and sync metadata on map bindings" do
+        ast = run(<<~CLEAR)
+          FN main() RETURNS Void ->
+            MUTABLE counts: HashMap<Int64>@sharded(4):locked = {};
+            RETURN;
+          END
+        CLEAR
+        decl = ast.statements.last.body.first
+
+        expect(decl.full_type.shard_count).to eq(4)
+        expect(decl.full_type.sync).to eq(:locked)
+      end
+
       it "preserves capability axes through Cache<T> get/set" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }

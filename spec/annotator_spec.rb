@@ -560,6 +560,34 @@ RSpec.describe SemanticAnnotator do
           FLUX
           expect { run(code) }.not_to raise_error
         end
+
+        it "rejects bare bindings for shared parameters" do
+          code = <<~FLUX
+            STRUCT Point { x: Int64 }
+            FN take(p: Point @shared) RETURNS Void ->
+              RETURN;
+            END
+            FN main() RETURNS Void ->
+              p = Point{ x: 1 };
+              take(p);
+              RETURN;
+            END
+          FLUX
+          expect { run(code) }.to raise_error(CompilerError, /expects Point @shared, got Point/i)
+        end
+      end
+
+      context "observable type annotations" do
+        it "rejects sync and ownership wrappers layered onto observables" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
+          node = AST::Identifier.new(token, "running")
+          type = Type.new(:"~Float64", ownership: :shared, sync: :locked, observable: true)
+
+          expect {
+            annotator.send(:validate_type_annotation!, node, type)
+          }.to raise_error(CompilerError, /observable.*lock-free.*sharing it/i)
+        end
       end
 
       context "Lambda defaults" do
@@ -2136,6 +2164,18 @@ RSpec.describe SemanticAnnotator do
           expect(result).to eq(:Int64)
         end
       end
+
+      it "rejects unsigned negative? calls before autocast can mask them" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              n: UInt64 = 1_u64;
+              bad = n.negative?();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /negative\?\(\).*unsigned integers/i)
+      end
     end
 
     context "Polymorphic Conversion (toFloat)" do
@@ -2922,6 +2962,63 @@ RSpec.describe SemanticAnnotator do
         ret_node  = caller_fn.body.last
         call = ret_node.value
         expect(call.module_alias).to eq("native_math")
+      end
+
+      it "records extern effects on calls and charges allocator effects" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN allocThing() RETURNS !String EFFECTS :alloc:heap FROM "native_alloc";
+          FN caller() RETURNS !String ->
+            RETURN allocThing();
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.extern_effects).to eq({ alloc: :heap })
+        expect(caller_fn.uses_heap).to be true
+      end
+
+      it "marks ordinary extern calls without allocator effects" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN nativeLen(s: String) RETURNS Int64 FROM "native";
+          FN caller() RETURNS Int64 ->
+            RETURN nativeLen("abc");
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.extern_call).to be true
+        expect(call.extern_effects).to eq({})
+        expect(caller_fn.uses_heap).to be false
+      end
+
+      it "extracts comptime type arguments for generic extern functions" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN STRUCT Parsed {} FROM "std_json";
+          EXTERN FN parseFromSlice<T>(comptime: T, content: String) RETURNS !Parsed EFFECTS :alloc:heap FROM "std_json";
+          STRUCT Doc { value: Int64 }
+          FN caller() RETURNS !Parsed ->
+            RETURN parseFromSlice(Doc, "{}");
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        ret_node = caller_fn.body.last
+        call = ret_node.value
+        expect(call.generic_type_args).to eq([:Doc])
+        expect(call.args.first.resolved_type).to eq(:Type)
+      end
+
+      it "rejects hash-shaped intrinsic overloads when the base type cannot match" do
+        annotator = SemanticAnnotator.new
+        arg = Struct.new(:resolved_type) do
+          def full_type!(context:)
+            Type.new(:String)
+          end
+        end.new(:String)
+
+        match = annotator.send(:find_matching_intrinsic, [{ args: [{ type: :Int64 }] }], [arg])
+        expect(match).to be_nil
       end
     end
 

@@ -146,6 +146,83 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
     end
   end
 
+  describe "function return lifetime declarations" do
+    it "rejects mutable borrowed return sources unless the argument is restricted" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Box { value: Int64 }
+          FN borrow!(MUTABLE box: Box) RETURNS box:Box ->
+            RETURN box;
+          END
+          FN main() RETURNS Void ->
+            MUTABLE b = Box{ value: 1 };
+            got = borrow!(b);
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /must be passed from a RESTRICT binding|mutable.*RESTRICT/i)
+    end
+
+    it "rejects returned lifetimes with ambiguous atomic and lock families" do
+      expect {
+        annotate(<<~CLEAR)
+          FN mixed(x: Int64) RETURNS x:Int64
+            REQUIRES x: ATOMIC | LOCKED
+          ->
+            RETURN x;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /RETURNS x:T.*ATOMIC|ATOMIC.*RETURNS x:T/i)
+    end
+
+    it "allows mutable arguments that are not returned lifetime sources" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Box { value: Int64 }
+          FN pass!(MUTABLE scratch: Box, source: Box) RETURNS source:Box ->
+            RETURN source;
+          END
+          FN main() RETURNS Void ->
+            MUTABLE a = Box{ value: 1 };
+            b = Box{ value: 2 };
+            got = pass!(a, b);
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "applies wildcard return lifetimes to mutable parameters" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Box { value: Int64 }
+          FN pass!(MUTABLE source: Box) RETURNS *:Box ->
+            RETURN source;
+          END
+          FN main() RETURNS Void ->
+            MUTABLE a = Box{ value: 1 };
+            WITH RESTRICT a AS MUTABLE source {
+              got = pass!(source);
+            }
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
+
+    it "accepts non-atomic multi-family lifetime requirements" do
+      fn = AST::FunctionDef.allocate
+      allow(fn).to receive(:respond_to?).with(:requires).and_return(true)
+      allow(fn).to receive(:requires).and_return({ "x" => Set[:LOCKED, :VERSIONED] })
+      allow(fn).to receive(:name).and_return("locked")
+      source = AST::Identifier.new(Lexer::Token.new(:IDENTIFIER, "x", 1, 1), "x")
+
+      expect {
+        SemanticAnnotator.new.send(:verify_no_mixed_atomic_returned_lifetime!, fn, [source])
+      }.not_to raise_error
+    end
+  end
+
   # ── Direct assignment (struct field / index store) ───────────
 
   describe "a.field = bg (struct field assign)" do
