@@ -787,6 +787,7 @@ module CapabilityHelper
       end
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+      record_capture_local!(alias_name) if cap[:alias]
       current_scope.locals[alias_name].non_escaping = true
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
@@ -805,6 +806,7 @@ module CapabilityHelper
       end
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+      record_capture_local!(alias_name) if cap[:alias]
       current_scope.locals[alias_name].non_escaping = true
       og_declare(alias_name, nil, inner_type)
       unless current_scope.declare_with_new_capability(cap)
@@ -831,6 +833,7 @@ module CapabilityHelper
         is_mutable = !!cap[:alias_mutable]
         resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
+        record_capture_local!(alias_name)
         sym = current_scope.locals[alias_name]
         sym.non_escaping  = true
         sym.borrowed_alias = true  # RESTRICT alias: fiber capture is stack-UAF
@@ -849,6 +852,7 @@ module CapabilityHelper
       bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
+      record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.locals[alias_name]
       if cap[:capability] == :VIEW
         sym.non_escaping  = true
@@ -883,6 +887,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       is_mutable = !!cap[:alias_mutable]
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
+      record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
       sym.borrowed_alias = true
@@ -909,6 +914,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       resolved_type = capability_alias_type(cap.resolved_type.untyped? ? (cap.old_scope&.resolve_type(var_name) || :Any) : cap.resolved_type)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
+      record_capture_local!(alias_name) if cap[:alias]
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
       sym.borrowed_alias = true  # BORROWED alias: fiber capture is stack-UAF
@@ -928,42 +934,25 @@ module CapabilityHelper
     end
   end
 
-  # --- Fiber capture analysis (shared by BG and DO blocks) ---
-
-  # Result of analyzing a fiber body's captured variables.
-  # Computed once per body by analyze_fiber_captures, queried by multiple consumers.
   CaptureAnalysis = Struct.new(
-    :has_local,        # captures @local var (sync == :local)
-    :has_rc,           # captures @multiowned (Rc) var
-    :has_shared,       # captures any shared/locked/write_locked/local/multiowned/sharded var
-    :has_sharded,      # specifically captures @sharded (for auto-pin reason)
-    :has_affine_locked, # captures affine @locked (not @shared) -- needs spawnPinned
-    :has_outer_ref,    # references any outer-scope variable
-    :has_non_escaping_capture, # captures a non_escaping (BORROWED/RESTRICT) binding -- UAF risk
-    :captures,         # Hash<name => type_obj> for code generation
-    :capture_symbols,  # Hash<name => SymbolEntry> -- live entry for late re-resolution
-                       # of sync/storage stamps that propagate_caller_sync! adds AFTER
-                       # the BG body was visited (params receiving @shared:locked from
-                       # callers). mir_lowering reads the entry's CURRENT sync/storage
-                       # to overlay onto the cached type, which fixes the BG ctx field
-                       # type-mismatch repro'd by transpile-tests/253_bg_capture_locked_param.cht.
-    :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
-    :pointer_captures, # Set<name> - captures needing *T pointer passing
-    :string_captures,  # Set<name> - string captures needing defer free in fiber
-    :resource_captures, # Set<name> - resource captures needing move suppression
-    # ── Phase 2: site_info collected during the same single walk.
-    # Names the user wrapped in GIVE/MOVE (moved) and COPY/CLONE (copied)
-    # at the BG capture site. Replaces the separate Pass-4 walk in
-    # mir_lowering.collect_bg_capture_site_info. Authority: this walk.
-    :site_moved,       # Set<name> -- user wrote GIVE x at BG site
-    :site_copied,      # Set<name> -- user wrote COPY/CLONE x at BG site
-    # ── Phase 3: derived facts produced by BgCaptureClassifier (after
-    # propagate_caller_sync! has finalized SymbolEntry stamps).
-    # Authority: BgCaptureClassifier.classify_one!. Every downstream
-    # consumer reads these instead of re-walking the BG body.
-    :strategies,        # Hash<name => CaptureStrategy::*>
-    :move_mark_names,   # Set<name> -- needs MIR::SuppressCleanup at outer scope
-    :alloc_mark_entries,# Hash<name => alloc_sym> -- FreshHeapCopy markers
+    :has_local,
+    :has_rc,
+    :has_shared,
+    :has_sharded,
+    :has_affine_locked,
+    :has_outer_ref,
+    :has_non_escaping_capture,
+    :captures,
+    :capture_symbols,
+    :close_patterns,
+    :pointer_captures,
+    :string_captures,
+    :resource_captures,
+    :site_moved,
+    :site_copied,
+    :strategies,
+    :move_mark_names,
+    :alloc_mark_entries,
     keyword_init: true
   ) do
     extend T::Sig
@@ -971,13 +960,11 @@ module CapabilityHelper
     def pin_reason; has_sharded ? :sharded : :shared; end
   end
 
-  # Single walk over a fiber body that computes ALL capture properties at once.
-  # Replaces 6 separate walks (_captures_with_storage?, _captures_with_sync?,
-  # _captures_shared?, _auto_pin_reason, _has_outer_ref?, _audit_walk_captures).
-  sig { params(body_exprs: T::Array[T.untyped], is_parallel: T.nilable(T::Boolean)).returns(CapabilityHelper::CaptureAnalysis) }
-  def analyze_fiber_captures(body_exprs, is_parallel: false)
-    T.bind(self, SemanticAnnotator) rescue nil
-    result = CaptureAnalysis.new(
+  CaptureContext = Struct.new(:analysis, :outer_scope, :locals, :is_parallel, :mark_moves, keyword_init: true)
+
+  sig { returns(CapabilityHelper::CaptureAnalysis) }
+  def new_capture_analysis
+    CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
@@ -986,15 +973,138 @@ module CapabilityHelper
       site_moved: Set.new, site_copied: Set.new,
       strategies: nil, move_mark_names: nil, alloc_mark_entries: nil
     )
-    _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
-    result
   end
 
-  # Validate capture safety using pre-computed analysis.
-  sig { params(node: AST::ConcurrentOp, body: T::Array[T.untyped], is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
-  def validate_fiber_captures!(node, body, is_parallel, is_pinned)
+  sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
+  def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
     T.bind(self, SemanticAnnotator) rescue nil
-    analysis = analyze_fiber_captures(body, is_parallel: is_parallel)
+    @capture_stack = T.let(@capture_stack, T.untyped)
+    ctx = CaptureContext.new(
+      analysis: new_capture_analysis,
+      outer_scope: current_scope,
+      locals: Set.new,
+      is_parallel: is_parallel,
+      mark_moves: mark_moves
+    )
+    (@capture_stack ||= []) << ctx
+    blk.call
+    ctx.analysis
+  ensure
+    @capture_stack.pop if @capture_stack
+  end
+
+  sig { returns(T.nilable(CapabilityHelper::CaptureContext)) }
+  def current_capture_context
+    @capture_stack = T.let(@capture_stack, T.untyped)
+    @capture_stack&.last
+  end
+
+  sig { params(name: T.nilable(String)).void }
+  def record_capture_local!(name)
+    current_capture_context&.locals&.add(name) if name
+  end
+
+  sig { params(node: T.untyped, copied: T::Boolean).void }
+  def record_capture_site!(node, copied:)
+    ctx = current_capture_context
+    return unless ctx
+    root = AST.root_identifier(node.value) rescue nil
+    name = root&.name&.to_s
+    return if !name || ctx.locals.include?(name)
+    copied ? ctx.analysis.site_copied << name : ctx.analysis.site_moved << name
+  end
+
+  sig { params(node: AST::Identifier).void }
+  def record_capture_identifier!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    ctx = current_capture_context
+    return unless ctx
+    name = node.name
+    return if ctx.locals.include?(name) || %w[TRUE FALSE VOID _].include?(name)
+    info = ctx.outer_scope.locals[name]
+    resolved_sym = info || node.symbol
+    ctx.analysis.has_non_escaping_capture = true if resolved_sym&.borrowed_alias
+    if info
+      record_capture_info!(ctx, name, info, node)
+      record_capture_move!(ctx, name, info, node)
+    elsif lookup_scope_for(name)
+      ctx.analysis.has_outer_ref = true
+    end
+  end
+
+  sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
+  def record_capture_info!(ctx, name, info, node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    @capability_audit = T.let(@capability_audit, T.untyped)
+    result = ctx.analysis
+    result.has_outer_ref = true
+    unless result.captures.key?(name)
+      cap_type = info.atomic? ? info.type : node.full_type!(context: "fiber capture identifier")
+      result.captures[name] = cap_type
+      result.capture_symbols[name] = info
+      t = cap_type.is_a?(Type) ? cap_type : Type.new(cap_type || :Any)
+      result.pointer_captures << name if t.needs_pointer_passing?
+      result.string_captures << name if t.string?
+      result.resource_captures << name if t.resource? || info.close_zig
+      if t.map? && !t.numeric_map? && !info.close_zig &&
+         !t.sharded? && !(t.respond_to?(:striped?) && t.striped?) &&
+         !t.shared? && !t.multiowned? &&
+         !(t.respond_to?(:any_sync?) && t.any_sync?)
+        result.resource_captures << name
+        result.close_patterns[name] ||= "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())"
+      end
+    end
+    result.close_patterns[name] ||= info.close_zig if info.close_zig
+    result.has_local = true if info.local?
+    result.has_rc = true if info.storage == :multiowned
+    ti = info.type
+    is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
+    unless is_dashmap || info.atomic?
+      result.has_shared = true if info.locked? || info.write_locked? || info.local?
+      result.has_shared = true if info.rc_stored?
+      result.has_affine_locked = true if (info.locked? || info.write_locked?) &&
+        info.storage != :shared && info.storage != :multiowned
+      if ti.is_a?(Type) && ti.sharded?
+        result.has_sharded = true
+        result.has_shared = true
+      end
+    end
+    if current_fn_ctx&.name
+      key = "#{current_fn_ctx.name}:#{name}"
+      if @capability_audit&.dig(key)
+        @capability_audit[key][:captured_bg] = true
+        @capability_audit[key][:captured_parallel] = true if ctx.is_parallel
+      end
+    end
+  end
+
+  sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
+  def record_capture_move!(ctx, name, info, node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    @capture_move_suppressed = T.let(@capture_move_suppressed, T.untyped)
+    return unless ctx.mark_moves && (@capture_move_suppressed || 0).zero?
+    return unless ctx.outer_scope.owned_names.include?(name)
+    classify_ownership!(info) unless info.ownership_kind
+    ti = info.type
+    if @og.live?(name) &&
+       (info.ownership_kind == :resource || info.ownership_kind == :affine ||
+        (ti.is_a?(Type) && ti.needs_escape_promotion?))
+      og_set_moved(name, at_token: node.token, action: :capture)
+    end
+  end
+
+  sig { params(blk: T.untyped).returns(T.untyped) }
+  def without_capture_moves(&blk)
+    @capture_move_suppressed = T.let(@capture_move_suppressed, T.untyped)
+    @capture_move_suppressed = (@capture_move_suppressed || 0) + 1
+    blk.call
+  ensure
+    @capture_move_suppressed -= 1
+  end
+
+  sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
+  def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
+    T.bind(self, SemanticAnnotator) rescue nil
 
     if is_parallel
       if analysis.has_local
@@ -1006,313 +1116,9 @@ module CapabilityHelper
     end
 
     if !is_pinned && !is_parallel && analysis.has_shared
-      return analysis  # caller should set pinned = true; return analysis for pin_reason
+      return analysis
     end
     nil
-  end
-
-  # Walk a BG block's body AST and mark any outer-scope resource, affine, or
-  # frame-allocated variables as :moved. Stops at nested BgBlock boundaries.
-  sig { params(stmts: T::Array[T.untyped], scope: Scope, locally_bound: T::Set[String]).returns(T::Array[T.untyped]) }
-  def walk_bg_capture_moves(stmts, scope, locally_bound)
-    T.bind(self, SemanticAnnotator) rescue nil
-    stmts.each { |expr| _bg_walk(expr, scope, locally_bound) }
-  end
-
-  # Returns true if body references any outer-scope variable not in locally_bound.
-  sig { params(body: T.untyped, locally_bound: T::Set[String]).returns(T::Boolean) }
-  def captures_outer_variables?(body, locally_bound)
-    T.bind(self, SemanticAnnotator) rescue nil
-    result = CaptureAnalysis.new(
-      has_local: false, has_rc: false, has_shared: false,
-      has_sharded: false, has_affine_locked: false, has_outer_ref: false,
-      has_non_escaping_capture: false,
-      captures: {}, capture_symbols: {}, close_patterns: {},
-      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
-      site_moved: Set.new, site_copied: Set.new,
-      strategies: nil, move_mark_names: nil, alloc_mark_entries: nil
-    )
-    _unified_capture_walk(body, locally_bound, result, false)
-    result.has_outer_ref
-  end
-
-  private
-
-  # One recursive walk that checks each outer-scope identifier for ALL properties.
-  sig { params(nodes: T::Array[T.untyped], locally_bound: T::Set[String], result: CapabilityHelper::CaptureAnalysis, is_parallel: T.nilable(T::Boolean)).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
-  def _unified_capture_walk(nodes, locally_bound, result, is_parallel)
-    T.bind(self, SemanticAnnotator) rescue nil
-    @capability_audit = T.let(@capability_audit, T.untyped)
-    name = T.let(nil, T.untyped)
-    info = T.let(nil, T.untyped)
-    key  = T.let(nil, T.untyped)
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-
-      # Track locally-declared names so we don't treat them as outer captures.
-      if (node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)) && node.name.is_a?(String)
-        locally_bound = locally_bound | Set[node.name]
-      end
-      if (node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)) && node.var_name.is_a?(String)
-        locally_bound = locally_bound | Set[node.var_name]
-      end
-
-      # Site-info collection (Phase 2): every MoveNode/CopyNode/CloneNode
-      # wrapping a captured outer-scope Identifier is the user's GIVE/COPY/
-      # CLONE intent at the BG site. Recorded ONCE here so downstream
-      # passes don't re-walk the body. The capture tracker (lines below)
-      # uses `result.captures.key?(name)` — but at first-encounter time
-      # the capture might not be registered yet. We don't gate on that;
-      # we record every wrapped outer-scope Identifier and let the
-      # classifier filter against the eventual captures dict.
-      if node.is_a?(AST::MoveNode)
-        root = AST.root_identifier(node.value) rescue nil
-        nm = root&.name&.to_s
-        result.site_moved << nm if nm && !locally_bound.include?(nm)
-      end
-      if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
-        root = AST.root_identifier(node.value) rescue nil
-        nm = root&.name&.to_s
-        result.site_copied << nm if nm && !locally_bound.include?(nm)
-      end
-      # A CopyNode can also carry `was_moved` when its copied result is
-      # consumed by a TAKES call. That consumes the copy, not the source
-      # identifier, so capture strategy remains FreshHeapCopy.
-
-      if node.is_a?(AST::Identifier)
-        name = node.name
-        next if locally_bound.include?(name)
-        next if %w[TRUE FALSE VOID _].include?(name)
-
-        info = current_scope.locals[name]
-        # Fallback: the symbol was resolved during visit_Identifier and stored on the node.
-        # Use it when current_scope lookup misses (e.g. inside DO branches with deep nesting).
-        resolved_sym = info || node.symbol
-        result.has_non_escaping_capture = true if resolved_sym&.borrowed_alias
-        if info
-          result.has_outer_ref = true
-
-          # Collect capture for code generation (type_info + close pattern).
-          # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
-          # Atomic reads narrow type_info to the bare inner T, but BG captures
-          # need the full cell shape so the captured ref keeps identity across
-          # fibers.
-          unless result.captures.key?(name)
-            cap_type = info.atomic? ? info.type : node.full_type!(context: "BG capture identifier")
-            result.captures[name] = cap_type
-            # Record the live SymbolEntry so mir_lowering can re-resolve the
-            # capture's actual type after EscapeAnalysis.propagate_caller_sync!
-            # has stamped sync/storage on params (which happens AFTER this walk).
-            result.capture_symbols[name] = info
-
-            # Pre-compute per-capture metadata for transpiler.
-            t = cap_type.is_a?(Type) ? cap_type : Type.new(cap_type || :Any)
-            result.pointer_captures << name if t.needs_pointer_passing?
-            result.string_captures << name if t.string?
-            result.resource_captures << name if t.resource? || info.close_zig
-            # Plain string-keyed HashMap captures (no @sharded / @shared /
-            # @locked / @multiowned wrappers): same MoveInto pattern as
-            # @set / @pool. CheatLib.StringMap stores its own allocator
-            # internally; the 2-arg deinit signature is `(self, key_alloc,
-            # bucket_alloc)` — both args are ignored, self.alloc drives
-            # the actual frees. Wrapped variants take the RcClone /
-            # safe-shared path in the classifier and don't need this.
-            if t.map? && !t.numeric_map? && !info.close_zig &&
-               !t.sharded? && !(t.respond_to?(:striped?) && t.striped?) &&
-               !t.shared? && !t.multiowned? &&
-               !(t.respond_to?(:any_sync?) && t.any_sync?)
-              result.resource_captures << name
-              result.close_patterns[name] ||= "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())"
-            end
-          end
-          if info.close_zig
-            result.close_patterns[name] ||= info.close_zig
-          end
-
-          result.has_local   = true if info.local?
-          result.has_rc      = true if info.storage == :multiowned
-          ti = info.type
-          # shared+striped maps (DashMap) are self-synchronizing — per-shard locking
-          # means any thread can access any shard without pinning. Skip has_shared
-          # so BG blocks are NOT auto-pinned, enabling work stealing.
-          # Non-shared striped maps (@sharded(N):locked without @shared) MUST be pinned
-          # because the map is affine-owned and concurrent access without Arc is unsafe.
-          is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
-          # @shared:atomic is self-synchronizing; pinning would defeat the
-          # cross-thread parallelism that atomic storage is meant to allow.
-          is_atomic = info.atomic?
-          unless is_dashmap || is_atomic
-            result.has_shared  = true if info.locked? || info.write_locked? || info.local?
-            result.has_shared  = true if info.rc_stored?
-            # Affine @locked: not backed by Arc, needs spawnPinned for scheduler affinity
-            if (info.locked? || info.write_locked?) && info.storage != :shared && info.storage != :multiowned
-              result.has_affine_locked = true
-            end
-            if ti.is_a?(Type) && ti.sharded?
-              result.has_sharded = true
-              result.has_shared  = true
-            end
-          end
-
-          # Audit: mark capability usage for over-engineering warnings
-          if current_fn_ctx&.name
-            key = "#{current_fn_ctx.name}:#{name}"
-            if @capability_audit&.dig(key)
-              @capability_audit[key][:captured_bg] = true
-              @capability_audit[key][:captured_parallel] = true if is_parallel
-            end
-          end
-        elsif lookup_scope_for(name)
-          result.has_outer_ref = true
-        end
-        next
-      end
-
-      # WithBlock: check var_nodes for sync/shared captures
-      if node.is_a?(AST::WithBlock) && node.capabilities.is_a?(Array)
-        node.capabilities.each do |cap|
-          var_node = cap[:var_node]
-          next unless var_node.is_a?(AST::Identifier)
-          name = var_node.name
-          next if locally_bound.include?(name)
-          info = current_scope.locals[name]
-          next unless info
-          result.has_outer_ref = true
-          result.captures[name] ||= var_node.full_type!(context: "WITH capture identifier")
-          # Also record the live SymbolEntry so mir_lowering can re-resolve
-          # types after EscapeAnalysis.propagate_caller_sync! stamps params.
-          result.capture_symbols[name] ||= info
-          if info.close_zig
-            result.close_patterns[name] ||= info.close_zig
-          end
-          result.has_local  = true if info.local?
-          result.has_shared = true if info.locked? || info.write_locked? || info.local?
-          result.has_shared = true if info.storage == :shared
-          if (info.locked? || info.write_locked?) && info.storage != :shared && info.storage != :multiowned
-            result.has_affine_locked = true
-          end
-
-          if current_fn_ctx&.name
-            key = "#{current_fn_ctx.name}:#{name}"
-            if @capability_audit&.dig(key)
-              @capability_audit[key][:captured_bg] = true
-              @capability_audit[key][:captured_parallel] = true if is_parallel
-            end
-          end
-        end
-
-        # lock_error_clause is an attr_accessor (not a Struct member), so
-        # the generic walk below misses it. Descend explicitly so any
-        # outer-scope vars used in the action's message/body are
-        # captured by the enclosing BG/DO/fiber.
-        if (clause = node.lock_error_clause)
-          _unified_capture_walk([clause[:message]], locally_bound, result, is_parallel) if clause[:message]
-          _unified_capture_walk(clause[:body], locally_bound, result, is_parallel) if clause[:body].is_a?(Array)
-        end
-
-        # WITH-block aliases (the AS-bound names) are declared inside the
-        # WITH scope -- references to them in the body are NOT outer
-        # captures, even though their underlying SymbolEntry has
-        # borrowed_alias=true. Without this, capturing an
-        # @shared:versioned cell into a `BG { WITH SNAPSHOT c AS view
-        # ... }` is wrongly rejected: the walker sees `view` in the body,
-        # resolves it through node.symbol to the borrowed_alias=true
-        # SymbolEntry, and flags the BG as capturing a WITH-scoped
-        # binding. Add alias names + per-arm aliases to locally_bound for
-        # the recursive walk into body / arms below.
-        with_locally_bound = locally_bound
-        node.capabilities.each do |cap|
-          a = cap[:alias]
-          with_locally_bound = with_locally_bound | Set[a] if a.is_a?(String)
-        end
-        if node.body.is_a?(Array)
-          _unified_capture_walk(node.body, with_locally_bound, result, is_parallel)
-        end
-        node.arms&.each do |arm|
-          _unified_capture_walk(arm[:body], with_locally_bound, result, is_parallel) if arm[:body].is_a?(Array)
-        end
-        # Skip the generic-member descent below -- we just walked the
-        # body / arms with the augmented locally_bound set.
-        next
-      end
-
-      # Don't recurse into nested BG/DO blocks — they have their own capture scope.
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-
-      # ThenChain.steps is an Array of Hashes (`{ expr:, binding: }`), not
-      # AST::Locatable nodes — the generic Struct-member walk below would
-      # skip them because the `next unless Locatable` filter rejects each
-      # Hash. Recurse explicitly so the chain's expressions contribute to
-      # the BG block's capture set.
-      if node.is_a?(AST::ThenChain)
-        bound_in_chain = locally_bound.dup
-        (node.steps || []).each do |step|
-          if step.is_a?(Hash)
-            _unified_capture_walk([step[:expr]], bound_in_chain, result, is_parallel) if step[:expr]
-            bound_in_chain = bound_in_chain | Set[step[:binding].to_s] if step[:binding]
-          end
-        end
-        next
-      end
-
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          _unified_capture_walk(val, locally_bound, result, is_parallel)
-        elsif val.is_a?(AST::Locatable)
-          _unified_capture_walk([val], locally_bound, result, is_parallel)
-        end
-      end
-    end
-  end
-
-  sig { params(node: T.untyped, scope: Scope, locally_bound: T::Set[String]).returns(T.nilable(T::Array[Symbol])) }
-  def _bg_walk(node, scope, locally_bound)
-    T.bind(self, SemanticAnnotator) rescue nil
-    @og = T.let(@og, T.untyped)
-    return unless node.is_a?(AST::Locatable)
-    return if node.is_a?(AST::BgBlock)
-
-    # COPY x / CLONE x at a BG capture site does NOT move x. COPY deep-
-    # copies into the fiber; CLONE retains an Rc/Arc. The outer binding
-    # remains live. Only MoveNode (GIVE) and bare captures of resource/
-    # affine values trigger the move below.
-    return if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) || node.is_a?(AST::FreezeNode)
-
-    if node.is_a?(AST::Identifier)
-      name = node.name
-      return if locally_bound.include?(name)
-      info = scope.locals[name]
-      return unless info && scope.owned_names.include?(name)
-      classify_ownership!(info) unless info.ownership_kind
-      kind = info.ownership_kind
-      ti = info.type
-      if @og.live?(name)
-        if kind == :resource || kind == :affine
-          og_set_moved(name, at_token: node.token, action: :capture)
-        elsif ti.is_a?(Type) && ti.needs_escape_promotion?
-          og_set_moved(name, at_token: node.token, action: :capture)
-        end
-      end
-      return
-    end
-
-    lb = locally_bound
-    if node.is_a?(AST::BindExpr) || node.is_a?(AST::VarDecl)
-      lb = lb | Set[node.name.to_s] if node.name.is_a?(String)
-    end
-    if node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)
-      lb = lb | Set[node.var_name.to_s] if node.var_name.is_a?(String)
-    end
-
-    node.class.members.each do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.each { |v| _bg_walk(v, scope, lb) }
-      elsif val.is_a?(AST::Locatable)
-        _bg_walk(val, scope, lb)
-      end
-    end
   end
 end
 
@@ -1368,13 +1174,6 @@ module CapabilityAudit
     return unless current_fn_ctx&.name
     key = "#{current_fn_ctx&.name}:#{var_name}"
     @capability_audit[key][:mutated] = true if @capability_audit[key]
-  end
-
-  # No longer needed — audit marking is handled by _unified_capture_walk.
-  # Kept as a no-op for call-site compatibility.
-  sig { params(body_exprs: T.untyped, is_parallel: T.untyped).void }
-  def audit_mark_bg_captures(body_exprs, is_parallel)
-    T.bind(self, SemanticAnnotator) rescue nil
   end
 
   sig { returns(T::Hash[String, T::Hash[Symbol, T.untyped]]) }

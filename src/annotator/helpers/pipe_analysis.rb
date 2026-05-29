@@ -1543,29 +1543,15 @@ module PipeAnalysis
         sharded_names = Set.new
         conc.op.body.each { |stmt| collect_sharded_names(stmt, sharded_names) }
 
-        if sharded_names.length > 1
-          emit_multi_map_warning(conc, sharded_names)
-          analyze_each_op(proxy)
-        elsif sharded_names.length == 1
-          analyze_auto_shard_each_op(node, conc, proxy)
-        else
-          analyze_each_op(proxy)
-        end
-        # List-source CONCURRENT EACH lowers via build_bounded_concurrent_callback
-        # which reads conc.capture_analysis. The non-concurrent
-        # analyze_each_op above doesn't set it -- without explicit
-        # capture analysis, the callback's ctx struct is empty and the
-        # body's outer-scope references depend on Zig's
-        # struct-method-can-see-outer-scope feature, which breaks for
-        # Arc-wrapped captures (WITH EXCLUSIVE c emits c.* deref expecting
-        # a pointer; outer c is Arc(Locked(T)) by value). Run the
-        # capture analysis so list-source CONCURRENT EACH goes through
-        # the same capture machinery as bounded/stream and BG/DO.
-        # Repro: transpile-tests/257_concurrent_capture_locked_param.cht.
-        with_new_scope(current_scope) do
-          item_type = node.left.full_type!(context: "pipeline left").element_type.resolved
-          current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-          conc.capture_analysis = analyze_fiber_captures(conc.op.body, is_parallel: false)
+        conc.capture_analysis = with_fiber_capture_analysis(is_parallel: false) do
+          if sharded_names.length > 1
+            emit_multi_map_warning(conc, sharded_names)
+            analyze_each_op(proxy)
+          elsif sharded_names.length == 1
+            analyze_auto_shard_each_op(node, conc, proxy)
+          else
+            analyze_each_op(proxy)
+          end
         end
       end
     when AST::SumOp
@@ -1637,16 +1623,17 @@ module PipeAnalysis
     item_type = lhs_type.stream_element_type.resolved
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope do
-      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        visit(node.right.op.expression)
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          visit(node.right.op.expression)
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
-      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
       error!(node.right.op, :WHERE_NEEDS_BOOL)
@@ -1670,16 +1657,17 @@ module PipeAnalysis
     item_type = lhs_type.stream_element_type.resolved
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope(current_scope) do
-      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        node.right.op.body.each { |stmt| visit(stmt) }
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope(current_scope) do
+        current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          node.right.op.body.each { |stmt| visit(stmt) }
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
-      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     stamp_type!(node, :Void)
     node.storage   = :stack
@@ -1699,16 +1687,17 @@ module PipeAnalysis
     end
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope do
-      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        visit(node.right.op.expression)
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope do
+        current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          visit(node.right.op.expression)
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
-      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
       error!(node.right.op, :WHERE_NEEDS_BOOL)
@@ -1735,16 +1724,17 @@ module PipeAnalysis
     end
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
-    with_new_scope(current_scope) do
-      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
-      with_soa_tracking(node, item_type) do
-        node.right.op.body.each { |stmt| visit(stmt) }
+    analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
+      with_new_scope(current_scope) do
+        current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+        with_soa_tracking(node, item_type) do
+          node.right.op.body.each { |stmt| visit(stmt) }
+        end
       end
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
-      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+      validate_capture_analysis!(node.right, analysis, is_parallel, false) || analysis
 
     stamp_type!(node, :Void)
     node.storage   = :stack

@@ -14,8 +14,7 @@ require_relative "../ast/scope"
 #
 # Walks every BG block reachable from each function (via the unified
 # `AST.each_bg_block` helper -- same set every consumer uses), reads
-# the per-capture `site_info` (collected by `analyze_fiber_captures`
-# during Pass 1's single AST walk), reads the LIVE SymbolEntry's
+# the per-capture `site_info` (collected during annotation), reads the LIVE SymbolEntry's
 # current sync/storage (no snapshot), classifies each capture via
 # `CaptureStrategy.classify`, and stamps the results back onto
 # `BgBlock.capture_analysis`:
@@ -44,7 +43,7 @@ module BgCaptureClassifier
       next unless fn&.body
       # `Scope.live_param_syms` returns the {name => live SymbolEntry}
       # map -- the entries that `propagate_caller_sync!` mutates in
-      # place. `analyze_fiber_captures` recorded references off
+      # place. Capture analysis recorded references off
       # nested scopes that `Scope.dup` deep-copied; refreshing
       # against the live entries before we read sync/storage closes
       # the dual-SymbolEntry divergence flagged in

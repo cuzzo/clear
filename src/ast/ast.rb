@@ -631,8 +631,7 @@ module AST
   # Yield every CaptureAnalysis instance reachable from `body`. A
   # CaptureAnalysis is attached to any "fiber-like context" -- BG block,
   # BgStream block, DO block branch, or ConcurrentOp (CONCURRENT
-  # SELECT/WHERE/EACH/etc.). All four use the same `analyze_fiber_captures`
-  # machinery; this single walker lets BgCaptureClassifier process every
+  # SELECT/WHERE/EACH/etc.). This lets BgCaptureClassifier process every
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.

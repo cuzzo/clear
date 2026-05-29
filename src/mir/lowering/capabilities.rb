@@ -59,8 +59,8 @@ module MIRLoweringCapabilities
   # the LIVE SymbolEntry from @current_fiber_capture_symbols. The AST
   # node's var_node.symbol can carry a stale snapshot of sync/storage;
   # the live entry was refreshed by EscapeAnalysis.propagate_caller_sync!
-  # and recorded into capture_analysis.capture_symbols by
-  # _unified_capture_walk. This is what makes WITH EXCLUSIVE c inside a
+  # and recorded into capture_analysis.capture_symbols during annotation.
+  # This is what makes WITH EXCLUSIVE c inside a
   # CONCURRENT EACH callback take the direct c.ctrl.data.* Arc-unwrap
   # path (storage = :shared) instead of the polymorphic c.* path that
   # only works for non-Arc parameters.

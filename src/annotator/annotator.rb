@@ -1819,6 +1819,7 @@ private
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, :Int64, false, false, nil, :stack)
+        record_capture_local!(node.var_name.to_s)
         node.symbol = current_scope.locals[node.var_name]
         classify_ownership!(node.symbol)
         visit_stmts(node.body)
@@ -1864,6 +1865,7 @@ private
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.var_name, nil, elem_sym, node.is_mutable == true, false, nil, :stack)
+        record_capture_local!(node.var_name.to_s)
         node.symbol = current_scope.locals[node.var_name]
         classify_ownership!(node.symbol)
         visit_stmts(node.body)
@@ -1980,6 +1982,7 @@ private
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.binding_name, nil, unwrapped, false, false, nil, :stack)
+        record_capture_local!(node.binding_name.to_s)
         entry = current_scope.locals[node.binding_name]
         classify_ownership!(entry)
         og_declare(node.binding_name.to_s, nil, unwrapped)
@@ -2820,6 +2823,7 @@ private
       resource: is_resource,
       close_zig: resource_close
     )
+    record_capture_local!(node.name.to_s)
     node.symbol = current_scope.locals[node.name]
     node.symbol.async_result_shape = node.value.async_result_shape if node.value.is_a?(AST::BgBlock)
     # (The late-provenance fold now happens BEFORE declare, above, so the
@@ -3003,6 +3007,8 @@ private
     owner = lookup_scope_for(node.name)
     owner&.mark_read(node.name)
     node.symbol = owner&.locals&.[](node.name)
+    record_capture_identifier!(node)
+    node.symbol
   end
 
   # DEPRECATED (SROA hint only, no memory safety role): Sets ownership_kind on scope entries
@@ -4196,7 +4202,8 @@ private
 
   sig { params(node: AST::MoveNode).returns(T.nilable(T::Set[T.untyped])) }
   def visit_MoveNode(node)
-    visit(node.value)
+    record_capture_site!(node, copied: false)
+    without_capture_moves { visit(node.value) }
 
     unless node.value.is_a?(AST::Identifier)
       error!(node, :MOVE_NEEDS_IDENTIFIER)
@@ -4294,7 +4301,8 @@ private
 
   sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
   def visit_CopyNode(node)
-    visit(node.value)
+    record_capture_site!(node, copied: true)
+    without_capture_moves { visit(node.value) }
     # COPY produces an owned deep-copy. The source is NOT consumed.
     # Clone the Type so mutating provenance doesn't affect the inner node.
     inner_type = node.value.full_type!(context: "COPY value")
@@ -4411,7 +4419,7 @@ private
 
   sig { params(node: AST::FreezeNode).returns(Symbol) }
   def visit_FreezeNode(node)
-    visit(node.value)
+    without_capture_moves { visit(node.value) }
     ti = node.value.full_type!(context: "FREEZE value")
     unless ti&.multiowned? || ti&.shared?
       error!(node, :FREEZE_NEEDS_OWNED, got: node.value.resolved_type)
@@ -4459,7 +4467,8 @@ private
 
   sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
   def visit_CloneNode(node)
-    visit(node.value)
+    record_capture_site!(node, copied: true)
+    without_capture_moves { visit(node.value) }
     type = node.value.full_type!(context: "CLONE value")
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
@@ -5135,9 +5144,9 @@ private
   sig { params(node: AST::DoBlock).returns(T.nilable(Symbol)) }
   def visit_DoBlock(node)
     node.branches.each do |branch|
-      visit_stmts(branch[:body])
-
-      full_analysis = analyze_fiber_captures(branch[:body], is_parallel: branch[:parallel])
+      full_analysis = with_fiber_capture_analysis(is_parallel: branch[:parallel]) do
+        visit_stmts(branch[:body])
+      end
       branch[:capture_analysis] = full_analysis
 
       if branch[:parallel]
@@ -5172,7 +5181,9 @@ private
     @current_stream_context = T.let(node, T.nilable(AST::BgStreamBlock))
     @stream_yield_types = []
 
-    visit_stmts(node.body)
+    stream_analysis = with_fiber_capture_analysis do
+      visit_stmts(node.body)
+    end
 
     yield_types = @stream_yield_types
     @current_stream_context = prev_stream_ctx
@@ -5189,8 +5200,6 @@ private
 
     stamp_type!(node, Type.new(:"~?#{elem_syms.first}[]"))
 
-    # Compute captures for transpiler (same as BG blocks).
-    stream_analysis = analyze_fiber_captures(node.body)
     node.capture_analysis = stream_analysis
 
     if stream_analysis.has_non_escaping_capture
@@ -5215,18 +5224,14 @@ private
     # Body runs in a separate fiber. The last expression's type determines T in ~T.
     # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
     record_effect(EffectTracker::YIELD)
-    outer_scope = current_scope
-    locally_bound = Set.new
     prev_bg_pinned = @current_bg_pinned
     @current_bg_pinned = node.pinned
 
     last_type = T.let(Type.new(:Void), Type)
-    node.body.each do |expr|
-      visit(expr)
-      last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
-      # Track names declared inside the body so we don't treat them as outer captures.
-      if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
-        locally_bound << expr.name
+    full_analysis = with_fiber_capture_analysis(is_parallel: node.parallel, mark_moves: true) do
+      node.body.each do |expr|
+        visit(expr)
+        last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
       end
     end
     # Strip leading `!` from the body's last-expression type: a BG fiber
@@ -5251,9 +5256,6 @@ private
       end
     end
 
-    # Single walk: compute captures, validate safety, detect shared state.
-    # Store on node for transpiler to read (eliminates re-walking).
-    full_analysis = analyze_fiber_captures(node.body, is_parallel: node.parallel)
     node.capture_analysis = full_analysis
 
     # Validate: @local in @parallel, @rc in @parallel
@@ -5273,12 +5275,12 @@ private
     analysis = (!node.pinned && !node.parallel && full_analysis.has_shared) ? full_analysis : nil
 
     # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
-    if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
+    if @current_bg_pinned && !node.pinned && full_analysis.has_outer_ref
       error!(node, :BG_PINNED_CAPTURE_MISMATCH, hint: "Thread-local memory cannot escape to a stealable fiber. " \
              "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
     end
 
-    # Auto-pin when shared state is captured (uses result from validate_fiber_captures!).
+    # Auto-pin when shared state is captured.
     if analysis && !node.pinned
       if analysis.has_local
         node.pinned = :local
@@ -5295,8 +5297,6 @@ private
         end
       end
     end
-
-    walk_bg_capture_moves(node.body, outer_scope, locally_bound)
     @current_bg_pinned = prev_bg_pinned
   end
 
@@ -5328,6 +5328,7 @@ private
           nil,
           :stack
         )
+        record_capture_local!(step[:binding].to_s)
       end
 
       last_type = step_type
