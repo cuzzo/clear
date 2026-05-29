@@ -845,12 +845,14 @@ module MIRHoistLowering
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
     if expr.is_a?(MIR::IfOptional)
-      used_prefix, normalized = normalize_allocating_used_expr(
+      optional_pair = normalize_allocating_used_expr(
         expr.optional,
         transfer_on_success: false,
       )
-      replace_mir_expr_child!(expr, expr.optional, normalized)
-      prefix.concat(used_prefix)
+      optional_prefix = T.let(optional_pair[0], T::Array[T.untyped])
+      optional_normalized = optional_pair[1]
+      replace_mir_expr_child!(expr, expr.optional, optional_normalized)
+      prefix.concat(optional_prefix)
       return prefix
     end
 
@@ -866,34 +868,40 @@ module MIRHoistLowering
         next
       end
       if mir_produces_owned_result?(child) || (child.is_a?(MIR::Call) && child.owned_return?)
-        used_prefix, normalized = normalize_allocating_used_expr(
+        owned_pair = normalize_allocating_used_expr(
           child,
           transfer_on_success: consumes_owned_children?(expr),
         )
-        replace_mir_expr_child!(expr, child, normalized)
-        prefix.concat(used_prefix)
+        owned_prefix = T.let(owned_pair[0], T::Array[T.untyped])
+        owned_normalized = owned_pair[1]
+        replace_mir_expr_child!(expr, child, owned_normalized)
+        prefix.concat(owned_prefix)
         next
       end
       if mir_allocates?(child)
         prefix.concat(normalize_allocating_result_expr!(child, transfer_on_success: transfer_on_success))
         next
       end
-      used_prefix, normalized = normalize_allocating_used_expr(
+      used_pair = normalize_allocating_used_expr(
         child,
         transfer_on_success: consumes_owned_children?(expr),
       )
-      replace_mir_expr_child!(expr, child, normalized)
-      prefix.concat(used_prefix)
+      child_prefix = T.let(used_pair[0], T::Array[T.untyped])
+      child_normalized = used_pair[1]
+      replace_mir_expr_child!(expr, child, child_normalized)
+      prefix.concat(child_prefix)
     end
     each_mir_expr_child(expr) do |child|
       next if result_children.any? { |result_child| result_child.equal?(child) }
 
-      used_prefix, normalized = normalize_allocating_used_expr(
+      child_pair = normalize_allocating_used_expr(
         child,
         transfer_on_success: consumes_owned_children?(expr),
       )
-      replace_mir_expr_child!(expr, child, normalized)
-      prefix.concat(used_prefix)
+      other_prefix = T.let(child_pair[0], T::Array[T.untyped])
+      other_normalized = child_pair[1]
+      replace_mir_expr_child!(expr, child, other_normalized)
+      prefix.concat(other_prefix)
     end
     prefix
   end

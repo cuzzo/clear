@@ -144,6 +144,11 @@ class AST::BindExpr
   def reassign_cleanup=(value); end
 end
 
+class AST::BodySlot
+  sig { returns(T::Array[T.untyped]) }
+  def body; end
+end
+
 class AST::CapabilityWrap
   sig { returns(T.untyped) }
   def lock_rank; end
@@ -861,7 +866,7 @@ class BindExpr
 end
 
 class BodySlot
-  sig { returns(T.untyped) }
+  sig { returns(T::Array[T.untyped]) }
   def body; end
   sig { returns(T.untyped) }
   def name; end
