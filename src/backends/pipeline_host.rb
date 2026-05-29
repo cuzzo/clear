@@ -644,7 +644,7 @@ class PipelineHost
   end
   def owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
     mark = MIR::AllocMark.new(name, alloc, type_info)
-    mark.scope = MIR::Placement.alloc_scope(alloc)
+    mark.scope = MIR::Placement.heap?(alloc) ? :heap : :function
     entry = CleanupEntry.build(:uniform, alloc: alloc, has_moved_guard: true, zig_type: zig_type)
     [
       mark,

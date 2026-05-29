@@ -859,6 +859,10 @@ module MIR
     include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([value])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+    sig { returns(T::Array[Emittable]) }
+    def owned_position_source_exprs = child_exprs
   end
 
   # Continue statement.

@@ -28,6 +28,7 @@ module CoverageBootstrap
     end
 
     SimpleCov.start do
+      coverage_dir ENV.fetch("COVERAGE_DIR", "coverage")
       command_name "#{command_name}-#{Process.pid}"
       enable_coverage :branch
 

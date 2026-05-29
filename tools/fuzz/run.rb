@@ -7,6 +7,10 @@
 #   ruby tools/fuzz/run.rb --generate-only               # generate only, don't run
 #   ruby tools/fuzz/run.rb --templates t1,t2             # restrict to named templates
 #
+# When COVERAGE=1, this runner is compile-only: it exercises the Ruby
+# compile/lower/emit path like transpile-tests/gen.rb without running Zig tests
+# or spawning per-file `clear` subprocesses.
+#
 # Cells may be marked :in_dev to reserve matrix space for unlanded features
 # (e.g., LEND). They are emitted as comments and not run.
 
@@ -296,6 +300,74 @@ def run_mir_checker_negatives(entries)
   [pass, unexpected_pass]
 end
 
+def run_compile_only_positive_coverage(entries)
+  return [[], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  generator = TestGenerator.new
+  pass = []
+  mir_errors = []
+
+  entries.each do |entry|
+    path = entry[:path]
+    begin
+      generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
+      pass << path
+    rescue StandardError => e
+      mir_errors << [path, "#{e.message}\n#{e.backtrace&.first(3)&.join("\n")}"]
+    end
+  end
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] coverage compile positives: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  [pass, mir_errors, []]
+end
+
+def run_compile_only_negative_coverage(entries)
+  return [[], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  generator = TestGenerator.new
+  pass = []
+  rejected = 0
+  emitted = 0
+
+  entries.each do |entry|
+    path = entry[:path]
+    begin
+      generator.generate_test_block(File.basename(path), File.read(path), source_dir: File.dirname(path))
+      emitted += 1
+    rescue StandardError
+      rejected += 1
+    ensure
+      pass << path
+    end
+  end
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] coverage compile negatives: #{entries.size} cells in #{format('%.2f', elapsed)}s " \
+       "(#{rejected} rejected by Ruby compile/lower, #{emitted} emitted for downstream gates)"
+  [pass, []]
+end
+
+def compile_only_coverage_run(emitted)
+  pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
+  negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
+  mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
+
+  pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries)
+  negative_ok, unexpected_pass = run_compile_only_negative_coverage(negative_entries)
+  mir_negative_ok, mir_unexpected_pass = run_mir_checker_negatives(mir_negative_entries)
+
+  [
+    pass_ok + negative_ok + mir_negative_ok,
+    [],
+    leaks,
+    mir_errors,
+    unexpected_pass + mir_unexpected_pass,
+  ]
+end
+
 def async_runtime_cell?(entry)
   src = File.read(entry[:path])
   src.include?('BG') || src.include?('DO {')
@@ -426,7 +498,12 @@ def per_file_run(emitted)
   [pass, fails, leaks, mir_errors, unexpected_pass]
 end
 
-pass, fails, leaks, mir_errors, unexpected_pass = hybrid_run(emitted, opts[:out])
+pass, fails, leaks, mir_errors, unexpected_pass =
+  if ENV['COVERAGE'] == '1'
+    compile_only_coverage_run(emitted)
+  else
+    hybrid_run(emitted, opts[:out])
+  end
 
 puts
 puts "=" * 60

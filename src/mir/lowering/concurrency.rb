@@ -228,8 +228,9 @@ module MIRLoweringConcurrency
                                          rt_override: "__rt") do
         body_stmts = branch[:body].flat_map { |e|
           mir = lower(e)
+          pending = flush_pending
           nodes = mir.is_a?(Array) ? mir.compact : do_branch_stmt_nodes(e, mir)
-          nodes.compact
+          pending + nodes.compact
         }
         branch_mir = finalized_boundary_body_for_emit(body_stmts)
         render_mir_list(branch_mir).gsub("\n", "\n        ")
@@ -763,23 +764,30 @@ module MIRLoweringConcurrency
 
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = T.let(nil, T.untyped)
-    body_code = with_fiber_capture_map(caps.capture_map,
-                                       capture_symbols: caps.capture_symbols,
-                                       rt_override: "__rt") do
-      body_mir = node.body.flat_map { |expr|
-        mir = lower(expr)
-        pending = flush_pending
-        mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-        pending + mir_nodes
-      }
-      stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
-      stream_run_body.filter_map { |mir|
-        next nil if capture_ownership_mirror_node?(mir, "ctx")
-        code = emit_expr(mir)
-        next nil if code.nil? || code.empty?
-        code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
-        code
-      }.join("\n            ")
+    inherited_capture_names = caps.specs.filter_map { |spec| spec.body_cleanup_zig ? "ctx.#{spec.name}" : nil }.to_set
+    prev_stream_inherited_allocs = instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
+    body_code = begin
+      instance_variable_set(:@current_fsm_inherited_alloc_names, inherited_capture_names)
+      with_fiber_capture_map(caps.capture_map,
+                             capture_symbols: caps.capture_symbols,
+                             rt_override: "__rt") do
+        body_mir = node.body.flat_map { |expr|
+          mir = lower(expr)
+          pending = flush_pending
+          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+          pending + mir_nodes
+        }
+        stream_run_body = finalized_boundary_body_for_emit(capture_ownership_mirror_nodes(caps, analysis, "ctx") + body_mir)
+        stream_run_body.filter_map { |mir|
+          next nil if capture_ownership_mirror_node?(mir, "ctx")
+          code = emit_expr(mir)
+          next nil if code.nil? || code.empty?
+          code = code + ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
+          code
+        }.join("\n            ")
+      end
+    ensure
+      instance_variable_set(:@current_fsm_inherited_alloc_names, prev_stream_inherited_allocs)
     end
 
     @current_stream_local = prev_stream_local

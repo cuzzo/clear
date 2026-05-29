@@ -17,7 +17,7 @@
 #
 # Usage:
 #   bundle exec prspec spec/                                # spec coverage
-#   COVERAGE=1 bundle exec ruby ./clear test transpile-tests/  # integration
+#   COVERAGE=1 bundle exec ruby transpile-tests/gen.rb         # .cht compile/lower coverage
 #   bundle exec ruby spec/collate_coverage.rb               # collate -> RSpec
 #   bundle exec rubycritic src/ --no-browser                # consume
 

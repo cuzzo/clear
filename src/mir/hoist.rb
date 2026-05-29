@@ -676,15 +676,18 @@ module MIRHoistLowering
     nil
   end
 
-  sig { params(expr: T.untyped, transfer_on_success: T::Boolean).returns([T::Array[T.untyped], MIR::Ident]) }
-  def hoist_normalized_alloc_expr(expr, transfer_on_success: false)
+  sig do
+    params(expr: T.untyped, transfer_on_success: T::Boolean,
+           type_info: T.nilable(Type), cleanup_entry: T.nilable(CleanupEntry)).returns([T::Array[T.untyped], MIR::Ident])
+  end
+  def hoist_normalized_alloc_expr(expr, transfer_on_success: false, type_info: nil, cleanup_entry: nil)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     alloc = mir_owned_alloc(expr) || :heap
-    mark = MIR::AllocMark.new(name, alloc, mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
+    mark = MIR::AllocMark.new(name, alloc, type_info || mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation"))
     mark.scope = MIR::Placement.alloc_scope(alloc)
     stamp_allocating_result_target!(expr, name, alloc: alloc)
-    entry = hoist_cleanup_entry(expr, nil)
+    entry = cleanup_entry || hoist_cleanup_entry(expr, nil)
     stmts = T.let([mark, MIR::Let.new(name, expr, false, nil, nil)], T::Array[T.untyped])
     if entry
       effective_transfer = transfer_on_success
@@ -841,6 +844,15 @@ module MIRHoistLowering
     return prefix unless expr.respond_to?(:expr?) && expr.expr?
     return prefix if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     return prefix if expr.is_a?(MIR::TryCatch)
+    if expr.is_a?(MIR::IfOptional)
+      used_prefix, normalized = normalize_allocating_used_expr(
+        expr.optional,
+        transfer_on_success: false,
+      )
+      replace_mir_expr_child!(expr, expr.optional, normalized)
+      prefix.concat(used_prefix)
+      return prefix
+    end
 
     result_children = T.let(expr.ownership_source_exprs, T::Array[T.untyped])
     owned_sources = T.let(expr.owned_position_source_exprs.to_set, T::Set[MIR::Emittable])
@@ -890,12 +902,21 @@ module MIRHoistLowering
   def normalize_allocating_used_expr(expr, transfer_on_success: false)
     prefix = T.let([], T::Array[T.untyped])
     return [prefix, expr] unless expr.respond_to?(:expr?) && expr.expr?
+    return [prefix, expr] if expr.is_a?(MIR::Ident)
     return [prefix, expr] if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
 
     if !mutating_receiver_allocator_op?(expr) && mir_produces_owned_result?(expr)
+      type_info = mir_alloc_mark_type_info(expr, nil, context: "normalized MIR allocation")
+      cleanup_entry = hoist_cleanup_entry(expr, nil)
       nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
-      hoisted, ident = hoist_normalized_alloc_expr(expr, transfer_on_success: transfer_on_success)
+      return [prefix, expr] if normalized_alloc_wrapper_alias?(expr)
+      hoisted, ident = hoist_normalized_alloc_expr(
+        expr,
+        transfer_on_success: transfer_on_success,
+        type_info: type_info,
+        cleanup_entry: cleanup_entry,
+      )
       prefix.concat(hoisted)
       return [prefix, ident]
     end
@@ -914,6 +935,16 @@ module MIRHoistLowering
       prefix.concat(child_prefix)
     end
     [prefix, expr]
+  end
+
+  sig { params(expr: T.untyped).returns(T::Boolean) }
+  def normalized_alloc_wrapper_alias?(expr)
+    case expr
+    when MIR::TryExpr, MIR::Cast
+      expr.expr.is_a?(MIR::Ident)
+    else
+      false
+    end
   end
 
   sig { params(expr: T.untyped).returns(T::Boolean) }

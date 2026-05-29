@@ -167,7 +167,8 @@ module FsmLowering
           # other escaping binding; the promise stores it directly and
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
-          result_set = MIR::Set.new(target, strip_try(last_mir), false)
+          result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
+          result_set = MIR::Set.new(target, result_value, false)
           transfer_facts = fsm_result_transfer_facts(last_mir, last_step[:expr])
           (@last_fsm_result_transfer_facts ||= []).concat(transfer_facts)
           guard_fsm_result_cleanup!(result_mir, transfer_facts)
@@ -205,6 +206,14 @@ module FsmLowering
   def uniform_fsm_result_target_alloc(facts)
     allocs = facts.map(&:target_alloc).uniq
     allocs.length == 1 ? allocs.first : nil
+  end
+
+  sig { params(value: T.untyped, result_type: Type).returns(T.untyped) }
+  def coerce_fsm_result_value(value, result_type)
+    return value unless result_type.integer?
+    return value if value.is_a?(MIR::Cast)
+
+    MIR::Cast.new(value, result_type.zig_type, :intCast)
   end
 
   sig { params(body: T::Array[T.untyped], facts: T::Array[FsmResultTransferFact]).void }

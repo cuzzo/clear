@@ -655,7 +655,9 @@ class MIRLowering
       body.concat(ownership_transfer_marks(name, :block_result, move_guarded: true))
     end
     body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
-    MIR::BlockExpr.new(label, body)
+    out = MIR::BlockExpr.new(label, body)
+    out.result_type = type_info
+    out
   end
 
   sig { params(mir: T.untyped, ast_node: T.untyped).returns(T::Boolean) }
@@ -1677,6 +1679,10 @@ class MIRLowering
       if owned_binding_visible?(mapped) || (!require_visible_owned && (@current_bindings[root] || CleanupEntry::NONE).present?)
         return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
       end
+      if ast_value.is_a?(AST::Identifier) && value_mir.is_a?(MIR::Ident) &&
+         value_mir.name.to_s == mapped && !borrowed_ownership_ast?(ast_value)
+        return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
+      end
     end
 
     return [] unless require_visible_owned
@@ -1711,6 +1717,9 @@ class MIRLowering
   sig { params(name: String).returns(T::Boolean) }
   def owned_binding_visible?(name)
     return true if (@current_bindings[name] || CleanupEntry::NONE).present?
+    return true if @pending_stmts&.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
+    inherited = instance_variable_get(:@current_fsm_inherited_alloc_names) rescue nil
+    return true if inherited&.include?(name)
 
     lowered = @lowered_alloc_names
     lowered ? lowered.include?(name) : false

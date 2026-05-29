@@ -2482,6 +2482,11 @@ pub const CheatLib = struct {
         _ = alloc; // alloc stored in control block
         rc.ctrl.strong -= 1;
         if (rc.ctrl.strong == 0) {
+            if (comptime isLocked(T) or isRwLocked(T)) {
+                arcDeinitInner(T, rc.ctrl.alloc, rc.ctrl.data);
+            } else if (comptime needsCleanup(T)) {
+                cleanup(T, rc.ctrl.alloc, rc.ctrl.data);
+            }
             rc.ctrl.alloc.destroy(rc.ctrl.data);
             if (rc.ctrl.weak == 0) {
                 rc.ctrl.alloc.destroy(rc.ctrl);

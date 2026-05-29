@@ -125,7 +125,7 @@ module MIRLoweringCapabilities
   sig { params(zig_var: String).returns(String) }
   def comptime_arc_unwrap_expr(zig_var)
     T.bind(self, MIRLowering) rescue nil
-    "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
+    "#{with_match_unwrap_value(zig_var)}.*"
   end
 
   sig { params(lock_expr: String, var_sync: T.nilable(Symbol), fallible: T::Boolean).returns(String) }

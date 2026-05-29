@@ -132,7 +132,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   transpile-tests:
-    name: transpile-tests/ (.cht via clear test)
+    name: transpile-tests/ coverage (.cht via gen.rb)
     runs-on: ubuntu-latest
     env:
       COVERAGE: "1"
@@ -145,8 +145,9 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      # Same cache as ruby-integration -- both jobs hammer ./clear build
-      # and benefit from a warm clear-cache + transpile-cache across runs.
+      # Coverage only needs Ruby compile/lowering/emission. Runtime execution
+      # is covered by non-coverage clear-test gates; running it here fans out
+      # hundreds of SimpleCov clear-cli resultsets.
       - uses: actions/cache@v4
         with:
           path: |
@@ -155,7 +156,7 @@ jobs:
           key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      - run: ./clear test transpile-tests/
+      - run: bundle exec ruby transpile-tests/gen.rb
       - run: bundle exec ruby spec/collate_coverage.rb
       - uses: codecov/codecov-action@v5
         with:
@@ -180,7 +181,7 @@ jobs:
           NIL_KILL_REQUIRE_CHT_ONLY: "1"
 
   tools-fuzz-shard:
-    name: tools/fuzz shard ${{ matrix.shard }}/5
+    name: tools/fuzz coverage shard ${{ matrix.shard }}/5
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -206,9 +207,9 @@ jobs:
           key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
-      # Required gate: the FULL template matrix minus quarantine
-      # (tools/fuzz/quarantine.txt). Every non-quarantined template must
-      # pass -- this is what stops templates bit-rotting unnoticed.
+      # Coverage mode is compile/lower/emit only. Runtime/leak fuzz gates run
+      # without COVERAGE so SimpleCov does not fan out through every child
+      # `clear test` / `clear build` process.
       - run: bundle exec ruby tools/fuzz/run.rb --matrix --skip-quarantined --shard ${{ matrix.shard }}/5 --out /tmp/clear-fuzz-ci-${{ matrix.shard }} --clean
       - run: bundle exec ruby spec/collate_coverage.rb
       - uses: codecov/codecov-action@v5
