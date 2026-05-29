@@ -42,11 +42,11 @@ end
 
 def bucket_for(path)
   return :src_rb if path.start_with?("src/") && path.end_with?(".rb")
+  return :zig_tests if path.start_with?("zig/") && (path.end_with?("test.zig") || path.end_with?("-vopr.zig"))
   return :zig_src if path.start_with?("zig/") && path.end_with?(".zig") && !path.end_with?("test.zig")
   return :spec if path.start_with?("spec/")
   return :transpile_tests if path.start_with?("transpile-tests/")
   return :tools if path.start_with?("tools/")
-  return :zig_tests if path.start_with?("zig/") && path.end_with?("test.zig")
   return :md if path.end_with?(".md")
 
   :other
@@ -92,6 +92,10 @@ def coverage_paths(env_name, default_paths)
   end
 end
 
+def explicit_coverage_paths?(env_name)
+  !ENV[env_name].to_s.empty?
+end
+
 def stale?(coverage_paths, paths)
   existing = coverage_paths.select { |path| File.exist?(path) }
   return :missing if existing.empty?
@@ -103,6 +107,14 @@ def stale?(coverage_paths, paths)
   return false unless newest_source
 
   existing.map { |path| File.mtime(path) }.max < newest_source
+end
+
+def coverage_state(env_name, cov_paths, paths)
+  if explicit_coverage_paths?(env_name)
+    cov_paths.any? { |path| File.exist?(path) } ? false : :missing
+  else
+    stale?(cov_paths, paths)
+  end
 end
 
 def pct(covered, total)
@@ -153,8 +165,10 @@ def tuple_line(tuple)
 end
 
 def ruby_added_coverage(adds, paths)
+  return ["", ""] if paths.empty?
+
   cov_paths = coverage_paths("RUBY_COVERAGE_PATHS", "coverage/.resultset.json")
-  state = stale?(cov_paths, paths)
+  state = coverage_state("RUBY_COVERAGE_PATHS", cov_paths, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
   coverage = parse_simplecov(cov_paths)
@@ -231,11 +245,13 @@ def parse_coberturas(paths)
 end
 
 def zig_added_coverage(adds, paths)
+  return ["", ""] if paths.empty?
+
   cov_paths = coverage_paths("ZIG_COVERAGE_PATHS", [
     "zig/zig-out/coverage/merged/cobertura.xml",
     "zig/zig-out/coverage/merged/kcov-merged/cobertura.xml",
   ])
-  state = stale?(cov_paths, paths)
+  state = coverage_state("ZIG_COVERAGE_PATHS", cov_paths, paths)
   return ["N/A (#{state == true ? "stale" : state})", "N/A (#{state == true ? "stale" : state})"] if state
 
   coverage = parse_coberturas(cov_paths)
@@ -292,11 +308,11 @@ adds_by_path = added_lines(base)
 bucket_order = [
   [:total, "total"],
   [:src_rb, "src/**/*.rb"],
-  [:zig_src, "zig/**/*.zig !*test.zig"],
+  [:zig_src, "zig/**/*.zig !(*test.zig|*-vopr.zig)"],
   [:spec, "spec/"],
   [:transpile_tests, "transpile-tests/"],
   [:tools, "tools/"],
-  [:zig_tests, "zig/**/*test.zig"],
+  [:zig_tests, "zig/**/*test.zig + *-vopr.zig"],
   [:md, "*.md"],
   [:other, "other"],
 ]
@@ -307,8 +323,10 @@ grouped[:total] = stats
 
 src_paths = grouped[:src_rb].map { |e| e[:path] }
 zig_paths = grouped[:zig_src].map { |e| e[:path] }
+zig_test_paths = grouped[:zig_tests].map { |e| e[:path] }
 src_cov = ruby_added_coverage(adds_by_path, src_paths)
 zig_cov = zig_added_coverage(adds_by_path, zig_paths)
+zig_test_cov = zig_added_coverage(adds_by_path, zig_test_paths)
 
 rows = [["bucket", "files", "additions", "deletions", "line cov additions", "branch cov additions"]]
 bucket_order.each do |key, label|
@@ -318,6 +336,8 @@ bucket_order.each do |key, label|
   coverage = case key
              when :src_rb then src_cov
              when :zig_src then zig_cov
+             when :zig_tests then zig_test_cov
+             when :spec, :tools then ["not tracked", "not tracked"]
              else ["", ""]
              end
   rows << [label, entries.length.to_s, additions.to_s, deletions.to_s, coverage[0], coverage[1]]
