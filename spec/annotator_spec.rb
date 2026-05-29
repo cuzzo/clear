@@ -527,6 +527,17 @@ RSpec.describe SemanticAnnotator do
           expect(get_last_type(code)).to eq(:Int64)
         end
 
+        it "allows an optional default before a required parameter" do
+          code = <<~FLUX
+            FN pick(a=1: Int64, b: Int64) RETURNS Int64 ->
+              RETURN b;
+            END
+            pick(2);
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Int64)
+        end
+
         it "errors DEFAULT for a primitive-type param" do
           expect {
             run(<<~FLUX)
@@ -542,6 +553,27 @@ RSpec.describe SemanticAnnotator do
               FN foo(p=DEFAULT: Partial) -> RETURN p.x; END
             FLUX
           }.to raise_error(/Type Error.*DEFAULT.*missing/i)
+        end
+
+        it "errors DEFAULT when the parameter omits a type annotation" do
+          expect {
+            run(<<~FLUX)
+              FN foo(cfg=DEFAULT) -> RETURN; END
+            FLUX
+          }.to raise_error(/Type Error.*DEFAULT.*struct/i)
+        end
+
+        it "errors DEFAULT when direct param analysis has no type" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "cfg", 1, 1)
+          param = AST::Param.new(name: "cfg", type: nil, default: AST::DefaultLit.new(token),
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: false, sync: nil)
+          node = Struct.new(:params, :requires).new([param], {})
+
+          expect {
+            annotator.send(:declare_and_verify_params, node)
+          }.to raise_error(/DEFAULT.*struct/i)
         end
       end
 
@@ -622,6 +654,22 @@ RSpec.describe SemanticAnnotator do
           expect(node.full_type.resolved).to eq(:Int64)
         end
 
+        it "allows optional unwrap targets whose ownership was unset" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
+          target = AST::Identifier.new(token, "maybe_n")
+          optional = Type.new(:"?Int64")
+          optional.ownership = nil
+          target.full_type = optional
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:affine)
+          expect(node.full_type.resolved).to eq(:Int64)
+        end
+
         it "types open-ended slice nodes" do
           annotator = SemanticAnnotator.new
           allow(annotator).to receive(:visit)
@@ -667,6 +715,24 @@ RSpec.describe SemanticAnnotator do
             annotator.send(:validate_assignment_type, node, :NIL, :String)
           }.not_to raise_error
           expect(value.coerced_type).to be_nil
+        end
+
+        it "declares params with direct sync and ignores unknown requires families" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "locked", 1, 1)
+          locked = AST::Param.new(name: "locked", type: Type.new(:Int64), default: nil,
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: true, sync: :locked)
+          unknown = AST::Param.new(name: "unknown", type: Type.new(:Int64), default: nil,
+            mutable: false, takes: false, comptime: false, name_token: token,
+            required: true, sync: nil)
+          node = Struct.new(:params, :requires).new([locked, unknown], { "unknown" => Set[:BOGUS] })
+
+          annotator.send(:declare_and_verify_params, node)
+
+          expect(locked.symbol.sync).to eq(:locked)
+          expect(unknown.symbol.sync).to be_nil
+          expect(unknown.symbol.sync_families).to eq(Set[:BOGUS])
         end
       end
 
@@ -3086,6 +3152,21 @@ RSpec.describe SemanticAnnotator do
         ret_node = caller_fn.body.last
         call = ret_node.value
         expect(call.generic_type_args).to eq([:Doc])
+        expect(call.args.first.resolved_type).to eq(:Type)
+      end
+
+      it "allows generic extern functions with fewer comptime args than type params" do
+        ast = annotate_extern(<<~CLEAR)
+          EXTERN FN tag<T, U>(comptime: T) RETURNS Void FROM "native";
+          STRUCT Doc { value: Int64 }
+          FN caller() RETURNS Void ->
+            tag(Doc);
+            RETURN;
+          END
+        CLEAR
+        caller_fn = ast.statements.last
+        call = caller_fn.body.first
+        expect(call.generic_type_args).to eq([:Doc, nil])
         expect(call.args.first.resolved_type).to eq(:Type)
       end
 

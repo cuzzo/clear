@@ -593,6 +593,33 @@ RSpec.describe SemanticAnnotator do
         expect(annotator.send(:find_container_source, slice)).to eq("items")
       end
 
+      it "finds the receiver source for explicit container borrow markers" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+        target = AST::Identifier.new(token, "items")
+        expr = AST::GetIndex.new(token, target, AST::Literal.new(token, :NUMBER, 0, nil))
+        expr.container_borrow = true
+
+        expect(annotator.send(:find_container_source, expr)).to eq("items")
+      end
+
+      it "ignores explicit container borrow markers without a receiver" do
+        annotator = SemanticAnnotator.new
+        expr = Struct.new(:container_borrow).new(true)
+
+        expect(annotator.send(:find_container_source, expr)).to be_nil
+      end
+
+      it "ignores slices whose target is not array-shaped" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:IDENTIFIER, "name", 1, 1)
+        target = AST::Identifier.new(token, "name")
+        target.full_type = Type.new(:String)
+        slice = AST::Slice.new(token, target, nil, nil)
+
+        expect(annotator.send(:find_container_source, slice)).to be_nil
+      end
+
       it "preserves capability axes through Cache<T> get/set" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }
