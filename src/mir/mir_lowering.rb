@@ -801,9 +801,10 @@ class MIRLowering
   sig { params(mir: T.untyped, node: T.untyped).returns(T.untyped) }
   def apply_lowered_coercion(mir, node)
     return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
-    return mir unless node.typed? && node.coerced_type != node.full_type!
+    coerced_type = Type.new(node.coerced_type)
+    return mir unless node.typed? && coerced_type != node.full_type!
     return mir if stack_fixed_array_coercion?(node)
-    mir_cast(mir, node.full_type!, node.coerced_type) || mir
+    mir_cast(mir, node.full_type!, coerced_type) || mir
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }

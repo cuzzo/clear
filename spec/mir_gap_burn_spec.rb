@@ -214,11 +214,100 @@ RSpec.describe "MIR gap-burn characterization" do
 
     expect(low.lower(AST::DefaultLit.new(tok))).to be_a(MIR::Lit)
     expect(low.lower(AST::Copy.new(tok, lit(7, type: :Int64)))).to be_a(MIR::Lit)
+    expect(low.lower(MIR::Return.new(tok, ["escaped"]))).to be_a(MIR::ReturnMark)
+    expect(low.lower(AST::ThrowNode.new(tok, nil))).to be_a(MIR::ReturnStmt)
+    expect(low.lower(AST::DieNode.new(tok, 2))).to be_a(MIR::ExprStmt)
+    expect(low.lower(AST::ShareNode.new(tok, id("shared", storage: :heap)))).to be_a(MIR::CapWrap)
+    expect(low.lower(AST::OrRaise.new(tok))).to be_a(MIR::Ident)
+    expect(low.lower(AST::OrBreak.new(tok))).to be_a(MIR::BreakStmt)
+    expect(low.lower(AST::OrPass.new(tok))).to be_a(MIR::Ident)
+    expect(low.lower(AST::OrPrune.new(tok))).to be_a(MIR::Ident)
+    expect(low.lower(AST::OrExit.new(tok, :Runtime, nil, nil))).to be_a(MIR::ScopeBlock)
+    expect(low.lower(AST::AssertRaises.new(tok, :Runtime, nil, lit(1, type: :Int64)))).to be_a(MIR::InlineZig)
+    expect { low.lower(AST::ThenChain.new(tok, [])) }.to raise_error(/ThenChain should be flattened/)
+    expect(low.send(:ast_void_type?, Type.new(:Int64))).to eq(false)
     expect(low.send(:zig_format_for_type, Type.new(:String))).to eq("{s}")
     expect(low.send(:zig_format_for_type, Type.new(:Int64))).to eq("{d}")
     expect(low.send(:zig_format_for_type, Type.new(:Bool))).to eq("{}")
     expect(low.send(:zig_format_for_type, Type.new(:Any))).to eq("{any}")
     expect(low.send(:callee_can_fail?, "")).to eq(true)
+    expect(low.send(:callee_can_fail?, "missing")).to eq(true)
+
+    prog = AST::Program.new(tok, [])
+    MIRPassState::ORDER.take_while { |stage| stage != :mir_lowered }.each { |stage| MIRPassState.for!(prog).mark!(stage) }
+    expect(low.lower(prog)).to be_a(MIR::Program)
+  end
+
+  it "covers top-ranked MIR helper branch variants without new source fixtures" do
+    low = lowering
+
+    same = lit(1, type: :Int64)
+    same.coerced_type = :Int64
+    expect(low.send(:apply_lowered_coercion, MIR::Ident.new("n"), same)).to be_a(MIR::Ident)
+
+    guarded = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
+    drop = MIR::Drop.new(tok, "unguarded")
+    drop.cleanup_entry = guarded
+    expect(low.lower(drop)).to be_a(MIR::Cleanup)
+
+    expect(low.send(:symbol_storage_for_node, nil)).to be_nil
+    expect(low.send(:placement_for_node, id("plain", storage: :heap))).to eq(:heap)
+    expect(low.send(:resolve_alloc_sym, :frame)).to eq(:frame)
+    expect(low.send(:resolve_alloc_sym, :unknown)).to eq(:heap)
+    expect(low.send(:extract_root_var_name, id("root"))).to eq("root")
+
+    nil_lowering = Class.new(MIRLowering) do
+      def lower(_stmt) = nil
+    end.new
+    expect(nil_lowering.send(:lowered_stmt_packet, AST::PassStmt.new(tok))).to be_nil
+    expect(low.send(:lower_body_with_break, [], "__label")).to eq([])
+    expect(low.send(:emit_stmts_zig, [MIR::Noop.new("skip")])).to eq("")
+
+    borrowed = MIR::OwnershipOperandFact.borrowed_access("b", Type.new(:String), "src", :frame)
+    owned = MIR::OwnershipOperandFact.owned_binding("o", Type.new(:String), "src", :frame)
+    non = MIR::OwnershipOperandFact.non_owning(Type.new(:String), "src")
+    retargeted = low.send(:retarget_ownership_operands, [borrowed, owned, non], :heap)
+    expect(retargeted[0].borrowed).to eq(true)
+    expect(retargeted[0].target_alloc).to eq(:heap)
+    expect(retargeted[1].name).to eq("o")
+    expect(retargeted[1].target_alloc).to eq(:heap)
+    expect(retargeted[2].name).to be_nil
+  end
+
+  it "covers owned sink materialization actions as a compact dispatch matrix" do
+    low = lowering
+    value = MIR::Ident.new("v")
+    ast = id("v", type: :String, storage: :frame)
+
+    expect(low.send(:materialize_owned_sink_value, value, nil, :heap)).to be(value)
+
+    plans = [
+      MIRLowering::OwnedSinkPlan.new(action: :deep_copy, target_alloc: :heap, zig_type: "[]const u8", copy_mode: :full_value, source_slice_view: true),
+      MIRLowering::OwnedSinkPlan.new(action: :rc_retain, target_alloc: :heap, zig_type: "Payload", copy_mode: nil, rc_func: "arcRetain"),
+      MIRLowering::OwnedSinkPlan.new(action: :dupe_union, target_alloc: :heap, zig_type: "Choice", copy_mode: nil),
+      MIRLowering::OwnedSinkPlan.new(action: :unknown, target_alloc: :heap, zig_type: nil, copy_mode: nil),
+    ]
+
+    plans.each do |plan|
+      singleton = Class.new(MIRLowering) do
+        define_method(:owned_sink_plan) { |_value, _ast_node, _sink_alloc, _sink_type = nil| plan }
+        def emit_builtin(name, args)
+          MIR::InlineZig.new("#{name}(#{args.length})", "test")
+        end
+      end.new
+      result = singleton.send(:materialize_owned_sink_value, value, ast, :heap, Type.new(:String))
+      case plan.action
+      when :deep_copy
+        expect(result).to be_a(MIR::DeepCopy)
+        expect(result.source).to be_a(MIR::ItemsAccess)
+      when :rc_retain
+        expect(result).to be_a(MIR::RcRetain)
+      when :dupe_union
+        expect(result).to be_a(MIR::InlineZig)
+      else
+        expect(result).to be(value)
+      end
+    end
   end
 
   it "covers ownership transfer collection through AST structural children" do
