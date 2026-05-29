@@ -46,6 +46,12 @@ module PipeAnalysis
       node.full_type!(context: "pipeline result").bounded_stream? || node.full_type!(context: "pipeline result").open_stream?
   end
 
+  sig { params(options: T::Hash[String, T.untyped]).returns(T::Boolean) }
+  def concurrent_parallel_enabled?(options)
+    value = options["parallel"]
+    !!(value.is_a?(AST::Identifier) && %w[true TRUE].include?(value.name))
+  end
+
   # Observable Phase 2.2 + COLLECT-default: a fold-terminal whose
   # source is a tense stream (`~T[...]`) is observable by default.
   # The pipe BinaryOp gets:
@@ -1643,8 +1649,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
     item_type = lhs_type.stream_element_type.resolved
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1654,7 +1659,7 @@ module PipeAnalysis
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], T.must(is_parallel), false) ||
+      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
       analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
@@ -1677,8 +1682,7 @@ module PipeAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
     item_type = lhs_type.stream_element_type.resolved
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     with_new_scope(current_scope) do
       current_scope.declare("_", nil, item_type, true, false, nil, :stack)
@@ -1688,7 +1692,7 @@ module PipeAnalysis
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, T.must(is_parallel), false) ||
+      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
       analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
 
     stamp_type!(node, :Void)
@@ -1707,8 +1711,7 @@ module PipeAnalysis
     else
       finite_stream_element_type(node.left)
     end
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -1718,7 +1721,7 @@ module PipeAnalysis
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, [node.right.op.expression], T.must(is_parallel), false) ||
+      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
       analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
@@ -1744,8 +1747,7 @@ module PipeAnalysis
     else
       finite_stream_element_type(node.left)
     end
-    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
-                  %w[true TRUE].include?(node.right.options["parallel"].name)
+    is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     with_new_scope(current_scope) do
       current_scope.declare("_", nil, item_type, true, false, nil, :stack)
@@ -1755,7 +1757,7 @@ module PipeAnalysis
     end
 
     node.right.capture_analysis =
-      validate_fiber_captures!(node.right, node.right.op.body, T.must(is_parallel), false) ||
+      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
       analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
 
     stamp_type!(node, :Void)

@@ -194,42 +194,7 @@ module FunctionAnalysis
         if call_type.respond_to?(:error_union?) &&
            call_type.error_union?
           node.error_union_type = call_type if node.respond_to?(:error_union_type=)
-          outer = call_type
-          inner = outer.payload_type
-          # The parser stamps storage/ownership/sync/layout on the
-          # OUTER error union (e.g. `!Node @multiowned` -> outer.ownership
-          # = :multiowned, payload = bare `Node`). Carry those over so
-          # the binding's type_info still classifies as multiowned/
-          # shared/heap/etc -- otherwise field-access lowering for `n.id`
-          # misses the `.ctrl.data` unwrap.
-          if inner.is_a?(Type)
-            inner = Type.new(inner)
-            if outer.respond_to?(:ownership) && outer.ownership && outer.ownership != :affine &&
-               inner.respond_to?(:ownership=) && (inner.ownership.nil? || inner.ownership == :affine)
-              inner.ownership = outer.ownership
-            end
-            if outer.respond_to?(:provenance) && outer.provenance &&
-               inner.respond_to?(:provenance) && inner.provenance.nil? &&
-               inner.respond_to?(:provenance=)
-              inner.provenance = outer.provenance
-            end
-            if outer.respond_to?(:sync) && outer.sync &&
-               inner.respond_to?(:sync) && inner.sync.nil? &&
-               inner.respond_to?(:sync=)
-              inner.sync = outer.sync
-            end
-            if outer.respond_to?(:layout) && outer.layout &&
-               inner.respond_to?(:layout) && inner.layout.nil? &&
-               inner.respond_to?(:layout=)
-              inner.layout = outer.layout
-            end
-            if outer.respond_to?(:collection) && outer.collection &&
-               inner.respond_to?(:collection) && inner.collection.nil? &&
-               inner.respond_to?(:collection=)
-              inner.collection = outer.collection
-            end
-          end
-          stamp_type!(node, inner)
+          stamp_type!(node, call_type.success_type)
         end
       end
 
