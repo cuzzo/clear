@@ -46,6 +46,15 @@ class ClassifierTest < Minitest::Test
     assert_equal :genuine, C.categorize("m", :case, node("foo(1)"), true)
   end
 
+  def test_project_supplied_diagnostic_methods_are_opt_in
+    diag = node("report_invalid_input!(x)")
+    assert_equal :genuine, C.categorize("m", :if, diag, true),
+                 "project helper names are not baked into the gem"
+    assert_equal :diagnostic,
+                 C.categorize("m", :if, diag, true, nil, [], nil, nil, false,
+                              [:report_invalid_input!])
+  end
+
   def test_non_decision_coverage_artifact_is_noise_not_defensive
     pnode = RubyVM::AbstractSyntaxTree.parse("class C; end").children.last
     assert_nil C.categorize("m", :if, nil, false, nil, [], pnode)
@@ -128,6 +137,44 @@ class ClassifierTest < Minitest::Test
     cats = arms.map(&:category)
     assert_includes cats, :type_norm, "the never-true String guard"
     refute_empty arms
+  ensure
+    f&.unlink
+    rsf&.unlink
+  end
+
+  def test_classify_file_uses_project_diagnostic_lexicon
+    src = <<~RB
+      def report_invalid_input!(x)
+        x
+      end
+
+      def shape(n)
+        if n > 0
+          1
+        else
+          report_invalid_input!(n)
+        end
+      end
+
+      shape(1)
+    RB
+    f = Tempfile.new(["cov", ".rb"])
+    f.write(src)
+    f.close
+    Coverage.start(branches: true)
+    load f.path
+    res = Coverage.result
+    rs = { "T" => { "coverage" => { f.path => { "branches" => res.dig(f.path, :branches) } } } }
+    rsf = Tempfile.new(["rs", ".json"])
+    rsf.write(JSON.dump(rs))
+    rsf.close
+
+    default_cats = C.classify_file(rsf.path, f.path).map(&:category)
+    custom_cats = C.classify_file(rsf.path, f.path,
+                                  diagnostic_mids: [:report_invalid_input!]).map(&:category)
+    assert_includes default_cats, :genuine
+    assert_includes custom_cats, :diagnostic
+    refute_includes custom_cats, :genuine
   ensure
     f&.unlink
     rsf&.unlink

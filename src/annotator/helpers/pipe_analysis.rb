@@ -1164,44 +1164,23 @@ module PipeAnalysis
   sig { params(node: T.untyped, names: T::Set[T.untyped]).returns(T.nilable(T::Array[Symbol])) }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
-    return unless node.is_a?(AST::Locatable)
-    if node.is_a?(AST::Identifier)
-      entry = node.symbol
-      if entry
-        names << node.name if entry.type.sharded? && entry.sync.nil?
-      end
+    each_shard_scan_node(node) do |n|
+      names << n.name if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
     end
-    return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-    node.class.members.each do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.each { |v| collect_sharded_names(v, names) }
-      elsif val.is_a?(AST::Locatable)
-        collect_sharded_names(val, names)
-      end
-    end
+    nil
   end
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def pre_scan_node_for_sharded(node)
     T.bind(self, SemanticAnnotator) rescue nil
-    return false unless node.is_a?(AST::Locatable)
-    if node.is_a?(AST::Identifier)
-      entry = node.symbol
-      return false unless entry
-      return entry.type.sharded? && entry.sync.nil?
-    end
-    return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-    node.class.members.any? do |member|
-      val = node[member]
-      if val.is_a?(Array)
-        val.any? { |v| pre_scan_node_for_sharded(v) }
-      elsif val.is_a?(AST::Locatable)
-        pre_scan_node_for_sharded(val)
-      else
-        false
+    found = T.let(false, T::Boolean)
+    each_shard_scan_node(node) do |n|
+      if n.is_a?(AST::Identifier) && sharded_unsynced_identifier?(n)
+        found = true
+        break
       end
     end
+    found
   end
 
   # Analyze CONCURRENT EACH with auto-detected @sharded map access.
@@ -1293,33 +1272,9 @@ module PipeAnalysis
   sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
   def walk_for_sharded_access(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-
-      # Assignment: map[key] = value
-      if node.is_a?(AST::Assignment) && node.name.is_a?(AST::GetIndex)
-        gi = node.name
-        if gi.target.is_a?(AST::Identifier)
-          ti = gi.target.full_type!(context: "group target")
-          if ti.is_a?(Type) && ti.sharded? && gi.target.symbol&.sync.nil?
-            results << { map_name: gi.target.name, key_expr: gi.index, map_token: gi.target.token }
-          end
-        end
-      end
-
-      # BindExpr: got = map[key] OR "" (the map[key] is inside value)
-      if node.is_a?(AST::BindExpr) && node.value
-        walk_for_sharded_getindex([node.value], results)
-      end
-
-      # Walk children (skip nested BG/DO blocks)
-      next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array) && member != :body  # don't re-walk body arrays we handle above
-          walk_for_sharded_access(val, results)
-        end
-      end
+    each_shard_scan_node(nodes) do |node|
+      access = sharded_get_index_access(node, context: "sharded pipeline target")
+      results << access if access
     end
   end
 
@@ -1327,24 +1282,55 @@ module PipeAnalysis
   sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
-    nodes.each do |node|
-      next unless node.is_a?(AST::Locatable)
-      if node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
-        ti = node.target.full_type!(context: "pipeline target")
-        if ti.is_a?(Type) && ti.sharded? && node.target.symbol&.sync.nil?
-          results << { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
-        end
-      end
-      # Recurse into sub-expressions
-      node.class.members.each do |member|
-        val = node[member]
-        if val.is_a?(Array)
-          walk_for_sharded_getindex(val, results)
-        elsif val.is_a?(AST::Locatable)
-          walk_for_sharded_getindex([val], results)
-        end
+    each_shard_scan_node(nodes) do |node|
+      access = sharded_get_index_access(node, context: "pipeline target")
+      results << access if access
+    end
+  end
+
+  sig { params(node: T.untyped, blk: T.proc.params(n: AST::Locatable).void).void }
+  def each_shard_scan_node(node, &blk)
+    T.bind(self, SemanticAnnotator) rescue nil
+    if node.is_a?(Array)
+      node.each { |child| each_shard_scan_node(child, &blk) }
+      return
+    end
+    return unless node.is_a?(AST::Locatable)
+
+    yield node
+    return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
+
+    node.class.members.each do |member|
+      val = node[member]
+      if val.is_a?(Array) || val.is_a?(AST::Locatable)
+        each_shard_scan_node(val, &blk)
       end
     end
+  end
+
+  sig { params(entry: T.untyped).returns(T::Boolean) }
+  def sharded_unsynced_entry?(entry)
+    return false unless entry
+    type = entry.type
+    type = Type.new(type) unless type.is_a?(Type)
+    type.sharded? && entry.sync.nil?
+  end
+
+  sig { params(node: AST::Identifier).returns(T::Boolean) }
+  def sharded_unsynced_identifier?(node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    sharded_unsynced_entry?(node.symbol || lookup_scope_for(node.name)&.locals&.[](node.name))
+  end
+
+  sig { params(node: T.untyped, context: String).returns(T.nilable(T::Hash[Symbol, T.untyped])) }
+  def sharded_get_index_access(node, context:)
+    return nil unless node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
+    return nil unless sharded_unsynced_identifier?(node.target)
+
+    ti = node.target.full_type!(context: context)
+    return nil unless ti.is_a?(Type) && ti.sharded?
+
+    { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }

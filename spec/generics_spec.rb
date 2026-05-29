@@ -486,6 +486,25 @@ RSpec.describe SemanticAnnotator do
         expect(call.generic_type_args.first.sync).to eq(:locked)
       end
 
+      it "preserves every capability axis when substituting a generic type parameter" do
+        annotator = SemanticAnnotator.new
+        generic = Type.new(:T)
+        generic.ownership = :shared
+        generic.sync = :locked
+        generic.layout = :indirect
+        generic.elem_ownership = :multiowned
+        generic.elem_sync = :atomic
+
+        substituted = annotator.send(:apply_type_subst, generic, { T: :Box })
+
+        expect(substituted.resolved).to eq(:Box)
+        expect(substituted.ownership).to eq(:shared)
+        expect(substituted.sync).to eq(:locked)
+        expect(substituted.layout).to eq(:indirect)
+        expect(substituted.elem_ownership).to eq(:multiowned)
+        expect(substituted.elem_sync).to eq(:atomic)
+      end
+
       it "preserves capability axes through Cache<T> get/set" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }

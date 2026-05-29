@@ -6,8 +6,9 @@ true gaps to test, ranked by fix-churn.**
 
 It is a **general engine** — it categorizes uncovered branches and
 ranks the genuine ones by consumed boobytrap churn. It ships **no
-project lexicon**; the only project-specific input (your
-external/boundary method names) is caller-supplied via `--ffi`.
+project lexicon**; project-specific inputs such as external/boundary
+method names and domain diagnostic helpers are caller-supplied via
+`--ffi` and `--diagnostic`.
 
 ## The report
 
@@ -24,7 +25,7 @@ external/boundary method names) is caller-supplied via `--ffi`.
 | `defensive` | inert / invariant-pinned — accept, exclude from denominator |
 | `spurious` | decomplex: redundant/cloned/re-derived decision — refactor or delete, not a test target |
 | `ffi` | a caller-declared external/boundary call — needs an integration test |
-| `diagnostic` | error/raise path — reachable only by invalid input |
+| `diagnostic` | error/raise path, including caller-declared diagnostic helpers — reachable only by invalid input |
 | `genuine` | the real reachable gap — **test it** (ranked by churn × decomplex structural deviance) |
 
 ## Usage
@@ -33,7 +34,8 @@ external/boundary method names) is caller-supplied via `--ffi`.
 slopcop report --repo=. --coverage=coverage/.resultset.json \
              --output=report.md \
              --files=src/a.rb,src/b.rb \
-             --ffi=my_extern_call,my_boundary_method
+             --ffi=my_extern_call,my_boundary_method \
+             --diagnostic=report_invalid_input!,emit_error!
 ```
 
 Needs `coverage/.resultset.json` (SimpleCov `enable_coverage :branch`)
@@ -68,11 +70,13 @@ with dark arms.
 
 ## Not a verdict
 
-Categories are ranked candidates (Engler discipline). v0 precision
-caveats — `diagnostic` is over-greedy, `type_norm` under-counted (no
-intra-procedural local→accessor resolution yet) — are documented in
-[docs/agents/design.md](docs/agents/design.md). The Top-True-Gaps
-ranking is the sound, validated part.
+Categories are ranked candidates (Engler discipline). `type_norm` is
+general type/nil guard pressure (`is_a?`, `nil?`, `respond_to?`,
+safe navigation), not a project type-system verdict. `diagnostic` is
+general invalid-input reporting: Ruby `raise/fail/abort` plus any
+caller-declared diagnostic helpers. v0 precision caveats are
+documented in [docs/agents/design.md](docs/agents/design.md). The
+Top-True-Gaps ranking is the sound, validated part.
 
 ## Links
 

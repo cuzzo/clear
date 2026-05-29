@@ -242,6 +242,26 @@ RSpec.describe SemanticAnnotator do
           expect(return_node.value.coerced_type).to eq(:"Float64[]")
         end
       end
+
+      context "Fallible call returned from fallible function" do
+        let(:code) {
+          <<~FLUX
+            FN may() RETURNS !Int64 ->
+              RETURN 1_i64;
+            END
+            FN wrap() RETURNS !Int64 ->
+              RETURN may();
+            END
+          FLUX
+        }
+
+        it "keeps the error-union coercion target for fallible values" do
+          return_node = ast.statements[1].body.last
+
+          expect(return_node.value.error_union_type.resolved).to eq(:"!Int64")
+          expect(return_node.value.coerced_type).to eq(:"!Int64")
+        end
+      end
     end
 
     context "Implicit / Any Return" do
@@ -468,6 +488,16 @@ RSpec.describe SemanticAnnotator do
           expect { run(code) }.not_to raise_error
           expect(get_last_type(code)).to eq(:Float64)
         end
+
+        it "does not inject defaults across a missing required param" do
+          code = <<~FLUX
+            FN needs_later(a=1: Int64, b: Int64) RETURNS Int64 ->
+              RETURN b;
+            END
+            needs_later();
+          FLUX
+          expect { run(code) }.to raise_error(/expects between 1 and 2 arguments/i)
+        end
       end
 
       context "DEFAULT keyword for struct params" do
@@ -512,6 +542,23 @@ RSpec.describe SemanticAnnotator do
               FN foo(p=DEFAULT: Partial) -> RETURN p.x; END
             FLUX
           }.to raise_error(/Type Error.*DEFAULT.*missing/i)
+        end
+      end
+
+      context "shared handle params" do
+        it "accepts a shared binding for a shared parameter" do
+          code = <<~FLUX
+            STRUCT Point { x: Int64 }
+            FN take(p: Point @shared) RETURNS Void ->
+              RETURN;
+            END
+            FN main() RETURNS Void ->
+              p = Point{ x: 1 } @shared;
+              take(p);
+              RETURN;
+            END
+          FLUX
+          expect { run(code) }.not_to raise_error
         end
       end
 
