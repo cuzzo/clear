@@ -590,6 +590,86 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
+      context "direct visitor type propagation" do
+        it "preserves sync and link metadata when unwrapping optionals" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_box", 1, 1)
+          target = AST::Identifier.new(token, "maybe_box")
+          optional = Type.new(:"?Box", ownership: :shared, sync: :locked)
+          optional.link_source = :shared
+          target.full_type = optional
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:shared)
+          expect(node.full_type.sync).to eq(:locked)
+          expect(node.full_type.link_source).to eq(:shared)
+        end
+
+        it "allows optional unwrap results without ownership metadata" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
+          target = AST::Identifier.new(token, "maybe_n")
+          target.full_type = Type.new(:"?Int64")
+
+          node = AST::OptionalUnwrap.new(token, target)
+          annotator.send(:visit_OptionalUnwrap, node)
+
+          expect(node.full_type.ownership).to eq(:affine)
+          expect(node.full_type.resolved).to eq(:Int64)
+        end
+
+        it "types open-ended slice nodes" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+          target = AST::Identifier.new(token, "items")
+          target.full_type = Type.new(:"Int64[]")
+
+          node = AST::Slice.new(token, target, nil, nil)
+          annotator.send(:visit_Slice, node)
+
+          expect(node.full_type.resolved).to eq(:"Int64[]")
+        end
+
+        it "marks explicit non-value COPY outside a function as heap-owned" do
+          annotator = SemanticAnnotator.new
+          allow(annotator).to receive(:visit)
+          token = Lexer::Token.new(:IDENTIFIER, "label", 1, 1)
+          value = AST::Identifier.new(token, "label")
+          value.full_type = Type.new(:String)
+
+          node = AST::CopyNode.new(token, value)
+          annotator.send(:visit_CopyNode, node)
+
+          expect(node.storage).to eq(:heap)
+          expect(node.full_type.provenance).to eq(:heap)
+        end
+
+        it "ignores unknown intrinsic reject predicates" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "n", 1, 1)
+          arg = AST::Identifier.new(token, "n")
+
+          expect(annotator.send(:reject_arg_type_matches?, arg, :unknown_shape)).to be false
+        end
+
+        it "accepts assignment narrowing from NIL" do
+          annotator = SemanticAnnotator.new
+          token = Lexer::Token.new(:IDENTIFIER, "x", 1, 1)
+          value = AST::Identifier.new(token, "value")
+          node = AST::Assignment.new(token, "x", value)
+
+          expect {
+            annotator.send(:validate_assignment_type, node, :NIL, :String)
+          }.not_to raise_error
+          expect(value.coerced_type).to be_nil
+        end
+      end
+
       context "Lambda defaults" do
         it "allows a lambda param with a primitive default" do
           code = <<~FLUX

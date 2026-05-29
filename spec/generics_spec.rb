@@ -515,6 +515,25 @@ RSpec.describe SemanticAnnotator do
         expect(array.resolved).to eq(:"Box[]")
       end
 
+      it "substitutes bare type params without capability metadata" do
+        annotator = SemanticAnnotator.new
+
+        substituted = annotator.send(:apply_type_subst, Type.new(:T), { T: :Box })
+
+        expect(substituted.resolved).to eq(:Box)
+        expect(substituted.ownership).to eq(:affine)
+      end
+
+      it "substitutes capability metadata without ownership overrides" do
+        annotator = SemanticAnnotator.new
+
+        substituted = annotator.send(:apply_type_subst, Type.new(:T, sync: :locked), { T: :Box })
+
+        expect(substituted.resolved).to eq(:Box)
+        expect(substituted.ownership).to eq(:affine)
+        expect(substituted.sync).to eq(:locked)
+      end
+
       it "preserves declared sharding and sync metadata on map bindings" do
         ast = run(<<~CLEAR)
           FN main() RETURNS Void ->
@@ -526,6 +545,52 @@ RSpec.describe SemanticAnnotator do
 
         expect(decl.full_type.shard_count).to eq(4)
         expect(decl.full_type.sync).to eq(:locked)
+      end
+
+      it "propagates sharding metadata from collection declarations" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+        value = AST::Identifier.new(token, "value")
+        value.full_type = Type.new(:"Int64[]")
+        declared = Type.new(:"Int64[]", collection: :list, shard_count: 4)
+        node = AST::VarDecl.new(token, "items", declared, value, true)
+        node.full_type = Type.new(:"Int64[]")
+
+        annotator.send(:propagate_collection_metadata!, node, node.full_type)
+
+        expect(node.full_type.collection).to eq(:list)
+        expect(node.full_type.shard_count).to eq(4)
+      end
+
+      it "propagates sharding and sync metadata from map declarations" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:IDENTIFIER, "counts", 1, 1)
+        value = AST::Identifier.new(token, "value")
+        value.full_type = Type.new(:"HashMap<Int64, String>")
+        declared = Type.new(:"HashMap<Int64, String>", shard_count: 4, sync: :locked)
+        node = AST::VarDecl.new(token, "counts", declared, value, true)
+        node.full_type = Type.new(:"HashMap<Int64, String>")
+
+        annotator.send(:propagate_collection_metadata!, node, node.full_type)
+
+        expect(node.full_type.shard_count).to eq(4)
+        expect(node.full_type.sync).to eq(:locked)
+      end
+
+      it "treats nil expressions as having no container source" do
+        annotator = SemanticAnnotator.new
+
+        expect(annotator.send(:find_container_source, nil)).to be_nil
+      end
+
+      it "finds the root source for slice borrows" do
+        annotator = SemanticAnnotator.new
+        token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+        target = AST::Identifier.new(token, "items")
+        target.full_type = Type.new(:"Int64[]")
+        slice = AST::Slice.new(token, target, nil, nil)
+
+        expect(annotator.send(:find_container_source, slice)).to eq("items")
       end
 
       it "preserves capability axes through Cache<T> get/set" do
