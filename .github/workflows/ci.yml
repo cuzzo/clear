@@ -671,11 +671,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: zig-coverage-${{ matrix.shard }}
-          path: zig/zig-out/coverage/merged/cobertura.xml
+          path: zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
+          if-no-files-found: error
           retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
-          files: ./zig/zig-out/coverage/merged/cobertura.xml
+          files: ./zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
           flags: zig
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}

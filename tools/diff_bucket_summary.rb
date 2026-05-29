@@ -257,7 +257,8 @@ def zig_added_coverage(adds, paths)
   coverage = parse_coberturas(cov_paths)
   line_total = line_hit = branch_total = branch_hit = 0
   paths.each do |path|
-    cov = coverage[path] || coverage["./#{path}"] || coverage[File.join(ROOT, path)]
+    zig_relative = path.delete_prefix("zig/")
+    cov = coverage[path] || coverage["./#{path}"] || coverage[zig_relative] || coverage["./#{zig_relative}"] || coverage[File.join(ROOT, path)]
     next unless cov
 
     adds[path].each do |line|
