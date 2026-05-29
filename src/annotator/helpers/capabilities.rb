@@ -852,7 +852,7 @@ module CapabilityHelper
       bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
-      record_capture_local!(alias_name) if cap[:alias]
+      record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
       if cap[:capability] == :VIEW
         sym.non_escaping  = true
@@ -887,7 +887,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       is_mutable = !!cap[:alias_mutable]
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
-      record_capture_local!(alias_name) if cap[:alias]
+      record_capture_local!(alias_name)
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
       sym.borrowed_alias = true
