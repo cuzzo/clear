@@ -296,7 +296,7 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
-  it "records a method punted to the TracePoint fallback (ensure in body)" do
+  it "source-wraps methods with ensure in the body" do
     Dir.mktmpdir("nil-kill-tp-fallback", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -305,8 +305,6 @@ RSpec.describe "nil-kill runtime trace" do
         class Worker
           extend T::Sig
 
-          # `ensure` -> contains_ensure? -> instrumenter punts this to
-          # the TracePoint fallback instead of a source wrapper.
           sig { params(value: T.untyped).returns(T.untyped) }
           def guarded(value)
             value.to_s
@@ -335,11 +333,9 @@ RSpec.describe "nil-kill runtime trace" do
       File.write(NilKill::TRACE_PLAN_PATH, JSON.pretty_generate(plan))
 
       instrumented_source = NilKill::SourceInstrumenter.new.instrument_file(source)
-      # Punted: NO source wrapper emitted ...
-      expect(instrumented_source).not_to include('record_source_method_call("Worker", "guarded"')
-      # ... and the method is registered in the TracePoint fallback plan.
+      expect(instrumented_source).to include('record_source_method_call("Worker", "guarded"')
       reloaded = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
-      expect(reloaded["tracepoint_methods"].keys.any? { |k| k.split("\0")[1] == "guarded" }).to be(true)
+      expect(reloaded.fetch("tracepoint_methods", {}).keys.any? { |k| k.split("\0")[1] == "guarded" }).to be(false)
 
       instrumented = File.join(dir, "sample.instrumented.rb")
       File.write(instrumented, instrumented_source)
@@ -347,8 +343,7 @@ RSpec.describe "nil-kill runtime trace" do
       trace_dir = File.join(trace_tmp, "runtime")
       FileUtils.rm_rf(trace_tmp)
       FileUtils.mkdir_p(trace_tmp)
-      # Faithful to real collect: the trace plan (now carrying
-      # tracepoint_methods) and the runtime dumps share one TMP_DIR.
+      # Faithful to real collect: the trace plan and runtime dumps share one TMP_DIR.
       FileUtils.cp(NilKill::TRACE_PLAN_PATH, File.join(trace_tmp, "trace-plan.json"))
       tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
       env = {
@@ -493,7 +488,7 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
-  it "uses targeted TracePoint fallback for source-instrumented methods with ensure" do
+  it "uses source wrappers for source-instrumented methods with ensure" do
     Dir.mktmpdir("nil-kill-runtime-source-ensure", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -535,8 +530,8 @@ RSpec.describe "nil-kill runtime trace" do
       File.write(instrumented, instrumented_source)
 
       trace_plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
-      expect(instrumented_source).not_to include('record_source_method_call("Worker", "guarded"')
-      expect(trace_plan.fetch("tracepoint_methods").keys).to eq(plan.fetch("methods").keys)
+      expect(instrumented_source).to include('record_source_method_call("Worker", "guarded"')
+      expect(trace_plan.fetch("tracepoint_methods", {})).to be_empty
 
       trace_tmp = File.join(dir, "trace-tmp")
       FileUtils.mkdir_p(trace_tmp)
