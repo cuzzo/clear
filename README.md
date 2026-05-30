@@ -20,7 +20,7 @@ See [Why These Priorities](docs/why-these-priorities.md) for more details.
 
 **Who *is* CLEAR for?**
 
- * Folks who want systems-like performance, Rust-level safety, and Go-level throughput - in an opinionated language designed to feel high-level.
+ * Folks who want systems-like performance, Rust-level safety, and Go-level throughput - in an opinionated language designed to feel high-level, and be as easy as possible to review and understand.
 
 ## WHAT DOES CLEAR LOOK LIKE
 
