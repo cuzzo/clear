@@ -1086,7 +1086,7 @@ module CapabilityHelper
     @capture_move_suppressed = (@capture_move_suppressed || 0) + 1
     blk.call
   ensure
-    @capture_move_suppressed -= 1
+    @capture_move_suppressed = T.must(@capture_move_suppressed) - 1
   end
 
   sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
