@@ -114,7 +114,7 @@ module MethodAnalysis
     # the shared registry FS is never mutated.
     if zig
       resolved_defn = defn.dup
-      resolved_defn.emit = (resolved_defn.emit ? resolved_defn.emit.dup : IntrinsicEmit.new)
+      resolved_defn.emit = T.must(resolved_defn.emit).dup
       resolved_defn.emit.zig = zig
       resolved_defn.emit.alloc = alloc if alloc
       node.zig_pattern = zig
@@ -143,7 +143,6 @@ module MethodAnalysis
     if defn.emit&.takes_args
       defn.emit.takes_args.each do |arg_idx|
         arg_node = node.args[arg_idx]
-        next unless arg_node
         move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
       end
     end

@@ -459,7 +459,7 @@ module FunctionAnalysis
       if atomic_cell_to_atomic_param?(arg_node, param, signature)
         arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
       end
-      if !match && expected_type_obj.shared?
+      if !match && expected_type_obj.shared? && expected_type_obj.resolved == actual_type_obj.resolved
         unless actual_type_obj.shared?
           hint = if arg_node.is_a?(AST::Identifier)
             " Use SHARE #{arg_node.name} to create a shared handle."
@@ -469,7 +469,7 @@ module FunctionAnalysis
           error!(arg_node, :ARG_NEEDS_SHARED,
             index: i + 1, fn: node.name, expected: expected_type_obj, actual: actual_type_obj, hint: hint)
         end
-        match = true if expected_type_obj.resolved == actual_type_obj.resolved
+        match = true
       end
 
       if !match && (expected == :Any || actual == :Any || expected == actual)

@@ -340,17 +340,16 @@ class AutoConstraintCollector
       # evidence; arbitrary expressions get skipped (we can't see
       # inside them at this layer).
       return unless rhs.is_a?(AST::HashLit)
-      key_slot = @slots[entry.key]
-      val_slot = @slots[entry.value]
+      key_slot = T.must(@slots[entry.key])
+      val_slot = T.must(@slots[entry.value])
       rhs.pairs.each do |k, v|
-        key_slot.sources << k if key_slot && k
-        val_slot.sources << v if val_slot && v
+        key_slot.sources << k
+        val_slot.sources << v
       end
       return
     end
 
-    slot = @slots[entry]
-    return unless slot
+    slot = T.must(@slots[entry])
 
     case slot.shape
     when :list_element
