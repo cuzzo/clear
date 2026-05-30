@@ -12,7 +12,15 @@ It's designed to be:
  4. Scalable
  5. *BLAZING* fast
 
- See [Why These Priorities](docs/why-these-priorities.md) for more details.
+See [Why These Priorities](docs/why-these-priorities.md) for more details.
+
+**Who is CLEAR *not* for?**
+
+ * Systems programmers who are very happy with their current language, tooling, and frameworks
+
+**Who *is* CLEAR for?**
+
+ * Folks who want systems-like performance, Rust-level safety, and Go-level throughput - in an opinionated language designed to feel high-level.
 
 ## WHAT DOES CLEAR LOOK LIKE
 
