@@ -55,7 +55,7 @@ See the [Walkthrough](docs/WALKTHROUGH.md) for more details.
 ## WHY CLEAR?
 
 * SQL solved the problem of writing code once, and it constantly improving as the engine improves.
-* Go proved the engine/run-time being added into the language can be fantastic.
+* Go proved the engine/run-time being baked into the language can be outstanding.
 * Rust proved that Affine Ownership can manage memory without a garbage collector simply.
   * Rust's borrow checker is what gives it a bad reputation for being complicated, not Affine Ownership in general.
 
