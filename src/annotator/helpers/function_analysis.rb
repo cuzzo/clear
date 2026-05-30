@@ -524,7 +524,6 @@ module FunctionAnalysis
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def borrowed_takes_argument?(node)
-    return false unless node
     return true if node.respond_to?(:container_borrow) && node.container_borrow
     return true if node.is_a?(AST::GetIndex)
     return false unless node.is_a?(AST::GetField)
@@ -607,7 +606,6 @@ module FunctionAnalysis
     lifetime_paths = signature.return_lifetime
     return true if lifetime_paths.empty?
 
-    borrow_type = param.mutable ? :mutable : :immutable
     return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
     # If `param` is named in the lifetime sources (any of the multi-
@@ -669,8 +667,7 @@ module FunctionAnalysis
     return if requires_map.empty?
 
     sources.each do |source|
-      path = get_path_to_root(source)
-      next unless path
+      path = T.must(get_path_to_root(source))
       root_name = path.first.to_s
       families = requires_map[root_name]
       next unless families.is_a?(Set) && families.size > 1
