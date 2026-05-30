@@ -82,7 +82,7 @@ module CapabilityHelper
     var_node.full_type!(context: "WITH capability sync target").sync
   end
 
-  sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
+  sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_storage(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     sym = var_node.symbol
@@ -92,12 +92,23 @@ module CapabilityHelper
 
   # Read layout from the SymbolEntry when available, or from full_type before
   # symbol binding has completed. Mirrors cap_var_sync / cap_var_storage.
-  sig { params(var_node: AST::Identifier).returns(T.nilable(Symbol)) }
+  sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_layout(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
     var_node.full_type!(context: "WITH capability layout target").layout
+  end
+
+  sig { params(var_node: AST::Locatable).returns(String) }
+  def cap_var_label(var_node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    case var_node
+    when AST::Identifier then var_node.name
+    when AST::GetField then var_node.field.to_s
+    when AST::GetIndex then cap_var_name(var_node)
+    else "__unknown"
+    end
   end
 
   # Validate that a capability type is legal for the given variable.
@@ -124,7 +135,7 @@ module CapabilityHelper
           }
         else
           storage = cap_var_storage(var_node)
-          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+          name = cap_var_label(var_node)
           emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
             [
               { sigil: '@locked',
@@ -145,7 +156,7 @@ module CapabilityHelper
             node: node, var_node: var_node, capability: :write_locked_read
           }
         else
-          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+          name = cap_var_label(var_node)
           emit_with_read_needs_write_lock!(node, name, var_node)
         end
       end
@@ -171,7 +182,7 @@ module CapabilityHelper
       # Any tense aggregate is allowed; non-tense sources are rejected.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future?
-        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        name = cap_var_label(var_node)
         emit_with_materialized_needs_tense!(node, name, t.resolved)
       end
 
@@ -182,13 +193,14 @@ module CapabilityHelper
       lay = cap_var_layout(var_node)
       atomic_ptr_ok = syn == :atomic && lay == :indirect
       unless syn == :versioned || atomic_ptr_ok
-        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        name = cap_var_label(var_node)
+        storage = cap_var_storage(var_node)
         actual = if syn && lay == :indirect
           "@#{lay}:#{syn}"
         elsif syn
           "@#{syn}"
-        elsif cap_var_storage(var_node)
-          "@#{cap_var_storage(var_node)}"
+        elsif storage
+          "@#{storage}"
         else
           "plain"
         end
@@ -205,7 +217,7 @@ module CapabilityHelper
 
     when :multiowned
       unless cap_var_storage(var_node) == :multiowned
-        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        name = cap_var_label(var_node)
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_MULTIOWNED,
           [{ sigil: '@multiowned',
              description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)." }],
@@ -215,7 +227,7 @@ module CapabilityHelper
 
     when :shared
       unless cap_var_storage(var_node) == :shared
-        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        name = cap_var_label(var_node)
         emit_with_cap_mismatch!(node, name, :WITH_NEEDS_SHARED,
           [{ sigil: '@shared',
              description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)." }],
@@ -232,8 +244,9 @@ module CapabilityHelper
             node: node, var_node: var_node, capability: :ATOMIC
           }
         else
-          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-          actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
+          name = cap_var_label(var_node)
+          storage = cap_var_storage(var_node)
+          actual = syn ? "@#{syn}" : (storage ? "@#{storage}" : "plain")
           emit_with_cap_mismatch!(node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC,
             [{ sigil: '@shared:atomic',
                description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)." }],
@@ -656,7 +669,7 @@ module CapabilityHelper
                          when storage == :multiowned    then :multiowned
                          when storage == :shared        then :shared
                          else
-                           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+                           name = cap_var_label(var_node)
                            emit_with_cannot_infer_cap!(node, name)
                            :unknown
                          end
@@ -738,12 +751,7 @@ module CapabilityHelper
   sig { params(var_node: T.untyped).returns(String) }
   def cap_var_name(var_node)
     T.bind(self, SemanticAnnotator) rescue nil
-    case var_node
-    when AST::Identifier then var_node.name
-    when AST::GetField   then var_node.name
-    when AST::GetIndex   then var_node.target.is_a?(AST::Identifier) ? var_node.target.name : "__idx"
-    else "__unknown"
-    end
+    AST.root_identifier(var_node)&.name || "__unknown"
   end
 
   sig { params(cap: AST::Capability).returns(T.nilable(String)) }

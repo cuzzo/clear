@@ -613,12 +613,12 @@ module PipeAnalysis
     # Also accepts range and stream sources (fused lazy path).
     is_range  = node.left.is_a?(AST::RangeLit)
     lhs_ti    = node.left.full_type!(context: "pipeline left")
-    is_stream = lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream? || lhs_ti&.inf_stream?
+    is_stream = lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? || lhs_ti.inf_stream?
     require_array_input!(node, "LIMIT", allow_range: is_range || is_stream, allow_stream: is_stream)
 
     item_type = if is_range
       range_element_type(node.left)
-    elsif lhs_ti&.inf_stream?
+    elsif lhs_ti.inf_stream?
       lhs_ti.inf_stream_element_type.resolved
     elsif is_stream
       lhs_ti.tense_type.element_type.resolved
@@ -1118,7 +1118,7 @@ module PipeAnalysis
     # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
     key_type = if shard_node
       ti = shard_node.target_map.full_type!(context: "shard target map")
-      (ti&.numeric_map? && ti&.key_type&.resolved) || :String
+      (ti.numeric_map? && ti.key_type&.resolved) || :String
     else
       :String
     end

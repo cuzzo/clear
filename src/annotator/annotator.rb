@@ -1023,9 +1023,9 @@ private
     (node.handlers || []).each do |clause|
       case clause[:action]
       when :exit
-        visit(clause[:message]) if clause[:message]
+        visit(clause.fetch(:message))
       when :block
-        visit_stmts(clause[:body]) if clause[:body]
+        visit_stmts(clause.fetch(:body))
       end
     end
   end
@@ -1117,19 +1117,6 @@ private
         found = true if node.is_a?(AST::Identifier) && node.name == "snapshot"
       end
       found
-    end
-  end
-
-  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(T::Array[Symbol])) }
-  def walk_ast(node, &block)
-    block.call(node)
-    return unless node.respond_to?(:class) && node.class.respond_to?(:members)
-    node.class.members.each do |m|
-      val = node.send(m) rescue next
-      case val
-      when Array then val.each { |v| walk_ast(v, &block) if v.respond_to?(:class) }
-      when AST::Locatable then walk_ast(val, &block)
-      end
     end
   end
 
@@ -4981,9 +4968,9 @@ private
       true
     when :infer
       # Inferred from the var_node's actual sync (if any).
-      sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
+      sym = cap[:var_node].symbol
       return false unless sym
-      !sym.sync.nil? || (sym.respond_to?(:sync_families) && sym.sync_families && !sym.sync_families.empty?)
+      !sym.sync.nil? || (sym.sync_families && !sym.sync_families.empty?)
     else
       false
     end
@@ -4997,10 +4984,10 @@ private
   #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
   sig { params(cap: AST::Capability).returns(T::Boolean) }
   def cap_admits_atomic?(cap)
-    sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
+    sym = cap[:var_node].symbol
     return false unless sym
     return true if sym.atomic?
-    fams = sym.respond_to?(:sync_families) ? sym.sync_families : nil
+    fams = sym.sync_families
     return false unless fams.is_a?(Set)
     expanded = WithMatchCheck.expand_snapshotted(fams)
     expanded.include?(:ATOMIC)
@@ -5044,9 +5031,9 @@ private
       (arm[:lock_error_clauses] || []).each do |clause|
         case clause[:action]
         when :exit
-          visit(clause[:message]) if clause[:message]
+          visit(clause.fetch(:message))
         when :block
-          visit_stmts(clause[:body]) if clause[:body]
+          visit_stmts(clause.fetch(:body))
         end
       end
     end
@@ -6056,9 +6043,8 @@ private
       tails = [then_tail, else_tail].compact
       tails.size == 2 && tails.all? { |t| init_value_contents_heap?(t) }
     when AST::MatchStatement
-      cases = (init.cases || []).map { |c| c.is_a?(Hash) ? c[:body]&.last : (c.respond_to?(:body) ? c.body&.last : nil) }.compact
-      default = init.default_case
-      default_tail = default.is_a?(Array) ? default.last : (default.respond_to?(:body) ? default.body&.last : nil)
+      cases = init.cases.map { |c| c.body.last }.compact
+      default_tail = init.default_case&.last
       tails = cases + (default_tail ? [default_tail] : [])
       tails.any? && tails.all? { |t| init_value_contents_heap?(t) }
     else
