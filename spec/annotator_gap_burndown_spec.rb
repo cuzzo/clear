@@ -22,6 +22,14 @@ RSpec.describe "annotator branch gap burndown" do
     Lexer::Token.new(type, value, 1, 1)
   end
 
+  it "covers representable capability conflict validation directly" do
+    type = Type.new(:Counter)
+    type.ownership = :shared
+    type.soa = true
+
+    expect(Capabilities.errors_for(type)).to eq(["SOA layout is incompatible with reference-counted ownership"])
+  end
+
   it "covers high-rank access, call, loop, match, and capability source shapes" do
     positive = [
       <<~CHT,
@@ -196,16 +204,20 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers literal source span recovery branches directly" do
-    ann = SemanticAnnotator.new(source_code: "missing\nplain = \"abc\"\nesc = \"a\\\\\"b\"\ntriple = \"\"\"abc\"\"\"\n")
+    ann = SemanticAnnotator.new(source_code: "missing\nplain = \"abc\"\nesc = \"a\\\\\"b\"\ntriple = \"\"\"abc\"\"\"\nopen = \"\"\"abc\nnum = 123_456_i64\n")
     tok_missing = Lexer::Token.new(:STRING, "x", 99, 1)
     tok_plain = Lexer::Token.new(:STRING, "abc", 2, 9)
     tok_escape = Lexer::Token.new(:STRING, "a\"b", 3, 7)
     tok_triple = Lexer::Token.new(:STRING, "abc", 4, 10)
+    tok_open = Lexer::Token.new(:STRING, "abc", 5, 8)
+    tok_number = Lexer::Token.new(:NUMBER, "123_456_i64", 6, 7)
 
     expect(ann.send(:literal_source_length, tok_missing)).to eq(1)
     expect(ann.send(:literal_source_length, tok_plain)).to eq(5)
     expect(ann.send(:literal_source_length, tok_escape)).to eq(5)
     expect(ann.send(:literal_source_length, tok_triple)).to eq(9)
+    expect(ann.send(:literal_source_length, tok_open)).to eq(3)
+    expect(ann.send(:literal_source_length, tok_number)).to eq(11)
   end
 
   it "covers collection narrowing helper branches directly" do

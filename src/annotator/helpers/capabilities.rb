@@ -15,19 +15,10 @@ require 'set'
 module Capabilities
     extend T::Sig
 
-  # Capability groups — at most one from each group is allowed.
-  GROUPS = T.let({
-    ownership: %i[multiowned shared],
-    sync:      %i[locked write_locked local],
-    layout:    %i[soa],
-  }.freeze, T::Hash[Symbol, T::Array[Symbol]])
-
   # Capabilities that are mutually exclusive with each other.
   Conflict = Struct.new(:set_a, :set_b, :message)
   CONFLICTS = T.let([
     Conflict.new([:soa],     [:shared, :multiowned], "SOA layout is incompatible with reference-counted ownership"),
-    Conflict.new([:arena],   [:parallel],            "@arena cannot be combined with @parallel — arena memory is thread-local"),
-    Conflict.new([:local],   [:parallel],            "@local requires single-scheduler affinity, incompatible with @parallel"),
   ].freeze, T::Array[T.untyped])
 
   sig { params(type: Type).returns(T::Array[T.untyped]) }
@@ -36,13 +27,6 @@ module Capabilities
 
     errors = []
     caps = active_capabilities(type)
-
-    GROUPS.each do |group_name, members|
-      active = members.select { |c| caps.include?(c) }
-      if active.size > 1
-        errors << "Conflicting #{group_name} capabilities: #{active.map { |c| "@#{c}" }.join(' and ')}. Only one #{group_name} capability is allowed."
-      end
-    end
 
     CONFLICTS.each do |conflict|
       has_a = conflict.set_a.any? { |c| caps.include?(c) }
@@ -843,9 +827,8 @@ module CapabilityHelper
       # Observables Phase 2.3 / 2.4. Bind alias to `?T` where T is the
       # inner element type of the tense source. VIEW is immutable +
       # non_escaping (borrow); MATERIALIZED_VIEW is owned and may escape.
-      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
-      st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
-      inner = st.future? && st.tense_type ? st.tense_type : st
+      st = Type.new(cap.resolved_type)
+      inner = st.tense_type
       # Wrap as ?T so the binding is null until the first item lands.
       # If `inner` is already optional (FIND yields `~?T@observable`,
       # whose tense_type is `?T`), don't double-wrap into `??T`.
@@ -873,17 +856,13 @@ module CapabilityHelper
       # capture, GIVE, COPY-to-non-temp, pipeline-binding crossing the
       # WITH) is rejected by the existing non_escaping checks at the
       # use site.
-      source_type = cap.resolved_type.untyped? ? cap.old_scope&.resolve_type(var_name) : cap.resolved_type
-      st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
+      st = Type.new(cap.resolved_type)
       # Strip Group-1 sigils so the alias's `.type` is the bare inner T.
       # The alias's SymbolEntry already keeps sync/layout=nil (declare
       # call below passes neither), but type-side downstream paths
       # (resolve_type / full_type readers) shouldn't see leftover
       # @versioned / @indirect:atomic flags on the alias's Type.
-      strip = st.versioned? ||
-              (st.respond_to?(:atomic?) && st.atomic? &&
-               st.respond_to?(:indirect?) && st.indirect?)
-      inner_type = strip ? st.bare_data_type : st
+      inner_type = st.bare_data_type
       alias_name = cap[:alias] || var_name
       is_mutable = !!cap[:alias_mutable]
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
