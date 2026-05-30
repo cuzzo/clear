@@ -108,6 +108,7 @@ module FunctionAnalysis
     func_type = scope.resolve_type(func_name)
     entry = scope.locals[func_name]
     fsig = FunctionSignature.unwrap(func_type)
+    call_node = args.equal?(node.args) ? node : Struct.new(:token, :name, :args).new(node.token, func_name, args)
 
     if func_type == :Intrinsic
       visit_IntrinsicFunc(node, args)
@@ -117,14 +118,15 @@ module FunctionAnalysis
     # NOT the storage shape of the signature — a fn-typed param/local
     # holds the same Type-wrapped FunctionSignature but is :stack and
     # routes to the fn_var_call path below.
-    elsif fsig && entry&.storage == :static && (func_type = fsig)
-      node.module_alias = func_type.module_alias if node.respond_to?(:module_alias=) && func_type.module_alias
-      if node.respond_to?(:extern_call=) && func_type.extern
+    elsif fsig && entry&.storage == :static
+      signature = fsig
+      node.module_alias = signature.module_alias if node.respond_to?(:module_alias=) && signature.module_alias
+      if node.respond_to?(:extern_call=) && signature.extern
         node.extern_call = true
-        node.extern_effects = func_type.extern_effects
+        node.extern_effects = signature.extern_effects
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
-        alloc_kind = func_type.extern_effects&.dig(:alloc)
+        alloc_kind = signature.extern_effects&.dig(:alloc)
         if alloc_kind && current_fn_ctx
           if alloc_kind == :heap
             current_fn_ctx.heap_count += 1
@@ -134,7 +136,7 @@ module FunctionAnalysis
         end
       end
 
-      if func_type.extern
+      if signature.extern
         args.each do |arg|
           if arg.full_type!(context: "extern argument").soa?
             error!(arg, :SOA_TO_EXTERN_FN)
@@ -143,7 +145,7 @@ module FunctionAnalysis
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
-        params = func_type.params
+        params = signature.params
         params.each_with_index do |p, i|
           if p.comptime && args[i].is_a?(AST::Identifier)
             comptime_type_args << args[i].name.to_sym
@@ -155,30 +157,28 @@ module FunctionAnalysis
         end
       end
 
-      type_params = func_type.type_params
+      type_params = signature.type_params
       if type_params&.any?
         # For EXTERN FN with comptime params, the type bindings come directly from
         # the comptime arguments (e.g. T=JsonRecord), not from inference on resolved_type.
         comptime_type_args ||= []
-        if func_type.extern && comptime_type_args.any?
+        if signature.extern && comptime_type_args.any?
           subst = {}
           type_params.each_with_index { |tp, i| subst[tp] = comptime_type_args[i] if comptime_type_args[i] }
         else
-          subst = infer_generic_type_args!(node, func_type, args, type_params)
+          subst = infer_generic_type_args!(node, signature, args, type_params)
         end
         node.generic_type_args = type_params.map { |tp| T.must(subst)[tp] } if node.respond_to?(:generic_type_args=)
-        substituted = substitute_type_params(func_type, T.must(subst))
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
+        substituted = substitute_type_params(signature, T.must(subst))
         verify_function_signature!(call_node, substituted)
         node.matched_signature = substituted if node.respond_to?(:matched_signature=)
         stamp_type!(node, substituted.return_type)
       else
-        call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
-        verify_function_signature!(call_node, func_type)
-        node.matched_signature = func_type if node.respond_to?(:matched_signature=)
+        verify_function_signature!(call_node, signature)
+        node.matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        rt = func_type.return_type
+        rt = signature.return_type
         stamp_type!(node, rt.is_a?(Type) ? Type.new(rt) : rt)
         # Auto-propagate (CLEAR's error-handling default): the call's
         # *expression-level* type is the SUCCESS branch -- a binding
@@ -207,7 +207,6 @@ module FunctionAnalysis
         params: sig.params,
         return_type: sig.return_type
       )
-      call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
       verify_function_signature!(call_node, synthetic_sig)
       node.matched_signature = synthetic_sig if node.respond_to?(:matched_signature=)
       stamp_type!(node, sig.return_type)
@@ -540,9 +539,9 @@ module FunctionAnalysis
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.atomic?
-    return false if sym.respond_to?(:layout) && sym.indirect?
+    return false if sym.indirect?
     return false if param.atomic?
-    return false if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
+    return false if param.symbol&.atomic?
     return false if expected_type_obj.any? || expected_type_obj.fn_type?
     return false if expected_type_obj.shared? || expected_type_obj.any_sync?
 
@@ -558,7 +557,7 @@ module FunctionAnalysis
     ptype = param.type
     return true if ptype.is_a?(Type) && ptype.atomic?
     return true if param.atomic?
-    return true if param.symbol&.respond_to?(:sync) && param.symbol.atomic?
+    return true if param.symbol&.atomic?
 
     requires = signature.requires
     families = requires && requires[param.name.to_s]
@@ -570,13 +569,13 @@ module FunctionAnalysis
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
-    sym&.atomic? && !(sym.respond_to?(:layout) && sym.indirect?)
+    sym&.atomic? && !sym.indirect?
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }
   def explicit_primitive_atomic_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    type.is_a?(Type) && type.atomic? && type.primitive?
+    type.atomic? && type.primitive?
   end
 
   sig { params(node: T.untyped, atomic_args: T::Array[T.untyped]).returns(T.nilable(T::Array[String])) }

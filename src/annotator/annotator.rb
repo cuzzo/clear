@@ -3393,26 +3393,17 @@ private
     # lock-acquire-and-release inline.
     if node.target.is_a?(AST::Identifier) && !node.is_assignment_lhs
       sym = node.target.symbol
-      if sym
-        # Skip when this read is the RHS of an auto-locked assignment
-        # against the same binding — `c.val = c.val + 1` on `@locked`
-        # is fine because the LHS write's auto-lock covers the read.
-        in_auto_lock = @in_auto_locked_assign == node.target.name
-        # Skip when we're inside a WITH block — the WITH unwrap
-        # mechanism handles capability access (either via an `AS`
-        # alias whose own symbol is plain, or via the no-AS form
-        # which auto-unwraps the original name).
-        in_with_block = (@with_block_depth || 0) > 0
-        cap_error = [
-          [sym.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
-          [sym.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
-          [sym.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
-        ].find { |candidate| candidate[0] }
-        if cap_error && !in_auto_lock && !in_with_block
-          emit_cap_field_needs_with!(node,
-            cap_error[1], perm: cap_error[2],
-            name: node.target.name, field: node.field, cap: cap_error[3])
-        end
+      in_auto_lock = @in_auto_locked_assign == node.target.name
+      in_with_block = (@with_block_depth || 0) > 0
+      cap_error = [
+        [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
+        [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
+        [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
+      ].find { |candidate| candidate[0] }
+      if cap_error && !in_auto_lock && !in_with_block
+        emit_cap_field_needs_with!(node,
+          cap_error[1], perm: cap_error[2],
+          name: node.target.name, field: node.field, cap: cap_error[3])
       end
     end
 
@@ -4857,7 +4848,7 @@ private
     has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
       next false unless c[:capability] == :SNAPSHOT
       sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
-      sym && sym.atomic? && sym.respond_to?(:layout) && sym.indirect?
+      sym && sym.atomic? && sym.indirect?
     }
 
     # Missing per-WITH conflict handlers fall back to SYNC POLICY. Stamp the
@@ -4902,11 +4893,11 @@ private
 
     case clause[:action]
     when :exit
-      visit(clause[:message]) if clause[:message]
+      visit(clause.fetch(:message))
     when :return
-      visit(clause[:value]) if clause[:value]
+      visit(clause.fetch(:value))
     when :block
-      visit_stmts(clause[:body]) if clause[:body]
+      visit_stmts(clause.fetch(:body))
     end
   end
 

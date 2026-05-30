@@ -117,6 +117,25 @@ RSpec.describe "annotator branch gap burndown" do
         END
       CHT
       <<~CHT,
+        FN risky(x: Int64) RETURNS !Int64 ->
+          IF x > 0_i64 THEN RETURN x; END
+          RAISE Input;
+        END
+        FN main() RETURNS !Void ->
+          y = 1_i64 |> risky();
+          ASSERT y == 1_i64, "pipe unwrap";
+          RETURN;
+        CATCH Input
+          RETURN;
+        END
+      CHT
+      <<~CHT,
+        FN main() RETURNS Void ->
+          1_i64 |> print;
+          RETURN;
+        END
+      CHT
+      <<~CHT,
         STRUCT Counter { value: Int64 }
         FN main() RETURNS Void ->
           MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
@@ -212,6 +231,17 @@ RSpec.describe "annotator branch gap burndown" do
             s: String = COPY "owned";
             GIVE s;
           END
+          RETURN;
+        END
+      CHT
+      <<~CHT,
+        FN bad(x: Int64) RETURNS x.missing:Int64 -> RETURN x; END
+      CHT
+      <<~CHT,
+        FN hold(MUTABLE x: String) RETURNS *:String -> RETURN x; END
+        FN main() RETURNS Void ->
+          MUTABLE s: String = COPY "abc";
+          out: String = hold(s);
           RETURN;
         END
       CHT
