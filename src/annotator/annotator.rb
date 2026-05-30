@@ -1338,13 +1338,6 @@ private
     stamp_type!(node, :Void)
   end
 
-  # Walk through field/index chains to the root binding. Used to determine
-  # whether an IF-AS source borrows from a non_escaping binding.
-  sig { params(expr: T.untyped).returns(T.nilable(AST::Identifier)) }
-  def ifbind_source_root(expr)
-    AST.root_identifier(expr)
-  end
-
   sig { params(node: AST::IfBind).returns(Symbol) }
   def visit_IfBind(node)
     # Visit and validate each binding expression.
@@ -1380,12 +1373,9 @@ private
           # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
           # makes the new binding a borrow into locked data; it must not
           # escape the enclosing WITH scope either.
-          src_root = ifbind_source_root(b.expr)
-          if src_root && src_root.symbol&.non_escaping
-            entry.non_escaping = true
-          end
-          if src_root && (find_container_source(b.expr) rescue nil)
-            entry.lifetime = SymbolEntry.tied_lifetime([src_root.symbol]) if src_root.symbol
+          if (src_sym = AST.root_identifier(b.expr)&.symbol)
+            entry.non_escaping = true if src_sym.non_escaping
+            entry.lifetime = SymbolEntry.tied_lifetime([src_sym]) if find_container_source(b.expr)
           end
           classify_ownership!(entry)
           og_declare(b.name.to_s, nil, unwrapped)
@@ -1661,8 +1651,8 @@ private
                 # MATCH AS: borrow view into the source union's payload.
                 # MATCH TAKES: owned extraction - source is consumed.
                 unless node.takes
-                  @og[c.binding]&.kind = :borrowed
-                  current_scope.locals[c.binding]&.storage = :borrow
+                  @og[c.binding].kind = :borrowed
+                  current_scope.locals[c.binding].storage = :borrow
                 end
               end
             end
@@ -3143,8 +3133,6 @@ private
       tname = target.target.name
       tscope = lookup_scope_for(tname)
       tsym = tscope&.locals&.[](tname)
-      sync = tsym&.sync
-      layout = tsym.respond_to?(:layout) ? tsym.layout : nil
       if tsym&.locked? || tsym&.write_locked? || tsym&.atomic_ptr?
         @in_auto_locked_assign = tname
       end
@@ -3160,7 +3148,7 @@ private
 
     target = node.name
     case target
-    when AST::Identifier, String
+    when AST::Identifier
       visit_assignment_variable(target, node)
 
     when AST::GetIndex
@@ -3180,10 +3168,9 @@ private
     og_set_live(target_name)
   end
 
-  sig { params(identifier_or_name: T.untyped, node: AST::Assignment).returns(T::Boolean) }
-  def visit_assignment_variable(identifier_or_name, node)
-    var_name = identifier_or_name.is_a?(AST::Identifier) ? identifier_or_name.name : identifier_or_name
-
+  sig { params(identifier: AST::Identifier, node: AST::Assignment).returns(T::Boolean) }
+  def visit_assignment_variable(identifier, node)
+    var_name = identifier.name
     scope = current_scope
     if !scope.locals.key?(var_name)
       error!(node, :ASSIGN_UNDEFINED_VAR, name: var_name)
@@ -3461,7 +3448,7 @@ private
         # `*T` -> `T` for those consumers).
         psch = (lookup_type_schema(field_type.resolved) rescue nil)
         struct_pointee = Schemas.struct?(psch)
-        node.indirect_field = true if node.is_a?(AST::GetField) && !struct_pointee
+        node.indirect_field = true unless struct_pointee
         # For non-struct pointees, the read-deref produces a value of the
         # inner type (layout no longer applies). For struct pointees, the
         # binding holds the *T pointer directly -- keep layout=:indirect so

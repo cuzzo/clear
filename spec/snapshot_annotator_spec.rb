@@ -58,6 +58,24 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       CLEAR
       expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic variable/i)
     end
+
+    it "reports indirect non-atomic sync accurately" do
+      src = <<~CLEAR
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @indirect:locked;
+        WITH SNAPSHOT c AS view { x = view.v; }
+      CLEAR
+      expect { run(src) }.to raise_error(/'c' is @indirect:locked/)
+    end
+
+    it "reports ownership-only sources accurately" do
+      src = <<~CLEAR
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @shared;
+        WITH SNAPSHOT c AS view { x = view.v; }
+      CLEAR
+      expect { run(src) }.to raise_error(/'c' is @shared/)
+    end
   end
 
   describe "alias declaration" do

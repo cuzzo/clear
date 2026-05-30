@@ -58,6 +58,14 @@ RSpec.describe "annotator branch gap burndown" do
         END
       CHT
       <<~CHT,
+        UNION Box { Empty, Item: String @indirect }
+        top = Box{ Item: COPY "abc" };
+      CHT
+      <<~CHT,
+        UNION Value { Nil, Lambda { body: Value @indirect } }
+        top = Value.Lambda{ body: Value.Nil };
+      CHT
+      <<~CHT,
         STRUCT Box { label: String }
         UNION Shape { Empty, Named { label: String }, Boxed: Box @indirect }
         FN main() RETURNS Void ->
@@ -95,6 +103,16 @@ RSpec.describe "annotator branch gap burndown" do
           s: String = COPY "abc";
           out: String = by_any(s);
           ASSERT out.length() == 3_i64, "wildcard lifetime";
+          RETURN;
+        END
+      CHT
+      <<~CHT,
+        FN inc(x: Int64) RETURNS Int64 -> RETURN x + 1_i64; END
+        FN main() RETURNS !Void ->
+          a = 1_i64 |> inc;
+          b = 2_i64 |> inc();
+          RETURN;
+        CATCH Input
           RETURN;
         END
       CHT
@@ -246,6 +264,43 @@ RSpec.describe "annotator branch gap burndown" do
     expect(sym.type.elem_ownership).to eq(:shared)
     expect(sym.type.elem_sync).to eq(:locked)
     expect(list.full_type.element_type.resolved).to eq(:Int64)
+  end
+
+  it "covers borrow source resolver branches directly" do
+    ann = SemanticAnnotator.new(source_code: "")
+    source = AST::Identifier.new(token, "source")
+
+    intrinsic = FunctionSignature.new(params: [], return_type: Type.new(:String))
+    intrinsic.arg_spec = [{ name: "value" }]
+    intrinsic.emit = IntrinsicEmit.new(lifetime: ["value"])
+    intrinsic_call = AST::FuncCall.new(token, "borrow_intrinsic", [source])
+    intrinsic_call.matched_stdlib_def = intrinsic
+    expect(ann.send(:resolve_borrow_source, intrinsic_call)).to equal(source)
+
+    self_lifetime = FunctionSignature.new(params: [], return_type: Type.new(:String))
+    self_lifetime.emit = IntrinsicEmit.new(lifetime: ["self"])
+    method_call = AST::MethodCall.new(token, source, "trim", [])
+    method_call.matched_stdlib_def = self_lifetime
+    expect(ann.send(:resolve_borrow_source, method_call)).to equal(source)
+
+    user_sig = FunctionSignature.new(
+      params: [AST::Param.new(name: "x", type: Type.new(:String))],
+      return_type: Type.new(:String),
+      return_lifetime: ["x"]
+    )
+    wildcard_sig = FunctionSignature.new(
+      params: [AST::Param.new(name: "x", type: Type.new(:String))],
+      return_type: Type.new(:String),
+      return_lifetime: :wildcard
+    )
+    scope = Struct.new(:entries) do
+      def resolve_type(name) = entries[name]
+    end.new({ "borrow_user" => user_sig, "borrow_any" => wildcard_sig })
+    ann.define_singleton_method(:lookup_scope_for) { |name| scope if scope.entries.key?(name) }
+
+    expect(ann.send(:resolve_borrow_source, AST::MethodCall.new(token, source, "borrow_user", []))).to equal(source)
+    expect(ann.send(:resolve_borrow_source, AST::FuncCall.new(token, "borrow_any", [source]))).to be_nil
+    expect(ann.send(:resolve_borrow_source, AST::FuncCall.new(token, "missing", [source]))).to be_nil
   end
 
   it "covers retryable WITH fallible source discovery branches directly" do

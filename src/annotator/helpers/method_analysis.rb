@@ -16,7 +16,7 @@ module MethodAnalysis
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
     obj_type = node.object.full_type!(context: "collection method receiver")
-    config = COLLECTION_METHOD_CONFIGS[obj_type&.dispatch_key]
+    config = COLLECTION_METHOD_CONFIGS[obj_type.dispatch_key]
     return false unless config
     resolve_typed_method(node, obj_type, config[:registry], config[:tag],
                          config[:label].call(obj_type))
@@ -88,25 +88,25 @@ module MethodAnalysis
     # Set tag and return type
     node.send(:"#{tag_field}=", node.name.to_sym)
     stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
-    node.container_borrow = true if defn.emit&.container_borrow
+    em = T.must(defn.emit)
+    node.container_borrow = true if em.container_borrow
 
     # Resolve zig pattern -- pick variant based on receiver type.
     # Sharded takes priority over numeric: PartitionedNumericMap shares the
     # sharded API (count/keys/values/put/get) with PartitionedStringMap.
-    em = defn.emit
-    zig = if (obj_type.sharded? || obj_type.striped?) && em&.sharded_zig
+    zig = if (obj_type.sharded? || obj_type.striped?) && em.sharded_zig
       em.sharded_zig
-    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && em&.numeric_zig
+    elsif obj_type.numeric_map? && !obj_type.sharded? && !obj_type.striped? && em.numeric_zig
       em.numeric_zig
     else
-      em&.zig
+      em.zig
     end
 
     # Resolve alloc variant for sharded types
-    alloc = if (obj_type.sharded? || obj_type.striped?) && em&.sharded_alloc
+    alloc = if (obj_type.sharded? || obj_type.striped?) && em.sharded_alloc
       em.sharded_alloc
     else
-      em&.alloc
+      em.alloc
     end
 
     # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles
@@ -122,8 +122,8 @@ module MethodAnalysis
       node.matched_signature = resolved_defn if node.respond_to?(:matched_signature=)
     end
 
-    node.stdlib_allocates = true if em&.allocates
-    node.mutates_receiver = true if em&.mutates_receiver
+    node.stdlib_allocates = true if em.allocates
+    node.mutates_receiver = true if em.mutates_receiver
 
     # Narrow Set element type on first insert (Any[] -> T[])
     if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
@@ -140,20 +140,20 @@ module MethodAnalysis
     end
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
-    if defn.emit&.takes_args
-      defn.emit.takes_args.each do |arg_idx|
+    if em.takes_args
+      em.takes_args.each do |arg_idx|
         arg_node = node.args[arg_idx]
         move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
       end
     end
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.
-    if defn.emit&.allocates && current_fn_ctx
+    if em.allocates && current_fn_ctx
       current_fn_ctx.heap_count += 1
     end
-    node.can_fail = true if defn.can_fail || defn.emit&.allocates
-    node.error_kind = defn.emit&.error_kind if defn.emit&.error_kind
-    node.error_type = defn.emit&.error_type if defn.emit&.error_type
+    node.can_fail = true if defn.can_fail || em.allocates
+    node.error_kind = em.error_kind
+    node.error_type = em.error_type
 
     true
   end

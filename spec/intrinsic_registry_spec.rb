@@ -80,4 +80,14 @@ RSpec.describe IntrinsicRegistry do
       expect(sub).to be_a(IntrinsicEmit)
     end
   end
+
+  it "keeps collection method entries fully emittable" do
+    [POOL_METHODS, SET_METHODS, MAP_METHODS].each do |registry|
+      registry.each_key do |name|
+        emit = IntrinsicRegistry.sig(registry, name).emit
+        expect(emit).to be_a(IntrinsicEmit)
+        expect(emit.zig).to be_a(String).or be_a(Symbol)
+      end
+    end
+  end
 end
