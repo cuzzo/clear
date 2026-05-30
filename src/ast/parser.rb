@@ -4113,7 +4113,7 @@ class Parser
   # clause is absent. Names are validated to be VAR_IDs (snake_case)
   # so `--tag slow` filtering can match unambiguously; allowing
   # arbitrary strings would invite typo-mismatches that pass silently.
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Array[String]) }
   def parse_when_tags
     return [] unless match!(:KEYWORD, 'TAGS')
     consume(:CHAR, '[')

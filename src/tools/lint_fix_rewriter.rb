@@ -23,6 +23,8 @@
 #
 # Idempotent: a second pass finds nothing left to rewrite.
 
+require "sorbet-runtime"
+
 require 'set'
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
@@ -31,8 +33,11 @@ require_relative '../ast/fixable_error'
 require_relative '../annotator'
 
 module LintFixRewriter
+  extend T::Sig
+
   module_function
 
+  sig { params(source: String).returns(String) }
   def rewrite(source)
     ast, findings = annotate(source)
     return source unless ast
@@ -53,6 +58,7 @@ module LintFixRewriter
   # MUTABLE param. Dropping MUTABLE in that case breaks the next
   # build (the param's mutability check fires at the call site).
   # Skip those names defensively until the annotator is fixed.
+  sig { params(ast: AST::Program).returns(Set) }
   def collect_bg_referenced_names(ast)
     set = Set.new
     walk_for_bg_names(ast, false, set)
@@ -73,6 +79,7 @@ module LintFixRewriter
     node.each_pair { |_, v| walk_for_bg_names(v, inside, set) }
   end
 
+  sig { params(ast: AST::Program).returns(Set) }
   def collect_mutation_sensitive_names(ast)
     set = Set.new
     walk_for_mutation_sensitive_names(ast, set)
@@ -110,6 +117,7 @@ module LintFixRewriter
     node.each_pair { |_, v| collect_identifier_names(v, set) }
   end
 
+  sig { params(name: String).returns(T::Boolean) }
   def mutating_method_name?(name)
     %w[
       append clear delete insert pop push remove reserve resize set shift
@@ -121,6 +129,7 @@ module LintFixRewriter
   # [annotated_ast, findings] on success; [nil, []] if anything
   # raised. Errors are swallowed because fmt must remain robust
   # against files with compile errors.
+  sig { params(source: String).returns(Array) }
   def annotate(source)
     FixCollector.enable!
     begin
@@ -140,6 +149,7 @@ module LintFixRewriter
 
   # ---- Rule 1: MUTABLE never reassigned ----
 
+  sig { params(findings: Array, bg_names: Set, mutation_sensitive_names: Set).returns(Array) }
   def mutable_unused_edits(findings, bg_names, mutation_sensitive_names)
     findings.flat_map do |finding|
       next [] unless mutable_unused_finding?(finding)
@@ -152,6 +162,7 @@ module LintFixRewriter
     end
   end
 
+  sig { params(finding: FixableFinding).returns(T::Boolean) }
   def mutable_unused_finding?(finding)
     finding.respond_to?(:message) &&
       finding.message&.include?("is never reassigned")
@@ -160,6 +171,7 @@ module LintFixRewriter
   # Pull the binding name out of the finding's message
   # ("MUTABLE 'name' is never reassigned ...") and check it against a
   # set of names where dropping MUTABLE would be unsafe.
+  sig { params(finding: FixableFinding, names: Set).returns(T::Boolean) }
   def mentions_name_in_set?(finding, names)
     return false if names.empty?
     msg = finding.respond_to?(:message) ? finding.message.to_s : ""
@@ -170,12 +182,14 @@ module LintFixRewriter
 
   # Translate a Span/Edit (1-based line/col) into a flat byte-offset
   # edit so we can apply both rules through the same machinery.
+  sig { params(span: Span, replacement: String).returns(Hash) }
   def edit_from_span(span, replacement)
     { line: span.line, col: span.col, length: span.length, replacement: replacement.to_s }
   end
 
   # ---- Rule 2: redundant type annotation ----
 
+  sig { params(ast: AST::Program, source: String).returns(Array) }
   def redundant_type_annotation_edits(ast, source)
     edits = []
     walk_for_redundant_type(ast, source, edits)
@@ -210,6 +224,7 @@ module LintFixRewriter
   # whenever the declared and inferred types don't match exactly, OR
   # when the declared type carries any decoration (sigil, capability,
   # array, optional, error union, generic instance).
+  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(T.nilable(Hash)) }
   def compute_redundant_type_edit(node, source)
     declared = node.type
     inferred = node.value && node.value.respond_to?(:full_type) ? node.value.full_type : nil
@@ -222,6 +237,7 @@ module LintFixRewriter
   end
 
   # True only when dropping `: Type` keeps semantics identical.
+  sig { params(declared: Type, inferred: Type).returns(T::Boolean) }
   def types_match_for_drop?(declared, inferred)
     decl_t = to_type(declared)
     inf_t  = to_type(inferred)
@@ -235,12 +251,14 @@ module LintFixRewriter
     decl_t.resolved == inf_t.resolved
   end
 
+  sig { params(t: Type).returns(Type) }
   def to_type(t)
     return nil if t.nil?
     return t if t.respond_to?(:resolved) && t.respond_to?(:any_sync?)
     Type.new(t) rescue nil
   end
 
+  sig { params(t: Type).returns(T::Boolean) }
   def any_decoration?(t)
     return true if t.respond_to?(:optional?) && t.optional?
     return true if t.respond_to?(:error_union?) && t.error_union?
@@ -264,6 +282,7 @@ module LintFixRewriter
   # well-formed declaration the formatter can re-space. Span starts
   # at the `:` and ends just before the `=` (after stripping trailing
   # whitespace), so the surrounding spacing is left to the formatter.
+  sig { params(node: T.any(AST::BindExpr, AST::VarDecl), source: String).returns(Hash) }
   def locate_type_annotation_span(node, source)
     return nil unless node.token
     name_off = offset_for(source, node.token.line, node.token.column)
@@ -316,6 +335,7 @@ module LintFixRewriter
 
   # Apply edits to source. Multiple edits per line are sorted right-
   # to-left so earlier ones don't shift later positions.
+  sig { params(source: String, edits: Array).returns(String) }
   def apply_edits(source, edits)
     grouped = edits.group_by { |e| e[:line] }
     lines = source.split("\n", -1)
@@ -337,6 +357,7 @@ module LintFixRewriter
 
   # ---- Source-offset helpers ----
 
+  sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
   def offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
@@ -352,6 +373,7 @@ module LintFixRewriter
     target
   end
 
+  sig { params(source: String, off: Integer).returns(Array) }
   def line_col_for_offset(source, off)
     line = 1
     col = 1

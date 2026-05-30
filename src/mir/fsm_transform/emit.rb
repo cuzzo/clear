@@ -13,6 +13,8 @@
 # than one dispatch arm. Per CLAUDE.md Invariant 13, never a new
 # top-level build_* function.
 
+require "sorbet-runtime"
+
 require "set"
 require_relative "../mir"
 require_relative "../fsm_wrapper_emitter"
@@ -96,7 +98,7 @@ module FsmTransform
     #     descriptor's ctx_field_decls; member_fns = one per segment;
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
-    sig { params(ctx: T.untyped, segment_specs: T.untyped, promoted_field_decls: T.untyped, lowering: T.untyped).returns(T.untyped) }
+    sig { params(ctx: T.untyped, segment_specs: T.untyped, promoted_field_decls: T.untyped, lowering: T.untyped).returns(T.nilable(MIR::FsmLoweringResult)) }
     def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
       T.bind(self, T.untyped) rescue nil
       return nil if segment_specs.nil? || segment_specs.empty?
@@ -1117,7 +1119,7 @@ module FsmTransform
     # encountered. Returns { seg.index => sp_N }. Suspends that are
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
-    sig { params(segments: T.untyped).returns(T::Hash[T.untyped, T.untyped]) }
+    sig { params(segments: T.untyped).returns(T::Hash[Integer, Integer]) }
     def compute_sp_indices(segments)
       T.bind(self, T.untyped) rescue nil
       out = {}

@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require_relative "migration_suggester_helpers"
 
 # Static eligibility detector for `@shared:locked` / `@locked` to
@@ -39,6 +41,8 @@ require_relative "migration_suggester_helpers"
 # This module owns single-primitive-field struct eligibility and
 # compound-arith-rewriteable WITH bodies.
 module AtomicMigrationSuggester
+  extend T::Sig
+
   module_function
   extend MigrationSuggesterHelpers
 
@@ -171,6 +175,7 @@ module AtomicMigrationSuggester
     !references_alias?(other, alias_name)
   end
 
+  sig { params(node: T.any(AST::GetField, AST::Literal), alias_name: String, field_name: String).returns(T::Boolean) }
   def field_get_of?(node, alias_name, field_name)
     node.is_a?(AST::GetField) &&
       node.target.is_a?(AST::Identifier) &&

@@ -55,7 +55,7 @@ module FsmTransform
         IoSuspend.new(call_node, stdlib_def, result_var, index)
       end
 
-      sig { returns(T.untyped) }
+      sig { returns(T.nilable(Type)) }
       def result_type
         call_node ? Type.from_node!(call_node, context: "FSM IO suspend result") : nil
       end

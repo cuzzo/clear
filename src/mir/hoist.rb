@@ -290,7 +290,7 @@ module Hoist
 
   # Build `__hoist_N = <concat>` with a real SymbolEntry, append the decl
   # to `hoists`, and return the Identifier that replaces the concat.
-  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], moved: T::Boolean, expected_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(T.untyped) }
+  sig { params(concat: T.untyped, hoists: T::Array[T.untyped], ctr: T::Array[Integer], moved: T::Boolean, expected_type: T.untyped, schema_lookup: T.nilable(Proc)).returns(AST::Identifier) }
   def make_temp!(concat, hoists, ctr, moved: true, expected_type: nil, schema_lookup: nil)
     n = T.must(ctr[0]) + 1
     ctr[0] = n
@@ -448,7 +448,7 @@ module MIRHoistLowering
     pending.empty? ? node : MIR::ScopeBlock.new(pending + [node])
   end
 
-  sig { params(parent: AST::BinaryOp, field: Symbol).returns(T.untyped) }
+  sig { params(parent: AST::BinaryOp, field: Symbol).void }
   def descend(parent, field)
     child = parent.send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
@@ -460,7 +460,7 @@ module MIRHoistLowering
     end
   end
 
-  sig { params(expr: T.untyped, ast_node: T.untyped).returns(T.untyped) }
+  sig { params(expr: T.untyped, ast_node: T.untyped).void }
   def hoist_lazy_alloc_result(expr, ast_node)
     return expr unless mir_allocates?(expr)
     @tmp_counter += 1

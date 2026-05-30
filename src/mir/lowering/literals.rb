@@ -51,7 +51,7 @@ module MIRLoweringLiterals
   sig { params(node: AST::ListLit).returns(T.untyped) }
   def lower_list_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     @current_decl_alloc = T.let(@current_decl_alloc, T.nilable(Symbol))
 
     plan = list_literal_plan(node)

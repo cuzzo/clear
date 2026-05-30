@@ -2461,7 +2461,7 @@ class PipelineHost
     # Terminal must be a fold op
     fold = node.right
     return nil unless AST.pipeline_range_fold?(fold)
-    cursor = T.let(node.left, T.untyped)
+    cursor = T.let(node.left, T.any(AST::BinaryOp, AST::Identifier))
 
     # Collect optional intermediate WHERE/SELECT stages (in chain order)
     stages = []
@@ -2601,7 +2601,7 @@ class PipelineHost
   # post_inner_stmts are placed in the OUTER loop after the inner for-loop.
   # placeholder is the Zig inner loop var name. smooth_node is the outer SMOOTH node.
   # names: hash of bc-suffixed binding names (acc, sum, cnt, val, result, found).
-  sig { params(fold: T.untyped, stages: T::Array[T.untyped], placeholder: String, smooth_node: T.nilable(AST::BinaryOp), names: T.nilable(T::Hash[T.untyped, T.untyped])).returns(T.nilable(T::Array[T.untyped])) }
+  sig { params(fold: T.untyped, stages: T::Array[T.untyped], placeholder: String, smooth_node: T.nilable(AST::BinaryOp), names: T.nilable(T::Hash[Symbol, String])).returns(T.nilable(T::Array[T.untyped])) }
   def lower_binding_fold(fold, stages, placeholder, smooth_node = nil, names = nil)
     names ||= { acc: "__bc_acc", sum: "__bc_sum", cnt: "__bc_cnt",
                 val: "__bc_val", result: "__bc_result", found: "__bc_found" }
@@ -3814,7 +3814,7 @@ class PipelineHost
   # computes the routing key/hash and enqueues an owned WorkItem; each worker
   # serially drains its shard and lowers the body in shard-direct mode so
   # map[k]/map[k]=v compile to getDirect/putDirect.
-  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(T.untyped) }
+  sig { params(lhs: T.untyped, conc_op: AST::ConcurrentOp, smooth_node: T.untyped).returns(MIR::ForStmt) }
   def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = conc_op.shard_context
     each_op = conc_op.op

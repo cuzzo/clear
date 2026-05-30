@@ -388,7 +388,7 @@ module WithMatchCheck
   # remainder is empty and no warning fires. The check exists so a
   # user-written partial-coverage scenario (or a future strict-mode
   # build) surfaces unhandled polymorphic errors at the WITH site.
-  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[T::Hash[Symbol, T.untyped]], warn_handler: Proc).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, T::Set[Symbol]], policy_handlers: T::Array[T::Hash[Symbol, T.untyped]], warn_handler: Proc).returns(T.nilable(T::Set[String])) }
   def self.warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                               policy_handlers, warn_handler)
     return unless warn_handler && node.polymorphic

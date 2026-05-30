@@ -16,15 +16,20 @@
 # Runs once, right before MIRPass. With PREMIR_SURVEY=1 it collects and
 # prints the distinct offending node classes instead of raising (used
 # to inventory annotator holes); default behavior raises the ICE.
+require "sorbet-runtime"
+
 require_relative "pass_state"
 
 module PreMirTypeCheck
+  extend T::Sig
+
   class InternalTypeResolutionError < StandardError; end
 
   LEAVES = [Symbol, String, Numeric, TrueClass, FalseClass, NilClass].freeze
 
   module_function
 
+  sig { params(program: AST::Program).returns(NilClass) }
   def verify!(program)
     MIRPassState.require!(program, :hoisted, consumer: "PreMirTypeCheck")
     violations = []

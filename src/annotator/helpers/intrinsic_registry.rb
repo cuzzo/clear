@@ -32,7 +32,7 @@ module IntrinsicRegistry
                    set_collection].freeze
 
   # registries: { Symbol => the registry Hash } (for {registry: X} ptrs)
-  sig { params(h: T.untyped, registries: T.untyped).returns(T.untyped) }
+  sig { params(h: T.untyped, registries: T.untyped).returns(T.nilable(IntrinsicEmit)) }
   def build_emit(h, registries)
     return nil unless h.is_a?(Hash)
     e = IntrinsicEmit.new
@@ -77,7 +77,7 @@ module IntrinsicRegistry
   # Type; receiver-parametric / host-inferred -> polymorphic
   # placeholder (the real resolution is consumer-side via
   # return_def.resolve, gated by fixed_return?).
-  sig { params(rdef: T.untyped).returns(T.untyped) }
+  sig { params(rdef: T.untyped).returns(Type) }
   def to_return_type(rdef)
     if rdef.fixed?
       rdef.fixed || Type.new(:Void)
@@ -125,7 +125,7 @@ module IntrinsicRegistry
     FunctionReturn.fixed(Type.new(v))
   end
 
-  sig { params(_name: T.untyped, h: T.untyped, registries: T.untyped).returns(T.untyped) }
+  sig { params(_name: T.untyped, h: T.untyped, registries: T.untyped).returns(FunctionSignature) }
   def convert_entry(_name, h, registries)
     ret  = h.key?(:return_type) ? h[:return_type] : h[:return]
     rdef = to_return_def(ret)
@@ -183,7 +183,7 @@ module IntrinsicRegistry
   end
 
   # registries: { Symbol => Hash<String, Hash> }
-  sig { params(reg: T.untyped, registries: T.untyped).returns(T.untyped) }
+  sig { params(reg: T.untyped, registries: T.untyped).void }
   def convert_registry(reg, registries)
     reg.each_with_object({}) do |(name, entry), out|
       out[name] = convert_entry(name, entry, registries) if entry.is_a?(Hash)

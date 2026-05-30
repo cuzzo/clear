@@ -20,6 +20,8 @@
 # WithBlock body or arm, but skip nested WithBlocks (those bubble their
 # own diagnostics). Nodes inside lambdas / nested function defs are
 # similarly ignored — they're separate scopes.
+require "sorbet-runtime"
+
 require_relative "../ast/ast"
 
 module ConcurrencyChecks
@@ -139,7 +141,7 @@ module ConcurrencyChecks
 
   # Names of bindings that the WithBlock acquires a LOCK on (vs.
   # borrow-only captures).
-  sig { params(with_block: T.untyped).returns(T::Set[T.untyped]) }
+  sig { params(with_block: T.untyped).returns(T::Set[String]) }
   def lock_holding_names(with_block)
     out = Set.new
     (with_block.capabilities || []).each do |cap|
@@ -233,7 +235,7 @@ module ConcurrencyChecks
   end
 
   # Names of function parameters held by a WithBlock's bindings.
-  sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[T.untyped]) }
+  sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[String]) }
   def collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p.name.to_s }.to_set

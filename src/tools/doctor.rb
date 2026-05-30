@@ -11,6 +11,8 @@ require 'stringio'
 # returns nothing. State that crosses sections (sites/resolved for heap,
 # llc_miss_rate for FREEZE) is collected in `run` and threaded through.
 module Doctor
+  extend T::Sig
+
   STRING_OPS = %w[concat charAtCodepoint intToString floatToString smartAlloc].freeze
   FREEZE_LLC_THRESHOLD  = 20   # % LLC miss rate to consider high
   FREEZE_MIN_ALLOCS     = 5_000
@@ -24,12 +26,14 @@ module Doctor
   # open-addressed table saturates. Returns the line (without the
   # leading `# `) or nil. Runtime modules emit at most one warning
   # line per dump, so the first match is authoritative.
+  sig { params(file: String).returns(T.nilable(String)) }
   def saturation_warning(file)
     return nil unless File.exist?(file)
     line = File.foreach(file).find { |l| l.start_with?('# WARNING:') }
     line&.sub(/\A# /, '')&.rstrip
   end
 
+  sig { params(profile_dir: T.nilable(String), cumulative: T::Boolean, focus: T.nilable(Regexp), ignore: T.nilable(Regexp), peek: T.nilable(Regexp), diff: T.nilable(String), by: Symbol).returns(NilClass) }
   def run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil, by: :bytes)
     if diff
       return run_diff(diff, profile_dir, focus: focus)
@@ -72,6 +76,7 @@ module Doctor
     funcs.any? { |f| f =~ @opts[:focus] }
   end
 
+  sig { returns(T::Boolean) }
   def cumulative?
     !!(@opts && @opts[:cumulative])
   end
@@ -79,6 +84,7 @@ module Doctor
   # Which Site field to sort/display by. Maps the user's --by flag
   # (`bytes` / `allocs` / `inuse_bytes` / `inuse_allocs`) to the
   # corresponding key in the parsed Site hash. Default `:bytes`.
+  sig { returns(Symbol) }
   def sort_key
     return :bytes unless @opts && @opts[:by]
     case @opts[:by]
@@ -294,6 +300,7 @@ module Doctor
   end
 
   # ── CPU Profile + CLEAR Source Hot Lines ──
+  sig { params(profile_dir: String, perf_data: String).returns(NilClass) }
   def section_cpu(profile_dir, perf_data)
     return unless File.exist?(perf_data)
     puts "=== CPU Profile ==="
@@ -369,6 +376,7 @@ module Doctor
   # fast-producer-slow-consumer (producer blocks often + max_depth at
   # capacity) or slow-producer-fast-consumer (consumer blocks often +
   # max_depth nowhere near capacity).
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_channels(profile_dir)
     channel_file = File.join(profile_dir, 'channels.txt')
     return unless File.exist?(channel_file)
@@ -416,6 +424,7 @@ module Doctor
   # fibers-run counter. Diagnoses micro-fiber overhead (fibers dominated
   # by sub-10us setup cost) and scheduler imbalance (one scheduler doing
   # most of the work while others are idle).
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_fibers(profile_dir)
     fiber_file = File.join(profile_dir, 'fibers.txt')
     return unless File.exist?(fiber_file)
@@ -641,6 +650,7 @@ module Doctor
   #   - high contention  (contended_acquires / acquires > 20%)
   #   - long critical sections (avg hold > 1ms)
   #   - hot lock (>10k acquires; recommends finer-grained locking)
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_locks(profile_dir)
     lock_prof = File.join(profile_dir, 'locks.txt')
     return unless File.exist?(lock_prof)
@@ -890,6 +900,7 @@ module Doctor
   #     @shared:writeLocked / @shared:locked is a better fit. MVCC's
   #     advantage is the lock-free read path; if writes dominate, the
   #     CAS-loop + EBR retire is just overhead.
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_mvcc(profile_dir)
     mvcc_prof = File.join(profile_dir, 'mvcc.txt')
     return unless File.exist?(mvcc_prof)
@@ -1082,6 +1093,7 @@ module Doctor
   # (`@shared:locked` today, atomic struct fields in v0.3).
   # Skipped silently when source.cht is missing or no atomic-
   # escape sites are detected.
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_atomic_escape(profile_dir)
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
@@ -1126,6 +1138,7 @@ module Doctor
   end
 
   # ── Syscalls ──
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_syscalls(profile_dir)
     strace_file = File.join(profile_dir, 'syscalls.txt')
     return unless File.exist?(strace_file)
@@ -1142,6 +1155,7 @@ module Doctor
   # ── Hardware Counters ──
   # Returns the LLC miss rate (or nil), so the FREEZE section can decide
   # whether to fire.
+  sig { params(profile_dir: String).returns(NilClass) }
   def section_hardware(profile_dir)
     perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
     return nil unless File.exist?(perf_stat_file)
@@ -1638,6 +1652,7 @@ module Doctor
     nil
   end
 
+  sig { params(n: Integer).returns(String) }
   def bytes_pretty(n)
     return "-" if n.zero?
     if n.abs >= 1024 * 1024

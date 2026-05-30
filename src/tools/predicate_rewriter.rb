@@ -1,4 +1,6 @@
 # typed: strict
+require "sorbet-runtime"
+
 require 'set'
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
@@ -29,8 +31,11 @@ require_relative '../ast/fixable_error'
 # patterns left to rewrite.
 
 module PredicateRewriter
+  extend T::Sig
+
   module_function
 
+  sig { params(source: String).returns(String) }
   def rewrite(source)
     tokens = ::Lexer.new(source).tokenize
     ast = ::Parser.new(tokens, source).parse
@@ -134,6 +139,7 @@ module PredicateRewriter
   # expression parser is fragile for chains (`NIL == users.find(p)`),
   # so v1 leaves it alone — users (or a future pre-pass) can flip
   # the operands first.
+  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
   def match_nil_compare(node, source)
     return nil unless [:EQ, :NEQ].include?(node.op)
     return nil unless nil_literal?(node.right)
@@ -169,6 +175,7 @@ module PredicateRewriter
   #
   # Always-true / always-false combinations (`>= 0`, `< 0`) are NOT
   # rewritten — PredicateLinter surfaces them as warnings instead.
+  sig { params(node: AST::BinaryOp, source: String).returns(T.nilable(Hash)) }
   def match_length_compare(node, source)
     op = node.op
     return nil unless [:EQ, :NEQ, :GT, :GTE, :LT, :LTE].include?(op)
@@ -204,6 +211,7 @@ module PredicateRewriter
     node.is_a?(AST::MethodCall) && node.name == "length"
   end
 
+  sig { params(node: T.any(AST::Literal, AST::MethodCall)).returns(T.nilable(Integer)) }
   def int_lit_value(node)
     return nil unless node.is_a?(AST::Literal)
     return nil unless node.type == :INT64 || node.type == :INT
@@ -216,6 +224,7 @@ module PredicateRewriter
 
   # Map (op, literal) -> canonical predicate name. nil means
   # "no rewrite — either always-true/false or shape we don't simplify."
+  sig { params(op: Symbol, lit: Integer).returns(T.nilable(String)) }
   def pick_length_predicate(op, lit)
     case [op, lit]
     when [:EQ,  0] then "empty?"
@@ -233,6 +242,7 @@ module PredicateRewriter
   # where one side is a small literal (NIL or Int). The "other" range
   # is the operand that ISN'T the literal — for the rewrite payload.
   # nil if span couldn't be cleanly resolved.
+  sig { params(node: AST::BinaryOp, source: String).returns(Hash) }
   def compute_compare_span(node, source)
     if literal_node?(node.right)
       # `<expr> <op> <literal>`
@@ -270,6 +280,7 @@ module PredicateRewriter
   # outward as far as the pairs match so the rewrite span includes
   # them — otherwise replacing from inside the parens orphans the
   # opening one. Returns the expanded (lhs_start, lhs_end).
+  sig { params(source: String, lhs_start: Integer, lhs_end: Integer).returns(Array) }
   def expand_paren_wrap(source, lhs_start, lhs_end)
     while lhs_start > 0 &&
           lhs_end < source.length &&
@@ -281,6 +292,7 @@ module PredicateRewriter
     [lhs_start, lhs_end]
   end
 
+  sig { params(node: AST::Literal).returns(T::Boolean) }
   def literal_node?(node)
     node.is_a?(AST::Literal) && [:NIL, :INT64, :INT].include?(node.type)
   end
@@ -289,6 +301,7 @@ module PredicateRewriter
   # NIL it's the fixed string `NIL`; for ints we scan forward through
   # digits / underscores / a numeric type suffix (e.g. `0_i64`,
   # `1_000`) so the source span includes the whole literal as written.
+  sig { params(node: AST::Literal, source: String, lit_off: Integer).returns(Integer) }
   def literal_source_length(node, source, lit_off)
     case node.type
     when :NIL
@@ -338,6 +351,7 @@ module PredicateRewriter
   # string state, stopping at the first character that ends an
   # expression at depth 0. The returned offset points just past the
   # last char of the expression.
+  sig { params(source: String, start: Integer).returns(Integer) }
   def walk_to_expr_end(source, start)
     i = start
     depth = 0
@@ -396,6 +410,7 @@ module PredicateRewriter
   # True when the chars at `j` start a comparison/logical operator
   # that would end a sub-expression in our patterns. Used to detect
   # the boundary of the operand to the left of the comparison.
+  sig { params(source: String, j: Integer).returns(T::Boolean) }
   def expression_terminator_op?(source, j)
     return true if source[j, 2] == '==' || source[j, 2] == '!=' ||
                    source[j, 2] == '>=' || source[j, 2] == '<=' ||
@@ -410,6 +425,7 @@ module PredicateRewriter
   # `coll.length()`), so the receiver ends one char before the `.`
   # that precedes that name. Walking back through whitespace handles
   # `coll  .length()` style spacing.
+  sig { params(call: AST::MethodCall, source: String).returns(String) }
   def receiver_source_for_method_call(call, source)
     obj_start = leftmost_offset(call.object, source)
     return nil unless obj_start
@@ -429,6 +445,7 @@ module PredicateRewriter
   # followed by `.method?()`. A bare identifier or method-call chain
   # is fine; a binary expression like `a + b` would need wrapping
   # to keep `.nil?` from binding to `b`.
+  sig { params(text: String).returns(String) }
   def paren_if_needed(text)
     stripped = text.strip
     # Identifier or chain (a.b.c, a.b()) — no parens needed.
@@ -441,6 +458,7 @@ module PredicateRewriter
 
   # ---- Source-offset helpers (mirrors MethodRewriter) ----
 
+  sig { params(source: String, line: Integer, col: Integer).returns(Integer) }
   def offset_for(source, line, col)
     return nil if line < 1 || col < 1
     off = 0
@@ -458,6 +476,7 @@ module PredicateRewriter
 
   # ---- Edit application ----
 
+  sig { params(source: String, edits: Array).returns(String) }
   def apply_edits(source, edits)
     sorted = edits.sort_by { |e| -e[:start] }
     out = source.dup

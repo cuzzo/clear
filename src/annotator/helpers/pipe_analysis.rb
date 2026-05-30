@@ -1161,7 +1161,7 @@ module PipeAnalysis
     end
   end
 
-  sig { params(node: T.untyped, names: T::Set[T.untyped]).returns(T.nilable(T::Array[Symbol])) }
+  sig { params(node: T.untyped, names: T::Set[String]).returns(T.nilable(T::Array[Symbol])) }
   def collect_sharded_names(node, names)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(node) do |n|
@@ -1279,7 +1279,7 @@ module PipeAnalysis
   end
 
   # Find GetIndex on @sharded maps in expression context (reads)
-  sig { params(nodes: T.untyped, results: T.untyped).returns(T.untyped) }
+  sig { params(nodes: T.untyped, results: T.untyped).void }
   def walk_for_sharded_getindex(nodes, results)
     T.bind(self, SemanticAnnotator) rescue nil
     each_shard_scan_node(nodes) do |node|

@@ -135,7 +135,7 @@ module FixableHelper
   #                 would have set); the finding is captured and THEN
   #                 the annotator raises. Pass `false` at sites where
   #                 the enclosing visitor can cleanly bail out.
-  sig { params(token: T.untyped, name: String, candidates: T::Array[T.untyped], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
+  sig { params(token: T.untyped, name: String, candidates: T::Array[String], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -427,7 +427,7 @@ module FixableHelper
   sig { params(line_num: Integer).returns(T.nilable(String)) }
   def consumer_source_text(line_num)
     T.bind(self, SemanticAnnotator) rescue nil
-    @source_code = T.let(@source_code, T.untyped)
+    @source_code = T.let(@source_code, T.nilable(String))
     return nil unless @source_code && line_num
     line = @source_code.lines[line_num - 1]
     return nil unless line
@@ -1195,7 +1195,7 @@ module FixableHelper
   sig { params(name: T.untyped, sigil: T.untyped, description: T.nilable(String), confidence: Symbol).returns(T.nilable(Fix)) }
   def build_decl_cap_insert_fix(name, sigil, description: nil, confidence: :auto)
     T.bind(self, SemanticAnnotator) rescue nil
-    @source_code = T.let(@source_code, T.untyped)
+    @source_code = T.let(@source_code, T.nilable(String))
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token

@@ -97,7 +97,7 @@ class OwnershipGraph
   end
 
   # Move ownership from source to target. Invalidates source and all children.
-  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(T::Set[String])) }
   def transfer(from, to, at_token: nil, action: :move)
     source = @nodes[from]
     return unless source
@@ -310,7 +310,7 @@ class OwnershipGraph
 
   private
 
-  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(T::Set[T.untyped])) }
+  sig { params(path: String, move_source: T.nilable(OwnershipGraph::Node)).returns(T.nilable(T::Set[String])) }
   def invalidate(path, move_source = nil)
     node = @nodes[path]
     return unless node

@@ -738,7 +738,7 @@ module ReentranceBridge
       fixes: [constrain_fix, propagate_fix])
   end
 
-  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Hash[T.untyped, T.untyped])) }
+  sig { params(fn_node: AST::FunctionDef).returns(T.nilable(T::Hash[String, Symbol])) }
   def validate_requires_clauses!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?

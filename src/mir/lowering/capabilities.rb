@@ -166,7 +166,7 @@ module MIRLoweringCapabilities
     T.bind(self, MIRLowering) rescue nil
     # mir-lowering strict ivars
     @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
+    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.nilable(String))
     @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
     @with_alias_alloc_map = T.let(@with_alias_alloc_map, T.untyped)

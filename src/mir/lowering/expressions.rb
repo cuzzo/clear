@@ -684,7 +684,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def or_fallback_expected_type(node)
     T.bind(self, MIRLowering) rescue nil
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     left_type = Type.from_node!(node.left, context: "OR fallback left type")
     success = left_type.success_type
     return success if success && !success.any?
@@ -1071,7 +1071,7 @@ module MIRLoweringExpressions
     direct_index_get(target, index, ast_node, ti) || lower_builtin_index_get(target, index, ti)
   end
 
-  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.untyped) }
+  sig { params(target: MIR::Node, index: MIR::Node, ti: Type).returns(T.any(MIR::InlineBc, MIR::InlineZig)) }
   def lower_builtin_index_get(target, index, ti)
     T.bind(self, MIRLowering) rescue nil
     builtin = INDEX_OPS.dig(ti.dispatch_key, :get, :builtin) || :getAt
@@ -1699,8 +1699,8 @@ module MIRLoweringExpressions
     # mir-lowering strict ivars
     @schema_lookup = T.let(@schema_lookup, T.untyped)
     @union_schemas = T.let(@union_schemas, T.untyped)
-    @current_sink_type = T.let(@current_sink_type, T.untyped)
-    @current_expected_type = T.let(@current_expected_type, T.untyped)
+    @current_sink_type = T.let(@current_sink_type, T.nilable(Type))
+    @current_expected_type = T.let(@current_expected_type, T.nilable(Type))
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
     ti = copy_source_type_info(node.value)

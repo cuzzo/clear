@@ -50,12 +50,12 @@ module Schemas
     attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility, :methods
     sig { params(close_zig: T.untyped, static_methods: T.untyped, fields: T.untyped, type_params: T.untyped, extern_module: T.untyped, as_type: T.untyped, visibility: Symbol, methods: T.untyped).void }
     def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package, methods: {})
-      @close_zig       = T.let(close_zig, T.untyped)
+      @close_zig       = T.let(close_zig, String)
       @static_methods  = T.let(static_methods, T.untyped)
       @fields          = T.let(fields, T.untyped)
       @type_params     = T.let(type_params, T.untyped)
-      @extern_module   = T.let(extern_module, T.untyped)
-      @as_type         = T.let(as_type, T.untyped)
+      @extern_module   = T.let(extern_module, T.nilable(String))
+      @as_type         = T.let(as_type, T.nilable(String))
       @visibility      = T.let(visibility, Symbol)
       @methods         = T.let(methods, T.untyped)
       freeze

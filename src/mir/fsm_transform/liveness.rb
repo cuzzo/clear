@@ -22,6 +22,8 @@
 # (b) rewrite step-local Lets to ctx-field Sets in the segment
 # whose body would otherwise declare them locally.
 
+require "sorbet-runtime"
+
 module FsmTransform
   module Liveness
     Result = Struct.new(:cross_segment_vars) do
@@ -116,7 +118,7 @@ module FsmTransform
     # tail edges (i.e. members of a non-trivial strongly-connected
     # component, or have a self-loop). Used to widen the live-set
     # for back-edge cases like B2-LOOP's cond+loop_pre+loop_post.
-    sig { params(segments: T.untyped).returns(T::Set[T.untyped]) }
+    sig { params(segments: T.untyped).returns(T::Set[Integer]) }
     def compute_cyclic_segments(segments)
       adj = {}
       segments.each { |seg| adj[seg.index] = tail_targets(seg) }
@@ -140,7 +142,7 @@ module FsmTransform
     # Targets a segment's tail can transition to (for cycle
     # detection). Linear suspends implicitly fall through to
     # seg.index + 1.
-    sig { params(seg: T.untyped).returns(T::Array[T.untyped]) }
+    sig { params(seg: T.untyped).returns(T::Array[Integer]) }
     def tail_targets(seg)
       case seg.tail
       when Segments::Done                          then []

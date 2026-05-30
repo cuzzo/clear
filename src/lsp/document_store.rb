@@ -24,7 +24,7 @@ module LSP
       # codeAction read these without re-analysing. Set by the Server
       # after each `analyze_and_publish` pass.
       sig { returns(T.untyped) }
-      def cached_findings;          @cached_findings = T.let(@cached_findings, T.untyped); end
+      def cached_findings;          @cached_findings = T.let(@cached_findings, T.nilable(T.any(LSP::Analyzer::Result, String))); end
       sig { params(value: T.untyped).void }
       def cached_findings=(value);  @cached_findings = value; end
       sig { returns(T.nilable(Integer)) }

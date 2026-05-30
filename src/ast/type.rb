@@ -630,7 +630,7 @@ class Type
   end
 
   # location is provenance (kept as alias for backward-compat callers).
-  sig { returns(T.untyped) }
+  sig { void }
   def location
     @provenance
   end

@@ -381,7 +381,7 @@ private
   end
 
   # Cached outer scope variable set - avoids O(n) flat_map per loop
-  sig { returns(T::Set[T.untyped]) }
+  sig { returns(T::Set[String]) }
   def outer_scope_vars
     @scope_stack.flat_map { |s| s.locals.keys }.to_set
   end
@@ -1457,7 +1457,7 @@ private
     [arm.value, *(arm.extra_values || [])].filter_map { |pattern| match_variant_name(pattern) }
   end
 
-  sig { params(payload: T.untyped, union_subst: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
+  sig { params(payload: T.untyped, union_subst: T::Hash[Symbol, Symbol]).returns(T.untyped) }
   def normalized_match_payload(payload, union_subst)
     return apply_type_subst(payload, union_subst).resolved if payload.is_a?(Type)
     return union_subst.fetch(payload, payload) if payload.is_a?(Symbol)
@@ -3091,9 +3091,9 @@ private
   # Identifier) and return the root identifier name, or nil if the chain
   # doesn't bottom out at one. Used to attribute receiver mutation back to
   # the declared binding.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(String)) }
   def chain_root_name(node)
-    curr = T.let(node, T.untyped)
+    curr = T.let(node, T.any(AST::GetField, AST::GetIndex, AST::Identifier))
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       curr = curr.target
     end
@@ -3651,7 +3651,7 @@ private
       field_is_borrowed = schema.borrowed_fields&.include?(field_name)
 
       # Apply type param substitution (e.g., T → Number, T[] → String[])
-      expected_type = T.let(apply_type_subst(raw_expected, type_subst), T.untyped)
+      expected_type = T.let(apply_type_subst(raw_expected, type_subst), Type)
 
       # BORROWED fields accept borrowed values — skip ownership checks.
       # Non-borrowed fields require owned data.
@@ -3664,7 +3664,7 @@ private
       is_call_arg = node.instance_variable_get(:@is_call_arg)
       owned = T.let(unless field_is_borrowed || is_call_arg
         ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
-      end, T.untyped)
+      end, T.nilable(AST::CopyNode))
       if owned
         node.fields[field_name] = owned
         val_node = owned
@@ -5385,7 +5385,7 @@ private
 
   sig { params(node: T.untyped).returns(T.untyped) }
   def get_root_object(node)
-    curr = T.let(node, T.untyped)
+    curr = T.let(node, T.any(AST::CopyNode, AST::Identifier, AST::StructLit))
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       curr = curr.target
     end
@@ -6212,7 +6212,7 @@ private
   end
 
   # Walk through GetField/GetIndex chains to find the root Identifier name.
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped).returns(T.nilable(String)) }
   def root_variable_name(node)
     curr = node
     while curr

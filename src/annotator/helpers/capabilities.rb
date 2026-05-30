@@ -21,7 +21,7 @@ module Capabilities
     Conflict.new([:soa],     [:shared, :multiowned], "SOA layout is incompatible with reference-counted ownership"),
   ].freeze, T::Array[T.untyped])
 
-  sig { params(type: Type).returns(T::Array[T.untyped]) }
+  sig { params(type: Type).returns(T::Array[String]) }
   def self.errors_for(type)
     return [] unless type.is_a?(Type)
 
@@ -1068,7 +1068,7 @@ module CapabilityHelper
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_move!(ctx, name, info, node)
     T.bind(self, SemanticAnnotator) rescue nil
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.untyped)
+    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
     return unless ctx.mark_moves && (@capture_move_suppressed || 0).zero?
     return unless ctx.outer_scope.owned_names.include?(name)
     classify_ownership!(info) unless info.ownership_kind
@@ -1082,7 +1082,7 @@ module CapabilityHelper
 
   sig { params(blk: T.untyped).returns(T.untyped) }
   def without_capture_moves(&blk)
-    @capture_move_suppressed = T.let(@capture_move_suppressed, T.untyped)
+    @capture_move_suppressed = T.let(@capture_move_suppressed, T.nilable(Integer))
     @capture_move_suppressed = (@capture_move_suppressed || 0) + 1
     blk.call
   ensure
