@@ -243,8 +243,7 @@ module MIRLoweringVariables
     empty_optional_init = optional_nil_initializer?(ft, node.value)
     binding_entry = CleanupEntry::NONE if empty_optional_init
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
-    @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-    heap_return_var = !empty_optional_init && @current_fn_heap_carry_return_vars&.include?(node.name.to_s) == true
+    heap_return_var = !empty_optional_init && current_function_heap_carry_return_var?(node.name.to_s)
     heap_return_binding_allocates = (heap_return_var && escaping_value_alloc(ft) == :heap) == true
     placement = binding_placement_fact(node, ft, binding_entry, heap_return_var, heap_return_binding_allocates)
 
@@ -524,8 +523,8 @@ module MIRLoweringVariables
 
   sig { params(name: String, alloc: Symbol, type_info: T.untyped, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
   def var_decl_alloc_mark(name, alloc, type_info, binding_entry)
-    mark = MIR::AllocMark.new(name, alloc, type_info)
-    mark.scope = alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration)
+    mark = MIR::AllocMark.new(name, alloc, type_info,
+      alloc == :heap ? :heap : (binding_entry.present? ? binding_entry.scope : :iteration))
     mark
   end
 
@@ -723,8 +722,7 @@ module MIRLoweringVariables
       # The new value's allocating expression inherits the reassigned
       # binding's allocator (one allocator per binding).
       binding_entry = @current_bindings[node.name.to_s] || CleanupEntry::NONE
-      @current_fn_heap_carry_return_vars = T.let(@current_fn_heap_carry_return_vars, T.untyped)
-      heap_return_var = @current_fn_heap_carry_return_vars&.include?(node.name.to_s)
+      heap_return_var = current_function_heap_carry_return_var?(node.name.to_s)
       assign_alloc = if heap_return_var
         :heap
       else
@@ -775,8 +773,6 @@ module MIRLoweringVariables
   sig { params(node: AST::BindExpr).returns(MIR::ExprStmt) }
   def lower_atomic_assignment(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
-    @current_fn_mutable_scalar_params = T.let(@current_fn_mutable_scalar_params, T.untyped)
     @do_capture_map = T.let(@do_capture_map, T.untyped)
     @fn_name_rename_map = T.let(@fn_name_rename_map, T.untyped)
     op_name = node.auto_atomic_op.to_s
@@ -785,7 +781,7 @@ module MIRLoweringVariables
     safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
     # A bare write to a mutable scalar atomic param may not create the usual
     # shadow variable, so resolve through param mangling explicitly.
-    if @current_fn_mutable_scalar_params&.include?(target_name)
+    if current_function_mutable_scalar_param?(target_name)
       safe = "_m_#{target_name}"
     end
     mapped = @do_capture_map && @do_capture_map[target_name]

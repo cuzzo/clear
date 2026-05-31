@@ -56,9 +56,7 @@ class MIRLowering
 
     sig { returns(MIR::AllocMark) }
     def alloc_mark
-      mark = MIR::AllocMark.new(name, alloc, type_info)
-      mark.scope = scope
-      mark
+      MIR::AllocMark.new(name, alloc, type_info, scope)
     end
   end
 
@@ -92,6 +90,14 @@ class MIRLowering
     def needs_owned_copy?(type_info)
       type_info.ownership_bearing? && borrowed && !owner_transfer && !heap_owned_result
     end
+  end
+
+  class PipelineAllocMarkFact < T::Struct
+    extend T::Sig
+
+    const :alloc, Symbol
+    const :mark, MIR::AllocMark
+    const :cleanup_entry, T.nilable(CleanupEntry), default: nil
   end
 
   class OwnedSinkPlan < T::Struct
@@ -232,6 +238,76 @@ class MIRLowering
     ti ? ti.void? : false
   end
 
+  sig { returns(T.nilable(MIRLoweringFunctions::FunctionLoweringContext)) }
+  def current_function_context
+    @current_function_context
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_has_rt?
+    current_function_context&.has_rt == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_has_catch?
+    current_function_context&.has_catch == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_heap_carry_return?
+    current_function_context&.heap_carry_return == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_tail_call?
+    current_function_context&.tail_call == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_param_name?(name)
+    current_function_context&.param_names&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_takes_param_name?(name)
+    current_function_context&.takes_param_names&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_collection_param?(name)
+    current_function_context&.collection_params&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_mutable_scalar_param?(name)
+    current_function_context&.mutable_scalar_params&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_heap_carry_return_var?(name)
+    current_function_context&.heap_carry_return_vars&.include?(name) == true
+  end
+
+  sig { returns(T.nilable(String)) }
+  def current_function_return_payload_zig
+    current_function_context&.return_payload_zig
+  end
+
+  sig { returns(T.nilable(Type)) }
+  def current_function_return_type
+    current_function_context&.return_type
+  end
+
+  sig { returns(MIRLoweringFunctions::NameSet) }
+  def current_function_snapshot_types
+    current_function_context&.snapshot_types || Set.new
+  end
+
+  sig { returns(T.nilable(String)) }
+  def current_function_zig_name
+    current_function_context&.zig_name
+  end
+
   sig { params(name: T.any(String, Symbol), bang_alias: T::Boolean).returns(T.nilable(FunctionSignature)) }
   def fn_sig_for(name, bang_alias: false)
     sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
@@ -282,21 +358,9 @@ class MIRLowering
     @decl_zig_name_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @guarded_cleanup_names = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @fn_name_rename_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
-    @current_fn_snapshot_types = T.let(nil, T.nilable(T::Set[T.untyped]))
+    @current_function_context = T.let(nil, T.nilable(MIRLoweringFunctions::FunctionLoweringContext))
     @atomic_emit_raw = T.let(false, T::Boolean)
     @used_sharded_map = T.let(false, T::Boolean)
-    @current_fn_has_rt = T.let(false, T::Boolean)
-    @current_fn_tail_call = T.let(false, T::Boolean)
-    @current_fn_zig_name = T.let(nil, T.nilable(String))
-    @current_fn_return_payload_zig = T.let(nil, T.nilable(String))
-    @current_fn_returned_names = T.let(Set.new, T::Set[String])
-    @current_fn_heap_carry_return = T.let(false, T::Boolean)
-    @current_fn_heap_carry_return_vars = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_fn_has_catch = T.let(false, T::Boolean)
-    @current_fn_collection_params = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_fn_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_fn_takes_param_names = T.let(nil, T.nilable(T::Set[T.untyped]))
-    @current_fn_mutable_scalar_params = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_bg_pointer_captures = T.let(nil, T.nilable(T::Set[T.untyped]))
     @current_fiber_capture_symbols = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
     @do_capture_map = T.let(nil, T.nilable(T::Hash[T.untyped, T.untyped]))
@@ -490,8 +554,7 @@ class MIRLowering
       success_try.result_type = Type.new(ti)
       success_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
       build_drop_entry!(success_cleanup, ti, nil)
-      mark = MIR::AllocMark.new(success, source_alloc, ti)
-      mark.scope = MIR::Placement.alloc_scope(source_alloc)
+      mark = MIR::AllocMark.new(success, source_alloc, ti, MIR::Placement.alloc_scope(source_alloc))
       body = [
         mark,
         MIR::Let.new(success, success_try, false, nil, nil),
@@ -514,8 +577,7 @@ class MIRLowering
     @tmp_counter += 1
     label = "__owned_branch_#{@tmp_counter}"
     name = "__owned_branch_val_#{@tmp_counter}"
-    mark = MIR::AllocMark.new(name, dest_alloc, ti)
-    mark.scope = MIR::Placement.alloc_scope(dest_alloc)
+    mark = MIR::AllocMark.new(name, dest_alloc, ti, MIR::Placement.alloc_scope(dest_alloc))
     body = T.let([
       mark,
       MIR::Let.new(name, mir, false, nil, nil),
@@ -534,8 +596,7 @@ class MIRLowering
     name = "__owned_val_#{@tmp_counter}"
     cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
     build_drop_entry!(cleanup, ti, nil)
-    mark = MIR::AllocMark.new(name, source_alloc, ti)
-    mark.scope = MIR::Placement.alloc_scope(source_alloc)
+    mark = MIR::AllocMark.new(name, source_alloc, ti, MIR::Placement.alloc_scope(source_alloc))
     body = [
       mark,
       MIR::Let.new(name, mir, false, nil, nil),
@@ -627,7 +688,7 @@ class MIRLowering
     return nil unless node.value
 
     value_type = Type.from_node!(node.value, context: "return destination allocation")
-    return escaping_value_alloc(value_type) if @current_fn_heap_carry_return
+    return escaping_value_alloc(value_type) if current_function_heap_carry_return?
     declared_type = return_value_destination_type(node)
     borrowed_owned = ownership_bearing_type?(value_type.success_type || value_type) ||
       (declared_type && ownership_bearing_type?(declared_type.success_type || declared_type))
@@ -645,8 +706,7 @@ class MIRLowering
     label = "__own_branch_#{@block_expr_counter}"
     name = "__tmp_#{@tmp_counter}"
     type_info = alloc_mark_type_info(mir, ast_node, "branch ownership placement")
-    mark = MIR::AllocMark.new(name, :heap, type_info)
-    mark.scope = :heap
+    mark = MIR::AllocMark.new(name, :heap, type_info, :heap)
     body = T.let([mark, MIR::Let.new(name, mir, false, nil, nil)], T::Array[MIR::Stmt])
     entry = hoist_cleanup_entry(mir, ast_node)
     if entry
@@ -961,8 +1021,8 @@ class MIRLowering
     @tmp_counter += 1
     discard_name = "__discard_#{@tmp_counter}"
     alloc = entry.alloc || mir_owned_alloc(mir) || :heap
-    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node!(stmt, context: "discard allocation mark"))
-    mark.scope = MIR::Placement.alloc_scope(alloc)
+    mark = MIR::AllocMark.new(discard_name, alloc, Type.from_node!(stmt, context: "discard allocation mark"),
+      MIR::Placement.alloc_scope(alloc))
     stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
     [
       MIR::ScopeBlock.new([
@@ -2102,7 +2162,7 @@ class MIRLowering
     if root.is_a?(AST::Identifier)
       alias_alloc = @with_alias_alloc_map&.[](root.name.to_s)
       return alias_alloc if alias_alloc
-      return :heap if @current_fn_collection_params&.include?(root.name)
+      return :heap if current_function_collection_param?(root.name)
       entry = @current_bindings[root.name.to_s] if @current_bindings
       return entry.alloc if entry&.alloc
     end
@@ -2859,7 +2919,7 @@ class MIRLowering
   def direct_slice_backed_expr?(ast_node, type_info)
     return true if type_info.fixed?
     return true if ast_node.is_a?(AST::GetField)
-    ast_node.is_a?(AST::Identifier) ? !!@current_fn_param_names&.include?(ast_node.name) : false
+    ast_node.is_a?(AST::Identifier) ? current_function_param_name?(ast_node.name) : false
   end
 
   sig { params(target: T.untyped, index: T.untyped, ast_node: T.untyped, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
@@ -2945,6 +3005,66 @@ class MIRLowering
   end
 
   public
+
+  public :task_config_zig, :emit_expr, :emit_builtin,
+    :lower_head, :append_ownership_transfers_for_mir_body
+
+  sig do
+    params(
+      value: MIR::Node,
+      name: String,
+      fallback_alloc: Symbol,
+      type_info: T.nilable(Type),
+      ast_node: T.nilable(AST::Node),
+      context: String,
+      known_allocating: T::Boolean,
+      accept_owned_call: T::Boolean,
+      include_cleanup: T::Boolean,
+    ).returns(T.nilable(PipelineAllocMarkFact))
+  end
+  def pipeline_alloc_mark_fact(value, name, fallback_alloc:, type_info: nil, ast_node: nil,
+                               context: "pipeline allocation", known_allocating: false,
+                               accept_owned_call: false, include_cleanup: false)
+    owns_call_result = accept_owned_call && value.is_a?(MIR::Call) && value.owned_return?
+    return nil unless known_allocating || mir_allocates?(value) || owns_call_result
+
+    alloc = mir_owned_alloc(value) || fallback_alloc
+    stamp_allocating_result_target!(value, name, alloc: alloc)
+    mark_type = type_info || mir_alloc_mark_type_info(value, ast_node, context: context)
+    mark = MIR::AllocMark.new(name, alloc, mark_type, MIR::Placement.alloc_scope(alloc))
+    PipelineAllocMarkFact.new(
+      alloc: alloc,
+      mark: mark,
+      cleanup_entry: include_cleanup ? hoist_cleanup_entry(value, ast_node) : nil,
+    )
+  end
+
+  sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node)).returns(T.nilable(CleanupEntry)) }
+  def pipeline_owned_cleanup_entry(value, ast_node)
+    return nil unless mir_owned_alloc(value)
+
+    hoist_cleanup_entry(value, ast_node)
+  end
+
+  sig do
+    params(
+      insert: MIR::IndexInsert,
+      value: MIR::Node,
+      value_owns: T::Boolean,
+      target_alloc: Symbol,
+    ).returns(MIR::IndexInsert)
+  end
+  def pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc:)
+    return insert unless value_owns || mir_allocates?(value)
+
+    T.cast(with_ownership_consumption(
+      insert,
+      mir_ident_names(value),
+      "MIR::IndexInsert",
+      target_alloc: target_alloc,
+      require_visible: false,
+    ), MIR::IndexInsert)
+  end
 
   # Temporarily installs a fiber capture map and rt alias, runs the block, then restores.
   # Used by DoBlock, BgBlock, and PipelineHost (for concurrent pipeline operators).

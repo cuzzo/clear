@@ -48,7 +48,7 @@ module PipelineGenerator
       prev_soa_active = @soa_rewrite_active
       prev_soa_fields = @soa_needed_fields
       @soa_rewrite_active = soa
-      @soa_needed_fields = T.let(Set.new, T.nilable(T::Set[T.untyped])) if soa
+      @soa_needed_fields = T.let(Set.new, T.nilable(T::Set[T.any(Symbol, String)])) if soa
     end
 
     result = blk.call

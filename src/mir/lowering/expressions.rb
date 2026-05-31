@@ -429,10 +429,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def lower_smooth(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
     @block_expr_counter = T.let(@block_expr_counter, T.untyped)
-    @current_fn_has_catch = T.let(@current_fn_has_catch, T.untyped)
-    @current_fn_snapshot_types = T.let(@current_fn_snapshot_types, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     rhs = node.right
 
@@ -540,7 +537,7 @@ module MIRLoweringExpressions
 
     # Capture snapshot for CATCH blocks: store LHS before the failable call
     snapshot_stmts = nil
-    if @current_fn_has_catch && @current_fn_snapshot_types&.size == 1
+    if current_function_has_catch? && current_function_snapshot_types.size == 1
       lhs_type = node.left.full_type!
       t = Type.new(lhs_type)
       unless t.void? || t.error_union?

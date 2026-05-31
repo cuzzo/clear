@@ -9,13 +9,14 @@ options = {
   output: nil,
   decomplex: nil,
   nil_kill: nil,
-  risk: nil
+  risk: nil,
+  manifest: nil
 }
 
 OptionParser.new do |opts|
   opts.banner = "Usage: espalier [options] <files/directories...>"
 
-  opts.on("-f", "--format FORMAT", [:markdown, :yaml], "Output format (markdown, yaml). Default: markdown") do |f|
+  opts.on("-f", "--format FORMAT", [:markdown, :yaml, :report], "Output format (markdown, yaml, report). Default: markdown") do |f|
     options[:format] = f
   end
 
@@ -34,7 +35,34 @@ OptionParser.new do |opts|
   opts.on("--risk FILE", "Path to boobytrap/slopcop churn & coverage report") do |r|
     options[:risk] = r
   end
+
+  opts.on("--manifest FILE", "Read an existing Espalier architecture YAML manifest") do |m|
+    options[:manifest] = m
+  end
 end.parse!
+
+if options[:manifest]
+  unless File.exist?(options[:manifest])
+    puts "Error: Manifest not found: #{options[:manifest]}"
+    exit 1
+  end
+
+  manifest = YAML.load_file(options[:manifest])
+  output_contents = if options[:format] == :report
+                      Espalier::Reporter.new(manifest).to_markdown
+                    elsif options[:format] == :yaml
+                      Espalier::Formatter.to_yaml(manifest)
+                    else
+                      Espalier::Formatter.to_markdown(manifest)
+                    end
+
+  if options[:output]
+    File.write(options[:output], output_contents)
+  else
+    puts output_contents
+  end
+  exit 0
+end
 
 if ARGV.empty?
   puts "Error: No files or directories provided."
@@ -213,6 +241,8 @@ manifest = aggregator.aggregate(modules)
 # Format & Outflow
 output_contents = if options[:format] == :yaml
                     Espalier::Formatter.to_yaml(manifest)
+                  elsif options[:format] == :report
+                    Espalier::Reporter.new(manifest).to_markdown
                   else
                     Espalier::Formatter.to_markdown(manifest)
                   end

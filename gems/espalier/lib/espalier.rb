@@ -3,6 +3,7 @@
 require_relative "espalier/ast_extractor"
 require_relative "espalier/aggregator"
 require_relative "espalier/formatter"
+require_relative "espalier/reporter"
 
 # Espalier: Architectural representation and semantic abstraction aggregator for LLMs.
 # Parses Ruby class/module skeletons and instance variable modifications, compiles call

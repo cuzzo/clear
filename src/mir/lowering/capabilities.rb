@@ -164,9 +164,7 @@ module MIRLoweringCapabilities
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_with_block(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
     @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.nilable(String))
     @locked_unwrap_map = T.let(@locked_unwrap_map, T.untyped)
     @rc_unwrap_map = T.let(@rc_unwrap_map, T.untyped)
     @with_alias_alloc_map = T.let(@with_alias_alloc_map, T.untyped)
@@ -785,9 +783,7 @@ module MIRLoweringCapabilities
   sig { params(node: AST::WithBlock).returns(T.untyped) }
   def lower_polymorphic_universal(node)
     T.bind(self, MIRLowering) rescue nil
-    # mir-lowering strict ivars
     @atomic_emit_raw = T.let(@atomic_emit_raw, T.untyped)
-    @current_fn_return_payload_zig = T.let(@current_fn_return_payload_zig, T.untyped)
     @rt_name = T.let(@rt_name, T.untyped)
     cap = node.capabilities.first
     var_node   = cap[:var_node]
@@ -816,7 +812,7 @@ module MIRLoweringCapabilities
       guard_fail = guard_cond ? guard_fail_flow_body(node) : []
       MIR::PolymorphicMutateFlow.new(
         cell_zig, @rt_name, safe_alias, bare_t_zig,
-        @current_fn_return_payload_zig || "void",
+        current_function_return_payload_zig || "void",
         body_mir, guard_cond, guard_fail
       )
     else
